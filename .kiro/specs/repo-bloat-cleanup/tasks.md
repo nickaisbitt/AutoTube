@@ -40,7 +40,7 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Property-Based Testing Plan → Phase 1 bug-condition exploration test"_
     - _Requirements: 1.1, 2.1_
 
-  - [-] 1.2 Run the test on the unfixed repo and capture the counterexample
+  - [x] 1.2 Run the test on the unfixed repo and capture the counterexample
     - Execute `npm run test:unit -- src/__tests__/repo-bloat-cleanup.bug.test.ts`
     - Confirm the test FAILS (expected)
     - Record the observed byte count from `du -sb .` as the counterexample

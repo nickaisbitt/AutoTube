@@ -21,10 +21,24 @@ import { describe, it, expect } from "vitest";
 
 const TEN_GIB = 10 * 1024 ** 3;
 
+/**
+ * Measure total disk usage of the repo root in bytes using only POSIX-portable
+ * `du` flags. `-k` is mandated by POSIX and returns 1024-byte blocks, so we
+ * multiply back to bytes. GNU `du -sb` (the spec's original command) is not
+ * portable to BSD `du` on macOS, so we avoid it.
+ */
+function repoBytes(): number {
+  const out = execSync("du -sk .", { encoding: "utf8" });
+  const kib = Number(out.trim().split(/\s+/)[0]);
+  if (!Number.isFinite(kib)) {
+    throw new Error(`du produced non-numeric size: ${JSON.stringify(out)}`);
+  }
+  return kib * 1024;
+}
+
 describe("Bug condition: repo size budget", () => {
   it("repository total disk usage is <= 10 GiB", () => {
-    const out = execSync("du -sb .", { encoding: "utf8" });
-    const bytes = Number(out.trim().split(/\s+/)[0]);
+    const bytes = repoBytes();
     expect(bytes).toBeLessThanOrEqual(TEN_GIB);
   });
 });

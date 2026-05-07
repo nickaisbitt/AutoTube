@@ -6,13 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "playwright test",
+    "test:app": "playwright test tests/app.spec.ts",
+    "test:journey": "playwright test tests/user-journey.spec.ts",
+    "test:unit": "vitest run --passWithNoTests",
+    "test:unit:watch": "vitest",
+    "test:unit:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "clsx": "2.1.1",
-    "duck-duck-scrape": "^2.2.7",
-    "duckduckgo-images-api": "^1.0.5",
-    "framer-motion": "^12.38.0",
     "lucide-react": "^1.8.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -21,14 +24,21 @@
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@tailwindcss/vite": "4.1.17",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.1.0",
     "@types/node": "22.19.17",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "@vitest/coverage-v8": "2.1.8",
+    "canvas": "^2.11.2",
+    "fast-check": "^4.7.0",
+    "jsdom": "25.0.1",
     "playwright": "^1.59.1",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "vite": "7.2.4",
-    "vite-plugin-singlefile": "2.3.0"
+    "vite-plugin-singlefile": "2.3.0",
+    "vitest": "2.1.8"
   }
 }

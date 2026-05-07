@@ -3,4 +3,19 @@ dist
 playwright-report
 test-results
 .env
+.env.local
+.env*.local
 *.log
+
+# Generated build/test output (regenerable)
+coverage/
+test-recordings/
+.vite/
+
+# Caches
+.eslintcache
+*.tsbuildinfo
+
+# OS cruft
+.DS_Store
+Thumbs.db

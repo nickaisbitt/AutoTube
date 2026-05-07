@@ -1,33 +1,98 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { 
   Lightbulb, Zap, TrendingUp, Globe, Shield, Cpu,
-  DollarSign, Leaf, Rocket, ChevronRight, Sparkles
+  DollarSign, Leaf, Rocket, ChevronRight, Sparkles,
+  RefreshCw, Loader2, KeyRound,
 } from 'lucide-react';
 import type { TopicConfig, VideoProject } from '../types';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 interface TopicStepProps {
   config: TopicConfig;
   onConfigChange: (config: TopicConfig) => void;
   onGenerate: (config: TopicConfig) => void;
+  onGenerateFull?: (config: TopicConfig) => void;
+  apiKey?: string;
 }
 
-const SUGGESTED_TOPICS = [
-  { icon: TrendingUp, label: 'How BlackRock Controls $10 Trillion', category: 'Finance' },
-  { icon: Globe, label: 'The Water Crisis No One Talks About', category: 'Environment' },
-  { icon: Shield, label: 'Inside the World\'s Most Secure Vault', category: 'Security' },
-  { icon: Cpu, label: 'AI is Replacing These Jobs First', category: 'Technology' },
-  { icon: DollarSign, label: 'Why the Dollar is Losing Its Power', category: 'Economics' },
-  { icon: Leaf, label: 'The Hidden Cost of Fast Fashion', category: 'Social' },
-  { icon: Rocket, label: 'SpaceX vs NASA: The Real Competition', category: 'Science' },
-  { icon: Zap, label: 'The Global Energy War Explained', category: 'Geopolitics' },
-];
+interface SuggestedTopic {
+  label: string;
+  category: string;
+}
 
-const STYLES: { key: VideoProject['style']; label: string; description: string; color: string }[] = [
-  { key: 'business_insider', label: 'Business Insider', description: 'Data-driven, professional analysis', color: 'from-blue-500 to-cyan-500' },
-  { key: 'warfront', label: 'WARFRONT', description: 'Dramatic, high-stakes narratives', color: 'from-red-500 to-orange-500' },
-  { key: 'documentary', label: 'Documentary', description: 'Deep-dive investigative format', color: 'from-amber-500 to-yellow-500' },
-  { key: 'explainer', label: 'Explainer', description: 'Simple, clear breakdowns', color: 'from-emerald-500 to-teal-500' },
-];
+const CATEGORY_ICONS: Record<string, typeof TrendingUp> = {
+  Finance: DollarSign,
+  Technology: Cpu,
+  Science: Rocket,
+  Environment: Leaf,
+  Geopolitics: Globe,
+  Security: Shield,
+  Economics: TrendingUp,
+  Social: Leaf,
+  Health: Sparkles,
+  Culture: Lightbulb,
+};
+
+function getIconForCategory(category: string) {
+  return CATEGORY_ICONS[category] || Lightbulb;
+}
+
+async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+
+  const response = await fetchWithTimeout(
+    'https://openrouter.ai/api/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://autotube.video',
+        'X-Title': 'AutoTube AI Generator',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.0-flash-001',
+        messages: [
+          {
+            role: 'system',
+            content: `You generate viral YouTube video topic ideas. Return a JSON array of exactly 8 objects with "label" (the topic title, punchy and clickable, 6-12 words) and "category" (one of: Finance, Technology, Science, Environment, Geopolitics, Security, Economics, Social, Health, Culture). No markdown, just the JSON array.`,
+          },
+          {
+            role: 'user',
+            content: `Today is ${today}. Generate 8 fresh, trending video topic ideas that would perform well on YouTube right now. Mix categories. Focus on topics that are timely, surprising, or have a strong narrative angle. Avoid generic evergreen topics — make them feel current and specific.`,
+          },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+    },
+    { timeoutMs: 15_000, maxRetries: 1 },
+  );
+
+  if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('Empty response');
+
+  const cleaned = content.replace(/```json/g, '').replace(/```/g, '').trim();
+  let parsed = JSON.parse(cleaned);
+
+  // Handle { "topics": [...] } wrapper or bare array
+  if (!Array.isArray(parsed)) {
+    const key = Object.keys(parsed).find(k => Array.isArray(parsed[k]));
+    parsed = key ? parsed[key] : [];
+  }
+
+  return (parsed as Array<{ label?: string; category?: string }>)
+    .filter(t => t && typeof t.label === 'string' && t.label.trim())
+    .map(t => ({
+      label: t.label!.trim(),
+      category: typeof t.category === 'string' ? t.category.trim() : 'Technology',
+    }))
+    .slice(0, 8);
+}
 
 const TONES: { key: TopicConfig['tone']; label: string; emoji: string }[] = [
   { key: 'informative', label: 'Informative', emoji: '📊' },
@@ -36,8 +101,32 @@ const TONES: { key: TopicConfig['tone']; label: string; emoji: string }[] = [
   { key: 'urgent', label: 'Urgent', emoji: '🚨' },
 ];
 
-export default function TopicStep({ config, onConfigChange, onGenerate }: TopicStepProps) {
+export default function TopicStep({ config, onConfigChange, onGenerate, onGenerateFull, apiKey }: TopicStepProps) {
   const [isHovering, setIsHovering] = useState<number | null>(null);
+  const [suggestedTopics, setSuggestedTopics] = useState<SuggestedTopic[]>([]);
+  const [isLoadingTopics, setIsLoadingTopics] = useState(false);
+  const [topicError, setTopicError] = useState<string | null>(null);
+
+  const fetchTopics = useCallback(async () => {
+    if (!apiKey) return;
+    setIsLoadingTopics(true);
+    setTopicError(null);
+    try {
+      const topics = await generateTopicIdeas(apiKey);
+      setSuggestedTopics(topics);
+    } catch (err) {
+      console.error('Failed to generate topic ideas:', err);
+      setTopicError('Failed to generate ideas. Try again.');
+    } finally {
+      setIsLoadingTopics(false);
+    }
+  }, [apiKey]);
+
+  useEffect(() => {
+    if (apiKey && suggestedTopics.length === 0) {
+      void fetchTopics();
+    }
+  }, [apiKey, fetchTopics, suggestedTopics.length]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-8 px-6 py-8">
@@ -49,7 +138,7 @@ export default function TopicStep({ config, onConfigChange, onGenerate }: TopicS
         </div>
         <h2 className="text-2xl font-bold text-white">Choose Your Video Topic</h2>
         <p className="mt-1 text-sm text-surface-400">
-          Select a trending topic or enter your own. Our AI will create a complete video production pipeline.
+          Enter a topic or pick from AI-generated trending ideas.
         </p>
       </div>
 
@@ -62,71 +151,87 @@ export default function TopicStep({ config, onConfigChange, onGenerate }: TopicS
             value={config.topic}
             onChange={(e) => onConfigChange({ ...config, topic: e.target.value })}
             placeholder="e.g., 'Why Countries Are Banning TikTok'"
-            className="w-full rounded-xl border border-surface-700 bg-surface-900/80 px-4 py-3.5 text-sm text-white placeholder-surface-500 ring-1 ring-transparent transition-all focus:border-brand-500 focus:outline-none focus:ring-brand-500/30"
+            className="w-full border-2 border-surface-700 bg-surface-900 px-4 py-3.5 text-sm text-white placeholder-surface-500 focus:border-brand-500 focus:outline-none"
+            data-testid="topic-input"
           />
           <Sparkles className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-surface-500" />
         </div>
       </div>
 
-      {/* Suggested Topics */}
+      {/* AI-Generated Topic Suggestions */}
       <div className="space-y-3">
-        <label className="text-sm font-medium text-surface-300">Trending Topics</label>
-        <div className="grid grid-cols-2 gap-2">
-          {SUGGESTED_TOPICS.map((topic, i) => (
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-surface-300">
+            {apiKey ? 'AI-Generated Trending Topics' : 'Trending Topics'}
+          </label>
+          {apiKey && (
             <button
-              key={i}
-              onClick={() => onConfigChange({ ...config, topic: topic.label })}
-              onMouseEnter={() => setIsHovering(i)}
-              onMouseLeave={() => setIsHovering(null)}
-              className={`flex items-center gap-3 rounded-lg border px-3.5 py-2.5 text-left text-sm transition-all ${
-                config.topic === topic.label
-                  ? 'border-brand-500/50 bg-brand-500/10 text-white'
-                  : 'border-surface-700/50 bg-surface-900/50 text-surface-300 hover:border-surface-600 hover:bg-surface-800/60 hover:text-white'
-              }`}
+              onClick={fetchTopics}
+              disabled={isLoadingTopics}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono font-medium text-surface-400 hover:bg-brand-500 hover:text-black disabled:opacity-50"
+              aria-label="Refresh topic ideas"
             >
-              <topic.icon className={`h-4 w-4 flex-shrink-0 ${
-                config.topic === topic.label ? 'text-brand-400' : isHovering === i ? 'text-surface-300' : 'text-surface-500'
-              }`} />
-              <div className="flex-1 min-w-0">
-                <div className="truncate text-[13px] font-medium">{topic.label}</div>
-                <div className="text-[10px] text-surface-500">{topic.category}</div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Style Selection */}
-      <div className="space-y-3">
-        <label className="text-sm font-medium text-surface-300">Video Style</label>
-        <div className="grid grid-cols-2 gap-3">
-          {STYLES.map((style) => (
-            <button
-              key={style.key}
-              onClick={() => onConfigChange({ ...config, style: style.key })}
-              className={`group relative overflow-hidden rounded-xl border p-4 text-left transition-all ${
-                config.style === style.key
-                  ? 'border-brand-500/50 bg-surface-900 ring-1 ring-brand-500/20'
-                  : 'border-surface-700/50 bg-surface-900/50 hover:border-surface-600 hover:bg-surface-800/60'
-              }`}
-            >
-              <div className={`absolute inset-0 bg-gradient-to-br ${style.color} opacity-[0.03] ${
-                config.style === style.key ? 'opacity-[0.08]' : ''
-              }`} />
-              <div className="relative">
-                <h3 className={`text-sm font-semibold ${
-                  config.style === style.key ? 'text-white' : 'text-surface-300'
-                }`}>
-                  {style.label}
-                </h3>
-                <p className="mt-0.5 text-[11px] text-surface-500">{style.description}</p>
-              </div>
-              {config.style === style.key && (
-                <div className="absolute right-3 top-3 h-2 w-2 rounded-full bg-brand-400" />
+              {isLoadingTopics ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
               )}
+              {isLoadingTopics ? 'Generating...' : 'Refresh'}
             </button>
-          ))}
+          )}
         </div>
+
+        {!apiKey ? (
+          <div className="flex items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-4">
+            <KeyRound className="h-5 w-5 flex-shrink-0 text-surface-500" />
+            <p className="text-sm font-mono text-surface-400">
+              Add an OpenRouter API key in Settings to get AI-generated topic ideas, or type your own topic above.
+            </p>
+          </div>
+        ) : isLoadingTopics && suggestedTopics.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 border-2 border-surface-700 bg-surface-900 px-4 py-8">
+            <Loader2 className="h-4 w-4 animate-spin text-brand-400" />
+            <span className="text-sm font-mono text-surface-400">Generating fresh topic ideas...</span>
+          </div>
+        ) : topicError && suggestedTopics.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 border-2 border-red-500 bg-surface-900 px-4 py-4">
+            <span className="text-sm font-mono text-red-400">{topicError}</span>
+            <button
+              onClick={fetchTopics}
+              className="bg-red-500 px-3 py-1 text-xs font-bold font-mono uppercase text-black hover:bg-red-400"
+            >
+              Retry
+            </button>
+          </div>
+        ) : suggestedTopics.length > 0 ? (
+          <div className="grid grid-cols-2 gap-2">
+            {suggestedTopics.map((topic, i) => {
+              const Icon = getIconForCategory(topic.category);
+              return (
+                <button
+                  key={i}
+                  onClick={() => onConfigChange({ ...config, topic: topic.label })}
+                  onMouseEnter={() => setIsHovering(i)}
+                  onMouseLeave={() => setIsHovering(null)}
+                  className={`flex items-center gap-3 border-2 px-3.5 py-2.5 text-left text-sm ${
+                    config.topic === topic.label
+                      ? 'border-brand-500 bg-brand-500 text-black'
+                      : 'border-surface-700 bg-surface-900 text-surface-300 hover:bg-brand-500 hover:text-black'
+                  }`}
+                  data-testid={`suggested-topic-${i}`}
+                >
+                  <Icon className={`h-4 w-4 flex-shrink-0 ${
+                    config.topic === topic.label ? 'text-black' : 'text-surface-500'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate text-[13px] font-medium">{topic.label}</div>
+                    <div className="text-[10px] text-surface-500">{topic.category}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
 
       {/* Settings Row */}
@@ -137,7 +242,9 @@ export default function TopicStep({ config, onConfigChange, onGenerate }: TopicS
           <select
             value={config.targetDuration}
             onChange={(e) => onConfigChange({ ...config, targetDuration: Number(e.target.value) })}
-            className="w-full rounded-lg border border-surface-700 bg-surface-900/80 px-3 py-2.5 text-sm text-white focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/30"
+            className="w-full border-2 border-surface-700 bg-surface-900 px-3 py-2.5 text-sm text-white focus:border-brand-500 focus:outline-none"
+            data-testid="duration-select"
+            aria-label="Duration"
           >
             <option value={3}>3 minutes</option>
             <option value={5}>5 minutes</option>
@@ -155,11 +262,12 @@ export default function TopicStep({ config, onConfigChange, onGenerate }: TopicS
               <button
                 key={tone.key}
                 onClick={() => onConfigChange({ ...config, tone: tone.key })}
-                className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-all ${
+                className={`border-2 px-2 py-1.5 text-[11px] font-mono font-bold uppercase ${
                   config.tone === tone.key
-                    ? 'border-brand-500/50 bg-brand-500/10 text-brand-300'
-                    : 'border-surface-700/50 bg-surface-900/50 text-surface-400 hover:border-surface-600 hover:text-surface-300'
+                    ? 'border-brand-500 bg-brand-500 text-black'
+                    : 'border-surface-700 bg-surface-900 text-surface-400 hover:bg-brand-500 hover:text-black'
                 }`}
+                data-testid={`tone-${tone.key}`}
               >
                 {tone.emoji} {tone.label}
               </button>
@@ -174,26 +282,44 @@ export default function TopicStep({ config, onConfigChange, onGenerate }: TopicS
             type="text"
             value={config.audience}
             onChange={(e) => onConfigChange({ ...config, audience: e.target.value })}
-            className="w-full rounded-lg border border-surface-700 bg-surface-900/80 px-3 py-2.5 text-sm text-white placeholder-surface-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/30"
+            className="w-full border-2 border-surface-700 bg-surface-900 px-3 py-2.5 text-sm text-white placeholder-surface-500 focus:border-brand-500 focus:outline-none"
             placeholder="e.g., Tech enthusiasts, 18-35"
+            data-testid="audience-input"
           />
         </div>
       </div>
 
-      {/* Generate Button */}
-      <div className="pt-2">
+      {/* Generate Buttons */}
+      <div className="pt-2 space-y-3">
+        {onGenerateFull && (
+          <button
+            onClick={() => config.topic.trim() && onGenerateFull(config)}
+            disabled={!config.topic.trim()}
+            className={`group flex w-full items-center justify-center gap-2 px-6 py-4 text-sm font-bold uppercase tracking-wider ${
+              config.topic.trim()
+                ? 'bg-brand-500 text-black shadow-hard hover:bg-brand-400'
+                : 'cursor-not-allowed bg-surface-800 text-surface-500'
+            }`}
+            data-testid="generate-full-video"
+          >
+            <Zap className="h-4 w-4" />
+            Generate Full Video (One-Click)
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        )}
         <button
           onClick={() => config.topic.trim() && onGenerate(config)}
           disabled={!config.topic.trim()}
-          className={`group flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-sm font-semibold transition-all ${
+          className={`group flex w-full items-center justify-center gap-2 px-6 py-4 text-sm font-bold uppercase tracking-wider ${
             config.topic.trim()
-              ? 'bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-lg shadow-brand-500/25 hover:shadow-brand-500/40 hover:from-brand-500 hover:to-brand-400'
+              ? 'bg-brand-500 text-black shadow-hard hover:bg-brand-400'
               : 'cursor-not-allowed bg-surface-800 text-surface-500'
           }`}
+          data-testid="generate-script-only"
         >
           <Sparkles className="h-4 w-4" />
-          Generate Video Script
-          <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+          Generate Script Only
+          <ChevronRight className="h-4 w-4" />
         </button>
       </div>
     </div>

@@ -3,10 +3,40 @@ export type PipelineStep =
   | 'script'
   | 'media'
   | 'narration'
+  | 'ai_edit'
   | 'assembly'
   | 'preview';
 
 export type StepStatus = 'idle' | 'active' | 'processing' | 'complete' | 'error';
+
+export type SegmentPurposeTag =
+  | 'stat_hook'
+  | 'history'
+  | 'moat'
+  | 'risk'
+  | 'prediction'
+  | 'human_story'
+  | 'competitive_analysis'
+  | 'transition_bridge'
+  | 'conclusion';
+
+export type SceneLayoutType =
+  | 'centered-text'
+  | 'left-text-right-image'
+  | 'lower-third-overlay'
+  | 'stat-card'
+  | 'quote-card';
+
+export interface AudioDirection {
+  /** Sound bed mood for this segment. */
+  soundBed: 'calm' | 'tense' | 'neutral' | 'building' | 'release';
+  /** Impact sound cues aligned to retention-critical lines. */
+  impactCues: string[];
+  /** Whether to leave brief sonic space (silence) before a major statement. */
+  sonicSpace: boolean;
+  /** Audio intensity on a 0-10 scale; varied across segments to prevent "wall of tension". */
+  intensity: number;
+}
 
 export interface ScriptSegment {
   id: string;
@@ -15,6 +45,16 @@ export interface ScriptSegment {
   narration: string;
   visualNote: string;
   duration: number;
+  /** Optional on-screen chapter label (not spoken). Max 50 characters. */
+  chapterLabel?: string;
+  /** Semantic label indicating this segment's narrative role. */
+  purposeTag?: SegmentPurposeTag;
+  /** Energy level score from 1 (calm) to 5 (urgent). */
+  pacingScore?: number;
+  /** Visual composition template assigned by the layout planner. */
+  sceneLayout?: SceneLayoutType;
+  /** Audio direction metadata for section-appropriate sound design. */
+  audioDirection?: AudioDirection;
 }
 
 export type NarrativeBeat =
@@ -125,6 +165,22 @@ export interface MediaAsset {
   score?: number;
   /** NEW: Detailed trace of the acquisition journey (Stage 1 -> 3, etc.) */
   trace?: string[];
+  /** 16:9 crop rectangle in pixels, applied by the renderer */
+  cropMetadata?: { x: number; y: number; width: number; height: number };
+  /** Multi-factor quality scores from Reka Edge (each 0-10) */
+  qualityFactors?: {
+    sharpness: number;
+    lighting: number;
+    composition: number;
+    vibrancy: number;
+    relevance: number;
+  };
+  /** Full-resolution width after URL resolution */
+  resolvedWidth?: number;
+  /** Full-resolution height after URL resolution */
+  resolvedHeight?: number;
+  /** Full-resolution URL if different from original url */
+  resolvedUrl?: string;
 }
 
 export interface NarrationClip {
@@ -138,7 +194,97 @@ export interface NarrationClip {
   mode?: 'live_browser' | 'exported_file';
 }
 
+export type TransitionType = 'crossfade' | 'cut' | 'dissolve' | 'wipe';
+
+export interface KenBurnsParams {
+  zoomStart: number;    // [1.0, 1.25]
+  zoomEnd: number;      // [1.0, 1.25]
+  panDirectionX: number; // [-1, 1] where -1=left, 0=center, 1=right
+  panDirectionY: number; // [-1, 1] where -1=up, 0=center, 1=down
+}
+
+export interface MediaReplacementSuggestion {
+  assetId: string;
+  reason: string;
+  alternativeQueries: string[];
+}
+
+export interface CaptionSettings {
+  wordsPerWindow: number;
+  displayDurationMs: number;
+  isFastPaced: boolean;
+}
+
+export interface SegmentEditEntry {
+  segmentId: string;
+  /** Reordered asset IDs (same set, different order). */
+  shotOrder: string[];
+  /** Adjusted duration in seconds (null = no change). */
+  adjustedDuration: number | null;
+  /** Original duration for audit trail. */
+  originalDuration: number;
+  /** Transition to use BEFORE this segment (null for first segment). */
+  transition: { type: TransitionType; durationMs: number } | null;
+  /** Ken Burns params keyed by asset ID. */
+  kenBurns: Record<string, KenBurnsParams>;
+  /** Caption optimization for this segment. */
+  captionSettings: CaptionSettings;
+  /** Media assets flagged for replacement. */
+  replacementSuggestions: MediaReplacementSuggestion[];
+  /** Human-readable rationale for changes. */
+  rationale: string;
+}
+
+export interface EditPlan {
+  /** Per-segment editing decisions. */
+  segments: SegmentEditEntry[];
+  /** Global summary of changes. */
+  summary: string;
+  /** Whether this is a default no-op plan. */
+  isDefault: boolean;
+}
+
+export interface AIEditOptions {
+  /** External AbortSignal for cancellation. */
+  signal?: AbortSignal;
+  /** Progress callback: phase description + percentage. */
+  onProgress?: (pct: number, message: string) => void;
+  /** LLM model override. Default: google/gemini-2.0-flash-001 */
+  model?: string;
+  /** Relevance threshold for media replacement flagging (0-100). Default: 40 */
+  relevanceThreshold?: number;
+  /** Padding seconds added to narration-matched durations. Default: 0.5 */
+  timingPadding?: number;
+}
+
+export interface QualityReport {
+  /** Scores per category, each an integer 1–10. */
+  scores: {
+    visualQuality: number;
+    pacing: number;
+    narrativeClarity: number;
+    thumbnailEffectiveness: number;
+    overallProductionValue: number;
+  };
+  /** Written feedback per category, 1–3 sentences each (max 500 chars). */
+  feedback: {
+    visualQuality: string;
+    pacing: string;
+    narrativeClarity: string;
+    thumbnailEffectiveness: string;
+    overallProductionValue: string;
+  };
+  /** Overall letter grade: A, B, C, D, or F. */
+  letterGrade: string;
+  /** Overall summary, 2–4 sentences (max 1000 chars). */
+  summary: string;
+  /** ISO timestamp of when the review was completed. */
+  reviewedAt: string;
+}
+
 export interface VideoProject {
+  /** Schema version for migration support. */
+  version: number;
   id: string;
   title: string;
   topic: string;
@@ -150,12 +296,29 @@ export interface VideoProject {
   thumbnail?: string;
   status: 'draft' | 'processing' | 'complete';
   createdAt: Date;
+  exportSettings?: {
+    quality: 'draft' | 'standard' | 'high';
+    format: 'webm' | 'mp4';
+    resolution?: '720p' | '1080p' | '4K';
+    width: number;
+    height: number;
+    mimeType: string;
+    fileName: string;
+    /** Whether to include background music in the rendered video. Defaults to true. */
+    backgroundMusic?: boolean;
+    /** Music mood preset ID (tense, uplifting, neutral). When set, overrides style-based music selection. */
+    musicPreset?: string;
+  };
   /** Topic-level research that drove the visual plan. */
   topicContext?: TopicContext;
   /** Per-segment visual plan + reasoning, keyed by segmentId. */
   visualPlans?: Record<string, SegmentVisualPlan>;
+  /** The AI-generated edit plan (stored for UI display). */
+  editPlan?: EditPlan;
   /** NEW: System-wide logs for this project session. */
   logs?: SystemLog[];
+  /** Blind review quality report, if available. */
+  blindReview?: QualityReport;
 }
 
 export interface SystemLog {
@@ -164,7 +327,8 @@ export interface SystemLog {
   level: 'info' | 'warn' | 'error' | 'success';
   source: string;
   message: string;
-  details?: any;
+  /** MR-7: narrowed from `any` to prevent accidental circular-ref / function serialisation into localStorage. */
+  details?: Record<string, unknown> | string | Error | unknown;
 }
 
 export interface TopicConfig {
@@ -176,10 +340,9 @@ export interface TopicConfig {
 }
 
 export interface AppConfig {
-  pexelsKey: string;
-  openAIKey: string;
-  serperKey: string;
   openRouterKey: string;
-  firecrawlKey: string;
   sourceType: 'stock' | 'raw';
+  flickrKey?: string;
+  /** Grok voice ID. Default: 'Sal'. */
+  ttsVoice?: string;
 }

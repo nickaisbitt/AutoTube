@@ -1,55 +1,180 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-50: #eff6ff;
-  --color-brand-100: #dbeafe;
-  --color-brand-200: #bfdbfe;
-  --color-brand-300: #93c5fd;
-  --color-brand-400: #60a5fa;
-  --color-brand-500: #3b82f6;
-  --color-brand-600: #2563eb;
-  --color-brand-700: #1d4ed8;
-  --color-brand-800: #1e40af;
-  --color-brand-900: #1e3a8a;
+  /* ── Brand: Safety Orange ── */
+  --color-brand-50: #fff7ed;
+  --color-brand-100: #ffedd5;
+  --color-brand-200: #fed7aa;
+  --color-brand-300: #fdba74;
+  --color-brand-400: #ff6b00;
+  --color-brand-500: #ff5500;
+  --color-brand-600: #ea580c;
+  --color-brand-700: #c2410c;
+  --color-brand-800: #9a3412;
+  --color-brand-900: #7c2d12;
 
-  --color-accent-400: #f97316;
-  --color-accent-500: #ea580c;
-  --color-accent-600: #c2410c;
+  /* ── Accent ── */
+  --color-accent-400: #ff6b00;
+  --color-accent-500: #ff5500;
+  --color-accent-600: #ea580c;
 
-  --color-surface-50: #f8fafc;
-  --color-surface-100: #f1f5f9;
-  --color-surface-200: #e2e8f0;
-  --color-surface-300: #cbd5e1;
-  --color-surface-400: #94a3b8;
-  --color-surface-500: #64748b;
-  --color-surface-600: #475569;
-  --color-surface-700: #334155;
-  --color-surface-800: #1e293b;
-  --color-surface-900: #0f172a;
-  --color-surface-950: #020617;
+  /* ── Surface: True blacks, whites, hard grays ── */
+  --color-surface-50: #ffffff;
+  --color-surface-100: #fafafa;
+  --color-surface-200: #e5e5e5;
+  --color-surface-300: #a3a3a3;
+  --color-surface-400: #737373;
+  --color-surface-500: #525252;
+  --color-surface-600: #404040;
+  --color-surface-700: #2a2a2a;
+  --color-surface-800: #1a1a1a;
+  --color-surface-900: #0d0d0d;
+  --color-surface-950: #000000;
 }
 
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 100 900;
-  src: url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+/* ═══════════════════════════════════════════════════
+   TASK 1–3: GLOBAL INDUSTRIAL OVERRIDES
+   Kill all rounded corners, transitions, soft shadows
+   ═══════════════════════════════════════════════════ */
+
+/* Zero out ALL border-radius variants */
+.rounded-sm, .rounded, .rounded-md, .rounded-lg,
+.rounded-xl, .rounded-2xl, .rounded-3xl, .rounded-full {
+  border-radius: 0px !important;
 }
 
+/* Kill ALL transitions globally — instant mechanical feel */
+*, *::before, *::after {
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+/* Exception: allow spinner animations */
+.animate-spin {
+  transition-duration: 0s !important;
+  animation: spin 1s linear infinite;
+}
+
+/* ═══════════════════════════════════════════════════
+   TASK 2: Override soft shadows → hard or none
+   ═══════════════════════════════════════════════════ */
+.shadow-sm { box-shadow: 2px 2px 0px rgba(255, 85, 0, 0.3) !important; }
+.shadow-md, .shadow { box-shadow: 3px 3px 0px rgba(255, 85, 0, 0.3) !important; }
+.shadow-lg { box-shadow: 4px 4px 0px #ff5500 !important; }
+.shadow-xl { box-shadow: 6px 6px 0px #ff5500 !important; }
+.shadow-2xl { box-shadow: 8px 8px 0px #ff5500 !important; }
+
+/* ═══════════════════════════════════════════════════
+   TASK 4: Kill hover transforms (scale, translate)
+   ═══════════════════════════════════════════════════ */
+.hover\:scale-105:hover,
+.hover\:-translate-y-0\.5:hover,
+.hover\:-translate-y-1:hover,
+.hover\:translate-x-0\.5:hover,
+.group-hover\:scale-105:hover,
+.group:hover .group-hover\:scale-105,
+.group:hover .group-hover\:translate-x-0\.5,
+.group:hover .group-hover\:-translate-y-0\.5 {
+  transform: none !important;
+}
+
+/* ═══════════════════════════════════════════════════
+   TASK 5: Kill ALL backdrop blur
+   ═══════════════════════════════════════════════════ */
+.backdrop-blur-sm, .backdrop-blur, .backdrop-blur-md,
+.backdrop-blur-lg, .backdrop-blur-xl, .backdrop-blur-2xl,
+.backdrop-blur-3xl, [class*="backdrop-blur"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ═══════════════════════════════════════════════════
+   TASK 6: Solid rings
+   ═══════════════════════════════════════════════════ */
+.ring-1 { box-shadow: inset 0 0 0 2px #ff5500 !important; }
+.ring-2 { box-shadow: inset 0 0 0 2px #ff5500 !important; }
+
+/* ═══════════════════════════════════════════════════
+   TASK 7: Replace animate-ping with hard blink
+   ═══════════════════════════════════════════════════ */
+@keyframes industrial-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.animate-ping {
+  animation: industrial-blink 1s step-end infinite !important;
+  transform: none !important;
+}
+
+/* ═══════════════════════════════════════════════════
+   GRADIENT OVERRIDES — flat brand color
+   Excludes .preview-overlay elements which need real gradients
+   ═══════════════════════════════════════════════════ */
+.bg-gradient-to-br:not(.preview-overlay), .bg-gradient-to-r:not(.preview-overlay), .bg-gradient-to-l:not(.preview-overlay),
+.bg-gradient-to-t:not(.preview-overlay), .bg-gradient-to-b:not(.preview-overlay), .bg-gradient-to-tr:not(.preview-overlay),
+.bg-gradient-to-tl:not(.preview-overlay), .bg-gradient-to-bl:not(.preview-overlay) {
+  background: #ff5500 !important;
+  background-image: none !important;
+}
+
+/* ═══════════════════════════════════════════════════
+   TASK 8: Industrial utility classes
+   ═══════════════════════════════════════════════════ */
+.shadow-hard { box-shadow: 4px 4px 0px #ff5500; }
+.shadow-hard-sm { box-shadow: 2px 2px 0px #ff5500; }
+.shadow-hard-white { box-shadow: 4px 4px 0px #ffffff; }
+.border-industrial { border: 4px solid #ff5500; }
+
+/* ═══════════════════════════════════════════════════
+   BASE STYLES
+   ═══════════════════════════════════════════════════ */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #334155 transparent;
+  scrollbar-color: #404040 transparent;
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background-color: #020617;
-  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background-color: #000000;
+  color: #e5e5e5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+code, pre, kbd, samp,
+[data-testid*="terminal"],
+.font-mono {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+}
+
+/* ═══════════════════════════════════════════════════
+   FOCUS STYLES — hard industrial
+   ═══════════════════════════════════════════════════ */
+input:focus, textarea:focus, select:focus {
+  outline: 2px solid #ff5500 !important;
+  outline-offset: 0px;
+  box-shadow: 4px 4px 0px #ff5500 !important;
+  border-color: #ff5500 !important;
+}
+
+/* ═══════════════════════════════════════════════════
+   SCROLLBAR
+   ═══════════════════════════════════════════════════ */
+*::-webkit-scrollbar { width: 8px; }
+*::-webkit-scrollbar-track { background: #000000; }
+*::-webkit-scrollbar-thumb { background: #404040; border: 2px solid #000000; }
+*::-webkit-scrollbar-thumb:hover { background: #ff5500; }
+
+/* ═══════════════════════════════════════════════════
+   ANIMATIONS — mechanical
+   ═══════════════════════════════════════════════════ */
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 5px rgba(59, 130, 246, 0.3); }
-  50% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.6); }
+  0%, 100% { box-shadow: 0 0 0px rgba(255, 85, 0, 0.4); }
+  50% { box-shadow: 0 0 12px rgba(255, 85, 0, 0.8); }
 }
 
 @keyframes shimmer {
@@ -58,35 +183,42 @@ body {
 }
 
 .shimmer {
-  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.05) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 85, 0, 0.08) 50%, transparent 100%);
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
 }
 
-.glow-border {
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-@keyframes typing {
-  from { width: 0; }
-  to { width: 100%; }
-}
+.glow-border { animation: pulse-glow 2s ease-in-out infinite; }
 
 @keyframes blink {
   50% { border-color: transparent; }
 }
 
 .typing-cursor::after {
-  content: '|';
-  animation: blink 1s step-end infinite;
-  color: #3b82f6;
+  content: '█';
+  animation: blink 0.8s step-end infinite;
+  color: #ff5500;
 }
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .animate-fade-in {
-  animation: fade-in 0.5s ease-out forwards;
+  animation: fade-in 0.15s step-end forwards;
 }
+
+/* ═══════════════════════════════════════════════════
+   SELECTION
+   ═══════════════════════════════════════════════════ */
+::selection {
+  background-color: #ff5500;
+  color: #000000;
+}
+
+/* ═══════════════════════════════════════════════════
+   SVG GRADIENT OVERRIDES — progress bars
+   All SVG linearGradient fills get overridden by
+   component-level changes below
+   ═══════════════════════════════════════════════════ */

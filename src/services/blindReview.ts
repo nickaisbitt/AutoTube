@@ -488,7 +488,8 @@ export function parseQualityReport(raw: unknown): QualityReport {
     } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
       parsed = raw as Record<string, unknown>;
     }
-  } catch {
+  } catch (err) {
+    console.warn('Blind review analysis parse failed:', err);
     // If parsing fails, use empty object — all defaults will apply
   }
 

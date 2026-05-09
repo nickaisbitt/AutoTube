@@ -152,7 +152,7 @@ export default function ScriptStep({ project, status, progress, message, onNext,
         {status === 'complete' && onRegenerate && (
           <button
             onClick={onRegenerate}
-            disabled={status === 'processing'}
+            disabled={false}
             className="flex items-center gap-2 border-2 border-surface-700 bg-surface-900 px-3 py-2 text-sm font-mono font-bold text-surface-300 hover:bg-brand-500 hover:text-black hover:border-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Regenerate script"
           >

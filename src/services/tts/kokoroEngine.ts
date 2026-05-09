@@ -32,9 +32,15 @@ export const kokoroEngine: TTSEngine = {
   async generate(
     text: string,
     voice: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      apiKey?: string;
+      serverUrl?: string;
+      cloudflareAccountId?: string;
+      cloudflareApiToken?: string;
+    },
   ): Promise<string | null> {
-    const serverUrl = _currentServerUrl;
+    const serverUrl = options?.serverUrl || _currentServerUrl;
     if (!serverUrl) {
       logger.error('KokoroTTS', 'No server URL configured');
       return null;
@@ -106,12 +112,12 @@ export const kokoroEngine: TTSEngine = {
 };
 
 /**
+ * @deprecated Use the `serverUrl` option in generate() instead.
  * Internal: Server URL set by the registry before calling generate.
- * This follows the same pattern as Grok/Melo credential injection.
  */
 let _currentServerUrl = '';
 
-/** Set the server URL for the Kokoro engine. Called by the registry. */
+/** @deprecated Use the `serverUrl` option in generate() instead. */
 export function setKokoroServerUrl(url: string): void {
   _currentServerUrl = url;
 }

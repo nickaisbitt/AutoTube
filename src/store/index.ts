@@ -29,6 +29,8 @@ import {
 } from './pipeline/orchestrator';
 import { logger } from '../services/logger';
 import { migrateProject } from '../services/projectMigrations';
+import { safeSetItem } from '../utils/storage';
+import { toast } from '../hooks/useToast';
 
 // ─── Validation (re-exported for tests) ──────────────────────────────────────
 
@@ -541,7 +543,7 @@ export function useVideoProject() {
         currentStep,
         savedAt: new Date().toISOString(),
       };
-      localStorage.setItem('autotube_project', JSON.stringify(data));
+      safeSetItem('autotube_project', JSON.stringify(data));
       logger.success('Store', 'Project saved to local storage');
     } catch (err) {
       logger.warn('Store', 'Failed to save project to localStorage (possible quota exceeded)', err);
@@ -564,7 +566,10 @@ export function useVideoProject() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(project),
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error('Failed to save project:', err);
+      toast('Failed to save project', 'warning');
+    });
   }, [project]);
 
   const loadProject = useCallback(() => {

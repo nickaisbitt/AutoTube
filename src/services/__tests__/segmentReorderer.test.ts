@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { reorderForHook } from '../segmentReorderer';
 import type { VideoProject, ScriptSegment, MediaAsset } from '../../types';
 
@@ -31,7 +31,7 @@ function makeAsset(overrides: Partial<MediaAsset> & { segmentId: string }): Medi
     source: 'DuckDuckGo',
     score: overrides.score ?? 0.5,
     concept: overrides.concept ?? '',
-    ...overrides,
+    ...(overrides as Omit<Partial<MediaAsset>, 'segmentId'>),
   };
 }
 
@@ -48,6 +48,7 @@ function makeProject(
     script: segments,
     media: assets,
     narration: [],
+    version: 1,
     status: 'draft',
     createdAt: new Date('2024-01-01'),
   };

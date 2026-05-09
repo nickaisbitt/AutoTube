@@ -828,9 +828,6 @@ describe('PBT Properties', () => {
 
   // Feature: blind-video-review, Property 7: QualityReport JSON round-trip
   it('Property 7: For any valid QualityReport object, JSON.parse(JSON.stringify(report)) produces a deeply equal object', () => {
-    // **Validates: Requirements 6.2, 6.3, 7.3**
-    const scoreCategories = ['visualQuality', 'pacing', 'narrativeClarity', 'thumbnailEffectiveness', 'overallProductionValue'] as const;
-
     const qualityReportArb = fc.record({
       scores: fc.record({
         visualQuality: fc.integer({ min: 1, max: 10 }),

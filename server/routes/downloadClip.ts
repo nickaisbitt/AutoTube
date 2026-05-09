@@ -11,11 +11,54 @@ import {
 } from "fs";
 import crypto from "crypto";
 
+const MAX_CACHE_SIZE = 100;
+
+interface ClipCacheEntry {
+  path: string;
+  lastAccessed: number;
+}
+
 /**
  * In-memory clip cache (keyed by URL hash).
  * Persists for the lifetime of the dev server process.
  */
-const clipCache = new Map<string, string>();
+const clipCache = new Map<string, ClipCacheEntry>();
+
+function evictOldestClip(): void {
+  let oldestKey: string | undefined;
+  let oldestTime = Infinity;
+  for (const [key, entry] of clipCache) {
+    if (entry.lastAccessed < oldestTime) {
+      oldestTime = entry.lastAccessed;
+      oldestKey = key;
+    }
+  }
+  if (oldestKey !== undefined) {
+    const entry = clipCache.get(oldestKey);
+    if (entry && existsSync(entry.path)) {
+      try {
+        unlinkSync(entry.path);
+      } catch (err) {
+        console.warn("[Clip Cache] Failed to delete old clip:", (err as Error).message);
+      }
+    }
+    clipCache.delete(oldestKey);
+  }
+}
+
+function getCachedPath(hash: string): string | undefined {
+  const entry = clipCache.get(hash);
+  if (!entry) return undefined;
+  entry.lastAccessed = Date.now();
+  return entry.path;
+}
+
+function setCachedPath(hash: string, path: string): void {
+  while (clipCache.size >= MAX_CACHE_SIZE) {
+    evictOldestClip();
+  }
+  clipCache.set(hash, { path, lastAccessed: Date.now() });
+}
 
 /**
  * GET /api/download-clip?url=...&duration=...
@@ -47,8 +90,9 @@ export async function handleDownloadClip(
     const outputPath = join(cacheDir, `${hash}.mp4`);
 
     // Return cached clip if available
-    if (clipCache.has(hash) && existsSync(clipCache.get(hash)!)) {
-      const cached = readFileSync(clipCache.get(hash)!);
+    const cachedPath = getCachedPath(hash);
+    if (cachedPath && existsSync(cachedPath)) {
+      const cached = readFileSync(cachedPath);
       res.setHeader("Content-Type", "video/mp4");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "public, max-age=86400");
@@ -132,14 +176,14 @@ export async function handleDownloadClip(
     // Clean up raw file
     try {
       unlinkSync(rawFile);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.warn("[Clip Download] Failed to remove raw file:", (err as Error).message);
     }
 
     if (!existsSync(outputPath))
       throw new Error("Trimmed clip not found");
 
-    clipCache.set(hash, outputPath);
+    setCachedPath(hash, outputPath);
     const clipBuffer = readFileSync(outputPath);
     res.setHeader("Content-Type", "video/mp4");
     res.setHeader("Access-Control-Allow-Origin", "*");

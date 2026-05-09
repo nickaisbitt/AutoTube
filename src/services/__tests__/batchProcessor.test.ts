@@ -9,6 +9,7 @@ import type { TopicConfig, VideoProject } from '../../types';
 function makeProject(topic: string): VideoProject {
   return {
     id: `proj-${topic}`,
+    version: 1,
     title: topic,
     topic,
     style: 'explainer',

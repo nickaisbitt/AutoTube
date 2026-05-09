@@ -148,17 +148,6 @@ function makeTopicContext(topic: string): TopicContext {
   };
 }
 
-/** Validate that a plan object matches the fallback shape */
-function isFallbackPlan(plan: LlmVisualPlan, topic: string): boolean {
-  return (
-    plan.intent === 'Fallback visual' &&
-    plan.visualConcept === 'Neutral documentary' &&
-    Array.isArray(plan.queries) &&
-    plan.queries.length > 0 &&
-    plan.queries.some((q) => q.includes(topic) || topic.includes(q))
-  );
-}
-
 /** Validate that a plan object is structurally valid (fallback or real) */
 function isValidPlan(plan: LlmVisualPlan): boolean {
   return (

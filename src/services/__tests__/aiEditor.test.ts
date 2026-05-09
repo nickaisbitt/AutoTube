@@ -32,7 +32,6 @@ function makeAsset(
   const id = overrides.id ?? `asset-${++assetCounter}`;
   return {
     id,
-    segmentId: overrides.segmentId,
     type: 'image',
     url: `https://example.com/${id}.jpg`,
     alt: 'generic image',
@@ -47,7 +46,6 @@ function makeNarration(
   const id = overrides.id ?? `narr-${++narrationCounter}`;
   return {
     id,
-    segmentId: overrides.segmentId,
     text: 'Some narration text.',
     voice: 'default',
     duration: 10,
@@ -63,6 +61,7 @@ function makeProject(
 ): VideoProject {
   return {
     id: 'proj-1',
+    version: 1,
     title: 'Test Project',
     topic: 'Test Topic',
     style: 'business_insider',

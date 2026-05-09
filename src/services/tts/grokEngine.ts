@@ -34,14 +34,16 @@ export const grokEngine: TTSEngine = {
   async generate(
     text: string,
     voice: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      apiKey?: string;
+      serverUrl?: string;
+      cloudflareAccountId?: string;
+      cloudflareApiToken?: string;
+    },
   ): Promise<string | null> {
     const selectedVoice = voice || DEFAULT_VOICE;
-
-    // We need the API key from the config — it's passed via the registry
-    // which sets it on the engine context. For now, we read from the
-    // module-level variable set by the registry before calling generate.
-    const apiKey = _currentApiKey;
+    const apiKey = options?.apiKey || _currentApiKey;
     if (!apiKey) {
       logger.error('GrokTTS', 'No API key available');
       return null;
@@ -125,25 +127,23 @@ export const grokEngine: TTSEngine = {
 };
 
 /**
+ * @deprecated Use the `apiKey` option in generate() instead.
  * Internal: API key set by the registry before calling generate.
- * This avoids changing the TTSEngine interface signature.
  */
 let _currentApiKey = '';
 
-/** Set the API key for the Grok engine. Called by the registry. */
+/** @deprecated Use the `apiKey` option in generate() instead. */
 export function setGrokApiKey(key: string): void {
   _currentApiKey = key;
 }
 
-/**
- * Standalone function matching the legacy `generateGrokTts` signature.
- * Used by store.ts during the transition period.
- */
 export async function generateGrokTts(
   text: string,
   apiKey: string,
   options?: { voice?: string; signal?: AbortSignal },
 ): Promise<string | null> {
-  _currentApiKey = apiKey;
-  return grokEngine.generate(text, options?.voice || DEFAULT_VOICE, { signal: options?.signal });
+  return grokEngine.generate(text, options?.voice || DEFAULT_VOICE, {
+    signal: options?.signal,
+    apiKey,
+  });
 }

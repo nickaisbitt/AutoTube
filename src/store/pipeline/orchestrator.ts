@@ -25,6 +25,7 @@ import { resolveTopicContext, planSegmentVisuals } from '../../services/visualPl
 import { generateAIScript, reviewAndImproveScript, generateVideoTitle } from '../../services/llm/index';
 import { assignSceneLayouts, scheduleRetentionBeats } from '../../services/renderingShared';
 import { QUALITY_PRESETS, renderVideoToBlob } from '../../services/renderer';
+import type { RenderResult } from '../../services/renderer/encoding';
 import { trackVideoGeneration } from '../../services/analytics';
 import { reorderForHook } from '../../services/segmentReorderer';
 import { CHART_KEYWORDS } from '../../services/captionUtils';
@@ -230,7 +231,6 @@ export async function executeSourceMedia(
           media[bestIdx] = { ...media[bestIdx], segmentId: donorSegmentId };
           media[firstIdx] = { ...media[firstIdx], segmentId: firstSegmentId };
           // Swap the actual entries so the first segment gets the best asset
-          const temp = media[bestIdx];
           media[bestIdx] = { ...firstSegmentBest, segmentId: donorSegmentId };
           media[firstIdx] = { ...bestOverall, segmentId: firstSegmentId };
           logger.info('FirstSegmentImpact', `Swapped first segment asset (score: ${firstSegmentBest.score}) with higher-scored asset (score: ${bestOverall.score}) from segment "${donorSegmentId}"`);
@@ -563,7 +563,7 @@ export async function executeAssembleVideo(
   );
   const projectToRender = hasChartAsset ? reorderForHook(renderSnapshot) : renderSnapshot;
 
-  const blob = await renderVideoToBlob(projectToRender, {
+  const renderResult = await renderVideoToBlob(projectToRender, {
     quality,
     format,
     width: preset.width,
@@ -577,9 +577,33 @@ export async function executeAssembleVideo(
 
   // Revoke old thumbnail blob URL to prevent memory leak
   if (renderSnapshot.thumbnail?.startsWith('blob:')) URL.revokeObjectURL(renderSnapshot.thumbnail);
-  const url = URL.createObjectURL(blob);
-  const mimeType = blob.type || 'video/webm';
-  const resolvedFormat = mimeType.includes('mp4') ? 'mp4' : 'webm';
+
+  // Determine video source: streaming URL for server renders, blob URL for browser renders
+  let url: string;
+  let mimeType: string;
+  let resolvedFormat: 'webm' | 'mp4';
+  let isServerRender = false;
+  let fileSize = 0;
+
+  if (renderResult && 'url' in renderResult && 'isServerRender' in renderResult) {
+    // Server-side render result — use streaming URL directly
+    const rr = renderResult as RenderResult;
+    url = rr.url;
+    isServerRender = rr.isServerRender;
+    // Infer format from URL
+    resolvedFormat = url.includes('.mp4') ? 'mp4' : 'webm';
+    mimeType = resolvedFormat === 'mp4' ? 'video/mp4' : 'video/webm';
+    // File size unknown for streaming; estimate from total frames * quality
+    fileSize = projectToRender.script.reduce((s, seg) => s + seg.duration, 0) * 1024 * 1024;
+  } else {
+    // Browser-side render result — create blob URL
+    const blob = renderResult as Blob;
+    url = URL.createObjectURL(blob);
+    mimeType = blob.type || 'video/webm';
+    resolvedFormat = mimeType.includes('mp4') ? 'mp4' : 'webm';
+    fileSize = blob.size;
+  }
+
   const fileName = `${projectToRender.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${resolvedFormat}`;
 
   const updatedProject: VideoProject = {
@@ -594,6 +618,7 @@ export async function executeAssembleVideo(
       mimeType,
       fileName,
       backgroundMusic: projectToRender.exportSettings?.backgroundMusic,
+      isStreaming: isServerRender,
     },
   };
 
@@ -603,7 +628,7 @@ export async function executeAssembleVideo(
     topic: renderSnapshot.topic,
     createdAt: new Date().toISOString(),
     renderTime: Math.max(0, (performance.now() - renderStartedAt) / 1000),
-    fileSize: blob.size,
+    fileSize,
     duration: renderSnapshot.script.reduce((sum, seg) => sum + seg.duration, 0),
     segments: renderSnapshot.script.length,
     mediaCount: renderSnapshot.media.length,

@@ -31,7 +31,8 @@ export const TRUSTED_DOMAINS: string[] = [
 export function extractHostname(url: string): string {
   try {
     return new URL(url).hostname;
-  } catch {
+  } catch (err) {
+    console.warn('Domain filter URL parse failed:', err);
     return '';
   }
 }

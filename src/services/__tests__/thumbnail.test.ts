@@ -47,6 +47,7 @@ function makeProject(): VideoProject {
     script: [],
     media: [chartAsset, portraitAsset],
     narration: [],
+    version: 1,
     status: 'draft',
     createdAt: new Date(),
   };

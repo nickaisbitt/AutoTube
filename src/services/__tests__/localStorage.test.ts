@@ -380,19 +380,19 @@ describe('Property 19: Config merge with defaults', () => {
   it('DEFAULT_APP_CONFIG has all required AppConfig fields', () => {
     const requiredFields = ['openRouterKey', 'sourceType'];
 
-    for (const field of requiredFields) {
-      expect(DEFAULT_APP_CONFIG).toHaveProperty(field);
-      expect((DEFAULT_APP_CONFIG as Record<string, unknown>)[field]).toBeDefined();
-    }
+     for (const field of requiredFields) {
+       expect(DEFAULT_APP_CONFIG).toHaveProperty(field);
+       expect((DEFAULT_APP_CONFIG as unknown as Record<string, unknown>)[field]).toBeDefined();
+     }
   });
 
   it('DEFAULT_APP_CONFIG fields are all strings', () => {
     fc.assert(
       fc.property(
         fc.constantFrom(...Object.keys(DEFAULT_APP_CONFIG)),
-        (field) => {
-          expect(typeof (DEFAULT_APP_CONFIG as Record<string, unknown>)[field]).toBe('string');
-        },
+         (field) => {
+           expect(typeof (DEFAULT_APP_CONFIG as unknown as Record<string, unknown>)[field]).toBe('string');
+         },
       ),
       { numRuns: 100 },
     );

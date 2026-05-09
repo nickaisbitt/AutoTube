@@ -29,7 +29,7 @@ interface NarrationStepProps {
   appConfig?: AppConfig;
 }
 
-export default function NarrationStep({ project, status, progress, message, onGenerateNarration, onNext, appConfig }: NarrationStepProps) {
+export default function NarrationStep({ project, status, progress, message, onGenerateNarration, onNext }: NarrationStepProps) {
   const [playingClip, setPlayingClip] = useState<string | null>(null);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [voiceCount, setVoiceCount] = useState(0);

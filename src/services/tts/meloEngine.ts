@@ -24,10 +24,16 @@ export const meloEngine: TTSEngine = {
   async generate(
     text: string,
     _voice: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      apiKey?: string;
+      serverUrl?: string;
+      cloudflareAccountId?: string;
+      cloudflareApiToken?: string;
+    },
   ): Promise<string | null> {
-    const accountId = _currentAccountId;
-    const apiToken = _currentApiToken;
+    const accountId = options?.cloudflareAccountId || _currentAccountId;
+    const apiToken = options?.cloudflareApiToken || _currentApiToken;
 
     if (!accountId || !apiToken) {
       logger.error('MeloTTS', 'Missing Cloudflare credentials');
@@ -106,28 +112,26 @@ export const meloEngine: TTSEngine = {
 };
 
 /**
- * Internal: Cloudflare credentials set by the registry before calling generate.
+ * @deprecated Use the `cloudflareAccountId`/`cloudflareApiToken` options in generate() instead.
  */
 let _currentAccountId = '';
 let _currentApiToken = '';
 
-/** Set Cloudflare credentials for the Melo engine. Called by the registry. */
+/** @deprecated Use the `cloudflareAccountId`/`cloudflareApiToken` options in generate() instead. */
 export function setMeloCredentials(accountId: string, apiToken: string): void {
   _currentAccountId = accountId;
   _currentApiToken = apiToken;
 }
 
-/**
- * Standalone function matching the legacy `generateMeloTts` signature.
- * Used by store.ts during the transition period.
- */
 export async function generateMeloTts(
   text: string,
   accountId: string,
   apiToken: string,
   options?: { signal?: AbortSignal },
 ): Promise<string | null> {
-  _currentAccountId = accountId;
-  _currentApiToken = apiToken;
-  return meloEngine.generate(text, 'default', { signal: options?.signal });
+  return meloEngine.generate(text, 'default', {
+    signal: options?.signal,
+    cloudflareAccountId: accountId,
+    cloudflareApiToken: apiToken,
+  });
 }

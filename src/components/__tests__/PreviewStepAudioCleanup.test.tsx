@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, act, fireEvent, screen } from '@testing-library/react';
+import { render, act, fireEvent } from '@testing-library/react';
 import type { VideoProject, NarrationClip } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -15,8 +15,6 @@ let capturedAudioInstance: { pause: ReturnType<typeof vi.fn>; src: string; addEv
 
 // We need to intercept the Audio constructor to capture the instance created
 // inside PreviewStep via `useState(() => new Audio())`.
-const originalAudio = globalThis.Audio;
-
 beforeEach(() => {
   capturedAudioInstance = null;
 

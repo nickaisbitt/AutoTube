@@ -87,19 +87,6 @@ function getTargetDomain(importPath: string, importingFile: string): DomainName 
   return null;
 }
 
-/**
- * Determine which domain the importing file belongs to.
- */
-function getFileDomain(filePath: string): DomainName | null {
-  for (const domain of DOMAIN_DIRS) {
-    const domainDir = path.join(SERVICES_ROOT, domain);
-    if (filePath.startsWith(domainDir + path.sep) || filePath === domainDir) {
-      return domain;
-    }
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // Build the domain dependency graph
 // ---------------------------------------------------------------------------
@@ -292,9 +279,6 @@ describe('Feature: codebase-refactor, Property 5: Acyclic domain dependency grap
   });
 
   it('random domain pair property: no bidirectional transitive dependency', () => {
-    // Use fast-check to randomly sample domain indices and verify the property
-    const domainIndices = DOMAIN_DIRS.map((_, i) => i);
-
     fc.assert(
       fc.property(
         fc.integer({ min: 0, max: DOMAIN_DIRS.length - 1 }),

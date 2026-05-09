@@ -8,9 +8,9 @@
 
 import { logger } from '../logger';
 import { browserEngine } from './browserEngine';
-import { grokEngine, setGrokApiKey } from './grokEngine';
+import { grokEngine } from './grokEngine';
 import type { TTSConfig, TTSEngine } from './interface';
-import { kokoroEngine, setKokoroServerUrl } from './kokoroEngine';
+import { kokoroEngine } from './kokoroEngine';
 import { meloEngine, setMeloCredentials } from './meloEngine';
 
 /** Default engine priority order: Kokoro → Grok → Melo → Browser */
@@ -37,15 +37,19 @@ function getOrderedEngines(config: TTSConfig): TTSEngine[] {
  * Configure engine credentials from the TTSConfig before generation.
  */
 function configureEngines(config: TTSConfig): void {
-  if (config.kokoroServerUrl) {
-    setKokoroServerUrl(config.kokoroServerUrl);
-  }
-  if (config.xaiApiKey) {
-    setGrokApiKey(config.xaiApiKey);
-  }
   if (config.cloudflareAccountId && config.cloudflareApiToken) {
     setMeloCredentials(config.cloudflareAccountId, config.cloudflareApiToken);
   }
+}
+
+function buildEngineOptions(config: TTSConfig, signal?: AbortSignal) {
+  return {
+    signal,
+    apiKey: config.xaiApiKey,
+    serverUrl: config.kokoroServerUrl,
+    cloudflareAccountId: config.cloudflareAccountId,
+    cloudflareApiToken: config.cloudflareApiToken,
+  };
 }
 
 /**
@@ -65,6 +69,7 @@ export async function generateWithFallback(
   configureEngines(config);
 
   const engines = getOrderedEngines(config);
+  const engineOptions = buildEngineOptions(config, options?.signal);
 
   if (engines.length === 0) {
     logger.error('TTS', 'No TTS engines available — check credentials and browser support');
@@ -77,7 +82,7 @@ export async function generateWithFallback(
     const engine = engines[i];
 
     try {
-      const result = await engine.generate(text, voice, options);
+      const result = await engine.generate(text, voice, engineOptions);
 
       if (result !== null) {
         return result;

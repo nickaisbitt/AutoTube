@@ -62,7 +62,7 @@ export function usePlayback(
   useEffect(() => {
     if (previewMode === 'rendered' && videoRef.current) {
       if (isPlaying) {
-        videoRef.current.play().catch(() => {});
+        videoRef.current.play().catch(err => { console.warn('Autoplay blocked:', err.message); });
       } else {
         videoRef.current.pause();
       }

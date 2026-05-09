@@ -8,6 +8,7 @@ import { createCanvas } from 'canvas';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
+import { homedir, tmpdir } from 'os';
 
 /**
  * Generate a thumbnail PNG for the video project.
@@ -132,7 +133,7 @@ export async function generateThumbnail(project, imgCache, fetchImage, fetchVide
       .toLowerCase()
       .substring(0, 60);
     const thumbDownloadName = `autotube-${safeTopic}-thumbnail.png`;
-    const thumbDownloadPath = `${process.env.HOME}/Downloads/${thumbDownloadName}`;
+    const thumbDownloadPath = `${homedir() || tmpdir()}/Downloads/${thumbDownloadName}`;
     spawnSync('cp', [thumbPath, thumbDownloadPath]);
     console.log(`📁 Thumbnail copied to ~/Downloads/${thumbDownloadName}`);
 

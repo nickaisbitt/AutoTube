@@ -10,7 +10,6 @@ import fc from 'fast-check';
 import {
   detectWeakHook,
   PERSONAL_STAKES_KEYWORDS,
-  STATISTIC_PATTERN,
 } from '../visualPlanner';
 
 // ---------------------------------------------------------------------------

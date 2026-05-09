@@ -100,9 +100,6 @@ describe('Feature: video-quality-max, Property 1: TTS Registry Fallback Guarante
 
         const engines = getRegisteredEngines();
 
-        // Mock all engines to fail (return null) except the last one
-        const originalGenerates = engines.map((e) => e.generate);
-
         for (let i = 0; i < engines.length; i++) {
           const engine = engines[i];
           vi.spyOn(engine, 'generate').mockImplementation(async () => {

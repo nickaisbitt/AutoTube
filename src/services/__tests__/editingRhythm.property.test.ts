@@ -42,32 +42,6 @@ const longNarrationArb: fc.Arbitrary<string> = fc
   )
   .map((words) => words.join(' ') + '.');
 
-/** Arbitrary for short narration text that produces <=8 seconds (<=20 words) */
-const shortNarrationArb: fc.Arbitrary<string> = fc
-  .array(
-    fc.constantFrom(
-      'The', 'market', 'grew', 'this', 'year', 'rapidly', 'and', 'strongly',
-      'with', 'great', 'results', 'overall',
-    ),
-    { minLength: 1, maxLength: 10 },
-  )
-  .map((words) => words.join(' ') + '.');
-
-/** Arbitrary for narration with statistical content */
-const statisticalNarrationArb: fc.Arbitrary<string> = fc.oneof(
-  fc.tuple(
-    fc.constantFrom('The company lost', 'Revenue reached', 'They invested'),
-    fc.integer({ min: 1, max: 999 }),
-    fc.constantFrom(' billion', ' million', ' trillion'),
-    fc.constantFrom(' in revenue.', ' last year.', ' this quarter.'),
-  ).map(([prefix, num, magnitude, suffix]) => `${prefix} $${num}${magnitude}${suffix}`),
-  fc.tuple(
-    fc.constantFrom('Growth was', 'The market dropped', 'Adoption increased by'),
-    fc.integer({ min: 1, max: 99 }),
-    fc.constantFrom(' this year.', ' in Q4.', ' since launch.'),
-  ).map(([prefix, pct, suffix]) => `${prefix} ${pct}%${suffix}`),
-);
-
 /** Arbitrary for a ScriptSegment with configurable duration and narration */
 function segmentArb(opts?: {
   minDuration?: number;

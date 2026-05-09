@@ -39,7 +39,7 @@ function makeAsset(
     url: `https://example.com/${id}.jpg`,
     alt: 'generic image',
     source: 'DuckDuckGo',
-    ...overrides,
+    ...(overrides as Omit<Partial<MediaAsset>, 'segmentId'>),
   };
 }
 
@@ -54,7 +54,7 @@ function makeNarration(
     voice: 'default',
     duration: 10,
     status: 'ready',
-    ...overrides,
+    ...(overrides as Omit<Partial<NarrationClip>, 'segmentId'>),
   };
 }
 
@@ -72,6 +72,7 @@ function makeProject(
     script: segments,
     media: assets,
     narration,
+    version: 1,
     status: 'draft',
     createdAt: new Date('2024-01-01'),
   };

@@ -12,8 +12,6 @@ import { applyEditPlan } from '../aiEditor';
 import type {
   VideoProject,
   ScriptSegment,
-  MediaAsset,
-  NarrationClip,
   EditPlan,
   SegmentEditEntry,
 } from '../../types';
@@ -34,6 +32,7 @@ function makeSegment(id: string, duration: number): ScriptSegment {
 function makeProject(segments: ScriptSegment[]): VideoProject {
   return {
     id: 'proj-1',
+    version: 1,
     title: 'Test Project',
     topic: 'Test Topic',
     style: 'business_insider',

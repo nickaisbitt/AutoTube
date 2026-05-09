@@ -10,6 +10,7 @@ import { handleExportProject } from "./routes/exportProject.js";
 import { handleSearchVideos } from "./routes/searchVideos.js";
 import { handleDownloadClip } from "./routes/downloadClip.js";
 import { handleSearch } from "./routes/search.js";
+import { handleNotify } from "./routes/notify.js";
 
 /**
  * Connect-compatible middleware that handles all /api/* routes.
@@ -32,8 +33,10 @@ export function apiMiddleware(
   // Apply CORS headers for all API routes
   cors(req, res, () => {});
 
-  // Debug: log all /api/ requests
-  console.log(`[API] ${req.method} ${req.url}`);
+  // Debug: log all /api/ requests (only in dev or when DEBUG_API is set)
+  if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_API) {
+    console.log(`[API] ${req.method} ${req.url}`);
+  }
 
   // Dispatch to route handlers
   const dispatch = async () => {
@@ -65,6 +68,11 @@ export function apiMiddleware(
         await handleDownloadClip(req, res);
       } else if (req.url!.startsWith("/api/search")) {
         await handleSearch(req, res);
+      } else if (
+        req.url!.startsWith("/api/notify") &&
+        req.method === "POST"
+      ) {
+        await handleNotify(req, res);
       } else {
         // No matching route — pass to next middleware
         next();

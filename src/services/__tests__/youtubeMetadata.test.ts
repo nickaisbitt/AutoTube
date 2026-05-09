@@ -44,6 +44,7 @@ function makeProject(
     script,
     media,
     narration: [],
+    version: 1,
     status: 'complete',
     createdAt: new Date(),
   };

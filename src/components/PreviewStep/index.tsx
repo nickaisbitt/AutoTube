@@ -36,7 +36,6 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
     currentSegmentIndex,
     isMuted,
     isNarrating,
-    speechSupported,
     totalDuration,
     handlePlayPause,
     handleResetPlayback,
@@ -51,26 +50,44 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
   useEffect(() => {
     if (!project) return;
 
+    let cancelled = false;
+    let localObjectUrl: string | null = null;
+
     const generate = async () => {
       try {
         const hookLine = extractHookLine(project.script);
         const blob = await generateSplitScreenThumbnail(project, project.title, hookLine);
-        objectUrlRef.current = URL.createObjectURL(blob);
-        setThumbnailPreviewUrl(objectUrlRef.current);
+        localObjectUrl = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(localObjectUrl);
+          return;
+        }
+        objectUrlRef.current = localObjectUrl;
+        setThumbnailPreviewUrl(localObjectUrl);
       } catch {
+        if (cancelled) return;
         try {
           const blob = await generateThumbnail(project.title, project.topic);
-          objectUrlRef.current = URL.createObjectURL(blob);
-          setThumbnailPreviewUrl(objectUrlRef.current);
+          localObjectUrl = URL.createObjectURL(blob);
+          if (cancelled) {
+            URL.revokeObjectURL(localObjectUrl);
+            return;
+          }
+          objectUrlRef.current = localObjectUrl;
+          setThumbnailPreviewUrl(localObjectUrl);
         } catch {
-          setThumbnailPreviewFailed(true);
+          if (!cancelled) setThumbnailPreviewFailed(true);
         }
       }
     };
 
-    generate().catch(() => setThumbnailPreviewFailed(true));
+    generate().catch(() => {
+      if (!cancelled) setThumbnailPreviewFailed(true);
+    });
 
     return () => {
+      cancelled = true;
+      if (localObjectUrl) URL.revokeObjectURL(localObjectUrl);
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

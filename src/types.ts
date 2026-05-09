@@ -194,7 +194,7 @@ export interface NarrationClip {
   mode?: 'live_browser' | 'exported_file';
 }
 
-export type TransitionType = 'crossfade' | 'cut' | 'dissolve' | 'wipe';
+export type TransitionType = 'crossfade' | 'cut' | 'dissolve' | 'wipe' | 'slide' | 'zoom' | 'glitch' | 'flash' | 'push' | 'spin';
 
 export interface KenBurnsParams {
   zoomStart: number;    // [1.0, 1.25]
@@ -308,6 +308,8 @@ export interface VideoProject {
     backgroundMusic?: boolean;
     /** Music mood preset ID (tense, uplifting, neutral). When set, overrides style-based music selection. */
     musicPreset?: string;
+    /** Whether the video was rendered server-side and uses a streaming URL (not a blob URL). */
+    isStreaming?: boolean;
   };
   /** Topic-level research that drove the visual plan. */
   topicContext?: TopicContext;

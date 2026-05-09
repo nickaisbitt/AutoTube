@@ -28,7 +28,7 @@ export async function fetchWikiContext(topic: string): Promise<{ extract: string
           }
         }
       }
-    } catch { /* fall through */ }
+    } catch (err) { console.warn('Wikipedia search failed:', err); /* fall through */ }
 
     if (!title) return empty;
 
@@ -43,7 +43,8 @@ export async function fetchWikiContext(topic: string): Promise<{ extract: string
       extract: typeof sum.extract === 'string' ? sum.extract : '',
       description: typeof sum.description === 'string' ? sum.description : '',
     };
-  } catch {
+  } catch (err) {
+    console.warn('Wikipedia summary fetch failed:', err);
     return empty;
   }
 }
@@ -66,7 +67,8 @@ export async function fetchTopicContext(topic: string): Promise<string> {
       .filter((line) => line.length > 2)
       .join('\n');
     return context ? `\nCURRENT CONTEXT (from recent web search):\n${context}\n` : '';
-  } catch {
+  } catch (err) {
+    console.warn('Topic context web search failed:', err);
     return '';
   }
 }

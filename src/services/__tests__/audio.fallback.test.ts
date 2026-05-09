@@ -35,6 +35,7 @@ describe('resolveBackgroundMusicPath', () => {
         unlinkSync: vi.fn(),
       },
     }));
+    // @ts-expect-error no declaration file
     const audioModule = await import('../../../server-render/audio.mjs');
     resolveBackgroundMusicPath = audioModule.resolveBackgroundMusicPath;
   });

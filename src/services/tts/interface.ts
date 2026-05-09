@@ -20,7 +20,13 @@ export interface TTSEngine {
   generate(
     text: string,
     voice: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      apiKey?: string;
+      serverUrl?: string;
+      cloudflareAccountId?: string;
+      cloudflareApiToken?: string;
+    },
   ): Promise<string | null>;
 
   /** Check whether this engine is available given the current config */

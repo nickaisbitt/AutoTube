@@ -77,18 +77,7 @@ function getTargetDomain(importPath: string, importingFile: string): string | nu
   return null;
 }
 
-/**
- * Determine which domain the importing file belongs to.
- */
-function getFileDomain(filePath: string): string | null {
-  for (const domain of DOMAIN_DIRS) {
-    const domainDir = path.join(SERVICES_ROOT, domain);
-    if (filePath.startsWith(domainDir + path.sep) || filePath === domainDir) {
-      return domain;
-    }
-  }
-  return null;
-}
+
 
 /**
  * Check if an import path targets a barrel (index.ts) of a domain.

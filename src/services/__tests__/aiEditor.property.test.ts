@@ -11,7 +11,6 @@ import type {
   SegmentEditEntry,
   KenBurnsParams,
   TransitionType,
-  MediaReplacementSuggestion,
 } from '../../types';
 
 // ── Custom Arbitraries ──────────────────────────────────────────────────────
@@ -97,6 +96,7 @@ const arbVideoProject: fc.Arbitrary<VideoProject> = fc
 
     return fc.tuple(segmentsArb, assetsPerSegArb, narrArb).map(
       ([segments, assetsPerSeg, narrations]) => ({
+        version: 1,
         id: 'proj-test',
         title: 'Test Project',
         topic: 'Test Topic',
@@ -425,6 +425,7 @@ const arbVideoProjectWithOptionalNarration: fc.Arbitrary<VideoProject> = fc
 
     return fc.tuple(segmentsArb, assetsPerSegArb, narrArb).map(
       ([segments, assetsPerSeg, narrPerSeg]) => ({
+        version: 1,
         id: 'proj-test',
         title: 'Test Project',
         topic: 'Test Topic',
@@ -498,6 +499,7 @@ function arbProjectWithControlledNarration(
 
     return fc.tuple(segmentsArb, assetsPerSegArb, narrArb).map(
       ([segments, assetsPerSeg, narrations]) => ({
+        version: 1,
         id: 'proj-test',
         title: 'Test Project',
         topic: 'Test Topic',
@@ -692,6 +694,7 @@ describe('Feature: ai-editor-layer, Property 9: Consecutive Shots Have Distinct 
 
         return fc.tuple(segmentsArb, assetsPerSegArb, narrArb).map(
           ([segments, assetsPerSeg, narrations]) => ({
+            version: 1,
             id: 'proj-test',
             title: 'Test Project',
             topic: 'Test Topic',
@@ -772,6 +775,7 @@ describe('Feature: ai-editor-layer, Property 10: Transition Variety Constraint',
 
         return fc.tuple(segmentsArb, assetsPerSegArb, narrArb).map(
           ([segments, assetsPerSeg, narrations]) => ({
+            version: 1,
             id: 'proj-test',
             title: 'Test Project',
             topic: 'Test Topic',
@@ -972,6 +976,7 @@ describe('Feature: ai-editor-layer, Property 15: Fallback Assets Flagged as Repl
 
         return fc.tuple(segmentsArb, assetsPerSegArb, narrArb).map(
           ([segments, assetsPerSeg, narrations]) => ({
+            version: 1,
             id: 'proj-test',
             title: 'Test Project',
             topic: 'Test Topic',

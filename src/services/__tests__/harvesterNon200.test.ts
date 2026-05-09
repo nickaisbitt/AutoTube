@@ -1,5 +1,5 @@
 // Feature: codebase-robustness-audit, Property 13: Harvester returns empty array on non-200
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fc from 'fast-check';
 
 /**

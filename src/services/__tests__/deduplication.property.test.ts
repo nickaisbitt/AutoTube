@@ -6,14 +6,14 @@
  *
  * Validates: Requirements 2.1, 2.2, 2.3
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import {
   createDeduplicationRegistry,
   registerAsset,
   getDeduplicationPenalty,
 } from '../media';
-import type { MediaCandidate, DeduplicationRegistry } from '../media';
+import type { MediaCandidate } from '../media';
 
 // ---------------------------------------------------------------------------
 // Arbitraries
@@ -27,9 +27,6 @@ const pathArb: fc.Arbitrary<string> = fc.stringMatching(/^\/[a-z]{2,8}\/[a-z0-9]
 
 /** Arbitrary for alt text (non-empty, lowercase words) */
 const altArb: fc.Arbitrary<string> = fc.stringMatching(/^[a-z]{3,8}( [a-z]{3,8}){1,4}$/);
-
-/** Arbitrary for a segment ID */
-const segmentIdArb: fc.Arbitrary<string> = fc.stringMatching(/^seg-[0-9]{1,4}$/);
 
 /**
  * Arbitrary for a minimal MediaAsset-like object suitable for registerAsset.

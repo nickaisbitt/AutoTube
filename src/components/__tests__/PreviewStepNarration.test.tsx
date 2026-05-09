@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, act, fireEvent, screen } from '@testing-library/react';
+import { render, act, fireEvent } from '@testing-library/react';
 import type { VideoProject, NarrationClip } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -138,7 +138,7 @@ describe('PreviewStep narration seek-back', () => {
     speakTextCalls.length = 0;
     stopSpeakingCalls.length = 0;
     // Mock requestAnimationFrame for controlled playback
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => {
       // Don't auto-call — we'll drive time manually
       return 1;
     });
@@ -186,7 +186,6 @@ describe('PreviewStep narration seek-back', () => {
     });
 
     // Segment 0 narration fires
-    const initialCallCount = speakTextCalls.length;
     expect(speakTextCalls.length).toBeGreaterThanOrEqual(1);
     expect(speakTextCalls).toContain('Welcome to the video.');
 
@@ -207,7 +206,6 @@ describe('PreviewStep narration seek-back', () => {
     });
 
     // Clear the call log to track only what happens after the seek-back
-    const callsBeforeSeekBack = [...speakTextCalls];
     speakTextCalls.length = 0;
 
     // Now seek BACK to segment 1 (time offset = 5s)

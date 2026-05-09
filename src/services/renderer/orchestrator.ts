@@ -10,6 +10,7 @@ import { planSegmentShots, alternateFraming, planPatternInterrupts, shouldInsert
 import type { ShotPlan, TextCardEntry } from './editingRhythm';
 import { preload } from './preload';
 import { cleanupRenderResources, getSupportedMimeType, tryServerRender } from './encoding';
+import type { RenderResult } from './encoding';
 
 export interface RenderOptions {
   width?: number;
@@ -23,9 +24,9 @@ export interface RenderOptions {
 }
 
 export const QUALITY_PRESETS = {
-  draft: { width: 854, height: 480, fps: 24, videoBitsPerSecond: 2_500_000 },
-  standard: { width: 1920, height: 1080, fps: 24, videoBitsPerSecond: 8_000_000 },
-  high: { width: 1920, height: 1080, fps: 24, videoBitsPerSecond: 10_000_000 },
+  draft:    { width: 854,  height: 480,  fps: 24, videoBitsPerSecond: 4_000_000  }, // Increased from 2.5M to 4M for usable quality
+  standard: { width: 1920, height: 1080, fps: 24, videoBitsPerSecond: 12_000_000 },
+  high:     { width: 1920, height: 1080, fps: 24, videoBitsPerSecond: 16_000_000 },
 };
 
 export interface ImgCache { [k: string]: HTMLImageElement; }
@@ -40,7 +41,7 @@ export const MAX_FRAMES = 2000;
 export async function renderVideoToBlob(
   project: VideoProject,
   options: RenderOptions = {},
-): Promise<Blob> {
+): Promise<Blob | RenderResult> {
   const quality = options.quality || 'standard';
   const requestedFormat = options.format || 'webm';
 
@@ -64,10 +65,10 @@ export async function renderVideoToBlob(
   onProgress?.(1, 'Connecting to render server...');
   let serverRenderFailed = false;
   try {
-    const serverBlob = await tryServerRender(project, onProgress, signal);
-    if (serverBlob && serverBlob.size > 0) {
+    const serverResult = await tryServerRender(project, onProgress, signal);
+    if (serverResult && serverResult.url) {
       logger.success('Renderer', 'Server-side render succeeded, skipping browser render');
-      return serverBlob;
+      return serverResult as unknown as Blob;
     }
     serverRenderFailed = true;
   } catch (err) {
@@ -287,7 +288,7 @@ export async function renderVideoToBlob(
       ctx.drawImage(offscreen, 0, 0);
 
       if (f % frameInterval === 0 && capturedFrames.length < MAX_CAPTURED_FRAMES) {
-        capturedFrames.push(canvas.toDataURL('image/png'));
+        capturedFrames.push(canvas.toDataURL('image/jpeg', 0.92)); // JPEG 92% quality = 5x faster than PNG
       }
 
       const segMsg = `Rendering segment ${i + 1}/${project.script.length}: ${seg.title}`;
@@ -343,6 +344,7 @@ export async function renderVideoToBlob(
   // ── Audio mixing via Web Audio API (narration + background music) ──
   let bgAudioCtx: AudioContext | null = null;
   let bgSourceNode: AudioBufferSourceNode | null = null;
+  let bgGainNode: GainNode | null = null; // Store gain node for fade-out
   const narrationSourceNodes: AudioBufferSourceNode[] = [];
   try {
     bgAudioCtx = new AudioContext();
@@ -390,6 +392,7 @@ export async function renderVideoToBlob(
         const bgVolume = computeBgMusicVolume(hasNarration);
 
         const gainNode = bgAudioCtx.createGain();
+        bgGainNode = gainNode; // Store reference for fade-out
         gainNode.gain.value = bgVolume;
 
         bgSourceNode = bgAudioCtx.createBufferSource();
@@ -430,6 +433,13 @@ export async function renderVideoToBlob(
     await new Promise<void>(r => setTimeout(r, frameDurationMs));
   }
 
+  // Fade out background music before stopping (prevent abrupt cut)
+  if (bgGainNode && bgAudioCtx) {
+    try {
+      bgGainNode.gain.setTargetAtTime(0, bgAudioCtx.currentTime, 0.5);
+      await new Promise<void>(r => setTimeout(r, 1500));
+    } catch { /* ignore fade errors */ }
+  }
   if (bgSourceNode) {
     try { bgSourceNode.stop(); } catch { /* already stopped */ }
   }

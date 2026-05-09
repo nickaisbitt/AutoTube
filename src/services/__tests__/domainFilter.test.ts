@@ -45,9 +45,7 @@ const blockedEntryArb = fc.constantFrom(...ALL_BLOCKED_ENTRIES);
 /** Generate a URL path suffix */
 const pathArb = fc.array(fc.constantFrom('a', 'b', '1', '2', '-', '_'), { minLength: 1, maxLength: 20 }).map(chars => chars.join(''));
 
-/** Build a full URL from a blocked domain pattern */
-const blockedUrlArb = (domain: string) =>
-  pathArb.map((path) => `https://${domain}.com/${path}`);
+/** Generate a clean (non-blocked) URL for the other field */
 
 /** Generate a clean (non-blocked) URL for the other field */
 const cleanUrlArb = fc.constantFrom(
@@ -55,22 +53,6 @@ const cleanUrlArb = fc.constantFrom(
   'https://cdn.somesite.org/photo.png',
   'https://images.neutral-domain.net/pic.jpg',
 );
-
-/** Generate a base MediaCandidate with placeholder URLs */
-function makeCandidateArb(sourceUrl: string, url: string): fc.Arbitrary<MediaCandidate> {
-  return fc.record({
-    url: fc.constant(url),
-    sourceUrl: fc.constant(sourceUrl),
-    source: fc.constantFrom('DuckDuckGo · web', 'Google · web', 'Firecrawl Search'),
-    alt: fc.string({ minLength: 1, maxLength: 50 }),
-    baseScore: fc.integer({ min: 0, max: 300 }),
-    query: fc.string({ minLength: 1, maxLength: 30 }),
-    finalScore: fc.constant(0),
-    type: fc.constantFrom('image' as const, 'video' as const),
-    width: fc.option(fc.integer({ min: 100, max: 4000 }), { nil: undefined }),
-    height: fc.option(fc.integer({ min: 100, max: 4000 }), { nil: undefined }),
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -150,7 +132,7 @@ describe('Property 1: Bug Condition — Blocked Domain Rejection', () => {
 
 // Feature: media-source-filter, Property 2: Preservation - Non-Blocked Candidate Behavior
 import { scoreCandidate } from '../media';
-import type { TopicContext, AppConfig } from '../../types';
+import type { TopicContext } from '../../types';
 
 /**
  * **Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6**
@@ -890,9 +872,6 @@ describe('Property 3: Resolution Scoring — Resolution Bonus Monotonicity', () 
           const scoreA = scoreCandidate(candidateA, STUB_TOPIC_CONTEXT, undefined, 'stock');
           const scoreB = scoreCandidate(candidateB, STUB_TOPIC_CONTEXT, undefined, 'stock');
 
-          // The score difference should equal the difference in expected bonuses
-          // (since all other factors are identical)
-          const expectedDiff = tierA.expectedBonus - tierB.expectedBonus;
           // Account for pixel-based scoring differences too (section 4 in scoreCandidate)
           // We just verify monotonicity: if tierA has higher bonus, scoreA >= scoreB
           if (tierA.expectedBonus > tierB.expectedBonus) {
@@ -918,14 +897,7 @@ describe('Property 3: Resolution Scoring — Resolution Bonus Monotonicity', () 
             width: undefined,
             height: undefined,
           };
-          const baseline720Candidate: MediaCandidate = {
-            ...baseResCandidate,
-            width: 1280,
-            height: 720,
-          };
-
           const unknownScore = scoreCandidate(unknownCandidate, STUB_TOPIC_CONTEXT, undefined, sourceType);
-          const baseline720Score = scoreCandidate(baseline720Candidate, STUB_TOPIC_CONTEXT, undefined, sourceType);
 
           // Unknown dimensions get no resolution bonus (+0), same as 720p (+0)
           // But 720p has pixel-based and ratio-based scoring from section 4 that unknown doesn't

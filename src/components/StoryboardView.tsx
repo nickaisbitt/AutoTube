@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { AlertCircle, Clock, Film, Image as ImageIcon, Sparkles } from 'lucide-react';
 import type { VideoProject } from '../types';
-import { buildStoryboard, formatStoryboardTimecode } from '../services/storyboard';
+import { buildStoryboard } from '../services/storyboard';
 
 interface StoryboardViewProps {
   project: VideoProject;

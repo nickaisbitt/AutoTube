@@ -84,7 +84,7 @@ export async function handleServerRender(
 
   // Determine the dev server URL from the incoming request
   const host = req.headers.host || 'localhost:5173';
-  const protocol = 'http';
+  const protocol = (req.headers['x-forwarded-proto'] as string) || 'http';
   const devServerUrl = `${protocol}://${host}`;
 
   const child = spawn("node", ["server-render/index.mjs", outputMp4], {
@@ -128,7 +128,11 @@ export async function handleServerRender(
       return;
     }
 
-    if (!existsSync(outputMp4)) {
+    const finalMp4 = outputMp4.replace('.mp4', '-final.mp4');
+    const fileToReturn = existsSync(finalMp4) ? finalMp4 : outputMp4;
+    const hasAudio = fileToReturn === finalMp4; // -final.mp4 includes audio muxing
+
+    if (!existsSync(fileToReturn)) {
       sendEvent({
         type: "error",
         message: "Render completed but output file not found",
@@ -140,13 +144,14 @@ export async function handleServerRender(
     // Send the file path so the client can fetch it.
     const relPath = join(
       "test-recordings",
-      outputMp4.split("test-recordings/")[1] || "",
+      fileToReturn.split("test-recordings/")[1] || "",
     );
     sendEvent({
       type: "complete",
-      message: "Server render complete!",
+      message: `Server render complete${hasAudio ? ' with audio' : ' (video only)'}!`,
       pct: 100,
       filePath: `/api/render-output/mp4/${relPath}`,
+      hasAudio,
     });
     res.end();
   });

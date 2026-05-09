@@ -1,3 +1,4 @@
+import { safeSetItem } from '../utils/storage';
 import { logger } from './logger';
 
 export interface VideoAnalytics {
@@ -25,7 +26,7 @@ export function trackVideoGeneration(analytics: VideoAnalytics): void {
     allAnalytics.push(analytics);
     // Keep last 50 entries
     const trimmed = allAnalytics.slice(-50);
-    localStorage.setItem('autotube_analytics', JSON.stringify(trimmed));
+    safeSetItem('autotube_analytics', JSON.stringify(trimmed));
     logger.success('Analytics', `Tracked video: ${analytics.title}`);
   } catch (err) {
     logger.error('Analytics', 'Failed to track video', err);

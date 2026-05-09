@@ -8,6 +8,7 @@ import { SCENE_LAYOUT_DISPATCH } from './scenes';
 
 // Requirement 8.1: Cache saturation scores keyed by image URL so the score is
 // computed at most once per image per render session.
+const MAX_SATURATION_CACHE_SIZE = 500;
 export const saturationCache = new Map<string, number>();
 
 // ── Procedural cinematic backgrounds ──
@@ -286,6 +287,10 @@ export function draw(
             } catch {
               // Requirement 3.6: fall back to score 0.5 (maps to default filter)
               score = 0.5;
+            }
+            if (saturationCache.size >= MAX_SATURATION_CACHE_SIZE) {
+              const oldestKey = saturationCache.keys().next().value;
+              saturationCache.delete(oldestKey);
             }
             saturationCache.set(asset.url, score);
           }

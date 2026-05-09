@@ -17,6 +17,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '../../..');
@@ -287,7 +288,7 @@ async function runAutoTubePipeline({ topic, style = 'business_insider', duration
             const fileName = suggestedName.endsWith('.webm') || suggestedName.endsWith('.mp4')
               ? suggestedName
               : `${suggestedName}.webm`;
-            const downloadsDir = join(process.env.HOME || '~', 'Downloads');
+            const downloadsDir = join(homedir(), 'Downloads');
             downloadedVideoPath = join(downloadsDir, fileName);
             await download.saveAs(downloadedVideoPath);
             log(`✓ Video saved to ${downloadedVideoPath}`);
@@ -308,7 +309,7 @@ async function runAutoTubePipeline({ topic, style = 'business_insider', duration
                   return Array.from(new Uint8Array(arrayBuf));
                 }, blobUrl);
                 const sanitizedTopic = topic.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                const downloadsDir = join(process.env.HOME || '~', 'Downloads');
+                const downloadsDir = join(homedir(), 'Downloads');
                 downloadedVideoPath = join(downloadsDir, `${sanitizedTopic}.webm`);
                 writeFileSync(downloadedVideoPath, Buffer.from(videoBuffer));
                 log(`✓ Video saved via fallback to ${downloadedVideoPath}`);

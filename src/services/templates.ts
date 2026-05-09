@@ -1,3 +1,5 @@
+import { TopicConfig } from '../types';
+
 export interface VideoTemplate {
   id: string;
   name: string;

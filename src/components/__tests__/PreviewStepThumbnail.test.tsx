@@ -14,15 +14,11 @@ import type { VideoProject } from '../../types';
 const createdBlobUrls: string[] = [];
 const revokedBlobUrls: string[] = [];
 
-// Mock URL.createObjectURL / revokeObjectURL
-const originalCreateObjectURL = URL.createObjectURL;
-const originalRevokeObjectURL = URL.revokeObjectURL;
-
 beforeEach(() => {
   createdBlobUrls.length = 0;
   revokedBlobUrls.length = 0;
 
-  URL.createObjectURL = vi.fn((blob: Blob) => {
+  URL.createObjectURL = vi.fn(() => {
     const url = `blob:http://localhost/fake-${createdBlobUrls.length}`;
     createdBlobUrls.push(url);
     return url;

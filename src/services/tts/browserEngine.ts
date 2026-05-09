@@ -33,7 +33,13 @@ export const browserEngine: TTSEngine = {
   async generate(
     text: string,
     voice: string,
-    _options?: { signal?: AbortSignal },
+    _options?: {
+      signal?: AbortSignal;
+      apiKey?: string;
+      serverUrl?: string;
+      cloudflareAccountId?: string;
+      cloudflareApiToken?: string;
+    },
   ): Promise<string | null> {
     if (!hasSpeechSupport()) {
       logger.warn('BrowserTTS', 'SpeechSynthesis not available in this environment');

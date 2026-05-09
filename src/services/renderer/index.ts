@@ -15,4 +15,5 @@ export { drawSceneStatCard, drawSceneQuoteCard, drawSceneLeftTextRightImage, dra
 export { hexToRgba, roundRect, wrapText, drawTechnicalLabel } from './canvas/text';
 export { preload, loadImage, buildImageSources, mkFallback, isCanvasSafeSource, evictOldestEntries } from './preload';
 export { cleanupRenderResources, getSupportedMimeType, tryServerRender } from './encoding';
+export type { RenderResult } from './encoding';
 export { IMG_CACHE_MAX, MAX_FRAMES } from './orchestrator';

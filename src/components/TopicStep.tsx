@@ -4,7 +4,7 @@ import {
   DollarSign, Leaf, Rocket, ChevronRight, Sparkles,
   RefreshCw, Loader2, KeyRound,
 } from 'lucide-react';
-import type { TopicConfig, VideoProject } from '../types';
+import type { TopicConfig } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 interface TopicStepProps {
@@ -102,7 +102,7 @@ const TONES: { key: TopicConfig['tone']; label: string; emoji: string }[] = [
 ];
 
 export default function TopicStep({ config, onConfigChange, onGenerate, onGenerateFull, apiKey }: TopicStepProps) {
-  const [isHovering, setIsHovering] = useState<number | null>(null);
+  const [, setIsHovering] = useState<number | null>(null);
   const [suggestedTopics, setSuggestedTopics] = useState<SuggestedTopic[]>([]);
   const [isLoadingTopics, setIsLoadingTopics] = useState(false);
   const [topicError, setTopicError] = useState<string | null>(null);

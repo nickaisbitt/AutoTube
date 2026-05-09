@@ -424,8 +424,9 @@ export async function generateSplitScreenThumbnail(
     }
 
     return blob;
-  } catch {
+  } catch (err) {
     // 11. On any error, fall back to the existing single-image layout
+    console.warn('Thumbnail multi-image layout failed, using fallback:', (err as Error).message);
     return generateThumbnail(title, project.topic);
   }
 }

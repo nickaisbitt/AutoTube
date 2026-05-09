@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import MediaStep, { MEDIA_STATUS_MESSAGES, parseMediaMessage } from '../../components/MediaStep';
 import type { VideoProject } from '../../types';
 
@@ -145,5 +145,277 @@ describe('parseMediaMessage', () => {
 
   it('returns null for an empty string', () => {
     expect(parseMediaMessage('')).toBeNull();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Task 2.2: MediaStep replace button visibility tests
+// Feature: remaining-improvements
+// **Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5, 2.6**
+// ---------------------------------------------------------------------------
+
+function makeProjectWithMedia(): VideoProject {
+  return {
+    version: 1,
+    id: 'proj-media-test',
+    title: 'Media Test Video',
+    topic: 'Test Topic',
+    style: 'business_insider',
+    targetDuration: 8,
+    script: [
+      {
+        id: 'seg-1',
+        type: 'intro',
+        title: 'Introduction',
+        narration: 'This is the intro narration text.',
+        visualNote: 'Show visuals',
+        duration: 20,
+      },
+      {
+        id: 'seg-2',
+        type: 'section',
+        title: 'Main Content',
+        narration: 'This is the main content section.',
+        visualNote: 'Show charts',
+        duration: 30,
+      },
+    ],
+    media: [
+      {
+        id: 'asset-1',
+        segmentId: 'seg-1',
+        url: 'https://example.com/image1.jpg',
+        alt: 'Test image 1',
+        type: 'image' as const,
+        source: 'DuckDuckGo',
+        isFallback: false,
+        score: 85,
+      },
+      {
+        id: 'asset-2',
+        segmentId: 'seg-2',
+        url: 'https://example.com/image2.jpg',
+        alt: 'Test image 2',
+        type: 'image' as const,
+        source: 'Pexels',
+        isFallback: true,
+        score: 60,
+      },
+    ],
+    narration: [],
+    status: 'complete',
+    createdAt: new Date(),
+  };
+}
+
+describe('MediaStep replace button visibility', () => {
+  it('renders the Replace button in the card body without hover interaction', () => {
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={vi.fn()}
+      />,
+    );
+
+    const bodyButtons = screen.queryAllByRole('button', { name: /replace visual for/i });
+    expect(bodyButtons.length).toBeGreaterThan(0);
+  });
+
+it('calls onReplace with the correct asset ID when the Replace button is clicked', () => {
+    const onReplace = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={onReplace}
+      />,
+    );
+
+    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
+    fireEvent.click(replaceButtons[0]);
+
+    expect(onReplace).toHaveBeenCalledWith('asset-1');
+  });
+
+  it('shows loading state with spinner and disables button for the specific card being replaced', async () => {
+    const onReplace = vi.fn().mockImplementation(() => new Promise<void>((r) => { setTimeout(r, 10); }));
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={onReplace}
+      />,
+    );
+
+    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
+    fireEvent.click(replaceButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Re-harvesting…')).toBeDefined();
+    });
+    expect(replaceButtons[0].disabled).toBe(true);
+  });
+
+  it('displays inline error message on the affected card when replace fails', async () => {
+    const onReplace = vi.fn().mockRejectedValue(new Error('Network error'));
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={onReplace}
+      />,
+    );
+
+    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
+    fireEvent.click(replaceButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Network error')).toBeDefined();
+    });
+  });
+
+  it('shows spinner only on the specific card being replaced, not all cards', async () => {
+    const onReplace = vi.fn().mockImplementation(() => new Promise<void>((r) => { setTimeout(r, 10); }));
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={onReplace}
+      />,
+    );
+
+    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
+    fireEvent.click(replaceButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Re-harvesting…')).toBeDefined();
+    });
+
+    const spinners = screen.getAllByText('Re-harvesting…');
+    expect(spinners.length).toBe(1);
+  });
+
+  it('Replace button is re-enabled after replace completes', async () => {
+    const onReplace = vi.fn().mockImplementation(() => new Promise<void>((r) => { setTimeout(r, 10); }));
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={onReplace}
+      />,
+    );
+
+    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
+    fireEvent.click(replaceButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Re-harvesting…')).toBeDefined();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Re-harvesting…')).toBeNull();
+    });
+
+    expect(replaceButtons[0].disabled).toBe(false);
+  });
+
+  it('shows loading state with spinner and disables button for the specific card being replaced', async () => {
+    let resolveReplace: () => void;
+    const onReplace = vi.fn().mockImplementation(() => new Promise<void>((r) => { resolveReplace = r; }));
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={onReplace}
+      />,
+    );
+
+    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
+
+    fireEvent.click(replaceButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Re-harvesting…')).toBeDefined();
+    });
+    expect(replaceButtons[0].disabled).toBe(true);
+  });
+
+  it('displays inline error message on the affected card when replace fails', async () => {
+    const onReplace = vi.fn().mockRejectedValue(new Error('Network error'));
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={onReplace}
+      />,
+    );
+
+    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
+    fireEvent.click(replaceButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Network error')).toBeDefined();
+    });
+  });
+
+  it('shows spinner only on the specific card being replaced, not all cards', async () => {
+    let resolveReplace: () => void;
+    const onReplace = vi.fn().mockImplementation(() => new Promise<void>((r) => { resolveReplace = r; }));
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={onReplace}
+      />,
+    );
+
+    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
+    fireEvent.click(replaceButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Re-harvesting…')).toBeDefined();
+    });
+
+    const spinners = screen.getAllByText('Re-harvesting…');
+    expect(spinners.length).toBe(1);
+  });
+
+  it('Replace button is re-enabled after replace completes', async () => {
+    let resolveReplace: () => void;
+    const onReplace = vi.fn().mockImplementation(() => new Promise<void>((r) => { resolveReplace = r; }));
+    render(
+      <MediaStep
+        {...defaultProps}
+        project={makeProjectWithMedia()}
+        status="complete"
+        onReplace={onReplace}
+      />,
+    );
+
+    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
+    fireEvent.click(replaceButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Re-harvesting…')).toBeDefined();
+    });
+
+    resolveReplace!();
+
+    await waitFor(() => {
+      expect(screen.queryByText('Re-harvesting…')).toBeNull();
+    });
+
+    expect(replaceButtons[0].disabled).toBe(false);
   });
 });

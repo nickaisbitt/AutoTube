@@ -302,3 +302,106 @@ describe('ScriptStep hook highlighting', () => {
     expect(feedback.textContent).toContain('Pattern detected');
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Task 1.3: ScriptStep regenerate button unit tests
+// Feature: remaining-improvements
+// **Validates: Requirements 1.1, 1.2, 1.3, 1.5, 1.6**
+// ---------------------------------------------------------------------------
+
+describe('ScriptStep regenerate button', () => {
+  it('renders the Regenerate button only when status is complete and onRegenerate is provided', () => {
+    const { rerender } = render(
+      <ScriptStep
+        project={makeProjectWithIntro('Test narration content that is in the right word range.')}
+        status="complete"
+        progress={100}
+        message=""
+        onNext={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /regenerate script/i })).toBeDefined();
+
+    rerender(
+      <ScriptStep
+        project={makeProjectWithIntro('Test narration content that is in the right word range.')}
+        status="complete"
+        progress={100}
+        message=""
+        onNext={vi.fn()}
+        onRegenerate={undefined}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /regenerate script/i })).toBeNull();
+  });
+
+  it('renders the Regenerate button only when status is complete, not when processing', () => {
+    render(
+      <ScriptStep
+        project={makeProject()}
+        status="processing"
+        progress={50}
+        message="Generating..."
+        onNext={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /regenerate script/i })).toBeNull();
+  });
+
+  it('calls onRegenerate when the Regenerate button is clicked', () => {
+    const onRegenerate = vi.fn();
+    render(
+      <ScriptStep
+        project={makeProjectWithIntro('Test narration content that is in the right word range.')}
+        status="complete"
+        progress={100}
+        message=""
+        onNext={vi.fn()}
+        onRegenerate={onRegenerate}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: /regenerate script/i });
+    fireEvent.click(button);
+
+    expect(onRegenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the Regenerate button with the RefreshCw icon and correct text', () => {
+    render(
+      <ScriptStep
+        project={makeProjectWithIntro('Test narration content that is in the right word range.')}
+        status="complete"
+        progress={100}
+        message=""
+        onNext={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: /regenerate script/i });
+    expect(button).toBeDefined();
+    expect(button.textContent).toContain('Regenerate');
+  });
+
+  it('is disabled when status is processing', () => {
+    render(
+      <ScriptStep
+        project={makeProject()}
+        status="processing"
+        progress={50}
+        message="Generating..."
+        onNext={vi.fn()}
+        onRegenerate={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /regenerate script/i })).toBeNull();
+  });
+});

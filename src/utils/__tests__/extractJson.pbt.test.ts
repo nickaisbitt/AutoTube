@@ -22,6 +22,27 @@ import { extractJson } from '../extractJson';
 // Property-Based Test: Bug Condition — JSON Extraction Fails on Wrapped Responses
 // ---------------------------------------------------------------------------
 
+function deepEqualWithNegativeZero(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a === 'object' && a !== null && typeof b === 'object' && b !== null) {
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    const aObj = a as Record<string, unknown>;
+    const bObj = b as Record<string, unknown>;
+    const aKeys = Object.keys(aObj);
+    const bKeys = Object.keys(bObj);
+    if (aKeys.length !== bKeys.length) return false;
+    for (const key of aKeys) {
+      if (!(key in bObj)) return false;
+      const av = aObj[key];
+      const bv = bObj[key];
+      if (av === 0 && bv === 0) continue;
+      if (!deepEqualWithNegativeZero(av, bv)) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 describe('Bug Condition: JSON Extraction Succeeds on Wrapped LLM Responses', () => {
   /**
    * **Validates: Requirements 1.4**
@@ -46,7 +67,7 @@ describe('Bug Condition: JSON Extraction Succeeds on Wrapped LLM Responses', () 
           const wrapped = '```json\n' + jsonStr + '\n```\nHope this helps!';
 
           const result = extractJson(wrapped);
-          expect(result).toEqual(obj);
+          expect(deepEqualWithNegativeZero(result, obj)).toBe(true);
         },
       ),
       { numRuns: 50 },
@@ -74,7 +95,7 @@ describe('Bug Condition: JSON Extraction Succeeds on Wrapped LLM Responses', () 
           const wrapped = 'Here is the result: ' + jsonStr;
 
           const result = extractJson(wrapped);
-          expect(result).toEqual(obj);
+          expect(deepEqualWithNegativeZero(result, obj)).toBe(true);
         },
       ),
       { numRuns: 50 },
@@ -103,7 +124,7 @@ describe('Bug Condition: JSON Extraction Succeeds on Wrapped LLM Responses', () 
           const wrapped = 'Based on analysis:\n```json\n' + jsonStr + '\n```\nLet me know';
 
           const result = extractJson(wrapped);
-          expect(result).toEqual(obj);
+          expect(deepEqualWithNegativeZero(result, obj)).toBe(true);
         },
       ),
       { numRuns: 50 },

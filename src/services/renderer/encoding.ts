@@ -64,6 +64,7 @@ export async function tryServerRender(
   onProgress?: (pct: number, message: string) => void,
   signal?: AbortSignal,
 ): Promise<Blob | null> {
+  let serverTimeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     // Ensure the project is saved for the server-side renderer to read
     const saveRes = await fetch('/api/save-project', {
@@ -77,9 +78,18 @@ export async function tryServerRender(
       return null;
     }
 
+    // Timeout server-render after 3 min so we fall back to browser render
+    const serverTimeout = new AbortController();
+    serverTimeoutId = setTimeout(() => serverTimeout.abort(), 180_000);
+    if (signal) {
+      signal.addEventListener('abort', () => serverTimeout.abort(), { once: true });
+    }
+    const combinedSignal = serverTimeout.signal;
+
     // Start the server-side render via SSE
-    const res = await fetch('/api/server-render', { method: 'POST', signal });
+    const res = await fetch('/api/server-render', { method: 'POST', signal: combinedSignal });
     if (!res.ok || !res.body) {
+      clearTimeout(serverTimeoutId);
       logger.warn('Renderer', `Server render endpoint returned ${res.status}`);
       return null;
     }
@@ -91,7 +101,7 @@ export async function tryServerRender(
     let filePath: string | null = null;
 
     while (true) {
-      if (signal?.aborted) throw new Error('Cancelled');
+      if (signal?.aborted) { clearTimeout(serverTimeoutId); throw new Error('Cancelled'); }
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -151,9 +161,10 @@ export async function tryServerRender(
     logger.success('Renderer', `Server render complete: ${(resolvedBlob.size / 1024 / 1024).toFixed(2)}MB (type: ${resolvedBlob.type})`);
     return resolvedBlob;
   } catch (err) {
-    if ((err as Error).message === 'Cancelled' || (err as Error).name === 'AbortError') {
-      throw err; // Re-throw cancellation
+    if ((err as Error).message === 'Cancelled' || ((err as Error).name === 'AbortError' && signal?.aborted)) {
+      throw err; // Re-throw only user cancellation
     }
+    clearTimeout(serverTimeoutId);
     logger.warn('Renderer', `Server render unavailable: ${(err as Error).message}`);
     return null;
   }

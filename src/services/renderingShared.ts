@@ -152,7 +152,7 @@ export function drawLetterboxBars(
   accentColors: Record<string, string> = ACCENT_COLORS,
 ): number {
   const barH = Math.round(h * 0.04);
-  const accent = accentColors[segType];
+  const accent = Object.hasOwn(accentColors, segType) ? accentColors[segType] : undefined;
   const fillColor = accent ? hexToRgba(accent, 0.85) : 'rgba(0,0,0,0.85)';
   ctx.fillStyle = fillColor;
   ctx.fillRect(0, 0, w, barH);

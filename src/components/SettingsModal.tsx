@@ -81,7 +81,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" data-testid="settings-modal">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
       
-      <div className="relative w-full max-w-lg overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-hard">
+      <div className="relative w-full max-w-lg overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-[4px_4px_0px_#ff5500]">
         <form onSubmit={handleSubmit}>
           <div className="flex items-center justify-between border-b-2 border-surface-700 px-6 py-4">
             <div className="flex items-center gap-2">
@@ -91,7 +91,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <button 
               type="button"
               onClick={onClose}
-              className="border-2 border-surface-700 p-1 text-surface-400 hover:bg-brand-500 hover:text-black"
+              className="border-2 border-surface-700 p-1 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
               data-testid="settings-modal-close"
               aria-label="Close settings modal"
               title="Close settings modal"
@@ -179,11 +179,11 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 Sourcing Strategy
               </label>
               <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                <label className="relative flex cursor-pointer items-center justify-center border-2 border-surface-700 bg-surface-950 py-2.5 text-surface-400 hover:bg-brand-500 hover:text-black has-[:checked]:border-brand-500 has-[:checked]:bg-brand-500 has-[:checked]:text-black">
+                <label className="relative flex cursor-pointer items-center justify-center border-2 border-surface-700 bg-surface-950 py-2.5 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black has-[:checked]:border-brand-500 has-[:checked]:bg-brand-500 has-[:checked]:text-black">
                   <input type="radio" name="sourceType" value="stock" checked={sourceTypeVal === 'stock'} onChange={() => setSourceTypeVal('stock')} className="sr-only" data-testid="source-type-stock" />
                   Stock (Free)
                 </label>
-                <label className="relative flex cursor-pointer items-center justify-center border-2 border-surface-700 bg-surface-950 py-2.5 text-surface-400 hover:bg-brand-500 hover:text-black has-[:checked]:border-brand-500 has-[:checked]:bg-brand-500 has-[:checked]:text-black">
+                <label className="relative flex cursor-pointer items-center justify-center border-2 border-surface-700 bg-surface-950 py-2.5 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black has-[:checked]:border-brand-500 has-[:checked]:bg-brand-500 has-[:checked]:text-black">
                   <input type="radio" name="sourceType" value="raw" checked={sourceTypeVal === 'raw'} onChange={() => setSourceTypeVal('raw')} className="sr-only" data-testid="source-type-raw" />
                   Raw (Web)
                 </label>
@@ -261,7 +261,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <button
               type="button"
               onClick={() => setShowAssetTester(true)}
-              className="flex items-center gap-2 border-2 border-surface-700 px-4 py-2 text-xs font-mono font-semibold text-surface-400 hover:bg-brand-500 hover:text-black"
+              className="flex items-center gap-2 border-2 border-surface-700 px-4 py-2 text-xs font-mono font-semibold text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
               data-testid="open-asset-tester"
             >
               Asset Tester
@@ -269,7 +269,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <button
               type="button"
               onClick={verifyAll}
-              className="flex items-center gap-2 border-2 border-surface-700 px-4 py-2 text-xs font-mono font-semibold text-surface-400 hover:bg-brand-500 hover:text-black"
+              className="flex items-center gap-2 border-2 border-surface-700 px-4 py-2 text-xs font-mono font-semibold text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
               data-testid="settings-test-connections"
             >
               Test Connection
@@ -278,13 +278,13 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <button
               type="button"
               onClick={onClose}
-              className="border-2 border-surface-700 px-4 py-2 text-xs font-mono font-semibold text-surface-400 hover:bg-brand-500 hover:text-black"
+              className="border-2 border-surface-700 px-4 py-2 text-xs font-mono font-semibold text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex items-center gap-2 bg-brand-500 px-6 py-2 text-xs font-bold uppercase text-black shadow-hard-sm"
+              className="flex items-center gap-2 bg-brand-500 px-6 py-2 text-xs font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500]"
               data-testid="settings-save-button"
             >
               Save Configuration

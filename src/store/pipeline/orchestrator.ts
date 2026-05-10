@@ -33,7 +33,7 @@ import { runAIEditPass } from '../../services/aiEditor';
 import { extractHookLine } from '../../services/seoTitles';
 import { logger } from '../../services/logger';
 import { runBlindReview } from '../../services/blindReview';
-import { generateGrokTts, generateMeloTts } from '../../services/tts';
+import { generateGrokTts } from '../../services/tts';
 import { CURRENT_PROJECT_VERSION } from '../../services/projectMigrations';
 
 // LR-1 fix: use crypto.randomUUID() for guaranteed uniqueness
@@ -327,11 +327,12 @@ export async function executeGenerateNarration(
   setProcessingMessage('Checking TTS options...');
 
   const xaiKey = import.meta.env.VITE_XAI_KEY || '';
-  const cfAccountId = import.meta.env.VITE_CF_ACCOUNT_ID || '';
-  const cfApiToken = import.meta.env.VITE_CF_API_TOKEN || '';
 
-  const hasGrok = !!xaiKey;
-  const hasMelo = !!cfAccountId && !!cfApiToken;
+  const hasGrok = !!xaiKey && !xaiKey.includes('your-xai-key-here') && xaiKey.length > 10;
+
+  if (!hasGrok && import.meta.env.VITE_XAI_KEY?.includes('your-xai-key-here')) {
+    logger.warn('Store', 'Grok TTS API key not configured - using placeholder value');
+  }
 
   const supported = hasSpeechSupport();
   const voices = supported ? await loadSpeechVoices() : [];
@@ -339,7 +340,6 @@ export async function executeGenerateNarration(
 
   const engines: string[] = [];
   if (hasGrok) engines.push('Grok TTS');
-  if (hasMelo) engines.push('MeloTTS');
   engines.push('Browser TTS');
   logger.info('Store', `TTS fallback chain: ${engines.join(' → ')}`);
   setProcessingMessage(`TTS engines: ${engines.join(' → ')}`);
@@ -389,27 +389,7 @@ export async function executeGenerateNarration(
       }
     }
 
-    // Tier 2: MeloTTS (Cloudflare)
-    if (!audioUrl && hasMelo) {
-      const meloUrl = await generateMeloTts(segment.narration, cfAccountId, cfApiToken, { signal });
-      if (meloUrl) {
-        audioUrl = meloUrl;
-        voiceUsed = 'MeloTTS (Cloudflare)';
-        clipMode = 'exported_file';
-        engineUsed = 'melo';
-
-        try {
-          const measured = await measureAudioDuration(meloUrl);
-          if (measured && measured > 0) {
-            estimatedDuration = Math.ceil(measured);
-          }
-        } catch { /* Keep estimated duration */ }
-      } else {
-        logger.warn('Store', `MeloTTS failed for segment "${segment.title}", falling back to browser TTS`);
-      }
-    }
-
-    // Tier 3: Browser TTS (free fallback)
+    // Tier 2: Browser TTS (free fallback)
     if (!audioUrl) {
       if (!supported || !selectedVoice) {
         status = 'unavailable';
@@ -420,7 +400,7 @@ export async function executeGenerateNarration(
     return { audioUrl, voiceUsed, clipMode, engineUsed, estimatedDuration, status };
   }
 
-  const useParallel = hasGrok || hasMelo;
+  const useParallel = hasGrok;
   const ttsResults: TtsResult[] = [];
 
   if (useParallel) {

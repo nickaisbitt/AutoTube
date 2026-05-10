@@ -31,7 +31,7 @@ export default function FeatureFlagsPanel({ onClose }: FeatureFlagsPanelProps) {
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/80" onClick={onClose} />
-      <div className="relative w-full max-w-lg border-2 border-surface-700 bg-surface-900 p-6 shadow-hard">
+      <div className="relative w-full max-w-lg border-2 border-surface-700 bg-surface-900 p-6 shadow-[4px_4px_0px_#ff5500]">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Flag className="h-5 w-5 text-brand-400" />
@@ -39,7 +39,7 @@ export default function FeatureFlagsPanel({ onClose }: FeatureFlagsPanelProps) {
           </div>
           <button
             onClick={onClose}
-            className="text-surface-400 hover:bg-brand-500 hover:text-black p-1"
+            className="text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black p-1"
             aria-label="Close feature flags panel"
           >
             <X className="h-5 w-5" />

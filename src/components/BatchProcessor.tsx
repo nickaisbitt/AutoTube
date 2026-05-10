@@ -229,7 +229,7 @@ export default function BatchProcessor({ onGenerate, isProcessing, batchJobs = [
                 {canDownload && (
                   <button
                     onClick={() => handleDownload(storeJob!)}
-                    className="p-1 text-emerald-400 hover:bg-brand-500 hover:text-black"
+                    className="p-1 text-emerald-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
                     aria-label={`Download ${job.topic}`}
                     title={`Download ${job.topic}`}
                   >
@@ -239,7 +239,7 @@ export default function BatchProcessor({ onGenerate, isProcessing, batchJobs = [
                 {!isProcessing && !allDone && !isStoreJob && (
                   <button
                     onClick={() => removeJob(job.id)}
-                    className="p-1 text-surface-500 hover:bg-brand-500 hover:text-black"
+                    className="p-1 text-surface-500 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
                     aria-label={`Remove ${job.topic}`}
                     title={`Remove ${job.topic}`}
                   >

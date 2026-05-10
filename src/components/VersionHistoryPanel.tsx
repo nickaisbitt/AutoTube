@@ -77,7 +77,7 @@ export default function VersionHistoryPanel({ project, onRestore, isOpen, onClos
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" data-testid="version-history-modal">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-hard flex flex-col">
+      <div className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-[4px_4px_0px_#ff5500] flex flex-col">
         <div className="flex items-center justify-between border-b-2 border-surface-700 px-6 py-4">
           <div className="flex items-center gap-2">
             <History className="h-5 w-5 text-brand-500" />
@@ -87,13 +87,13 @@ export default function VersionHistoryPanel({ project, onRestore, isOpen, onClos
             <button
               onClick={handleSaveVersion}
               disabled={!project}
-              className="flex items-center gap-1 border-2 border-brand-500 px-3 py-1 text-xs font-mono text-brand-400 hover:bg-brand-500 hover:text-black disabled:opacity-50"
+              className="flex items-center gap-1 border-2 border-brand-500 px-3 py-1 text-xs font-mono text-brand-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black disabled:opacity-50"
             >
               Save Current
             </button>
             <button
               onClick={onClose}
-              className="border-2 border-surface-700 p-1 text-surface-400 hover:bg-brand-500 hover:text-black"
+              className="border-2 border-surface-700 p-1 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
               aria-label="Close version history"
             >
               <X className="h-5 w-5" />
@@ -113,7 +113,7 @@ export default function VersionHistoryPanel({ project, onRestore, isOpen, onClos
               className={`flex items-center gap-2 border-2 px-3 py-1.5 text-xs font-mono ${
                 compareMode
                   ? 'border-brand-500 bg-brand-500 text-black'
-                  : 'border-surface-700 text-surface-400 hover:bg-brand-500 hover:text-black'
+                  : 'border-surface-700 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black'
               }`}
             >
               <GitCompare className="h-3.5 w-3.5" />
@@ -195,7 +195,7 @@ export default function VersionHistoryPanel({ project, onRestore, isOpen, onClos
                     {!compareMode && (
                       <button
                         onClick={() => handleRestore(v.id)}
-                        className="flex items-center gap-1 border-2 border-surface-700 px-2 py-1 text-[10px] font-mono text-surface-400 hover:bg-brand-500 hover:text-black"
+                        className="flex items-center gap-1 border-2 border-surface-700 px-2 py-1 text-[10px] font-mono text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
                         aria-label="Restore this version"
                       >
                         <RotateCcw className="h-3 w-3" />
@@ -227,7 +227,7 @@ export default function VersionHistoryPanel({ project, onRestore, isOpen, onClos
               <button
                 onClick={handleVideoCompare}
                 disabled={!compareA || !compareB}
-                className="flex items-center gap-2 border-2 border-brand-500 px-4 py-2 text-xs font-bold text-brand-400 hover:bg-brand-500 hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 border-2 border-brand-500 px-4 py-2 text-xs font-bold text-brand-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <GitCompare className="h-4 w-4" />
                 Video Compare

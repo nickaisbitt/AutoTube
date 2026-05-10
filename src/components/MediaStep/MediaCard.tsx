@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   Image as ImageIcon,
   ExternalLink,
@@ -31,15 +31,15 @@ interface MediaCardProps {
   onPreview: (url: string) => void;
 }
 
-export default function MediaCard({ asset, index, project, onReplace, onPreview }: MediaCardProps) {
+export default React.memo(function MediaCard({ asset, index, project, onReplace, onPreview }: MediaCardProps) {
   const [isReplacing, setIsReplacing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [replaceError, setReplaceError] = useState<string | null>(null);
 
-  const segment = project.script.find((item) => item.id === asset.segmentId);
-  const plan = project.visualPlans?.[asset.segmentId];
+  const segment = useMemo(() => project.script.find((item) => item.id === asset.segmentId), [project.script, asset.segmentId]);
+  const plan = useMemo(() => project.visualPlans?.[asset.segmentId], [project.visualPlans, asset.segmentId]);
 
-  const handleReplace = async () => {
+  const handleReplace = useCallback(async () => {
     setIsReplacing(true);
     setReplaceError(null);
     try {
@@ -50,7 +50,7 @@ export default function MediaCard({ asset, index, project, onReplace, onPreview 
     } finally {
       setIsReplacing(false);
     }
-  };
+  }, [onReplace, asset.id]);
 
   return (
     <div className="group overflow-hidden border-2 border-surface-700 bg-surface-900 hover:border-brand-500">
@@ -112,7 +112,7 @@ export default function MediaCard({ asset, index, project, onReplace, onPreview 
           <button
             onClick={handleReplace}
             disabled={isReplacing}
-            className="bg-black p-1.5 text-white hover:bg-brand-500 hover:text-black disabled:opacity-50"
+            className="bg-black p-1.5 text-white transition-colors duration-200 hover:bg-brand-500 hover:text-black disabled:opacity-50"
             title="Re-harvest a different visual"
             aria-label={`Replace visual for ${segment?.title ?? 'this segment'}`}
           >
@@ -120,7 +120,7 @@ export default function MediaCard({ asset, index, project, onReplace, onPreview 
           </button>
           <button
             onClick={() => onPreview(asset.url)}
-            className="bg-black p-1.5 text-white hover:bg-brand-500 hover:text-black"
+            className="bg-black p-1.5 text-white transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             title="Preview"
             aria-label={`Preview image for ${segment?.title ?? 'this segment'}`}
           >
@@ -186,7 +186,7 @@ export default function MediaCard({ asset, index, project, onReplace, onPreview 
           <button
             onClick={handleReplace}
             disabled={isReplacing}
-            className="inline-flex items-center gap-1.5 border-2 border-brand-500 bg-surface-900 px-2.5 py-1.5 font-mono text-brand-400 hover:bg-brand-500 hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 border-2 border-brand-500 bg-surface-900 px-2.5 py-1.5 font-mono text-brand-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label={`Replace visual for ${segment?.title ?? 'this segment'}`}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isReplacing ? 'animate-spin' : ''}`} />
@@ -208,4 +208,4 @@ export default function MediaCard({ asset, index, project, onReplace, onPreview 
       </div>
     </div>
   );
-}
+});

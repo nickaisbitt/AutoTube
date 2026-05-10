@@ -12,7 +12,6 @@
 export type { TTSConfig, TTSEngine } from './interface';
 export { GROK_VOICES, type GrokVoiceId, generateGrokTts } from './grokEngine';
 export { KOKORO_VOICES, type KokoroVoiceId, kokoroEngine } from './kokoroEngine';
-export { generateMeloTts } from './meloEngine';
 export { generateWithFallback } from './registry';
 export { applyPacing, computeSegmentWpm, insertDataPointPauses, getWpmRange } from './pacingController';
 export type { PacingConfig, PacingResult } from './pacingController';
@@ -29,12 +28,11 @@ import { logger } from '../logger';
 import { grokEngine } from './grokEngine';
 import { kokoroEngine } from './kokoroEngine';
 import type { TTSConfig } from './interface';
-import { meloEngine } from './meloEngine';
 import { browserEngine } from './browserEngine';
 import { generateWithFallback } from './registry';
 
 /** All available TTS engines (in priority order) */
-export const TTS_ENGINES = [kokoroEngine, grokEngine, meloEngine, browserEngine] as const;
+export const TTS_ENGINES = [kokoroEngine, grokEngine, browserEngine] as const;
 
 /**
  * Generate narration audio for the given text.

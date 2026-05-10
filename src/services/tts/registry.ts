@@ -11,10 +11,9 @@ import { browserEngine } from './browserEngine';
 import { grokEngine } from './grokEngine';
 import type { TTSConfig, TTSEngine } from './interface';
 import { kokoroEngine } from './kokoroEngine';
-import { meloEngine, setMeloCredentials } from './meloEngine';
 
-/** Default engine priority order: Kokoro → Grok → Melo → Browser */
-const ENGINE_PRIORITY: TTSEngine[] = [kokoroEngine, grokEngine, meloEngine, browserEngine];
+/** Default engine priority order: Kokoro → Grok → Browser */
+const ENGINE_PRIORITY: TTSEngine[] = [kokoroEngine, grokEngine, browserEngine];
 
 /**
  * Get the ordered list of engines to try, starting with the preferred engine.
@@ -33,40 +32,28 @@ function getOrderedEngines(config: TTSConfig): TTSEngine[] {
   return available;
 }
 
-/**
- * Configure engine credentials from the TTSConfig before generation.
- */
-function configureEngines(config: TTSConfig): void {
-  if (config.cloudflareAccountId && config.cloudflareApiToken) {
-    setMeloCredentials(config.cloudflareAccountId, config.cloudflareApiToken);
-  }
-}
-
 function buildEngineOptions(config: TTSConfig, signal?: AbortSignal) {
   return {
     signal,
     apiKey: config.xaiApiKey,
     serverUrl: config.kokoroServerUrl,
-    cloudflareAccountId: config.cloudflareAccountId,
-    cloudflareApiToken: config.cloudflareApiToken,
   };
 }
 
 /**
  * Generate narration audio by trying engines in priority order with fallback.
  *
- * 1. Configures engine credentials from config
- * 2. Tries the preferred engine first
- * 3. On failure, falls back to next available engine
- * 4. Logs each fallback event
- * 5. Returns the audio URL from the first successful engine, or null if all fail
+ * 1. Tries the preferred engine first
+ * 2. On failure, falls back to next available engine
+ * 3. Logs each fallback event
+ * 4. Returns the audio URL from the first successful engine, or null if all fail
  */
 export async function generateWithFallback(
   text: string,
   config: TTSConfig,
   options?: { signal?: AbortSignal },
 ): Promise<string | null> {
-  configureEngines(config);
+
 
   const engines = getOrderedEngines(config);
   const engineOptions = buildEngineOptions(config, options?.signal);

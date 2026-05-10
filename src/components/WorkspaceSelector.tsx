@@ -100,7 +100,7 @@ export default function WorkspaceSelector({ onWorkspaceChange }: WorkspaceSelect
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full z-[60] mt-1 w-72 border-2 border-surface-700 bg-surface-900 shadow-hard">
+        <div className="absolute right-0 top-full z-[60] mt-1 w-72 border-2 border-surface-700 bg-surface-900 shadow-[4px_4px_0px_#ff5500]">
           {mode === 'list' && (
             <div className="p-2">
               <div className="mb-2 px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-surface-500">

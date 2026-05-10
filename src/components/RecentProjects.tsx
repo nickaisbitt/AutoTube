@@ -54,7 +54,7 @@ export default function RecentProjects({ onSelect, onDelete }: RecentProjectsPro
         <button
           key={project.id}
           onClick={() => onSelect(project)}
-          className="group flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 p-3 text-left hover:bg-brand-500 hover:text-black hover:border-brand-500"
+          className="group flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 p-3 text-left transition-colors duration-200 hover:bg-brand-500 hover:text-black hover:border-brand-500"
         >
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center bg-brand-500 text-black">
             <Play className="h-4 w-4" />
@@ -72,7 +72,7 @@ export default function RecentProjects({ onSelect, onDelete }: RecentProjectsPro
             <ChevronRight className="h-4 w-4 text-surface-500" />
             <button
               onClick={(e) => handleDelete(project.id, e)}
-              className="border-2 border-surface-700 p-1 text-surface-500 hover:bg-brand-500 hover:text-black hover:border-brand-500"
+              className="border-2 border-surface-700 p-1 text-surface-500 transition-colors duration-200 hover:bg-brand-500 hover:text-black hover:border-brand-500"
               aria-label={`Delete project ${project.title}`}
               title={`Delete project ${project.title}`}
             >

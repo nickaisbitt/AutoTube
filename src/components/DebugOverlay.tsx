@@ -53,7 +53,7 @@ export default function DebugOverlay({ logs = [] }: DebugOverlayProps) {
       {/* Toggle Button */}
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 flex h-12 w-12 items-center justify-center border-2 border-surface-700 bg-surface-900 text-surface-400 shadow-hard hover:bg-brand-500 hover:text-black hover:border-brand-500 z-[60]"
+        className="fixed bottom-6 right-6 flex h-12 w-12 items-center justify-center border-2 border-surface-700 bg-surface-900 text-surface-400 shadow-[4px_4px_0px_#ff5500] transition-colors duration-200 hover:bg-brand-500 hover:text-black hover:border-brand-500 z-[60]"
         title="Open System Logs"
       >
         <Terminal className="h-5 w-5" />
@@ -72,7 +72,7 @@ export default function DebugOverlay({ logs = [] }: DebugOverlayProps) {
         />
       )}
       <div 
-        className={`fixed inset-y-0 right-0 w-96 bg-surface-950 border-l-2 border-surface-700 shadow-hard transform z-[70] ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed inset-y-0 right-0 w-96 bg-surface-950 border-l-2 border-surface-700 shadow-[4px_4px_0px_#ff5500] transform z-[70] ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
       >
         <div className="flex h-full flex-col">
           <div className="flex items-center justify-between border-b-2 border-surface-700 p-4">
@@ -91,7 +91,7 @@ export default function DebugOverlay({ logs = [] }: DebugOverlayProps) {
             </button>
             <button 
               onClick={() => setIsOpen(false)}
-              className="text-surface-500 hover:bg-brand-500 hover:text-black p-1"
+              className="text-surface-500 transition-colors duration-200 hover:bg-brand-500 hover:text-black p-1"
             >
               <X className="h-5 w-5" />
             </button>

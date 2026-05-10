@@ -79,10 +79,6 @@ vi.mock('../../services/tts/grokEngine', () => ({
   generateGrokTts: vi.fn(),
 }));
 
-vi.mock('../../services/tts/meloEngine', () => ({
-  generateMeloTts: vi.fn(),
-}));
-
 vi.mock('../../services/blindReview', () => ({
   runBlindReview: vi.fn(),
 }));

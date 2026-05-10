@@ -154,7 +154,7 @@ export default function PerfDashboard({ onClose }: PerfDashboardProps) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto border-2 border-surface-700 bg-surface-900 p-6 shadow-hard">
+      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto border-2 border-surface-700 bg-surface-900 p-6 shadow-[4px_4px_0px_#ff5500]">
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center bg-brand-500">
@@ -168,7 +168,7 @@ export default function PerfDashboard({ onClose }: PerfDashboardProps) {
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopyReport}
-              className="flex items-center gap-1.5 border-2 border-surface-700 px-3 py-1.5 text-xs font-mono text-surface-400 hover:bg-brand-500 hover:text-black"
+              className="flex items-center gap-1.5 border-2 border-surface-700 px-3 py-1.5 text-xs font-mono text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             >
               <Copy className="h-3.5 w-3.5" />
               {copied ? 'Copied!' : 'Copy Report'}
@@ -176,7 +176,7 @@ export default function PerfDashboard({ onClose }: PerfDashboardProps) {
             {onClose && (
               <button
                 onClick={onClose}
-                className="border-2 border-surface-700 p-2 text-surface-400 hover:bg-brand-500 hover:text-black"
+                className="border-2 border-surface-700 p-2 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
                 aria-label="Close performance dashboard"
               >
                 <X className="h-4 w-4" />

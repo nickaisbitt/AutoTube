@@ -92,17 +92,6 @@ vi.mock('../../services/tts/grokEngine', () => ({
   generateGrokTts: vi.fn(),
 }));
 
-vi.mock('../../services/tts/meloEngine', () => ({
-  meloEngine: {
-    name: 'melo',
-    voices: [{ id: 'default', description: 'MeloTTS default voice' }],
-    isAvailable: vi.fn(() => false),
-    generate: vi.fn(() => Promise.resolve(null)),
-  },
-  setMeloCredentials: vi.fn(),
-  generateMeloTts: vi.fn(),
-}));
-
 vi.mock('../../services/blindReview', () => ({
   runBlindReview: vi.fn(),
 }));

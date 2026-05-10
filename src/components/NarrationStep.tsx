@@ -143,7 +143,7 @@ export default function NarrationStep({ project, status, progress, message, onGe
         <div className="w-full max-w-lg space-y-6 text-center">
           <div className="relative mx-auto h-20 w-20">
             <div className="absolute inset-0 bg-brand-500/20 animate-ping" />
-            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-hard">
+            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500]">
               <Mic2 className="h-8 w-8" />
             </div>
           </div>
@@ -205,7 +205,7 @@ export default function NarrationStep({ project, status, progress, message, onGe
           {project && (
             <button
               onClick={onGenerateNarration}
-              className="inline-flex items-center justify-center gap-2 bg-brand-500 px-6 py-3 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400 hover:text-black"
+              className="inline-flex items-center justify-center gap-2 bg-brand-500 px-6 py-3 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400 hover:text-black"
               data-testid="prepare-narration-button"
             >
               Prepare Narration
@@ -364,9 +364,9 @@ export default function NarrationStep({ project, status, progress, message, onGe
                   disabled={!canPlay}
                   className={`flex h-9 w-9 flex-shrink-0 items-center justify-center ${
                     isPlaying
-                      ? 'bg-brand-500 text-black shadow-hard-sm'
+                      ? 'bg-brand-500 text-black shadow-[2px_2px_0px_#ff5500]'
                       : canPlay
-                        ? 'bg-surface-800 border-2 border-surface-600 text-surface-400 hover:bg-brand-500 hover:text-black hover:border-brand-500'
+                        ? 'bg-surface-800 border-2 border-surface-600 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black hover:border-brand-500'
                         : 'cursor-not-allowed bg-surface-800/50 text-surface-600'
                   }`}
                   data-testid={`play-clip-${clip.id}`}
@@ -444,7 +444,7 @@ export default function NarrationStep({ project, status, progress, message, onGe
       {project.narration.length > 0 && (
         <button
           onClick={onNext}
-          className="flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400"
+          className="flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400"
           data-testid="assemble-video-button"
         >
           Assemble Video

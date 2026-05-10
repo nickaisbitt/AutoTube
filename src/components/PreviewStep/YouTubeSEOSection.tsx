@@ -122,7 +122,7 @@ export default function YouTubeSEOSection({
           </span>
           <button
             onClick={() => handleCopy(editedTitle, 'title')}
-            className="flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-2 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider text-surface-400 hover:bg-brand-500 hover:text-black"
+            className="flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-2 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             data-testid="copy-title-button"
           >
             <Copy className="h-3 w-3" />
@@ -160,7 +160,7 @@ export default function YouTubeSEOSection({
           </p>
           <button
             onClick={handleCopyDescription}
-            className="flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-2 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider text-surface-400 hover:bg-brand-500 hover:text-black"
+            className="flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-2 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             data-testid="copy-description-button"
           >
             <Copy className="h-3 w-3" />
@@ -186,7 +186,7 @@ export default function YouTubeSEOSection({
           </p>
           <button
             onClick={() => handleCopy(editedTags.join(', '), 'tags')}
-            className="flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-2 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider text-surface-400 hover:bg-brand-500 hover:text-black"
+            className="flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-2 py-1 text-[10px] font-mono font-semibold uppercase tracking-wider text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             data-testid="copy-tags-button"
           >
             <Copy className="h-3 w-3" />
@@ -217,7 +217,7 @@ export default function YouTubeSEOSection({
       {/* Thumbnail with variant selection and regenerate */}
       <div className="space-y-2">
         <p className="text-xs font-mono font-medium text-surface-400 flex items-center gap-1.5">
-          <Image className="h-3.5 w-3.5" />
+          <Image className="h-3.5 w-3.5" aria-label="Thumbnail Image Icon" />
           Thumbnail
         </p>
         <div className="flex gap-4">
@@ -272,7 +272,7 @@ export default function YouTubeSEOSection({
             <button
               onClick={onRegenerateThumbnail}
               disabled={isRegeneratingThumbnail}
-              className="mt-2 flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-3 py-1.5 text-xs font-mono font-semibold uppercase text-surface-400 hover:bg-brand-500 hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
+              className="mt-2 flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-3 py-1.5 text-xs font-mono font-semibold uppercase text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black disabled:opacity-50 disabled:cursor-not-allowed"
               data-testid="regenerate-thumbnail-button"
               aria-label="Regenerate thumbnail"
             >

@@ -105,7 +105,7 @@ describe('AssemblyStep music controls', () => {
 
     // Click assemble
     fireEvent.click(screen.getByTestId('assemble-video-button'));
-    expect(onAssemble).toHaveBeenCalledWith({ backgroundMusic: true, musicPreset: 'tense' });
+    expect(onAssemble).toHaveBeenCalledWith({ backgroundMusic: true, musicPreset: 'tense', quality: 'standard' });
   });
 
   it('passes musicPreset as undefined when music is disabled', () => {
@@ -117,7 +117,7 @@ describe('AssemblyStep music controls', () => {
 
     // Click assemble
     fireEvent.click(screen.getByTestId('assemble-video-button'));
-    expect(onAssemble).toHaveBeenCalledWith({ backgroundMusic: false, musicPreset: undefined });
+    expect(onAssemble).toHaveBeenCalledWith({ backgroundMusic: false, musicPreset: undefined, quality: 'standard' });
   });
 
   it('does not show music controls when video is already rendered', () => {

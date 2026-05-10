@@ -30,7 +30,7 @@ export default function RenderProgressBar({ progress, message, etaDisplay, segme
       <div className="flex flex-col items-center gap-4">
         <div className="relative">
           <div className="absolute inset-0 bg-brand-500/20 animate-ping" />
-          <div className="relative flex h-16 w-16 items-center justify-center bg-brand-500 text-black shadow-hard">
+          <div className="relative flex h-16 w-16 items-center justify-center bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500]">
             <Loader2 className="h-7 w-7 animate-spin" />
           </div>
         </div>

@@ -9,6 +9,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('full user journey: topic → script → media → narration → assembly → preview', async ({ page }) => {
+  test.setTimeout(900000); // 15 min — render takes ~9-10 min
   // Ensure clean screenshot dir
   await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -22,7 +23,7 @@ test('full user journey: topic → script → media → narration → assembly �
   const topicInput = page.getByTestId('topic-input');
   await topicInput.fill('The Rise of SpaceX and the Future of Space Travel');
 
-  // Select 3 minute duration for faster test
+  // Select 3 minute duration (shortest available)
   await page.getByTestId('duration-select').selectOption('3');
   
   await page.screenshot({ path: `${SCREENSHOT_DIR}/02-topic-filled.png` });
@@ -57,40 +58,43 @@ test('full user journey: topic → script → media → narration → assembly �
   await page.waitForTimeout(3000);
   await page.screenshot({ path: `${SCREENSHOT_DIR}/07-narration.png` });
 
-  // Wait for narration to complete
-  await page.waitForSelector('button:has-text("Assemble Video")', { timeout: 600000 });
+  // Narration auto-completes via handleGenerateNarration and advances to AI Edit
+  // Wait for AI Edit step to appear
+  await page.waitForSelector('button:has-text("Skip AI Edit")', { timeout: 600000 });
   await page.screenshot({ path: `${SCREENSHOT_DIR}/08-narration-complete.png` });
-  console.log('✅ Step 8: Narration complete - Assemble Video button visible');
+  console.log('✅ Step 8: Narration complete - AI Edit step visible');
 
-  // 9. Assemble video
+  // 9. Skip AI Edit to reach Assembly step
+  await page.click('button:has-text("Skip AI Edit")');
+  console.log('✅ Step 9: Skipped AI Edit - moving to Assembly...');
+  await page.waitForTimeout(2000);
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/09-assembly-ready.png` });
+
+  // 10. Select draft quality for faster render
+  await page.waitForSelector('[data-testid="quality-draft"]', { timeout: 30000 });
+  await page.click('[data-testid="quality-draft"]');
+  console.log('✅ Step 10: Selected draft quality');
+
+  // 11. Click Assemble Video in AssemblyStep (starts the render)
+  await page.waitForSelector('button:has-text("Assemble Video")', { timeout: 30000 });
   await page.click('button:has-text("Assemble Video")');
-  console.log('✅ Step 9: Clicked Assemble Video - rendering...');
+  console.log('✅ Step 11: Clicked Assemble Video (AssemblyStep) - rendering...');
   await page.waitForTimeout(5000);
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/09-assembling.png` });
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/10-assembling.png` });
 
-  // Wait for render to complete (preview page loads automatically)
-  await page.waitForURL('**/preview**', { timeout: 180000 }).catch(() => {});
-  
-  // Wait for any of these indicators
-  try {
-    await page.waitForSelector('button:has-text("Download"), button:has-text("New Video")', { timeout: 180000 });
-  } catch {
-    console.log('⚠️ Waiting for preview indicators...');
-  }
-  
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/10-preview.png` });
-  console.log('✅ Step 10: Preview page loaded');
+  // Wait for preview step to render (draft quality at 480p should render faster)
+  await page.getByTestId('preview-step').waitFor({ timeout: 600000 });
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/11-preview.png` });
+  console.log('✅ Step 12: Preview loaded');
 
-  // Verify final state
-  const hasVideoTitle = await page.locator('text=The Rise of SpaceX').isVisible().catch(() => false);
-  const hasPreview = await page.getByTestId('preview-step').isVisible().catch(() => false);
-  const hasDownload = await page.getByTestId('download-video-button').isVisible().catch(() => false);
+  // Verify final state with proper assertions
+  await expect(page.getByTestId('preview-step')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId('new-video-button')).toBeVisible({ timeout: 10000 });
   
-  console.log(`\n--- FINAL STATE ---`);
-  console.log(`Video title visible: ${hasVideoTitle}`);
-  console.log(`Preview panel visible: ${hasPreview}`);
-  console.log(`Download button visible: ${hasDownload}`);
+  console.log('\n--- FINAL STATE ---');
+  console.log('Preview panel visible: true');
+  console.log('New Video button visible: true');
   
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/11-final-state.png`, fullPage: true });
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/13-final-state.png`, fullPage: true });
   console.log('\n🎬 Full user journey test complete!');
 });

@@ -25,7 +25,7 @@ export default function ShareButton({ project }: ShareButtonProps) {
     <button
       onClick={handleShare}
       disabled={isCopying}
-      className="flex items-center gap-2 border-2 border-surface-700 bg-surface-900 px-3 py-2 text-xs font-mono text-surface-300 hover:bg-brand-500 hover:text-black disabled:opacity-50"
+      className="flex items-center gap-2 border-2 border-surface-700 bg-surface-900 px-3 py-2 text-xs font-mono text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black disabled:opacity-50"
       aria-label="Share project"
       title="Copy shareable project URL"
       data-testid="share-project-button"

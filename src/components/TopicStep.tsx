@@ -37,6 +37,8 @@ function getIconForCategory(category: string) {
   return CATEGORY_ICONS[category] || Lightbulb;
 }
 
+import { extractJson } from '../utils/extractJson';
+
 async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -76,13 +78,16 @@ async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new Error('Empty response');
 
-  const cleaned = content.replace(/```json/g, '').replace(/```/g, '').trim();
-  let parsed = JSON.parse(cleaned);
+  let parsed = extractJson(content);
 
   // Handle { "topics": [...] } wrapper or bare array
+  if (parsed && !Array.isArray(parsed) && typeof parsed === 'object') {
+    const key = Object.keys(parsed).find(k => Array.isArray((parsed as Record<string, any>)[k]));
+    parsed = key ? (parsed as Record<string, any>)[key] : [];
+  }
+
   if (!Array.isArray(parsed)) {
-    const key = Object.keys(parsed).find(k => Array.isArray(parsed[k]));
-    parsed = key ? parsed[key] : [];
+    parsed = [];
   }
 
   return (parsed as Array<{ label?: string; category?: string }>)
@@ -116,7 +121,8 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
       setSuggestedTopics(topics);
     } catch (err) {
       console.error('Failed to generate topic ideas:', err);
-      setTopicError('Failed to generate ideas. Try again.');
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      setTopicError(`Failed to generate ideas: ${msg}. Check your API key in Settings.`);
     } finally {
       setIsLoadingTopics(false);
     }
@@ -168,7 +174,7 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
             <button
               onClick={fetchTopics}
               disabled={isLoadingTopics}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono font-medium text-surface-400 hover:bg-brand-500 hover:text-black disabled:opacity-50"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-mono font-medium text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black disabled:opacity-50"
               aria-label="Refresh topic ideas"
             >
               {isLoadingTopics ? (
@@ -216,7 +222,7 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
                   className={`flex items-center gap-3 border-2 px-3.5 py-2.5 text-left text-sm ${
                     config.topic === topic.label
                       ? 'border-brand-500 bg-brand-500 text-black'
-                      : 'border-surface-700 bg-surface-900 text-surface-300 hover:bg-brand-500 hover:text-black'
+                      : 'border-surface-700 bg-surface-900 text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black'
                   }`}
                   data-testid={`suggested-topic-${i}`}
                 >
@@ -265,7 +271,7 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
                 className={`border-2 px-2 py-1.5 text-[11px] font-mono font-bold uppercase ${
                   config.tone === tone.key
                     ? 'border-brand-500 bg-brand-500 text-black'
-                    : 'border-surface-700 bg-surface-900 text-surface-400 hover:bg-brand-500 hover:text-black'
+                    : 'border-surface-700 bg-surface-900 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black'
                 }`}
                 data-testid={`tone-${tone.key}`}
               >
@@ -297,7 +303,7 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
             disabled={!config.topic.trim()}
             className={`group flex w-full items-center justify-center gap-2 px-6 py-4 text-sm font-bold uppercase tracking-wider ${
               config.topic.trim()
-                ? 'bg-brand-500 text-black shadow-hard hover:bg-brand-400'
+                ? 'bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400'
                 : 'cursor-not-allowed bg-surface-800 text-surface-500'
             }`}
             data-testid="generate-full-video"
@@ -312,7 +318,7 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
           disabled={!config.topic.trim()}
           className={`group flex w-full items-center justify-center gap-2 px-6 py-4 text-sm font-bold uppercase tracking-wider ${
             config.topic.trim()
-              ? 'bg-brand-500 text-black shadow-hard hover:bg-brand-400'
+              ? 'bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400'
               : 'cursor-not-allowed bg-surface-800 text-surface-500'
           }`}
           data-testid="generate-script-only"

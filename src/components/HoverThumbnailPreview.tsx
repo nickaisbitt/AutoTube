@@ -36,7 +36,7 @@ export default function HoverThumbnailPreview({
       {children}
       {isHovered && (
         <div
-          className="fixed z-[300] border-2 border-surface-600 bg-surface-900 shadow-hard"
+          className="fixed z-[300] border-2 border-surface-600 bg-surface-900 shadow-[4px_4px_0px_#ff5500]"
           style={{
             width,
             height,

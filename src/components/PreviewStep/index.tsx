@@ -140,7 +140,7 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
           {onOpenExport && (
             <button
               onClick={onOpenExport}
-              className="flex items-center gap-2 bg-brand-500 px-3 py-2 text-xs font-bold uppercase text-black shadow-hard-sm hover:bg-brand-400"
+              className="flex items-center gap-2 bg-brand-500 px-3 py-2 text-xs font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500] hover:bg-brand-400"
               aria-label="Open export settings"
               title="Open export settings"
               data-testid="preview-export-button"
@@ -155,7 +155,7 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
               className={`px-3 py-2 text-xs font-mono font-medium ${
                 previewMode === 'rendered'
                   ? 'bg-brand-500 text-black'
-                  : 'text-surface-400 hover:bg-brand-500 hover:text-black'
+                  : 'text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black'
               }`}
               aria-label="Switch to MP4 preview"
               title="MP4 preview"
@@ -168,7 +168,7 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
               className={`px-3 py-2 text-xs font-mono font-medium ${
                 previewMode === 'storyboard'
                   ? 'bg-brand-500 text-black'
-                  : 'text-surface-400 hover:bg-brand-500 hover:text-black'
+                  : 'text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black'
               }`}
               aria-label="Switch to storyboard mode"
               title="Storyboard mode"
@@ -179,7 +179,7 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
           </div>
           <button
             onClick={onReset}
-            className="flex items-center gap-2 border-2 border-surface-700 bg-surface-900 px-4 py-2 text-sm font-mono text-surface-300 hover:bg-brand-500 hover:text-black"
+            className="flex items-center gap-2 border-2 border-surface-700 bg-surface-900 px-4 py-2 text-sm font-mono text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             aria-label="Create new video"
             title="Create new video"
             data-testid="new-video-button"

@@ -1,14 +1,20 @@
 import { useState } from 'react';
-import { Film, ChevronRight, X, Music } from 'lucide-react';
+import { Film, ChevronRight, X, Music, Monitor } from 'lucide-react';
 import type { VideoProject, StepStatus } from '../types';
 import { MUSIC_PRESETS } from '../services/audioMixer';
+
+const QUALITY_OPTIONS = [
+  { id: 'draft', label: 'Draft', desc: '480p / 4 Mbps' },
+  { id: 'standard', label: 'Standard', desc: '1080p / 12 Mbps' },
+  { id: 'high', label: 'High', desc: '1080p / 16 Mbps' },
+] as const;
 
 interface AssemblyStepProps {
   project: VideoProject | null;
   status: StepStatus;
   progress: number;
   message: string;
-  onAssemble: (options?: { backgroundMusic?: boolean; musicPreset?: string }) => void;
+  onAssemble: (options?: { backgroundMusic?: boolean; musicPreset?: string; quality?: 'draft' | 'standard' | 'high' }) => void;
   onNext: () => void;
   onCancel: () => void;
   /** Called when the user clicks "Try Again" after a render failure. */
@@ -20,6 +26,7 @@ export default function AssemblyStep({ project, status, progress, message, onAss
   const [startTime, setStartTime] = useState<number | null>(null);
   const [backgroundMusic, setBackgroundMusic] = useState(true);
   const [musicPreset, setMusicPreset] = useState('neutral');
+  const [quality, setQuality] = useState<'draft' | 'standard' | 'high'>('standard');
 
   // Record start time when processing begins
   if (status === 'processing' && startTime === null) {
@@ -52,7 +59,7 @@ export default function AssemblyStep({ project, status, progress, message, onAss
         <div className="w-full max-w-2xl space-y-8 text-center">
           <div className="relative mx-auto h-20 w-20">
             <div className="absolute inset-0 bg-brand-500/20 animate-ping" />
-            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-hard">
+            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500]">
               <Film className="h-8 w-8" />
             </div>
           </div>
@@ -165,7 +172,7 @@ export default function AssemblyStep({ project, status, progress, message, onAss
           <p className="text-sm font-mono text-surface-400">{message || 'An error occurred during rendering.'}</p>
           <button
             onClick={onRetry}
-            className="inline-flex items-center gap-2 border-2 border-brand-500 bg-surface-800 px-6 py-3 text-sm font-bold font-mono text-brand-400 hover:bg-brand-500 hover:text-black"
+            className="inline-flex items-center gap-2 border-2 border-brand-500 bg-surface-800 px-6 py-3 text-sm font-bold font-mono text-brand-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             data-testid="assembly-retry-button"
           >
             Try Again
@@ -197,6 +204,26 @@ export default function AssemblyStep({ project, status, progress, message, onAss
         </p>
         {!project.thumbnail && (
           <div className="flex flex-col items-center gap-3 mt-2">
+            <div className="flex items-center gap-2" data-testid="quality-selector">
+              <Monitor className="h-4 w-4 text-surface-400" />
+              <span className="text-xs font-mono text-surface-400 uppercase tracking-wider">Quality:</span>
+              {QUALITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setQuality(opt.id)}
+                  className={`border-2 px-3 py-1.5 text-xs font-bold font-mono uppercase tracking-wider ${
+                    quality === opt.id
+                      ? 'border-brand-500 bg-brand-500/10 text-brand-400'
+                      : 'border-surface-600 bg-surface-900 text-surface-500 hover:border-surface-400'
+                  }`}
+                  data-testid={`quality-${opt.id}`}
+                  aria-pressed={quality === opt.id}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => setBackgroundMusic(!backgroundMusic)}
@@ -237,7 +264,7 @@ export default function AssemblyStep({ project, status, progress, message, onAss
         {project.thumbnail ? (
           <button
             onClick={onNext}
-            className="flex items-center justify-center gap-2 bg-brand-500 px-8 py-3 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400 mx-auto"
+            className="flex items-center justify-center gap-2 bg-brand-500 px-8 py-3 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400 mx-auto"
             data-testid="preview-video-button"
           >
             Preview Video
@@ -245,8 +272,8 @@ export default function AssemblyStep({ project, status, progress, message, onAss
           </button>
         ) : (
           <button
-            onClick={() => onAssemble({ backgroundMusic, musicPreset: backgroundMusic ? musicPreset : undefined })}
-            className="flex items-center justify-center gap-2 bg-brand-500 px-8 py-3 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400 mx-auto"
+            onClick={() => onAssemble({ quality, backgroundMusic, musicPreset: backgroundMusic ? musicPreset : undefined })}
+            className="flex items-center justify-center gap-2 bg-brand-500 px-8 py-3 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400 mx-auto"
             data-testid="assemble-video-button"
           >
             Assemble Video

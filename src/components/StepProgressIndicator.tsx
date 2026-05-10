@@ -60,7 +60,7 @@ export default function StepProgressIndicator({
     <div className="w-full max-w-2xl space-y-6">
       {/* Title and overall progress */}
       <div className="text-center">
-        <div className="relative mx-auto mb-4 flex h-16 w-16 items-center justify-center bg-brand-500 text-black shadow-hard">
+        <div className="relative mx-auto mb-4 flex h-16 w-16 items-center justify-center bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500]">
           {state.currentStepId ? (
             <Loader2 className="h-7 w-7 animate-spin" />
           ) : (

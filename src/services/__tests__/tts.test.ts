@@ -10,11 +10,10 @@ describe('TTS module', () => {
   });
 
   it('exports TTS_ENGINES array with all engine implementations', () => {
-    expect(TTS_ENGINES).toHaveLength(4);
+    expect(TTS_ENGINES).toHaveLength(3);
     const names = TTS_ENGINES.map((e) => e.name);
     expect(names).toContain('kokoro');
     expect(names).toContain('grok');
-    expect(names).toContain('melo');
     expect(names).toContain('browser');
   });
 

@@ -98,7 +98,7 @@ export default function ConfirmDialog({
       <div className="absolute inset-0 bg-black/90" />
       <div
         ref={dialogRef}
-        className={`relative w-full max-w-md border-2 bg-surface-900 shadow-hard ${
+        className={`relative w-full max-w-md border-2 bg-surface-900 shadow-[4px_4px_0px_#ff5500] ${
           isDanger ? 'border-red-500' : 'border-surface-700'
         }`}
       >
@@ -113,7 +113,7 @@ export default function ConfirmDialog({
           </h2>
           <button
             onClick={handleCancel}
-            className="border-2 border-surface-700 p-1 text-surface-400 hover:bg-brand-500 hover:text-black"
+            className="border-2 border-surface-700 p-1 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             aria-label="Close dialog"
           >
             <X className="h-5 w-5" />
@@ -143,13 +143,13 @@ export default function ConfirmDialog({
         <div className="flex items-center justify-end gap-3 border-t-2 border-surface-700 bg-surface-950 px-6 py-4">
           <button
             onClick={handleCancel}
-            className="border-2 border-surface-700 px-4 py-2 text-xs font-mono font-semibold text-surface-400 hover:bg-brand-500 hover:text-black"
+            className="border-2 border-surface-700 px-4 py-2 text-xs font-mono font-semibold text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
           >
             {cancelLabel}
           </button>
           <button
             onClick={handleConfirm}
-            className={`px-4 py-2 text-xs font-bold uppercase text-black shadow-hard-sm ${
+            className={`px-4 py-2 text-xs font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500] ${
               isDanger
                 ? 'bg-red-500 hover:bg-red-400'
                 : 'bg-brand-500 hover:bg-brand-400'

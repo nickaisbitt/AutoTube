@@ -59,7 +59,7 @@ export default function BlindReviewCard({ report }: BlindReviewCardProps) {
         </div>
         <button
           onClick={() => setIsCollapsed((prev) => !prev)}
-          className="flex items-center gap-1 border-2 border-surface-700 px-2 py-1 text-xs font-mono text-surface-400 hover:bg-brand-500 hover:text-black"
+          className="flex items-center gap-1 border-2 border-surface-700 px-2 py-1 text-xs font-mono text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
           aria-label={isCollapsed ? 'Expand review' : 'Collapse review'}
           data-testid="blind-review-toggle"
         >

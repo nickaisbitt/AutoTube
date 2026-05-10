@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Image as ImageIcon,
   RefreshCw,
@@ -50,9 +50,12 @@ export default function MediaStep({
     return () => clearInterval(interval);
   }, [status]);
 
-  const handleReplace = async (assetId: string) => {
+  const handleReplace = useCallback(async (assetId: string) => {
     await onReplace(assetId);
-  };
+  }, [onReplace]);
+
+  const fallbackCount = useMemo(() => (project?.media ?? []).filter((asset) => asset.isFallback).length, [project?.media]);
+  const matchedCount = (project?.media?.length ?? 0) - fallbackCount;
 
   if (status === 'processing') {
     return (
@@ -76,7 +79,7 @@ export default function MediaStep({
         </div>
         <button
           onClick={onRetry}
-          className="inline-flex items-center gap-2 border-2 border-brand-500 bg-surface-900 px-4 py-2 text-sm font-mono font-bold uppercase text-brand-400 hover:bg-brand-500 hover:text-black"
+          className="inline-flex items-center gap-2 border-2 border-brand-500 bg-surface-900 px-4 py-2 text-sm font-mono font-bold uppercase text-brand-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
         >
           <RefreshCw className="h-4 w-4" />
           Retry Media Search
@@ -84,9 +87,6 @@ export default function MediaStep({
       </div>
     );
   }
-
-  const fallbackCount = project.media.filter((asset) => asset.isFallback).length;
-  const matchedCount = project.media.length - fallbackCount;
   const ctx = project.topicContext;
 
   return (
@@ -161,7 +161,7 @@ export default function MediaStep({
       {status === 'complete' && (
         <button
           onClick={onNext}
-          className="group flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase tracking-wider text-black shadow-hard hover:bg-brand-400"
+          className="group flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase tracking-wider text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400"
         >
           Prepare Narration
           <ChevronRight className="h-4 w-4" />

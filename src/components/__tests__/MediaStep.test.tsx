@@ -258,7 +258,7 @@ it('calls onReplace with the correct asset ID when the Replace button is clicked
     await waitFor(() => {
       expect(screen.getByText('Re-harvesting…')).toBeDefined();
     });
-    expect(replaceButtons[0].disabled).toBe(true);
+    expect(replaceButtons[0].hasAttribute('disabled')).toBe(true);
   });
 
   it('displays inline error message on the affected card when replace fails', async () => {
@@ -346,7 +346,7 @@ it('calls onReplace with the correct asset ID when the Replace button is clicked
     await waitFor(() => {
       expect(screen.getByText('Re-harvesting…')).toBeDefined();
     });
-    expect(replaceButtons[0].disabled).toBe(true);
+    expect(replaceButtons[0].hasAttribute('disabled')).toBe(true);
   });
 
   it('displays inline error message on the affected card when replace fails', async () => {

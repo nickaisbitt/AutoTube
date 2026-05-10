@@ -106,7 +106,7 @@ export default function TestRunner({
         <button
           type="button"
           onClick={onClose}
-          className="border-2 border-surface-700 p-1 text-surface-400 hover:bg-brand-500 hover:text-black"
+          className="border-2 border-surface-700 p-1 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
           aria-label="Close asset tester"
         >
           <X className="h-4 w-4" />
@@ -141,7 +141,7 @@ export default function TestRunner({
             type="button"
             onClick={onRun}
             disabled={!query.trim() || !hasApiKey}
-            className="bg-brand-500 px-4 py-2 text-xs font-bold uppercase text-black shadow-hard-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            className="bg-brand-500 px-4 py-2 text-xs font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500] disabled:opacity-40 disabled:cursor-not-allowed"
             data-testid="asset-tester-run"
           >
             Test Harvest
@@ -252,7 +252,7 @@ export default function TestRunner({
           <button
             type="button"
             onClick={onExport}
-            className="ml-auto flex items-center gap-1.5 border-2 border-surface-700 px-3 py-1.5 text-[11px] font-semibold text-surface-400 hover:bg-brand-500 hover:text-black"
+            className="ml-auto flex items-center gap-1.5 border-2 border-surface-700 px-3 py-1.5 text-[11px] font-semibold text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             data-testid="asset-tester-export"
           >
             {copyStatus === 'copied' ? (

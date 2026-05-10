@@ -98,7 +98,7 @@ export default function TrimEditor({ project, isOpen, onClose, onApplyTrim }: Tr
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" data-testid="trim-editor">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
-      <div className="relative w-full max-w-3xl border-2 border-surface-700 bg-surface-900 p-6 shadow-hard">
+      <div className="relative w-full max-w-3xl border-2 border-surface-700 bg-surface-900 p-6 shadow-[4px_4px_0px_#ff5500]">
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center bg-brand-500">
@@ -113,7 +113,7 @@ export default function TrimEditor({ project, isOpen, onClose, onApplyTrim }: Tr
           </div>
           <button
             onClick={onClose}
-            className="border-2 border-surface-700 p-2 text-surface-400 hover:bg-brand-500 hover:text-black"
+            className="border-2 border-surface-700 p-2 text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             aria-label="Close trim editor"
             data-testid="trim-editor-close"
           >
@@ -219,7 +219,7 @@ export default function TrimEditor({ project, isOpen, onClose, onApplyTrim }: Tr
                 <div className="flex gap-1">
                   {!isRemoved && (
                     <button
-                      className="rounded border border-surface-600 px-2 py-1 text-[10px] font-mono text-surface-400 hover:bg-brand-500 hover:text-black"
+                      className="rounded border border-surface-600 px-2 py-1 text-[10px] font-mono text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
                       data-testid={`preview-segment-${seg.id}`}
                     >
                       <Play className="inline h-3 w-3" />
@@ -227,7 +227,7 @@ export default function TrimEditor({ project, isOpen, onClose, onApplyTrim }: Tr
                   )}
                   <button
                     onClick={() => resetSegment(seg.id)}
-                    className="rounded border border-surface-600 px-2 py-1 text-[10px] font-mono text-surface-400 hover:bg-brand-500 hover:text-black"
+                    className="rounded border border-surface-600 px-2 py-1 text-[10px] font-mono text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
                     data-testid={`reset-segment-${seg.id}`}
                   >
                     <RotateCcw className="inline h-3 w-3" />
@@ -261,7 +261,7 @@ export default function TrimEditor({ project, isOpen, onClose, onApplyTrim }: Tr
           </button>
           <button
             onClick={applyTrim}
-            className="flex flex-1 items-center justify-center gap-2 bg-brand-500 px-4 py-2 text-sm font-bold uppercase text-black shadow-hard-sm hover:bg-brand-400"
+            className="flex flex-1 items-center justify-center gap-2 bg-brand-500 px-4 py-2 text-sm font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500] hover:bg-brand-400"
             data-testid="trim-apply"
           >
             <Scissors className="h-4 w-4" />

@@ -59,7 +59,7 @@ export default function ExportActions({
           a.click();
           document.body.removeChild(a);
         }}
-        className="flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-3 text-sm font-medium text-surface-300 hover:bg-brand-500 hover:text-black"
+        className="flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-3 text-sm font-medium text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
         data-testid="download-video-button"
       >
         <Download className="h-5 w-5" />
@@ -71,7 +71,7 @@ export default function ExportActions({
           const srtContent = generateSRTSubtitles(project.script.map(s => ({ narration: s.narration, duration: s.duration })));
           downloadSubtitles(srtContent, `${project.title.replace(/[^a-z0-9]/gi, '_')}.srt`, 'srt');
         }}
-        className="flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-3 text-sm font-medium text-surface-300 hover:bg-brand-500 hover:text-black"
+        className="flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-3 text-sm font-medium text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
         data-testid="download-srt-button"
       >
         <FileText className="h-5 w-5" />
@@ -83,7 +83,7 @@ export default function ExportActions({
           const vttContent = generateVTTSubtitles(project.script.map(s => ({ narration: s.narration, duration: s.duration })));
           downloadSubtitles(vttContent, `${project.title.replace(/[^a-z0-9]/gi, '_')}.vtt`, 'vtt');
         }}
-        className="flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-3 text-sm font-medium text-surface-300 hover:bg-brand-500 hover:text-black"
+        className="flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-3 text-sm font-medium text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
         data-testid="download-vtt-button"
       >
         <FileText className="h-5 w-5" />
@@ -115,7 +115,7 @@ export default function ExportActions({
           }
           downloadThumbnail(thumbBlob, `${sanitizedTitle}_thumbnail.png`);
         }}
-        className="flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-3 text-sm font-medium text-surface-300 hover:bg-brand-500 hover:text-black"
+        className="flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-3 text-sm font-medium text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
         data-testid="download-thumbnail-button"
       >
         <Download className="h-5 w-5" />

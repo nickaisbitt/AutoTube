@@ -175,7 +175,7 @@ export default function OnboardingTour({ isOpen, onComplete, currentStep }: Onbo
         style={getSpotlightStyle()}
         data-onboarding-spotlight
       />
-      <div style={getTooltipPosition()} className="border-2 border-brand-500 bg-surface-900 p-5 shadow-hard">
+      <div style={getTooltipPosition()} className="border-2 border-brand-500 bg-surface-900 p-5 shadow-[4px_4px_0px_#ff5500]">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex gap-1.5">
             {STEPS.map((_, i) => (

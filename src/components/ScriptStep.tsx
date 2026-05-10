@@ -85,7 +85,7 @@ export default function ScriptStep({ project, status, progress, message, onNext,
         <div className="w-full max-w-lg space-y-6 text-center">
           <div className="relative mx-auto h-20 w-20">
             <div className="absolute inset-0 bg-brand-500/20 animate-ping" />
-            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-hard">
+            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500]">
               <FileText className="h-8 w-8" />
             </div>
           </div>
@@ -153,7 +153,7 @@ export default function ScriptStep({ project, status, progress, message, onNext,
           <button
             onClick={onRegenerate}
             disabled={false}
-            className="flex items-center gap-2 border-2 border-surface-700 bg-surface-900 px-3 py-2 text-sm font-mono font-bold text-surface-300 hover:bg-brand-500 hover:text-black hover:border-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 border-2 border-surface-700 bg-surface-900 px-3 py-2 text-sm font-mono font-bold text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black hover:border-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Regenerate script"
           >
             <RefreshCw className="h-4 w-4" />
@@ -314,7 +314,7 @@ export default function ScriptStep({ project, status, progress, message, onNext,
       {status === 'complete' && (
         <button
           onClick={onNext}
-          className="group flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase tracking-wider text-black shadow-hard hover:bg-brand-400"
+          className="group flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase tracking-wider text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400"
         >
           Source Media Assets
           <ChevronRight className="h-4 w-4" />

@@ -61,7 +61,7 @@ export default function PipelineSidebar({ currentStep, stepStatuses, onStepClick
     <div className="flex h-full w-72 flex-col border-r-2 border-surface-700 bg-surface-950" data-testid="pipeline-sidebar">
       {/* Logo */}
       <div className="flex items-center gap-3 border-b-2 border-surface-700 px-5 py-5">
-        <div className="flex h-9 w-9 items-center justify-center bg-brand-500 shadow-hard-sm">
+        <div className="flex h-9 w-9 items-center justify-center bg-brand-500 shadow-[2px_2px_0px_#ff5500]">
           <Film className="h-5 w-5 text-black" />
         </div>
         <div>
@@ -90,7 +90,7 @@ export default function PipelineSidebar({ currentStep, stepStatuses, onStepClick
                   isActive
                     ? 'bg-brand-500 text-black border-l-4 border-brand-400'
                     : isClickable
-                    ? 'text-surface-300 hover:bg-brand-500 hover:text-black'
+                    ? 'text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black'
                     : 'cursor-not-allowed text-surface-600'
                 }`}
                 data-testid={`sidebar-step-${step.key}`}
@@ -121,7 +121,7 @@ export default function PipelineSidebar({ currentStep, stepStatuses, onStepClick
         <div className="mt-8 px-2">
           <button
             onClick={onOpenSettings}
-            className="group flex w-full items-center gap-3 px-3 py-2.5 text-left text-surface-400 hover:bg-brand-500 hover:text-black"
+            className="group flex w-full items-center gap-3 px-3 py-2.5 text-left text-surface-400 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             data-testid="sidebar-settings-button"
           >
             <div className="flex h-6 w-6 items-center justify-center border border-surface-600 text-surface-500 group-hover:border-black group-hover:text-black">

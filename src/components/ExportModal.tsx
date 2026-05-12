@@ -18,7 +18,7 @@ const RESOLUTION_LABELS: Record<ResolutionKey, string> = {
 };
 
 export default function ExportModal({ isOpen, onClose, project, onExport }: ExportModalProps) {
-  const [quality, setQuality] = useState<keyof typeof QUALITY_PRESETS>('high');
+  const [quality, setQuality] = useState<keyof typeof QUALITY_PRESETS>('standard');
   const [format, setFormat] = useState<'webm' | 'mp4'>('mp4');
   const [resolution, setResolution] = useState<ResolutionKey>(
     (project?.exportSettings?.resolution as ResolutionKey) || '1080p'

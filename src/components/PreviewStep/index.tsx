@@ -140,7 +140,7 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
           {onOpenExport && (
             <button
               onClick={onOpenExport}
-              className="flex items-center gap-2 bg-brand-500 px-3 py-2 text-xs font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500] hover:bg-brand-400"
+              className="flex items-center gap-2 bg-brand-500 px-3 py-2 text-xs font-bold uppercase text-black shadow-hard-sm hover:bg-brand-400"
               aria-label="Open export settings"
               title="Open export settings"
               data-testid="preview-export-button"

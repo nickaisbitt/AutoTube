@@ -141,7 +141,7 @@ export default function TestRunner({
             type="button"
             onClick={onRun}
             disabled={!query.trim() || !hasApiKey}
-            className="bg-brand-500 px-4 py-2 text-xs font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="bg-brand-500 px-4 py-2 text-xs font-bold uppercase text-black shadow-hard-sm disabled:opacity-40 disabled:cursor-not-allowed"
             data-testid="asset-tester-run"
           >
             Test Harvest

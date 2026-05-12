@@ -37,7 +37,7 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" data-testid="export-modal">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
-      <div className="relative w-full max-w-md border-2 border-surface-700 bg-surface-900 p-6 shadow-[4px_4px_0px_#ff5500]">
+      <div className="relative w-full max-w-md border-2 border-surface-700 bg-surface-900 p-6 shadow-hard">
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center bg-brand-500">
@@ -172,7 +172,7 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
         {/* Export Button */}
         <button
           onClick={handleExport}
-          className="flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-3 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500]"
+          className="flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-3 text-sm font-bold uppercase text-black shadow-hard"
           data-testid="export-submit-button"
         >
           <Download className="h-4 w-4" />

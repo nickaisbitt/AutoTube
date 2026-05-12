@@ -59,7 +59,7 @@ export default function AssemblyStep({ project, status, progress, message, onAss
         <div className="w-full max-w-2xl space-y-8 text-center">
           <div className="relative mx-auto h-20 w-20">
             <div className="absolute inset-0 bg-brand-500/20 animate-ping" />
-            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500]">
+            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-hard">
               <Film className="h-8 w-8" />
             </div>
           </div>
@@ -264,7 +264,7 @@ export default function AssemblyStep({ project, status, progress, message, onAss
         {project.thumbnail ? (
           <button
             onClick={onNext}
-            className="flex items-center justify-center gap-2 bg-brand-500 px-8 py-3 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400 mx-auto"
+            className="flex items-center justify-center gap-2 bg-brand-500 px-8 py-3 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400 mx-auto"
             data-testid="preview-video-button"
           >
             Preview Video
@@ -273,7 +273,7 @@ export default function AssemblyStep({ project, status, progress, message, onAss
         ) : (
           <button
             onClick={() => onAssemble({ quality, backgroundMusic, musicPreset: backgroundMusic ? musicPreset : undefined })}
-            className="flex items-center justify-center gap-2 bg-brand-500 px-8 py-3 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400 mx-auto"
+            className="flex items-center justify-center gap-2 bg-brand-500 px-8 py-3 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400 mx-auto"
             data-testid="assemble-video-button"
           >
             Assemble Video

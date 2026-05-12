@@ -303,7 +303,7 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
             disabled={!config.topic.trim()}
             className={`group flex w-full items-center justify-center gap-2 px-6 py-4 text-sm font-bold uppercase tracking-wider ${
               config.topic.trim()
-                ? 'bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400'
+                ? 'bg-brand-500 text-black shadow-hard hover:bg-brand-400'
                 : 'cursor-not-allowed bg-surface-800 text-surface-500'
             }`}
             data-testid="generate-full-video"
@@ -318,7 +318,7 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
           disabled={!config.topic.trim()}
           className={`group flex w-full items-center justify-center gap-2 px-6 py-4 text-sm font-bold uppercase tracking-wider ${
             config.topic.trim()
-              ? 'bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400'
+              ? 'bg-brand-500 text-black shadow-hard hover:bg-brand-400'
               : 'cursor-not-allowed bg-surface-800 text-surface-500'
           }`}
           data-testid="generate-script-only"

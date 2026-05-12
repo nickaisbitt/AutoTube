@@ -59,6 +59,11 @@
    ═══════════════════════════════════════════════════ */
 .shadow-sm { box-shadow: 2px 2px 0px rgba(255, 85, 0, 0.3) !important; }
 .shadow-md, .shadow { box-shadow: 3px 3px 0px rgba(255, 85, 0, 0.3) !important; }
+
+/* Task 2b: Dedicated hard-shadow utilities */
+.shadow-hard { box-shadow: 4px 4px 0px #ff5500 !important; }
+.shadow-hard-sm { box-shadow: 2px 2px 0px #ff5500 !important; }
+
 .shadow-lg { box-shadow: 4px 4px 0px #ff5500 !important; }
 .shadow-xl { box-shadow: 6px 6px 0px #ff5500 !important; }
 .shadow-2xl { box-shadow: 8px 8px 0px #ff5500 !important; }

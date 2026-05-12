@@ -130,7 +130,7 @@ export default function AnalyticsDashboard({ onClose }: AnalyticsDashboardProps)
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
-      <div className="relative w-full max-w-3xl max-h-[85vh] overflow-y-auto border-2 border-surface-700 bg-surface-900 p-6 shadow-[4px_4px_0px_#ff5500]">
+      <div className="relative w-full max-w-3xl max-h-[85vh] overflow-y-auto border-2 border-surface-700 bg-surface-900 p-6 shadow-hard">
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center bg-brand-500">

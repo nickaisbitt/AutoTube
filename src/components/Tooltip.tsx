@@ -73,7 +73,7 @@ export default function Tooltip({
           className={`absolute z-[300] ${positionClasses[position]}`}
           style={{ maxWidth: `${maxWidth}px`, whiteSpace: 'normal' }}
         >
-          <div className="border-2 border-surface-600 bg-surface-800 px-3 py-2 text-xs font-mono text-surface-200 shadow-[4px_4px_0px_#ff5500]">
+          <div className="border-2 border-surface-600 bg-surface-800 px-3 py-2 text-xs font-mono text-surface-200 shadow-hard">
             {content}
           </div>
           <div

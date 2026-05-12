@@ -161,7 +161,7 @@ export default function MediaStep({
       {status === 'complete' && (
         <button
           onClick={onNext}
-          className="group flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase tracking-wider text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400"
+          className="group flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase tracking-wider text-black shadow-hard hover:bg-brand-400"
         >
           Prepare Narration
           <ChevronRight className="h-4 w-4" />

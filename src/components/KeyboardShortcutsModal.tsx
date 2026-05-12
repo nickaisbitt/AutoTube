@@ -12,7 +12,7 @@ export default function KeyboardShortcutsModal({ isOpen, onClose }: KeyboardShor
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" data-testid="keyboard-shortcuts-modal">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
-      <div className="relative w-full max-w-md overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-[4px_4px_0px_#ff5500]">
+      <div className="relative w-full max-w-md overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-hard">
         <div className="flex items-center justify-between border-b-2 border-surface-700 px-6 py-4">
           <div className="flex items-center gap-2">
             <Keyboard className="h-5 w-5 text-brand-500" />

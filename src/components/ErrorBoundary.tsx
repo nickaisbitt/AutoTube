@@ -41,7 +41,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                 this.setState({ hasError: false, error: null });
                 window.location.reload();
               }}
-              className="inline-flex items-center gap-2 bg-brand-500 px-6 py-3 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400"
+              className="inline-flex items-center gap-2 bg-brand-500 px-6 py-3 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400"
             >
               <RotateCcw className="h-4 w-4" />
               Reload App

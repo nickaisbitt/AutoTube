@@ -175,7 +175,7 @@ export default function CommandPalette({ isOpen, onClose, commands, recentProjec
   return (
     <div className="fixed inset-0 z-[200] flex items-start justify-center pt-[20vh]" data-testid="command-palette">
       <div className="absolute inset-0 bg-black/80" onClick={onClose} />
-      <div className="relative w-full max-w-lg overflow-hidden rounded border-2 border-surface-700 bg-surface-900 shadow-[4px_4px_0px_#ff5500]">
+      <div className="relative w-full max-w-lg overflow-hidden rounded border-2 border-surface-700 bg-surface-900 shadow-hard">
         <div className="flex items-center gap-2 border-b-2 border-surface-700 px-4 py-3">
           <Search className="h-4 w-4 text-surface-500" />
           <input

@@ -50,7 +50,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/90" />
-      <div className="relative w-full max-w-lg border-2 border-surface-700 bg-surface-900 p-8 shadow-[4px_4px_0px_#ff5500]">
+      <div className="relative w-full max-w-lg border-2 border-surface-700 bg-surface-900 p-8 shadow-hard">
         {/* Progress squares */}
         <div className="mb-6 flex justify-center gap-2">
           {STEPS.map((_, i) => (
@@ -111,14 +111,14 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
           {currentStep < STEPS.length - 1 ? (
             <button
               onClick={() => setCurrentStep(currentStep + 1)}
-              className="flex items-center gap-2 bg-brand-500 px-4 py-2 text-sm font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500]"
+              className="flex items-center gap-2 bg-brand-500 px-4 py-2 text-sm font-bold uppercase text-black shadow-hard-sm"
             >
               Next <ChevronRight className="h-4 w-4" />
             </button>
           ) : (
             <button
               onClick={handleSave}
-              className="flex items-center gap-2 bg-emerald-500 px-4 py-2 text-sm font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500]"
+              className="flex items-center gap-2 bg-emerald-500 px-4 py-2 text-sm font-bold uppercase text-black shadow-hard-sm"
             >
               <Check className="h-4 w-4" />
               Get Started

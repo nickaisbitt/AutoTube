@@ -78,7 +78,7 @@ export default function AIEditStep({
         <div className="w-full max-w-lg space-y-6 text-center">
           <div className="relative mx-auto h-20 w-20">
             <div className="absolute inset-0 bg-brand-500/20 animate-ping" />
-            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-[4px_4px_0px_#ff5500]">
+            <div className="relative flex h-20 w-20 items-center justify-center bg-brand-500 text-black shadow-hard">
               <Sparkles className="h-8 w-8" />
             </div>
           </div>
@@ -275,7 +275,7 @@ export default function AIEditStep({
         {/* Next button */}
         <button
           onClick={onNext}
-          className="flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400"
+          className="flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400"
           data-testid="proceed-to-assembly-button"
         >
           Proceed to Assembly
@@ -302,7 +302,7 @@ export default function AIEditStep({
         <div className="flex flex-col items-center gap-3">
           <button
             onClick={onRunAIEdit}
-            className="inline-flex items-center justify-center gap-2 bg-brand-500 px-6 py-3 text-sm font-bold uppercase text-black shadow-[4px_4px_0px_#ff5500] hover:bg-brand-400"
+            className="inline-flex items-center justify-center gap-2 bg-brand-500 px-6 py-3 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400"
             data-testid="run-ai-edit-button"
           >
             <Sparkles className="h-4 w-4" />

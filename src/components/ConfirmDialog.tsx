@@ -98,7 +98,7 @@ export default function ConfirmDialog({
       <div className="absolute inset-0 bg-black/90" />
       <div
         ref={dialogRef}
-        className={`relative w-full max-w-md border-2 bg-surface-900 shadow-[4px_4px_0px_#ff5500] ${
+        className={`relative w-full max-w-md border-2 bg-surface-900 shadow-hard ${
           isDanger ? 'border-red-500' : 'border-surface-700'
         }`}
       >
@@ -149,7 +149,7 @@ export default function ConfirmDialog({
           </button>
           <button
             onClick={handleConfirm}
-            className={`px-4 py-2 text-xs font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500] ${
+            className={`px-4 py-2 text-xs font-bold uppercase text-black shadow-hard-sm ${
               isDanger
                 ? 'bg-red-500 hover:bg-red-400'
                 : 'bg-brand-500 hover:bg-brand-400'

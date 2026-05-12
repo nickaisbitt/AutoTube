@@ -81,7 +81,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" data-testid="settings-modal">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
       
-      <div className="relative w-full max-w-lg overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-[4px_4px_0px_#ff5500]">
+      <div className="relative w-full max-w-lg overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-hard">
         <form onSubmit={handleSubmit}>
           <div className="flex items-center justify-between border-b-2 border-surface-700 px-6 py-4">
             <div className="flex items-center gap-2">
@@ -284,7 +284,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </button>
             <button
               type="submit"
-              className="flex items-center gap-2 bg-brand-500 px-6 py-2 text-xs font-bold uppercase text-black shadow-[2px_2px_0px_#ff5500]"
+              className="flex items-center gap-2 bg-brand-500 px-6 py-2 text-xs font-bold uppercase text-black shadow-hard-sm"
               data-testid="settings-save-button"
             >
               Save Configuration

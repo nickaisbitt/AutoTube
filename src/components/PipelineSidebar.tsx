@@ -61,7 +61,7 @@ export default function PipelineSidebar({ currentStep, stepStatuses, onStepClick
     <div className="flex h-full w-72 flex-col border-r-2 border-surface-700 bg-surface-950" data-testid="pipeline-sidebar">
       {/* Logo */}
       <div className="flex items-center gap-3 border-b-2 border-surface-700 px-5 py-5">
-        <div className="flex h-9 w-9 items-center justify-center bg-brand-500 shadow-[2px_2px_0px_#ff5500]">
+        <div className="flex h-9 w-9 items-center justify-center bg-brand-500 shadow-hard-sm">
           <Film className="h-5 w-5 text-black" />
         </div>
         <div>

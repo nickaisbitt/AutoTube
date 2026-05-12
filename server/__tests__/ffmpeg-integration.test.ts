@@ -119,14 +119,16 @@ existsSync: mockExistsSync,
   });
 
   describe('audio.mjs ffmpeg arguments', () => {
-    it('concatenateAudio uses aac codec at 128k', async () => {
+    it('concatenateAudio uses aac codec at 192k with loudnorm', async () => {
       const files = [{ file: '/tmp/a.mp3', duration: 5 }];
       await audioModuleConcatenateAudio(files, '/tmp/out.aac');
       const args = mockSpawnSync.mock.calls[0][1] as string[];
       expect(args).toContain('-c:a');
       expect(args).toContain('aac');
       expect(args).toContain('-b:a');
-      expect(args).toContain('128k');
+      expect(args).toContain('192k');
+      expect(args).toContain('-af');
+      expect(args).toContain('loudnorm=I=-14:TP=-1.5:LRA=11');
     });
 
     it('mixNarrationWithBgMusic uses amix filter', () => {
@@ -157,14 +159,16 @@ existsSync: mockExistsSync,
       expect(args).toContain('libx264');
     });
 
-    it('uses aac audio at 128k bitrate', () => {
+    it('uses aac audio at 192k bitrate with loudnorm', () => {
       mockExistsSync.mockImplementation((p: string) => p.includes('narration'));
       muxVideoWithAudio('/tmp/video.mp4', '/tmp/narration.aac', '/tmp/out.mp4', 30, { backgroundMusic: false });
       const args = mockSpawnSync.mock.calls[0][1] as string[];
       expect(args).toContain('-c:a');
       expect(args).toContain('aac');
       expect(args).toContain('-b:a');
-      expect(args).toContain('128k');
+      expect(args).toContain('192k');
+      expect(args).toContain('-af');
+      expect(args).toContain('loudnorm=I=-14:TP=-1.5:LRA=11');
     });
   });
 

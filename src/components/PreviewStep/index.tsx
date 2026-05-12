@@ -12,6 +12,7 @@ import type { PreviewMode } from './VideoPlayer';
 import Timeline from './Timeline';
 import QualitySettings from './QualitySettings';
 import ExportActions from './ExportActions';
+import QualityCheck from './QualityCheck';
 import BlindReviewCard from './BlindReviewCard';
 import YouTubeSEOSection from './YouTubeSEOSection';
 import { usePlayback } from './usePlayback';
@@ -209,6 +210,9 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
         onTimeUpdate={setCurrentTime}
         onVideoEnded={() => setIsPlaying(false)}
       />
+
+      {/* Video Quality Check */}
+      <QualityCheck videoUrl={project.thumbnail ?? null} />
 
       {/* Blind Review Card */}
       <BlindReviewCard report={project.blindReview ?? null} />

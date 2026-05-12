@@ -11,10 +11,10 @@ function drawSceneLayoutFallback(
   segType: string,
 ): void {
   const palettes: Record<string, { bg: string[]; accent: string }> = {
-    intro:      { bg: ['#0a0a1a', '#1a0a2e', '#0a1a2e'], accent: '#e74c3c' },
-    section:    { bg: ['#0a0a1a', '#0a1a2e', '#0a2a3e'], accent: '#3498db' },
-    transition: { bg: ['#1a1a0a', '#2a1a0a', '#1a0a0a'], accent: '#f39c12' },
-    outro:      { bg: ['#0a1a0a', '#0a2a1a', '#0a1a2a'], accent: '#2ecc71' },
+    intro:      { bg: ['#1a1a3e', '#2a1a5e', '#1a2a4e'], accent: '#e74c3c' },
+    section:    { bg: ['#1a1a3e', '#1a2a5e', '#1a3a6e'], accent: '#3498db' },
+    transition: { bg: ['#2a2a1a', '#3a2a1a', '#2a1a1a'], accent: '#f39c12' },
+    outro:      { bg: ['#1a2a2a', '#1a3a2a', '#1a2a3a'], accent: '#2ecc71' },
   };
   const p = palettes[segType] || palettes.section;
 
@@ -262,8 +262,8 @@ export function drawSceneLeftTextRightImage(
 
   // Left panel: dark gradient background
   const leftGrad = ctx.createLinearGradient(0, 0, splitX, 0);
-  leftGrad.addColorStop(0, '#0a0a1a');
-  leftGrad.addColorStop(1, '#0a1a2e');
+  leftGrad.addColorStop(0, '#1a1a3e');
+  leftGrad.addColorStop(1, '#1a2a5e');
   ctx.fillStyle = leftGrad;
   ctx.fillRect(0, 0, splitX, h);
 
@@ -283,8 +283,8 @@ export function drawSceneLeftTextRightImage(
   } else {
     // Procedural fallback for right panel
     const palettes: Record<string, string[]> = {
-      intro: ['#1a0a2e', '#0a1a2e'], section: ['#0a1a2e', '#0a2a3e'],
-      transition: ['#2a1a0a', '#1a0a0a'], outro: ['#0a2a1a', '#0a1a2a'],
+      intro: ['#2a1a5e', '#1a2a5e'], section: ['#1a2a5e', '#1a3a6e'],
+      transition: ['#3a2a1a', '#2a1a1a'], outro: ['#1a3a2a', '#1a2a3a'],
     };
     const p = palettes[seg.type] || palettes.section;
     const rightGrad = ctx.createLinearGradient(splitX, 0, w, h);

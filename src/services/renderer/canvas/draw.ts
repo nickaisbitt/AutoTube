@@ -20,25 +20,25 @@ export function drawProceduralBackground(
   // Topic-aware color palettes
   const palettes: Record<string, { bg: string[]; accent: string; glow: string; secondary: string }> = {
     intro: {
-      bg: ['#0a0a1a', '#1a0a2e', '#0a1a2e'],
+      bg: ['#1a1a3e', '#2a1a5e', '#1a2a4e'],
       accent: '#e74c3c',
       glow: '#ff6b6b',
       secondary: '#f39c12',
     },
     section: {
-      bg: ['#0a0a1a', '#0a1a2e', '#0a2a3e'],
+      bg: ['#1a1a3e', '#1a2a5e', '#1a3a6e'],
       accent: '#3498db',
       glow: '#5dade2',
       secondary: '#9b59b6',
     },
     transition: {
-      bg: ['#1a1a0a', '#2a1a0a', '#1a0a0a'],
+      bg: ['#2a2a1a', '#3a2a1a', '#2a1a1a'],
       accent: '#f39c12',
       glow: '#f5b041',
       secondary: '#e67e22',
     },
     outro: {
-      bg: ['#0a1a0a', '#0a2a1a', '#0a1a2a'],
+      bg: ['#1a2a2a', '#1a3a2a', '#1a2a3a'],
       accent: '#2ecc71',
       glow: '#58d68d',
       secondary: '#1abc9c',
@@ -268,7 +268,7 @@ export function draw(
         ctx.scale(zoom, zoom);
 
         // ── Requirement 3.1–3.6, 8.1: Adaptive colour grading ──
-        const DEFAULT_FILTER = 'saturate(1.12) contrast(1.08) brightness(0.94)';
+        const DEFAULT_FILTER = 'saturate(1.15) contrast(1.12) brightness(1.08)';
         let filterString = DEFAULT_FILTER;
         if (asset) {
           let score: number;

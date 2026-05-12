@@ -11,6 +11,7 @@ import { handleSearchVideos } from "./routes/searchVideos.js";
 import { handleDownloadClip } from "./routes/downloadClip.js";
 import { handleSearch } from "./routes/search.js";
 import { handleNotify } from "./routes/notify.js";
+import { handleQualityCheck } from "./routes/qualityCheck.js";
 
 /**
  * Connect-compatible middleware that handles all /api/* routes.
@@ -73,6 +74,11 @@ export function apiMiddleware(
         req.method === "POST"
       ) {
         await handleNotify(req, res);
+      } else if (
+        req.url!.startsWith("/api/quality-check") &&
+        req.method === "POST"
+      ) {
+        await handleQualityCheck(req, res);
       } else {
         // No matching route — pass to next middleware
         next();

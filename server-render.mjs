@@ -312,10 +312,10 @@ function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec = 4) {
  */
 function drawProceduralFallbackWithText(ctx, w, h, topicText, segType) {
   const palettes = {
-    intro:      { bg: ['#0f0c29', '#302b63', '#24243e'], accent: '#06d6a0' },
-    section:    { bg: ['#0c0c1d', '#1a1a3e', '#0d1b2a'], accent: '#4cc9f0' },
-    transition: { bg: ['#1a0a2e', '#2d1b69', '#1a0a2e'], accent: '#f72585' },
-    outro:      { bg: ['#0a192f', '#0d2137', '#0a192f'], accent: '#06d6a0' },
+    intro:      { bg: ['#1a1540', '#4a3f8c', '#3a3560'], accent: '#06d6a0' },
+    section:    { bg: ['#1a1a3e', '#2d2d5e', '#1a2d4a'], accent: '#4cc9f0' },
+    transition: { bg: ['#2d1a5e', '#4a2d9e', '#2d1a5e'], accent: '#f72585' },
+    outro:      { bg: ['#1a2d4a', '#1d3d5a', '#1a2d4a'], accent: '#06d6a0' },
   };
   const p = palettes[segType] || palettes.section;
 
@@ -770,10 +770,10 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
 // ── Procedural background (matches browser renderer) ──────────────────────
 function drawProceduralBackground(ctx, seg, progress, skipParticles = false) {
   const palettes = {
-    intro:      { bg: ['#0f0c29', '#302b63', '#24243e'], accent: '#06d6a0' },
-    section:    { bg: ['#0c0c1d', '#1a1a3e', '#0d1b2a'], accent: '#4cc9f0' },
-    transition: { bg: ['#1a0a2e', '#2d1b69', '#1a0a2e'], accent: '#f72585' },
-    outro:      { bg: ['#0a192f', '#0d2137', '#0a192f'], accent: '#06d6a0' },
+    intro:      { bg: ['#1a1540', '#4a3f8c', '#3a3560'], accent: '#06d6a0' },
+    section:    { bg: ['#1a1a3e', '#2d2d5e', '#1a2d4a'], accent: '#4cc9f0' },
+    transition: { bg: ['#2d1a5e', '#4a2d9e', '#2d1a5e'], accent: '#f72585' },
+    outro:      { bg: ['#1a2d4a', '#1d3d5a', '#1a2d4a'], accent: '#06d6a0' },
   };
   const p = palettes[seg.type] || palettes.section;
 
@@ -843,9 +843,9 @@ function drawTitleCardFrame(ctx, title, topic, progress) {
   const cx = WIDTH / 2 + Math.cos(progress * Math.PI * 0.3) * WIDTH * 0.08;
   const cy = HEIGHT / 2 + Math.sin(progress * Math.PI * 0.2) * HEIGHT * 0.06;
   const grad = ctx.createRadialGradient(cx, cy, 0, WIDTH / 2, HEIGHT / 2, WIDTH * 0.85);
-  grad.addColorStop(0, '#1a1a4e');
-  grad.addColorStop(0.4, '#0f0c29');
-  grad.addColorStop(1, '#0a0a1a');
+  grad.addColorStop(0, '#2a2a6e');
+  grad.addColorStop(0.4, '#1a1a4e');
+  grad.addColorStop(1, '#0f0c29');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
@@ -967,9 +967,9 @@ function drawEndScreenFrame(ctx, title, progress) {
   const cx = WIDTH / 2 + Math.cos(progress * Math.PI * 0.2) * WIDTH * 0.06;
   const cy = HEIGHT / 2 + Math.sin(progress * Math.PI * 0.15) * HEIGHT * 0.04;
   const grad = ctx.createRadialGradient(cx, cy, 0, WIDTH / 2, HEIGHT / 2, WIDTH * 0.85);
-  grad.addColorStop(0, '#1a1a4e');
-  grad.addColorStop(0.4, '#0f0c29');
-  grad.addColorStop(1, '#0a0a1a');
+  grad.addColorStop(0, '#2a2a6e');
+  grad.addColorStop(0.4, '#1a1a4e');
+  grad.addColorStop(1, '#0f0c29');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
@@ -1789,7 +1789,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
 
       // ── Adaptive colour grading ──────────────────────────────────────────
       // Saturation scores pre-computed during preload phase (P0 optimization).
-      const DEFAULT_FILTER = 'saturate(1.12) contrast(1.08) brightness(0.94)';
+      const DEFAULT_FILTER = 'saturate(1.15) contrast(1.12) brightness(1.08)';
       let filterString = DEFAULT_FILTER;
       if (asset && asset.url && saturationCache.has(asset.url)) {
         filterString = computeAdaptiveFilter(saturationCache.get(asset.url));
@@ -1838,8 +1838,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   if (!DRAFT_MODE) {
     const vig = ctx.createRadialGradient(WIDTH/2, HEIGHT/2, HEIGHT*0.35, WIDTH/2, HEIGHT/2, WIDTH*0.8);
     vig.addColorStop(0, 'rgba(0,0,0,0)');
-    vig.addColorStop(0.75, 'rgba(0,0,0,0.10)');
-    vig.addColorStop(1, 'rgba(0,0,0,0.40)');
+    vig.addColorStop(0.75, 'rgba(0,0,0,0.05)');
+    vig.addColorStop(1, 'rgba(0,0,0,0.20)');
     ctx.fillStyle = vig;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
   }
@@ -2190,11 +2190,11 @@ async function generateNarration(segments, outputDir, options = {}) {
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
 
-    // Generate 0.5s crossfade silence for the segment title card (reduced from 1.5s for better pacing)
+    // Generate 0.15s brief pause for the segment title card (was 0.5s — too much dead air)
     const silenceFile = join(outputDir, `silence-${i}.mp3`);
-    spawnSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '0.5', silenceFile], { encoding: 'utf8', timeout: 5000 });
+    spawnSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '0.15', silenceFile], { encoding: 'utf8', timeout: 5000 });
     if (existsSync(silenceFile)) {
-      audioFiles.push({ file: silenceFile, duration: 0.5 });
+      audioFiles.push({ file: silenceFile, duration: 0.15 });
     }
 
     const audioFile = join(outputDir, `narration-${i}.mp3`);

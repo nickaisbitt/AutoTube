@@ -151,51 +151,51 @@ describe('computeSaturationScore', () => {
 describe('computeAdaptiveFilter', () => {
   // Validates: Requirements 3.2, 3.3, 3.4, 3.6
 
-  it('score = 0.9 (> 0.75): saturation clamped to [0.85, 1.12] and filter includes contrast(1.08) brightness(0.94)', () => {
-    // raw = 1.0 + 0.12 * (1 - (0.9 - 0.75) / 0.25) = 1.0 + 0.12 * 0.4 = 1.048
-    // clamped to [0.85, 1.12] → 1.048
+  it('score = 0.9 (> 0.75): saturation clamped to [0.88, 1.15] and filter includes contrast(1.12) brightness(1.08)', () => {
+    // raw = 1.0 + 0.15 * (1 - (0.9 - 0.75) / 0.25) = 1.0 + 0.15 * 0.4 = 1.06
+    // clamped to [0.88, 1.15] → 1.06
     const filter = computeAdaptiveFilter(0.9);
-    expect(filter).toBe('saturate(1.0480) contrast(1.08) brightness(0.94)');
+    expect(filter).toBe('saturate(1.0600) contrast(1.12) brightness(1.08)');
     const satMatch = filter.match(/saturate\(([^)]+)\)/);
     const satValue = satMatch ? parseFloat(satMatch[1]) : NaN;
-    expect(satValue).toBeGreaterThanOrEqual(0.85);
-    expect(satValue).toBeLessThanOrEqual(1.12);
+    expect(satValue).toBeGreaterThanOrEqual(0.88);
+    expect(satValue).toBeLessThanOrEqual(1.15);
   });
 
-  it('score = 0.2 (< 0.35): saturation clamped to [1.12, 1.30]', () => {
-    // raw = 1.12 + (0.35 - 0.2) * 0.4 = 1.12 + 0.06 = 1.18
-    // clamped to [1.12, 1.30] → 1.18
+  it('score = 0.2 (< 0.35): saturation clamped to [1.15, 1.33]', () => {
+    // raw = 1.15 + (0.35 - 0.2) * 0.4 = 1.15 + 0.06 = 1.21
+    // clamped to [1.15, 1.33] → 1.21
     const filter = computeAdaptiveFilter(0.2);
-    expect(filter).toBe('saturate(1.1800) contrast(1.08) brightness(0.94)');
+    expect(filter).toBe('saturate(1.2100) contrast(1.12) brightness(1.08)');
     const satMatch = filter.match(/saturate\(([^)]+)\)/);
     const satValue = satMatch ? parseFloat(satMatch[1]) : NaN;
-    expect(satValue).toBeGreaterThanOrEqual(1.12);
-    expect(satValue).toBeLessThanOrEqual(1.30);
+    expect(satValue).toBeGreaterThanOrEqual(1.15);
+    expect(satValue).toBeLessThanOrEqual(1.33);
   });
 
   it('score = 0.5 (in [0.35, 0.75]): returns the default filter string unchanged', () => {
     const filter = computeAdaptiveFilter(0.5);
-    expect(filter).toBe('saturate(1.12) contrast(1.08) brightness(0.94)');
+    expect(filter).toBe('saturate(1.15) contrast(1.12) brightness(1.08)');
   });
 
-  it('score = 1.0 (boundary): saturation clamped to 0.85 (lower bound of high-saturation range)', () => {
-    // raw = 1.0 + 0.12 * (1 - (1.0 - 0.75) / 0.25) = 1.0 + 0.12 * 0 = 1.0
-    // clamped to [0.85, 1.12] → 1.0
+  it('score = 1.0 (boundary): saturation clamped to 0.88 (lower bound of high-saturation range)', () => {
+    // raw = 1.0 + 0.15 * (1 - (1.0 - 0.75) / 0.25) = 1.0 + 0.15 * 0 = 1.0
+    // clamped to [0.88, 1.15] → 1.0
     const filter = computeAdaptiveFilter(1.0);
     const satMatch = filter.match(/saturate\(([^)]+)\)/);
     const satValue = satMatch ? parseFloat(satMatch[1]) : NaN;
-    expect(satValue).toBeGreaterThanOrEqual(0.85);
-    expect(satValue).toBeLessThanOrEqual(1.12);
+    expect(satValue).toBeGreaterThanOrEqual(0.88);
+    expect(satValue).toBeLessThanOrEqual(1.15);
   });
 
-  it('score = 0.0 (boundary): saturation clamped to 1.30 (upper bound of low-saturation range)', () => {
-    // raw = 1.12 + (0.35 - 0.0) * 0.4 = 1.12 + 0.14 = 1.26
-    // clamped to [1.12, 1.30] → 1.26
+  it('score = 0.0 (boundary): saturation clamped to 1.33 (upper bound of low-saturation range)', () => {
+    // raw = 1.15 + (0.35 - 0.0) * 0.4 = 1.15 + 0.14 = 1.29
+    // clamped to [1.15, 1.33] → 1.29
     const filter = computeAdaptiveFilter(0.0);
     const satMatch = filter.match(/saturate\(([^)]+)\)/);
     const satValue = satMatch ? parseFloat(satMatch[1]) : NaN;
-    expect(satValue).toBeGreaterThanOrEqual(1.12);
-    expect(satValue).toBeLessThanOrEqual(1.30);
+    expect(satValue).toBeGreaterThanOrEqual(1.15);
+    expect(satValue).toBeLessThanOrEqual(1.33);
   });
 });
 

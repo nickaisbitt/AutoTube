@@ -90,24 +90,24 @@ export function computeSaturationScore(
  * @returns      Full CSS filter string.
  */
 export function computeAdaptiveFilter(score: number): string {
-  const DEFAULT_FILTER = "saturate(1.12) contrast(1.08) brightness(0.94)";
+  const DEFAULT_FILTER = "saturate(1.15) contrast(1.12) brightness(1.08)";
 
   let saturation: number;
 
   if (score > 0.75) {
     // Requirement 3.2: desaturation correction
-    const raw = 1.0 + (1.12 - 1.0) * (1 - (score - 0.75) / 0.25);
-    saturation = Math.min(1.12, Math.max(0.85, raw));
+    const raw = 1.0 + (1.15 - 1.0) * (1 - (score - 0.75) / 0.25);
+    saturation = Math.min(1.15, Math.max(0.88, raw));
   } else if (score < 0.35) {
     // Requirement 3.3: saturation boost
-    const raw = 1.12 + (0.35 - score) * 0.4;
-    saturation = Math.min(1.30, Math.max(1.12, raw));
+    const raw = 1.15 + (0.35 - score) * 0.4;
+    saturation = Math.min(1.33, Math.max(1.15, raw));
   } else {
     // Requirement 3.4: default band [0.35, 0.75]
     return DEFAULT_FILTER;
   }
 
-  return `saturate(${saturation.toFixed(4)}) contrast(1.08) brightness(0.94)`;
+  return `saturate(${saturation.toFixed(4)}) contrast(1.12) brightness(1.08)`;
 }
 
 /**

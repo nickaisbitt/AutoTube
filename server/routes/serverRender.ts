@@ -8,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // Project root is two levels up from server/routes/
 const PROJECT_ROOT = join(__dirname, "..", "..");
+const QUALITY_CHECK_SCRIPT = join(PROJECT_ROOT, "server", "quality-check", "check_quality.py");
 
 /**
  * POST /api/server-render
@@ -116,7 +117,7 @@ export async function handleServerRender(
     stderr += data.toString();
   });
 
-  child.on("close", (code: number) => {
+  child.on("close", async (code: number) => {
     clearInterval(heartbeat);
     if (code !== 0) {
       sendEvent({
@@ -146,12 +147,35 @@ export async function handleServerRender(
       "test-recordings",
       fileToReturn.split("test-recordings/")[1] || "",
     );
+
+    // Run quick quality check (ffmpeg-only, no vision) in background
+    let qualityReport: Record<string, unknown> | null = null;
+    try {
+      sendEvent({ type: "progress", message: "Running quality check...", pct: 95 });
+      const { spawnSync } = await import("child_process");
+      const qcResult = spawnSync("python3", [
+        QUALITY_CHECK_SCRIPT,
+        fileToReturn,
+        "--json",
+        "--skip-vision",
+      ], { timeout: 60000, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+
+      if (qcResult.status === 0 && qcResult.stdout) {
+        try {
+          qualityReport = JSON.parse(qcResult.stdout);
+        } catch {}
+      }
+    } catch {
+      // Quality check is non-blocking — don't fail the render
+    }
+
     sendEvent({
       type: "complete",
-      message: `Server render complete${hasAudio ? ' with audio' : ' (video only)'}!`,
+      message: `Server render complete${hasAudio ? ' with audio' : ' (video only)'}!${qualityReport ? ` Quality: ${qualityReport.score}/100` : ''}`,
       pct: 100,
       filePath: `/api/render-output/mp4/${relPath}`,
       hasAudio,
+      quality: qualityReport,
     });
     res.end();
   });

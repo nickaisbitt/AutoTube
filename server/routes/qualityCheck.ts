@@ -31,8 +31,10 @@ export async function handleQualityCheck(
   const body = Buffer.concat(chunks).toString("utf8");
 
   let videoPath: string;
+  let includeVision = false;
   try {
     const parsed = JSON.parse(body);
+    includeVision = !!parsed.includeVision;
     // Accept either videoPath (absolute) or videoUrl (relative URL)
     if (parsed.videoPath) {
       videoPath = parsed.videoPath;
@@ -92,7 +94,7 @@ export async function handleQualityCheck(
 
   // Spawn Python quality check script
   const args = [CHECK_SCRIPT, videoPath, "--json"];
-  if (apiKey) {
+  if (includeVision && apiKey) {
     args.push("--api-key", apiKey);
     args.push("--model", "google/gemini-2.0-flash-001");
   } else {

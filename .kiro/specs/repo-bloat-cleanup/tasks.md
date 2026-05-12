@@ -49,7 +49,7 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Observability & rollback → Manifests and snapshots"_
     - _Requirements: 1.1, 2.4, 2.5, E1_
 
-  - [~] 1.3 Commit the failing test on the dedicated cleanup branch
+  - [ ] 1.3 Commit the failing test on the dedicated cleanup branch
     - Create (or switch to) a dedicated cleanup branch before committing - execution discipline requires all cleanup work on an isolated branch (design "Execution plan" + E3)
     - Stage only `src/__tests__/repo-bloat-cleanup.bug.test.ts` and the newly created `findings/verification/pre-cleanup-snapshot.md` stub
     - Commit message: `test(repo-bloat-cleanup): add failing bug-condition size test`
@@ -66,18 +66,18 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Investigation tooling → Phase 1 - Size audit commands"; "Classification rubric (Phase 1)"_
   - _Requirements: 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10, E1, E2_
 
-  - [~] 2.1 Capture total repository size
+  - [ ] 2.1 Capture total repository size
     - Run `du -sh .` at the repository root (human-readable)
     - Run `du -sb .` at the repository root (byte-exact - feeds P4 comparisons)
     - Record both outputs verbatim in `size-findings.md` under "Total size"
     - _Requirements: 2.4, 1.1_
 
-  - [~] 2.2 Capture top-level directory breakdown
+  - [ ] 2.2 Capture top-level directory breakdown
     - Run `du -sh ./*/ .[!.]*/ 2>/dev/null | sort -h`
     - Record the full sorted listing in `size-findings.md` under "Top-level breakdown"
     - _Requirements: 2.5_
 
-  - [~] 2.3 Measure `.git` separately
+  - [ ] 2.3 Measure `.git` separately
     - Run `du -sh .git`
     - Run `git count-objects -vH`
     - Run `git rev-list --objects --all | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' | sort -k3 -n | tail -n 50` to enumerate the top 50 pack blobs (names + sizes only; this is what a future Batch E would target)
@@ -85,17 +85,17 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Investigation tooling → Phase 1"; "Non-goals" (history rewrite is opt-in)_
     - _Requirements: 2.7, 2.28_
 
-  - [~] 2.4 Measure `node_modules` separately
+  - [ ] 2.4 Measure `node_modules` separately
     - Run `du -sh node_modules 2>/dev/null`
     - Record in `size-findings.md` under "node_modules size"
     - _Requirements: 2.8_
 
-  - [~] 2.5 Enumerate working-tree files larger than 10 MB
+  - [ ] 2.5 Enumerate working-tree files larger than 10 MB
     - Run `find . -type f -not -path './.git/*' -not -path './node_modules/*' -size +10M -exec ls -lh {} +`
     - Record each file with its human-readable size in `size-findings.md` under "Files > 10M (working tree)"
     - _Requirements: 2.6_
 
-  - [~] 2.6 Break down known high-volume directories
+  - [ ] 2.6 Break down known high-volume directories
     - Run `find test-recordings -type f \( -name '*.webm' -o -name '*.mp4' -o -name '*.jpg' -o -name '*.png' \) -exec du -sh {} + | sort -h | tail -n 50`
     - Run `find coverage -type f -exec du -sh {} + | sort -h | tail -n 20`
     - Run `find dist -type f 2>/dev/null -exec du -sh {} + | sort -h | tail -n 20`
@@ -103,14 +103,14 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Hypothesized Root Cause" items 1, 2, 3_
     - _Requirements: 2.5, 2.6_
 
-  - [~] 2.7 Classify every reported item using the Phase 1 rubric
+  - [ ] 2.7 Classify every reported item using the Phase 1 rubric
     - For every path reported by sub-tasks 2.1-2.6, walk the nine-category decision tree from design.md "Classification rubric (Phase 1)" top-down (first match wins)
     - Apply the four tie-breakers verbatim: secrets always win, `.kiro/specs/` always wins over dead-code heuristics, `public/` assets only classify as "uploaded media" after a failed reference check, duplicate requires hash match AND non-canonical location
     - Any path that reaches fallthrough is labeled "needs confirmation" (E4)
     - _Design: "Classification rubric (Phase 1)"_
     - _Requirements: 2.9, E1, E4_
 
-  - [~] 2.8 Emit the Phase 1 findings artifacts
+  - [ ] 2.8 Emit the Phase 1 findings artifacts
     - Write `findings/size-findings.md` with the tables from 2.1-2.7, columns: `path | size | classification | evidence`
     - Write `findings/size-findings.json` as an array of `{ path, sizeBytes, sizeHuman, classification, evidence, phase: 1 }` records
     - Do NOT include file contents, only paths and sizes (E5, 3.6)
@@ -128,12 +128,12 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Investigation tooling → Phase 2"; "Dead-code confidence scoring (Phase 2)"_
   - _Requirements: 2.11, 2.12, 2.13, 2.14, 2.15, E1, E2, E4_
 
-  - [~] 3.1 Enumerate candidate files under source roots
+  - [ ] 3.1 Enumerate candidate files under source roots
     - Produce the candidate set: every tracked file under `src/`, `server/`, `server-render/`, `powers/`
     - Record the candidate count in `dead-code-findings.md`
     - _Requirements: 2.11_
 
-  - [~] 3.2 Run reference checks across SCAN_ROOTS for each candidate
+  - [ ] 3.2 Run reference checks across SCAN_ROOTS for each candidate
     - For each candidate, run `rg --fixed-strings "<basename_without_ext>" src server server-render powers package.json vite.config*.* playwright.config.ts index.html tsconfig*.json`
     - For each candidate, run `rg --fixed-strings "<path_without_src_prefix>" src server server-render powers`
     - A candidate with zero hits from both ripgrep searches is unreferenced and proceeds to confidence scoring
@@ -141,13 +141,13 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Investigation tooling → Phase 2"_
     - _Requirements: 2.11, E1_
 
-  - [~] 3.3 Apply backup, experimental, and legacy heuristics
+  - [ ] 3.3 Apply backup, experimental, and legacy heuristics
     - Run `find src server server-render powers -type f \( -name '*.bak' -o -name '*.old' -o -name '*.orig' -o -name '*_old*' -o -name '*_backup*' \)`
     - Run `find . -type d \( -name 'experimental' -o -name '_archive' -o -name 'legacy' -o -name 'old' \) -not -path './node_modules/*'`
     - Merge the resulting paths into the candidate set; these contribute to HIGH confidence per the rubric when also unreferenced
     - _Requirements: 2.12_
 
-  - [~] 3.4 Detect duplicate utilities and components
+  - [ ] 3.4 Detect duplicate utilities and components
     - Enumerate export names across source files with `rg '^export (default |const |function |class )' -N`
     - Group candidates with matching export names
     - For each group, compute md5 hashes (`md5 -q <file>` on macOS, `md5sum` on Linux) and group by hash
@@ -156,7 +156,7 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Investigation tooling → Phase 2"; tie-breaker on accidental duplicate_
     - _Requirements: 2.13_
 
-  - [~] 3.5 Assign confidence and emit findings
+  - [ ] 3.5 Assign confidence and emit findings
     - Apply the HIGH / MEDIUM / LOW rubric from design.md "Dead-code confidence scoring (Phase 2)" verbatim
     - Any candidate not reaching HIGH is labeled "needs confirmation" (E4, 2.14)
     - Write `findings/dead-code-findings.md` with columns: `path | reason flagged | confidence level | references checked`
@@ -174,21 +174,21 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Investigation tooling → Phase 3"; "Refactor heuristics (Phase 3)"_
   - _Requirements: 2.16, 2.17, 2.18, 2.19, 2.20, E1, E2_
 
-  - [~] 4.1 Identify oversized files under source roots
+  - [ ] 4.1 Identify oversized files under source roots
     - Run `find src server server-render powers -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.mjs' -o -name '*.js' \) -exec wc -l {} + | sort -n | tail -n 30`
     - Filter to lines where count > 500
     - Record columns: `path | lineCount | proposedSplit` (the `proposedSplit` is a brief human-authored suggestion, e.g. "split by export boundary into N files"; the split is not executed)
     - _Design: "Refactor heuristics (Phase 3) → Oversized files"_
     - _Requirements: 2.16, 2.20_
 
-  - [~] 4.2 Detect repeated code candidates
+  - [ ] 4.2 Detect repeated code candidates
     - Check whether `jscpd` is already present in `node_modules`; if yes, run `jscpd --min-lines 30 --min-tokens 80 --reporters console src server server-render powers`
     - If `jscpd` is not installed, do NOT install it - instead, manually review the top-30 `wc -l` output from 4.1 for obviously duplicated helpers
     - Record each repeat as `{ paths[], summary }` in `refactor-findings.md`
     - _Design: "Refactor heuristics (Phase 3) → Repeated code"_
     - _Requirements: 2.17, 2.20_
 
-  - [~] 4.3 Cross-reference every `package.json` dependency with its usage
+  - [ ] 4.3 Cross-reference every `package.json` dependency with its usage
     - For each entry in `dependencies` and `devDependencies`, run `rg "from ['\"]${dep}" src server server-render powers` and `rg "require\(['\"]${dep}" src server server-render powers`
     - Record columns: `dep | used (true/false) | alternative | notes`
     - Flag entries with `used = false` as "unused" candidates
@@ -197,7 +197,7 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Refactor heuristics (Phase 3) → Heavy / redundant deps"_
     - _Requirements: 2.18, 2.20_
 
-  - [~] 4.4 Hash-group `public/` for duplicates and extension-scan for uncompressed assets
+  - [ ] 4.4 Hash-group `public/` for duplicates and extension-scan for uncompressed assets
     - Run `find public -type f -exec md5 -q {} \; -print | paste - -` (macOS) or `find public -type f -exec md5sum {} +` (Linux); sort and group by hash
     - Run `find public -type f \( -name '*.wav' -o -name '*.png' -o -name '*.bmp' -o -name '*.tiff' \) -exec du -sh {} +` to surface uncompressed candidates
     - Record columns: `path | sizeHuman | duplicateOf | compressionCandidate | referenced`
@@ -215,66 +215,66 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Preservation set construction"_
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.8, P5 (Correctness Properties), E1_
 
-  - [~] 5.1 Parse `package.json` entry points and script paths
+  - [ ] 5.1 Parse `package.json` entry points and script paths
     - Extract `main`, `module`, `type` if present
     - Scan every command string in `scripts` for file path arguments (`.ts`, `.tsx`, `.mjs`, `.js`)
     - Add all resolved entry points (e.g. `run-pipeline.mjs`, `server-render.mjs`, `server/index.ts` per current `package.json`) to the preservation set
     - _Design: "Preservation set construction" step 1_
     - _Requirements: 3.5_
 
-  - [~] 5.2 Parse `index.html` for asset/script references
+  - [ ] 5.2 Parse `index.html` for asset/script references
     - Extract every `<script src>`, `<link href>`, `<img src>`, `<source src>`
     - Add each resolved path to the preservation set
     - _Design: "Preservation set construction" step 2_
     - _Requirements: 3.4, 3.5_
 
-  - [~] 5.3 Transitive static-import trace from entry points
+  - [ ] 5.3 Transitive static-import trace from entry points
     - Starting from each entry in 5.1 and 5.2, walk imports using `rg "from ['\"]\./|from ['\"]\\.\\./|import\\(['\"]"`
     - Resolve every relative path; add resolved files to the preservation set
     - Continue transitively until fixed point (no new files added)
     - _Design: "Preservation set construction" step 3_
     - _Requirements: 3.5_
 
-  - [~] 5.4 Record dynamic imports and runtime string literals
+  - [ ] 5.4 Record dynamic imports and runtime string literals
     - Search for `import(<expr>)`, `require(<expr>)`, `new Worker(<expr>)`, `fetch('/<path>')`
     - For literal string paths, resolve and add to the preservation set
     - For non-literal expressions (e.g. `import(variable)`), label every candidate file in the matched directory as "needs confirmation" rather than deletable (E4)
     - _Design: "Preservation set construction" step 4_
     - _Requirements: 3.5, E4_
 
-  - [~] 5.5 Unconditionally add project config files
+  - [ ] 5.5 Unconditionally add project config files
     - Add `package.json`, `package-lock.json`, every `tsconfig*.json`, every `vite.config*.{ts,js,mts,mjs}`, `playwright.config.ts`, `.gitignore`, `.env.example`, `index.html`, `README.md`, and `tailwind.config.*` if present
     - These are added regardless of whether anything imports them
     - _Design: "Preservation set construction" step 5_
     - _Requirements: 3.5_
 
-  - [~] 5.6 Unconditionally add secret-shaped files
+  - [ ] 5.6 Unconditionally add secret-shaped files
     - Add every file whose basename matches `.env*`, `*.pem`, `id_rsa*`, `*credentials*`, `*secret*`, `*.key`
     - Add them regardless of reference status - secrets are preserved by shape alone (3.6)
     - Do NOT echo file contents into findings or logs; store only `{ path, sha256, sizeBytes }` (E5)
     - _Design: "Preservation set construction" step 6; "Security / Secret handling"_
     - _Requirements: 3.6, E5_
 
-  - [~] 5.7 Ripgrep referenced `public/` assets into the set
+  - [ ] 5.7 Ripgrep referenced `public/` assets into the set
     - For every file under `public/`, ripgrep its basename against source + HTML + config
     - Any hit adds the asset to the preservation set
     - Misses are deletion candidates but NEVER auto-deletable - Batch D handles them with per-item approval
     - _Design: "Preservation set construction" step 7_
     - _Requirements: 3.4_
 
-  - [~] 5.8 Unconditionally add every `.kiro/specs/*` folder
+  - [ ] 5.8 Unconditionally add every `.kiro/specs/*` folder
     - Add every directory directly under `.kiro/specs/` to the preservation set
     - No spec folder may be removed without explicit user confirmation (3.8)
     - _Design: "Preservation set construction" step 8_
     - _Requirements: 3.8_
 
-  - [~] 5.9 Scan `__tests__` directories for referenced fixtures
+  - [ ] 5.9 Scan `__tests__` directories for referenced fixtures
     - Ripgrep every `__tests__` folder for file paths mentioned in source (string literals, imports, `readFile`/`readFileSync` arguments)
     - Add every referenced fixture to the preservation set
     - _Design: "Preservation set construction" step 9_
     - _Requirements: 3.5_
 
-  - [~] 5.10 Emit `preservation-set.json`
+  - [ ] 5.10 Emit `preservation-set.json`
     - Serialize the union of 5.1-5.9 to `findings/preservation-set.json` as `{ path, sha256, sizeBytes }[]`
     - Sort by path for deterministic review
     - This file is the immutable baseline for P5 - each batch will re-hash these paths and diff against it
@@ -290,7 +290,7 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Cleanup plan format (Phase 4)"; "Risk tiers"_
   - _Requirements: 2.21, 2.22, 2.23, 2.24, 2.25, E1, E2, E3_
 
-  - [~] 6.1 Write the risk-tiered cleanup plan (markdown + JSON sidecar)
+  - [ ] 6.1 Write the risk-tiered cleanup plan (markdown + JSON sidecar)
     - Write `findings/cleanup-plan.md` with the unified table: `path | size | classification | risk | bucket | projected_savings | evidence`
     - Write `findings/cleanup-plan.json` with the same rows as typed objects (machine-checkable for P1 and P5)
     - Every row must cite a finding in `size-findings.md`, `dead-code-findings.md`, or `refactor-findings.md` via `evidenceRef`
@@ -298,7 +298,7 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Cleanup plan format (Phase 4)"_
     - _Requirements: 2.21, 2.22, 2.24, E1, P5_
 
-  - [~] 6.2 Apply the risk tier rubric top-down
+  - [ ] 6.2 Apply the risk tier rubric top-down
     - Evaluate each row against the SAFE / MEDIUM / HIGH rubric from design.md "Risk tiers" - first match wins
     - SAFE: classification is `generated build output`, `cache or temporary file`, or `log`, AND is `.gitignore`d (actual or proposed), AND has zero ripgrep hits across SCAN_ROOTS
     - MEDIUM: HIGH-confidence Phase 2 dead code; or `public/` duplicate/compressible with zero references; or large non-preservation file flagged as accidental duplicate or uploaded media
@@ -307,14 +307,14 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Risk tiers"_
     - _Requirements: 2.21, 2.22, 2.27_
 
-  - [~] 6.3 Compute projected savings per item and totals
+  - [ ] 6.3 Compute projected savings per item and totals
     - Populate `projected_savings` (bytes) for every row using Phase 1 sizes
     - Compute total savings per bucket (`delete_now`, `needs_approval`) and per risk tier (SAFE, MEDIUM, HIGH)
     - Compute a "SAFE-only projected size" = `totalDiskUsageBytes(R) - sum(savings | risk=SAFE)` - this is the input to the executive summary's "fastest low-risk path" section
     - _Design: "Cleanup plan format (Phase 4)"_
     - _Requirements: 2.24_
 
-  - [~] 6.4 Write the `.gitignore` proposal
+  - [ ] 6.4 Write the `.gitignore` proposal
     - Write `findings/gitignore-proposal.md` as a proposed diff against `.gitignore`, preserving the existing entries verbatim
     - Grouped additions (per design.md "Cleanup plan format (Phase 4)"):
       - Generated build/test output: `coverage/`, `test-recordings/`, `playwright-report/`, `test-results/`, `.vite/`
@@ -325,7 +325,7 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Cleanup plan format (Phase 4)" → gitignore-proposal.md_
     - _Requirements: 2.23_
 
-  - [~] 6.5 Write the executive summary
+  - [ ] 6.5 Write the executive summary
     - Write `findings/executive-summary.md` with the structure from design.md:
       1. **Headline**: current `du -sb .` bytes, target (10 GiB), projected post-cleanup size from 6.3
       2. **Primary contributors**: top 3-5 bloat categories by bytes (Phase 1 breakdown)
@@ -346,7 +346,7 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Observability & rollback → Manifests and snapshots"; "Testing Strategy → Preservation Checking"_
   - _Requirements: 3.1, 3.2, 3.5, 3.8, P2, P3, P5, E1_
 
-  - [~] 7.1 Write the pre-cleanup snapshot
+  - [ ] 7.1 Write the pre-cleanup snapshot
     - Write `findings/verification/pre-cleanup-snapshot.md` containing (in this order):
       - Output of `git status` (paths only, no diff bodies - E5)
       - Output of `du -sb .`
@@ -355,7 +355,7 @@ Optional tasks are marked with a trailing `*`.
     - Append to the "Bug Condition Counterexample" section from Task 1.2 rather than overwriting it
     - _Requirements: 2.4, 2.7, E1_
 
-  - [~] 7.2 Capture baseline test failure counts
+  - [ ] 7.2 Capture baseline test failure counts
     - Run `npm run test:unit` once against the UNFIXED repo
     - Record `{ "unit": { "passed": <n>, "failed": <m> } }` to `findings/verification/baseline-tests.json`
     - The Task 1 exploration test is expected to contribute exactly one failure to this baseline - document it explicitly in the JSON as `expectedFailures: ["repo-bloat-cleanup.bug.test.ts"]`
@@ -364,7 +364,7 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Property-Based Testing Plan → P3"_
     - _Requirements: 3.2, P3_
 
-  - [~] 7.3 Verify `preservation-set.json` hashes are stable
+  - [ ] 7.3 Verify `preservation-set.json` hashes are stable
     - Re-compute sha256 for every path in `findings/preservation-set.json`
     - Diff the newly computed hashes against the stored hashes - they must be identical (no working-tree drift)
     - Record the diff (expected: empty) in `findings/verification/preservation-baseline.md`
@@ -381,36 +381,36 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Execution plan → Batch A"_
   - _Requirements: 2.10, 2.22, 2.26, E3, P1, P2, P3, P4, P5_
 
-  - [~] 8.1 Remove `coverage/`
+  - [ ] 8.1 Remove `coverage/`
     - Verify `coverage/` appears in `cleanup-plan.json` with `risk = safe`, `bucket = delete_now`
     - `git rm -r coverage/` (or `rm -rf coverage/ && git add -A` if untracked)
     - Commit: `chore(cleanup): remove coverage/ (regenerable by npm run test:unit:coverage)`
     - _Requirements: 2.10, 2.26_
 
-  - [~] 8.2 Remove `test-recordings/`
+  - [ ] 8.2 Remove `test-recordings/`
     - Verify `test-recordings/` appears in `cleanup-plan.json` with `risk = safe`, `bucket = delete_now`
     - `git rm -r test-recordings/`
     - Commit: `chore(cleanup): remove test-recordings/ (regenerable by npm test)`
     - _Requirements: 2.10, 2.26_
 
-  - [~] 8.3 Remove remaining regenerable directories if present
+  - [ ] 8.3 Remove remaining regenerable directories if present
     - For each of `dist/`, `playwright-report/`, `test-results/`, `.vite/`: if present in the working tree AND listed in `cleanup-plan.json` with `risk = safe`, `bucket = delete_now`, run `git rm -r <dir>/`
     - Use a separate commit per directory: `chore(cleanup): remove <dir>/ (regenerable)`
     - If a directory is absent, skip silently and record "absent at cleanup time" in the batch manifest
     - _Requirements: 2.10, 2.26_
 
-  - [~] 8.4 Remove root-level regenerable files if present
+  - [ ] 8.4 Remove root-level regenerable files if present
     - For each of `*.log` at repo root, `.eslintcache`, `*.tsbuildinfo`: if present AND listed in `cleanup-plan.json` with `risk = safe`, `bucket = delete_now`, `git rm` each
     - Single commit: `chore(cleanup): remove root-level caches and logs`
     - _Requirements: 2.10, 2.26_
 
-  - [~] 8.5 Write `batch-A-manifest.md`
+  - [ ] 8.5 Write `batch-A-manifest.md`
     - Write `findings/verification/batch-A-manifest.md` with one row per deleted path: `{ path, sizeBytes (from Phase 1), classification, risk, evidenceRef, commitSha }`
     - Record the total bytes freed by Batch A (sum of `sizeBytes`)
     - _Design: "Observability & rollback → Manifests and snapshots"_
     - _Requirements: 2.2, 2.26, E1_
 
-  - [~] 8.6 Run post-batch verification gate (P2 + P3 + P5 + P4)
+  - [ ] 8.6 Run post-batch verification gate (P2 + P3 + P5 + P4)
     - On a staging checkout of the cleanup branch after Batch A:
       - **P2**: `npm install --no-audit --no-fund` then `npm run build` - assert exit 0
       - **P3**: `npm run test:unit` - assert `post.failed <= baseline.failed` per `baseline-tests.json`
@@ -429,19 +429,19 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Execution plan → Batch B"_
   - _Requirements: 2.23, 2.26, E3, P2, P3, P4, P5_
 
-  - [~] 9.1 Append proposed entries to `.gitignore`
+  - [ ] 9.1 Append proposed entries to `.gitignore`
     - Open `.gitignore` and append the grouped additions from `findings/gitignore-proposal.md` verbatim, with the group headers as comments
     - Do not reorder, re-case, or remove any existing line
     - Skip any entry already present in `.gitignore` (currently `node_modules`, `dist`, `playwright-report`, `test-results`, `.env`, `.env.local`, `.env*.local`, `*.log`)
     - Commit: `chore(gitignore): ignore regenerable build/test artifacts`
     - _Requirements: 2.23_
 
-  - [~] 9.2 Write `batch-B-manifest.md`
+  - [ ] 9.2 Write `batch-B-manifest.md`
     - Write `findings/verification/batch-B-manifest.md` describing the `.gitignore` diff (single file, single commit)
     - Include the list of added patterns
     - _Requirements: 2.2, E1_
 
-  - [~] 9.3 Run post-batch verification gate (P2 + P3 + P5 + P4)
+  - [ ] 9.3 Run post-batch verification gate (P2 + P3 + P5 + P4)
     - Same four checks as 8.6, run on a staging checkout after Batch B
     - P4 is expected to be neutral (ignore-only change does not free bytes in the working tree), but P2/P3/P5 must still pass
     - Record results in `findings/verification/batch-B-verification.md`
@@ -457,7 +457,7 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Execution plan → Batch C"_
   - _Requirements: 2.26, 2.27, E3, E4, P1, P2, P3, P4, P5_
 
-  - [~] 10.1 Present HIGH-confidence candidates and capture approvals
+  - [ ] 10.1 Present HIGH-confidence candidates and capture approvals
     - Present the HIGH-confidence rows from `dead-code-findings.json` to the user, grouped by sub-batch (≤10 files each)
     - For each row, show `path | reason | referencesChecked | sizeBytes | evidenceRef`
     - Capture explicit per-item approval (yes/no) - record approvals in `findings/verification/batch-C-approvals.md`
@@ -465,7 +465,7 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Execution plan → Batch C"; E4_
     - _Requirements: 2.27, E4_
 
-  - [~] 10.2 Re-validate P1 immediately before each sub-batch deletes
+  - [ ] 10.2 Re-validate P1 immediately before each sub-batch deletes
     - For each approved item, re-run the ripgrep basename + path checks from Task 3.2 across SCAN_ROOTS
     - If ANY ripgrep hit is now present (e.g. a hit introduced since Phase 2 ran), the row is demoted and removed from the deletion set
     - This is the P1 property from design.md "Property-Based Testing Plan → P1" applied per sub-batch
@@ -473,14 +473,14 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Property-Based Testing Plan → P1"_
     - _Requirements: P1, 2.27, E4_
 
-  - [~] 10.3 Delete approved items in sub-batches of ≤10 files per commit
+  - [ ] 10.3 Delete approved items in sub-batches of ≤10 files per commit
     - `git rm <path>` for each approved + P1-validated path
     - One commit per sub-batch: `chore(cleanup): remove dead code - <short list>`
     - After each sub-batch commit, proceed to 10.4 before starting the next sub-batch
     - _Design: "Execution plan → Batch C"_
     - _Requirements: 2.26, E3_
 
-  - [~] 10.4 Per-sub-batch manifest + verification gate (P2 + P3 + P5 + P4)
+  - [ ] 10.4 Per-sub-batch manifest + verification gate (P2 + P3 + P5 + P4)
     - Append to `findings/verification/batch-C-manifest.md` a row per deleted path: `{ path, sizeBytes, classification, confidence, evidenceRef, commitSha }`
     - Run the four-property gate (P2/P3/P5/P4) on a staging checkout after each sub-batch commit
     - Record results in `findings/verification/batch-C-verification.md` (appending per sub-batch)
@@ -496,7 +496,7 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Execution plan → Batch D"_
   - _Requirements: 2.26, 2.27, 3.4, E3, E4, P1, P2, P3, P4, P5_
 
-  - [~] 11.1 Present duplicate/compression candidates and capture approvals
+  - [ ] 11.1 Present duplicate/compression candidates and capture approvals
     - Present the candidate rows from `refactor-findings.md` (hash-duplicate groups and uncompressed extensions) to the user, grouped by sub-batch (≤10 files each)
     - For each row, show `path | sizeHuman | duplicateOf | compressionCandidate | referenced (must be false)`
     - Capture explicit per-item approval (yes/no) in `findings/verification/batch-D-approvals.md`
@@ -504,19 +504,19 @@ Optional tasks are marked with a trailing `*`.
     - Any row without explicit yes is SKIPPED
     - _Requirements: 2.27, 3.4, E4_
 
-  - [~] 11.2 Re-validate zero references immediately before each sub-batch deletes
+  - [ ] 11.2 Re-validate zero references immediately before each sub-batch deletes
     - For each approved item, re-run ripgrep of its basename across source + HTML + config
     - Any hit demotes the row and removes it from the deletion set
     - Record rejections in `batch-D-verification.md`
     - _Design: "Property-Based Testing Plan → P1"_
     - _Requirements: P1, 3.4, E4_
 
-  - [~] 11.3 Delete approved items per sub-batch
+  - [ ] 11.3 Delete approved items per sub-batch
     - `git rm <path>` for each approved + P1-validated path
     - One commit per sub-batch: `chore(assets): remove duplicate/uncompressed public assets - <short list>`
     - _Requirements: 2.26, E3_
 
-  - [~] 11.4 Per-sub-batch manifest + verification gate (P2 + P3 + P5 + P4)
+  - [ ] 11.4 Per-sub-batch manifest + verification gate (P2 + P3 + P5 + P4)
     - Append to `findings/verification/batch-D-manifest.md` one row per deleted path: `{ path, sizeBytes, duplicateOf, evidenceRef, commitSha }`
     - Run the four-property gate (P2/P3/P5/P4) on a staging checkout
     - Record results in `findings/verification/batch-D-verification.md`
@@ -530,7 +530,7 @@ Optional tasks are marked with a trailing `*`.
   - _Design: "Correctness Properties → Property 1: Bug Condition"; "Testing Strategy → Fix Checking"_
   - _Requirements: 2.1, P1, P2, P3, P4, P5_
 
-  - [~] 12.1 Re-run the exploration test from Task 1
+  - [ ] 12.1 Re-run the exploration test from Task 1
     - **Property 1: Expected Behavior** - Repository Exceeds 10 GiB Size Budget (now resolved)
     - **IMPORTANT**: Re-run the SAME test from Task 1 (`src/__tests__/repo-bloat-cleanup.bug.test.ts`) - do NOT write a new test
     - The test from Task 1 encodes the expected behavior; its passing confirms the Bug Condition no longer holds
@@ -539,7 +539,7 @@ Optional tasks are marked with a trailing `*`.
     - _Design: "Property-Based Testing Plan → Phase 1 bug-condition exploration test"_
     - _Requirements: 2.1, P4_
 
-  - [~] 12.2 Update the executive summary with final numbers
+  - [ ] 12.2 Update the executive summary with final numbers
     - Update `findings/executive-summary.md` with:
       - Final pre/post `du -sb .` bytes
       - Savings per batch (A, B, C, D) from each `batch-<X>-manifest.md`
@@ -547,7 +547,7 @@ Optional tasks are marked with a trailing `*`.
       - If not met, the recommendation on Batch E (required vs. optional)
     - _Requirements: 2.24, 2.25_
 
-  - [~] 12.3 Run the full P1+P2+P3+P4+P5 suite one final time
+  - [ ] 12.3 Run the full P1+P2+P3+P4+P5 suite one final time
     - **Property 2: Preservation** - Full Preservation Suite on Cleaned Tree
     - P1: re-run ripgrep over every deleted path from every batch manifest, assert zero hits - confirms no surviving reference to any deleted file
     - P2: `npm install --no-audit --no-fund && npm run build` on staging, assert exit 0

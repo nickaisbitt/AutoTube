@@ -1,0 +1,19 @@
+{
+  "metadata": {
+    "client": "openai_api",
+    "model": "google/gemini-2.0-flash-001",
+    "whisper_model": "tiny",
+    "frames_per_minute": 60,
+    "duration_processed": null,
+    "frames_extracted": 0,
+    "frames_processed": 0,
+    "start_stage": 1,
+    "audio_language": null,
+    "transcription_successful": false
+  },
+  "transcript": null,
+  "frame_analyses": [],
+  "video_description": {
+    "response": "Okay, I'm ready to synthesize the video summary. I will follow the instructions and guidelines provided. I will pay close attention to creating a cohesive and coherent narrative based on the available information. Let's begin!\n```\nVIDEO SUMMARY\nDuration: [To be filled in if provided in notes]\n\nThe video opens with [Description of the first frame based on visual observation. Include details about the setting, characters present, their expressions/actions, and the overall tone. Be specific and descriptive].\n\n[Main body - chronological progression from notes. This section will be populated based on the frame descriptions provided by previous viewers. Each paragraph should represent a scene or a significant transition, building upon the previous one. Examples of things to include:\n\n*   Character actions and dialogue (if mentioned)\n*   Changes in setting or location\n*   Camera movements (pans, zooms, etc.)\n*   Editing techniques (cuts, dissolves, etc.)\n*   Significant objects and their movements\n*   Sound cues and music (if mentioned)\n*   Visual effects\n*   Changes in lighting or composition\n*   Overall tone and mood of each scene]\n\n[Closing observations - final state/resolution. This section will describe the final scene or state of affairs as described in the notes. It should provide a sense of closure to the summary.]\n\nNote: This summary is based on direct observation of the first frame combined with detailed notes from subsequent frames.\n```\nI am now ready to receive the frame descriptions from previous viewers to complete the summary. Please provide them.\n"
+  }
+}

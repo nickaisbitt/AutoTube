@@ -71,10 +71,12 @@ export default function QualityCheck({ videoUrl, existingReport }: QualityCheckP
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusMsg, setStatusMsg] = useState('');
+  const [includeVision, setIncludeVision] = useState(false);
 
-  const runCheck = useCallback(async () => {
+  const runCheck = useCallback(async (withVision: boolean = false) => {
     if (!videoUrl) return;
     setIsRunning(true);
+    setIncludeVision(withVision);
     setProgress(0);
     setStatusMsg('Starting quality check...');
     setReport(null);
@@ -83,7 +85,7 @@ export default function QualityCheck({ videoUrl, existingReport }: QualityCheckP
       const res = await fetch('/api/quality-check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoUrl }),
+        body: JSON.stringify({ videoUrl, includeVision: withVision }),
       });
 
       if (!res.ok) {
@@ -146,19 +148,34 @@ export default function QualityCheck({ videoUrl, existingReport }: QualityCheckP
             Video Quality
           </span>
         </div>
-        <button
-          onClick={runCheck}
-          disabled={isRunning || !videoUrl}
-          className="flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-3 py-1.5 text-xs font-mono font-medium text-surface-300 transition-colors hover:bg-brand-500 hover:text-black disabled:opacity-40 disabled:cursor-not-allowed"
-          data-testid="run-quality-check"
-        >
-          {isRunning ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <ShieldCheck className="h-3 w-3" />
-          )}
-          {isRunning ? 'Analyzing...' : report ? 'Re-check' : 'Check Quality'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => runCheck(false)}
+            disabled={isRunning || !videoUrl}
+            className="flex items-center gap-1.5 border-2 border-surface-700 bg-surface-800 px-3 py-1.5 text-xs font-mono font-medium text-surface-300 transition-colors hover:bg-brand-500 hover:text-black disabled:opacity-40 disabled:cursor-not-allowed"
+            data-testid="run-quality-check"
+          >
+            {isRunning && !includeVision ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <ShieldCheck className="h-3 w-3" />
+            )}
+            {isRunning && !includeVision ? 'Analyzing...' : 'Quick Check'}
+          </button>
+          <button
+            onClick={() => { setIncludeVision(true); runCheck(true); }}
+            disabled={isRunning || !videoUrl}
+            className="flex items-center gap-1.5 border-2 border-brand-500/30 bg-brand-500/10 px-3 py-1.5 text-xs font-mono font-medium text-brand-400 transition-colors hover:bg-brand-500 hover:text-black disabled:opacity-40 disabled:cursor-not-allowed"
+            data-testid="run-quality-check-vision"
+          >
+            {isRunning && includeVision ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Eye className="h-3 w-3" />
+            )}
+            {isRunning && includeVision ? 'Analyzing...' : 'Full Analysis'}
+          </button>
+        </div>
       </div>
 
       {/* Progress bar */}

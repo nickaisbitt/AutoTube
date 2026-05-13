@@ -64,10 +64,11 @@ ${toneRules}
 
 DEPTH PER SEGMENT (CRITICAL):
 Each segment narration MUST be 5-8 sentences long. No 2-3 sentence segments. Every segment must contain:
-- At least one concrete detail (a name, number, date, or specific event)
+- At least TWO concrete details with numbers (dollar amounts, percentages, dates, quantities, or named entities)
 - At least one sentence of analysis or opinion (why this matters)
 - At least one forward-looking or connecting statement
 If a segment feels thin, add context, consequences, or competitive dynamics — never pad with filler.
+NEVER write a segment without at least 2 specific numbers or quantifiable claims. If you can't find real numbers, use estimates with attribution ("roughly", "approximately", "estimates suggest").
 
 NO REPETITION RULE:
 NEVER repeat the same phrase, sentence, or key descriptor across segments. Each segment must introduce NEW information, a NEW angle, or a NEW consequence. If you used "worth $X billion" in segment 1, do NOT use that same figure again. If you described something as "unprecedented" once, find a different word next time. Scan your full output before finalizing — if any phrase appears verbatim in two segments, rewrite one.
@@ -93,6 +94,12 @@ Address the viewer directly using "you", "your", or "you're" at least 3 times ac
 
 CRITICAL STRUCTURE RULE:
 Do NOT survey the topic broadly with many equal examples. Pick ONE central story, case, or example as your anchor. Build the ENTIRE video around proving that one thing. Other examples are brief supporting evidence only (1-2 sentences max each).
+
+MANDATORY THESIS RULE (CRITICAL):
+Every script MUST have a single, clear THESIS — a central claim that the entire video argues FOR or AGAINST. The thesis must be debatable, not a bland summary. Examples of good theses: "SpaceX's 2026 Mars timeline is unrealistic because...", "This company is secretly losing the AI race", "The cybersecurity industry is selling you false comfort." The thesis should be implied or stated in the intro and proven by the outro. NEVER produce a script that neutrally summarizes a topic without taking a position.
+
+CONTRARIAN ANGLE RULE:
+The intro must present a TENSION or COUNTERINTUITIVE CLAIM — something the viewer didn't expect or already believe the opposite of. Don't open with what everyone already knows. Open with what they DON'T know, or what they think is true but ISN'T. Examples: "Everyone thinks X is safe. It's not." "The experts said Y would never happen. It just did." "This looks like good news. It's actually terrifying."
 
 STAKES ESCALATION RULE:
 Each segment MUST feel heavier and more urgent than the last. Escalate the stakes like a thriller — start with curiosity, build to concern, arrive at alarm. Use explicit bridge lines between segments to signal escalation:
@@ -145,6 +152,7 @@ ENDING AND CTA RULES (CRITICAL):
 - The next-video teaser must feel like an IRRESISTIBLE CONTINUATION, not a generic "stay tuned." Connect it to an unanswered thread from this video — a question raised but not resolved, a bigger player hinted at, or a consequence that deserves its own deep dive. The viewer should feel they're missing out if they don't watch the next one.
 - The ending must feel EMPOWERING, not only alarming — the viewer should leave feeling informed AND capable. Balance the fear with a clear survival path. They should feel: "This is serious, but I know what to do."
 - NEVER end on pure fear without action. Every alarming conclusion must be followed by a concrete survival path — specific, actionable, achievable steps that make the viewer feel in control. Fear without agency causes click-away, not click-through.
+- BANNED ENDING PHRASES: "the question is not if, but when", "the possibilities are endless", "only time will tell", "the future is bright", "this is just the beginning", "stay tuned for more", "thanks for watching", "like and subscribe". These are stock AI closers — they sound robotic and lazy. End with a SPECIFIC, SURPRISING, or ACTIONABLE line instead.
 
 AUDIENCE ADAPTATION (CRITICAL):
 - Use SIMPLE language throughout — no jargon, no acronyms without immediate plain-English explanation.

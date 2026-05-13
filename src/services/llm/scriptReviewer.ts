@@ -205,8 +205,25 @@ export async function reviewAndImproveScript(
      • But NEVER sacrifice accuracy for drama — the facts must remain correct even if the framing is intense
    - Regardless of mode: NO fabricated sources, NO invented statistics, NO unverifiable claims presented as fact.
 
+28. THESIS CHECK (full script):
+   - The script MUST have a single, clear THESIS — a central claim that the entire video argues FOR or AGAINST.
+   - The thesis must be debatable, not a bland summary. It should be implied or stated in the intro and proven by the outro.
+   - If the script neutrally summarizes a topic without taking a position, REWRITE the intro to present a clear thesis and the outro to conclude the argument.
+   - Good thesis examples: "SpaceX's 2026 Mars timeline is unrealistic because...", "This company is secretly losing the AI race", "The cybersecurity industry is selling you false comfort."
+
+29. SPECIFICITY CHECK (every segment):
+   - Each segment MUST contain at least TWO concrete details with numbers — dollar amounts, percentages, dates, quantities, or named entities.
+   - If a segment has fewer than 2 specific numbers or quantifiable claims, ADD them. Use real data from the topic context or estimates with attribution ("roughly", "approximately", "estimates suggest").
+   - NEVER write a segment that is purely qualitative analysis without any numbers. Numbers create credibility and retention.
+
+30. BANNED ENDING PHRASES (outro segment):
+   - The outro MUST NOT end with any of these stock AI phrases: "the question is not if, but when", "the possibilities are endless", "only time will tell", "the future is bright", "this is just the beginning", "stay tuned for more", "thanks for watching", "like and subscribe".
+   - If any banned phrase is found, REPLACE it with a specific, surprising, or actionable final line.
+   - The last line should be quotable, punchy, and feel like the payoff of the entire video — not a generic AI closer.
+
 === ADDITIONAL RULES ===
 - No filler phrases: imagine, what if, all eyes on, game changer, critical moment, time will tell, basically, no seriously, thanks for watching, stay tuned, more videos coming soon, find out what happens next, let me know your thoughts
+- No stock AI ending phrases: "the question is not if, but when", "the possibilities are endless", "only time will tell", "the future is bright", "this is just the beginning"
 - Argument must escalate gradually — don't drop the boldest claim first
 - Named character must appear at least TWICE — once introduced, once referenced later
 - The most COMPLEX section needs the MOST time — don't rush the hardest part

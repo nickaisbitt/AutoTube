@@ -21,6 +21,12 @@ import { existsSync, mkdirSync, writeFileSync, unlinkSync, rmSync, readFileSync,
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir, homedir } from 'os';
+import { parseVttWordTimestamps, findCurrentWord } from './server-render/subtitleParser.mjs';
+
+// ── Word timestamp cache for karaoke subtitle sync ─────────────────────────
+// Populated from edge-tts VTT files before rendering begins.
+// Keyed by segment index. Used by drawFrame() for word-level caption timing.
+const wordTimestampCache = new Map();
 
 const LOG_LEVEL = process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'warn' : 'info');
 const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
@@ -1971,10 +1977,10 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   // Words appear one at a time with a pop-in scale effect
   const words = segWordsCache && segWordsCache.has(seg.id) ? segWordsCache.get(seg.id) : (seg.narration ? seg.narration.split(' ') : []);
   if (words.length > 0) {
-    const currentWordIdx = Math.min(Math.floor(progress * words.length), words.length - 1);
-
-    // Show the last 6-7 spoken words plus the current word
-    const windowStart = Math.max(0, currentWordIdx - 6);
+    // Use real word timestamps from VTT if available, otherwise uniform distribution
+    const segIndex = project ? project.script.indexOf(seg) : -1;
+    const wordTs = segIndex >= 0 ? wordTimestampCache.get(segIndex) || [] : [];
+    const { wordIndex: currentWordIdx, windowStart } = findCurrentWord(progress, seg.duration, wordTs, words.length);
     const visibleCount = currentWordIdx - windowStart + 1;
 
     if (visibleCount > 0) {
@@ -2171,6 +2177,7 @@ async function generateNarration(segments, outputDir, options = {}) {
   const useGrok = !!xaiKey;
   const useMelo = !!cfAccountId && !!cfApiToken;
   const audioFiles = [];
+  const subtitleFiles = {};
 
   const engines = [];
   if (useGrok) engines.push('Grok TTS');
@@ -2219,20 +2226,25 @@ async function generateNarration(segments, outputDir, options = {}) {
       }
     }
 
-    // Tier 3: edge-tts
+    // Tier 3: edge-tts (with word-level subtitles for karaoke sync)
     if (!success) {
+      const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
       const result = spawnSync('edge-tts', [
         '--voice', edgeVoice || 'en-US-GuyNeural',
         '--rate', '+10%',
         '--text', seg.narration,
         '--write-media', audioFile,
+        '--write-subtitles', subtitleFile,
       ], { encoding: 'utf8', timeout: 30000 });
       success = result.status === 0 && existsSync(audioFile);
+      if (success && existsSync(subtitleFile)) {
+        subtitleFiles[i] = subtitleFile;
+      }
     }
 
     // Tier 4: Silence (last resort)
     if (success) {
-      audioFiles.push({ file: audioFile, duration: seg.duration });
+      audioFiles.push({ file: audioFile, duration: seg.duration, subtitleFile: subtitleFiles[i] || null });
     } else {
       console.warn(`\n  ⚠ All TTS engines failed for segment ${i + 1}, using silence`);
       spawnSync('ffmpeg', [
@@ -2552,6 +2564,36 @@ async function render() {
       }
     }
     log('info', `  ✓ Video frames pre-extracted: ${videoFramesExtracted} succeeded, ${videoFramesFailed} failed`);
+  }
+
+  // ── Pre-generate narration audio BEFORE video rendering ──────────────────
+  // This allows word-level VTT timestamps to be available for karaoke caption sync.
+  const audioDir = join(dirname(OUTPUT_FILE), `narration-audio-${Date.now()}`);
+  mkdirSync(audioDir, { recursive: true });
+  const xaiKey = process.env.XAI_API_KEY || process.env.VITE_XAI_KEY || '';
+  const ttsVoice = project.exportSettings?.ttsVoice || process.env.XAI_TTS_VOICE || 'Leo';
+  const cfAccountId = process.env.CF_ACCOUNT_ID || process.env.VITE_CF_ACCOUNT_ID || '';
+  const cfApiToken = process.env.CF_API_TOKEN || process.env.VITE_CF_API_TOKEN || '';
+  const edgeVoice = project.exportSettings?.edgeTtsVoice || 'en-US-GuyNeural';
+  log('info', `\n🔑 TTS keys: Grok=${xaiKey ? 'YES (' + xaiKey.substring(0, 8) + '...)' : 'NO'}, MeloTTS=${cfAccountId && cfApiToken ? 'YES' : 'NO'}`);
+
+  let audioFiles = [];
+  try {
+    audioFiles = await generateNarration(project.script, audioDir, { xaiKey, ttsVoice, cfAccountId, cfApiToken, edgeVoice });
+
+    // Load VTT word timestamps into cache for karaoke sync
+    for (const af of audioFiles) {
+      if (af.subtitleFile && existsSync(af.subtitleFile)) {
+        const segIdx = audioFiles.indexOf(af);
+        const words = parseVttWordTimestamps(af.subtitleFile);
+        if (words.length > 0) {
+          wordTimestampCache.set(segIdx, words);
+          log('info', `  📝 Loaded ${words.length} word timestamps for segment ${segIdx + 1}`);
+        }
+      }
+    }
+  } catch (err) {
+    log('info', `  ⚠ Narration pre-generation failed: ${err.message}. Captions will use uniform timing.`);
   }
 
   // Set up ffmpeg pipe
@@ -3127,18 +3169,7 @@ async function render() {
   log('info', `\n✅ Done! ${totalFrames} frames rendered`);
   log('info', `📹 Output: ${OUTPUT_FILE}`);
 
-  // Generate narration audio (isolated per run to avoid cross-contamination)
-  const audioDir = join(dirname(OUTPUT_FILE), `narration-audio-${Date.now()}`);
-  mkdirSync(audioDir, { recursive: true });
-  // Pass TTS keys from env for 3-tier fallback: Grok → MeloTTS → edge-tts
-  const xaiKey = process.env.XAI_API_KEY || process.env.VITE_XAI_KEY || '';
-  const ttsVoice = project.exportSettings?.ttsVoice || process.env.XAI_TTS_VOICE || 'Leo';
-  const cfAccountId = process.env.CF_ACCOUNT_ID || process.env.VITE_CF_ACCOUNT_ID || '';
-  const cfApiToken = process.env.CF_API_TOKEN || process.env.VITE_CF_API_TOKEN || '';
-  const edgeVoice = project.exportSettings?.edgeTtsVoice || 'en-US-GuyNeural';
-  log('info', `\n🔑 TTS keys: Grok=${xaiKey ? 'YES (' + xaiKey.substring(0, 8) + '...)' : 'NO'}, MeloTTS=${cfAccountId && cfApiToken ? 'YES' : 'NO'}`);
-  const audioFiles = await generateNarration(project.script, audioDir, { xaiKey, ttsVoice, cfAccountId, cfApiToken, edgeVoice });
-
+  // Narration was pre-generated before rendering. Use the existing audioFiles.
   if (audioFiles.length > 0) {
     log('info', `\nMuxing audio with video... (${audioFiles.length} audio segments)`);
     const combinedAudio = join(audioDir, 'combined-narration.aac');

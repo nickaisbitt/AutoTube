@@ -147,11 +147,13 @@ async function generateMeloSegment(text, outputPath, accountId, apiToken) {
  * @returns {boolean}
  */
 function generateEdgeTtsSegment(text, outputPath) {
+  const subtitlePath = outputPath.replace(/\.\w+$/, '.vtt');
   const result = spawnSync('edge-tts', [
     '--voice', 'en-US-GuyNeural',
     '--rate', '+10%',
     '--text', text,
     '--write-media', outputPath,
+    '--write-subtitles', subtitlePath,
   ], { encoding: 'utf8', timeout: 30000 });
 
   return result.status === 0 && existsSync(outputPath);
@@ -246,7 +248,12 @@ export async function generateNarration(segments, outputDir, options = {}) {
 
     // Tier 4: Silence (last resort)
     if (success) {
-      audioFiles.push({ file: audioFile, duration: seg.duration });
+      const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
+      audioFiles.push({
+        file: audioFile,
+        duration: seg.duration,
+        subtitleFile: existsSync(subtitleFile) ? subtitleFile : null,
+      });
     } else {
       console.warn(`\n  ⚠ All TTS engines failed for segment ${i + 1}, using silence`);
       if (generateSilenceFallback(audioFile, seg.duration)) {

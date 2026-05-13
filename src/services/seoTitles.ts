@@ -95,10 +95,18 @@ export function scoreSpecificity(title: string): number {
     'drain', 'destroy', 'ruin', 'exposed', 'exposure',
     'sabotage', 'loss', 'lost', 'stolen', 'breach',
     'one click', 'disaster', 'wiped', 'frozen', 'hijack',
+    // Space/science domain
+    'fail', 'failure', 'crash', 'explode', 'launch', 'mission',
+    'discovery', 'breakthrough', 'danger', 'risk', 'threat',
+    'crisis', 'alarm', 'warning', 'alert', 'worse',
+    'numbers say', 'data says', 'hidden', 'secret',
   ];
   const audienceFacing = [
     'your ', 'you ', "you're", 'your business', 'your files',
     'your data', 'your accounts', 'your system', 'your payroll',
+    // Space/science domain
+    'your family', 'your health', 'your future', 'your world',
+    'you think', 'you know', 'you need',
   ];
 
   let score = 0.5; // baseline
@@ -348,6 +356,45 @@ export function generateTitleOptions(
     style: 'listicle',
     estimatedCTR: 7.2,
   });
+
+  // ── Space/Science/Environment/Health domain templates ──
+  const lowerTopic = topic.toLowerCase();
+  const isSpace = ['space', 'rocket', 'mars', 'nasa', 'spacex', 'starship', 'satellite', 'orbit', 'launch'].some(k => lowerTopic.includes(k));
+  const isScience = ['science', 'research', 'discovery', 'quantum', 'nuclear', 'energy', 'particle', 'experiment'].some(k => lowerTopic.includes(k));
+  const isEnvironment = ['climate', 'weather', 'ocean', 'wildfire', 'flood', 'drought', 'hurricane', 'glacier'].some(k => lowerTopic.includes(k));
+  const isHealth = ['health', 'medical', 'virus', 'vaccine', 'disease', 'pandemic', 'epidemic'].some(k => lowerTopic.includes(k));
+
+  if (isSpace) {
+    titles.push({ title: `Can ${topic} REALLY Work? The Numbers Say...`, style: 'question', estimatedCTR: 9.0 });
+    titles.push({ title: `Why ${topic} Is More Dangerous Than You Think`, style: 'shocking', estimatedCTR: 8.8 });
+    titles.push({ title: `${topic}: The Hidden Problem No One's Talking About`, style: 'clickbait', estimatedCTR: 8.5 });
+    titles.push({ title: `How ${topic} Could Change Everything (Or Fail)`, style: 'clickbait', estimatedCTR: 8.3 });
+    titles.push({ title: `${topic}: Not Ready? The Data Says Otherwise`, style: 'question', estimatedCTR: 7.8 });
+  }
+
+  if (isScience) {
+    titles.push({ title: `${topic}: The Discovery That Changes Everything`, style: 'shocking', estimatedCTR: 9.0 });
+    titles.push({ title: `Why Scientists Are Worried About ${topic}`, style: 'clickbait', estimatedCTR: 8.7 });
+    titles.push({ title: `${topic}: What They Don't Want You to Know`, style: 'clickbait', estimatedCTR: 8.4 });
+    titles.push({ title: `The ${topic} Experiment That Went Wrong`, style: 'shocking', estimatedCTR: 8.2 });
+    titles.push({ title: `Is ${topic} the End of Physics As We Know It?`, style: 'question', estimatedCTR: 7.8 });
+  }
+
+  if (isEnvironment) {
+    titles.push({ title: `${topic}: It's Worse Than the Models Predict`, style: 'shocking', estimatedCTR: 9.0 });
+    titles.push({ title: `The ${topic} Crisis Nobody's Preparing For`, style: 'clickbait', estimatedCTR: 8.7 });
+    titles.push({ title: `How ${topic} Could Affect You by 2030`, style: 'question', estimatedCTR: 8.4 });
+    titles.push({ title: `${topic}: The Numbers That Should Alarm You`, style: 'shocking', estimatedCTR: 8.2 });
+    titles.push({ title: `Why ${topic} Is Getting Worse (And Faster)`, style: 'clickbait', estimatedCTR: 7.9 });
+  }
+
+  if (isHealth) {
+    titles.push({ title: `${topic}: What Your Doctor Isn't Telling You`, style: 'clickbait', estimatedCTR: 9.0 });
+    titles.push({ title: `The ${topic} Risk You're Ignoring Right Now`, style: 'shocking', estimatedCTR: 8.7 });
+    titles.push({ title: `Is ${topic} More Dangerous Than We Thought?`, style: 'question', estimatedCTR: 8.4 });
+    titles.push({ title: `${topic}: The Hidden Threat in Your Daily Routine`, style: 'clickbait', estimatedCTR: 8.2 });
+    titles.push({ title: `What ${topic} Means for Your Family`, style: 'question', estimatedCTR: 7.8 });
+  }
 
   // When a hook line is provided, add a hook-aligned title (Requirement 11.3)
   if (hookLine.trim()) {

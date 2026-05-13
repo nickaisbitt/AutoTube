@@ -71,6 +71,26 @@ const TOPIC_THREAT_MAP: TopicThreatMapping[] = [
     signifiers: ['drained crypto wallet', 'blockchain transaction', 'exchange hack screen'],
     threats: ['wallet drain', 'exchange compromise', 'stolen cryptocurrency'],
   },
+  {
+    keywords: ['space', 'rocket', 'mars', 'nasa', 'spacex', 'starship', 'satellite', 'orbit', 'launch', 'astronaut'],
+    signifiers: ['rocket launch at sunset', 'Mars red surface landscape', 'Starship on launchpad', 'satellite constellation in orbit', 'space station Earth view'],
+    threats: ['launch failure explosion', 'rocket debris falling', 'astronaut emergency', 'satellite collision debris'],
+  },
+  {
+    keywords: ['science', 'tech', 'research', 'discovery', 'quantum', 'nuclear', 'energy', 'particle', 'experiment'],
+    signifiers: ['particle collision visualization', 'quantum computer close-up', 'nuclear reactor core', 'laboratory equipment glowing', 'DNA helix animation'],
+    threats: ['lab accident warning', 'radiation exposure alert', 'experiment gone wrong', 'research data falsified'],
+  },
+  {
+    keywords: ['climate', 'weather', 'ocean', 'wildfire', 'flood', 'drought', 'hurricane', 'tornado', 'ice', 'glacier'],
+    signifiers: ['wildfire burning forest', 'hurricane satellite view', 'melting glacier calving', 'drought cracked earth', 'flooded city streets'],
+    threats: ['extreme weather alert', 'sea level rise map', 'air quality warning', 'evacuation order'],
+  },
+  {
+    keywords: ['health', 'medical', 'virus', 'vaccine', 'disease', 'pharma', 'hospital', 'pandemic', 'epidemic'],
+    signifiers: ['virus microscopic view', 'hospital ICU ward', 'vaccine vial close-up', 'medical scan imagery', 'outbreak map visualization'],
+    threats: ['outbreak spreading map', 'hospital overwhelmed', 'vaccine shortage alert', 'health emergency declaration'],
+  },
 ];
 
 /**
@@ -171,6 +191,10 @@ function generateTextOverlay(
       if (lowerTopic.includes('hack') || lowerTopic.includes('cyber')) return 'You Could Be Next';
       if (lowerTopic.includes('bank') || lowerTopic.includes('money')) return 'Your Money Gone';
       if (lowerTopic.includes('business')) return 'Business Shutdown Risk';
+      if (lowerTopic.includes('space') || lowerTopic.includes('rocket') || lowerTopic.includes('mars')) return 'Mission In Danger';
+      if (lowerTopic.includes('climate') || lowerTopic.includes('weather')) return 'Extreme Weather Alert';
+      if (lowerTopic.includes('health') || lowerTopic.includes('virus') || lowerTopic.includes('disease')) return 'Outbreak Spreading';
+      if (lowerTopic.includes('nuclear') || lowerTopic.includes('energy')) return 'Radiation Risk';
       return `${topicKeyword} Targets You`;
     }
     return 'Are You Safe?';
@@ -180,6 +204,10 @@ function generateTextOverlay(
     if (lowerTopic.includes('hack') || lowerTopic.includes('cyber')) return 'One Click Away';
     if (lowerTopic.includes('ai') || lowerTopic.includes('deepfake')) return 'Can You Tell?';
     if (lowerTopic.includes('bank') || lowerTopic.includes('money')) return 'Check This Now';
+    if (lowerTopic.includes('space') || lowerTopic.includes('rocket') || lowerTopic.includes('mars')) return 'Not Ready Yet';
+    if (lowerTopic.includes('climate') || lowerTopic.includes('weather')) return 'Worse Than You Think';
+    if (lowerTopic.includes('health') || lowerTopic.includes('virus')) return 'Hidden Threat';
+    if (lowerTopic.includes('science') || lowerTopic.includes('research')) return 'Shocking Discovery';
     return `Hidden ${topicKeyword} Risk`;
   }
 
@@ -187,6 +215,10 @@ function generateTextOverlay(
   if (lowerTopic.includes('hack') || lowerTopic.includes('cyber')) return 'Experts Warn Now';
   if (lowerTopic.includes('war') || lowerTopic.includes('military')) return 'Intel Report Leaked';
   if (lowerTopic.includes('business')) return 'Industry Alert';
+  if (lowerTopic.includes('space') || lowerTopic.includes('rocket') || lowerTopic.includes('mars')) return 'Mission Report';
+  if (lowerTopic.includes('climate') || lowerTopic.includes('weather')) return 'Climate Data Revealed';
+  if (lowerTopic.includes('health') || lowerTopic.includes('virus')) return 'Health Alert';
+  if (lowerTopic.includes('science') || lowerTopic.includes('research')) return 'Research Update';
   return `${topicKeyword} Crisis Report`;
 }
 

@@ -87,7 +87,7 @@ function detectAspectRatioFromTopic(topic) {
   return '16:9';
 }
 
-const ACCENT_COLORS = { intro: '#06d6a0', section: '#4cc9f0', transition: '#f72585', outro: '#06d6a0' };
+const ACCENT_COLORS = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
 let DRAFT_MODE = false;
 
 // ── Caches to avoid per-frame allocations ──────────────────────────────────
@@ -318,10 +318,10 @@ function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec = 4) {
  */
 function drawProceduralFallbackWithText(ctx, w, h, topicText, segType) {
   const palettes = {
-    intro:      { bg: ['#1a1540', '#4a3f8c', '#3a3560'], accent: '#06d6a0' },
-    section:    { bg: ['#1a1a3e', '#2d2d5e', '#1a2d4a'], accent: '#4cc9f0' },
-    transition: { bg: ['#2d1a5e', '#4a2d9e', '#2d1a5e'], accent: '#f72585' },
-    outro:      { bg: ['#1a2d4a', '#1d3d5a', '#1a2d4a'], accent: '#06d6a0' },
+    intro:      { bg: ['#1a1540', '#4a3f8c', '#3a3560'], accent: '#60a5fa' },
+    section:    { bg: ['#1a1a3e', '#2d2d5e', '#1a2d4a'], accent: '#3b82f6' },
+    transition: { bg: ['#2d1a5e', '#4a2d9e', '#2d1a5e'], accent: '#8b5cf6' },
+    outro:      { bg: ['#1a2d4a', '#1d3d5a', '#1a2d4a'], accent: '#60a5fa' },
   };
   const p = palettes[segType] || palettes.section;
 
@@ -776,10 +776,10 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
 // ── Procedural background (matches browser renderer) ──────────────────────
 function drawProceduralBackground(ctx, seg, progress, skipParticles = false) {
   const palettes = {
-    intro:      { bg: ['#1a1540', '#4a3f8c', '#3a3560'], accent: '#06d6a0' },
-    section:    { bg: ['#1a1a3e', '#2d2d5e', '#1a2d4a'], accent: '#4cc9f0' },
-    transition: { bg: ['#2d1a5e', '#4a2d9e', '#2d1a5e'], accent: '#f72585' },
-    outro:      { bg: ['#1a2d4a', '#1d3d5a', '#1a2d4a'], accent: '#06d6a0' },
+    intro:      { bg: ['#1a1540', '#4a3f8c', '#3a3560'], accent: '#60a5fa' },
+    section:    { bg: ['#1a1a3e', '#2d2d5e', '#1a2d4a'], accent: '#3b82f6' },
+    transition: { bg: ['#2d1a5e', '#4a2d9e', '#2d1a5e'], accent: '#8b5cf6' },
+    outro:      { bg: ['#1a2d4a', '#1d3d5a', '#1a2d4a'], accent: '#60a5fa' },
   };
   const p = palettes[seg.type] || palettes.section;
 
@@ -1248,8 +1248,8 @@ function drawStatCard(ctx, seg, img, w, h, safeZone) {
   const stat = extractStat(seg.narration);
   const displayStat = stat || seg.title;
 
-  const accentColors = { intro: '#06d6a0', section: '#4cc9f0', transition: '#f72585', outro: '#06d6a0' };
-  const accent = accentColors[seg.type] || '#4cc9f0';
+  const accentColors = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
+  const accent = accentColors[seg.type] || '#3b82f6';
 
   // Stat display — large with glow
   ctx.save();
@@ -1266,9 +1266,9 @@ function drawStatCard(ctx, seg, img, w, h, safeZone) {
   ctx.save();
   const statW = ctx.measureText(displayStat).width;
   const lineGrad = ctx.createLinearGradient(w/2 - statW/2, 0, w/2 + statW/2, 0);
-  lineGrad.addColorStop(0, 'rgba(76, 201, 240, 0)');
+  lineGrad.addColorStop(0, 'rgba(96, 165, 250, 0)');
   lineGrad.addColorStop(0.5, accent);
-  lineGrad.addColorStop(1, 'rgba(76, 201, 240, 0)');
+  lineGrad.addColorStop(1, 'rgba(96, 165, 250, 0)');
   ctx.fillStyle = lineGrad;
   ctx.fillRect(w/2 - statW/2, h * 0.35 + h * 0.06, statW, 3);
   ctx.restore();
@@ -1340,7 +1340,7 @@ function drawQuoteCard(ctx, seg, img, w, h, safeZone) {
   // Large decorative quote mark
   ctx.save();
   ctx.font = `800 ${Math.round(h * 0.14)}px system-ui, -apple-system, sans-serif`;
-  ctx.fillStyle = 'rgba(76, 201, 240, 0.2)';
+  ctx.fillStyle = 'rgba(96, 165, 250, 0.25)';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText('\u201C', safeZone.left + 30, safeZone.top + h * 0.12);
@@ -1445,8 +1445,8 @@ function drawLeftTextRightImage(ctx, seg, img, w, h, safeZone) {
   const textMaxW = splitX - textLeft - 30;
 
   // Accent line
-  const accentColors = { intro: '#e74c3c', section: '#3498db', transition: '#f39c12', outro: '#2ecc71' };
-  const accent = accentColors[seg.type] || '#3498db';
+  const accentColors = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
+  const accent = accentColors[seg.type] || '#3b82f6';
   ctx.fillStyle = accent;
   ctx.fillRect(textLeft, safeZone.top + h * 0.2, 60, 3);
 
@@ -1544,8 +1544,8 @@ function drawLowerThirdOverlay(ctx, seg, img, w, h, safeZone) {
   ctx.fillStyle = overlay;
   ctx.fillRect(0, overlayTop, w, h - overlayTop);
 
-  const accentColors = { intro: '#06d6a0', section: '#4cc9f0', transition: '#f72585', outro: '#06d6a0' };
-  const accent = accentColors[seg.type] || '#4cc9f0';
+  const accentColors = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
+  const accent = accentColors[seg.type] || '#3b82f6';
   const textAreaTop = Math.round(h * 0.68);
 
   // Accent line
@@ -1629,8 +1629,8 @@ function drawCenteredText(ctx, seg, img, w, h, safeZone) {
   ctx.restore();
 
   // Accent line
-  const accentColors = { intro: '#06d6a0', section: '#4cc9f0', transition: '#f72585', outro: '#06d6a0' };
-  const accent = accentColors[seg.type] || '#4cc9f0';
+  const accentColors = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
+  const accent = accentColors[seg.type] || '#3b82f6';
   ctx.save();
   const lineGrad = ctx.createLinearGradient(w/2 - 60, 0, w/2 + 60, 0);
   lineGrad.addColorStop(0, 'rgba(76, 201, 240, 0)');

@@ -2144,6 +2144,55 @@ async function generateGrokSegment(text, outputPath, xaiKey, voice = 'Sal') {
   }
 }
 
+/**
+ * Generate a segment using Coqui XTTS v2 (high quality, free, but slow).
+ * Calls the Python wrapper script which loads the model once and generates all segments.
+ * Falls back gracefully if XTTS is not installed.
+ */
+const XTTS_SCRIPT = join(__dirname, 'server-render', 'xtts_generate.py');
+let xttsInitialized = false;
+
+async function generateXttsSegment(text, outputPath, audioDir) {
+  try {
+    const { existsSync } = await import('fs');
+    // Check if Python 3.10 and the script exist
+    const checkResult = spawnSync('python3.10', ['-c', 'from TTS.api import TTS; print("ok")'], { timeout: 5000, encoding: 'utf8' });
+    if (checkResult.status !== 0) {
+      return false; // XTTS not available
+    }
+
+    // Create input JSON for the batch wrapper
+    const batchInput = join(audioDir, '_xtts_batch.json');
+    const segments = [{ id: 'current', text }];
+    writeFileSync(batchInput, JSON.stringify({ segments, language: 'en' }));
+
+    const result = spawnSync('python3.10', [
+      XTTS_SCRIPT, batchInput, audioDir
+    ], { timeout: 600000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+    if (result.status !== 0) {
+      console.warn(`  ⚠ XTTS v2 exited with code ${result.status}`);
+      return false;
+    }
+
+    // Check if the output file was created
+    const outWav = join(audioDir, 'current.wav');
+    if (existsSync(outWav)) {
+      // Convert WAV to MP3 for the pipeline
+      const convertResult = spawnSync('ffmpeg', [
+        '-y', '-i', outWav,
+        '-c:a', 'libmp3lame', '-b:a', '128k',
+        outputPath,
+      ], { encoding: 'utf8', timeout: 30000 });
+      return convertResult.status === 0 && existsSync(outputPath);
+    }
+    return false;
+  } catch (err) {
+    console.warn(`  ⚠ XTTS v2 error: ${err.message}`);
+    return false;
+  }
+}
+
 async function generateMeloSegment(text, outputPath, accountId, apiToken) {
   try {
     const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/myshell-ai/melotts`;
@@ -2221,7 +2270,7 @@ async function generateNarration(segments, outputDir, options = {}) {
     
     let success = false;
 
-    // Tier 1: edge-tts (free, includes word-level subtitles for karaoke sync)
+    // Tier 1: edge-tts (free, instant, includes word-level subtitles)
     if (!success) {
       const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
       const result = spawnSync('edge-tts', [
@@ -2240,19 +2289,20 @@ async function generateNarration(segments, outputDir, options = {}) {
       }
     }
 
-    // Tier 2: Grok TTS (premium fallback — 3x more expensive, use sparingly)
+    // Tier 2: XTTS v2 (Coqui, high quality, free, but slow — ~50s load + ~5x real-time)
+    // Only used when edge-tts fails and xaiKey is NOT available (to avoid Grok costs)
+    if (!success && !useGrok) {
+      success = await generateXttsSegment(seg.narration, audioFile, audioDir);
+      if (!success) {
+        console.warn(`\n  ⚠ XTTS v2 failed for segment ${i + 1}`);
+      }
+    }
+
+    // Tier 3: Grok TTS (premium fallback — 3x more expensive, use sparingly)
     if (useGrok && !success) {
       success = await generateGrokSegment(seg.narration, audioFile, xaiKey, ttsVoice || 'Leo');
       if (!success) {
         console.warn(`\n  ⚠ Grok TTS failed for segment ${i + 1}, trying next engine`);
-      }
-    }
-
-    // Tier 3: MeloTTS (deprecated, may not be available)
-    if (useMelo && !success) {
-      success = await generateMeloSegment(seg.narration, audioFile, cfAccountId, cfApiToken);
-      if (!success) {
-        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying silence`);
       }
     }
 

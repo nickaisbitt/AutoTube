@@ -1965,7 +1965,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     if (nameMatch) {
       const personName = nameMatch[1];
       ctx.save();
-      ctx.font = '16px sans-serif';
+      ctx.font = '600 14px system-ui, -apple-system, sans-serif';
       const nameW = ctx.measureText(personName).width;
       const namePadX = 12;
       const namePadY = 6;
@@ -2099,9 +2099,12 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   if (typeof globalProgress === 'number') {
     ctx.save();
     const progressSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
-    ctx.fillStyle = '#4cc9f0';
-    // Position progress bar just above the bottom safe zone to avoid YouTube's own progress bar
+    // Progress track background
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
     const progressBarY = HEIGHT - progressSafeZone.bottom;
+    ctx.fillRect(0, progressBarY, WIDTH, 3);
+    // Progress fill
+    ctx.fillStyle = '#60a5fa';
     ctx.fillRect(0, progressBarY, globalProgress * WIDTH, 3);
     ctx.restore();
   }
@@ -2827,18 +2830,19 @@ async function render() {
     // "COMING UP..." text overlay in the top-right corner with contrast background (Requirements 4.1, 4.2, 5.2)
     const comingUpSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
     ctx.save();
-    ctx.globalAlpha = 0.75;
-    ctx.font = '16px sans-serif';
+    ctx.globalAlpha = 0.8;
+    ctx.font = '600 14px system-ui, -apple-system, sans-serif';
+    ctx.letterSpacing = '2px';
     const comingUpW = ctx.measureText('COMING UP...').width;
     const comingUpPadX = 10;
     const comingUpPadY = 6;
-    // Position below the top safe zone margin to avoid YouTube title overlay
     const comingUpY = comingUpSafeZone.top + 4;
-    ctx.fillStyle = 'rgba(0,0,0,0.60)';
+    ctx.fillStyle = 'rgba(96, 165, 250, 0.85)';
     ctx.fillRect(WIDTH - comingUpSafeZone.right - comingUpW - comingUpPadX * 2, comingUpY - comingUpPadY, comingUpW + comingUpPadX * 2, 16 + comingUpPadY * 2);
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
+    ctx.letterSpacing = '0px';
     ctx.fillText('COMING UP...', WIDTH - comingUpSafeZone.right - comingUpPadX, comingUpY);
     ctx.restore();
 

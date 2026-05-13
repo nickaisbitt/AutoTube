@@ -1088,6 +1088,16 @@ function drawEndScreenFrame(ctx, title, progress) {
   ctx.fillText(btnText, WIDTH / 2, HEIGHT * 0.52);
   ctx.restore();
 
+  // "More videos coming soon"
+  ctx.save();
+  ctx.globalAlpha = fadeAlpha * 0.6;
+  ctx.fillStyle = '#93c5fd';
+  ctx.font = '400 20px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('More videos coming soon', WIDTH / 2, HEIGHT * 0.68);
+  ctx.restore();
+
   // Bottom decorative bar
   ctx.save();
   ctx.globalAlpha = fadeAlpha * 0.4;
@@ -2700,7 +2710,7 @@ async function render() {
   const SEGMENT_TITLE_FRAMES = Math.round(CONFIG.SEGMENT_TITLE_DURATION * FPS); // dynamic based on FPS
   const COLD_OPEN_FRAMES = Math.round(2 * FPS); // 2 seconds, dynamic based on FPS
   const COLD_OPEN_FADE_FRAMES = Math.round(0.125 * FPS); // ~0.125s fade-to-black at end of cold open
-  const SEGMENT_FADE_FRAMES = Math.round(0.25 * FPS); // ~0.25s crossfade between segments
+  const SEGMENT_FADE_FRAMES = Math.round(0.12 * FPS); // ~0.12s fade between segments
   const SEGMENT_TITLE_FADE_FRAMES = Math.round(0.17 * FPS); // ~0.17s fade-in for segment title text
   const titleCardFrames = Math.round(TITLE_CARD_SECONDS * FPS);
   const endScreenFrames = Math.round(END_SCREEN_SECONDS * FPS);

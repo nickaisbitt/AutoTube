@@ -128,7 +128,7 @@ existsSync: mockExistsSync,
       expect(args).toContain('-b:a');
       expect(args).toContain('192k');
       expect(args).toContain('-af');
-      expect(args).toContain('loudnorm=I=-14:TP=-1.5:LRA=11');
+      expect(args).toContain('volume=6dB,loudnorm=I=-14:TP=-1.5:LRA=11');
     });
 
     it('mixNarrationWithBgMusic uses amix filter', () => {
@@ -168,7 +168,7 @@ existsSync: mockExistsSync,
       expect(args).toContain('-b:a');
       expect(args).toContain('192k');
       expect(args).toContain('-af');
-      expect(args).toContain('loudnorm=I=-14:TP=-1.5:LRA=11');
+      expect(args).toContain('volume=6dB,loudnorm=I=-14:TP=-1.5:LRA=11');
     });
   });
 

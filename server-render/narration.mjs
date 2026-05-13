@@ -199,11 +199,11 @@ export async function generateNarration(segments, outputDir, options = {}) {
   const audioFiles = [];
 
   const engines = [];
+  engines.push('edge-tts');
   if (hasGrok) engines.push('Grok TTS');
   if (hasMelo) engines.push('MeloTTS');
-  engines.push('edge-tts');
   console.log(`Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
-  if (hasGrok) console.log(`  Grok voice: ${ttsVoice || DEFAULT_VOICE}`);
+  if (hasGrok) console.log(`  Grok TTS available as fallback (cost reduction)`);
 
   // Generate initial silence for cold open (2s) + title card (3s) = 5s
   const introSilenceFile = join(outputDir, 'silence-intro.mp3');
@@ -225,7 +225,15 @@ export async function generateNarration(segments, outputDir, options = {}) {
 
     let success = false;
 
-    // Tier 1: Grok TTS
+    // Tier 1: edge-tts (free, includes word-level subtitles)
+    if (!success) {
+      success = generateEdgeTtsSegment(seg.narration, audioFile);
+      if (!success) {
+        console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}, trying next engine`);
+      }
+    }
+
+    // Tier 2: Grok TTS (premium fallback — 3x more expensive, use sparingly)
     if (hasGrok && !success) {
       success = await generateGrokSegment(seg.narration, audioFile, xaiKey, ttsVoice || DEFAULT_VOICE);
       if (!success) {
@@ -233,17 +241,12 @@ export async function generateNarration(segments, outputDir, options = {}) {
       }
     }
 
-    // Tier 2: MeloTTS
+    // Tier 3: MeloTTS (deprecated)
     if (hasMelo && !success) {
       success = await generateMeloSegment(seg.narration, audioFile, cfAccountId, cfApiToken);
       if (!success) {
-        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying edge-tts`);
+        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying silence`);
       }
-    }
-
-    // Tier 3: edge-tts
-    if (!success) {
-      success = generateEdgeTtsSegment(seg.narration, audioFile);
     }
 
     // Tier 4: Silence (last resort)

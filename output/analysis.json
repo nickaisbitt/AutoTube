@@ -1,0 +1,774 @@
+{
+  "metadata": {
+    "client": "openai_api",
+    "model": "google/gemini-2.0-flash-001",
+    "whisper_model": "tiny",
+    "frames_per_minute": 60,
+    "duration_processed": null,
+    "frames_extracted": 8,
+    "frames_processed": 8,
+    "start_stage": 1,
+    "audio_language": "en",
+    "transcription_successful": true
+  },
+  "transcript": {
+    "text": " SpaceX is planning to send five unmanned Starships to Mars in 2026.  Each test flight costs hundreds of millions of dollars, but Elon Musk believes this  is the future of humanity.  Every failed launch teaches SpaceX something new.  They iterate faster than any traditional aerospace company, learning from explosive failures  to build better rockets.  Starship is not just a rocket.  It's a fully reusable two-stage system designed for Mars.  The super heavy booster returns to Earth, while Starship continues to deep space.  SpaceX is building a sustainable space economy.  From satellite internet to space tourism, the possibilities are endless.  The question is not IF, but when.",
+    "segments": [
+      {
+        "text": " SpaceX is planning to send five unmanned Starships to Mars in 2026.",
+        "start": 4.94,
+        "end": 10.2,
+        "words": [
+          {
+            "word": " SpaceX",
+            "start": 4.94,
+            "end": 5.84,
+            "probability": 0.7309128642082214
+          },
+          {
+            "word": " is",
+            "start": 5.84,
+            "end": 6.2,
+            "probability": 0.9918000102043152
+          },
+          {
+            "word": " planning",
+            "start": 6.2,
+            "end": 6.48,
+            "probability": 0.9983600974082947
+          },
+          {
+            "word": " to",
+            "start": 6.48,
+            "end": 6.68,
+            "probability": 0.9984775185585022
+          },
+          {
+            "word": " send",
+            "start": 6.68,
+            "end": 6.94,
+            "probability": 0.9891372323036194
+          },
+          {
+            "word": " five",
+            "start": 6.94,
+            "end": 7.42,
+            "probability": 0.583837628364563
+          },
+          {
+            "word": " unmanned",
+            "start": 7.42,
+            "end": 7.92,
+            "probability": 0.9732463657855988
+          },
+          {
+            "word": " Starships",
+            "start": 7.92,
+            "end": 8.4,
+            "probability": 0.7381837666034698
+          },
+          {
+            "word": " to",
+            "start": 8.4,
+            "end": 8.64,
+            "probability": 0.9757754802703857
+          },
+          {
+            "word": " Mars",
+            "start": 8.64,
+            "end": 8.9,
+            "probability": 0.9818761944770813
+          },
+          {
+            "word": " in",
+            "start": 8.9,
+            "end": 9.2,
+            "probability": 0.974378764629364
+          },
+          {
+            "word": " 2026.",
+            "start": 9.2,
+            "end": 10.2,
+            "probability": 0.8675251007080078
+          }
+        ]
+      },
+      {
+        "text": " Each test flight costs hundreds of millions of dollars, but Elon Musk believes this",
+        "start": 10.74,
+        "end": 15.5,
+        "words": [
+          {
+            "word": " Each",
+            "start": 10.74,
+            "end": 10.94,
+            "probability": 0.9853284955024719
+          },
+          {
+            "word": " test",
+            "start": 10.94,
+            "end": 11.32,
+            "probability": 0.9255355596542358
+          },
+          {
+            "word": " flight",
+            "start": 11.32,
+            "end": 11.6,
+            "probability": 0.8695888519287109
+          },
+          {
+            "word": " costs",
+            "start": 11.6,
+            "end": 11.96,
+            "probability": 0.9417123794555664
+          },
+          {
+            "word": " hundreds",
+            "start": 11.96,
+            "end": 12.42,
+            "probability": 0.986381471157074
+          },
+          {
+            "word": " of",
+            "start": 12.42,
+            "end": 12.68,
+            "probability": 0.9970539808273315
+          },
+          {
+            "word": " millions",
+            "start": 12.68,
+            "end": 12.88,
+            "probability": 0.9892099499702454
+          },
+          {
+            "word": " of",
+            "start": 12.88,
+            "end": 13.08,
+            "probability": 0.9859418272972107
+          },
+          {
+            "word": " dollars,",
+            "start": 13.08,
+            "end": 13.5,
+            "probability": 0.9861394166946411
+          },
+          {
+            "word": " but",
+            "start": 13.78,
+            "end": 14.0,
+            "probability": 0.9962143301963806
+          },
+          {
+            "word": " Elon",
+            "start": 14.0,
+            "end": 14.26,
+            "probability": 0.9849260449409485
+          },
+          {
+            "word": " Musk",
+            "start": 14.26,
+            "end": 14.64,
+            "probability": 0.9963501691818237
+          },
+          {
+            "word": " believes",
+            "start": 14.64,
+            "end": 15.0,
+            "probability": 0.9934267997741699
+          },
+          {
+            "word": " this",
+            "start": 15.0,
+            "end": 15.5,
+            "probability": 0.9772985577583313
+          }
+        ]
+      },
+      {
+        "text": " is the future of humanity.",
+        "start": 15.5,
+        "end": 16.82,
+        "words": [
+          {
+            "word": " is",
+            "start": 15.5,
+            "end": 15.66,
+            "probability": 0.9923250675201416
+          },
+          {
+            "word": " the",
+            "start": 15.66,
+            "end": 15.74,
+            "probability": 0.9951230883598328
+          },
+          {
+            "word": " future",
+            "start": 15.74,
+            "end": 16.12,
+            "probability": 0.9950075149536133
+          },
+          {
+            "word": " of",
+            "start": 16.12,
+            "end": 16.36,
+            "probability": 0.9982427358627319
+          },
+          {
+            "word": " humanity.",
+            "start": 16.36,
+            "end": 16.82,
+            "probability": 0.9839228987693787
+          }
+        ]
+      },
+      {
+        "text": " Every failed launch teaches SpaceX something new.",
+        "start": 17.44,
+        "end": 20.5,
+        "words": [
+          {
+            "word": " Every",
+            "start": 17.44,
+            "end": 17.76,
+            "probability": 0.9895089864730835
+          },
+          {
+            "word": " failed",
+            "start": 17.76,
+            "end": 18.1,
+            "probability": 0.9793409705162048
+          },
+          {
+            "word": " launch",
+            "start": 18.1,
+            "end": 18.44,
+            "probability": 0.9972100853919983
+          },
+          {
+            "word": " teaches",
+            "start": 18.44,
+            "end": 18.94,
+            "probability": 0.9583578705787659
+          },
+          {
+            "word": " SpaceX",
+            "start": 18.94,
+            "end": 19.48,
+            "probability": 0.9950025677680969
+          },
+          {
+            "word": " something",
+            "start": 19.48,
+            "end": 19.94,
+            "probability": 0.9982604384422302
+          },
+          {
+            "word": " new.",
+            "start": 19.94,
+            "end": 20.5,
+            "probability": 0.9996801614761353
+          }
+        ]
+      },
+      {
+        "text": " They iterate faster than any traditional aerospace company, learning from explosive failures",
+        "start": 21.02,
+        "end": 26.34,
+        "words": [
+          {
+            "word": " They",
+            "start": 21.02,
+            "end": 21.16,
+            "probability": 0.9864112734794617
+          },
+          {
+            "word": " iterate",
+            "start": 21.16,
+            "end": 21.54,
+            "probability": 0.989611029624939
+          },
+          {
+            "word": " faster",
+            "start": 21.54,
+            "end": 22.12,
+            "probability": 0.9877550005912781
+          },
+          {
+            "word": " than",
+            "start": 22.12,
+            "end": 22.46,
+            "probability": 0.9990014433860779
+          },
+          {
+            "word": " any",
+            "start": 22.46,
+            "end": 22.72,
+            "probability": 0.9971880316734314
+          },
+          {
+            "word": " traditional",
+            "start": 22.72,
+            "end": 23.16,
+            "probability": 0.9876112341880798
+          },
+          {
+            "word": " aerospace",
+            "start": 23.16,
+            "end": 23.64,
+            "probability": 0.8721961379051208
+          },
+          {
+            "word": " company,",
+            "start": 23.64,
+            "end": 24.36,
+            "probability": 0.9988051652908325
+          },
+          {
+            "word": " learning",
+            "start": 24.8,
+            "end": 24.92,
+            "probability": 0.9928010702133179
+          },
+          {
+            "word": " from",
+            "start": 24.92,
+            "end": 25.24,
+            "probability": 0.9993308782577515
+          },
+          {
+            "word": " explosive",
+            "start": 25.24,
+            "end": 25.78,
+            "probability": 0.9705120325088501
+          },
+          {
+            "word": " failures",
+            "start": 25.78,
+            "end": 26.34,
+            "probability": 0.992065966129303
+          }
+        ]
+      },
+      {
+        "text": " to build better rockets.",
+        "start": 26.34,
+        "end": 27.78,
+        "words": [
+          {
+            "word": " to",
+            "start": 26.34,
+            "end": 26.62,
+            "probability": 0.9956657290458679
+          },
+          {
+            "word": " build",
+            "start": 26.62,
+            "end": 26.88,
+            "probability": 0.9130520224571228
+          },
+          {
+            "word": " better",
+            "start": 26.88,
+            "end": 27.26,
+            "probability": 0.9924654960632324
+          },
+          {
+            "word": " rockets.",
+            "start": 27.26,
+            "end": 27.78,
+            "probability": 0.9573596119880676
+          }
+        ]
+      },
+      {
+        "text": " Starship is not just a rocket.",
+        "start": 28.34,
+        "end": 29.98,
+        "words": [
+          {
+            "word": " Starship",
+            "start": 28.34,
+            "end": 28.72,
+            "probability": 0.9886973202228546
+          },
+          {
+            "word": " is",
+            "start": 28.72,
+            "end": 28.92,
+            "probability": 0.9014405012130737
+          },
+          {
+            "word": " not",
+            "start": 28.92,
+            "end": 29.1,
+            "probability": 0.9973675608634949
+          },
+          {
+            "word": " just",
+            "start": 29.1,
+            "end": 29.34,
+            "probability": 0.9990923404693604
+          },
+          {
+            "word": " a",
+            "start": 29.34,
+            "end": 29.6,
+            "probability": 0.9884958267211914
+          },
+          {
+            "word": " rocket.",
+            "start": 29.6,
+            "end": 29.98,
+            "probability": 0.9868616461753845
+          }
+        ]
+      },
+      {
+        "text": " It's a fully reusable two-stage system designed for Mars.",
+        "start": 30.28,
+        "end": 34.1,
+        "words": [
+          {
+            "word": " It's",
+            "start": 30.28,
+            "end": 30.52,
+            "probability": 0.9761055409908295
+          },
+          {
+            "word": " a",
+            "start": 30.52,
+            "end": 30.68,
+            "probability": 0.9976040720939636
+          },
+          {
+            "word": " fully",
+            "start": 30.68,
+            "end": 31.0,
+            "probability": 0.9932180047035217
+          },
+          {
+            "word": " reusable",
+            "start": 31.0,
+            "end": 31.56,
+            "probability": 0.9802917242050171
+          },
+          {
+            "word": " two",
+            "start": 31.56,
+            "end": 32.12,
+            "probability": 0.3839947283267975
+          },
+          {
+            "word": "-stage",
+            "start": 32.12,
+            "end": 32.42,
+            "probability": 0.9218620359897614
+          },
+          {
+            "word": " system",
+            "start": 32.42,
+            "end": 32.94,
+            "probability": 0.9957824945449829
+          },
+          {
+            "word": " designed",
+            "start": 32.94,
+            "end": 33.46,
+            "probability": 0.8062180876731873
+          },
+          {
+            "word": " for",
+            "start": 33.46,
+            "end": 33.7,
+            "probability": 0.9908124804496765
+          },
+          {
+            "word": " Mars.",
+            "start": 33.7,
+            "end": 34.1,
+            "probability": 0.974103569984436
+          }
+        ]
+      },
+      {
+        "text": " The super heavy booster returns to Earth, while Starship continues to deep space.",
+        "start": 34.1,
+        "end": 39.36,
+        "words": [
+          {
+            "word": " The",
+            "start": 34.1,
+            "end": 34.8,
+            "probability": 0.8360705971717834
+          },
+          {
+            "word": " super",
+            "start": 34.8,
+            "end": 35.02,
+            "probability": 0.7548320889472961
+          },
+          {
+            "word": " heavy",
+            "start": 35.02,
+            "end": 35.26,
+            "probability": 0.5568559765815735
+          },
+          {
+            "word": " booster",
+            "start": 35.26,
+            "end": 35.7,
+            "probability": 0.9148675203323364
+          },
+          {
+            "word": " returns",
+            "start": 35.7,
+            "end": 36.26,
+            "probability": 0.9598132967948914
+          },
+          {
+            "word": " to",
+            "start": 36.26,
+            "end": 36.54,
+            "probability": 0.9979960918426514
+          },
+          {
+            "word": " Earth,",
+            "start": 36.54,
+            "end": 36.88,
+            "probability": 0.759612500667572
+          },
+          {
+            "word": " while",
+            "start": 37.12,
+            "end": 37.28,
+            "probability": 0.9342887997627258
+          },
+          {
+            "word": " Starship",
+            "start": 37.28,
+            "end": 37.76,
+            "probability": 0.9486664831638336
+          },
+          {
+            "word": " continues",
+            "start": 37.76,
+            "end": 38.28,
+            "probability": 0.9949239492416382
+          },
+          {
+            "word": " to",
+            "start": 38.28,
+            "end": 38.64,
+            "probability": 0.9986610412597656
+          },
+          {
+            "word": " deep",
+            "start": 38.64,
+            "end": 38.84,
+            "probability": 0.8408299684524536
+          },
+          {
+            "word": " space.",
+            "start": 38.84,
+            "end": 39.36,
+            "probability": 0.9305053353309631
+          }
+        ]
+      },
+      {
+        "text": " SpaceX is building a sustainable space economy.",
+        "start": 39.96,
+        "end": 42.94,
+        "words": [
+          {
+            "word": " SpaceX",
+            "start": 39.96,
+            "end": 40.34,
+            "probability": 0.5478476881980896
+          },
+          {
+            "word": " is",
+            "start": 40.34,
+            "end": 40.82,
+            "probability": 0.996859073638916
+          },
+          {
+            "word": " building",
+            "start": 40.82,
+            "end": 41.1,
+            "probability": 0.9968980550765991
+          },
+          {
+            "word": " a",
+            "start": 41.1,
+            "end": 41.42,
+            "probability": 0.9959565997123718
+          },
+          {
+            "word": " sustainable",
+            "start": 41.42,
+            "end": 41.88,
+            "probability": 0.9556939005851746
+          },
+          {
+            "word": " space",
+            "start": 41.88,
+            "end": 42.48,
+            "probability": 0.9332575798034668
+          },
+          {
+            "word": " economy.",
+            "start": 42.48,
+            "end": 42.94,
+            "probability": 0.9960364699363708
+          }
+        ]
+      },
+      {
+        "text": " From satellite internet to space tourism, the possibilities are endless.",
+        "start": 43.42,
+        "end": 47.9,
+        "words": [
+          {
+            "word": " From",
+            "start": 43.42,
+            "end": 43.64,
+            "probability": 0.9911195635795593
+          },
+          {
+            "word": " satellite",
+            "start": 43.64,
+            "end": 44.04,
+            "probability": 0.9668788313865662
+          },
+          {
+            "word": " internet",
+            "start": 44.04,
+            "end": 44.7,
+            "probability": 0.7326298356056213
+          },
+          {
+            "word": " to",
+            "start": 44.7,
+            "end": 45.02,
+            "probability": 0.9875561594963074
+          },
+          {
+            "word": " space",
+            "start": 45.02,
+            "end": 45.3,
+            "probability": 0.9832761287689209
+          },
+          {
+            "word": " tourism,",
+            "start": 45.3,
+            "end": 45.76,
+            "probability": 0.9884839653968811
+          },
+          {
+            "word": " the",
+            "start": 46.32,
+            "end": 46.4,
+            "probability": 0.9777448773384094
+          },
+          {
+            "word": " possibilities",
+            "start": 46.4,
+            "end": 46.86,
+            "probability": 0.9928713440895081
+          },
+          {
+            "word": " are",
+            "start": 46.86,
+            "end": 47.48,
+            "probability": 0.994851291179657
+          },
+          {
+            "word": " endless.",
+            "start": 47.48,
+            "end": 47.9,
+            "probability": 0.9973579049110413
+          }
+        ]
+      },
+      {
+        "text": " The question is not IF, but when.",
+        "start": 48.6,
+        "end": 50.72,
+        "words": [
+          {
+            "word": " The",
+            "start": 48.6,
+            "end": 48.66,
+            "probability": 0.9928142428398132
+          },
+          {
+            "word": " question",
+            "start": 48.66,
+            "end": 48.94,
+            "probability": 0.9963594079017639
+          },
+          {
+            "word": " is",
+            "start": 48.94,
+            "end": 49.18,
+            "probability": 0.9965887069702148
+          },
+          {
+            "word": " not",
+            "start": 49.18,
+            "end": 49.52,
+            "probability": 0.974152684211731
+          },
+          {
+            "word": " IF,",
+            "start": 49.52,
+            "end": 49.92,
+            "probability": 0.4665006995201111
+          },
+          {
+            "word": " but",
+            "start": 50.28,
+            "end": 50.48,
+            "probability": 0.9602415561676025
+          },
+          {
+            "word": " when.",
+            "start": 50.48,
+            "end": 50.72,
+            "probability": 0.571111261844635
+          }
+        ]
+      }
+    ]
+  },
+  "frame_analyses": [
+    {
+      "response": "```\nFrame 0\nThe scene is a dark blue background with white dots scattered around, resembling stars. At the top center, \"THE UPDATE DESK\" is written in white. The main text in the center reads \"SpaceX Mars Missio\" in large, white font. Below that, in smaller white font, it says \"SpaceX Starship Mars mission plans for 2026\".\n\nKey continuation points:\n- Watch for any changes in the text or background.\n- Note any new elements that appear on the screen.\n- Observe if the \"stars\" move or if the perspective changes.\n```"
+    },
+    {
+      "response": "```\nFrame 1\nSetting/Scene\nThe scene is a dark blue background with white dots scattered around, resembling stars, similar to the previous frame. However, the background appears to have a subtle radial gradient, with the center being slightly lighter.\n\nNew Information\nThe text \"THE UPDATE DESK\" and \"SpaceX Mars Missio SpaceX Starship Mars mission plans for 2026\" from the previous frame are no longer visible. Instead, the text \"CHAPTER 1 OF 4\" appears in a smaller, white font at the top center. Below that, the text \"SpaceX's Mars Dream\" is displayed in a larger, white font. A short, horizontal teal line is positioned beneath \"SpaceX's Mars Dream\".\n\nContinuity Points\nThis frame marks a transition from the title screen to what appears to be the beginning of a chapter within the video. The \"stars\" background is maintained from the previous frame.\n\nKey continuation points:\n- Watch for any changes in the text or background.\n- Note any new elements that appear on the screen.\n- Observe if the \"stars\" move or if the perspective changes.\n```"
+    },
+    {
+      "response": "```\nFrame 2\nSetting/Scene\nThe scene transitions from the dark blue \"stars\" background to a live-action shot of wheat stalks in a field. The background is blurred, focusing on the stalks in the foreground.\n\nNew Information\nThe text \"CHAPTER 1 OF 4\" and the teal line from the previous frame are no longer visible. The text \"SpaceX's Mars Dream\" remains at the bottom left, with \"Elon Musk\" above it in a smaller font. At the bottom center, the text \"SpaceX is planning to send five unmanned\" appears in a smaller font. \"THE UPDATE DESK\" is visible at the bottom right. \"SpaceX\" is visible at the top left.\n\nContinuity Points\nThis frame continues the narrative by introducing a new visual element (the wheat field) while retaining the title \"SpaceX's Mars Dream\" from the previous frame.\n\nKey continuation points:\n- Watch for any changes in the text or background.\n- Note any new elements that appear on the screen.\n- Observe if the wheat stalks move or if the perspective changes.\n```"
+    },
+    {
+      "response": "```\nFrame 3\nSetting/Scene\nThe scene remains the same live-action shot of wheat stalks in a field as in the previous frame. The background is still blurred, focusing on the stalks in the foreground.\n\nNew Information\nThe text \"Elon Musk\" and \"SpaceX is planning to send five unmanned\" from the previous frame are no longer visible. The text \"test flight costs hundreds of millions of\" appears at the bottom center. \"SpaceX's Mars Dream\", \"SpaceX\", and \"THE UPDATE DESK\" remain in the same positions as in the previous frame.\n\nContinuity Points\nThis frame continues the narrative by displaying new text while retaining the wheat field visual and the title \"SpaceX's Mars Dream\".\n\nKey continuation points:\n- Watch for any changes in the text or background.\n- Note any new elements that appear on the screen.\n- Observe if the wheat stalks move or if the perspective changes.\n```"
+    },
+    {
+      "response": "```\nFrame 4\nSetting/Scene\nThe scene transitions from the live-action shot of wheat stalks back to a dark blue background with white dots scattered around, resembling stars. The background has a subtle radial gradient, with the center being slightly lighter.\n\nNew Information\nThe text \"SpaceX's Mars Dream\", \"SpaceX\", \"THE UPDATE DESK\", and \"test flight costs hundreds of millions of\" from the previous frame are no longer visible. Instead, the text \"CHAPTER 2 OF 4\" appears in a smaller, white font at the top center. Below that, the text \"The Cost of Innovation\" is displayed in a larger, white font. A short, horizontal teal line is positioned beneath \"The Cost of Innovation\".\n\nContinuity Points\nThis frame marks a transition from the live-action shot back to the \"stars\" background, and introduces a new chapter title. The \"stars\" background is similar to frames 0 and 1.\n\nKey continuation points:\n- Watch for any changes in the text or background.\n- Note any new elements that appear on the screen.\n- Observe if the \"stars\" move or if the perspective changes.\n```"
+    },
+    {
+      "response": "```\nFrame 5\nSetting/Scene\nThe scene transitions from the \"stars\" background to a live-action shot of a dark, cloudy sky over what appears to be a body of water.\n\nNew Information\nThe text \"CHAPTER 2 OF 4\" and the teal line from the previous frame are no longer visible. The text \"The Cost of Innovation\" remains at the bottom left. At the bottom center, the text \"Every failed launch teaches\" appears. \"THE UPDATE DESK\" is visible at the bottom right.\n\nContinuity Points\nThis frame continues the narrative by introducing a new visual element (the cloudy sky and water) while retaining the title \"The Cost of Innovation\" from the previous frame. This is similar to the transition in Frame 2.\n\nKey continuation points:\n- Watch for any changes in the text or background.\n- Note any new elements that appear on the screen.\n- Observe if the clouds move or if the perspective changes.\n```"
+    },
+    {
+      "response": "```\nFrame 6\nSetting/Scene\nThe scene transitions from the live-action shot back to a dark blue background with white dots scattered around, resembling stars. The background has a subtle radial gradient, with the center being slightly lighter. This is similar to frames 0, 1, and 4.\n\nNew Information\nThe text \"The Cost of Innovation\", \"Every failed launch teaches\", and \"THE UPDATE DESK\" from the previous frame are no longer visible. Instead, the text \"CHAPTER 3 OF 4\" appears in a smaller, white font at the top center. Below that, the text \"Starship Technology\" is displayed in a larger, white font. A short, horizontal teal line is positioned beneath \"Starship Technology\".\n\nContinuity Points\nThis frame marks a transition from the live-action shot back to the \"stars\" background, and introduces a new chapter title.\n\nKey continuation points:\n- Watch for any changes in the text or background.\n- Note any new elements that appear on the screen.\n- Observe if the \"stars\" move or if the perspective changes.\n```"
+    },
+    {
+      "response": "```\nFrame 7\nSetting/Scene\nThe scene transitions from the \"stars\" background to a live-action shot of a mountain range at sunrise or sunset. The sun is visible between the mountains, creating a bright glow. Trees are visible in the foreground.\n\nNew Information\nThe text \"CHAPTER 3 OF 4\" and the teal line from the previous frame are no longer visible. The text \"Starship Technology\" remains at the bottom left. \"THE UPDATE DESK\" is visible at the bottom right. The text \"Starship is not just\" appears at the bottom center. The text \"The Super\" is visible at the top left.\n\nContinuity Points\nThis frame continues the narrative by introducing a new visual element (the mountain range) while retaining the title \"Starship Technology\" from the previous frame. This is similar to the transitions in Frames 2 and 5.\n\nKey continuation points:\n- Watch for any changes in the text or background.\n- Note any new elements that appear on the screen.\n- Observe if the mountain range changes or if the perspective changes.\n```"
+    }
+  ],
+  "video_description": {
+    "response": "```\nVIDEO SUMMARY\nDuration: 44.00s\n\nThe video opens with a dark blue background speckled with white dots, resembling stars. \"THE UPDATE DESK\" is displayed at the top center, and the title \"SpaceX Mars Missio SpaceX Starship Mars mission plans for 2026\" is prominently featured in the center.\n\nThe video transitions to a chaptered format, beginning with \"CHAPTER 1 OF 4: SpaceX's Mars Dream\" against the starfield background. This then shifts to a live-action shot of wheat stalks in a field, where the title \"SpaceX's Mars Dream\" remains visible along with \"Elon Musk\" and \"THE UPDATE DESK\". The text indicates SpaceX's plan to send five unmanned Starships to Mars. The text then changes to mention the high cost of test flights.\n\nThe scene then returns to the starfield background, introducing \"CHAPTER 2 OF 4: The Cost of Innovation\". This transitions to a live-action shot of a dark, cloudy sky over water, retaining the title \"The Cost of Innovation\" and \"THE UPDATE DESK\". The text highlights that every failed launch provides valuable lessons.\n\nThe video again transitions back to the starfield background, introducing \"CHAPTER 3 OF 4: Starship Technology\". This shifts to a live-action shot of a mountain range at sunrise or sunset, with the title \"Starship Technology\" and \"THE UPDATE DESK\" remaining visible. The text describes Starship as more than just a rocket, emphasizing its fully reusable two-stage system designed for Mars. The audio describes the super heavy booster returning to Earth, while Starship continues to deep space. The audio further explains SpaceX is building a sustainable space economy, and the question is not IF, but when.\n\nClosing observations: The video emphasizes SpaceX's Mars mission plans, highlighting the costs, the iterative learning process from failures, and the Starship technology.\n```"
+  }
+}

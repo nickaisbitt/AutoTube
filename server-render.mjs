@@ -2191,12 +2191,12 @@ async function generateNarration(segments, outputDir, options = {}) {
   const subtitleFiles = {};
 
   const engines = [];
+  engines.push('edge-tts');
   if (useGrok) engines.push('Grok TTS');
   if (useMelo) engines.push('MeloTTS');
-  engines.push('edge-tts');
   log('info', `Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
-  if (useGrok) log('info', `  Grok voice: ${ttsVoice || 'Leo'}`);
-  if (!useGrok && !useMelo) log('info', `  edge-tts voice: ${edgeVoice || 'en-US-GuyNeural'}`);
+  if (useGrok) log('info', `  Grok TTS available as fallback (cost reduction)`);
+  log('info', `  edge-tts voice: ${edgeVoice || 'en-US-GuyNeural'} (free, default)`);
 
   // Generate initial silence for cold open (2s) + title card (3s) = 5s
   const introSilenceFile = join(outputDir, 'silence-intro.mp3');
@@ -2221,23 +2221,7 @@ async function generateNarration(segments, outputDir, options = {}) {
     
     let success = false;
 
-    // Tier 1: Grok TTS
-    if (useGrok && !success) {
-      success = await generateGrokSegment(seg.narration, audioFile, xaiKey, ttsVoice || 'Leo');
-      if (!success) {
-        console.warn(`\n  ⚠ Grok TTS failed for segment ${i + 1}, trying next engine`);
-      }
-    }
-
-    // Tier 2: MeloTTS
-    if (useMelo && !success) {
-      success = await generateMeloSegment(seg.narration, audioFile, cfAccountId, cfApiToken);
-      if (!success) {
-        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying edge-tts`);
-      }
-    }
-
-    // Tier 3: edge-tts (with word-level subtitles for karaoke sync)
+    // Tier 1: edge-tts (free, includes word-level subtitles for karaoke sync)
     if (!success) {
       const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
       const result = spawnSync('edge-tts', [
@@ -2250,6 +2234,25 @@ async function generateNarration(segments, outputDir, options = {}) {
       success = result.status === 0 && existsSync(audioFile);
       if (success && existsSync(subtitleFile)) {
         subtitleFiles[i] = subtitleFile;
+      }
+      if (!success) {
+        console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}, trying next engine`);
+      }
+    }
+
+    // Tier 2: Grok TTS (premium fallback — 3x more expensive, use sparingly)
+    if (useGrok && !success) {
+      success = await generateGrokSegment(seg.narration, audioFile, xaiKey, ttsVoice || 'Leo');
+      if (!success) {
+        console.warn(`\n  ⚠ Grok TTS failed for segment ${i + 1}, trying next engine`);
+      }
+    }
+
+    // Tier 3: MeloTTS (deprecated, may not be available)
+    if (useMelo && !success) {
+      success = await generateMeloSegment(seg.narration, audioFile, cfAccountId, cfApiToken);
+      if (!success) {
+        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying silence`);
       }
     }
 

@@ -845,36 +845,39 @@ function drawProceduralBackground(ctx, seg, progress, skipParticles = false) {
 
 // ── Draw intro title card frame ────────────────────────────────────────────
 function drawTitleCardFrame(ctx, title, topic, progress) {
-  // Rich cinematic gradient background
+  // Rich cinematic gradient background with brighter colors
   const cx = WIDTH / 2 + Math.cos(progress * Math.PI * 0.3) * WIDTH * 0.08;
   const cy = HEIGHT / 2 + Math.sin(progress * Math.PI * 0.2) * HEIGHT * 0.06;
   const grad = ctx.createRadialGradient(cx, cy, 0, WIDTH / 2, HEIGHT / 2, WIDTH * 0.85);
-  grad.addColorStop(0, '#2a2a6e');
-  grad.addColorStop(0.4, '#1a1a4e');
+  grad.addColorStop(0, '#3a3a8e');
+  grad.addColorStop(0.3, '#2a2a6e');
+  grad.addColorStop(0.6, '#1a1a4e');
   grad.addColorStop(1, '#0f0c29');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
   // Multi-layer particles (skipped in draft mode)
   if (!DRAFT_MODE) {
-    ctx.globalAlpha = 0.2;
-    for (let i = 0; i < 60; i++) {
+    // Bright accent particles
+    ctx.globalAlpha = 0.25;
+    for (let i = 0; i < 80; i++) {
       const seed = i * 137.508 + progress * 0.3;
       const px = ((Math.sin(seed) + 1) / 2) * WIDTH;
       const py = ((Math.cos(seed * 0.7) + 1) / 2) * HEIGHT;
-      ctx.fillStyle = '#4cc9f0';
-      ctx.fillRect(px, py, 1.5, 1.5);
+      ctx.fillStyle = '#60a5fa';
+      ctx.fillRect(px, py, 2, 2);
     }
-    ctx.globalAlpha = 0.4;
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#4cc9f0';
-    for (let i = 0; i < 25; i++) {
+    // Glowing white accent dots
+    ctx.globalAlpha = 0.5;
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = '#60a5fa';
+    for (let i = 0; i < 30; i++) {
       const seed = i * 91.3 + progress * 0.6;
       const px = ((Math.sin(seed * 1.5) + 1) / 2) * WIDTH;
       const py = ((Math.cos(seed * 0.9) + 1) / 2) * HEIGHT;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(px, py, 2 + Math.sin(seed) * 1.5, 0, Math.PI * 2);
+      ctx.arc(px, py, 2.5 + Math.sin(seed) * 1.5, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.shadowBlur = 0;
@@ -884,44 +887,45 @@ function drawTitleCardFrame(ctx, title, topic, progress) {
   // Fade-in effect for text
   const fadeAlpha = Math.min(1, progress / 0.3);
 
+  // Large decorative accent bar across top
+  ctx.save();
+  ctx.globalAlpha = fadeAlpha * 0.8;
+  const topAccentGrad = ctx.createLinearGradient(WIDTH * 0.05, 0, WIDTH * 0.95, 0);
+  topAccentGrad.addColorStop(0, 'rgba(96, 165, 250, 0)');
+  topAccentGrad.addColorStop(0.3, 'rgba(96, 165, 250, 0.5)');
+  topAccentGrad.addColorStop(0.7, 'rgba(96, 165, 250, 0.5)');
+  topAccentGrad.addColorStop(1, 'rgba(96, 165, 250, 0)');
+  ctx.fillStyle = topAccentGrad;
+  ctx.fillRect(WIDTH * 0.05, HEIGHT * 0.15, WIDTH * 0.9, 2);
+  ctx.restore();
+
   // Channel name — modern styling with glow
   ctx.save();
-  ctx.globalAlpha = fadeAlpha * 0.7;
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '500 18px system-ui, -apple-system, sans-serif';
+  ctx.globalAlpha = fadeAlpha * 0.85;
+  ctx.fillStyle = '#93c5fd';
+  ctx.font = '600 20px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.letterSpacing = '3px';
-  ctx.fillText('THE UPDATE DESK', WIDTH / 2, HEIGHT * 0.28);
+  ctx.letterSpacing = '4px';
+  ctx.fillText('THE UPDATE DESK', WIDTH / 2, HEIGHT * 0.22);
   ctx.restore();
 
-  // Thin accent line above title
-  ctx.save();
-  ctx.globalAlpha = fadeAlpha;
-  const accentGrad = ctx.createLinearGradient(WIDTH * 0.35, 0, WIDTH * 0.65, 0);
-  accentGrad.addColorStop(0, 'rgba(76, 201, 240, 0)');
-  accentGrad.addColorStop(0.5, '#4cc9f0');
-  accentGrad.addColorStop(1, 'rgba(76, 201, 240, 0)');
-  ctx.fillStyle = accentGrad;
-  ctx.fillRect(WIDTH * 0.35, HEIGHT * 0.32, WIDTH * 0.3, 2);
-  ctx.restore();
-
-  // Project title — larger, bolder, with cyan glow
+  // Project title — larger, bolder, with blue glow
   const visibleChars = progress < 0.6
     ? Math.min(title.length, Math.floor((progress / 0.6) * title.length))
     : title.length;
   const displayTitle = title.substring(0, visibleChars);
 
-  const baseFontSize = Math.min(72, WIDTH * 0.038);
+  const baseFontSize = Math.min(68, WIDTH * 0.036);
   const { lines: titleLines, fontSize: titleFontSize } = wrapTitleText(ctx, displayTitle, WIDTH, baseFontSize);
-  const titleLineHeight = titleFontSize * 1.25;
+  const titleLineHeight = titleFontSize * 1.3;
   const titleBlockHeight = titleLines.length * titleLineHeight;
-  const titleStartY = HEIGHT * 0.42 - titleBlockHeight / 2 + titleLineHeight / 2;
+  const titleStartY = HEIGHT * 0.38 - titleBlockHeight / 2 + titleLineHeight / 2;
 
   ctx.save();
   ctx.globalAlpha = fadeAlpha;
-  ctx.shadowColor = 'rgba(76, 201, 240, 0.4)';
-  ctx.shadowBlur = 25;
+  ctx.shadowColor = 'rgba(96, 165, 250, 0.5)';
+  ctx.shadowBlur = 30;
   ctx.fillStyle = '#ffffff';
   ctx.font = `800 ${titleFontSize}px system-ui, -apple-system, sans-serif`;
   ctx.textAlign = 'center';
@@ -931,39 +935,42 @@ function drawTitleCardFrame(ctx, title, topic, progress) {
   }
   ctx.restore();
 
+  // Thin accent line below title
+  ctx.save();
+  ctx.globalAlpha = fadeAlpha;
+  const accentGrad = ctx.createLinearGradient(WIDTH * 0.3, 0, WIDTH * 0.7, 0);
+  accentGrad.addColorStop(0, 'rgba(96, 165, 250, 0)');
+  accentGrad.addColorStop(0.3, 'rgba(96, 165, 250, 0.8)');
+  accentGrad.addColorStop(0.7, 'rgba(96, 165, 250, 0.8)');
+  accentGrad.addColorStop(1, 'rgba(96, 165, 250, 0)');
+  ctx.fillStyle = accentGrad;
+  ctx.fillRect(WIDTH * 0.3, titleStartY + titleBlockHeight / 2 + 12, WIDTH * 0.4, 2);
+  ctx.restore();
+
   // Topic subtitle — modern styling
   const titleBlockBottom = titleStartY + (titleLines.length - 1) * titleLineHeight + titleLineHeight / 2;
-  const subtitleY = Math.max(titleBlockBottom + 24, HEIGHT * 0.55);
+  const subtitleY = Math.max(titleBlockBottom + 36, HEIGHT * 0.52);
 
   ctx.save();
   ctx.globalAlpha = fadeAlpha * 0.8;
   ctx.shadowColor = 'rgba(0,0,0,0.7)';
-  ctx.shadowBlur = 8;
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '400 22px system-ui, -apple-system, sans-serif';
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = '#93c5fd';
+  ctx.font = '400 20px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(topic.substring(0, 80), WIDTH / 2, subtitleY);
   ctx.restore();
 
-  // Accent bar below subtitle
-  const accentLineY = subtitleY + 24;
+  // Bottom decorative bar
   ctx.save();
-  ctx.globalAlpha = fadeAlpha;
-  ctx.fillStyle = '#4cc9f0';
-  ctx.shadowColor = 'rgba(76, 201, 240, 0.5)';
-  ctx.shadowBlur = 12;
-  ctx.fillRect((WIDTH - 120) / 2, accentLineY, 120, 3);
-  ctx.restore();
-
-  // Tagline
-  ctx.save();
-  ctx.globalAlpha = fadeAlpha * 0.6;
-  ctx.fillStyle = '#64748b';
-  ctx.font = 'italic 400 16px system-ui, -apple-system, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('News. Analysis. Opinion.', WIDTH / 2, accentLineY + 28);
+  ctx.globalAlpha = fadeAlpha * 0.5;
+  const bottomAccentGrad = ctx.createLinearGradient(WIDTH * 0.2, 0, WIDTH * 0.8, 0);
+  bottomAccentGrad.addColorStop(0, 'rgba(96, 165, 250, 0)');
+  bottomAccentGrad.addColorStop(0.5, 'rgba(96, 165, 250, 0.3)');
+  bottomAccentGrad.addColorStop(1, 'rgba(96, 165, 250, 0)');
+  ctx.fillStyle = bottomAccentGrad;
+  ctx.fillRect(WIDTH * 0.2, HEIGHT - HEIGHT * 0.15, WIDTH * 0.6, 1);
   ctx.restore();
 }
 
@@ -973,32 +980,33 @@ function drawEndScreenFrame(ctx, title, progress) {
   const cx = WIDTH / 2 + Math.cos(progress * Math.PI * 0.2) * WIDTH * 0.06;
   const cy = HEIGHT / 2 + Math.sin(progress * Math.PI * 0.15) * HEIGHT * 0.04;
   const grad = ctx.createRadialGradient(cx, cy, 0, WIDTH / 2, HEIGHT / 2, WIDTH * 0.85);
-  grad.addColorStop(0, '#2a2a6e');
-  grad.addColorStop(0.4, '#1a1a4e');
+  grad.addColorStop(0, '#3a3a8e');
+  grad.addColorStop(0.3, '#2a2a6e');
+  grad.addColorStop(0.6, '#1a1a4e');
   grad.addColorStop(1, '#0f0c29');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-  // Multi-layer particles (skipped in draft mode)
+  // Multi-layer particles
   if (!DRAFT_MODE) {
     ctx.globalAlpha = 0.2;
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 60; i++) {
       const seed = i * 137.508 + progress * 0.25;
       const px = ((Math.sin(seed) + 1) / 2) * WIDTH;
       const py = ((Math.cos(seed * 0.7) + 1) / 2) * HEIGHT;
-      ctx.fillStyle = '#06d6a0';
-      ctx.fillRect(px, py, 1.5, 1.5);
+      ctx.fillStyle = '#60a5fa';
+      ctx.fillRect(px, py, 2, 2);
     }
-    ctx.globalAlpha = 0.35;
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = '#06d6a0';
-    for (let i = 0; i < 20; i++) {
+    ctx.globalAlpha = 0.4;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = '#60a5fa';
+    for (let i = 0; i < 25; i++) {
       const seed = i * 91.3 + progress * 0.5;
       const px = ((Math.sin(seed * 1.5) + 1) / 2) * WIDTH;
       const py = ((Math.cos(seed * 0.9) + 1) / 2) * HEIGHT;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(px, py, 2 + Math.sin(seed), 0, Math.PI * 2);
+      ctx.arc(px, py, 2.5 + Math.sin(seed), 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.shadowBlur = 0;
@@ -1011,55 +1019,53 @@ function drawEndScreenFrame(ctx, title, progress) {
   // "Thanks for watching" — large, bold with glow
   ctx.save();
   ctx.globalAlpha = fadeAlpha;
-  ctx.shadowColor = 'rgba(6, 214, 160, 0.4)';
-  ctx.shadowBlur = 20;
+  ctx.shadowColor = 'rgba(96, 165, 250, 0.4)';
+  ctx.shadowBlur = 25;
   ctx.fillStyle = '#ffffff';
-  ctx.font = '800 48px system-ui, -apple-system, sans-serif';
+  ctx.font = '800 52px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Thanks for watching', WIDTH / 2, HEIGHT * 0.32);
+  ctx.fillText('Thanks for watching', WIDTH / 2, HEIGHT * 0.30);
   ctx.restore();
 
   // Accent line
   ctx.save();
   ctx.globalAlpha = fadeAlpha;
-  const accentGrad = ctx.createLinearGradient(WIDTH * 0.35, 0, WIDTH * 0.65, 0);
-  accentGrad.addColorStop(0, 'rgba(6, 214, 160, 0)');
-  accentGrad.addColorStop(0.5, '#06d6a0');
-  accentGrad.addColorStop(1, 'rgba(6, 214, 160, 0)');
+  const accentGrad = ctx.createLinearGradient(WIDTH * 0.3, 0, WIDTH * 0.7, 0);
+  accentGrad.addColorStop(0, 'rgba(96, 165, 250, 0)');
+  accentGrad.addColorStop(0.5, 'rgba(96, 165, 250, 0.8)');
+  accentGrad.addColorStop(1, 'rgba(96, 165, 250, 0)');
   ctx.fillStyle = accentGrad;
-  ctx.fillRect(WIDTH * 0.35, HEIGHT * 0.38, WIDTH * 0.3, 2);
+  ctx.fillRect(WIDTH * 0.3, HEIGHT * 0.36, WIDTH * 0.4, 2);
   ctx.restore();
 
   // Project title
   ctx.save();
   ctx.globalAlpha = fadeAlpha * 0.8;
   ctx.shadowColor = 'rgba(0,0,0,0.7)';
-  ctx.shadowBlur = 8;
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '400 26px system-ui, -apple-system, sans-serif';
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = '#93c5fd';
+  ctx.font = '400 24px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(title.substring(0, 60), WIDTH / 2, HEIGHT * 0.44);
+  ctx.fillText(title.substring(0, 60), WIDTH / 2, HEIGHT * 0.42);
   ctx.restore();
 
   // "Subscribe" pill button — modern with glow
   ctx.save();
   ctx.globalAlpha = fadeAlpha;
   const btnText = 'Subscribe';
-  ctx.font = '700 24px system-ui, -apple-system, sans-serif';
+  ctx.font = '700 26px system-ui, -apple-system, sans-serif';
   const btnTextW = ctx.measureText(btnText).width;
-  const btnW = btnTextW + 56;
-  const btnH = 52;
+  const btnW = btnTextW + 60;
+  const btnH = 54;
   const btnX = (WIDTH - btnW) / 2;
-  const btnY = HEIGHT * 0.56 - btnH / 2;
+  const btnY = HEIGHT * 0.52 - btnH / 2;
   const btnR = btnH / 2;
 
-  // Button glow
-  ctx.shadowColor = 'rgba(6, 214, 160, 0.5)';
-  ctx.shadowBlur = 20;
+  ctx.shadowColor = 'rgba(96, 165, 250, 0.5)';
+  ctx.shadowBlur = 25;
 
-  // Draw rounded rect
   ctx.beginPath();
   ctx.moveTo(btnX + btnR, btnY);
   ctx.lineTo(btnX + btnW - btnR, btnY);
@@ -1068,44 +1074,35 @@ function drawEndScreenFrame(ctx, title, progress) {
   ctx.arc(btnX + btnR, btnY + btnR, btnR, Math.PI / 2, -Math.PI / 2);
   ctx.closePath();
 
-  // Button gradient
   const btnGrad = ctx.createLinearGradient(btnX, btnY, btnX + btnW, btnY);
-  btnGrad.addColorStop(0, '#06d6a0');
-  btnGrad.addColorStop(1, '#00b894');
+  btnGrad.addColorStop(0, '#3b82f6');
+  btnGrad.addColorStop(1, '#2563eb');
   ctx.fillStyle = btnGrad;
   ctx.fill();
 
-  // Button text
   ctx.shadowBlur = 0;
-  ctx.fillStyle = '#0a0a1a';
-  ctx.font = '700 24px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 26px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(btnText, WIDTH / 2, HEIGHT * 0.56);
+  ctx.fillText(btnText, WIDTH / 2, HEIGHT * 0.52);
   ctx.restore();
 
-  // "More videos coming soon"
+  // Bottom decorative bar
   ctx.save();
-  ctx.globalAlpha = fadeAlpha * 0.6;
-  ctx.fillStyle = '#64748b';
-  ctx.font = '400 18px system-ui, -apple-system, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('More videos coming soon', WIDTH / 2, HEIGHT * 0.72);
+  ctx.globalAlpha = fadeAlpha * 0.4;
+  const bottomAccent = ctx.createLinearGradient(WIDTH * 0.2, 0, WIDTH * 0.8, 0);
+  bottomAccent.addColorStop(0, 'rgba(96, 165, 250, 0)');
+  bottomAccent.addColorStop(0.5, 'rgba(96, 165, 250, 0.3)');
+  bottomAccent.addColorStop(1, 'rgba(96, 165, 250, 0)');
+  ctx.fillStyle = bottomAccent;
+  ctx.fillRect(WIDTH * 0.2, HEIGHT - HEIGHT * 0.12, WIDTH * 0.6, 1);
   ctx.restore();
 }
 
 // ── Safe zone computation (mirrors src/services/renderingShared.ts) ─────────
 /**
  * Compute safe zone margins scaled proportionally from a 1080p reference.
- *
- * Reference values at 1080p (1920×1080):
- * - top:    40 px  (avoids YouTube title overlay)
- * - bottom: 60 px  (avoids YouTube progress bar and controls)
- * - left:   5% of width
- * - right:  5% of width
- *
- * Requirements 5.1, 5.2, 5.3
  */
 function computeSafeZone(w, h) {
   const scale = h / 1080;
@@ -1923,20 +1920,20 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
 
   // Title overlay — only rendered when no scene layout is active (layouts handle their own titles)
   if (!layoutFn) {
-  const accent = ACCENT_COLORS[seg.type] || '#4cc9f0';
+  const titleAccent = '#60a5fa';
   const titleSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
   // Position title overlay above the bottom safe zone (Requirement 5.1, 5.3)
   const ltY = Math.min(HEIGHT - barH - 120, HEIGHT - titleSafeZone.bottom - 80);
 
   // Semi-transparent dark gradient behind the title text area for contrast (Requirement 4.1, 4.2)
-  const titleOverlayGrad = ctx.createLinearGradient(0, ltY - 20, 0, ltY + 60);
+  const titleOverlayGrad = ctx.createLinearGradient(0, ltY - 20, 0, ltY + 56);
   titleOverlayGrad.addColorStop(0, 'rgba(0,0,0,0)');
-  titleOverlayGrad.addColorStop(0.2, 'rgba(0,0,0,0.6)');
+  titleOverlayGrad.addColorStop(0.3, 'rgba(0,0,0,0.6)');
   titleOverlayGrad.addColorStop(1, 'rgba(0,0,0,0.7)');
   ctx.fillStyle = titleOverlayGrad;
-  ctx.fillRect(0, ltY - 20, WIDTH * 0.6, 80);
+  ctx.fillRect(0, ltY - 20, WIDTH * 0.55, 76);
 
-  ctx.fillStyle = accent;
+  ctx.fillStyle = titleAccent;
   ctx.fillRect(titleSafeZone.left + 12, ltY, Math.min(40 + progress * 60, 100), 2);
 
   ctx.save();
@@ -1945,10 +1942,10 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     ctx.shadowBlur = 16;
   }
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px sans-serif';
+  ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText(seg.title.substring(0, 50), titleSafeZone.left + 12, ltY + 12);
+  ctx.fillText(seg.title.substring(0, 50), titleSafeZone.left + 12, ltY + 10);
   ctx.restore();
 
   // #22: Lower-third name card for named people mentioned in narration
@@ -1984,36 +1981,36 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     const visibleCount = currentWordIdx - windowStart + 1;
 
     if (visibleCount > 0) {
-      // Modern glass-morphism caption background
+      // Modern glass-morphism caption background — centered for mobile readability
       const capSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
-      const capBgW = Math.min(800, WIDTH * 0.42);
-      const capBgH = 56;
-      const capY = Math.min(HEIGHT - barH - 56, HEIGHT - capSafeZone.bottom - capBgH + 12);
+      const capBgW = Math.min(750, WIDTH * 0.40);
+      const capBgH = 48;
+      // Position above the title overlay area to avoid overlap
+      const capY = Math.min(HEIGHT - barH - 100, HEIGHT - capSafeZone.bottom - capBgH - 12);
 
       // Glass background with rounded corners
       ctx.save();
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+      ctx.fillStyle = 'rgba(10, 10, 26, 0.80)';
       if (!DRAFT_MODE) {
-        ctx.shadowColor = 'rgba(76, 201, 240, 0.15)';
-        ctx.shadowBlur = 16;
+        ctx.shadowColor = 'rgba(96, 165, 250, 0.15)';
+        ctx.shadowBlur = 20;
       }
       ctx.beginPath();
-      ctx.roundRect((WIDTH - capBgW) / 2, capY - 12, capBgW, capBgH, 10);
+      ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
       ctx.fill();
 
-      // Top accent line
+      // Subtle accent border
       ctx.shadowBlur = 0;
-      const capAccentGrad = ctx.createLinearGradient((WIDTH - capBgW) / 2, 0, (WIDTH + capBgW) / 2, 0);
-      capAccentGrad.addColorStop(0, 'rgba(76, 201, 240, 0)');
-      capAccentGrad.addColorStop(0.5, 'rgba(76, 201, 240, 0.5)');
-      capAccentGrad.addColorStop(1, 'rgba(76, 201, 240, 0)');
-      ctx.fillStyle = capAccentGrad;
-      ctx.fillRect((WIDTH - capBgW) / 2 + 20, capY - 12, capBgW - 40, 2);
+      ctx.strokeStyle = 'rgba(96, 165, 250, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
+      ctx.stroke();
       ctx.restore();
 
       // Measure total width to center the word group
-      const normalFont = '400 20px system-ui, -apple-system, sans-serif';
-      const boldFont = '700 22px system-ui, -apple-system, sans-serif';
+      const normalFont = '400 18px system-ui, -apple-system, sans-serif';
+      const boldFont = '700 20px system-ui, -apple-system, sans-serif';
       const spaceWidth = measureWordCached(ctx, normalFont, ' ');
 
       // Pre-measure all words (cached)
@@ -2055,9 +2052,9 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
 
         if (isCurrentWord) {
           ctx.font = boldFont;
-          ctx.fillStyle = '#ffffff';
+          ctx.fillStyle = '#60a5fa';
           if (!DRAFT_MODE) {
-            ctx.shadowColor = 'rgba(76, 201, 240, 0.4)';
+            ctx.shadowColor = 'rgba(96, 165, 250, 0.4)';
             ctx.shadowBlur = 8;
           }
         } else {

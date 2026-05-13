@@ -859,25 +859,26 @@ function drawTitleCardFrame(ctx, title, topic, progress) {
   // Multi-layer particles (skipped in draft mode)
   if (!DRAFT_MODE) {
     // Bright accent particles
-    ctx.globalAlpha = 0.25;
-    for (let i = 0; i < 80; i++) {
+    ctx.globalAlpha = 0.3;
+    for (let i = 0; i < 120; i++) {
       const seed = i * 137.508 + progress * 0.3;
       const px = ((Math.sin(seed) + 1) / 2) * WIDTH;
       const py = ((Math.cos(seed * 0.7) + 1) / 2) * HEIGHT;
-      ctx.fillStyle = '#60a5fa';
-      ctx.fillRect(px, py, 2, 2);
+      const size = 1.5 + Math.sin(seed * 5) * 1;
+      ctx.fillStyle = '#93c5fd';
+      ctx.fillRect(px, py, size, size);
     }
     // Glowing white accent dots
-    ctx.globalAlpha = 0.5;
-    ctx.shadowBlur = 12;
+    ctx.globalAlpha = 0.6;
+    ctx.shadowBlur = 15;
     ctx.shadowColor = '#60a5fa';
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
       const seed = i * 91.3 + progress * 0.6;
       const px = ((Math.sin(seed * 1.5) + 1) / 2) * WIDTH;
       const py = ((Math.cos(seed * 0.9) + 1) / 2) * HEIGHT;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(px, py, 2.5 + Math.sin(seed) * 1.5, 0, Math.PI * 2);
+      ctx.arc(px, py, 3 + Math.sin(seed) * 2, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.shadowBlur = 0;
@@ -2924,26 +2925,40 @@ async function render() {
       ctx.save();
       ctx.globalAlpha = titleFadeAlpha;
 
-      // Segment number — 16px dim text above the title
-      ctx.fillStyle = '#71717a';
-      ctx.font = '16px sans-serif';
+      // Segment number — accent-colored with progress indicator
+      ctx.fillStyle = '#93c5fd';
+      ctx.font = '600 14px system-ui, -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`Part ${si + 1} of ${project.script.length}`, WIDTH / 2, HEIGHT * 0.38);
+      ctx.letterSpacing = '2px';
+      ctx.fillText(`CHAPTER ${si + 1} OF ${project.script.length}`, WIDTH / 2, HEIGHT * 0.35);
+
+      // Small progress dots
+      const dotSpacing = 12;
+      const dotsWidth = project.script.length * dotSpacing;
+      const dotsStartX = WIDTH / 2 - dotsWidth / 2 + dotSpacing / 2;
+      for (let di = 0; di < project.script.length; di++) {
+        const isActive = di === si;
+        ctx.beginPath();
+        ctx.arc(dotsStartX + di * dotSpacing, HEIGHT * 0.38, isActive ? 3 : 2, 0, Math.PI * 2);
+        ctx.fillStyle = isActive ? '#60a5fa' : '#374151';
+        ctx.fill();
+      }
 
       // Segment title — bold 42px white text centered at 45% height
       ctx.shadowColor = 'rgba(0,0,0,0.9)';
       ctx.shadowBlur = 16;
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 42px sans-serif';
+      ctx.font = 'bold 42px system-ui, -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
+      ctx.letterSpacing = '0px';
       ctx.fillText(seg.title.substring(0, 50), WIDTH / 2, HEIGHT * 0.45);
 
       // Thin accent-colored line below the title, 150px wide, centered
       ctx.shadowBlur = 0;
       ctx.fillStyle = segAccent;
-      ctx.fillRect((WIDTH - 150) / 2, HEIGHT * 0.51, 150, 3);
+      ctx.fillRect((WIDTH - 150) / 2, HEIGHT * 0.50, 150, 3);
 
       ctx.restore();
 

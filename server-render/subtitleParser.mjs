@@ -109,7 +109,11 @@ function parseVttTimestamp(str) {
 export function findCurrentWord(progress, segmentDuration, wordTimestamps, totalWords) {
   // If we have real word timestamps, use them
   if (wordTimestamps.length > 0 && segmentDuration > 0) {
-    const currentTime = progress * segmentDuration;
+    // Use actual audio duration from VTT (last timestamp end) instead of
+    // planned seg.duration — Kokoro often produces audio that's longer or
+    // shorter than the planned segment duration, causing subtitle drift.
+    const actualDuration = wordTimestamps[wordTimestamps.length - 1].end;
+    const currentTime = progress * actualDuration;
 
     // Find the word that contains currentTime
     let wordIndex = 0;

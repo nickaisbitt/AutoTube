@@ -25,7 +25,7 @@ export function formatRenderError(error: Error, context: RenderErrorContext): st
     msg.includes('narration') ||
     msg.includes('no text-to-speech provider')
   ) {
-    return 'No text-to-speech provider available. Add XAI_API_KEY to your .env file, or install edge-tts.';
+    return 'No text-to-speech provider available. Install Kokoro-82M (pip install kokoro).';
   }
 
   if (

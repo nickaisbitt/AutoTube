@@ -1,19 +1,34 @@
 /**
  * Narration Generation Module
  *
- * Generates narration audio using a 3-tier fallback chain:
- *   1. xAI Grok TTS (when API key is provided) — high quality
+ * Generates narration audio using a fallback chain:
+ *   1. Kokoro-82M (local, free, 82M params) — GPU accelerated, RTF ~0.25
  *   2. Cloudflare MeloTTS (when account ID + API token provided) — cheap fallback
- *   3. edge-tts (free) — browser-based fallback
- *   4. Silence (last resort)
+ *   3. Silence (last resort)
+ *
+ * Subtitles are generated from Kokoro's audio duration (word-level VTT) after audio success.
  */
 
 import { spawnSync } from 'child_process';
-import { existsSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, writeFileSync, rmSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-const XAI_TTS_ENDPOINT = 'https://api.x.ai/v1/tts';
-const DEFAULT_VOICE = 'Sal';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const KOKORO_SCRIPT = join(__dirname, 'kokoro_generate.py');
+const KOKORO_PYTHON = '/tmp/tts-env/bin/python';
+const DEFAULT_VOICE = 'af_heart';
+
+// Map emotion label to Kokoro speed (only emotion control available)
+const EMOTION_SPEED = {
+  calm: 0.8,
+  neutral: 1.0,
+  excited: 1.2,
+  urgent: 1.3,
+  serious: 0.9,
+  sad: 0.85,
+  angry: 1.15,
+};
 
 /**
  * Generate a silence audio file of the given duration.
@@ -30,133 +45,59 @@ export function generateSilence(outputPath, durationSec) {
 }
 
 /**
- * Generate narration audio for a single segment using xAI Grok TTS.
- * Returns true if the file was written successfully, false otherwise.
+ * Generate narration audio for a single segment using Kokoro-82M (local TTS).
+ * Falls back gracefully if the model is not installed.
  *
  * @param {string} text       Narration text.
  * @param {string} outputPath Path to write the MP3 file.
- * @param {string} xaiKey     xAI API key.
- * @param {string} [voice]    Voice ID (default: 'Sal').
- * @returns {Promise<boolean>}
- */
-async function generateGrokSegment(text, outputPath, xaiKey, voice = DEFAULT_VOICE) {
-  try {
-    const response = await fetch(XAI_TTS_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${xaiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        text,
-        voice_id: voice,
-        output_format: {
-          codec: 'mp3',
-          sample_rate: 44100,
-          bit_rate: 128000,
-        },
-        language: 'en',
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      console.warn(`  ⚠ Grok TTS API returned ${response.status}: ${errText.substring(0, 100)}`);
-      return false;
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length === 0) {
-      console.warn('  ⚠ Grok TTS returned empty audio');
-      return false;
-    }
-
-    writeFileSync(outputPath, buffer);
-    return existsSync(outputPath);
-  } catch (err) {
-    console.warn(`  ⚠ Grok TTS request failed: ${err.message}`);
-    return false;
-  }
-}
-
-/**
- * Generate narration audio for a single segment using Cloudflare MeloTTS.
- * Returns true if the file was written successfully, false otherwise.
- *
- * @param {string} text       Narration text.
- * @param {string} outputPath Path to write the MP3 file.
- * @param {string} accountId  Cloudflare account ID.
- * @param {string} apiToken   Cloudflare API token.
- * @returns {Promise<boolean>}
- */
-async function generateMeloSegment(text, outputPath, accountId, apiToken) {
-  try {
-    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/myshell-ai/melotts`;
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ prompt: text, lang: 'en' }),
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      console.warn(`  ⚠ MeloTTS API returned ${response.status}: ${errText.substring(0, 100)}`);
-      return false;
-    }
-
-    const contentType = response.headers.get('content-type') || '';
-    let buffer;
-
-    if (contentType.includes('application/json')) {
-      const data = await response.json();
-      const base64Audio = data?.result?.audio;
-      if (!base64Audio) {
-        console.warn('  ⚠ MeloTTS: No audio in JSON response');
-        return false;
-      }
-      buffer = Buffer.from(base64Audio, 'base64');
-    } else {
-      buffer = Buffer.from(await response.arrayBuffer());
-    }
-
-    if (buffer.length === 0) {
-      console.warn('  ⚠ MeloTTS returned empty audio');
-      return false;
-    }
-
-    writeFileSync(outputPath, buffer);
-    return existsSync(outputPath);
-  } catch (err) {
-    console.warn(`  ⚠ MeloTTS request failed: ${err.message}`);
-    return false;
-  }
-}
-
-/**
- * Generate narration audio for a single segment using edge-tts (free fallback).
- * Returns true if the file was written successfully, false otherwise.
- *
- * @param {string} text       Narration text.
- * @param {string} outputPath Path to write the MP3 file.
+ * @param {object} [options]  Optional { speed, voice }.
  * @returns {boolean}
  */
-function generateEdgeTtsSegment(text, outputPath) {
-  const subtitlePath = outputPath.replace(/\.\w+$/, '.vtt');
-  const result = spawnSync('edge-tts', [
-    '--voice', 'en-US-GuyNeural',
-    '--rate', '+10%',
-    '--text', text,
-    '--write-media', outputPath,
-    '--write-subtitles', subtitlePath,
-  ], { encoding: 'utf8', timeout: 30000 });
+function generateKokoroSegment(text, outputPath, options = {}) {
+  const tmpDir = join(dirname(outputPath), '_kokoro');
+  spawnSync('mkdir', ['-p', tmpDir]);
 
-  return result.status === 0 && existsSync(outputPath);
+  // Map emotion to speed
+  const emotion = options.emotion || null;
+  const speed = emotion && EMOTION_SPEED[emotion] ? EMOTION_SPEED[emotion] : (options.speed || 1.0);
+  const voice = options.voice || DEFAULT_VOICE;
+
+  // Create batch JSON
+  const batchInput = join(tmpDir, 'batch.json');
+  const config = {
+    segments: [{ id: 'current', text, speed }],
+    voice,
+    output_dir: tmpDir,
+  };
+  writeFileSync(batchInput, JSON.stringify(config));
+
+  // Generate audio via Kokoro Python wrapper
+  const env = { ...process.env, PYTORCH_ENABLE_MPS_FALLBACK: '1' };
+  const result = spawnSync(KOKORO_PYTHON, [
+    KOKORO_SCRIPT, batchInput
+  ], { encoding: 'utf8', timeout: 300000, env });
+
+  // Read the generated WAV and convert to MP3
+  const wavPath = join(tmpDir, 'current.wav');
+  const vttPath = join(tmpDir, 'current.vtt');
+  if (result.status === 0 && existsSync(wavPath)) {
+    const convertResult = spawnSync('ffmpeg', [
+      '-y', '-i', wavPath, '-c:a', 'libmp3lame', '-b:a', '128k', outputPath,
+    ], { encoding: 'utf8', timeout: 30000 });
+
+    if (convertResult.status === 0 && existsSync(outputPath)) {
+      // Copy aligned subtitles from Kokoro's output
+      if (existsSync(vttPath)) {
+        const subtitlePath = outputPath.replace(/\.\w+$/, '.vtt');
+        spawnSync('cp', [vttPath, subtitlePath]);
+      }
+      // Clean up temp files
+      try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -175,35 +116,28 @@ function generateSilenceFallback(outputPath, durationSec) {
 }
 
 /**
- * Generate narration audio for all segments using a 3-tier fallback chain:
- *   1. Grok TTS (if xaiKey provided)
+ * Generate narration audio for all segments using a fallback chain:
+ *   1. Kokoro-82M (local, free, GPU accelerated)
  *   2. MeloTTS (if cfAccountId + cfApiToken provided)
- *   3. edge-tts (free)
- *   4. Silence (last resort)
+ *   3. Silence (last resort)
  *
  * Includes silence gaps for cold open (5s) and segment title cards (1.5s each).
  *
  * @param {Array} segments   Script segments with narration text.
  * @param {string} outputDir Directory to write audio files.
  * @param {object} [options] Optional config.
- * @param {string} [options.xaiKey]       xAI API key for Grok TTS.
- * @param {string} [options.ttsVoice]     xAI voice ID (default: 'Sal').
  * @param {string} [options.cfAccountId]  Cloudflare account ID for MeloTTS.
  * @param {string} [options.cfApiToken]   Cloudflare API token for MeloTTS.
  * @returns {Promise<Array<{file: string, duration: number}>>}
  */
 export async function generateNarration(segments, outputDir, options = {}) {
-  const { xaiKey, ttsVoice, cfAccountId, cfApiToken } = options;
-  const hasGrok = !!xaiKey;
+  const { cfAccountId, cfApiToken } = options;
   const hasMelo = !!cfAccountId && !!cfApiToken;
   const audioFiles = [];
 
-  const engines = [];
-  engines.push('edge-tts');
-  if (hasGrok) engines.push('Grok TTS');
+  const engines = ['Kokoro-82M'];
   if (hasMelo) engines.push('MeloTTS');
   console.log(`Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
-  if (hasGrok) console.log(`  Grok TTS available as fallback (cost reduction)`);
 
   // Generate initial silence for cold open (2s) + title card (3s) = 5s
   const introSilenceFile = join(outputDir, 'silence-intro.mp3');
@@ -225,23 +159,18 @@ export async function generateNarration(segments, outputDir, options = {}) {
 
     let success = false;
 
-    // Tier 1: edge-tts (free, includes word-level subtitles)
+    // Tier 1: Kokoro-82M (local, free, GPU accelerated)
     if (!success) {
-      success = generateEdgeTtsSegment(seg.narration, audioFile);
+      success = generateKokoroSegment(seg.narration, audioFile, {
+        emotion: seg.emotion || null,
+        speed: seg.speed || 1.0,
+      });
       if (!success) {
-        console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}, trying next engine`);
+        console.warn(`\n  ⚠ Kokoro failed for segment ${i + 1}, trying next engine`);
       }
     }
 
-    // Tier 2: Grok TTS (premium fallback — 3x more expensive, use sparingly)
-    if (hasGrok && !success) {
-      success = await generateGrokSegment(seg.narration, audioFile, xaiKey, ttsVoice || DEFAULT_VOICE);
-      if (!success) {
-        console.warn(`\n  ⚠ Grok TTS failed for segment ${i + 1}, trying next engine`);
-      }
-    }
-
-    // Tier 3: MeloTTS (deprecated)
+    // Tier 2: MeloTTS (Cloudflare, cheap fallback)
     if (hasMelo && !success) {
       success = await generateMeloSegment(seg.narration, audioFile, cfAccountId, cfApiToken);
       if (!success) {
@@ -249,7 +178,7 @@ export async function generateNarration(segments, outputDir, options = {}) {
       }
     }
 
-    // Tier 4: Silence (last resort)
+    // Tier 3: Silence (last resort)
     if (success) {
       const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
       audioFiles.push({

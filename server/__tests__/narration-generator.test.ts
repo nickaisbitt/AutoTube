@@ -78,50 +78,36 @@ existsSync: mockExistsSync,
       { title: 'Intro', narration: 'Hello world', duration: 5 },
     ];
 
-    it('uses edge-tts by default (free, tier 1)', async () => {
+    it('uses Kokoro-82M by default (local TTS, tier 1)', async () => {
       const segments = [{ title: 'Test', narration: 'Hello world', duration: 5 }];
       await generateNarration(segments, '/tmp/audio');
-      // edge-tts is called since no API key provided
+      // Kokoro Python script should be called
       expect(mockSpawnSync).toHaveBeenCalled();
-      const lastCall = mockSpawnSync.mock.calls[mockSpawnSync.mock.calls.length - 1];
-      expect(lastCall[0]).toBe('edge-tts');
+      const kokoroCall = mockSpawnSync.mock.calls.find(c =>
+        Array.isArray(c[1]) && c[1].some(a => typeof a === 'string' && a.includes('kokoro_generate'))
+      );
+      expect(kokoroCall).toBeTruthy();
     });
 
-    it('still tries edge-tts first even when xaiKey is provided', async () => {
+    it('uses Kokoro-82M first regardless of options', async () => {
       const segments = [{ title: 'Test', narration: 'Hello world', duration: 5 }];
       await generateNarration(segments, '/tmp/audio', { xaiKey: 'test-key', ttsVoice: 'Leo' });
-      // When edge-tts succeeds (mock returns status 0), Grok should NOT be called
-      const edgeTtsCalls = mockSpawnSync.mock.calls.filter(c => c[0] === 'edge-tts');
-      expect(edgeTtsCalls.length).toBeGreaterThanOrEqual(1);
+      // Kokoro is always tier 1
+      const kokoroCalls = mockSpawnSync.mock.calls.filter(c =>
+        Array.isArray(c[1]) && c[1].some(a => a.includes('kokoro_generate'))
+      );
+      expect(kokoroCalls.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('falls back to Grok TTS when edge-tts fails', async () => {
-      // Make edge-tts fail so we test the fallback
+    it('falls back to silence when Kokoro fails and no API providers available', async () => {
+      // Make Kokoro fail (spawnSync returns non-zero)
       mockSpawnSync.mockImplementation((cmd: string, _args: string[]) => {
-        if (cmd === 'edge-tts') return { status: 1, stdout: '' };
+        if (cmd === '/tmp/tts-env/bin/python') return { status: 1, stdout: '' };
+        if (cmd === 'ffmpeg') return { status: 0 };
         return { status: 0 };
       });
-
-      const fetchMock = vi.fn()
-        .mockResolvedValueOnce({
-          ok: true,
-          arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(10)),
-        });
-      vi.stubGlobal('fetch', fetchMock);
-
-      const result = await generateNarration(segments, '/tmp/audio', {
-        xaiKey: 'test-key',
-        ttsVoice: 'Leo',
-      });
-      expect(result.length).toBeGreaterThan(0);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    });
-
-    it('falls back to silence when edge-tts fails and no API providers available', async () => {
-      mockSpawnSync.mockImplementation((cmd: string, _args: string[]) => {
-        if (cmd === 'edge-tts') return { status: 1, stdout: '' };
-        return { status: 0 };
-      });
+      // Make existsSync return true for the silence file
+      mockExistsSync.mockReturnValue(true);
 
       const result = await generateNarration(segments, '/tmp/audio', {});
       expect(result.length).toBeGreaterThan(0);

@@ -8,12 +8,11 @@
 
 import { logger } from '../logger';
 import { browserEngine } from './browserEngine';
-import { grokEngine } from './grokEngine';
 import type { TTSConfig, TTSEngine } from './interface';
 import { kokoroEngine } from './kokoroEngine';
 
-/** Default engine priority order: Kokoro → Grok → Browser */
-const ENGINE_PRIORITY: TTSEngine[] = [kokoroEngine, grokEngine, browserEngine];
+/** Default engine priority order: Kokoro → Browser */
+const ENGINE_PRIORITY: TTSEngine[] = [kokoroEngine, browserEngine];
 
 /**
  * Get the ordered list of engines to try, starting with the preferred engine.
@@ -35,7 +34,6 @@ function getOrderedEngines(config: TTSConfig): TTSEngine[] {
 function buildEngineOptions(config: TTSConfig, signal?: AbortSignal) {
   return {
     signal,
-    apiKey: config.xaiApiKey,
     serverUrl: config.kokoroServerUrl,
   };
 }

@@ -26,7 +26,7 @@ vi.mock('../../../utils/speech', () => ({
   pickPreferredVoice: vi.fn(() => ({ name: 'TestVoice', lang: 'en-US' })),
 }));
 
-// We need to mock fetch for grok/melo engines
+// We need to mock fetch for melo engine
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:mock-url') });
@@ -41,20 +41,19 @@ const textArb = fc.string({ minLength: 1, maxLength: 200 }).filter(
 );
 
 /** Arbitrary for a valid TTSConfig with a specific engine preference */
-const ttsConfigArb = (engine: 'grok' | 'melo' | 'browser'): fc.Arbitrary<TTSConfig> => {
+const ttsConfigArb = (engine: 'kokoro' | 'browser'): fc.Arbitrary<TTSConfig> => {
   return fc.record({
     engine: fc.constant(engine),
-    xaiApiKey: fc.constant('test-xai-key'),
     cloudflareAccountId: fc.constant('test-cf-account'),
     cloudflareApiToken: fc.constant('test-cf-token'),
-    voice: fc.constantFrom('Eve', 'Sal', 'default'),
+    voice: fc.constantFrom('Eve', 'default'),
+    kokoroServerUrl: fc.constant('http://localhost:59123'),
   });
 };
 
 /** Arbitrary for any valid TTSConfig */
 const anyTtsConfigArb: fc.Arbitrary<TTSConfig> = fc.oneof(
-  ttsConfigArb('grok'),
-  ttsConfigArb('melo'),
+  ttsConfigArb('kokoro'),
   ttsConfigArb('browser'),
 );
 
@@ -82,16 +81,10 @@ describe('Property 6: TTS engine delegation', () => {
         // Create mock engines — all succeed
         const mockEngines: TTSEngine[] = [
           {
-            name: 'grok',
-            voices: [{ id: 'Sal', description: 'Smooth' }],
-            generate: vi.fn().mockResolvedValue('blob:grok-audio-url'),
-            isAvailable: vi.fn((c: TTSConfig) => !!c.xaiApiKey),
-          },
-          {
-            name: 'melo',
-            voices: [{ id: 'default', description: 'MeloTTS default' }],
-            generate: vi.fn().mockResolvedValue('blob:melo-audio-url'),
-            isAvailable: vi.fn((c: TTSConfig) => !!c.cloudflareAccountId && !!c.cloudflareApiToken),
+            name: 'kokoro',
+            voices: [{ id: 'Eve', description: 'British female' }],
+            generate: vi.fn().mockResolvedValue('blob:kokoro-audio-url'),
+            isAvailable: vi.fn((c: TTSConfig) => !!c.kokoroServerUrl),
           },
           {
             name: 'browser',
@@ -193,16 +186,10 @@ describe('Property 7: TTS engine fallback on failure', () => {
           // Create mock engines where the preferred one fails
           const mockEngines: TTSEngine[] = [
             {
-              name: 'grok',
-              voices: [{ id: 'Sal', description: 'Smooth' }],
-              generate: vi.fn().mockResolvedValue('blob:grok-audio-url'),
-              isAvailable: vi.fn((c: TTSConfig) => !!c.xaiApiKey),
-            },
-            {
-              name: 'melo',
-              voices: [{ id: 'default', description: 'MeloTTS default' }],
-              generate: vi.fn().mockResolvedValue('blob:melo-audio-url'),
-              isAvailable: vi.fn((c: TTSConfig) => !!c.cloudflareAccountId && !!c.cloudflareApiToken),
+              name: 'kokoro',
+              voices: [{ id: 'Eve', description: 'British female' }],
+              generate: vi.fn().mockResolvedValue('blob:kokoro-audio-url'),
+              isAvailable: vi.fn((c: TTSConfig) => !!c.kokoroServerUrl),
             },
             {
               name: 'browser',

@@ -115,7 +115,6 @@ describe('Feature: video-quality-max, Property 1: TTS Registry Fallback Guarante
         const config: TTSConfig = {
           engine: 'kokoro',
           kokoroServerUrl: 'http://localhost:8080',
-          xaiApiKey: 'test-key',
           cloudflareAccountId: 'test-account',
           cloudflareApiToken: 'test-token',
         };
@@ -162,7 +161,6 @@ describe('Feature: video-quality-max, Property 1: TTS Registry Fallback Guarante
         const config: TTSConfig = {
           engine: 'kokoro',
           kokoroServerUrl: 'http://localhost:8080',
-          xaiApiKey: 'test-key',
           cloudflareAccountId: 'test-account',
           cloudflareApiToken: 'test-token',
         };

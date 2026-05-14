@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { X, ExternalLink, Settings, AlertTriangle, CheckCircle, AlertCircle, Mic2, Check, XCircle } from 'lucide-react';
 import { useVideoProject } from '../store';
 import { logger } from '../services/logger';
-import { GROK_VOICES } from '../services/tts';
 import AssetTester from './AssetTester';
 
 interface SettingsModalProps {
@@ -15,14 +14,12 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [orVal, setOrVal] = useState(config.openRouterKey);
   const [sourceTypeVal, setSourceTypeVal] = useState(config.sourceType);
   const [flickrVal, setFlickrVal] = useState(config.flickrKey || '');
-  const [ttsVoiceVal, setTtsVoiceVal] = useState(config.ttsVoice || 'Sal');
   const [showAssetTester, setShowAssetTester] = useState(false);
   const [status, setStatus] = useState<Record<string, 'idle' | 'testing' | 'valid' | 'invalid'>>({
     openRouter: 'idle',
   });
 
   // TTS engine availability from env vars
-  const hasGrokKey = useMemo(() => !!(import.meta.env.VITE_XAI_KEY), []);
   const hasMeloKeys = useMemo(() => !!(import.meta.env.VITE_CF_ACCOUNT_ID && import.meta.env.VITE_CF_API_TOKEN), []);
 
   useEffect(() => {
@@ -30,7 +27,6 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setOrVal(config.openRouterKey);
       setSourceTypeVal(config.sourceType);
       setFlickrVal(config.flickrKey || '');
-      setTtsVoiceVal(config.ttsVoice || 'Sal');
     }
   }, [isOpen, config]);
 
@@ -201,58 +197,33 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="space-y-1.5">
                 <label className="text-[11px] font-mono font-medium text-surface-400">TTS Fallback Chain</label>
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-[11px] font-mono">
-                    {hasGrokKey ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
-                    ) : (
-                      <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
-                    )}
-                    <span className={hasGrokKey ? 'text-emerald-400' : 'text-surface-500'}>
-                      1. Grok TTS — High quality
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 text-[11px] font-mono">
-                    {hasMeloKeys ? (
-                      <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
-                    ) : (
-                      <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
-                    )}
-                    <span className={hasMeloKeys ? 'text-emerald-400' : 'text-surface-500'}>
-                      2. MeloTTS (Cloudflare) — Cheap fallback
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 text-[11px] font-mono">
-                    <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
-                    <span className="text-emerald-400">
-                      3. Browser TTS — Free fallback
-                    </span>
-                  </div>
+                   <div className="flex items-center gap-2 text-[11px] font-mono">
+                     <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                     <span className="text-emerald-400">
+                       1. Kokoro-82M — Local, GPU accelerated (primary)
+                     </span>
+                   </div>
+                   <div className="flex items-center gap-2 text-[11px] font-mono">
+                     {hasMeloKeys ? (
+                       <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                     ) : (
+                       <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                     )}
+                     <span className={hasMeloKeys ? 'text-emerald-400' : 'text-surface-500'}>
+                       2. MeloTTS (Cloudflare) — Cheap fallback
+                     </span>
+                   </div>
+                   <div className="flex items-center gap-2 text-[11px] font-mono">
+                     <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                     <span className="text-emerald-400">
+                       3. Browser TTS — Free fallback
+                     </span>
+                   </div>
                 </div>
               </div>
 
-              {/* Voice Selector for Grok */}
-              {hasGrokKey && (
-                <div className="space-y-2">
-                  <label htmlFor="ttsVoice" className="text-[11px] font-mono font-medium text-surface-400">Grok Voice</label>
-                  <select
-                    id="ttsVoice"
-                    name="ttsVoice"
-                    value={ttsVoiceVal}
-                    onChange={(e) => setTtsVoiceVal(e.target.value)}
-                    className="w-full border-2 border-surface-700 bg-surface-800 px-3 py-2 text-xs font-mono text-white focus:border-brand-500 focus:outline-none"
-                    data-testid="tts-voice-select"
-                  >
-                    {GROK_VOICES.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.id} — {v.description}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
               <p className="text-[10px] font-mono text-surface-500">
-                API keys are configured in <span className="text-surface-400">.env.local</span>. The system auto-detects available engines and falls back through the chain.
+                Server-side renders use Kokoro-82M (local) → MeloTTS. Browser renders use built-in speech synthesis. All free, no API costs.
               </p>
             </div>
           </div>

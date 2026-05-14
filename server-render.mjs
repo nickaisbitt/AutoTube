@@ -2110,87 +2110,54 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 }
 
-// ── Generate narration audio with edge-tts or Grok TTS ─────────────────────
-const XAI_TTS_ENDPOINT = 'https://api.x.ai/v1/tts';
+// ── Generate narration audio with Kokoro-82M ──────────────────────────────
 
-async function generateGrokSegment(text, outputPath, xaiKey, voice = 'Sal') {
-  try {
-    const response = await fetch(XAI_TTS_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${xaiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        text,
-        voice_id: voice,
-        output_format: { codec: 'mp3', sample_rate: 44100, bit_rate: 128000 },
-        language: 'en',
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      console.warn(`  ⚠ Grok TTS API returned ${response.status}: ${errText.substring(0, 100)}`);
-      return false;
+const KOKORO_SCRIPT = join(__dirname, 'server-render', 'kokoro_generate.py');
+const KOKORO_PYTHON = '/tmp/tts-env/bin/python';
+const KOKORO_VOICE = 'af_heart';
+
+const EMOTION_SPEED = {
+  calm: 0.8, neutral: 1.0, excited: 1.2, urgent: 1.3, serious: 0.9, sad: 0.85, angry: 1.15,
+};
+
+async function generateKokoroSegment(text, outputPath, options = {}) {
+  const tmpDir = join(__dirname, '..', 'tmp', 'kokoro', String(Date.now()));
+  mkdirSync(tmpDir, { recursive: true });
+
+  const emotion = options.emotion || null;
+  const speed = emotion && EMOTION_SPEED[emotion] ? EMOTION_SPEED[emotion] : (options.speed || 1.0);
+
+  const batchInput = join(tmpDir, 'batch.json');
+  writeFileSync(batchInput, JSON.stringify({
+    segments: [{ id: 'current', text, speed }],
+    voice: KOKORO_VOICE,
+    output_dir: tmpDir,
+  }));
+
+  const env = { ...process.env, PYTORCH_ENABLE_MPS_FALLBACK: '1' };
+  const result = spawnSync(KOKORO_PYTHON, [KOKORO_SCRIPT, batchInput], {
+    encoding: 'utf8', timeout: 300000, env,
+  });
+
+  const wavPath = join(tmpDir, 'current.wav');
+  const vttPath = join(tmpDir, 'current.vtt');
+  if (result.status === 0 && existsSync(wavPath)) {
+    const convertResult = spawnSync('ffmpeg', [
+      '-y', '-i', wavPath, '-c:a', 'libmp3lame', '-b:a', '128k', outputPath,
+    ], { encoding: 'utf8', timeout: 30000 });
+
+    if (convertResult.status === 0 && existsSync(outputPath)) {
+      // Copy aligned subtitles from Kokoro's output
+      if (existsSync(vttPath)) {
+        const subtitlePath = outputPath.replace(/\.\w+$/, '.vtt');
+        spawnSync('cp', [vttPath, subtitlePath]);
+      }
+      try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      return true;
     }
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length === 0) return false;
-    writeFileSync(outputPath, buffer);
-    return existsSync(outputPath);
-  } catch (err) {
-    console.warn(`  ⚠ Grok TTS request failed: ${err.message}`);
-    return false;
   }
-}
-
-/**
- * Generate a segment using Coqui XTTS v2 (high quality, free, but slow).
- * Calls the Python wrapper script which loads the model once and generates all segments.
- * Falls back gracefully if XTTS is not installed.
- */
-const XTTS_SCRIPT = join(__dirname, 'server-render', 'xtts_generate.py');
-let xttsInitialized = false;
-
-async function generateXttsSegment(text, outputPath, audioDir) {
-  try {
-    const { existsSync } = await import('fs');
-    // Check if Python 3.10 and the script exist
-    const checkResult = spawnSync('python3.10', ['-c', 'from TTS.api import TTS; print("ok")'], { timeout: 5000, encoding: 'utf8' });
-    if (checkResult.status !== 0) {
-      return false; // XTTS not available
-    }
-
-    // Create input JSON for the batch wrapper
-    const batchInput = join(audioDir, '_xtts_batch.json');
-    const segments = [{ id: 'current', text }];
-    writeFileSync(batchInput, JSON.stringify({ segments, language: 'en' }));
-
-    const result = spawnSync('python3.10', [
-      XTTS_SCRIPT, batchInput, audioDir
-    ], { timeout: 600000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-
-    if (result.status !== 0) {
-      console.warn(`  ⚠ XTTS v2 exited with code ${result.status}`);
-      return false;
-    }
-
-    // Check if the output file was created
-    const outWav = join(audioDir, 'current.wav');
-    if (existsSync(outWav)) {
-      // Convert WAV to MP3 for the pipeline
-      const convertResult = spawnSync('ffmpeg', [
-        '-y', '-i', outWav,
-        '-c:a', 'libmp3lame', '-b:a', '128k',
-        outputPath,
-      ], { encoding: 'utf8', timeout: 30000 });
-      return convertResult.status === 0 && existsSync(outputPath);
-    }
-    return false;
-  } catch (err) {
-    console.warn(`  ⚠ XTTS v2 error: ${err.message}`);
-    return false;
-  }
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  return false;
 }
 
 async function generateMeloSegment(text, outputPath, accountId, apiToken) {
@@ -2233,19 +2200,15 @@ async function generateMeloSegment(text, outputPath, accountId, apiToken) {
 }
 
 async function generateNarration(segments, outputDir, options = {}) {
-  const { xaiKey, ttsVoice, cfAccountId, cfApiToken, edgeVoice } = options;
-  const useGrok = !!xaiKey;
+  const { cfAccountId, cfApiToken } = options;
   const useMelo = !!cfAccountId && !!cfApiToken;
   const audioFiles = [];
   const subtitleFiles = {};
 
-  const engines = [];
-  engines.push('edge-tts');
-  if (useGrok) engines.push('Grok TTS');
+  const engines = ['Kokoro-82M'];
   if (useMelo) engines.push('MeloTTS');
   log('info', `Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
-  if (useGrok) log('info', `  Grok TTS available as fallback (cost reduction)`);
-  log('info', `  edge-tts voice: ${edgeVoice || 'en-US-GuyNeural'} (free, default)`);
+  log('info', `  Kokoro voice: ${KOKORO_VOICE || 'af_heart'} (local, GPU accelerated)`);
 
   // Generate initial silence for cold open (2s) + title card (3s) = 5s
   const introSilenceFile = join(outputDir, 'silence-intro.mp3');
@@ -2270,43 +2233,31 @@ async function generateNarration(segments, outputDir, options = {}) {
     
     let success = false;
 
-    // Tier 1: edge-tts (free, instant, includes word-level subtitles)
+    // Tier 1: Kokoro-82M (local, GPU accelerated, RTF ~0.25)
     if (!success) {
-      const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
-      const result = spawnSync('edge-tts', [
-        '--voice', edgeVoice || 'en-US-GuyNeural',
-        '--rate', '+10%',
-        '--text', seg.narration,
-        '--write-media', audioFile,
-        '--write-subtitles', subtitleFile,
-      ], { encoding: 'utf8', timeout: 30000 });
-      success = result.status === 0 && existsSync(audioFile);
-      if (success && existsSync(subtitleFile)) {
-        subtitleFiles[i] = subtitleFile;
-      }
-      if (!success) {
-        console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}, trying next engine`);
+      success = await generateKokoroSegment(seg.narration, audioFile, {
+        emotion: seg.emotion || null,
+        speed: seg.speed || 1.0,
+      });
+      if (success) {
+        const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
+        if (existsSync(subtitleFile)) {
+          subtitleFiles[i] = subtitleFile;
+        }
+      } else {
+        console.warn(`\n  ⚠ Kokoro failed for segment ${i + 1}, trying next engine`);
       }
     }
 
-    // Tier 2: XTTS v2 (Coqui, high quality, free, but slow — ~50s load + ~5x real-time)
-    // Only used when edge-tts fails and xaiKey is NOT available (to avoid Grok costs)
-    if (!success && !useGrok) {
-      success = await generateXttsSegment(seg.narration, audioFile, audioDir);
+    // Tier 2: MeloTTS (Cloudflare, cheap fallback)
+    if (useMelo && !success) {
+      success = await generateMeloSegment(seg.narration, audioFile, cfAccountId, cfApiToken);
       if (!success) {
-        console.warn(`\n  ⚠ XTTS v2 failed for segment ${i + 1}`);
+        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying silence`);
       }
     }
 
-    // Tier 3: Grok TTS (premium fallback — 3x more expensive, use sparingly)
-    if (useGrok && !success) {
-      success = await generateGrokSegment(seg.narration, audioFile, xaiKey, ttsVoice || 'Leo');
-      if (!success) {
-        console.warn(`\n  ⚠ Grok TTS failed for segment ${i + 1}, trying next engine`);
-      }
-    }
-
-    // Tier 4: Silence (last resort)
+    // Tier 3: Silence (last resort)
     if (success) {
       audioFiles.push({ file: audioFile, duration: seg.duration, subtitleFile: subtitleFiles[i] || null });
     } else {
@@ -2324,41 +2275,25 @@ async function generateNarration(segments, outputDir, options = {}) {
 
 // ── TTS Voice presets per engine ──
 const TTS_VOICES = {
-  grok: ['Leo', 'Sarah', 'Marcus', 'Aria'],
   melotts: ['default'],
-  edgetts: ['en-US-GuyNeural', 'en-US-JennyNeural', 'en-GB-SoniaNeural', 'en-AU-NatashaNeural'],
+  kokoro: ['af_heart', 'af_bella', 'af_nicole', 'bf_emma', 'am_michael'],
 };
-
-function validateApiKey(key, name) {
-  if (!key || typeof key !== 'string' || key.length < 10) {
-    console.warn(`Invalid or missing ${name} API key`);
-    return false;
-  }
-  return true;
-}
 
 // ── TTS provider validation ────────────────────────────────────────────────
 function validateTTSConfiguration() {
-  const xaiKey = process.env.XAI_API_KEY || process.env.VITE_XAI_KEY || '';
   const cfAccountId = process.env.CF_ACCOUNT_ID || process.env.VITE_CF_ACCOUNT_ID || '';
   const cfApiToken = process.env.CF_API_TOKEN || process.env.VITE_CF_API_TOKEN || '';
 
-  const grokAvailable = validateApiKey(xaiKey, 'Grok/XAI');
-  const meloAvailable = validateApiKey(cfAccountId, 'Cloudflare Account ID') && validateApiKey(cfApiToken, 'Cloudflare API Token');
+  const meloAvailable = !!cfAccountId && !!cfApiToken;
   const edgeTtsAvailable = spawnSync('which', ['edge-tts'], { encoding: 'utf-8' }).status === 0;
 
-  log('info', `TTS providers: Grok=${grokAvailable ? 'YES' : 'NO'}, MeloTTS=${meloAvailable ? 'YES' : 'NO'}, edge-tts=${edgeTtsAvailable ? 'YES' : 'NO'}`);
+  log('info', `TTS providers: MeloTTS=${meloAvailable ? 'YES' : 'NO'}, Kokoro-82M=YES (primary), edge-tts subtitles=${edgeTtsAvailable ? 'YES' : 'NO'}`);
 
-  if (!grokAvailable && !meloAvailable && !edgeTtsAvailable) {
-    console.warn('⚠ WARNING: No TTS providers available. Video will be rendered without narration (video-only).');
-    console.warn('   To add narration: Configure XAI_API_KEY for Grok TTS, or install edge-tts (pip install edge-tts).');
+  if (!meloAvailable) {
+    console.warn('⚠ MeloTTS not configured (optional). Set CF_ACCOUNT_ID and CF_API_TOKEN for MeloTTS fallback.');
   }
 
-  if (!grokAvailable && !meloAvailable && edgeTtsAvailable) {
-    console.warn('⚠ WARNING: No API-key TTS providers configured (Grok/MeloTTS). Falling back to edge-tts only.');
-  }
-
-  return { grokAvailable, meloAvailable, edgeTtsAvailable };
+  return { meloAvailable, edgeTtsAvailable };
 }
 
 // ── Concatenate audio files ────────────────────────────────────────────────
@@ -2634,16 +2569,14 @@ async function render() {
   // This allows word-level VTT timestamps to be available for karaoke caption sync.
   const audioDir = join(dirname(OUTPUT_FILE), `narration-audio-${Date.now()}`);
   mkdirSync(audioDir, { recursive: true });
-  const xaiKey = process.env.XAI_API_KEY || process.env.VITE_XAI_KEY || '';
-  const ttsVoice = project.exportSettings?.ttsVoice || process.env.XAI_TTS_VOICE || 'Leo';
   const cfAccountId = process.env.CF_ACCOUNT_ID || process.env.VITE_CF_ACCOUNT_ID || '';
   const cfApiToken = process.env.CF_API_TOKEN || process.env.VITE_CF_API_TOKEN || '';
   const edgeVoice = project.exportSettings?.edgeTtsVoice || 'en-US-GuyNeural';
-  log('info', `\n🔑 TTS keys: Grok=${xaiKey ? 'YES (' + xaiKey.substring(0, 8) + '...)' : 'NO'}, MeloTTS=${cfAccountId && cfApiToken ? 'YES' : 'NO'}`);
+  log('info', `\n🎙️ TTS providers: Kokoro-82M (voice=${edgeVoice}), MeloTTS=${cfAccountId && cfApiToken ? 'YES' : 'NO'}`);
 
   let audioFiles = [];
   try {
-    audioFiles = await generateNarration(project.script, audioDir, { xaiKey, ttsVoice, cfAccountId, cfApiToken, edgeVoice });
+    audioFiles = await generateNarration(project.script, audioDir, { cfAccountId, cfApiToken, edgeVoice });
 
     // Load VTT word timestamps into cache for karaoke sync
     for (const af of audioFiles) {

@@ -1,13 +1,13 @@
 /**
  * Unified TTS engine interface and configuration types.
  *
- * All TTS engines (Grok, Melo, browser SpeechSynthesis) implement the
+ * All TTS engines (Kokoro, browser SpeechSynthesis) implement the
  * TTSEngine interface. The registry uses TTSConfig to determine which
  * engine to invoke and what credentials to pass.
  */
 
 export interface TTSEngine {
-  /** Human-readable engine name (e.g. 'grok', 'melo', 'browser') */
+  /** Human-readable engine name (e.g. 'kokoro', 'browser') */
   readonly name: string;
 
   /** Available voices for this engine */
@@ -22,7 +22,6 @@ export interface TTSEngine {
     voice: string,
     options?: {
       signal?: AbortSignal;
-      apiKey?: string;
       serverUrl?: string;
       cloudflareAccountId?: string;
       cloudflareApiToken?: string;
@@ -35,10 +34,7 @@ export interface TTSEngine {
 
 export interface TTSConfig {
   /** Preferred engine to use */
-  engine: 'kokoro' | 'grok' | 'melo' | 'browser';
-
-  /** xAI API key for Grok TTS */
-  xaiApiKey?: string;
+  engine: 'kokoro' | 'browser';
 
   /** Cloudflare account ID for MeloTTS */
   cloudflareAccountId?: string;

@@ -233,7 +233,6 @@ export default function NarrationStep({ project, status, progress, message, onGe
       {/* TTS Fallback Chain Status */}
       {(() => {
         const hasKokoro = !!(import.meta.env.VITE_KOKORO_SERVER_URL);
-        const hasGrok = !!(import.meta.env.VITE_XAI_KEY);
         const hasMelo = !!(import.meta.env.VITE_CF_ACCOUNT_ID && import.meta.env.VITE_CF_API_TOKEN);
         return (
           <div className="flex items-center gap-4 border-2 border-surface-700 bg-surface-800 px-4 py-3">
@@ -243,16 +242,6 @@ export default function NarrationStep({ project, status, progress, message, onGe
               <span className={`flex items-center gap-1 ${hasKokoro ? 'text-emerald-400' : 'text-surface-600'}`}>
                 {hasKokoro ? <Check className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
                 Kokoro
-              </span>
-              <span className="text-surface-600">→</span>
-              <span className={`flex items-center gap-1 ${hasGrok ? 'text-emerald-400' : 'text-surface-600'}`}>
-                {hasGrok ? <Check className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                Grok
-              </span>
-              <span className="text-surface-600">→</span>
-              <span className={`flex items-center gap-1 ${hasMelo ? 'text-emerald-400' : 'text-surface-600'}`}>
-                {hasMelo ? <Check className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                MeloTTS
               </span>
               <span className="text-surface-600">→</span>
               <span className="flex items-center gap-1 text-emerald-400">

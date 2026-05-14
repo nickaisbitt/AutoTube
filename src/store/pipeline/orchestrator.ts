@@ -33,7 +33,6 @@ import { runAIEditPass } from '../../services/aiEditor';
 import { extractHookLine } from '../../services/seoTitles';
 import { logger } from '../../services/logger';
 import { runBlindReview } from '../../services/blindReview';
-import { generateGrokTts } from '../../services/tts';
 import { CURRENT_PROJECT_VERSION } from '../../services/projectMigrations';
 
 // LR-1 fix: use crypto.randomUUID() for guaranteed uniqueness
@@ -326,27 +325,16 @@ export async function executeGenerateNarration(
   setProcessingProgress(6);
   setProcessingMessage('Checking TTS options...');
 
-  const xaiKey = import.meta.env.VITE_XAI_KEY || '';
-
-  const hasGrok = !!xaiKey && !xaiKey.includes('your-xai-key-here') && xaiKey.length > 10;
-
-  if (!hasGrok && import.meta.env.VITE_XAI_KEY?.includes('your-xai-key-here')) {
-    logger.warn('Store', 'Grok TTS API key not configured - using placeholder value');
-  }
-
   const supported = hasSpeechSupport();
   const voices = supported ? await loadSpeechVoices() : [];
   const selectedVoice = pickPreferredVoice(voices);
 
-  const engines: string[] = [];
-  if (hasGrok) engines.push('Grok TTS');
-  engines.push('Browser TTS');
+  const engines: string[] = ['Browser TTS'];
   logger.info('Store', `TTS fallback chain: ${engines.join(' → ')}`);
   setProcessingMessage(`TTS engines: ${engines.join(' → ')}`);
 
   const narration: NarrationClip[] = [];
   const segmentCount = activeProject.script.length;
-  const CONCURRENCY_LIMIT = 3;
 
   type TtsResult = {
     audioUrl?: string;
@@ -366,99 +354,41 @@ export async function executeGenerateNarration(
     let engineUsed = 'browser';
     let status: NarrationClip['status'] = 'ready';
 
-    // Tier 1: Grok TTS
-    if (hasGrok) {
-      const grokUrl = await generateGrokTts(segment.narration, xaiKey, {
-        voice: appConfig.ttsVoice,
-        signal,
-      });
-      if (grokUrl) {
-        audioUrl = grokUrl;
-        voiceUsed = `Grok TTS (${appConfig.ttsVoice || 'Sal'})`;
-        clipMode = 'exported_file';
-        engineUsed = 'grok';
-
-        try {
-          const measured = await measureAudioDuration(grokUrl);
-          if (measured && measured > 0) {
-            estimatedDuration = Math.ceil(measured);
-          }
-        } catch { /* Keep estimated duration */ }
-      } else {
-        logger.warn('Store', `Grok TTS failed for segment "${segment.title}", trying next engine`);
-      }
+    // Browser TTS (free)
+    if (!supported || !selectedVoice) {
+      status = 'unavailable';
     }
-
-    // Tier 2: Browser TTS (free fallback)
-    if (!audioUrl) {
-      if (!supported || !selectedVoice) {
-        status = 'unavailable';
-      }
-      engineUsed = 'browser';
-    }
+    engineUsed = 'browser';
 
     return { audioUrl, voiceUsed, clipMode, engineUsed, estimatedDuration, status };
   }
 
-  const useParallel = hasGrok;
   const ttsResults: TtsResult[] = [];
 
-  if (useParallel) {
-    for (let batchStart = 0; batchStart < segmentCount; batchStart += CONCURRENCY_LIMIT) {
-      if (signal.aborted) {
-        logger.info('Store', 'Narration generation cancelled by user');
-        return null;
-      }
-
-      const batchEnd = Math.min(batchStart + CONCURRENCY_LIMIT, segmentCount);
-      const batchSegments = activeProject.script.slice(batchStart, batchEnd);
-
-      setProcessingMessage(
-        `Generating TTS for segments ${batchStart + 1}\u2013${batchEnd} of ${segmentCount}...`,
-      );
-
-      const batchResults = await Promise.all(
-        batchSegments.map((seg) =>
-          generateTtsForSegment(seg).catch((): TtsResult => ({
-            audioUrl: undefined,
-            voiceUsed: selectedVoice?.name || 'No browser voice available',
-            clipMode: 'live_browser',
-            engineUsed: 'browser',
-            estimatedDuration: Math.max(6, Math.ceil((seg.narration.split(/\s+/).length / 150) * 60)),
-            status: !supported || !selectedVoice ? 'unavailable' : 'ready',
-          })),
-        ),
-      );
-
-      ttsResults.push(...batchResults);
-      setProcessingProgress(Math.round((batchEnd / segmentCount) * 100));
+  // Sequential TTS generation (browser speech synthesis)
+  for (let i = 0; i < segmentCount; i += 1) {
+    if (signal.aborted) {
+      logger.info('Store', 'Narration generation cancelled by user');
+      return null;
     }
-  } else {
-    for (let i = 0; i < segmentCount; i += 1) {
-      if (signal.aborted) {
-        logger.info('Store', 'Narration generation cancelled by user');
-        return null;
-      }
 
-      const segment = activeProject.script[i];
-      setProcessingProgress(Math.round((i / segmentCount) * 100));
-      setProcessingMessage(`Preparing voice for \u201c${segment.title}\u201d...`);
+    const segment = activeProject.script[i];
+    setProcessingProgress(Math.round((i / segmentCount) * 100));
+    setProcessingMessage(`Preparing voice for "${segment.title}"...`);
 
-      const wordCount = segment.narration.split(/\s+/).length;
-      const estimatedDuration = Math.max(6, Math.ceil((wordCount / 150) * 60));
+    const result = await generateTtsForSegment(segment).catch((): TtsResult => ({
+      audioUrl: undefined,
+      voiceUsed: selectedVoice?.name || 'No browser voice available',
+      clipMode: 'live_browser',
+      engineUsed: 'browser',
+      estimatedDuration: Math.max(6, Math.ceil((segment.narration.split(/\s+/).length / 150) * 60)),
+      status: !supported || !selectedVoice ? 'unavailable' : 'ready',
+    }));
 
-      ttsResults.push({
-        audioUrl: undefined,
-        voiceUsed: selectedVoice?.name || 'No browser voice available',
-        clipMode: 'live_browser',
-        engineUsed: 'browser',
-        estimatedDuration,
-        status: !supported || !selectedVoice ? 'unavailable' : 'ready',
-      });
+    ttsResults.push(result);
 
-      const delayMs = Math.max(50, Math.min(200, wordCount * 0.5));
-      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
-    }
+    const delayMs = Math.max(50, Math.min(200, segment.narration.split(/\s+/).length * 0.5));
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
   }
 
   // Build narration clips from results

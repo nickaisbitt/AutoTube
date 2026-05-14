@@ -47,10 +47,11 @@ export function generateSilence(outputPath, durationSec) {
 /**
  * Generate narration audio for a single segment using Kokoro-82M (local TTS).
  * Falls back gracefully if the model is not installed.
+ * Pads audio with silence to match targetDuration so the video timeline stays consistent.
  *
- * @param {string} text       Narration text.
- * @param {string} outputPath Path to write the MP3 file.
- * @param {object} [options]  Optional { speed, voice }.
+ * @param {string} text           Narration text.
+ * @param {string} outputPath     Path to write the MP3 file.
+ * @param {object} [options]      Optional { speed, voice, targetDuration }.
  * @returns {boolean}
  */
 function generateKokoroSegment(text, outputPath, options = {}) {
@@ -61,6 +62,7 @@ function generateKokoroSegment(text, outputPath, options = {}) {
   const emotion = options.emotion || null;
   const speed = emotion && EMOTION_SPEED[emotion] ? EMOTION_SPEED[emotion] : (options.speed || 1.0);
   const voice = options.voice || DEFAULT_VOICE;
+  const targetDuration = options.targetDuration || null;
 
   // Create batch JSON
   const batchInput = join(tmpDir, 'batch.json');
@@ -81,12 +83,17 @@ function generateKokoroSegment(text, outputPath, options = {}) {
   const wavPath = join(tmpDir, 'current.wav');
   const vttPath = join(tmpDir, 'current.vtt');
   if (result.status === 0 && existsSync(wavPath)) {
-    const convertResult = spawnSync('ffmpeg', [
-      '-y', '-i', wavPath, '-c:a', 'libmp3lame', '-b:a', '128k', outputPath,
-    ], { encoding: 'utf8', timeout: 30000 });
+    // Convert WAV to MP3, padding with silence to match target duration
+    // so the video timeline stays consistent with seg.duration
+    const ffmpegArgs = ['-y', '-i', wavPath];
+    if (targetDuration) {
+      ffmpegArgs.push('-af', `apad=whole_dur=${targetDuration}`);
+    }
+    ffmpegArgs.push('-c:a', 'libmp3lame', '-b:a', '128k', outputPath);
+    const convertResult = spawnSync('ffmpeg', ffmpegArgs, { encoding: 'utf8', timeout: 30000 });
 
     if (convertResult.status === 0 && existsSync(outputPath)) {
-      // Copy aligned subtitles from Kokoro's output
+      // Copy aligned subtitles from Kokoro's output (VTT timestamps stay as-is)
       if (existsSync(vttPath)) {
         const subtitlePath = outputPath.replace(/\.\w+$/, '.vtt');
         spawnSync('cp', [vttPath, subtitlePath]);
@@ -164,6 +171,7 @@ export async function generateNarration(segments, outputDir, options = {}) {
       success = generateKokoroSegment(seg.narration, audioFile, {
         emotion: seg.emotion || null,
         speed: seg.speed || 1.0,
+        targetDuration: seg.duration,
       });
       if (!success) {
         console.warn(`\n  ⚠ Kokoro failed for segment ${i + 1}, trying next engine`);

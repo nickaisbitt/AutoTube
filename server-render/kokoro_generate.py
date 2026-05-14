@@ -25,36 +25,24 @@ def progress(msg):
     print(f"PROGRESS:{msg}", flush=True)
 
 
-def text_to_words(text):
-    """Split text into words with their character positions."""
-    words = []
-    i = 0
-    for part in text.split(' '):
-        if part:
-            words.append({'text': part + ' ', 'chars': len(part) + 1, 'start': i})
-            i += len(part) + 1
-        else:
-            words.append({'text': ' ', 'chars': 1, 'start': i})
-            i += 1
-    if words and words[-1]['text'].endswith(' '):
-        words[-1]['chars'] -= 1
-        words[-1]['text'] = words[-1]['text'].rstrip()
-    return words
+def generate_vtt_from_tokens(token_lists, audio_durations):
+    """Generate VTT with word-level timing from Kokoro's MToken timestamps.
 
-
-def generate_vtt(words, total_duration):
-    """Generate VTT with word-level timing from Kokoro audio duration."""
-    total_chars = sum(w['chars'] for w in words) if words else 1
+    Args:
+        token_lists: list of token lists, one per chunk
+        audio_durations: list of audio durations per chunk in seconds
+    """
     lines = ['WEBVTT\n\n']
-    t = 0.0
-    for w in words:
-        if not w['text'].strip():
-            continue
-        word_dur = (w['chars'] / total_chars) * total_duration
-        start = t
-        end = t + word_dur
-        lines.append(f"{start:.3f} --> {end:.3f}\n{w['text']}\n")
-        t = end
+    offset = 0.0
+    for tokens, dur in zip(token_lists, audio_durations):
+        for tok in tokens:
+            # Skip punctuation-only tokens
+            if not tok.text.strip() or all(c in '.,!?;:' for c in tok.text):
+                continue
+            start = offset + tok.start_ts
+            end = offset + tok.end_ts
+            lines.append(f"{start:.3f} --> {end:.3f}\n{tok.text}\n")
+        offset += dur
     return ''.join(lines)
 
 
@@ -100,12 +88,16 @@ def main():
         try:
             gen = pipeline(text, voice=voice, speed=seg_speed)
             audios = []
-            all_text = '' 
-            for gs, ps, audio in gen:
+            token_lists = []
+            audio_durations = []
+            for result in gen:
+                audio = result.output.audio
+                tokens = result.tokens
                 if audio is not None and len(audio) > 0:
                     audios.append(audio)
-                if gs:
-                    all_text += gs + ' '
+                    audio_durations.append(len(audio) / 24000)
+                if tokens:
+                    token_lists.append(tokens)
 
             if not audios:
                 progress(f"Segment {i+1} FAILED: No audio generated")
@@ -117,9 +109,8 @@ def main():
             import soundfile as sf
             sf.write(out_path, combined, 24000)
 
-            # Generate aligned VTT subtitles from Kokoro's actual audio duration
-            words = text_to_words(text.strip())
-            vtt_content = generate_vtt(words, total_duration)
+            # Generate VTT from Kokoro's real word-level timestamps
+            vtt_content = generate_vtt_from_tokens(token_lists, audio_durations)
             with open(vtt_path, 'w') as f:
                 f.write(vtt_content)
 

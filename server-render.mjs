@@ -1712,7 +1712,7 @@ const SCENE_LAYOUT_DISPATCH = {
 };
 
 // ── Draw a single frame ────────────────────────────────────────────────────
-async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress, segmentIndex) {
+async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress, segmentIndex, suppressSubtitles = false) {
   // ── Determine if a scene layout should handle background + text rendering ──
   const sceneLayout = seg.sceneLayout || null;
   const layoutFn = sceneLayout ? (SCENE_LAYOUT_DISPATCH[sceneLayout] || null) : null;
@@ -1982,7 +1982,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     }
   }
   } // end no-layout title/name-card block
-  // Words appear one at a time with a pop-in scale effect
+  // Words appear one at a time with a pop-in scale effect (skip during cold open / title cards)
+  if (!suppressSubtitles) {
   const words = segWordsCache && segWordsCache.has(seg.id) ? segWordsCache.get(seg.id) : (seg.narration ? seg.narration.split(' ') : []);
   if (words.length > 0) {
     // Use real word timestamps from VTT if available, otherwise uniform distribution
@@ -2094,6 +2095,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       }
     }
   }
+  } // end !suppressSubtitles
 
   // ── Step 11: Progress bar at the bottom of the video (safe zone enforced — Requirement 5.1) ──
   if (typeof globalProgress === 'number') {
@@ -2220,11 +2222,11 @@ async function generateNarration(segments, outputDir, options = {}) {
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
 
-    // Generate 0.15s brief pause for the segment title card (was 0.5s — too much dead air)
+    // Generate 1.5s silence for the segment title card (must match CONFIG.SEGMENT_TITLE_DURATION)
     const silenceFile = join(outputDir, `silence-${i}.mp3`);
-    spawnSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '0.15', silenceFile], { encoding: 'utf8', timeout: 5000 });
+    spawnSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', String(CONFIG.SEGMENT_TITLE_DURATION), silenceFile], { encoding: 'utf8', timeout: 5000 });
     if (existsSync(silenceFile)) {
-      audioFiles.push({ file: silenceFile, duration: 0.15 });
+      audioFiles.push({ file: silenceFile, duration: CONFIG.SEGMENT_TITLE_DURATION });
     }
 
     const audioFile = join(outputDir, `narration-${i}.mp3`);
@@ -2578,15 +2580,17 @@ async function render() {
   try {
     audioFiles = await generateNarration(project.script, audioDir, { cfAccountId, cfApiToken, edgeVoice });
 
-    // Load VTT word timestamps into cache for karaoke sync
+    // Load VTT word timestamps into cache for karaoke sync.
+    // audioFiles includes silence gaps, so use a separate counter for segment indices.
+    let narrationSegIdx = 0;
     for (const af of audioFiles) {
       if (af.subtitleFile && existsSync(af.subtitleFile)) {
-        const segIdx = audioFiles.indexOf(af);
         const words = parseVttWordTimestamps(af.subtitleFile);
         if (words.length > 0) {
-          wordTimestampCache.set(segIdx, words);
-          log('info', `  📝 Loaded ${words.length} word timestamps for segment ${segIdx + 1}`);
+          wordTimestampCache.set(narrationSegIdx, words);
+          log('info', `  📝 Loaded ${words.length} word timestamps for segment ${narrationSegIdx + 1}`);
         }
+        narrationSegIdx++;
       }
     }
   } catch (err) {
@@ -2801,7 +2805,7 @@ async function render() {
 
     const coldGlobalProgress = (f / COLD_OPEN_FRAMES * coldOpenSec) / totalSec;
     try {
-      await drawFrame(ctx, coldOpenSeg, coldAsset, coldImg, coldProgress, project, coldGlobalProgress, coldOpenSegIndex);
+      await drawFrame(ctx, coldOpenSeg, coldAsset, coldImg, coldProgress, project, coldGlobalProgress, coldOpenSegIndex, true);
     } catch (err) {
       console.error(`  ❌ Cold open drawFrame failed: ${err.message}, rendering fallback frame`);
       // Render a simple fallback frame with segment title

@@ -1,8 +1,0 @@
-[phases.build]
-cmds = ["npm ci", "npm run build"]
-
-[phases.setup]
-nixPkgs = ["...", "ffmpeg"]
-
-[start]
-cmd = "npx tsx server.mjs"

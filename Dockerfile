@@ -1,15 +1,5 @@
 FROM node:22-alpine AS builder
 
-RUN apk add --no-cache --virtual .build-deps \
-    build-base \
-    cairo-dev \
-    pango-dev \
-    libpng-dev \
-    libjpeg-turbo-dev \
-    giflib-dev \
-    python3 \
-    && rm -rf /var/cache/apk/*
-
 WORKDIR /app
 
 COPY package.json package-lock.json ./

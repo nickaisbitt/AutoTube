@@ -11,7 +11,7 @@ import type { VideoProject, NarrationClip } from '../../types';
 
 // ── Track Audio instance lifecycle ──────────────────────────────────────────
 
-let capturedAudioInstance: { pause: ReturnType<typeof vi.fn>; src: string; addEventListener: ReturnType<typeof vi.fn>; removeEventListener: ReturnType<typeof vi.fn>; play: ReturnType<typeof vi.fn> } | null = null;
+let capturedAudioInstance: { pause: ReturnType<typeof vi.fn>; src: string; addEventListener: ReturnType<typeof vi.fn>; removeEventListener: ReturnType<typeof vi.fn>; load: ReturnType<typeof vi.fn>; play: ReturnType<typeof vi.fn> } | null = null;
 
 // We need to intercept the Audio constructor to capture the instance created
 // inside PreviewStep via `useState(() => new Audio())`.
@@ -23,6 +23,7 @@ beforeEach(() => {
     const instance = {
       pause: vi.fn(),
       play: vi.fn(() => Promise.resolve()),
+      load: vi.fn(),
       src: '',
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),

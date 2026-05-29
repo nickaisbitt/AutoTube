@@ -23,6 +23,7 @@ function createMockCanvas() {
     textAlign: 'left',
     textBaseline: 'top',
     fillText: vi.fn(),
+    strokeText: vi.fn(),
     measureText: vi.fn(() => ({ width: 100 })),
     beginPath: vi.fn(),
     rect: vi.fn(),
@@ -47,6 +48,8 @@ function createMockCanvas() {
     stroke: vi.fn(),
     strokeStyle: '',
     lineWidth: 0,
+    lineJoin: 'miter',
+    miterLimit: 10,
   } as unknown as CanvasRenderingContext2D;
 
   const canvas = {

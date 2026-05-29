@@ -7,6 +7,7 @@ import {
   executeRunAIEdit,
   executeAssembleVideo,
 } from '../store/pipeline/orchestrator';
+import { MediaCache } from './mediaCache';
 
 export interface BatchRenderResult {
   topic: string;
@@ -42,6 +43,10 @@ export async function batchRender(
   const { topicConfig, appConfig, signal, onProgress, narrationEnabled } = options;
 
   logger.info('BatchRender', `Starting batch render for ${topics.length} topics`);
+
+  // Task 158: Shared media cache across batch renders for similar topics
+  const sharedCache = new MediaCache();
+  sharedCache.pruneExpired();
 
   for (let i = 0; i < topics.length; i++) {
     const topic = topics[i];

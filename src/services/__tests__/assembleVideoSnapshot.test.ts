@@ -10,7 +10,44 @@ import type { TopicConfig, ScriptSegment, VideoProject } from '../../types';
 vi.mock('../../services/llm', () => ({
   generateAIScript: vi.fn(),
   reviewAndImproveScript: vi.fn(async (segs: unknown[]) => segs),
+  refineScriptMultiPass: vi.fn(async (segs: unknown[]) => segs),
   generateVideoTitle: vi.fn(async () => 'Test Title'),
+  generateSeriesMetadata: vi.fn(),
+  generatePinnedComments: vi.fn(),
+  generateHashtags: vi.fn(),
+  mapEmotionalArc: vi.fn(() => [{ emotion: 'curiosity', segmentIndex: 0, intensity: 0.5 }]),
+  validateStoryArc: vi.fn(() => ({ passed: true, score: 100, issues: [] })),
+}));
+
+vi.mock('../../services/llm/titleGenerator', () => ({
+  generateTitleVariants: vi.fn(() => Promise.resolve({
+    direct: 'Direct Title',
+    curiosityGap: 'Curiosity Gap Title',
+    emotionalUrgent: 'Emotional Urgent Title',
+  })),
+}));
+
+vi.mock('../../services/renderingShared', () => ({
+  assignSceneLayouts: vi.fn((segs: unknown[]) => (segs as unknown[]).map(() => 'centered-text')),
+  scheduleRetentionBeats: vi.fn(() => []),
+}));
+
+vi.mock('../../services/seoTitles', () => ({
+  extractHookLine: vi.fn(() => 'Hook line'),
+}));
+
+vi.mock('../../services/blindReview', () => ({
+  runBlindReview: vi.fn(),
+}));
+
+vi.mock('../../services/projectMigrations', () => ({
+  CURRENT_PROJECT_VERSION: 1,
+  migrateProject: vi.fn((p: unknown) => p),
+}));
+
+vi.mock('../../services/tts', () => ({
+  generateGrokTts: vi.fn(),
+  generateMeloTts: vi.fn(),
 }));
 
 vi.mock('../../services/tts', () => ({}));

@@ -1,6 +1,11 @@
 import type { VideoProject } from '../../types';
 import { logger } from '../logger';
 
+export interface RenderResult {
+  url: string;
+  isServerRender: boolean;
+}
+
 /**
  * Releases GPU memory and cleans up resources allocated during rendering.
  *
@@ -66,15 +71,19 @@ export async function tryServerRender(
 ): Promise<Blob | null> {
   let serverTimeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
-    // Ensure the project is saved for the server-side renderer to read
+    // Ensure the project is saved for the server-side renderer to read (10s timeout)
+    const saveTimeout = new AbortController();
+    const saveTimer = setTimeout(() => saveTimeout.abort(), 10_000);
+    const saveSignal = signal ? AbortSignal.any([signal, saveTimeout.signal]) : saveTimeout.signal;
     const saveRes = await fetch('/api/save-project', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(project),
-      signal,
+      signal: saveSignal,
     });
+    clearTimeout(saveTimer);
     if (!saveRes.ok) {
-      logger.warn('Renderer', 'Could not save project for server render');
+      logger.error('Renderer', `Failed to save project for server render: ${saveRes.status}`);
       return null;
     }
 
@@ -86,8 +95,13 @@ export async function tryServerRender(
     }
     const combinedSignal = serverTimeout.signal;
 
-    // Start the server-side render via SSE
-    const res = await fetch('/api/server-render', { method: 'POST', signal: combinedSignal });
+    // Start the server-side render via SSE — send project data in request body
+    const res = await fetch('/api/server-render', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: project.id || '' }),
+      signal: combinedSignal,
+    });
     if (!res.ok || !res.body) {
       clearTimeout(serverTimeoutId);
       logger.warn('Renderer', `Server render endpoint returned ${res.status}`);
@@ -136,7 +150,11 @@ export async function tryServerRender(
 
     // Fetch the rendered video file
     logger.info('Renderer', `Fetching server-rendered file from: ${filePath}`);
-    const videoRes = await fetch(filePath, { signal });
+    // Convert absolute filesystem path to relative URL path (#55)
+    const urlPath = filePath.startsWith('/') && !filePath.startsWith('http')
+      ? `/api/render-output?file=${encodeURIComponent(filePath)}`
+      : filePath;
+    const videoRes = await fetch(urlPath, { signal });
     if (!videoRes.ok) {
       logger.warn('Renderer', `Could not fetch rendered video from ${filePath}: status=${videoRes.status} statusText=${videoRes.statusText}`);
       logger.warn('Renderer', `Response headers: content-type=${videoRes.headers.get('content-type')}, content-length=${videoRes.headers.get('content-length')}`);

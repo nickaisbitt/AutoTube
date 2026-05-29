@@ -59,17 +59,18 @@ export class BatchProcessor {
     }
 
     this.isRunning = true;
-    this.abortController = new AbortController();
+    const abortController = new AbortController();
+    this.abortController = abortController;
 
     const processJob = async (job: BatchJob) => {
-      if (this.abortController?.signal.aborted) return;
+      if (abortController.signal.aborted) return;
 
       job.status = 'running';
       job.startedAt = new Date();
       this.onProgress?.([...this.jobs]);
 
       try {
-        job.project = await generateVideo(job.config, this.abortController.signal);
+        job.project = await generateVideo(job.config, abortController.signal);
         job.status = 'complete';
         job.completedAt = new Date();
         logger.success('Batch', `Completed: ${job.topic}`);

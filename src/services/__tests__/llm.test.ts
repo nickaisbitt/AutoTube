@@ -166,9 +166,11 @@ describe('generateAIScript', () => {
       .mockResolvedValueOnce({ ok: false, status: 404, text: async () => '' })
       // Second call: fetchTopicContext (returns non-ok, silently ignored)
       .mockResolvedValueOnce({ ok: false, status: 404, text: async () => '' })
-      // Third call: OpenRouter attempt 1 → 429
+      // Third call: YouTube SEO search (returns non-ok, silently ignored)
+      .mockResolvedValueOnce({ ok: false, status: 404, text: async () => '' })
+      // Fourth call: OpenRouter attempt 1 → 429
       .mockResolvedValueOnce({ ok: false, status: 429, text: async () => 'rate limited' })
-      // Fourth call: OpenRouter attempt 2 → success
+      // Fifth call: OpenRouter attempt 2 → success
       .mockResolvedValueOnce(okResponse);
 
     vi.stubGlobal('fetch', mockFetch);
@@ -181,7 +183,7 @@ describe('generateAIScript', () => {
     const segments = await promise;
     expect(segments).toHaveLength(1);
     expect(segments[0].type).toBe('intro');
-    expect(mockFetch).toHaveBeenCalledTimes(4);
+    expect(mockFetch).toHaveBeenCalledTimes(5);
   });
 
   it('3.15 throws after exhausting all retries on 500', async () => {
@@ -201,7 +203,7 @@ describe('generateAIScript', () => {
     await vi.runAllTimersAsync();
 
     await rejection;
-    // 1 call for fetchWikiContext opensearch + 1 call for fetchTopicContext + maxRetries = 3 for OpenRouter = 5 total
-    expect(mockFetch).toHaveBeenCalledTimes(5);
+    // 1 call for fetchWikiContext opensearch + 1 call for fetchTopicContext + 1 call for YouTube SEO + maxRetries = 3 for OpenRouter = 6 total
+    expect(mockFetch).toHaveBeenCalledTimes(6);
   });
 });

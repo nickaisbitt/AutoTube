@@ -63,6 +63,195 @@ function checkPromisePayoff(segments: ScriptSegment[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-pass script refinement (Task 84)
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs multiple LLM passes to progressively refine a script.
+ * Pass 1 (review): catches structural/quality issues — existing reviewAndImproveScript.
+ * Pass 2 (polish): tightens prose, removes filler, strengthens hooks and payoffs.
+ * Pass 3 (trim): removes any sentence that doesn't advance the story.
+ *
+ * Each pass is a separate LLM call with a focused prompt. If any pass fails,
+ * the result from the previous pass is returned unchanged.
+ */
+export async function refineScriptMultiPass(
+  segments: ScriptSegment[],
+  topic: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<ScriptSegment[]> {
+  // Pass 1: structural review (existing function)
+  let result = await reviewAndImproveScript(segments, topic, apiKey, signal);
+
+  // Pass 2: polish pass
+  result = await polishScriptPass(result, topic, apiKey, signal);
+
+  // Pass 3: trimming pass
+  result = await trimScriptPass(result, topic, apiKey, signal);
+
+  return result;
+}
+
+/**
+ * Polish pass: tighten prose, strengthen hooks and payoffs, remove filler words,
+ * improve rhythm and pacing. Focuses on writing quality rather than structure.
+ */
+async function polishScriptPass(
+  segments: ScriptSegment[],
+  topic: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<ScriptSegment[]> {
+  const systemPrompt =
+    'You are a ruthless YouTube script editor. Your job is to POLISH this script — tighten every sentence, cut every word that doesn\'t earn its place, and make the narration punchier. Return the polished script as a JSON array of segments with the same structure.';
+
+  const scriptJson = JSON.stringify(
+    segments.map((s) => ({
+      type: s.type,
+      title: s.title,
+      narration: s.narration,
+      visualNote: s.visualNote,
+      duration: s.duration,
+    })),
+  );
+
+  const userPrompt = `Here is the script for a video about "${sanitiseTopic(topic)}":\n\n${scriptJson}\n\nPOLISH this script using the rules below. For EVERY item, check the script and FIX violations.\n\n=== POLISH CHECKLIST ===\n\n1. FILLER REMOVAL: Remove every instance of: "basically", "actually", "literally", "essentially", "it's worth noting", "let me explain", "here's the thing", "now", "so", "well" (when used as sentence openers). These add nothing.\n\n2. VERB STRENGTH: Replace weak verbs with strong ones. "went" → "surged/plummeted/dove". "is going to" → "will". "has been" → "was". Every verb should carry weight.\n\n3. SENTENCE VARIATION: If 3+ consecutive sentences are the same length, rewrite one to be dramatically shorter or longer. Rhythm is everything.\n\n4. PAYOFF DELIVERY: Every segment must end with a payoff — an insight, a consequence, or a forward-looking statement that rewards the viewer. Never end a segment on a flat note.\n\n5. HOOK SHARPENING: The first 2 sentences of the intro must be the sharpest in the entire script. If they're not, rewrite them.\n\n6. SPECIFICITY BOOST: Any vague phrase ("a lot", "many", "significant", "substantial") must be replaced with a specific number or concrete detail.\n\n7. RHYTHM: Alternate between short punchy sentences (2-5 words) and medium explanatory sentences (10-20 words). Never write a paragraph where all sentences are the same length.\n\n8. WORD ECONOMY: Cut every word that doesn't change meaning. "In order to" → "To". "Due to the fact that" → "Because". "At this point in time" → "Now".\n\nReturn ONLY a valid JSON array of the polished segments. No markdown, no preamble.`;
+
+  try {
+    const response = await fetchWithTimeout(
+      OPENROUTER_ENDPOINT,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://autotube.video',
+          'X-Title': 'AutoTube AI Generator',
+        },
+        body: JSON.stringify({
+          model: DEFAULT_SCRIPT_MODEL,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          response_format: { type: 'json_object' },
+        }),
+      },
+      {
+        timeoutMs: 30_000,
+        maxRetries: 3,
+        signal,
+      },
+    );
+
+    if (!response.ok) {
+      logger.warn('OpenRouter', `Polish pass failed (Status: ${response.status})`);
+      return segments;
+    }
+
+    const data = await response.json();
+    const rawContent: unknown = data?.choices?.[0]?.message?.content;
+    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+      return segments;
+    }
+
+    const polished = parseSegmentsFromContent(rawContent);
+    const validated = polished.map((s, i) => validateSegment(s, i));
+    for (const seg of validated) {
+      if (seg.duration > 25) seg.duration = 25;
+      seg.purposeTag = assignPurposeTag(seg);
+      seg.pacingScore = computePacingScore(seg.narration);
+    }
+    logger.success('OpenRouter', `Polish pass complete — ${validated.length} segments refined`);
+    return validated;
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') throw err;
+    logger.warn('OpenRouter', 'Polish pass failed, using previous version', err);
+    return segments;
+  }
+}
+
+/**
+ * Trimming pass: removes any sentence that does not advance the story.
+ * This is the final quality filter — ruthlessly cuts filler.
+ */
+async function trimScriptPass(
+  segments: ScriptSegment[],
+  topic: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<ScriptSegment[]> {
+  const systemPrompt =
+    'You are a ruthless script trimmer. Remove every sentence that does not advance the story. Each surviving sentence must do at least one of: advance the argument, provide a concrete detail, create emotional impact, re-hook the viewer, or give practical value. If a sentence does NONE of these, DELETE it. Return the trimmed script as a JSON array.';
+
+  const scriptJson = JSON.stringify(
+    segments.map((s) => ({
+      type: s.type,
+      title: s.title,
+      narration: s.narration,
+      visualNote: s.visualNote,
+      duration: s.duration,
+    })),
+  );
+
+  const userPrompt = `Here is the script for a video about "${sanitiseTopic(topic)}":\n\n${scriptJson}\n\nTRIM this script. Remove any sentence that does not advance the story.\n\nRULES:\n1. Every sentence must serve at least one purpose: advance the argument, provide a concrete detail, create emotional impact, re-hook the viewer, or give practical value.\n2. If a sentence is filler, repetition, throat-clearing, or vague commentary — REMOVE it.\n3. Common offenders to cut: "This is really important.", "Let's think about that for a moment.", "It's worth noting that...", "The implications are significant.", "This is a big deal.", "Now let's move on to...", "So what does this mean?"\n4. After removing sentences, do NOT add new filler to fill the gap. Let the segment be shorter if needed.\n5. Ensure the narration still flows naturally after trimming — no abrupt jumps.\n6. Do NOT trim the intro or outro below 5 sentences each.\n\nReturn ONLY a valid JSON array of the trimmed segments. No markdown, no preamble.`;
+
+  try {
+    const response = await fetchWithTimeout(
+      OPENROUTER_ENDPOINT,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://autotube.video',
+          'X-Title': 'AutoTube AI Generator',
+        },
+        body: JSON.stringify({
+          model: DEFAULT_SCRIPT_MODEL,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          response_format: { type: 'json_object' },
+        }),
+      },
+      {
+        timeoutMs: 30_000,
+        maxRetries: 3,
+        signal,
+      },
+    );
+
+    if (!response.ok) {
+      logger.warn('OpenRouter', `Trim pass failed (Status: ${response.status})`);
+      return segments;
+    }
+
+    const data = await response.json();
+    const rawContent: unknown = data?.choices?.[0]?.message?.content;
+    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+      return segments;
+    }
+
+    const trimmed = parseSegmentsFromContent(rawContent);
+    const validated = trimmed.map((s, i) => validateSegment(s, i));
+    for (const seg of validated) {
+      if (seg.duration > 25) seg.duration = 25;
+      seg.purposeTag = assignPurposeTag(seg);
+      seg.pacingScore = computePacingScore(seg.narration);
+    }
+    logger.success('OpenRouter', `Trim pass complete — ${validated.length} segments after trimming`);
+    return validated;
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') throw err;
+    logger.warn('OpenRouter', 'Trim pass failed, using previous version', err);
+    return segments;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Script review LLM pass (Step 7)
 // ---------------------------------------------------------------------------
 
@@ -77,7 +266,7 @@ export async function reviewAndImproveScript(
   signal?: AbortSignal,
 ): Promise<ScriptSegment[]> {
   const systemPrompt =
-    'You are a YouTube script editor. Review this script and rewrite any weak sections. Return the improved script as a JSON array of segments with the same structure.';
+    'You are a ruthless YouTube script editor who enforces specificity. Every segment must contain real statistics with numbers (dates, dollar amounts, percentages), named entities (real companies, people, places), and a mini-story arc (setup \u2192 tension \u2192 payoff). No generic summaries \u2014 demand concrete data and specific examples. Return the improved script as a JSON array of segments with the same structure.';
 
   const scriptJson = JSON.stringify(
     segments.map((s) => ({

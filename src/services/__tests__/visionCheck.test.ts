@@ -5,7 +5,7 @@
 // Task 10.2 — Integration Tests for Vision Check in the Harvester
 // ============================================================================
 
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import fc from 'fast-check';
 import type { MediaCandidate } from '../media';
 import {
@@ -29,7 +29,6 @@ vi.mock('../logger', () => ({
 }));
 
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
-import { logger } from '../logger';
 
 const mockFetch = vi.mocked(fetchWithTimeout);
 
@@ -70,13 +69,14 @@ describe('buildVisionCheckPrompt', () => {
     const { system } = buildVisionCheckPrompt('https://example.com/image.jpg');
 
     // The prompt covers all blocking criteria concepts, though with different wording
-    expect(system).toContain('watermark');
-    expect(system).toContain('state media');
-    expect(system).toContain('Meme');
-    expect(system).toContain('adult content');
-    expect(system).toContain('blurry');
-    expect(system).toContain('screenshot');
-    expect(system).toContain('AI generation');
+    const systemLower = system.toLowerCase();
+    expect(systemLower).toContain('watermark');
+    expect(systemLower).toContain('state media');
+    expect(systemLower).toContain('meme');
+    expect(systemLower).toContain('adult content');
+    expect(systemLower).toContain('blurry');
+    expect(systemLower).toContain('screenshot');
+    expect(systemLower).toContain('ai-generated');
   });
 
   it('includes quality evaluation guidance in the system prompt', () => {

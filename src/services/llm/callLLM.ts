@@ -5,6 +5,7 @@
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { withRetry } from '../../utils/withRetry';
 import { logger } from '../logger';
+import { trackOpenRouterCost } from '../costTracker';
 
 const DEFAULT_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = 'google/gemini-2.0-flash-001';
@@ -99,6 +100,14 @@ export async function callLLM<T = string>(
             completionTokens: data.usage.completion_tokens ?? 0,
           }
         : undefined;
+
+      if (usage) {
+        try {
+          trackOpenRouterCost(model, usage.promptTokens, usage.completionTokens, `LLM call: ${messages[0]?.content?.substring(0, 50) || 'unnamed'}`);
+        } catch {
+          // cost tracking is best-effort
+        }
+      }
 
       return { data: parsed, usage };
     },

@@ -40,5 +40,5 @@ export function computeVisualStyle(
  * Requirements 5.1, 5.2: draft → 3 fps, standard → 6 fps, high → 8 fps.
  */
 export function getFrameSampleRate(quality: string): number {
-  return quality === 'high' ? 8 : quality === 'standard' ? 6 : 3;
+  return quality === 'high' ? 24 : quality === 'standard' ? 16 : 12;
 }

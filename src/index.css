@@ -30,6 +30,10 @@
   --color-surface-800: #1a1a1a;
   --color-surface-900: #0d0d0d;
   --color-surface-950: #000000;
+
+  /* ── Hard Shadows ── */
+  --shadow-hard: 4px 4px 0px #ff5500;
+  --shadow-hard-sm: 2px 2px 0px #ff5500;
 }
 
 /* ═══════════════════════════════════════════════════

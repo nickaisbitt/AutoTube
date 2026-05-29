@@ -10,6 +10,109 @@ import { DEFAULT_SCRIPT_MODEL } from './scriptGenerator';
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
+export interface TitleVariants {
+  /** Direct/factual title — straightforward, informational */
+  direct: string;
+  /** Curiosity gap title — creates a knowledge gap the viewer must fill */
+  curiosityGap: string;
+  /** Emotional/urgent title — creates urgency and emotional pull */
+  emotionalUrgent: string;
+}
+
+/**
+ * Generates 3 title variants: direct/factual, curiosity gap, emotional/urgent.
+ * Returns the best overall title plus all 3 variants.
+ */
+export async function generateTitleVariants(
+  segments: ScriptSegment[],
+  topic: string,
+  apiKey: string,
+  hookLine?: string,
+  signal?: AbortSignal,
+): Promise<TitleVariants> {
+  const scriptSummary = segments
+    .map((s) => `[${s.type}] ${s.title}: ${s.narration}`)
+    .join('\n');
+
+  const systemPrompt =
+    'You are a YouTube title optimization expert. Generate exactly 3 title variants for the given video script. Return ONLY a JSON object with keys "direct", "curiosityGap", "emotionalUrgent". No markdown, no preamble.';
+
+  const hookInstruction = hookLine
+    ? `\n\nHOOK ALIGNMENT: The video's opening hook line is: "${hookLine}". At least one title must reference the hook's core claim.`
+    : '';
+
+  const userPrompt = `Generate 3 YouTube-optimized title variants for this video about "${sanitiseTopic(topic)}".\n\nScript:\n${scriptSummary}\n\nTitle requirements:\n- Each title: 40-70 characters\n- "direct": Factual, straightforward, informational. State what the video covers clearly.\n- "curiosityGap": Creates a knowledge gap. Use "Why...", "How...", "The truth about...", "What happens when..."\n- "emotionalUrgent": Creates urgency and emotional pull. Use loss framing, urgency, or emotional stakes.\n- All 3 must match the script's actual angle, not just the raw topic\n- Avoid generic patterns like "The Full Story" or "Everything You Need to Know"${hookInstruction}\n\nReturn ONLY a JSON object with keys "direct", "curiosityGap", "emotionalUrgent".`;
+
+  const fallback: TitleVariants = {
+    direct: topic,
+    curiosityGap: `Why ${topic} Changes Everything`,
+    emotionalUrgent: `The ${topic} Crisis Nobody's Talking About`,
+  };
+
+  try {
+    const response = await fetchWithTimeout(
+      OPENROUTER_ENDPOINT,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://autotube.video',
+          'X-Title': 'AutoTube AI Generator',
+        },
+        body: JSON.stringify({
+          model: DEFAULT_SCRIPT_MODEL,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          response_format: { type: 'json_object' },
+        }),
+      },
+      {
+        timeoutMs: 15_000,
+        maxRetries: 2,
+        signal,
+      },
+    );
+
+    if (!response.ok) {
+      return fallback;
+    }
+
+    const data = await response.json();
+    const rawContent: unknown = data?.choices?.[0]?.message?.content;
+    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+      return fallback;
+    }
+
+    const cleaned = (rawContent as string).replace(/```json/g, '').replace(/```/g, '').trim();
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      return fallback;
+    }
+
+    const direct = typeof parsed.direct === 'string' && parsed.direct.trim().length >= 20
+      ? parsed.direct.trim()
+      : fallback.direct;
+    const curiosityGap = typeof parsed.curiosityGap === 'string' && parsed.curiosityGap.trim().length >= 20
+      ? parsed.curiosityGap.trim()
+      : fallback.curiosityGap;
+    const emotionalUrgent = typeof parsed.emotionalUrgent === 'string' && parsed.emotionalUrgent.trim().length >= 20
+      ? parsed.emotionalUrgent.trim()
+      : fallback.emotionalUrgent;
+
+    logger.success('OpenRouter', `Generated 3 title variants`);
+    return { direct, curiosityGap, emotionalUrgent };
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') throw err;
+    logger.warn('OpenRouter', 'Title variant generation failed, using fallback', err);
+    return fallback;
+  }
+}
+
 /**
  * Generates a YouTube-optimized video title from the script content.
  * Returns the best title option, or the raw topic as fallback.

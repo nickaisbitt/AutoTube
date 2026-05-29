@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { X, Keyboard } from 'lucide-react';
 import { SHORTCUT_DEFINITIONS } from '../hooks/useKeyboardShortcuts';
 
@@ -7,12 +8,44 @@ interface KeyboardShortcutsModalProps {
 }
 
 export default function KeyboardShortcutsModal({ isOpen, onClose }: KeyboardShortcutsModalProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevFocus = document.activeElement as HTMLElement;
+    const modal = modalRef.current;
+    modal?.focus();
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !modal) return;
+      const focusable = modal.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleTab);
+    return () => {
+      document.removeEventListener('keydown', handleTab);
+      prevFocus?.focus();
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" data-testid="keyboard-shortcuts-modal">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
-      <div className="relative w-full max-w-md overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-hard">
+      <div ref={modalRef} id="keyboard-shortcuts-modal-inner" tabIndex={-1} className="relative w-full max-w-md overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-hard outline-none">
         <div className="flex items-center justify-between border-b-2 border-surface-700 px-6 py-4">
           <div className="flex items-center gap-2">
             <Keyboard className="h-5 w-5 text-brand-500" />

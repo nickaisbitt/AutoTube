@@ -1,4 +1,3 @@
-import React from 'react';
 import { useVideoProject } from '../store';
 import OnboardingModal from './OnboardingModal';
 import SettingsModal from './SettingsModal';

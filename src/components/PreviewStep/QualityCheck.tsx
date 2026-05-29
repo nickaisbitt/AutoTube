@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ShieldCheck, AlertTriangle, CheckCircle, Info, Eye, Volume2, Sun, Loader2 } from 'lucide-react';
 
 export interface QualityReport {
@@ -72,6 +72,11 @@ export default function QualityCheck({ videoUrl, existingReport }: QualityCheckP
   const [progress, setProgress] = useState(0);
   const [statusMsg, setStatusMsg] = useState('');
   const [includeVision, setIncludeVision] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const runCheck = useCallback(async (withVision: boolean = false) => {
     if (!videoUrl) return;
@@ -110,6 +115,7 @@ export default function QualityCheck({ videoUrl, existingReport }: QualityCheckP
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
           for (const line of lines) {
+            if (!mountedRef.current) break;
             if (line.startsWith('data: ')) {
               try {
                 const event = JSON.parse(line.slice(6));

@@ -10,10 +10,15 @@ const DDG_USER_AGENT =
 export async function fetchDDGVQD(query: string): Promise<string> {
   const initialRes = await fetch(
     `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
-    { headers: { "User-Agent": DDG_USER_AGENT } },
+    {
+      headers: { "User-Agent": DDG_USER_AGENT },
+      signal: AbortSignal.timeout(10_000),
+    },
   );
   const text = await initialRes.text();
-  const vqdMatch = text.match(/vqd=([^&'"]+)/);
+  const vqdMatch = text.match(/vqd=([^&'"]+)/)
+    || text.match(/vqd=["']?([^&'"]+)["']/)
+    || text.match(/"vqd":"([^"]+)"/);
   if (!vqdMatch) throw new Error("Could not extract VQD token from DuckDuckGo");
   return vqdMatch[1];
 }
@@ -21,12 +26,16 @@ export async function fetchDDGVQD(query: string): Promise<string> {
 /** Fetch image results from DuckDuckGo. */
 export async function fetchDDGImages(query: string) {
   const vqd = await fetchDDGVQD(query);
-  const searchUrl = `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&o=json&vqd=${vqd}&f=,,,`;
+  const searchUrl = `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&o=json&vqd=${vqd}&f=,,,l`;
   const apiRes = await fetch(searchUrl, {
     headers: { "User-Agent": DDG_USER_AGENT, Referer: "https://duckduckgo.com/" },
   });
   if (!apiRes.ok) throw new Error(`DDG Image API failed: ${apiRes.status}`);
-  return await apiRes.json();
+  try {
+    return await apiRes.json();
+  } catch {
+    return [];
+  }
 }
 
 /** Fetch video results from DuckDuckGo. */
@@ -37,5 +46,9 @@ export async function fetchDDGVideos(query: string) {
     headers: { "User-Agent": DDG_USER_AGENT, Referer: "https://duckduckgo.com/" },
   });
   if (!apiRes.ok) throw new Error(`DDG Video API failed: ${apiRes.status}`);
-  return await apiRes.json();
+  try {
+    return await apiRes.json();
+  } catch {
+    return [];
+  }
 }

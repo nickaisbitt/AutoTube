@@ -26,6 +26,7 @@ function makeMockCtx() {
     restore: vi.fn(() => calls.push('restore')),
     fillRect: vi.fn(() => calls.push('fillRect')),
     fillText: vi.fn(() => calls.push('fillText')),
+    strokeText: vi.fn(() => calls.push('strokeText')),
     fill: vi.fn(() => calls.push('fill')),
     stroke: vi.fn(() => calls.push('stroke')),
     beginPath: vi.fn(() => calls.push('beginPath')),
@@ -40,6 +41,8 @@ function makeMockCtx() {
     measureText: vi.fn((text: string) => ({ width: (text || '').length * 10 })),
     createLinearGradient: vi.fn(() => createGradient()),
     createRadialGradient: vi.fn(() => createGradient()),
+    clearRect: vi.fn(),
+    strokeRect: vi.fn(() => calls.push('strokeRect')),
     roundRect: vi.fn(),
     getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(100) })),
     set fillStyle(val: string) { state.fillStyle = val; },
@@ -219,7 +222,7 @@ existsSync: vi.fn(),
       // Progress bar is a thin rect at the bottom
       const progressBarCalls = fillRectCalls.filter((c: unknown[]) => {
         const height = c[3] as number;
-        return height === 3;
+        return height === 6;
       });
       expect(progressBarCalls.length).toBeGreaterThanOrEqual(1);
     });
@@ -260,7 +263,7 @@ existsSync: vi.fn(),
         width: 1920,
         height: 1080,
         fps: 24,
-        videoBitsPerSecond: 10_000_000,
+        videoBitsPerSecond: 12_000_000,
       });
     });
 

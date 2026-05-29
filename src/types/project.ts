@@ -23,6 +23,32 @@ export interface QualityReport {
   reviewedAt: string;
 }
 
+export interface TitleVariants {
+  direct: string;
+  curiosityGap: string;
+  emotionalUrgent: string;
+}
+
+export interface PinnedComment {
+  text: string;
+  type: 'question_prompt' | 'controversial_take' | 'what_did_i_miss';
+}
+
+export interface SeriesMetadata {
+  seriesName: string;
+  episodeNumber: number;
+  playlistDescription: string;
+  episodeTitle: string;
+}
+
+export interface EmotionalArcPoint {
+  segmentIndex: number;
+  segmentTitle: string;
+  emotion: string;
+  intensity: number;
+  rationale: string;
+}
+
 export interface VideoProject {
   version: number;
   id: string;
@@ -53,4 +79,20 @@ export interface VideoProject {
   editPlan?: EditPlan;
   logs?: SystemLog[];
   blindReview?: QualityReport;
+  /** Task 97: Title A/B/C variants */
+  titleVariants?: TitleVariants;
+  /** Task 102: Series/playlist metadata */
+  seriesMetadata?: SeriesMetadata;
+  /** Task 91: Pinned comment options */
+  pinnedComments?: PinnedComment[];
+  /** Task 96: Generated hashtags */
+  hashtags?: string[];
+  /** Task 98: Emotional arc mapping */
+  emotionalArc?: EmotionalArcPoint[];
+  /** Task 86: Story arc validation result */
+  storyArcValidation?: {
+    passed: boolean;
+    score: number;
+    issues: string[];
+  };
 }

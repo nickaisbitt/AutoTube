@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, ExternalLink, Settings, AlertTriangle, CheckCircle, AlertCircle, Mic2, Check, XCircle } from 'lucide-react';
 import { useVideoProject } from '../store';
 import { logger } from '../services/logger';
@@ -22,6 +22,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // TTS engine availability from env vars
   const hasMeloKeys = useMemo(() => !!(import.meta.env.VITE_CF_ACCOUNT_ID && import.meta.env.VITE_CF_API_TOKEN), []);
 
+  const modalRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (isOpen) {
       setOrVal(config.openRouterKey);
@@ -29,6 +31,36 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setFlickrVal(config.flickrKey || '');
     }
   }, [isOpen, config]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevFocus = document.activeElement as HTMLElement;
+    const modal = modalRef.current;
+    modal?.focus();
+
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || !modal) return;
+      const focusable = modal.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleTab);
+    return () => {
+      document.removeEventListener('keydown', handleTab);
+      prevFocus?.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -68,7 +100,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       openRouterKey: orVal.trim(),
       sourceType: sourceTypeVal,
       flickrKey: flickrVal.trim(),
-      ttsVoice: ttsVoiceVal,
+      ttsVoice: config.ttsVoice,
     });
     onClose();
   };
@@ -77,7 +109,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" data-testid="settings-modal">
       <div className="absolute inset-0 bg-black/90" onClick={onClose} />
       
-      <div className="relative w-full max-w-lg overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-hard">
+      <div ref={modalRef} id="settings-modal-inner" tabIndex={-1} className="relative w-full max-w-lg overflow-hidden border-2 border-surface-700 bg-surface-900 shadow-hard outline-none">
         <form onSubmit={handleSubmit}>
           <div className="flex items-center justify-between border-b-2 border-surface-700 px-6 py-4">
             <div className="flex items-center gap-2">

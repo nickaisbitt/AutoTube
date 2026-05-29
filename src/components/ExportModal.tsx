@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Download, Film, Settings, Check, Monitor } from 'lucide-react';
+import { X, Download, Film, Settings, Check, Monitor, Loader2 } from 'lucide-react';
 import type { VideoProject } from '../types';
 import { QUALITY_PRESETS } from '../services/renderer';
 import { RESOLUTION_PRESETS, type ResolutionKey } from '../services/renderingShared';
@@ -23,15 +23,21 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
   const [resolution, setResolution] = useState<ResolutionKey>(
     (project?.exportSettings?.resolution as ResolutionKey) || '1080p'
   );
+  const [isExporting, setIsExporting] = useState(false);
 
   if (!isOpen || !project) return null;
 
   const resPreset = RESOLUTION_PRESETS[resolution];
   const estimatedSize = Math.round(project.script.reduce((s, seg) => s + seg.duration, 0) * resPreset.videoBitsPerSecond / 8 / 1024 / 1024);
 
-  const handleExport = () => {
-    onExport(quality, format, resolution);
-    onClose();
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await onExport(quality, format, resolution);
+    } finally {
+      setIsExporting(false);
+      onClose();
+    }
   };
 
   return (
@@ -172,11 +178,18 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
         {/* Export Button */}
         <button
           onClick={handleExport}
-          className="flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-3 text-sm font-bold uppercase text-black shadow-hard"
+          disabled={isExporting}
+          className={`flex w-full items-center justify-center gap-2 px-6 py-3 text-sm font-bold uppercase text-black shadow-hard ${
+            isExporting ? 'cursor-not-allowed bg-surface-600' : 'bg-brand-500'
+          }`}
           data-testid="export-submit-button"
         >
-          <Download className="h-4 w-4" />
-          Export Video
+          {isExporting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+          {isExporting ? 'Exporting...' : 'Export Video'}
           <Check className="h-4 w-4" />
         </button>
       </div>

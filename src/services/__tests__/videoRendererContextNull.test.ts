@@ -21,15 +21,7 @@ afterEach(() => {
 
 describe('Canvas context null error handling (Bug 11)', () => {
   it('throws a clear error when getContext("2d") returns null, without secondary cleanup errors', async () => {
-    // Mock document.createElement to return canvases whose getContext returns null
-    const mockCanvas = {
-      width: 0,
-      height: 0,
-      getContext: vi.fn().mockReturnValue(null),
-      captureStream: vi.fn(),
-    };
-
-    const createElementSpy = vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
       if (tag === 'canvas') {
         // Return a fresh mock each time so width/height assignments work
         return {
@@ -43,7 +35,7 @@ describe('Canvas context null error handling (Bug 11)', () => {
     });
 
     // Mock fetch for the server render attempt (returns failure so we fall through to browser render)
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No server'));
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No server'));
 
     // Import renderVideoToBlob dynamically to use the mocked environment
     const { renderVideoToBlob } = await import('../renderer');

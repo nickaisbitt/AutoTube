@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 let mockExistsSync: ReturnType<typeof vi.fn>;
 let mockSpawnSync: ReturnType<typeof vi.fn>;
+let mockSpawn: ReturnType<typeof vi.fn>;
 let mockWriteFileSync: ReturnType<typeof vi.fn>;
 let generateNarration: (segments: Array<{ title: string; narration: string; duration: number }>, outputDir: string, options?: Record<string, unknown>) => Promise<Array<{ file: string; duration: number }>>;
 let generateSilence: (outputPath: string, durationSec: number) => boolean;
@@ -11,6 +12,15 @@ describe('narration.mjs', () => {
     vi.resetModules();
     mockExistsSync = vi.fn().mockReturnValue(true);
     mockSpawnSync = vi.fn().mockReturnValue({ status: 0 });
+    mockSpawn = vi.fn().mockImplementation(() => ({
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn().mockImplementation((event, callback) => {
+        if (event === 'close') {
+          setTimeout(() => callback(0), 5);
+        }
+      }),
+    }));
     mockWriteFileSync = vi.fn();
 
     vi.doMock('fs', () => ({
@@ -23,21 +33,23 @@ describe('narration.mjs', () => {
       statSync: vi.fn(),
       readdirSync: vi.fn(),
       default: {
-existsSync: mockExistsSync,
-      writeFileSync: mockWriteFileSync,
-      unlinkSync: vi.fn(),
-      readFileSync: vi.fn(),
-      mkdirSync: vi.fn(),
-      rmSync: vi.fn(),
-      statSync: vi.fn(),
-      readdirSync: vi.fn(),
+        existsSync: mockExistsSync,
+        writeFileSync: mockWriteFileSync,
+        unlinkSync: vi.fn(),
+        readFileSync: vi.fn(),
+        mkdirSync: vi.fn(),
+        rmSync: vi.fn(),
+        statSync: vi.fn(),
+        readdirSync: vi.fn(),
       },
     }));
 
     vi.doMock('child_process', () => ({
       spawnSync: mockSpawnSync,
+      spawn: mockSpawn,
       default: {
         spawnSync: mockSpawnSync,
+        spawn: mockSpawn,
       },
     }));
 
@@ -82,8 +94,8 @@ existsSync: mockExistsSync,
       const segments = [{ title: 'Test', narration: 'Hello world', duration: 5 }];
       await generateNarration(segments, '/tmp/audio');
       // Kokoro Python script should be called
-      expect(mockSpawnSync).toHaveBeenCalled();
-      const kokoroCall = mockSpawnSync.mock.calls.find(c =>
+      expect(mockSpawn).toHaveBeenCalled();
+      const kokoroCall = mockSpawn.mock.calls.find(c =>
         Array.isArray(c[1]) && c[1].some(a => typeof a === 'string' && a.includes('kokoro_generate'))
       );
       expect(kokoroCall).toBeTruthy();
@@ -93,19 +105,23 @@ existsSync: mockExistsSync,
       const segments = [{ title: 'Test', narration: 'Hello world', duration: 5 }];
       await generateNarration(segments, '/tmp/audio', { xaiKey: 'test-key', ttsVoice: 'Leo' });
       // Kokoro is always tier 1
-      const kokoroCalls = mockSpawnSync.mock.calls.filter(c =>
+      const kokoroCalls = mockSpawn.mock.calls.filter(c =>
         Array.isArray(c[1]) && c[1].some(a => a.includes('kokoro_generate'))
       );
       expect(kokoroCalls.length).toBeGreaterThanOrEqual(1);
     });
 
     it('falls back to silence when Kokoro fails and no API providers available', async () => {
-      // Make Kokoro fail (spawnSync returns non-zero)
-      mockSpawnSync.mockImplementation((cmd: string, _args: string[]) => {
-        if (cmd === '/tmp/tts-env/bin/python') return { status: 1, stdout: '' };
-        if (cmd === 'ffmpeg') return { status: 0 };
-        return { status: 0 };
-      });
+      // Make Kokoro fail (spawn returns non-zero)
+      mockSpawn.mockImplementation(() => ({
+        stdout: { on: vi.fn() },
+        stderr: { on: vi.fn() },
+        on: vi.fn().mockImplementation((event, callback) => {
+          if (event === 'close') {
+            setTimeout(() => callback(1), 5);
+          }
+        }),
+      }));
       // Make existsSync return true for the silence file
       mockExistsSync.mockReturnValue(true);
 

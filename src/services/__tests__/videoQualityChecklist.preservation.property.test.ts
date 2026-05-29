@@ -16,10 +16,10 @@ import fc from 'fast-check';
 
 import { scoreCandidate, type MediaCandidate } from '../media';
 import { buildStoryboard, type StoryboardQualityLabel } from '../storyboard';
-import { parseQualityResponse, type QualityFactors } from '../qualityScorer';
+import { parseQualityResponse } from '../qualityScorer';
 import { generateTitleOptions } from '../seoTitles';
 import { validateVisualPlan } from '../llmVisualDirector';
-import type { TopicContext, VideoProject, ScriptSegment, MediaAsset, SegmentVisualPlan } from '../../types';
+import type { TopicContext, VideoProject, ScriptSegment } from '../../types';
 
 // ---------------------------------------------------------------------------
 // Arbitraries — generate valid pipeline inputs

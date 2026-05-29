@@ -158,22 +158,31 @@ export async function generateAIPlan(
   const fallbackTopic = topic;
 
   const titleLine = segmentTitle ? `\nSEGMENT TITLE: ${segmentTitle}` : '';
-  const prompt = `You are a professional Creative Director.
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const prompt = `You are a professional Creative Director and photo researcher.
 
 ABSOLUTE RULE — READ THIS FIRST:
 NEVER return generic concepts like "Establish visual context", "Supporting b-roll", "Visual representation", or any abstract phrase. If you return "Establish visual context" or any generic phrase, your response will be REJECTED. Every shot MUST name a specific person, place, object, or scene that can be image-searched.
 
-Plan TWO DISTINCT SHOTS for this specific video segment.
+IMPORTANT: Today is ${today}. The information in the following topic and narration may be based on your training data, which could be outdated. Use common sense — if the narration makes claims about events in 2025 or 2026, judge them against the current date.
+
+Plan TWO DISTINCT SHOTS for this specific video segment. Each shot must have MULTIPLE diverse search queries targeting different source types.
 
 TOPIC: ${topic}${titleLine}
 DESCRIPTION: ${topicContext.description}
 NARRATION: "${segmentText}"
+${topicContext.recentNews && topicContext.recentNews.length > 0 ? `\nRECENT NEWS (live from web):\n${topicContext.recentNews.map((n, i) => `  ${i + 1}. [${n.source}] ${n.headline}${n.date ? ` (${n.date})` : ''} — ${n.snippet.substring(0, 200)}`).join('\n')}` : ''}
+${topicContext.extract ? `\nWIKIPEDIA CONTEXT:\n${topicContext.extract.substring(0, 1000)}` : ''}
 
 CRITICAL:
 1. Your shots MUST be about the NARRATION above.
-2. DO NOT include entities unrelated to the topic above.
-3. Provide TWO distinct shots (Primary and Secondary) to maintain visual velocity.
-4. Your shots must be SPECIFIC and SEARCHABLE. Instead of "Establish visual context", say exactly what should be on screen: "Aerial shot of Tokyo skyline at night", "Close-up of Japanese yen coins", "Elderly Japanese man walking alone on empty street".
+2. Provide TWO distinct shots (Primary and Secondary) to maintain visual velocity.
+3. Your shots must be SPECIFIC and SEARCHABLE. Instead of "Establish visual context", say exactly what should be on screen: "Aerial shot of NCL Luna cruise ship at Port of Miami", "Close-up of Fincantieri shipyard construction".
+4. For EACH shot, provide 3-4 diverse search queries targeting different source types:
+   - A general web search query
+   - An official/press source query (targeting company press rooms, news outlets)
+   - A location or context query (maps, aerial views, related entities)
+   - A detail or close-up query
 5. CLASSIFY this segment as one of: personal, institutional, geopolitical, or practical.
    - "personal": Individual human stories, personal risk, identity, money, family impact → use INTIMATE visuals (close-ups, faces, hands, screens, personal spaces)
    - "institutional": Corporate/organizational threats, company systems, business operations → use MEDIUM-SCALE visuals (offices, servers, dashboards, teams, buildings)
@@ -187,12 +196,12 @@ Return JSON:
   "classification": "personal | institutional | geopolitical | practical",
   "primaryShot": {
     "concept": "Specific visual focus — name a real person, place, object, or scene",
-    "queries": ["Search term 1", "Search term 2"],
+    "queries": ["General search for this shot", "Official/press source query", "Location or context query", "Detail or close-up query"],
     "vibe": "Visual mood"
   },
   "secondaryShot": {
     "concept": "Specific cutaway — name a real person, place, object, or scene",
-    "queries": ["Search term 1", "Search term 2"],
+    "queries": ["General search for this shot", "Official/press source query", "Location or context query", "Detail or close-up query"],
     "vibe": "Visual mood"
   },
   "visualConcept": "Overall vibe"

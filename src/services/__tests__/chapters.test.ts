@@ -22,7 +22,7 @@ describe('generateChapterMarkers', () => {
   it('formats a single segment starting at 00:00', () => {
     const segments: ScriptSegment[] = [makeSegment({ title: 'Intro', duration: 30 })];
     const result = generateChapterMarkers(segments);
-    expect(result).toMatch(/^00:00 Intro/);
+    expect(result).toMatch(/^00:00 Why Intro Matters More Than You Think/);
   });
 
   // 7.3 – multiple segments produce correct cumulative timestamps

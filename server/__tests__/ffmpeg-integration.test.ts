@@ -86,54 +86,61 @@ existsSync: mockExistsSync,
   });
 
   describe('concatenateAudio (local) edge cases', () => {
-    it('handles empty audio file list via ffmpeg concat demuxer', async () => {
-      await audioModuleConcatenateAudio([], '/tmp/out.aac');
-      // Empty list still calls ffmpeg concat demuxer; mock returns status 0 so true
-      expect(mockSpawnSync).toHaveBeenCalled();
-      const args = mockSpawnSync.mock.calls[0][1] as string[];
-      expect(args).toContain('concat');
+    it('handles empty audio file list by returning false early', async () => {
+      const result = await audioModuleConcatenateAudio([], '/tmp/out.aac');
+      expect(result).toBe(false);
+      expect(mockSpawnSync).not.toHaveBeenCalled();
     });
 
-    it('concatenates single file via concat demuxer', async () => {
+    it('concatenates single file by converting format directly', async () => {
       const result = await audioModuleConcatenateAudio([{ file: '/tmp/solo.aac', duration: 10 }], '/tmp/out.aac');
       expect(result).toBe(true);
       const args = mockSpawnSync.mock.calls[0][1] as string[];
-      expect(args).toContain('concat');
       expect(args).toContain('-i');
+      expect(args).toContain('/tmp/solo.aac');
       expect(args).toContain('-c:a');
       expect(args).toContain('aac');
     });
 
-    it('concatenates multiple files via concat demuxer', async () => {
+    it('concatenates multiple files with premium exponential crossfades', async () => {
       const files = [
         { file: '/tmp/a.aac', duration: 5 },
         { file: '/tmp/b.aac', duration: 5 },
       ];
       const result = await audioModuleConcatenateAudio(files, '/tmp/out.aac');
       expect(result).toBe(true);
-      const args = mockSpawnSync.mock.calls[0][1] as string[];
-      expect(args).toContain('concat');
+      
+      // The last call to spawnSync will be the one merging files using filter_complex
+      const lastCall = mockSpawnSync.mock.calls[mockSpawnSync.mock.calls.length - 1];
+      const args = lastCall[1] as string[];
+      expect(args).toContain('-filter_complex');
+      expect(args.some(a => a.includes('acrossfade'))).toBe(true);
       expect(args).toContain('-c:a');
       expect(args).toContain('aac');
     });
   });
 
   describe('audio.mjs ffmpeg arguments', () => {
-    it('concatenateAudio uses aac codec at 192k with loudnorm', async () => {
-      const files = [{ file: '/tmp/a.mp3', duration: 5 }];
+    it('concatenateAudio uses aac codec at 320k', async () => {
+      const files = [
+        { file: '/tmp/a.mp3', duration: 5 },
+        { file: '/tmp/b.mp3', duration: 3 },
+      ];
       await audioModuleConcatenateAudio(files, '/tmp/out.aac');
-      const args = mockSpawnSync.mock.calls[0][1] as string[];
+      const concatCall = mockSpawnSync.mock.calls.find((c: any) => c[1].includes('-filter_complex'));
+      expect(concatCall).toBeDefined();
+      const args = concatCall[1] as string[];
       expect(args).toContain('-c:a');
       expect(args).toContain('aac');
       expect(args).toContain('-b:a');
-      expect(args).toContain('192k');
-      expect(args).toContain('-af');
-      expect(args).toContain('volume=6dB,loudnorm=I=-14:TP=-1.5:LRA=11');
+      expect(args).toContain('320k');
     });
 
     it('mixNarrationWithBgMusic uses amix filter', () => {
       mixNarrationWithBgMusic('/tmp/narration.aac', '/tmp/music.aac', '/tmp/out.aac', 0.15);
-      const args = mockSpawnSync.mock.calls[0][1] as string[];
+      const mixCall = mockSpawnSync.mock.calls.find((c: any) => c[1].includes('-filter_complex'));
+      expect(mixCall).toBeDefined();
+      const args = mixCall[1] as string[];
       expect(args.some(a => a.includes('amix'))).toBe(true);
       expect(args).toContain('-c:a');
       expect(args).toContain('aac');
@@ -151,33 +158,35 @@ existsSync: mockExistsSync,
   });
 
   describe('muxVideoWithAudio quality presets', () => {
-    it('uses libx264 for video stream encoding', () => {
+    it('copies the video stream without re-encoding', () => {
       mockExistsSync.mockImplementation((p: string) => p.includes('narration'));
       muxVideoWithAudio('/tmp/video.mp4', '/tmp/narration.aac', '/tmp/out.mp4', 30, { backgroundMusic: false });
-      const args = mockSpawnSync.mock.calls[0][1] as string[];
+      const lastCall = mockSpawnSync.mock.calls[mockSpawnSync.mock.calls.length - 1];
+      const args = lastCall[1] as string[];
       expect(args).toContain('-c:v');
-      expect(args).toContain('libx264');
+      expect(args).toContain('copy');
     });
 
-    it('uses aac audio at 192k bitrate with loudnorm', () => {
+    it('uses aac audio at 320k bitrate', () => {
       mockExistsSync.mockImplementation((p: string) => p.includes('narration'));
       muxVideoWithAudio('/tmp/video.mp4', '/tmp/narration.aac', '/tmp/out.mp4', 30, { backgroundMusic: false });
-      const args = mockSpawnSync.mock.calls[0][1] as string[];
+      const lastCall = mockSpawnSync.mock.calls[mockSpawnSync.mock.calls.length - 1];
+      const args = lastCall[1] as string[];
       expect(args).toContain('-c:a');
       expect(args).toContain('aac');
       expect(args).toContain('-b:a');
-      expect(args).toContain('192k');
-      expect(args).toContain('-af');
-      expect(args).toContain('volume=6dB,loudnorm=I=-14:TP=-1.5:LRA=11');
+      expect(args).toContain('320k');
     });
   });
 
   describe('hardware encoding detection', () => {
-    it('currently uses libx264 for video stream encoding', () => {
+    it('currently copies the video stream without re-encoding', () => {
       mockExistsSync.mockImplementation((p: string) => p.includes('narration'));
       muxVideoWithAudio('/tmp/video.mp4', '/tmp/narration.aac', '/tmp/out.mp4', 30, { backgroundMusic: false });
-      const args = mockSpawnSync.mock.calls[0][1] as string[];
-      expect(args).toContain('libx264');
+      const lastCall = mockSpawnSync.mock.calls[mockSpawnSync.mock.calls.length - 1];
+      const args = lastCall[1] as string[];
+      expect(args).toContain('copy');
+      expect(args).not.toContain('libx264');
       expect(args).not.toContain('videotoolbox');
       expect(args).not.toContain('h264_nvenc');
       expect(args).not.toContain('h264_qsv');

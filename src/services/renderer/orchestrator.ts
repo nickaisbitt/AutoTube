@@ -59,24 +59,16 @@ export async function renderVideoToBlob(
   
   logger.info('Renderer', `Start: ${width}x${height} @ ${fps}fps (${quality}, ${requestedFormat})`);
 
-  let lastProgress = 0;
-  let lastProgressMsg = '';
-  const reportProgress = (pct: number, msg: string) => {
-    lastProgress = pct;
-    lastProgressMsg = msg;
-    onProgress?.(pct, msg);
-  };
-
   // ── Try full server-side render first ──
   logger.info('Renderer', 'Attempting server-side render via /api/server-render...');
-  reportProgress(0, 'Trying server-side render...');
-  reportProgress(1, 'Connecting to render server...');
+  onProgress?.(0, 'Trying server-side render...');
+  onProgress?.(1, 'Connecting to render server...');
   let serverRenderFailed = false;
   try {
     const serverResult = await tryServerRender(project, onProgress, signal);
-    if (serverResult && serverResult.size > 0) {
+    if (serverResult && serverResult.url) {
       logger.success('Renderer', 'Server-side render succeeded, skipping browser render');
-      return serverResult;
+      return serverResult as unknown as Blob;
     }
     serverRenderFailed = true;
   } catch (err) {
@@ -88,12 +80,12 @@ export async function renderVideoToBlob(
   }
 
   if (serverRenderFailed) {
-    reportProgress(2, 'Server unavailable, preparing browser render...');
+    onProgress?.(2, 'Server unavailable, preparing browser render...');
   }
 
   // ── Fallback: browser-side frame capture + ffmpeg/MediaRecorder ──
   logger.info('Renderer', 'Falling back to browser-side rendering...');
-  reportProgress(3, 'Rendering in browser...');
+  onProgress?.(3, 'Rendering in browser...');
 
   let canvas: HTMLCanvasElement | null = null;
   let offscreen: HTMLCanvasElement | null = null;
@@ -101,7 +93,6 @@ export async function renderVideoToBlob(
   let recCanvas: HTMLCanvasElement | null = null;
   const blobUrls: string[] = [];
   const capturedFrames: string[] = [];
-  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
   try {
 
@@ -136,7 +127,7 @@ export async function renderVideoToBlob(
   bgCacheCanvas.height = height;
   const bgCacheCtx = bgCacheCanvas.getContext('2d');
 
-  reportProgress(1, 'Preloading images...');
+  onProgress?.(1, 'Preloading images...');
 
   const cache: ImgCache = {};
   await preload(project, cache, blobUrls, signal, onProgress);
@@ -170,12 +161,8 @@ export async function renderVideoToBlob(
 
   const frameInterval = Math.max(1, Math.round(fps / frameSampleRate));
   const MAX_CAPTURED_FRAMES = MAX_FRAMES;
-  const RENDER_DEADLINE = Date.now() + 12 * 60 * 1000;
+  const RENDER_DEADLINE = Date.now() + 5 * 60 * 1000;
   const isRenderingFlag = true;
-
-  heartbeatTimer = setInterval(() => {
-    reportProgress(lastProgress, lastProgressMsg);
-  }, 2000);
 
   let elapsed = 0;
   let prevSegmentMedia: MediaAsset[] = [];
@@ -301,17 +288,17 @@ export async function renderVideoToBlob(
       ctx.drawImage(offscreen, 0, 0);
 
       if (f % frameInterval === 0 && capturedFrames.length < MAX_CAPTURED_FRAMES) {
-        capturedFrames.push(canvas.toDataURL('image/jpeg', 0.92)); // JPEG 92% quality = 5x faster than PNG
+        capturedFrames.push(canvas.toDataURL('image/jpeg', 0.96));
       }
 
       const segMsg = `Rendering segment ${i + 1}/${project.script.length}: ${seg.title}`;
       if (f === 0) {
         const overall = segStart;
-        reportProgress(Math.min(Math.round(overall * 100), 99), segMsg);
+        onProgress?.(Math.min(Math.round(overall * 100), 99), segMsg);
       }
       if (f % Math.max(1, Math.floor(totalFrames / 10)) === 0) {
         const overall = segStart + (f / totalFrames * seg.duration / totalSec);
-        reportProgress(Math.min(Math.round(overall * 100), 99), segMsg);
+        onProgress?.(Math.min(Math.round(overall * 100), 99), segMsg);
       }
 
       if (f % 60 === 0 || f === totalFrames - 1) await new Promise<void>(r => setTimeout(r, 0));
@@ -326,20 +313,19 @@ export async function renderVideoToBlob(
     }
   }
 
-  reportProgress(95, 'Assembling video with ffmpeg...');
+  onProgress?.(95, 'Assembling video with ffmpeg...');
   logger.info('Renderer', `Captured ${capturedFrames.length} frames, sending to ffmpeg...`);
 
   // Try server-side ffmpeg assembly first (dev mode)
   try {
-    const blobParts = capturedFrames.map(f => f + '\n');
-    const bodyBlob = new Blob(blobParts, { type: 'text/plain' });
-    const res = await fetch(`/api/render-video?fps=${frameSampleRate}&format=${requestedFormat}`, {
+    const res = await fetch('/api/render-video', {
       method: 'POST',
-      body: bodyBlob,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frames: capturedFrames, fps: frameSampleRate, format: requestedFormat }),
     });
     if (res.ok) {
       const videoBlob = await res.blob();
-      reportProgress(100, 'Done!');
+      onProgress?.(100, 'Done!');
       logger.success('Renderer', `Done (ffmpeg): ${(videoBlob.size / 1024 / 1024).toFixed(2)}MB`);
       return videoBlob;
     }
@@ -469,12 +455,11 @@ export async function renderVideoToBlob(
   }
 
   const videoBlob = new Blob(chunks, { type: mimeType });
-  reportProgress(100, 'Done!');
+  onProgress?.(100, 'Done!');
   logger.success('Renderer', `Done (MediaRecorder fallback): ${(videoBlob.size / 1024 / 1024).toFixed(2)}MB`);
   return videoBlob;
 
   } finally {
-    if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
     cleanupRenderResources(canvas, offscreen, bgCacheCanvas, recCanvas, blobUrls, capturedFrames, saturationCache);
   }
 }

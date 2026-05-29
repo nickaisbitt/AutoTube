@@ -83,13 +83,13 @@ describe('scoreCandidate', () => {
     const portraitScore = scoreCandidate(portrait, baseTopicContext);
 
     // Landscape: +30 (ratio bonus) + 0 (720p resolution baseline)
-    // Portrait: −150 (portrait penalty) − 100 (below 720p resolution penalty)
-    // Difference: 30 − (−250) = 280
-    expect(landscapeScore - portraitScore).toBe(280);
+    // Portrait: −150 (portrait penalty) − 50 (below 720p resolution penalty)
+    // Difference: 30 − (−200) = 230
+    expect(landscapeScore - portraitScore).toBe(230);
   });
 
-  it('4.4 gives +30 ratio bonus and +40 pixel bonus for 1920×1080 vs small image', () => {
-    // Small image: 320×240, ratio ≈ 1.33 → +30 ratio bonus, pixels = 76800 < 307200 → −80 penalty
+  it('4.4 gives +30 ratio bonus and resolution bonuses for 1920×1080 vs small image', () => {
+    // Small image: 320×240, ratio ≈ 1.33 → +30 ratio bonus, pixels = 76800 < 307200 → −150 penalty (too small)
     const small: MediaCandidate = {
       ...baseCandidate,
       width: 320,
@@ -98,7 +98,7 @@ describe('scoreCandidate', () => {
     };
     const smallScore = scoreCandidate(small, baseTopicContext);
 
-    // HD image: 1920×1080, ratio ≈ 1.78 → +30 ratio bonus, pixels = 2073600 ≥ 2073600 → +40 pixel bonus
+    // HD image: 1920×1080, ratio ≈ 1.78 → +30 ratio bonus, +50 (1080p bonus), +100 (HD bonus)
     const hd: MediaCandidate = {
       ...baseCandidate,
       width: 1920,
@@ -107,10 +107,10 @@ describe('scoreCandidate', () => {
     };
     const hdScore = scoreCandidate(hd, baseTopicContext);
 
-    // Small net from resolution: +30 (ratio) − 80 (small pixels) − 100 (below 720p) = −150
-    // HD net from resolution:    +30 (ratio) + 40 (pixels) + 50 (1080p bonus)       = +120
-    // Difference: 120 − (−150) = 270
-    expect(hdScore - smallScore).toBe(270);
+    // Small net from resolution: +30 (ratio) − 150 (too small penalty) = −120
+    // HD net from resolution:    +30 (ratio) + 50 (1080p bonus) + 100 (HD bonus) = +180
+    // Difference: 180 − (−120) = 300
+    expect(hdScore - smallScore).toBe(300);
   });
 
   it('4.6 gives +25 per matching query keyword found in alt text', () => {
@@ -157,7 +157,7 @@ describe('scoreCandidate', () => {
   });
 
   it('4.7 gives +90 video bonus in stock source mode', () => {
-    // Image candidate in stock mode (baseline)
+    // Image candidate in stock mode (baseline) — gets -200 missing-dimensions penalty
     const image: MediaCandidate = {
       ...baseCandidate,
       type: 'image',
@@ -168,7 +168,7 @@ describe('scoreCandidate', () => {
     };
     const imageScore = scoreCandidate(image, baseTopicContext, undefined, 'stock');
 
-    // Video candidate in stock mode: +90 (stock video bonus)
+    // Video candidate in stock mode: +150 (stock video bonus), no missing-dimensions penalty
     const video: MediaCandidate = {
       ...baseCandidate,
       type: 'video',
@@ -179,11 +179,12 @@ describe('scoreCandidate', () => {
     };
     const videoScore = scoreCandidate(video, baseTopicContext, undefined, 'stock');
 
-    expect(videoScore - imageScore).toBe(90);
+    // Video: +150 (type bonus) vs Image: -200 (missing dims) → 150 - (-200) = 350
+    expect(videoScore - imageScore).toBe(350);
   });
 
-  it('4.8 gives +120 Wikimedia bonus in raw source mode', () => {
-    // Non-Wikimedia candidate in raw mode (baseline)
+  it('4.8 gives +80 Wikimedia bonus', () => {
+    // Non-Wikimedia candidate (baseline)
     const nonWiki: MediaCandidate = {
       ...baseCandidate,
       source: 'Generic Source',
@@ -193,9 +194,7 @@ describe('scoreCandidate', () => {
     };
     const baselineScore = scoreCandidate(nonWiki, baseTopicContext, undefined, 'raw');
 
-    // Wikimedia Commons in raw mode:
-    //   +80 (base Wikimedia Commons bonus, always)
-    //   +120 (raw-mode Wikimedia bonus)
+    // Wikimedia Commons: +80 (base Wikimedia Commons bonus)
     const wiki: MediaCandidate = {
       ...baseCandidate,
       source: 'Wikimedia Commons',
@@ -205,8 +204,8 @@ describe('scoreCandidate', () => {
     };
     const wikiScore = scoreCandidate(wiki, baseTopicContext, undefined, 'raw');
 
-    // Total Wikimedia bonus over baseline: +80 + +120 = +200
-    expect(wikiScore - baselineScore).toBe(200);
+    // Total Wikimedia bonus over baseline: +80 (authority) + 100 (licensed source) = 180
+    expect(wikiScore - baselineScore).toBe(180);
   });
 });
 
@@ -336,15 +335,15 @@ describe('searchDDGVideos', () => {
     expect(result[0].source).toBe('DuckDuckGo Video');
   });
 
-  it('filters out videos longer than 5 minutes', async () => {
+  it('filters out videos longer than 10 minutes', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
         results: [
           { content: 'https://example.com/short.mp4', title: 'Short', duration: '2:00' },
-          { content: 'https://example.com/long.mp4', title: 'Long', duration: '10:00' },
-          { content: 'https://example.com/medium.mp4', title: 'Medium', duration: '4:59' },
+          { content: 'https://example.com/long.mp4', title: 'Long', duration: '15:00' },
+          { content: 'https://example.com/medium.mp4', title: 'Medium', duration: '9:59' },
         ],
       }),
     }));
@@ -354,8 +353,8 @@ describe('searchDDGVideos', () => {
     expect(result.map(r => r.alt)).toEqual(['Short', 'Medium']);
   });
 
-  it('limits to 3 results', async () => {
-    const results = Array.from({ length: 10 }, (_, i) => ({
+  it('limits to 10 results', async () => {
+    const results = Array.from({ length: 15 }, (_, i) => ({
       content: `https://example.com/video${i}.mp4`,
       title: `Video ${i}`,
       duration: '1:00',
@@ -368,7 +367,7 @@ describe('searchDDGVideos', () => {
     }));
 
     const result = await searchDDGVideos('test query');
-    expect(result).toHaveLength(3);
+    expect(result).toHaveLength(10);
   });
 
   it('returns empty array when fetch returns 404', async () => {

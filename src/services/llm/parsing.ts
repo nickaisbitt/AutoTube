@@ -117,8 +117,18 @@ export function validateSegment(raw: unknown, index: number): ScriptSegment {
  * Parses raw LLM content string into an array of validated ScriptSegments.
  */
 export function parseSegmentsFromContent(content: string): ScriptSegment[] {
-  // Strip markdown code fences if present
-  const cleaned = content.replace(/```json/g, '').replace(/```/g, '').trim();
+  // Strip markdown code fences if present at the boundaries of the string
+  let cleaned = content.trim();
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.slice(7);
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.slice(3);
+  }
+  cleaned = cleaned.trim();
+  if (cleaned.endsWith('```')) {
+    cleaned = cleaned.slice(0, -3);
+  }
+  cleaned = cleaned.trim();
 
   let parsed: unknown;
   try {

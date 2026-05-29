@@ -7,6 +7,20 @@ import type { SourceProvider, SourceProviderConfig } from './types';
 import type { AppConfig } from '../../types';
 import { FlickrProvider } from './flickr';
 import { GovPressProvider } from './govPress';
+import { PixabayProvider } from './pixabay';
+import { PexelsProvider } from './pexels';
+import { NasaProvider } from './nasa';
+import { VimeoProvider } from './vimeo';
+import { DailymotionProvider } from './dailymotion';
+import { GiphyProvider } from './giphy';
+import { UnsplashProvider } from './unsplash';
+import { ArchiveOrgProvider } from './archiveOrg';
+import { HybridScraperProvider } from './hybridScraper';
+import { PexelsVideoProvider } from './pexelsVideo';
+import { PixabayVideoProvider } from './pixabayVideo';
+import { DeepHarvestProvider } from './deepHarvest';
+import { filterWatermarked } from './watermarkFilter';
+import { searchDDGLocal, searchDDGVideos, searchWikimedia, searchBingImages, searchGoogleImages, searchYandexImages, searchDuckDuckGoImages, searchStaticMap, searchBingVideos, searchGoogleVideos } from '../media';
 import { logger } from '../logger';
 
 // ---------------------------------------------------------------------------
@@ -22,7 +36,6 @@ class DDGLocalAdapter implements SourceProvider {
   }
 
   async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
-    const { searchDDGLocal } = await import('../media');
     return searchDDGLocal(query, config.signal);
   }
 }
@@ -36,7 +49,6 @@ class DDGVideoAdapter implements SourceProvider {
   }
 
   async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
-    const { searchDDGVideos } = await import('../media');
     return searchDDGVideos(query, config.signal);
   }
 }
@@ -50,7 +62,6 @@ class WikimediaAdapter implements SourceProvider {
   }
 
   async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
-    const { searchWikimedia } = await import('../media');
     return searchWikimedia(query, config.signal);
   }
 }
@@ -63,7 +74,8 @@ class PicsumAdapter implements SourceProvider {
     return true;
   }
 
-  async search(query: string): Promise<MediaCandidate[]> {
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    if (config.signal?.aborted) return [];
     const seed = query.toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 30);
     const sizes: Array<[number, number]> = [[1920, 1080], [1280, 720]];
     return sizes.map(([w, h], i) => ({
@@ -80,8 +92,127 @@ class PicsumAdapter implements SourceProvider {
   }
 }
 
+class BingImagesAdapter implements SourceProvider {
+  readonly name = 'Bing Images';
+  readonly requiresKey = false;
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    return searchBingImages(query, config.signal);
+  }
+}
+
+class GoogleImagesAdapter implements SourceProvider {
+  readonly name = 'Google Images';
+  readonly requiresKey = false;
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    return searchGoogleImages(query, config.signal);
+  }
+}
+
+class YandexImagesAdapter implements SourceProvider {
+  readonly name = 'Startpage Images';
+  readonly requiresKey = false;
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    return searchYandexImages(query, config.signal);
+  }
+}
+
+class DuckDuckGoImagesAdapter implements SourceProvider {
+  readonly name = 'DuckDuckGo Images';
+  readonly requiresKey = false;
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    return searchDuckDuckGoImages(query, config.signal);
+  }
+}
+
+class StaticMapAdapter implements SourceProvider {
+  readonly name = 'OpenStreetMap';
+  readonly requiresKey = false;
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    return searchStaticMap(query, config.signal);
+  }
+}
+
+class BingVideosAdapter implements SourceProvider {
+  readonly name = 'Bing Videos';
+  readonly requiresKey = false;
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    return searchBingVideos(query, config.signal);
+  }
+}
+
+class GoogleVideosAdapter implements SourceProvider {
+  readonly name = 'Google Videos';
+  readonly requiresKey = false;
+
+  isAvailable(): boolean {
+    return true;
+  }
+
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    return searchGoogleVideos(query, config.signal);
+  }
+}
+
+class PixabayAdapter implements SourceProvider {
+  readonly name = 'Pixabay';
+  readonly requiresKey = true;
+
+  isAvailable(config: SourceProviderConfig): boolean {
+    return Boolean(config.apiKey);
+  }
+
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    const provider = new PixabayProvider();
+    return provider.search(query, config);
+  }
+}
+
+class PexelsAdapter implements SourceProvider {
+  readonly name = 'Pexels';
+  readonly requiresKey = true;
+
+  isAvailable(config: SourceProviderConfig): boolean {
+    return Boolean(config.apiKey);
+  }
+
+  async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
+    const provider = new PexelsProvider();
+    return provider.search(query, config);
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Registry — free sources only (no Serper, Pexels, Pixabay)
+// Registry — all source providers
 // ---------------------------------------------------------------------------
 
 const allProviders: SourceProvider[] = [
@@ -89,8 +220,27 @@ const allProviders: SourceProvider[] = [
   new DDGVideoAdapter(),
   new WikimediaAdapter(),
   new PicsumAdapter(),
+  new BingImagesAdapter(),
+  new GoogleImagesAdapter(),
+  new YandexImagesAdapter(),
+  new DuckDuckGoImagesAdapter(),
+  new BingVideosAdapter(),
+  new GoogleVideosAdapter(),
+  new StaticMapAdapter(),
   new FlickrProvider(),
   new GovPressProvider(),
+  new PixabayAdapter(),
+  new PexelsAdapter(),
+  new PexelsVideoProvider(),
+  new PixabayVideoProvider(),
+  new NasaProvider(),
+  new VimeoProvider(),
+  new DailymotionProvider(),
+  new GiphyProvider(),
+  new UnsplashProvider(),
+  new ArchiveOrgProvider(),
+  new HybridScraperProvider(),
+  new DeepHarvestProvider(),
 ];
 
 export function getAllProviders(): SourceProvider[] {
@@ -116,8 +266,8 @@ export async function queryAllProviders(
       const providerConfig = mapAppConfigToProviderConfig(provider, config, signal);
 
       const providerSignal = signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(6_000)])
-        : AbortSignal.timeout(6_000);
+        ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+        : AbortSignal.timeout(8_000);
 
       try {
         const candidates = await provider.search(query, { ...providerConfig, signal: providerSignal });
@@ -131,6 +281,8 @@ export async function queryAllProviders(
     }),
   );
 
+  if (signal?.aborted) return [];
+
   const allCandidates: MediaCandidate[] = [];
   for (const result of results) {
     if (result.status === 'fulfilled') {
@@ -138,13 +290,19 @@ export async function queryAllProviders(
     }
   }
 
-  return deduplicateCandidates(allCandidates);
+  const deduplicated = deduplicateCandidates(allCandidates);
+  return filterWatermarked(deduplicated);
 }
 
 export function deduplicateCandidates(candidates: MediaCandidate[]): MediaCandidate[] {
   const bestByUrl = new Map<string, MediaCandidate>();
+  const seenByQueryAndUrl = new Set<string>();
 
   for (const candidate of candidates) {
+    const key = `${candidate.query}::${candidate.url}`;
+    if (seenByQueryAndUrl.has(key)) continue;
+    seenByQueryAndUrl.add(key);
+
     const existing = bestByUrl.get(candidate.url);
     if (!existing || candidate.baseScore > existing.baseScore) {
       bestByUrl.set(candidate.url, candidate);
@@ -164,6 +322,14 @@ function mapAppConfigToProviderConfig(
   switch (provider.name) {
     case 'Flickr':
       apiKey = config.flickrKey;
+      break;
+    case 'Pexels':
+    case 'Pexels Videos':
+      apiKey = (config as unknown as Record<string, unknown>).pexelsKey as string | undefined;
+      break;
+    case 'Pixabay':
+    case 'Pixabay Videos':
+      apiKey = (config as unknown as Record<string, unknown>).pixabayKey as string | undefined;
       break;
     default:
       apiKey = undefined;

@@ -22,7 +22,18 @@ import {
   resetUsedUrlsMap,
 } from '../../services/media';
 import { resolveTopicContext, planSegmentVisuals } from '../../services/visualPlanner';
-import { generateAIScript, reviewAndImproveScript, generateVideoTitle } from '../../services/llm/index';
+import {
+  generateAIScript,
+  reviewAndImproveScript,
+  refineScriptMultiPass,
+  generateVideoTitle,
+  generateSeriesMetadata,
+  generatePinnedComments,
+  generateHashtags,
+  mapEmotionalArc,
+  validateStoryArc,
+} from '../../services/llm/index';
+import { generateTitleVariants } from '../../services/llm/titleGenerator';
 import { assignSceneLayouts, scheduleRetentionBeats } from '../../services/renderingShared';
 import { QUALITY_PRESETS, renderVideoToBlob } from '../../services/renderer';
 import type { RenderResult } from '../../services/renderer/encoding';
@@ -33,6 +44,7 @@ import { runAIEditPass } from '../../services/aiEditor';
 import { extractHookLine } from '../../services/seoTitles';
 import { logger } from '../../services/logger';
 import { runBlindReview } from '../../services/blindReview';
+import { generateGrokTts, generateMeloTts } from '../../services/tts';
 import { CURRENT_PROJECT_VERSION } from '../../services/projectMigrations';
 
 // LR-1 fix: use crypto.randomUUID() for guaranteed uniqueness
@@ -75,18 +87,35 @@ export async function executeGenerateScript(
     throw err;
   }
 
-  // Review and improve the script via a second LLM pass
-  setProcessingProgress(55);
-  setProcessingMessage('Reviewing script...');
+  // Multi-pass script refinement: review → polish → trim (Task 84, 100)
+  setProcessingProgress(40);
+  setProcessingMessage('Refining script (review pass)...');
   try {
-    segments = await reviewAndImproveScript(segments, config.topic, appConfig.openRouterKey, signal);
+    segments = await refineScriptMultiPass(segments, config.topic, appConfig.openRouterKey, signal);
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
-      logger.info('Store', 'Script review cancelled by user');
+      logger.info('Store', 'Script refinement cancelled by user');
       return null;
     }
-    logger.warn('Store', 'Script review encountered an error, using original script');
+    logger.warn('Store', 'Script refinement encountered an error, falling back to single review pass');
+    try {
+      segments = await reviewAndImproveScript(segments, config.topic, appConfig.openRouterKey, signal);
+    } catch {
+      logger.warn('Store', 'Script review also failed, using original script');
+    }
   }
+
+  // Validate story arc (Task 86)
+  const arcValidation = validateStoryArc(segments);
+  if (!arcValidation.passed) {
+    logger.warn('Store', `Story arc validation issues: ${arcValidation.issues.join('; ')}`);
+  } else {
+    logger.success('Store', `Story arc validation passed (score: ${arcValidation.score}/100)`);
+  }
+
+  // Map emotional arc (Task 98)
+  const emotionalArc = mapEmotionalArc(segments);
+  logger.info('Store', `Emotional arc: ${emotionalArc.map((p) => p.emotion).join(' → ')}`);
 
   // Assign scene layouts based on purpose tags
   const layouts = assignSceneLayouts(segments);
@@ -105,19 +134,49 @@ export async function executeGenerateScript(
     logger.info('Store', `Retention beat: segment=${beat.segmentIndex} offset=${beat.timeOffsetSec.toFixed(1)}s type=${beat.type}`);
   }
 
-  // Generate an optimized title from the reviewed script
+  // Generate title variants (Task 97): direct, curiosity gap, emotional/urgent
   setProcessingProgress(80);
-  setProcessingMessage('Generating title...');
+  setProcessingMessage('Generating title variants...');
   const hookLine = extractHookLine(segments);
   let videoTitle: string;
+  let titleVariants: { direct: string; curiosityGap: string; emotionalUrgent: string } | undefined;
   try {
-    videoTitle = await generateVideoTitle(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
+    titleVariants = await generateTitleVariants(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
+    videoTitle = titleVariants.curiosityGap; // Default to curiosity gap variant
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
       logger.info('Store', 'Title generation cancelled by user');
       return null;
     }
-    videoTitle = config.topic;
+    try {
+      videoTitle = await generateVideoTitle(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
+    } catch {
+      videoTitle = config.topic;
+    }
+  }
+
+  // Generate series metadata (Task 102)
+  let seriesMetadata: { seriesName: string; episodeNumber: number; playlistDescription: string; episodeTitle: string } | undefined;
+  try {
+    seriesMetadata = await generateSeriesMetadata(segments, config.topic, appConfig.openRouterKey, signal);
+  } catch {
+    logger.warn('Store', 'Series metadata generation failed');
+  }
+
+  // Generate pinned comments (Task 91)
+  let pinnedComments: Array<{ text: string; type: 'question_prompt' | 'controversial_take' | 'what_did_i_miss' }> | undefined;
+  try {
+    pinnedComments = await generatePinnedComments(segments, config.topic, appConfig.openRouterKey, signal);
+  } catch {
+    logger.warn('Store', 'Pinned comment generation failed');
+  }
+
+  // Generate hashtags (Task 96)
+  let hashtags: string[] | undefined;
+  try {
+    hashtags = await generateHashtags(config.topic, config.style, '', appConfig.openRouterKey, signal);
+  } catch {
+    logger.warn('Store', 'Hashtag generation failed');
   }
 
   const newProject: VideoProject = {
@@ -132,6 +191,16 @@ export async function executeGenerateScript(
     narration: [],
     status: 'draft',
     createdAt: new Date(),
+    titleVariants,
+    seriesMetadata,
+    pinnedComments,
+    hashtags,
+    emotionalArc,
+    storyArcValidation: {
+      passed: arcValidation.passed,
+      score: arcValidation.score,
+      issues: arcValidation.issues,
+    },
   };
 
   return newProject;
@@ -325,16 +394,27 @@ export async function executeGenerateNarration(
   setProcessingProgress(6);
   setProcessingMessage('Checking TTS options...');
 
+  const xaiKey = import.meta.env.VITE_XAI_KEY || '';
+  const cfAccountId = import.meta.env.VITE_CF_ACCOUNT_ID || '';
+  const cfApiToken = import.meta.env.VITE_CF_API_TOKEN || '';
+
+  const hasGrok = !!xaiKey;
+  const hasMelo = !!cfAccountId && !!cfApiToken;
+
   const supported = hasSpeechSupport();
   const voices = supported ? await loadSpeechVoices() : [];
   const selectedVoice = pickPreferredVoice(voices);
 
-  const engines: string[] = ['Browser TTS'];
+  const engines: string[] = [];
+  if (hasGrok) engines.push('Grok TTS');
+  if (hasMelo) engines.push('MeloTTS');
+  engines.push('Browser TTS');
   logger.info('Store', `TTS fallback chain: ${engines.join(' → ')}`);
   setProcessingMessage(`TTS engines: ${engines.join(' → ')}`);
 
   const narration: NarrationClip[] = [];
   const segmentCount = activeProject.script.length;
+  const CONCURRENCY_LIMIT = 3;
 
   type TtsResult = {
     audioUrl?: string;
@@ -354,41 +434,119 @@ export async function executeGenerateNarration(
     let engineUsed = 'browser';
     let status: NarrationClip['status'] = 'ready';
 
-    // Browser TTS (free)
-    if (!supported || !selectedVoice) {
-      status = 'unavailable';
+    // Tier 1: Grok TTS
+    if (hasGrok) {
+      const grokUrl = await generateGrokTts(segment.narration, xaiKey, {
+        voice: appConfig.ttsVoice,
+        signal,
+      });
+      if (grokUrl) {
+        audioUrl = grokUrl;
+        voiceUsed = `Grok TTS (${appConfig.ttsVoice || 'Sal'})`;
+        clipMode = 'exported_file';
+        engineUsed = 'grok';
+
+        try {
+          const measured = await measureAudioDuration(grokUrl);
+          if (measured && measured > 0) {
+            estimatedDuration = Math.ceil(measured);
+          }
+        } catch { /* Keep estimated duration */ }
+      } else {
+        logger.warn('Store', `Grok TTS failed for segment "${segment.title}", trying next engine`);
+      }
     }
-    engineUsed = 'browser';
+
+    // Tier 2: MeloTTS (Cloudflare)
+    if (!audioUrl && hasMelo) {
+      const meloUrl = await generateMeloTts(segment.narration, cfAccountId, cfApiToken, { signal });
+      if (meloUrl) {
+        audioUrl = meloUrl;
+        voiceUsed = 'MeloTTS (Cloudflare)';
+        clipMode = 'exported_file';
+        engineUsed = 'melo';
+
+        try {
+          const measured = await measureAudioDuration(meloUrl);
+          if (measured && measured > 0) {
+            estimatedDuration = Math.ceil(measured);
+          }
+        } catch { /* Keep estimated duration */ }
+      } else {
+        logger.warn('Store', `MeloTTS failed for segment "${segment.title}", falling back to browser TTS`);
+      }
+    }
+
+    // Tier 3: Browser TTS (free fallback)
+    if (!audioUrl) {
+      if (!supported || !selectedVoice) {
+        status = 'unavailable';
+      }
+      engineUsed = 'browser';
+    }
 
     return { audioUrl, voiceUsed, clipMode, engineUsed, estimatedDuration, status };
   }
 
+  const useParallel = hasGrok || hasMelo;
   const ttsResults: TtsResult[] = [];
 
-  // Sequential TTS generation (browser speech synthesis)
-  for (let i = 0; i < segmentCount; i += 1) {
-    if (signal.aborted) {
-      logger.info('Store', 'Narration generation cancelled by user');
-      return null;
+  if (useParallel) {
+    for (let batchStart = 0; batchStart < segmentCount; batchStart += CONCURRENCY_LIMIT) {
+      if (signal.aborted) {
+        logger.info('Store', 'Narration generation cancelled by user');
+        return null;
+      }
+
+      const batchEnd = Math.min(batchStart + CONCURRENCY_LIMIT, segmentCount);
+      const batchSegments = activeProject.script.slice(batchStart, batchEnd);
+
+      setProcessingMessage(
+        `Generating TTS for segments ${batchStart + 1}\u2013${batchEnd} of ${segmentCount}...`,
+      );
+
+      const batchResults = await Promise.all(
+        batchSegments.map((seg) =>
+          generateTtsForSegment(seg).catch((): TtsResult => ({
+            audioUrl: undefined,
+            voiceUsed: selectedVoice?.name || 'No browser voice available',
+            clipMode: 'live_browser',
+            engineUsed: 'browser',
+            estimatedDuration: Math.max(6, Math.ceil((seg.narration.split(/\s+/).length / 150) * 60)),
+            status: !supported || !selectedVoice ? 'unavailable' : 'ready',
+          })),
+        ),
+      );
+
+      ttsResults.push(...batchResults);
+      setProcessingProgress(Math.round((batchEnd / segmentCount) * 100));
     }
+  } else {
+    for (let i = 0; i < segmentCount; i += 1) {
+      if (signal.aborted) {
+        logger.info('Store', 'Narration generation cancelled by user');
+        return null;
+      }
 
-    const segment = activeProject.script[i];
-    setProcessingProgress(Math.round((i / segmentCount) * 100));
-    setProcessingMessage(`Preparing voice for "${segment.title}"...`);
+      const segment = activeProject.script[i];
+      setProcessingProgress(Math.round((i / segmentCount) * 100));
+      setProcessingMessage(`Preparing voice for \u201c${segment.title}\u201d...`);
 
-    const result = await generateTtsForSegment(segment).catch((): TtsResult => ({
-      audioUrl: undefined,
-      voiceUsed: selectedVoice?.name || 'No browser voice available',
-      clipMode: 'live_browser',
-      engineUsed: 'browser',
-      estimatedDuration: Math.max(6, Math.ceil((segment.narration.split(/\s+/).length / 150) * 60)),
-      status: !supported || !selectedVoice ? 'unavailable' : 'ready',
-    }));
+      const wordCount = segment.narration.split(/\s+/).length;
+      const estimatedDuration = Math.max(6, Math.ceil((wordCount / 150) * 60));
 
-    ttsResults.push(result);
+      ttsResults.push({
+        audioUrl: undefined,
+        voiceUsed: selectedVoice?.name || 'No browser voice available',
+        clipMode: 'live_browser',
+        engineUsed: 'browser',
+        estimatedDuration,
+        status: !supported || !selectedVoice ? 'unavailable' : 'ready',
+      });
 
-    const delayMs = Math.max(50, Math.min(200, segment.narration.split(/\s+/).length * 0.5));
-    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+      const delayMs = Math.max(50, Math.min(200, wordCount * 0.5));
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    }
   }
 
   // Build narration clips from results

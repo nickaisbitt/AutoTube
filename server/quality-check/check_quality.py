@@ -309,8 +309,8 @@ def main():
         'score': score,
         'issues': issues,
         'metadata': {
-            'duration': float(metrics['probe']['format']['duration']) if metrics.get('probe') else None,
-            'size_mb': round(int(metrics['probe']['format']['size']) / 1048576, 1) if metrics.get('probe') else None,
+            'duration': float(metrics['probe']['format'].get('duration', 0)) if metrics.get('probe') and metrics['probe'].get('format') else None,
+            'size_mb': round(int(metrics['probe']['format'].get('size', 0)) / 1048576, 1) if metrics.get('probe') and metrics['probe'].get('format') else None,
             'resolution': None,
             'video_bitrate_kbps': None,
             'audio_bitrate_kbps': None,

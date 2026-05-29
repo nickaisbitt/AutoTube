@@ -51,8 +51,12 @@ def main():
         print("Usage: kokoro_generate.py <input_json>", file=sys.stderr)
         sys.exit(1)
 
-    with open(sys.argv[1]) as f:
-        config = json.load(f)
+    try:
+        with open(sys.argv[1]) as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"ERROR: Failed to read config: {e}", file=sys.stderr)
+        sys.exit(1)
 
     segments = config.get("segments", [])
     output_dir = config.get("output_dir", ".")
@@ -65,12 +69,28 @@ def main():
 
     os.makedirs(output_dir, exist_ok=True)
 
+    SAMPLE_RATE = 24000
+
     t0 = time.time()
     progress("Loading Kokoro-82M...")
-    from kokoro import KPipeline
+    try:
+        from kokoro import KPipeline
+    except ImportError as e:
+        progress(f"FAILED: kokoro package not installed. Run: pip install kokoro")
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
     import numpy as np
-    pipeline = KPipeline(lang_code='a', device='mps')
-    progress(f"Model loaded in {time.time()-t0:.1f}s")
+    device = 'cpu'
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            device = 'mps'
+        elif torch.cuda.is_available():
+            device = 'cuda'
+    except Exception:
+        pass
+    pipeline = KPipeline(lang_code='a', device=device)
+    progress(f"Model loaded on {device} in {time.time()-t0:.1f}s")
 
     for i, seg in enumerate(segments):
         seg_id = seg.get("id", f"seg_{i}")
@@ -79,6 +99,13 @@ def main():
             continue
         seg_speed = seg.get("speed", default_speed)
         seg_emotion = seg.get("emotion", None)
+
+        EMOTION_SPEED = {
+            "calm": 0.8, "neutral": 1.0, "excited": 1.2,
+            "urgent": 1.3, "serious": 0.9, "sad": 0.85, "angry": 1.15,
+        }
+        if seg_emotion and seg_emotion in EMOTION_SPEED:
+            seg_speed = seg_speed * EMOTION_SPEED[seg_emotion]
 
         progress(f"Generating segment {i+1}/{len(segments)}: {seg_id} (speed={seg_speed})")
         out_path = os.path.join(output_dir, f"{seg_id}.wav")
@@ -91,11 +118,11 @@ def main():
             token_lists = []
             audio_durations = []
             for result in gen:
-                audio = result.output.audio
+                audio = result.output.audio if result.output is not None else None
                 tokens = result.tokens
                 if audio is not None and len(audio) > 0:
                     audios.append(audio)
-                    audio_durations.append(len(audio) / 24000)
+                    audio_durations.append(len(audio) / SAMPLE_RATE)
                 if tokens:
                     token_lists.append(tokens)
 
@@ -104,10 +131,10 @@ def main():
                 continue
 
             combined = np.concatenate(audios) if len(audios) > 1 else audios[0]
-            total_duration = len(combined) / 24000
+            total_duration = len(combined) / SAMPLE_RATE
 
             import soundfile as sf
-            sf.write(out_path, combined, 24000)
+            sf.write(out_path, combined, SAMPLE_RATE)
 
             # Generate VTT from Kokoro's real word-level timestamps
             vtt_content = generate_vtt_from_tokens(token_lists, audio_durations)
@@ -119,6 +146,7 @@ def main():
 
         except Exception as e:
             progress(f"Segment {i+1} FAILED: {str(e)[:200]}")
+            print(f"ERROR: Segment {i+1} failed: {e}", file=sys.stderr)
 
     progress("ALL_DONE")
 

@@ -9,16 +9,19 @@ import type {
   TopicContext,
   AppConfig,
 } from '../types';
-import { resolveTopicContext } from './visualPlanner';
+
 import { logger } from './logger';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { filterCandidates, getDomainTrustTier } from './domainFilter';
 import { batchVisionCheck, checkCandidateVision } from './visionCheck';
 import { queryAllProviders } from './sourceProviders';
-import { batchResolve, type ResolveResult } from './fullResResolver';
+import { batchResolve } from './fullResResolver';
 import { MediaCache } from './mediaCache';
-import { batchScoreQuality, type QualityScorerResult } from './qualityScorer';
+import { batchScoreQuality } from './qualityScorer';
 import { focalCrop, needsCropping } from './focalCropper';
+import { isWatermarked } from './sourceProviders/watermarkFilter';
+import { determineLicense, isLicenseCompatible } from './licenseTracker';
+import { computePaletteBonus } from './qualityValidation/colorPalette';
 
 // ---------------------------------------------------------------------------
 // Watermark Detection Constants
@@ -27,15 +30,150 @@ import { focalCrop, needsCropping } from './focalCropper';
 export const WATERMARK_DOMAINS = [
   'shutterstock.com', 'gettyimages.com', 'istockphoto.com',
   '123rf.com', 'dreamstime.com', 'depositphotos.com',
-  'alamy.com', 'ftcdn.net',
+  'alamy.com', 'ftcdn.net', 'adobestock.com', 'stock.adobe.com',
+  'fotolia.com', 'pond5.com', 'videoblocks.com', 'storyblocks.com',
+  'envato.com', 'videohive.net', 'motionelements.com', 'pexels.com',
+  'pixabay.com', 'unsplash.com',
 ];
 
 export const WATERMARK_INDICATORS = [
   'stock', 'watermark', 'preview', 'comp', 'sample', 'licensed',
+  'shutterstock', 'gettyimages', 'alamy watermark', 'adobe stock',
 ];
 
 const WATERMARK_DOMAIN_PENALTY = -500;
 const WATERMARK_INDICATOR_PENALTY = -300;
+
+// ---------------------------------------------------------------------------
+// Copyright Claim Prevention (Task 178)
+// ---------------------------------------------------------------------------
+
+export interface CopyrightCheckResult {
+  flagged: boolean;
+  patterns: string[];
+  source: string;
+  licenseStatus: 'verified' | 'unverified' | 'blocked';
+}
+
+export const COPYRIGHT_PATTERNS: Record<string, string[]> = {
+  'Getty Images': ['getty', 'gettyimages', 'istockphoto', 'getty images'],
+  'Shutterstock': ['shutterstock', 'shutterstock.com'],
+  'Adobe Stock': ['adobe stock', 'stock.adobe', 'adobestock', 'fotolia'],
+  'Alamy': ['alamy', 'alamy stock'],
+  '123RF': ['123rf', '123rf.com'],
+  'Dreamstime': ['dreamstime', 'dreamstime.com'],
+  'Depositphotos': ['depositphotos', 'depositphotos.com'],
+  'Pond5': ['pond5', 'pond5.com'],
+  'Envato': ['envato', 'videohive', 'motion elements'],
+};
+
+export const LICENSED_SOURCES: Record<string, string> = {
+  'Wikimedia Commons': 'CC-BY-SA',
+  'Unsplash': 'Unsplash License',
+  'Picsum': 'Pexels/Pixabay-style',
+  'Pexels': 'Pexels License',
+  'Pixabay': 'Pixabay License',
+  'OpenStreetMap': 'ODbL',
+  'Wikipedia': 'Fair Use / CC-BY-SA',
+};
+
+// ---------------------------------------------------------------------------
+// License Resolution (Task 179)
+// ---------------------------------------------------------------------------
+
+export function resolveLicense(source: string, sourceUrl?: string): { license: string; attribution: string } {
+  const lowerSource = source.toLowerCase();
+
+  for (const [name, license] of Object.entries(LICENSED_SOURCES)) {
+    if (lowerSource.includes(name.toLowerCase())) {
+      const attribution = `${name} (${license})`;
+      return { license, attribution };
+    }
+  }
+
+  if (sourceUrl) {
+    const hostname = (() => {
+      try { return new URL(sourceUrl).hostname; } catch { return ''; }
+    })();
+    if (hostname.includes('wikimedia.org') || hostname.includes('wikipedia.org')) {
+      return { license: 'CC-BY-SA', attribution: 'Wikimedia Commons (CC-BY-SA)' };
+    }
+  }
+
+  return { license: 'Unknown', attribution: 'Unknown source' };
+}
+
+export function logLicenseInfo(asset: MediaAsset): void {
+  if (asset.license && asset.license.licenseType !== 'Unknown') {
+    logger.info('License', `Asset "${asset.alt}" from ${asset.source}: ${asset.license.licenseType}`);
+  } else {
+    logger.warn('License', `Asset "${asset.alt}" from ${asset.source}: License unverified`);
+  }
+}
+
+export const BLOCKED_COPYRIGHT_SOURCES = [
+  'gettyimages.com',
+  'shutterstock.com',
+  'adobestock.com',
+  'stock.adobe.com',
+  'istockphoto.com',
+  '123rf.com',
+  'dreamstime.com',
+  'depositphotos.com',
+  'alamy.com',
+  'pond5.com',
+  'fotolia.com',
+];
+
+export function checkCopyright(c: MediaCandidate): CopyrightCheckResult {
+  const meta = `${c.alt} ${c.url} ${c.sourceUrl || ''} ${c.source}`.toLowerCase();
+  const hostname = (() => {
+    try { return new URL(c.url).hostname; } catch { return ''; }
+  })();
+  const sourceHostname = (() => {
+    try { return new URL(c.sourceUrl || '').hostname; } catch { return ''; }
+  })();
+
+  const matchedPatterns: string[] = [];
+
+  for (const [name, patterns] of Object.entries(COPYRIGHT_PATTERNS)) {
+    for (const pattern of patterns) {
+      if (meta.includes(pattern) || hostname.includes(pattern) || sourceHostname.includes(pattern)) {
+        matchedPatterns.push(`${name}: ${pattern}`);
+      }
+    }
+  }
+
+  const isBlocked = BLOCKED_COPYRIGHT_SOURCES.some(
+    d => hostname.includes(d) || sourceHostname.includes(d)
+  );
+
+  const licenseStatus: CopyrightCheckResult['licenseStatus'] = isBlocked
+    ? 'blocked'
+    : matchedPatterns.length > 0
+      ? 'unverified'
+      : 'verified';
+
+  const knownLicense = Object.entries(LICENSED_SOURCES).find(
+    ([name]) => c.source.includes(name) || meta.includes(name.toLowerCase())
+  );
+
+  if (knownLicense) {
+    return {
+      flagged: false,
+      patterns: [],
+      source: knownLicense[0],
+      licenseStatus: 'verified',
+    };
+  }
+
+  return {
+    flagged: isBlocked || matchedPatterns.length > 0,
+    patterns: matchedPatterns,
+    source: c.source,
+    licenseStatus,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Relevance Scoring Constants
@@ -57,6 +195,201 @@ export const UNRELATED_DOMAIN_TERMS: Record<string, string[]> = {
   astronomy: ['constellation', 'nebula', 'supernova', 'asteroid', 'telescope', 'galaxy', 'pulsar', 'quasar'],
   fashion: ['runway', 'couture', 'designer', 'garment', 'textile', 'embroidery', 'hemline', 'silhouette'],
 };
+
+// ---------------------------------------------------------------------------
+// Minimum image size filter
+// ---------------------------------------------------------------------------
+
+function meetsMinimumSize(c: { type: MediaCandidate['type']; width?: number; height?: number }): boolean {
+  if (c.type !== 'image') return true;
+  if (c.width !== undefined && c.height !== undefined) {
+    return c.width >= 400 && c.height >= 300;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Resolution Minimum Filter (Task 149)
+// ---------------------------------------------------------------------------
+
+export const MIN_IMAGE_WIDTH = 1280;
+export const MIN_IMAGE_HEIGHT = 720;
+export const MIN_VIDEO_WIDTH = 1280;
+export const MIN_VIDEO_HEIGHT = 720;
+
+export const MIN_IMAGE_MEGAPIXELS = 0.9;
+
+function meetsResolutionMinimum(c: MediaCandidate): boolean {
+  if (c.type === 'image') {
+    if (c.width === undefined || c.height === undefined) return true;
+    return c.width >= MIN_IMAGE_WIDTH && c.height >= MIN_IMAGE_HEIGHT;
+  }
+  if (c.type === 'video') {
+    if (c.width === undefined || c.height === undefined) return true;
+    return (c.width ?? 0) >= MIN_VIDEO_WIDTH && (c.height ?? 0) >= MIN_VIDEO_HEIGHT;
+  }
+  return true;
+}
+
+function meetsMegapixelMinimum(c: MediaCandidate): boolean {
+  if (c.type !== 'image') return true;
+  if (c.width === undefined || c.height === undefined) return true;
+  const megapixels = (c.width * c.height) / 1_000_000;
+  return megapixels >= MIN_IMAGE_MEGAPIXELS;
+}
+
+// ---------------------------------------------------------------------------
+// Aspect Ratio Validation (Task 150)
+// ---------------------------------------------------------------------------
+
+const MIN_ASPECT_RATIO = 1.3;
+const MAX_ASPECT_RATIO = 2.5;
+
+function meetsAspectRatio(c: MediaCandidate): boolean {
+  if (!c.width || !c.height || c.height === 0) return true;
+  const ratio = c.width / c.height;
+  return ratio >= MIN_ASPECT_RATIO && ratio <= MAX_ASPECT_RATIO;
+}
+
+// ---------------------------------------------------------------------------
+// Image Quality Gate (Task 147)
+// ---------------------------------------------------------------------------
+
+export interface QualityGateResult {
+  passed: boolean;
+  resolutionOk: boolean;
+  contrastOk: boolean;
+  brightnessOk: boolean;
+  noWatermark: boolean;
+  issues: string[];
+}
+
+/**
+ * Validates an image candidate against minimum quality thresholds.
+ */
+export function passesQualityGate(c: MediaCandidate): QualityGateResult {
+  const issues: string[] = [];
+
+  // Resolution check
+  const resolutionOk = (c.width ?? 0) >= MIN_IMAGE_WIDTH && (c.height ?? 0) >= MIN_IMAGE_HEIGHT;
+  if (!resolutionOk) {
+    issues.push(`Resolution ${c.width}x${c.height} below minimum ${MIN_IMAGE_WIDTH}x${MIN_IMAGE_HEIGHT}`);
+  }
+
+  // Watermark check (Task 148: verify watermark filter integration)
+  const noWatermark = !isWatermarked(c);
+  if (!noWatermark) {
+    issues.push('Watermark detected — candidate rejected');
+  }
+
+  // Contrast/brightness: placeholder checks based on scoring
+  // Full contrast analysis requires pixel data (done at render time)
+  const contrastOk = true;
+  const brightnessOk = true;
+
+  return {
+    passed: resolutionOk && noWatermark && contrastOk && brightnessOk,
+    resolutionOk,
+    contrastOk,
+    brightnessOk,
+    noWatermark,
+    issues,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Face Detection for Thumbnails (Task 152)
+// ---------------------------------------------------------------------------
+
+/**
+ * Brightness-based skin-tone detection for face regions.
+ * Returns true if the region likely contains a face based on
+ * skin-tone pixel ratio and brightness.
+ */
+export function detectFaceBySkinTone(
+  imageData: Uint8ClampedArray,
+  region: { x: number; y: number; width: number; height: number },
+  imgWidth: number,
+): { hasFace: boolean; confidence: number } {
+  const { x: rx, y: ry, width: rw, height: rh } = region;
+  if (rw <= 0 || rh <= 0) return { hasFace: false, confidence: 0 };
+
+  let skinPixels = 0;
+  let totalPixels = 0;
+  let brightnessSum = 0;
+
+  const xEnd = Math.min(rx + rw, imgWidth);
+  const yEnd = Math.min(ry + rh, imageData.length / 4 / imgWidth);
+
+  for (let y = ry; y < yEnd; y++) {
+    for (let x = rx; x < xEnd; x++) {
+      const idx = (y * imgWidth + x) * 4;
+      if (idx + 2 >= imageData.length) break;
+      const r = imageData[idx];
+      const g = imageData[idx + 1];
+      const b = imageData[idx + 2];
+      totalPixels++;
+      brightnessSum += (r + g + b) / 3;
+
+      // Skin-tone heuristic: R > 95, G > 40, B > 20, R-G within 15-100
+      if (r > 95 && g > 40 && b > 20 && (r - g) > 15 && (r - g) < 100) {
+        skinPixels++;
+      }
+    }
+  }
+
+  if (totalPixels === 0) return { hasFace: false, confidence: 0 };
+
+  const skinRatio = skinPixels / totalPixels;
+  const avgBrightness = brightnessSum / totalPixels;
+
+  // Face is likely present if skin ratio > 15% and brightness is in reasonable range
+  const hasFace = skinRatio > 0.15 && avgBrightness > 60 && avgBrightness < 240;
+  const confidence = hasFace ? Math.min(1, skinRatio * 2.5) : 0;
+
+  return { hasFace, confidence };
+}
+
+// ---------------------------------------------------------------------------
+// Color Palette Matching (Task 151)
+// ---------------------------------------------------------------------------
+
+/**
+ * Scores how well a candidate image's dominant colors match given accent colors.
+ * Uses the existing computePaletteBonus from qualityValidation.
+ */
+export function scoreColorPaletteMatch(
+  candidateColors: { dominant: string; secondary: string; accent: string },
+  videoAccentColors: string[],
+): number {
+  let totalBonus = 0;
+  for (const accent of videoAccentColors) {
+    const palette = {
+      dominant: candidateColors.dominant,
+      secondary: candidateColors.secondary,
+      accent: candidateColors.accent,
+      warmth: 'neutral' as const,
+      saturation: 0.5,
+      brightness: 0.5,
+    };
+    totalBonus += computePaletteBonus(palette, accent);
+  }
+  return totalBonus;
+}
+
+// ---------------------------------------------------------------------------
+// Copyright Verification (Task 155)
+// ---------------------------------------------------------------------------
+
+/**
+ * Verifies the license of a media candidate and returns compatibility info.
+ */
+export function verifyCopyright(c: MediaCandidate): { compatible: boolean; licenseType: string; attribution: string } {
+  const license = determineLicense(c.source, c.sourceUrl);
+  const compatible = isLicenseCompatible(license);
+  const attribution = !license.attributionRequired ? '' : `${license.licenseType} via ${c.source}`;
+  return { compatible, licenseType: license.licenseType, attribution };
+}
 
 // ---------------------------------------------------------------------------
 // Candidate type
@@ -86,6 +419,12 @@ export interface MediaCandidate {
   qualityCompositeScore?: number;
   /** Duration in seconds for video clips */
   duration?: number;
+  /** Copyright check result (Task 178) */
+  copyrightCheck?: CopyrightCheckResult;
+  /** License type (Task 179) */
+  license?: string;
+  /** Attribution info (Task 179) */
+  attribution?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,18 +438,30 @@ export function scoreCandidate(
   visualConcept?: string,
   sourceType: AppConfig['sourceType'] = 'stock',
   narrationText?: string,
+  segmentTitle?: string,
 ): number {
   let score = c.baseScore;
 
   if (c.type === 'video') {
-    score += sourceType === 'stock' ? 90 : 60;
+    score += sourceType === 'stock' ? 150 : 100;
   }
+
 
   // 1. Keyword Relevance
   const meta = (c.alt + ' ' + (c.sourceUrl || '')).toLowerCase();
   const queryWords = c.query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
   for (const w of queryWords) {
     if (meta.includes(w)) score += 25;
+  }
+
+  // 1b. Segment Title Relevance Boost
+  if (segmentTitle) {
+    const segmentWords = segmentTitle.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const candidateMeta = (c.alt + ' ' + c.url).toLowerCase();
+    const hasSegmentWord = segmentWords.some(w => candidateMeta.includes(w));
+    if (hasSegmentWord) {
+      score += 20;
+    }
   }
 
   // 2. Vibe Match
@@ -121,55 +472,67 @@ export function scoreCandidate(
     }
   }
 
-  // 3. Source Authority
+  // 3. Source Authority (consolidated — removed duplicate trust scoring)
   const highTrust = ['reuters', 'apnews', 'bloomberg', 'nytimes', 'wsj', 'cnn', 'bbc', 'theguardian', 'cnbc', 'forbes', 'getty', 'shutterstock', 'adobe', 'alamy'];
   const src = (c.sourceUrl || '').toLowerCase();
-  if (highTrust.some(d => src.includes(d))) score += 100;
   
-  if (c.source.includes('Google News')) score += 60;
-  if (c.source.includes('DuckDuckGo')) score += 50;
-  if (c.source === 'Wikimedia Commons') score += 80; // Highly preferred for educational content
-
-  if (sourceType === 'stock') {
-    if (c.source.includes('Unsplash')) score += 70;
-    if (c.source.includes('Picsum')) score += 35;
-    if (c.source.includes('DuckDuckGo')) score += 10;
-    if (c.source.includes('Wikimedia')) score += 20;
-  } else {
-    if (c.source.includes('Wikimedia')) score += 120;
-    if (c.source.includes('DuckDuckGo')) score += 90;
-    if (c.source.includes('Google')) score += 80;
-    if (c.source.includes('Unsplash')) score += 25;
+  // Single authority score — takes the best match, not cumulative
+  let authorityScore = 0;
+  if (highTrust.some(d => src.includes(d))) {
+    authorityScore = 100;
+  } else if (c.source === 'Wikimedia Commons') {
+    authorityScore = 80;
+  } else if (sourceType !== 'stock' && c.source.includes('Wikimedia')) {
+    authorityScore = 80;
+  } else if (c.source.includes('Google News')) {
+    authorityScore = 60;
+  } else if (sourceType !== 'stock' && c.source.includes('DuckDuckGo')) {
+    authorityScore = 90;
+  } else if (sourceType !== 'stock' && c.source.includes('Google')) {
+    authorityScore = 80;
+  } else if (sourceType === 'stock' && c.source.includes('Unsplash')) {
+    authorityScore = 70;
+  } else if (sourceType === 'stock' && c.source.includes('Picsum')) {
+    authorityScore = 35;
   }
+  score += authorityScore;
 
   // Trust-tier penalty for unknown domains
   if (getDomainTrustTier(c.sourceUrl || c.url) === 'unknown') {
     score -= 50;
   }
 
-  // 4. Resolution & Aspect Ratio
+  // 4. Resolution & Aspect Ratio (consolidated — removed duplicate scoring)
   if (c.width && c.height) {
     const ratio = c.width / c.height;
     if (ratio > 1.3 && ratio < 1.9) score += 30;
     if (ratio < 0.9) score -= 150;
 
-    const pixels = c.width * c.height;
-    if (pixels >= 1920 * 1080) score += 40;
-    if (pixels < 640 * 480) score -= 80;
+    // Single resolution tier scoring (replaced duplicate blocks at lines 156-174)
+    if (c.width >= 3840 && c.height >= 2160) {
+      score += 200; // 4K
+    } else if (c.width >= 2560 && c.height >= 1440) {
+      score += 100; // 1440p
+    } else if (c.width >= 1920 && c.height >= 1080) {
+      score += 50; // 1080p
+    } else if (c.width >= 1280 && c.height >= 720) {
+      score += 0; // 720p baseline
+    } else if (c.width * c.height >= 640 * 480) {
+      score -= 50; // Below 720p but usable
+    } else {
+      score -= 150; // Too small
+    }
   }
 
-  // Resolution preference (4K+)
-  if (c.width && c.height) {
-    if (c.width >= 3840 && c.height >= 2160) {
-      score += 200;
-    } else if (c.width >= 2560 && c.height >= 1440) {
+  // 4b. Missing dimensions penalty — images without dimension data get penalized
+  if (c.type === 'image' && (c.width === undefined || c.height === undefined)) {
+    score -= 200;
+  }
+
+  // 4c. HD resolution bonus for images >= 1920x1080
+  if (c.type === 'image' && c.width !== undefined && c.height !== undefined) {
+    if (c.width >= 1920 && c.height >= 1080) {
       score += 100;
-    } else if (c.width >= 1920 && c.height >= 1080) {
-      score += 50;
-    } else if (c.width >= 1280 && c.height >= 720) {
-      score += 0; // baseline
-    } else {
-      score -= 100; // below 720p
     }
   }
 
@@ -458,6 +821,22 @@ export function scoreCandidate(
     }
   }
 
+  // 20. Copyright claim prevention — heavily penalize assets from known copyrighted sources
+  {
+    const copyrightResult = checkCopyright(c);
+    if (copyrightResult.licenseStatus === 'blocked') {
+      score -= 800; // Severe penalty for blocked copyrighted sources
+    } else if (copyrightResult.licenseStatus === 'unverified') {
+      score -= 200; // Moderate penalty for unverified sources
+    }
+
+    // Bonus for known free/CC sources
+    const knownLicense = LICENSED_SOURCES[c.source];
+    if (knownLicense) {
+      score += 100; // Strong bonus for verified free sources
+    }
+  }
+
   return score;
 }
 
@@ -478,6 +857,34 @@ interface DDGImageResult {
 }
 
 /**
+ * Attempt to upgrade a thumbnail/proxy URL to a full-size image URL.
+ * Handles common CDN patterns to extract the actual source image.
+ */
+function upgradeToFullSize(url: string): string {
+  try {
+    const parsed = new URL(url);
+    // Extract actual image URL from DuckDuckGo's proxy wrapper
+    if (parsed.hostname.includes('duckduckgo.com') && parsed.searchParams.has('u')) {
+      const u = parsed.searchParams.get('u');
+      if (u) return u;
+    }
+  } catch {
+    // ignore
+  }
+
+  // Strip WordPress-style dimension suffixes (-NNNxNNN before extension)
+  url = url.replace(/-\d+x\d+(\.\w+)(?=[?#]|$)/, '$1');
+
+  // Upgrade common thumbnail path patterns to full-size paths
+  url = url.replace(/\/thumb\//, '/');
+  url = url.replace(/\/thumbnail\//, '/');
+  url = url.replace(/\/small\//, '/');
+  url = url.replace(/\/medium\//, '/');
+
+  return url;
+}
+
+/**
  * Level 1: Local DDG Scraper (100% Free, High Intent)
  *
  * This relies on the Vite dev-server proxy at /api/search.
@@ -488,7 +895,7 @@ interface DDGImageResult {
 /* @internal */
 export async function searchDDGLocal(query: string, signal?: AbortSignal): Promise<MediaCandidate[]> {
   try {
-    const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query + ' high resolution')}`, {}, {
+    const res = await fetchWithTimeout(`/api/search?q=${encodeURIComponent(query + ' high resolution free')}`, {}, {
       timeoutMs: 15_000,
       maxRetries: 1,
       signal,
@@ -510,8 +917,9 @@ export async function searchDDGLocal(query: string, signal?: AbortSignal): Promi
         try {
           if (!img.image) return null;
           const hostname = img.url ? new URL(img.url).hostname : 'unknown';
+          const upgradedImage = upgradeToFullSize(img.image);
           return {
-            url: img.image,
+            url: upgradedImage,
             thumbnailUrl: img.thumbnail,
             alt: img.title || query,
             source: `DuckDuckGo · ${hostname}`,
@@ -522,12 +930,12 @@ export async function searchDDGLocal(query: string, signal?: AbortSignal): Promi
             query,
             finalScore: 0,
             type: 'image' as const,
-          };
+          } satisfies MediaCandidate;
         } catch {
           return null;
         }
       })
-      .filter((c): c is MediaCandidate => c !== null);
+      .filter((c) => c !== null) as MediaCandidate[];
 
     logger.info('DDG Scraper', `Found ${candidates.length} free images for "${query}"`);
     return candidates;
@@ -592,8 +1000,8 @@ export async function searchDDGVideos(query: string, signal?: AbortSignal): Prom
     const results = (data as Record<string, unknown>).results;
     if (!Array.isArray(results)) return [];
 
-    const MAX_DURATION_SECONDS = 5 * 60; // 5 minutes
-    const MAX_RESULTS = 3;
+    const MAX_DURATION_SECONDS = 10 * 60; // 10 minutes (was 5 min — too restrictive)
+    const MAX_RESULTS = 10; // Increased from 3 for better selection
 
     const candidates: MediaCandidate[] = (results as DDGVideoResult[])
       .filter((v) => {
@@ -617,12 +1025,12 @@ export async function searchDDGVideos(query: string, signal?: AbortSignal): Prom
             query,
             finalScore: 0,
             type: 'video' as const,
-          };
+          } satisfies MediaCandidate;
         } catch {
           return null;
         }
       })
-      .filter((c): c is MediaCandidate => c !== null);
+      .filter((c) => c !== null) as MediaCandidate[];
 
     logger.info('DDG Video', `Found ${candidates.length} video clips for "${query}"`);
     return candidates;
@@ -666,16 +1074,319 @@ export async function searchWikimedia(query: string, signal?: AbortSignal): Prom
         query,
         finalScore: 0,
         type: 'image' as const,
-      };
-    }).filter((c): c is MediaCandidate => c !== null)
-      .filter(c => !c.url.toLowerCase().endsWith('.svg'));
+      } satisfies MediaCandidate;
+    }).filter((c) => c !== null) as MediaCandidate[];
+    
+    const finalCandidates = candidates.filter((c) => !c.url.toLowerCase().endsWith('.svg'));
 
-    logger.info('Wikimedia', `Found ${candidates.length} free assets for "${query}"`);
-    return candidates;
+    logger.info('Wikimedia', `Found ${finalCandidates.length} free assets for "${query}"`);
+    return finalCandidates;
   } catch (err) {
     return [];
   }
 }
+
+export async function searchBingImages(query: string, signal?: AbortSignal): Promise<MediaCandidate[]> {
+  try {
+    const res = await fetchWithTimeout(`/api/search-bing-images?q=${encodeURIComponent(query)}`, {}, {
+      timeoutMs: 15_000,
+      maxRetries: 1,
+      signal,
+    });
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    const results = (data as Record<string, unknown>).results;
+    if (!Array.isArray(results)) return [];
+
+    const candidates: MediaCandidate[] = results.map((img: any) => {
+      try {
+        if (!img.url) return null;
+        const hostname = new URL(img.url).hostname;
+        return {
+          url: img.url,
+          thumbnailUrl: img.thumbnailUrl || img.url,
+          alt: img.title || query,
+          source: `Bing Images · ${hostname}`,
+          sourceUrl: img.sourceUrl || img.url,
+          width: img.width,
+          height: img.height,
+          baseScore: 170,
+          query,
+          finalScore: 0,
+          type: 'image' as const,
+        } satisfies MediaCandidate;
+      } catch {
+        return null;
+      }
+    }).filter((c) => c !== null) as MediaCandidate[];
+
+    logger.info('Bing Images', `Found ${candidates.length} images for "${query}"`);
+    return candidates;
+  } catch (err) {
+    logger.warn('Bing Images', `Exception for "${query}"`, err);
+    return [];
+  }
+}
+
+export async function searchGoogleImages(query: string, signal?: AbortSignal): Promise<MediaCandidate[]> {
+  try {
+    const res = await fetchWithTimeout(`/api/search-google-images?q=${encodeURIComponent(query)}`, {}, {
+      timeoutMs: 15_000,
+      maxRetries: 1,
+      signal,
+    });
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    const results = (data as Record<string, unknown>).results;
+    if (!Array.isArray(results)) return [];
+
+    const candidates: MediaCandidate[] = results.map((img: any) => {
+      try {
+        if (!img.url) return null;
+        const hostname = new URL(img.url).hostname;
+        return {
+          url: img.url,
+          thumbnailUrl: img.thumbnailUrl || img.url,
+          alt: img.title || query,
+          source: `Google Images · ${hostname}`,
+          sourceUrl: img.sourceUrl || img.url,
+          width: img.width,
+          height: img.height,
+          baseScore: 170,
+          query,
+          finalScore: 0,
+          type: 'image' as const,
+        } satisfies MediaCandidate;
+      } catch {
+        return null;
+      }
+    }).filter((c) => c !== null) as MediaCandidate[];
+
+    logger.info('Google Images', `Found ${candidates.length} images for "${query}"`);
+    return candidates;
+  } catch (err) {
+    logger.warn('Google Images', `Exception for "${query}"`, err);
+    return [];
+  }
+}
+
+export async function searchYandexImages(query: string, signal?: AbortSignal): Promise<MediaCandidate[]> {
+  try {
+    const res = await fetchWithTimeout(`/api/search-yandex-images?q=${encodeURIComponent(query)}`, {}, {
+      timeoutMs: 15_000,
+      maxRetries: 1,
+      signal,
+    });
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    const results = (data as Record<string, unknown>).results;
+    if (!Array.isArray(results)) return [];
+
+    const candidates: MediaCandidate[] = results.map((img: any) => {
+      try {
+        if (!img.url) return null;
+        const hostname = new URL(img.url).hostname;
+        return {
+          url: img.url,
+          thumbnailUrl: img.thumbnailUrl || img.url,
+          alt: img.title || query,
+          source: `Startpage Images · ${hostname}`,
+          sourceUrl: img.sourceUrl || img.url,
+          width: img.width,
+          height: img.height,
+          baseScore: 170,
+          query,
+          finalScore: 0,
+          type: 'image' as const,
+        } satisfies MediaCandidate;
+      } catch {
+        return null;
+      }
+    }).filter((c) => c !== null) as MediaCandidate[];
+
+    logger.info('Startpage Images', `Found ${candidates.length} images for "${query}"`);
+    return candidates;
+  } catch (err) {
+    logger.warn('Startpage Images', `Exception for "${query}"`, err);
+    return [];
+  }
+}
+
+export async function searchDuckDuckGoImages(query: string, signal?: AbortSignal): Promise<MediaCandidate[]> {
+  try {
+    const res = await fetchWithTimeout(`/api/search-duckduckgo-images?q=${encodeURIComponent(query)}`, {}, {
+      timeoutMs: 15_000,
+      maxRetries: 1,
+      signal,
+    });
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    const results = (data as Record<string, unknown>).results;
+    if (!Array.isArray(results)) return [];
+
+    const candidates: MediaCandidate[] = results.map((img: any) => {
+      try {
+        if (!img.url) return null;
+        const hostname = new URL(img.url).hostname;
+        const upgradedUrl = upgradeToFullSize(img.url);
+        return {
+          url: upgradedUrl,
+          thumbnailUrl: img.thumbnailUrl || img.url,
+          alt: img.title || query,
+          source: `DuckDuckGo Images · ${hostname}`,
+          sourceUrl: img.sourceUrl || img.url,
+          width: img.width,
+          height: img.height,
+          baseScore: 170,
+          query,
+          finalScore: 0,
+          type: 'image' as const,
+        } satisfies MediaCandidate;
+      } catch {
+        return null;
+      }
+    }).filter((c) => c !== null) as MediaCandidate[];
+
+    logger.info('DuckDuckGo Images', `Found ${candidates.length} images for "${query}"`);
+    return candidates;
+  } catch (err) {
+    logger.warn('DuckDuckGo Images', `Exception for "${query}"`, err);
+    return [];
+  }
+}
+
+export async function searchStaticMap(query: string, signal?: AbortSignal): Promise<MediaCandidate[]> {
+  try {
+    const res = await fetchWithTimeout(`/api/static-map?q=${encodeURIComponent(query)}`, {}, {
+      timeoutMs: 15_000,
+      maxRetries: 1,
+      signal,
+    });
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    const results = (data as Record<string, unknown>).results;
+    if (!Array.isArray(results)) return [];
+
+    const candidates: MediaCandidate[] = results.map((img: any) => {
+      try {
+        if (!img.url) return null;
+        return {
+          url: img.url,
+          thumbnailUrl: img.thumbnailUrl || img.url,
+          alt: img.alt || query,
+          source: img.source || 'OpenStreetMap',
+          sourceUrl: img.sourceUrl || img.url,
+          width: img.width,
+          height: img.height,
+          baseScore: 190,
+          query,
+          finalScore: 0,
+          type: 'image' as const,
+        } satisfies MediaCandidate;
+      } catch {
+        return null;
+      }
+    }).filter((c) => c !== null) as MediaCandidate[];
+
+    logger.info('Static Map', `Found ${candidates.length} map candidates for "${query}"`);
+    return candidates;
+  } catch (err) {
+    logger.warn('Static Map', `Exception for "${query}"`, err);
+    return [];
+  }
+}
+
+export async function searchBingVideos(query: string, signal?: AbortSignal): Promise<MediaCandidate[]> {
+  try {
+    const res = await fetchWithTimeout(`/api/search-bing-videos?q=${encodeURIComponent(query)}`, {}, {
+      timeoutMs: 15_000,
+      maxRetries: 1,
+      signal,
+    });
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    const results = (data as Record<string, unknown>).results;
+    if (!Array.isArray(results)) return [];
+
+    const candidates: MediaCandidate[] = results.map((v: any) => {
+      try {
+        if (!v.url) return null;
+        const clipUrl = `/api/download-clip?url=${encodeURIComponent(v.url)}&duration=10`;
+        return {
+          url: clipUrl,
+          thumbnailUrl: v.thumbnailUrl,
+          alt: v.title || query,
+          source: 'Bing Video',
+          sourceUrl: v.url,
+          width: undefined,
+          height: undefined,
+          baseScore: 200,
+          query,
+          finalScore: 0,
+          type: 'video' as const,
+        } satisfies MediaCandidate;
+      } catch {
+        return null;
+      }
+    }).filter((c) => c !== null) as MediaCandidate[];
+
+    logger.info('Bing Video', `Found ${candidates.length} video clips for "${query}"`);
+    return candidates;
+  } catch (err) {
+    logger.warn('Bing Video', `Exception for "${query}"`, err);
+    return [];
+  }
+}
+
+export async function searchGoogleVideos(query: string, signal?: AbortSignal): Promise<MediaCandidate[]> {
+  try {
+    const res = await fetchWithTimeout(`/api/search-google-videos?q=${encodeURIComponent(query)}`, {}, {
+      timeoutMs: 15_000,
+      maxRetries: 1,
+      signal,
+    });
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    if (!data || typeof data !== 'object') return [];
+    const results = (data as Record<string, unknown>).results;
+    if (!Array.isArray(results)) return [];
+
+    const candidates: MediaCandidate[] = results.map((v: any) => {
+      try {
+        if (!v.url) return null;
+        const clipUrl = `/api/download-clip?url=${encodeURIComponent(v.url)}&duration=10`;
+        return {
+          url: clipUrl,
+          thumbnailUrl: v.thumbnailUrl,
+          alt: v.title || query,
+          source: 'Google Video',
+          sourceUrl: v.url,
+          width: undefined,
+          height: undefined,
+          baseScore: 200,
+          query,
+          finalScore: 0,
+          type: 'video' as const,
+        } satisfies MediaCandidate;
+      } catch {
+        return null;
+      }
+    }).filter((c) => c !== null) as MediaCandidate[];
+
+    logger.info('Google Video', `Found ${candidates.length} video clips for "${query}"`);
+    return candidates;
+  } catch (err) {
+    logger.warn('Google Video', `Exception for "${query}"`, err);
+    return [];
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // Typed shapes for external API responses
@@ -812,8 +1523,9 @@ async function harvestMediaWithSafetyNet(
   signal?: AbortSignal,
   progressCallback?: (message: string, pct: number) => void,
   narrationText?: string,
+  segmentTitle?: string,
 ): Promise<{ candidates: MediaCandidate[], trace: string[] }> {
-  
+
   // Deduplicate repeated words in the query (e.g. "Boeing's Crisis Boeing" → "Boeing's Crisis")
   const words = query.split(/\s+/);
   const seen = new Set<string>();
@@ -835,6 +1547,7 @@ async function harvestMediaWithSafetyNet(
   // Task 13.1: Use queryAllProviders from the provider registry instead of inline calls
   progressCallback?.(`Searching sources for '${cleanQuery}'...`, 5);
   let candidates = await queryAllProviders(cleanQuery, config, signal);
+  candidates = candidates.filter(meetsMinimumSize);
 
   // Check signal before triggering fallbacks
   if (signal?.aborted) {
@@ -849,6 +1562,15 @@ async function harvestMediaWithSafetyNet(
 
   progressCallback?.(`Found ${candidates.length} candidates, filtering...`, 15);
 
+  // Resolution minimum filter (Task 149)
+  candidates = candidates.filter(meetsResolutionMinimum);
+
+  // Megapixel minimum filter (ensure sufficient image resolution)
+  candidates = candidates.filter(meetsMegapixelMinimum);
+
+  // Aspect ratio validation (Task 150)
+  candidates = candidates.filter(meetsAspectRatio);
+
   // Domain filtering — reject blocked domains before scoring
   const { accepted, rejected } = filterCandidates(candidates);
   for (const { candidate: rejCandidate, pattern, category } of rejected) {
@@ -857,7 +1579,7 @@ async function harvestMediaWithSafetyNet(
 
   const scored = accepted.map(c => ({
     ...c,
-    finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText)
+    finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle)
   })).sort((a, b) => b.finalScore - a.finalScore);
 
   // Vision check — run on top 3 candidates if OpenRouter API key is available
@@ -926,7 +1648,7 @@ async function harvestMediaWithSafetyNet(
     if (wikimediaResults.length > 0) {
       const wikiScored = wikimediaResults.map(c => ({
         ...c,
-        finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText),
+        finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
       }));
       scored.push(...wikiScored);
       trace.push(`[S${depth+1}] Wikimedia fallback: found ${wikimediaResults.length} candidates`);
@@ -960,7 +1682,7 @@ async function harvestMediaWithSafetyNet(
     ];
     const unsplashScored = unsplashFallbacks.map(c => ({
       ...c,
-      finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText),
+      finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
     }));
     scored.push(...unsplashScored);
     trace.push(`[S${depth+1}] Unsplash fallback: added ${unsplashFallbacks.length} candidates`);
@@ -968,18 +1690,18 @@ async function harvestMediaWithSafetyNet(
     scored.sort((a, b) => b.finalScore - a.finalScore);
   }
 
-  // Resolution stage — resolve full-resolution URLs for top 3 candidates (with 15s timeout)
+  // Resolution stage — resolve full-resolution URLs for ALL candidates (with 15s timeout)
   if (scored.length > 0) {
     try {
-      const top3Resolve = scored.slice(0, 3);
-      progressCallback?.(`Resolving full-resolution for top ${top3Resolve.length}...`, 35);
+      const allResolve = scored;
+      progressCallback?.(`Resolving full-resolution for ${allResolve.length} candidates...`, 35);
       const cache = new MediaCache();
       const resolveSignal = signal
         ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
         : AbortSignal.timeout(15_000);
-      const resolveResults = await batchResolve(top3Resolve, { signal: resolveSignal, cache });
+      const resolveResults = await batchResolve(allResolve, { signal: resolveSignal, cache });
 
-      for (const candidate of top3Resolve) {
+      for (const candidate of allResolve) {
         const result = resolveResults.get(candidate.url);
         if (result && result.changed) {
           const idx = scored.findIndex(c => c.url === candidate.url);
@@ -989,7 +1711,6 @@ async function harvestMediaWithSafetyNet(
               resolvedUrl: result.resolvedUrl,
               resolvedWidth: result.width,
               resolvedHeight: result.height,
-              // Update dimensions for scoring if resolved dimensions are available
               width: result.width || scored[idx].width,
               height: result.height || scored[idx].height,
             };
@@ -997,7 +1718,6 @@ async function harvestMediaWithSafetyNet(
         }
       }
 
-      // Re-sort after resolution updates
       scored.sort((a, b) => b.finalScore - a.finalScore);
     } catch (err) {
       logger.warn('Resolver', 'Batch resolution failed — continuing with original URLs', err);
@@ -1036,6 +1756,27 @@ async function harvestMediaWithSafetyNet(
     }
   }
 
+  // Copyright verification (Task 155): verify license for each candidate
+  for (let i = 0; i < scored.length; i++) {
+    const c = scored[i];
+    const copyright = verifyCopyright(c);
+    if (!copyright.compatible) {
+      scored[i] = { ...c, finalScore: c.finalScore - 200 };
+      logger.info('LicenseCheck', `Incompatible license for ${c.source}: ${copyright.licenseType} — penalized`);
+    }
+  }
+  scored.sort((a, b) => b.finalScore - a.finalScore);
+
+  // Quality gate (Task 147): apply quality gate to top candidates
+  for (let i = 0; i < Math.min(scored.length, 5); i++) {
+    const gate = passesQualityGate(scored[i]);
+    if (!gate.passed) {
+      scored[i] = { ...scored[i], finalScore: scored[i].finalScore - 300 };
+      logger.info('QualityGate', `Candidate ${scored[i].url.substring(0, 60)} failed quality gate: ${gate.issues.join('; ')}`);
+    }
+  }
+  scored.sort((a, b) => b.finalScore - a.finalScore);
+
   // Task 13.6: Structured fallback chain
   const viableCandidates = scored.filter(c => c.finalScore > 100);
   if (viableCandidates.length < 2 && depth === 0) {
@@ -1054,7 +1795,7 @@ async function harvestMediaWithSafetyNet(
       const broadened = await queryAllProviders(broadenedQuery, config, signal);
       const broadScored = broadened.map(c => ({
         ...c,
-        finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText),
+        finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
       }));
       scored.push(...broadScored);
       scored.sort((a, b) => b.finalScore - a.finalScore);
@@ -1070,7 +1811,7 @@ async function harvestMediaWithSafetyNet(
         const coreResults = await queryAllProviders(coreSubjectQuery, config, signal);
         const coreScored = coreResults.map(c => ({
           ...c,
-          finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText),
+          finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
         }));
         scored.push(...coreScored);
         scored.sort((a, b) => b.finalScore - a.finalScore);
@@ -1089,7 +1830,7 @@ async function harvestMediaWithSafetyNet(
       if (wikiResults.length > 0) {
         const wikiScored = wikiResults.map(c => ({
           ...c,
-          finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText),
+          finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
         }));
         scored.push(...wikiScored);
         trace.push(`[S${depth+1}] Wikimedia fallback: found ${wikiResults.length} candidates`);
@@ -1100,20 +1841,20 @@ async function harvestMediaWithSafetyNet(
       scored.push({
         url: `https://picsum.photos/seed/${wmFreeSeed}-clean/1920/1080`,
         alt: wmFreeQuery,
-        source: 'Picsum (Unsplash fallback)',
+        source: 'Picsum (Fallback)',
         baseScore: 30,
         query: cleanQuery,
         finalScore: scoreCandidate({
           url: `https://picsum.photos/seed/${wmFreeSeed}-clean/1920/1080`,
           alt: wmFreeQuery,
-          source: 'Picsum (Unsplash fallback)',
+          source: 'Picsum (Fallback)',
           baseScore: 30,
           query: cleanQuery,
           finalScore: 0,
           type: 'image',
           width: 1920,
           height: 1080,
-        }, topicContext, visualConcept, config.sourceType, narrationText),
+        }, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
         type: 'image',
         width: 1920,
         height: 1080,
@@ -1131,7 +1872,7 @@ async function harvestMediaWithSafetyNet(
       const entityResults = await queryAllProviders(entityQuery, config, signal);
       const entityScored = entityResults.map(c => ({
         ...c,
-        finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText),
+        finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
       }));
       scored.push(...entityScored);
       scored.sort((a, b) => b.finalScore - a.finalScore);
@@ -1173,7 +1914,9 @@ async function harvestMediaWithSafetyNet(
     }
   }
 
-  return { candidates: scored, trace };
+  // Final size filter — remove any too-small images that slipped through fallbacks
+  const filteredScored = scored.filter(meetsMinimumSize);
+  return { candidates: filteredScored, trace };
 }
 
 function selectShotCandidate(
@@ -1182,6 +1925,7 @@ function selectShotCandidate(
   segmentIndex: number,
   excludedUrls: Set<string>,
   preferredType?: MediaCandidate['type'],
+  blockedUrls?: Set<string>,
 ): MediaCandidate | undefined {
   const shotMeta = `${shot.concept} ${shot.vibe} ${shot.queries.join(' ')}`.toLowerCase();
   const shotTerms = shotMeta.split(/\s+/).filter((word) => word.length > 2);
@@ -1189,6 +1933,7 @@ function selectShotCandidate(
   const ranked = candidates
     .map((candidate) => {
       if (excludedUrls.has(candidate.url)) return null;
+      if (blockedUrls?.has(candidate.url)) return null;
       const lastUsed = usedUrlsMap.get(candidate.url);
       if (lastUsed !== undefined && (segmentIndex - lastUsed) <= 3) return null;
 
@@ -1210,11 +1955,41 @@ function selectShotCandidate(
 
       return { candidate, score };
     })
-    .filter(Boolean)
-    .sort((a, b) => b.score - a.score);
+    .filter((x): x is { candidate: MediaCandidate; score: number } => x != null)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      // Tiebreak: higher resolution wins
+      const aPixels = (a.candidate.width ?? 0) * (a.candidate.height ?? 0);
+      const bPixels = (b.candidate.width ?? 0) * (b.candidate.height ?? 0);
+      return bPixels - aPixels;
+    });
 
   return ranked[0]?.candidate;
 }
+
+function buildSpecificQuery(baseQuery: string, topicContext: TopicContext): string {
+  const topic = topicContext.topic || topicContext.coreSubject || '';
+  let query = baseQuery;
+  if (topic) {
+    const baseLower = baseQuery.toLowerCase();
+    const topicLower = topic.toLowerCase();
+    if (!baseLower.includes(topicLower)) {
+      query = `${baseQuery} ${topic}`;
+    }
+  }
+
+  // A+++ Strategy: Automatically append high-fidelity B-roll modifiers to search queries for key themes
+  const qLower = query.toLowerCase();
+  if (qLower.includes('launch') || qLower.includes('rocket') || qLower.includes('spacex') || qLower.includes('starship') || qLower.includes('flight')) {
+    query += ' launch footage archive';
+  } else if (qLower.includes('presentation') || qLower.includes('ceo') || qLower.includes('keynote') || qLower.includes('unveil') || qLower.includes('office')) {
+    query += ' keynote event stage';
+  } else if (qLower.includes('test') || qLower.includes('engine') || qLower.includes('development') || qLower.includes('laboratory')) {
+    query += ' close up slow motion';
+  }
+  return query;
+}
+
 
 export async function sourceSegmentMedia(
   segment: ScriptSegment,
@@ -1228,22 +2003,26 @@ export async function sourceSegmentMedia(
 ): Promise<{ assets: Omit<MediaAsset, 'id' | 'segmentId'>[]; plan: SegmentVisualPlan; segmentId: string }> {
   try {
     const finalAssets: Omit<MediaAsset, 'id' | 'segmentId'>[] = [];
-    const shotsToHarvest = plan.shots && plan.shots.length > 0 
-      ? plan.shots 
+    const shotsToHarvest = plan.shots && plan.shots.length > 0
+      ? plan.shots
       : [{ concept: plan.visualAction, queries: plan.queries, vibe: plan.visualConcept }];
     const targetAssetsPerSegment = 2;
     const shotCount = Math.max(targetAssetsPerSegment, shotsToHarvest.length);
-    const primaryQuery = shotsToHarvest[0]?.queries[0] || segment.title;
-    const { candidates, trace } = await harvestMediaWithSafetyNet(primaryQuery, topicContext, config, shotsToHarvest[0]?.vibe, 0, [], signal, progressCallback, segment.narration);
+    const rawPrimaryQuery = shotsToHarvest[0]?.queries[0] || segment.title;
+    const primaryQuery = buildSpecificQuery(rawPrimaryQuery, topicContext);
+    const { candidates, trace } = await harvestMediaWithSafetyNet(primaryQuery, topicContext, config, shotsToHarvest[0]?.vibe, 0, [], signal, progressCallback, segment.narration, segment.title);
 
     // Harvest a second batch with a variation query for visual variety
-    const variationQuery = shotsToHarvest[1]?.queries[0]
+    const rawVariationQuery = shotsToHarvest[1]?.queries[0]
       || (plan.queries.length > 1 ? plan.queries[1] : null)
       || `${segment.title} ${topicContext.coreSubject}`;
+    const variationQuery = rawVariationQuery && rawVariationQuery !== primaryQuery
+      ? buildSpecificQuery(rawVariationQuery, topicContext)
+      : rawVariationQuery;
     let secondaryCandidates: MediaCandidate[] = [];
-    if (variationQuery !== primaryQuery && !signal?.aborted) {
+    if (variationQuery && variationQuery !== primaryQuery && !signal?.aborted) {
       try {
-        const secondary = await harvestMediaWithSafetyNet(variationQuery, topicContext, config, shotsToHarvest[1]?.vibe || shotsToHarvest[0]?.vibe, 1, [...trace], signal, undefined, segment.narration);
+        const secondary = await harvestMediaWithSafetyNet(variationQuery, topicContext, config, shotsToHarvest[1]?.vibe || shotsToHarvest[0]?.vibe, 1, [...trace], signal, undefined, segment.narration, segment.title);
         secondaryCandidates = secondary.candidates;
         trace.push(...secondary.trace.filter(t => !trace.includes(t)));
       } catch {
@@ -1258,10 +2037,10 @@ export async function sourceSegmentMedia(
     for (let i = 0; i < shotsToHarvest.length; i++) {
       const shot = shotsToHarvest[i];
       const shotType = i === 0 ? 'primary' : 'secondary';
-      let best = selectShotCandidate(uniqueCandidates, shot, segmentIndex, excludedUrls, i > 0 ? finalAssets[i - 1]?.type : undefined);
+      let best = selectShotCandidate(uniqueCandidates, shot, segmentIndex, excludedUrls, i > 0 ? finalAssets[i - 1]?.type : undefined, deduplicationRegistry.usedUrls);
 
       if (!best) {
-        best = selectShotCandidate(uniqueCandidates, shot, segmentIndex, excludedUrls);
+        best = selectShotCandidate(uniqueCandidates, shot, segmentIndex, excludedUrls, undefined, deduplicationRegistry.usedUrls);
       }
 
       // Deduplication fallback: if all candidates were rejected (likely due to dedup penalties),
@@ -1271,8 +2050,8 @@ export async function sourceSegmentMedia(
         const altQuery = alternativeShot.queries[0] || alternativeShot.concept;
         if (altQuery) {
           try {
-            const altResult = await harvestMediaWithSafetyNet(altQuery, topicContext, config, alternativeShot.vibe, 1, [...trace], signal, undefined, segment.narration);
-            const altCandidates = altResult.candidates.filter(c => !excludedUrls.has(c.url));
+            const altResult = await harvestMediaWithSafetyNet(altQuery, topicContext, config, alternativeShot.vibe, 1, [...trace], signal, undefined, segment.narration, segment.title);
+            const altCandidates = altResult.candidates.filter(c => !excludedUrls.has(c.url) && !deduplicationRegistry.usedUrls.has(c.url));
             best = altCandidates.length > 0 ? altCandidates[0] : undefined;
             if (best) {
               trace.push(`[S${segmentIndex + 1}] Dedup fallback: found alternative via "${altQuery}"`);
@@ -1292,7 +2071,7 @@ export async function sourceSegmentMedia(
               logger.warn('VisionGate', `Final check REJECTED ${best.url} — issues: ${visionResult.issues.join(', ')}`);
               excludedUrls.add(best.url);
               // Try next best candidate
-              const fallback = selectShotCandidate(uniqueCandidates, shot, segmentIndex, excludedUrls);
+              const fallback = selectShotCandidate(uniqueCandidates, shot, segmentIndex, excludedUrls, undefined, deduplicationRegistry.usedUrls);
               if (fallback) {
                 best = fallback;
               }
@@ -1341,8 +2120,19 @@ export async function sourceSegmentMedia(
           resolvedWidth: best.resolvedWidth,
           resolvedHeight: best.resolvedHeight,
           resolvedUrl: best.resolvedUrl,
+          // Task 156: License tracking
+          license: (() => {
+            const lic = determineLicense(best.source, best.sourceUrl);
+            return {
+              source: lic.source,
+              licenseType: lic.licenseType,
+              attributionRequired: lic.attributionRequired,
+              attributionText: lic.attributionText,
+              commercialUse: lic.commercialUse,
+            };
+          })(),
         });
-      } else if (topicContext.thumbnailUrl) {
+      } else if (topicContext.thumbnailUrl && !deduplicationRegistry.usedUrls.has(topicContext.thumbnailUrl)) {
         finalAssets.push({
           type: 'image',
           url: topicContext.thumbnailUrl,
@@ -1354,15 +2144,24 @@ export async function sourceSegmentMedia(
           concept: shot.concept,
           reasoning: 'Fallback to Subject Heritage.',
           score: 50,
-          trace: [...trace, '[S4] Wiki Hero Fallback used.']
+          trace: [...trace, '[S4] Wiki Hero Fallback used.'],
+          license: {
+            source: 'wikimedia',
+            licenseType: 'CC-BY-SA',
+            attributionRequired: true,
+            attributionText: 'Wikipedia (CC-BY-SA)',
+            commercialUse: true,
+          },
         });
+        usedUrlsMap.set(topicContext.thumbnailUrl, segmentIndex);
+        registerAsset(deduplicationRegistry, { url: topicContext.thumbnailUrl, alt: `Topic Hub: ${topicContext.coreSubject}` });
       }
     }
 
     // If we only got 1 asset from the shot loop but have more candidates, try to pick a second
     if (finalAssets.length < targetAssetsPerSegment && uniqueCandidates.length > 1) {
       const fallbackShot = shotsToHarvest[1] || shotsToHarvest[0];
-      const extra = selectShotCandidate(uniqueCandidates, fallbackShot, segmentIndex, excludedUrls);
+      const extra = selectShotCandidate(uniqueCandidates, fallbackShot, segmentIndex, excludedUrls, undefined, deduplicationRegistry.usedUrls);
       if (extra) {
         usedUrlsMap.set(extra.url, segmentIndex);
         registerAsset(deduplicationRegistry, { url: extra.url, alt: extra.alt, sourceUrl: extra.sourceUrl });
@@ -1376,7 +2175,7 @@ export async function sourceSegmentMedia(
           duration: segment.duration / shotCount,
           query: extra.query,
           sourceUrl: extra.sourceUrl,
-          isFallback: false,
+          isFallback: extra.source.includes('Picsum') || extra.source.includes('Fallback'),
           shotType: 'secondary',
           concept: fallbackShot.concept,
           reasoning: `Zero-Cost Harvester: bonus B-roll from ${extra.source}`,
@@ -1395,16 +2194,17 @@ export async function sourceSegmentMedia(
       progressCallback?.(`Selected: ${selectedAsset.source}${dims}`, 90);
     }
 
-    // Visual variety pass: swap out any asset whose URL was already used in the
-    // immediately preceding segment to avoid the same image spanning two segments.
+    // Visual variety pass: check last 3-4 segments to avoid repetition cycles (was only checking 1)
+    const DIVERSITY_WINDOW = 4;
     if (segmentIndex > 0) {
       for (let ai = 0; ai < finalAssets.length; ai++) {
         const asset = finalAssets[ai];
         const prevSegUsed = usedUrlsMap.get(asset.url);
-        if (prevSegUsed !== undefined && prevSegUsed === segmentIndex - 1) {
-          // This URL was used in the previous segment — try to swap it
+        // Check if URL was used in any of the last DIVERSITY_WINDOW segments
+        if (prevSegUsed !== undefined && prevSegUsed >= segmentIndex - DIVERSITY_WINDOW && prevSegUsed < segmentIndex) {
+          // This URL was used recently — try to swap it
           const replacement = uniqueCandidates.find(
-            c => !excludedUrls.has(c.url) && usedUrlsMap.get(c.url) !== segmentIndex - 1
+            c => !excludedUrls.has(c.url) && !deduplicationRegistry.usedUrls.has(c.url) && (usedUrlsMap.get(c.url) === undefined || usedUrlsMap.get(c.url)! < segmentIndex - DIVERSITY_WINDOW)
           );
           if (replacement) {
             usedUrlsMap.set(replacement.url, segmentIndex);
@@ -1420,7 +2220,7 @@ export async function sourceSegmentMedia(
               query: replacement.query,
               sourceUrl: replacement.sourceUrl,
               score: replacement.finalScore,
-              reasoning: `${asset.reasoning} → swapped for visual variety (prev segment duplicate)`,
+              reasoning: `${asset.reasoning} → swapped for visual variety (used ${segmentIndex - prevSegUsed} segments ago)`,
             };
           }
         }
@@ -1444,7 +2244,7 @@ export async function replaceMediaAsset(
   config: AppConfig,
 ): Promise<Omit<MediaAsset, 'id' | 'segmentId'>> {
   // Simple replacement logic for consistency
-  const { candidates } = await harvestMediaWithSafetyNet(plan.queries[0], topicContext, config, undefined, 0, [], undefined, undefined, segment.narration);
+  const { candidates } = await harvestMediaWithSafetyNet(plan.queries[0], topicContext, config, undefined, 0, [], undefined, undefined, segment.narration, segment.title);
   const best = candidates.find(c => !excludeUrls.has(c.url)) || candidates[0];
   if (!best) {
     const fallbackUrl = topicContext.thumbnailUrl;

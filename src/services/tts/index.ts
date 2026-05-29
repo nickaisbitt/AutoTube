@@ -53,3 +53,32 @@ export async function generateNarration(
 
   return result;
 }
+
+export { generateGrokTts } from './grokEngine';
+
+export async function generateMeloTts(
+  text: string,
+  accountId: string,
+  apiToken: string,
+  options?: { signal?: AbortSignal }
+): Promise<string | null> {
+  try {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/freetts/melo-tts`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ text }),
+      signal: options?.signal
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    logger.error('MeloTTS', `MeloTTS failed for text: "${text.substring(0, 40)}..."`, err);
+    return null;
+  }
+}
+

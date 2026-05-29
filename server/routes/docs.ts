@@ -10,11 +10,16 @@ const PROJECT_ROOT = join(__dirname, "..");
 
 let swaggerHtml: string | null = null;
 
-function getSwaggerHtml(): string {
+async function getSwaggerHtml(): Promise<string> {
   if (swaggerHtml) return swaggerHtml;
 
   const specPath = join(PROJECT_ROOT, "server", "openapi.yaml");
-  const spec = yaml.load(readFileSync(specPath, "utf8"));
+  let spec: unknown;
+  try {
+    spec = yaml.load(readFileSync(specPath, "utf8"));
+  } catch {
+    return `<html><body><h1>API docs unavailable</h1><p>openapi.yaml not found.</p></body></html>`;
+  }
   const specJson = JSON.stringify(spec);
 
   swaggerHtml = `<!DOCTYPE html>
@@ -62,5 +67,5 @@ export async function handleDocs(
 ): Promise<void> {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.end(getSwaggerHtml());
+  res.end(await getSwaggerHtml());
 }

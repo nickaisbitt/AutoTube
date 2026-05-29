@@ -18,18 +18,6 @@ import type { ScriptSegment, VideoProject, MediaAsset } from '../../types';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeSegment(overrides: Partial<ScriptSegment> = {}): ScriptSegment {
-  return {
-    id: 'seg-1',
-    type: 'section',
-    title: 'Default Segment',
-    narration: 'Default narration text.',
-    visualNote: 'Default visual note.',
-    duration: 10,
-    ...overrides,
-  };
-}
-
 function makeProject(
   topic: string,
   script: ScriptSegment[],

@@ -19,25 +19,70 @@ function extractKeywords(topic: string): string[] {
     .slice(0, 5);
 }
 
-export function generateDescription(project: VideoProject): string {
-  const title = project.title || project.topic;
+/**
+ * Generates an SEO-optimized YouTube description.
+ *
+ * Task 95: First 200 chars contain primary keyword. Includes timestamps,
+ * links, hashtags. Under 5000 chars.
+ */
+export function generateDescription(
+  project: VideoProject,
+  options?: {
+    hashtags?: string[];
+    channelUrl?: string;
+    socialLinks?: string[];
+  },
+): string {
+  const primaryKeyword = project.topic.toLowerCase();
   const summary = extractTopicSummary(project.script);
   const chapters = generateChapterMarkers(project.script);
   const keywords = extractKeywords(project.topic);
-  const hashtags = keywords.map(k => `#${k}`).join(' ');
+  const hashtags = options?.hashtags ?? keywords.map(k => `#${k}`);
 
-  const lines = [
-    title,
-    '',
-    summary,
-    '',
-    'Chapters:',
-    chapters,
-    '',
-    hashtags,
-    '',
-    'Subscribe for more content like this!',
-  ];
+  // SEO optimization: first 200 chars must contain primary keyword
+  const seoHook = `Learn everything about ${primaryKeyword} in this deep dive. ${summary}`;
 
-  return lines.join('\n');
+  // Ensure first 200 chars contain the keyword
+  const first200 = seoHook.slice(0, 200);
+  const keywordInFirst200 = first200.toLowerCase().includes(primaryKeyword);
+
+  const lines: string[] = [];
+
+  // Line 1: SEO-optimized hook (keyword in first 200 chars)
+  if (keywordInFirst200) {
+    lines.push(seoHook);
+  } else {
+    lines.push(`${primaryKeyword} — ${summary}`);
+  }
+
+  lines.push('');
+
+  // Timestamps / chapters
+  lines.push('CHAPTERS:');
+  lines.push(chapters);
+  lines.push('');
+
+  // Links section
+  if (options?.channelUrl) {
+    lines.push(`Subscribe: ${options.channelUrl}`);
+  }
+  if (options?.socialLinks && options.socialLinks.length > 0) {
+    lines.push(`Follow us: ${options.socialLinks.join(' | ')}`);
+  }
+  lines.push('');
+
+  // Hashtags (YouTube shows first 3 above title)
+  lines.push(hashtags.join(' '));
+  lines.push('');
+
+  // CTA
+  lines.push('Like and subscribe for more deep dives like this!');
+  lines.push('');
+
+  // Description under 5000 chars
+  const result = lines.join('\n');
+  if (result.length > 5000) {
+    return result.slice(0, 4997) + '...';
+  }
+  return result;
 }

@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateThumbnailText,
-  checkMobileReadability,
+  checkConceptMobileReadability,
   scoreVisualHierarchy,
   generateStrongerWordingVariants,
   ThumbnailConcept,
@@ -31,18 +31,18 @@ function makeConcept(overrides: Partial<ThumbnailConcept> = {}): ThumbnailConcep
 // ─── validateThumbnailText ──────────────────────────────────────────────────
 
 describe('validateThumbnailText', () => {
-  it('returns text unchanged when 2-5 words (Requirement 2.5)', () => {
+  it('returns text unchanged when 2-4 words (Requirement 2.5)', () => {
     expect(validateThumbnailText('You Are Next')).toBe('You Are Next');
     expect(validateThumbnailText('Check This Now')).toBe('Check This Now');
     expect(validateThumbnailText('Your Business Could End')).toBe('Your Business Could End');
-    expect(validateThumbnailText('Act Before Too Late Now')).toBe('Act Before Too Late Now');
+    expect(validateThumbnailText('Act Before Too Late')).toBe('Act Before Too Late');
   });
 
-  it('truncates text longer than 5 words (Requirement 2.7)', () => {
+  it('truncates text longer than 4 words (Requirement 2.7)', () => {
     const result = validateThumbnailText('This Is Way Too Long For A Thumbnail');
     const words = result.split(/\s+/);
-    expect(words.length).toBe(5);
-    expect(result).toBe('This Is Way Too Long');
+    expect(words.length).toBe(4);
+    expect(result).toBe('This Is Way Too');
   });
 
   it('pads single-word text to 2 words', () => {
@@ -63,52 +63,52 @@ describe('validateThumbnailText', () => {
     expect(result.split(/\s+/).length).toBe(2);
   });
 
-  it('returns exactly 5 words for maximum valid input', () => {
-    const result = validateThumbnailText('Your Business Could Be Next');
-    expect(result.split(/\s+/).length).toBe(5);
+  it('returns exactly 4 words for maximum valid input', () => {
+    const result = validateThumbnailText('Your Business Could End');
+    expect(result.split(/\s+/).length).toBe(4);
   });
 });
 
 // ─── checkMobileReadability ─────────────────────────────────────────────────
 
-describe('checkMobileReadability', () => {
+describe('checkConceptMobileReadability', () => {
   it('returns readable for well-formed concept (Requirement 2.6)', () => {
     const concept = makeConcept({ textOverlay: 'You Are Next' });
-    const result = checkMobileReadability(concept);
+    const result = checkConceptMobileReadability(concept);
     expect(result.readable).toBe(true);
     expect(result.score).toBeGreaterThanOrEqual(0.6);
   });
 
-  it('flags text with more than 5 words as unreadable (Requirement 2.13)', () => {
+  it('flags text with more than 4 words as unreadable (Requirement 2.13)', () => {
     const concept = makeConcept({ textOverlay: 'This Is Way Too Long For Mobile' });
-    const result = checkMobileReadability(concept);
+    const result = checkConceptMobileReadability(concept);
     expect(result.readable).toBe(false);
-    expect(result.issues.some(i => i.includes('exceeds 5 words'))).toBe(true);
+    expect(result.issues.some(i => i.includes('exceeds 4 words'))).toBe(true);
   });
 
   it('flags text exceeding character limit for mobile (Requirement 2.14)', () => {
     const concept = makeConcept({ textOverlay: 'Your Business Could Be Destroyed' });
-    const result = checkMobileReadability(concept);
+    const result = checkConceptMobileReadability(concept);
     expect(result.issues.some(i => i.includes('char mobile limit'))).toBe(true);
   });
 
   it('detects low contrast between text and accent color (Requirement 2.18)', () => {
     // Yellow accent (#f5f500) has high luminance — low contrast with white text
     const concept = makeConcept({ colorAccent: '#f5f500', textOverlay: 'Act Now' });
-    const result = checkMobileReadability(concept);
+    const result = checkConceptMobileReadability(concept);
     expect(result.issues.some(i => i.includes('contrast'))).toBe(true);
   });
 
   it('passes contrast check for dark accent colors', () => {
     // Dark red has good contrast with white text
     const concept = makeConcept({ colorAccent: '#7f1d1d', textOverlay: 'Act Now' });
-    const result = checkMobileReadability(concept);
+    const result = checkConceptMobileReadability(concept);
     expect(result.issues.some(i => i.includes('contrast'))).toBe(false);
   });
 
   it('returns score between 0 and 1', () => {
     const concept = makeConcept();
-    const result = checkMobileReadability(concept);
+    const result = checkConceptMobileReadability(concept);
     expect(result.score).toBeGreaterThanOrEqual(0);
     expect(result.score).toBeLessThanOrEqual(1);
   });
@@ -118,13 +118,13 @@ describe('checkMobileReadability', () => {
       signifier: 'very complex multi element detailed visual scene with many parts',
       textOverlay: 'Act Now',
     });
-    const result = checkMobileReadability(concept);
+    const result = checkConceptMobileReadability(concept);
     expect(result.issues.some(i => i.includes('clutter'))).toBe(true);
   });
 
   it('returns issues array even when readable', () => {
     const concept = makeConcept({ textOverlay: 'Act Now' });
-    const result = checkMobileReadability(concept);
+    const result = checkConceptMobileReadability(concept);
     expect(Array.isArray(result.issues)).toBe(true);
   });
 });
@@ -191,12 +191,12 @@ describe('generateStrongerWordingVariants', () => {
     expect(variants.length).toBeGreaterThanOrEqual(5);
   });
 
-  it('all variants are 2-5 words (Requirement 2.5)', () => {
+  it('all variants are 2-4 words (Requirement 2.5)', () => {
     const variants = generateStrongerWordingVariants('Some Text', 'bank fraud');
     for (const v of variants) {
       const wordCount = v.split(/\s+/).length;
       expect(wordCount).toBeGreaterThanOrEqual(2);
-      expect(wordCount).toBeLessThanOrEqual(5);
+      expect(wordCount).toBeLessThanOrEqual(4);
     }
   });
 
@@ -242,7 +242,7 @@ describe('generateStrongerWordingVariants', () => {
     for (const v of variants) {
       const wordCount = v.split(/\s+/).length;
       expect(wordCount).toBeGreaterThanOrEqual(2);
-      expect(wordCount).toBeLessThanOrEqual(5);
+      expect(wordCount).toBeLessThanOrEqual(4);
     }
   });
 });

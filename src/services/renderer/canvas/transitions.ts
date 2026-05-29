@@ -92,12 +92,21 @@ export function renderSectionTransition(
 
   switch (config.type) {
     case 'motif-swipe': {
-      // Horizontal swipe with accent color bar at the boundary
+      // Horizontal swipe with accent color bar + light streak at the boundary
       const boundary = Math.round(progress * w);
-      const barWidth = Math.max(4, Math.round(w * 0.02));
+      const barWidth = Math.max(6, Math.round(w * 0.025));
 
-      // Draw outgoing frame
+      // Draw outgoing frame first
       ctx.putImageData(fromFrame, 0, 0);
+
+      // Flash frame at the cut point (quick white flash at 50% progress)
+      if (progress > 0.45 && progress < 0.55) {
+        const flashAlpha = 1 - Math.abs(progress - 0.5) * 20;
+        ctx.save();
+        ctx.fillStyle = `rgba(255,255,255,${Math.max(0, flashAlpha * 0.5)})`;
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+      }
 
       // Clip and draw incoming frame from left
       ctx.save();
@@ -109,22 +118,28 @@ export function renderSectionTransition(
 
       // Draw accent bar at boundary
       if (config.accentColor && boundary > 0 && boundary < w) {
+        // Main accent bar
         ctx.fillStyle = config.accentColor;
         ctx.fillRect(Math.max(0, boundary - barWidth / 2), 0, barWidth, h);
+        // Light streak — wider, semi-transparent glow around the bar
+        const streakW = barWidth * 4;
+        const streakGrad = ctx.createLinearGradient(boundary - streakW, 0, boundary + streakW, 0);
+        streakGrad.addColorStop(0, 'rgba(255,255,255,0)');
+        streakGrad.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+        streakGrad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = streakGrad;
+        ctx.fillRect(boundary - streakW, 0, streakW * 2, h);
       }
       break;
     }
 
     case 'gentle-dissolve': {
-      // Slow ease-in-out alpha blend (smoother than standard dissolve)
+      // Ease-in-out cubic alpha blend
       const easeProgress = progress < 0.5
         ? 4 * progress * progress * progress
         : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
-      // Draw outgoing frame as base
       ctx.putImageData(fromFrame, 0, 0);
-
-      // Create temporary canvas for incoming frame with alpha
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = w;
       tempCanvas.height = h;
@@ -142,14 +157,12 @@ export function renderSectionTransition(
     case 'fade-out': {
       // Fade to black then reveal incoming
       if (progress < 0.5) {
-        // First half: fade outgoing to black
-        const fadeOut = progress * 2; // 0→1
+        const fadeOut = progress * 2;
         ctx.putImageData(fromFrame, 0, 0);
         ctx.fillStyle = `rgba(0, 0, 0, ${fadeOut})`;
         ctx.fillRect(0, 0, w, h);
       } else {
-        // Second half: reveal incoming from black
-        const fadeIn = (progress - 0.5) * 2; // 0→1
+        const fadeIn = (progress - 0.5) * 2;
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, w, h);
         const tempCanvas = document.createElement('canvas');
@@ -168,7 +181,8 @@ export function renderSectionTransition(
     }
 
     default: {
-      // Fallback: simple crossfade
+      // Fallback: ease-in-out crossfade (snappier than linear)
+      const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
       ctx.putImageData(fromFrame, 0, 0);
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = w;
@@ -177,7 +191,7 @@ export function renderSectionTransition(
       if (tempCtx) {
         tempCtx.putImageData(toFrame, 0, 0);
         ctx.save();
-        ctx.globalAlpha = progress;
+        ctx.globalAlpha = ease;
         ctx.drawImage(tempCanvas, 0, 0);
         ctx.restore();
       }
@@ -359,7 +373,7 @@ export function renderSectionTitleCard(
  * @param assetCount - Number of available assets for the segment
  * @returns Minimum number of visual changes required
  */
-export function computeVisualChangeCount(segmentDuration: number, assetCount: number): number {
+export function computeVisualChangeCount(segmentDuration: number, _assetCount: number): number {
   if (segmentDuration <= 0) return 0;
 
   // Minimum 2 changes per 10-second window
@@ -505,13 +519,155 @@ export function renderTransition(
     }
 
     case 'crossfade':
-    default:
-      // Crossfade: linear alpha blend (existing behavior)
+    default: {
+      // Crossfade: ease-in-out alpha blend (snappier than linear)
+      const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
       draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
       ctx.save();
-      ctx.globalAlpha = progress;
+      ctx.globalAlpha = ease;
       draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
       ctx.restore();
       break;
+    }
+
+    case 'slide': {
+      // Slide: incoming frame slides in from right, pushing outgoing to left
+      const offset = progress * w;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, w, canvas.height);
+      ctx.clip();
+      // Draw outgoing moving left
+      ctx.save();
+      ctx.translate(-offset, 0);
+      draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
+      ctx.restore();
+      // Draw incoming moving in from right
+      ctx.save();
+      ctx.translate(w - offset, 0);
+      draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+      ctx.restore();
+      ctx.restore();
+      break;
+    }
+
+    case 'push': {
+      // Push: incoming pushes outgoing off screen (similar to slide but with depth)
+      const offset = progress * w;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, w, canvas.height);
+      ctx.clip();
+      // Outgoing slides left with slight scale down
+      ctx.save();
+      ctx.translate(-offset * 0.5, 0);
+      ctx.scale(1 - progress * 0.1, 1 - progress * 0.1);
+      draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
+      ctx.restore();
+      // Incoming pushes from right
+      ctx.save();
+      ctx.translate(w - offset, 0);
+      draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+      ctx.restore();
+      ctx.restore();
+      break;
+    }
+
+    case 'zoom': {
+      // Zoom: outgoing zooms out and fades, incoming zooms in from center
+      const easeProgress = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      const outgoingScale = 1 + easeProgress * 0.5;
+      const incomingScale = 2 - easeProgress;
+      // Draw outgoing with zoom-out and fade
+      ctx.save();
+      ctx.globalAlpha = 1 - easeProgress * 0.7;
+      ctx.translate(w / 2, canvas.height / 2);
+      ctx.scale(outgoingScale, outgoingScale);
+      ctx.translate(-w / 2, -canvas.height / 2);
+      draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
+      ctx.restore();
+      // Draw incoming with zoom-in
+      ctx.save();
+      ctx.globalAlpha = easeProgress;
+      ctx.translate(w / 2, canvas.height / 2);
+      ctx.scale(incomingScale, incomingScale);
+      ctx.translate(-w / 2, -canvas.height / 2);
+      draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+      ctx.restore();
+      break;
+    }
+
+    case 'flash': {
+      // Flash: quick white flash between outgoing and incoming
+      draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
+      // White flash overlay peaking at 50%
+      const flashIntensity = Math.sin(progress * Math.PI) * 0.8;
+      if (flashIntensity > 0.01) {
+        ctx.save();
+        ctx.fillStyle = `rgba(255,255,255,${flashIntensity})`;
+        ctx.fillRect(0, 0, w, canvas.height);
+        ctx.restore();
+      }
+      if (progress > 0.3) {
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, (progress - 0.3) / 0.7);
+        draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+        ctx.restore();
+      }
+      break;
+    }
+
+    case 'glitch': {
+      // Glitch: RGB split + horizontal displacement effect
+      const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      const glitchAmount = Math.sin(progress * Math.PI * 4) * ease * 15;
+      // Draw outgoing with slight RGB offset
+      draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
+      if (progress > 0.2 && progress < 0.8) {
+        // Red channel offset
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = ease * 0.5;
+        ctx.translate(glitchAmount, 0);
+        draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+        ctx.restore();
+        // Blue channel offset
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = ease * 0.5;
+        ctx.translate(-glitchAmount, 0);
+        draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+        ctx.restore();
+      }
+      if (progress > 0.5) {
+        ctx.save();
+        ctx.globalAlpha = (progress - 0.5) * 2;
+        draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+        ctx.restore();
+      }
+      break;
+    }
+
+    case 'spin': {
+      // Spin: outgoing spins out clockwise, incoming spins in
+      const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      const rotation = ease * Math.PI * 0.5;
+      draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
+      ctx.save();
+      ctx.globalAlpha = 1 - ease * 0.8;
+      ctx.translate(w / 2, canvas.height / 2);
+      ctx.rotate(rotation);
+      ctx.translate(-w / 2, -canvas.height / 2);
+      draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
+      ctx.restore();
+      ctx.save();
+      ctx.globalAlpha = ease;
+      ctx.translate(w / 2, canvas.height / 2);
+      ctx.rotate(-rotation);
+      ctx.translate(-w / 2, -canvas.height / 2);
+      draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+      ctx.restore();
+      break;
+    }
   }
 }

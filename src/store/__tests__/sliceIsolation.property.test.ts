@@ -60,7 +60,9 @@ const projectArb: fc.Arbitrary<VideoProject> = fc.record({
   narration: fc.constant([]),
   status: fc.constantFrom('draft', 'complete'),
   createdAt: fc.constant(new Date().toISOString()),
-}) as fc.Arbitrary<VideoProject>;
+  version: fc.constant(1),
+  targetDuration: fc.integer({ min: 1, max: 60 }),
+}) as unknown as fc.Arbitrary<VideoProject>;
 
 const pipelineStepArb: fc.Arbitrary<PipelineStep> = fc.constantFrom(
   'topic', 'script', 'media', 'narration', 'ai_edit', 'assembly', 'preview',
@@ -283,10 +285,11 @@ describe('Property 2: State slice isolation', () => {
     await fc.assert(
       fc.asyncProperty(
         fc.array(fc.record({
+          id: fc.uuid(),
           level: fc.constantFrom('info', 'warn', 'error', 'success') as fc.Arbitrary<'info' | 'warn' | 'error' | 'success'>,
           source: fc.string({ minLength: 1, maxLength: 20 }),
           message: fc.string({ minLength: 1, maxLength: 100 }),
-          timestamp: fc.date(),
+          timestamp: fc.constant(new Date().toISOString()),
         }), { minLength: 0, maxLength: 5 }),
         async (logs) => {
           const { result } = renderHook(() => ({

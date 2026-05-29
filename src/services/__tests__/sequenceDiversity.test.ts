@@ -82,7 +82,7 @@ describe('scoreSequenceDiversity', () => {
 
   it('penalizes long fresh shot intervals', () => {
     // All same alt and source = no fresh shots
-    const media: MediaCandidate[] = Array.from({ length: 8 }, (_, i) =>
+    const media: MediaCandidate[] = Array.from({ length: 8 }, (_) =>
       makeCandidate({ alt: 'same image repeated', source: 'Same Source' })
     );
     const result = scoreSequenceDiversity(media);

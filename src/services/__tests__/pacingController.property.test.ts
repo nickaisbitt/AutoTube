@@ -19,7 +19,6 @@ import fc from 'fast-check';
 import {
   planSegmentShots,
   detectSentenceBoundaries,
-  detectEmphasisPoints,
   alignCutsToSentences,
   planPatternInterrupts,
   shouldInsertContrastingTransition,
@@ -65,19 +64,6 @@ function scriptSegmentArb(opts?: {
     narration: narrationArb,
     visualNote: fc.constant('Visual note'),
     duration: fc.double({ min: minDur, max: maxDur, noNaN: true }),
-  });
-}
-
-/** Arbitrary for a MediaAsset of type 'image' */
-function imageAssetArb(segmentId: string): fc.Arbitrary<MediaAsset> {
-  return fc.record({
-    id: fc.stringMatching(/^asset-[0-9]{1,4}$/),
-    segmentId: fc.constant(segmentId),
-    type: fc.constant('image' as const),
-    url: fc.stringMatching(/^https:\/\/example\.com\/img-[a-z0-9]{4,8}\.jpg$/),
-    alt: fc.stringMatching(/^[a-z]{3,8}( [a-z]{3,8}){1,3}$/),
-    source: fc.constant('test'),
-    duration: fc.constant(undefined),
   });
 }
 

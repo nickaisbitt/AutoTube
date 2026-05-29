@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { 
   Lightbulb, Zap, TrendingUp, Globe, Shield, Cpu,
   DollarSign, Leaf, Rocket, ChevronRight, Sparkles,
-  RefreshCw, Loader2, KeyRound,
+  RefreshCw, Loader2, KeyRound, AlertTriangle,
 } from 'lucide-react';
 import type { TopicConfig } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
@@ -215,7 +215,7 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
               const Icon = getIconForCategory(topic.category);
               return (
                 <button
-                  key={i}
+                  key={topic.label}
                   onClick={() => onConfigChange({ ...config, topic: topic.label })}
                   onMouseEnter={() => setIsHovering(i)}
                   onMouseLeave={() => setIsHovering(null)}
@@ -292,6 +292,26 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
             placeholder="e.g., Tech enthusiasts, 18-35"
             data-testid="audience-input"
           />
+        </div>
+
+        {/* What I Know — user corrections to override LLM training data */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold uppercase tracking-wider text-surface-400 flex items-center gap-2">
+            <AlertTriangle className="h-3 w-3 text-amber-400" />
+            What I Know (Corrections)
+            <span className="text-[10px] text-amber-500 normal-case font-normal">Overrides LLM training data</span>
+          </label>
+          <textarea
+            value={config.corrections || ''}
+            onChange={(e) => onConfigChange({ ...config, corrections: e.target.value })}
+            className="w-full border-2 border-amber-700 bg-surface-900 px-3 py-2.5 text-sm text-white placeholder-amber-600 focus:border-amber-500 focus:outline-none resize-none"
+            placeholder="e.g., This ship has already launched — I board it on May 17, 2026. The CEO stepped down last month."
+            rows={3}
+            data-testid="corrections-input"
+          />
+          <p className="text-[10px] font-mono text-surface-500">
+            Enter facts you know to be true. These override the AI's training data and are injected directly into the script prompt.
+          </p>
         </div>
       </div>
 

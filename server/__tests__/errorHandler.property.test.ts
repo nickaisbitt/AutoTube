@@ -54,14 +54,19 @@ describe('Feature: codebase-refactor, Property 1: API error responses are struct
   /**
    * **Validates: Requirements 1.5**
    *
-   * Property: For any Error with any message, errorHandler sets status code to 500.
+   * Property: For any Error with a generic message, errorHandler defaults to status 500.
    */
-  it('always sets status code to 500', () => {
+  it('defaults to status code 500 for generic errors', () => {
     fc.assert(
       fc.property(
         fc.string({ minLength: 1 }),
         (errorMessage) => {
-          const err = new Error(errorMessage);
+          // Avoid messages that would trigger special status codes
+          const safeMessage = errorMessage
+            .replace(/validation|bad request/i, 'problem')
+            .replace(/not found/i, 'missing')
+            .replace(/unauthorized/i, 'forbidden');
+          const err = new Error(safeMessage);
           const req = createMockRequest();
           const res = createMockResponse();
           const next = () => {};
@@ -73,6 +78,54 @@ describe('Feature: codebase-refactor, Property 1: API error responses are struct
       ),
       { numRuns: 100 },
     );
+  });
+
+  /**
+   * **Validates: Requirements 1.5**
+   *
+   * Property: Error messages containing "validation" or "bad request" get status 400.
+   */
+  it('sets status 400 for validation errors', () => {
+    const err = new Error('Validation failed: bad request');
+    const req = createMockRequest();
+    const res = createMockResponse();
+    const next = () => {};
+
+    errorHandler(err, req, res, next);
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  /**
+   * **Validates: Requirements 1.5**
+   *
+   * Property: Error messages containing "not found" get status 404.
+   */
+  it('sets status 404 for not found errors', () => {
+    const err = new Error('Resource not found');
+    const req = createMockRequest();
+    const res = createMockResponse();
+    const next = () => {};
+
+    errorHandler(err, req, res, next);
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  /**
+   * **Validates: Requirements 1.5**
+   *
+   * Property: Error messages containing "unauthorized" get status 401.
+   */
+  it('sets status 401 for unauthorized errors', () => {
+    const err = new Error('User unauthorized');
+    const req = createMockRequest();
+    const res = createMockResponse();
+    const next = () => {};
+
+    errorHandler(err, req, res, next);
+
+    expect(res.statusCode).toBe(401);
   });
 
   /**

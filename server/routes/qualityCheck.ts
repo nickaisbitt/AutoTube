@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import { spawn } from "child_process";
 import { existsSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,7 +41,16 @@ export async function handleQualityCheck(
     } else if (parsed.videoUrl) {
       // Convert URL like /api/render-output/mp4/test-recordings/file.mp4
       // to absolute path like /path/to/project/test-recordings/file.mp4
-      const urlPath = parsed.videoUrl.replace(/^\/api\/render-output\/mp4\//, '');
+      const urlPath = parsed.videoUrl.replace(/^\/api\/render-output\/mp4\//, '').replace(/[^a-zA-Z0-9-_.\/]/g, '');
+      
+      // SECURITY: Path traversal check
+      if (urlPath.includes("..") || urlPath.startsWith("/")) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Invalid videoUrl path format" }));
+        return;
+      }
+      
       videoPath = join(PROJECT_ROOT, urlPath);
     } else {
       res.statusCode = 400;
@@ -56,28 +65,49 @@ export async function handleQualityCheck(
     return;
   }
 
-  if (!videoPath || !existsSync(videoPath)) {
+  // SECURITY: Strictly verify resolved path resides inside PROJECT_ROOT
+  const resolvedPath = resolve(videoPath);
+  const resolvedRoot = resolve(PROJECT_ROOT);
+  if (!resolvedPath.startsWith(resolvedRoot)) {
+    res.statusCode = 403;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Access denied: file must reside inside the project directory" }));
+    return;
+  }
+
+  if (!existsSync(resolvedPath)) {
     res.statusCode = 400;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: `Video file not found: ${videoPath}` }));
     return;
   }
 
-  // Resolve API key from .env.local
-  let apiKey = "";
-  try {
-    const envPath = join(PROJECT_ROOT, ".env.local");
-    const { readFileSync } = await import("fs");
-    const envContent = readFileSync(envPath, "utf8");
-    for (const line of envContent.split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("VITE_OPENROUTER_KEY=")) {
-        apiKey = trimmed.split("=")[1].trim();
-        break;
+  // Prioritize environment variable first (standard production pattern)
+  let apiKey = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_KEY || "";
+  
+  if (process.env.VITE_OPENROUTER_KEY && !process.env.OPENROUTER_API_KEY) {
+    console.warn("WARNING: Using VITE_OPENROUTER_KEY which is exposed to clients. Set OPENROUTER_API_KEY instead.");
+  }
+
+  if (!apiKey) {
+    // Resolve API key from .env.local
+    try {
+      const envPath = join(PROJECT_ROOT, ".env.local");
+      const { readFileSync } = await import("fs");
+      const envContent = readFileSync(envPath, "utf8");
+      for (const line of envContent.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("OPENROUTER_API_KEY=")) {
+          apiKey = trimmed.split("=").slice(1).join("=").trim();
+          break;
+        }
+        if (trimmed.startsWith("VITE_OPENROUTER_KEY=")) {
+          apiKey = trimmed.split("=").slice(1).join("=").trim();
+        }
       }
+    } catch {
+      /* .env.local may not exist */
     }
-  } catch {
-    /* .env.local may not exist */
   }
 
   // Stream SSE for progress

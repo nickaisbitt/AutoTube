@@ -58,10 +58,10 @@ export interface RenderContext2D {
 
 /** Segment-type → accent colour mapping used across both renderers. */
 export const ACCENT_COLORS: Record<string, string> = {
-  intro: '#e74c3c',
-  section: '#3498db',
-  transition: '#f39c12',
-  outro: '#2ecc71',
+  intro: '#60a5fa',
+  section: '#3b82f6',
+  transition: '#8b5cf6',
+  outro: '#60a5fa',
 };
 
 /**
@@ -117,7 +117,7 @@ export function computeKenBurnsTransform(
   kenBurns?: { zoomStart: number; zoomEnd: number; panDirectionX: number; panDirectionY: number },
   assetSeed = 0,
 ): KenBurnsResult {
-  const scale = Math.max(canvasW / imgW, canvasH / imgH) * 1.15;
+  const scale = Math.max(canvasW / imgW, canvasH / imgH) * 1.4;
   const dw = imgW * scale;
   const dh = imgH * scale;
 
@@ -131,8 +131,8 @@ export function computeKenBurnsTransform(
   // Vary pan direction per asset for visual variety
   const panMultX = (assetSeed % 3 === 0) ? -1 : (assetSeed % 3 === 1) ? 0.5 : 1;
   const panMultY = (assetSeed % 5 === 0) ? -1 : (assetSeed % 5 === 1) ? 0.3 : 1;
-  const panX = Math.sin(progress * Math.PI * 0.7) * 12 * kbPanDirX * panMultX;
-  const panY = Math.cos(progress * Math.PI * 0.4) * 6 * kbPanDirY * panMultY;
+  const panX = Math.sin(progress * Math.PI * 0.7) * 40 * kbPanDirX * panMultX;
+  const panY = Math.cos(progress * Math.PI * 0.4) * 20 * kbPanDirY * panMultY;
 
   return { zoom, panX, panY, scale, dw, dh };
 }
@@ -168,10 +168,10 @@ export function drawLetterboxBars(
  * Draw a radial vignette overlay.
  */
 export function drawVignette(ctx: RenderContext2D, w: number, h: number): void {
-  const vig = ctx.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, w * 0.75);
+  const vig = ctx.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, w * 0.8);
   vig.addColorStop(0, 'rgba(0,0,0,0)');
-  vig.addColorStop(0.7, 'rgba(0,0,0,0.15)');
-  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  vig.addColorStop(0.75, 'rgba(0,0,0,0.08)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.25)');
   ctx.fillStyle = vig;
   ctx.fillRect(0, 0, w, h);
 }
@@ -291,8 +291,8 @@ export function computeBgMusicVolume(hasNarration: boolean): number {
 // ---------------------------------------------------------------------------
 
 export interface KenBurnsConfig {
-  zoomStart: number;    // [1.0, 1.25]
-  zoomEnd: number;      // [1.0, 1.25]
+  zoomStart: number;    // [1.0, 1.40]
+  zoomEnd: number;      // [1.0, 1.40]
   panDirectionX: number; // [-1, 1]
   panDirectionY: number; // [-1, 1]
 }
@@ -333,9 +333,9 @@ export function computeKenBurnsParams(
   const h3 = seededHash(seed + ':px');
   const h4 = seededHash(seed + ':py');
 
-  // Zoom values in [1.0, 1.25]
-  const zoomStart = 1.0 + h1 * 0.25;
-  const zoomEnd = 1.0 + h2 * 0.25;
+  // Zoom values in [1.0, 1.40] — matches server-render.mjs for cinematic movement
+  const zoomStart = 1.0 + h1 * 0.40;
+  const zoomEnd = 1.0 + h2 * 0.40;
 
   // Pan directions in [-1, 1]
   let panDirectionX = h3 * 2 - 1;
@@ -380,7 +380,11 @@ export function computeCrossfadeAlpha(
 ): number {
   if (totalTransitionFrames <= 0) return 1.0;
   const t = frameInTransition / totalTransitionFrames;
-  return Math.max(0, Math.min(1, t));
+  // Ease-in-out cubic for smoother, more cinematic crossfades
+  const eased = t < 0.5
+    ? 4 * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  return Math.max(0, Math.min(1, eased));
 }
 
 // ---------------------------------------------------------------------------
@@ -418,6 +422,7 @@ export const RESOLUTION_PRESETS = {
   '720p':  { width: 1280, height: 720,  fps: 24, videoBitsPerSecond: 6_000_000 },
   '1080p': { width: 1920, height: 1080, fps: 24, videoBitsPerSecond: 10_000_000 },
   '4K':    { width: 3840, height: 2160, fps: 24, videoBitsPerSecond: 20_000_000 },
+  '2.39:1': { width: 1920, height: 803, fps: 24, videoBitsPerSecond: 12_000_000 },
 } as const;
 
 export type ResolutionKey = keyof typeof RESOLUTION_PRESETS;
@@ -730,6 +735,7 @@ type WavePacingPhase = 'impact' | 'explanation' | 'escalation' | 'relief';
 
 /**
  * Determine the wave pacing phase based on position within the video.
+ * Task 99: Tuned pacing intervals.
  * The wave cycles: impact → explanation → escalation → relief → impact...
  *
  * The opener (first 15%) is always in 'impact' phase for faster cuts.
@@ -740,9 +746,9 @@ function getWavePhase(progress: number): WavePacingPhase {
 
   // Cycle through phases for the rest of the video
   const cycleProgress = ((progress - 0.15) / 0.85) % 1.0;
-  if (cycleProgress < 0.25) return 'impact';
-  if (cycleProgress < 0.50) return 'explanation';
-  if (cycleProgress < 0.75) return 'escalation';
+  if (cycleProgress < 0.30) return 'impact';
+  if (cycleProgress < 0.55) return 'explanation';
+  if (cycleProgress < 0.80) return 'escalation';
   return 'relief';
 }
 
@@ -788,17 +794,16 @@ function selectBeatType(
 
 /**
  * Compute the maximum gap between beats based on the wave phase.
- * Opener/impact phases use faster cuts (shorter intervals),
- * explanation phases allow longer gaps.
+ * Task 99: Tuned pacing — fast-paced (15s), normal (25s), slow (35s).
  *
  * Requirements 2.62, 2.65
  */
 function getMaxGapForPhase(phase: WavePacingPhase): number {
   switch (phase) {
-    case 'impact': return 20;       // Faster cuts in high-energy sections
-    case 'explanation': return 28;  // Slower, more breathing room
-    case 'escalation': return 22;   // Building tension, moderate pace
-    case 'relief': return 25;       // Brief respite
+    case 'impact': return 15;       // Fast-paced: rapid pattern interrupts
+    case 'explanation': return 35;  // Slow: let explanations breathe
+    case 'escalation': return 20;   // Normal: building tension at moderate pace
+    case 'relief': return 25;       // Normal: brief respite
   }
 }
 
@@ -879,13 +884,13 @@ export function scheduleRetentionBeats(
     cumulativeTime = segEnd;
   }
 
-  // Final pass: ensure no gap exceeds 30 seconds (absolute maximum)
+  // Final pass: ensure no gap exceeds 35 seconds (absolute maximum — Task 99 tuned)
   // This handles edge cases where segments are very long
   if (beats.length >= 2) {
     const additionalBeats: RetentionBeat[] = [];
     for (let i = 1; i < beats.length; i++) {
       const gap = beats[i].timeOffsetSec - beats[i - 1].timeOffsetSec;
-      if (gap > 30) {
+      if (gap > 35) {
         // Insert an intermediate beat
         const midTime = (beats[i - 1].timeOffsetSec + beats[i].timeOffsetSec) / 2;
         const progress = midTime / totalDuration;

@@ -145,6 +145,7 @@ describe('Watermark Vision Check Integration (Req 1.3)', () => {
     const [calledCandidates, calledKey] = mockBatchVisionCheck.mock.calls[0];
     expect(calledKey).toBe('test-key-123');
     expect(calledCandidates.length).toBeLessThanOrEqual(3);
+    expect(calledCandidates.length).toBe(3);
   });
 
   it('rejects candidates where vision model identifies a watermark', async () => {

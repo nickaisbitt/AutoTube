@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import AppShell from './components/AppShell';
 import AppModals from './components/AppModals';
 import PipelineStepRouter from './components/PipelineStepRouter';
+import RenderProgressDashboard from './components/RenderProgressDashboard';
 import { useVideoProject } from './store';
 import { VideoProject } from './types';
 
@@ -31,25 +32,26 @@ export default function App() {
 
   const handleExport = useCallback(async (quality: 'draft' | 'standard' | 'high', format: 'webm' | 'mp4', resolution?: '720p' | '1080p' | '4K') => {
     if (!project) return;
-    if (resolution && project.exportSettings) {
-      project.exportSettings.resolution = resolution;
-    } else if (resolution) {
-      project.exportSettings = {
-        quality,
-        format,
-        resolution,
-        width: 0,
-        height: 0,
-        mimeType: format === 'mp4' ? 'video/mp4' : 'video/webm',
-        fileName: `${project.title || 'video'}.${format}`,
-      };
-    }
-    await assembleVideoWithOptions({ quality, format }, project);
+    
+    // Use structuredClone for deep immutable copy to prevent store mutations
+    const clonedProject = structuredClone(project);
+    clonedProject.exportSettings = {
+      quality,
+      format,
+      resolution: resolution || '1080p',
+      width: 0,
+      height: 0,
+      mimeType: format === 'mp4' ? 'video/mp4' : 'video/webm',
+      fileName: `${project.title || 'video'}.${format}`,
+    };
+    
+    await assembleVideoWithOptions({ quality, format }, clonedProject);
   }, [project, assembleVideoWithOptions]);
 
   return (
     <AppShell onOpenSettings={() => setIsSettingsOpen(true)}>
       <PipelineStepRouter onOpenExport={() => setIsExportOpen(true)} />
+      <RenderProgressDashboard />
       <AppModals
         isSettingsOpen={isSettingsOpen}
         setIsSettingsOpen={setIsSettingsOpen}

@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoTube Frame Inspector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --bg-card-hover: rgba(31, 41, 55, 0.8);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-glow: rgba(6, 182, 212, 0.3);
+      --text-primary: #f3f4f6;
+      --text-secondary: #9ca3af;
+      --text-muted: #6b7280;
+      --cyan: #06b6d4;
+      --cyan-glow: rgba(6, 182, 212, 0.5);
+      --purple: #8b5cf6;
+      --purple-glow: rgba(139, 92, 246, 0.5);
+      --magenta: #d946ef;
+      --fps: 24;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(139, 92, 246, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.15) 0px, transparent 50%);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      padding: 1.5rem;
+    }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.3);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 1rem;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #ffffff 30%, var(--cyan) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    .brand p {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      margin-top: 0.25rem;
+    }
+
+    .shortcuts-badge {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      padding: 0.5rem 1rem;
+      border-radius: 30px;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .shortcuts-badge kbd {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-family: monospace;
+      color: #fff;
+    }
+
+    /* main grid */
+    .app-container {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+      flex-grow: 1;
+      max-width: 1600px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* File loader cards */
+    .setup-panel {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .glass-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .glass-card:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .loader-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      border: 2px dashed rgba(255, 255, 255, 0.1);
+      cursor: pointer;
+      min-height: 140px;
+    }
+
+    .loader-card.has-file {
+      border: 2px solid var(--cyan);
+      background: rgba(6, 182, 212, 0.03);
+      box-shadow: 0 0 15px rgba(6, 182, 212, 0.1);
+    }
+
+    .loader-card.has-file.hq {
+      border-color: var(--purple);
+      background: rgba(139, 92, 246, 0.03);
+      box-shadow: 0 0 15px rgba(139, 92, 246, 0.1);
+    }
+
+    .loader-card input[type="file"] {
+      display: none;
+    }
+
+    .loader-card svg {
+      width: 32px;
+      height: 32px;
+      color: var(--text-secondary);
+      margin-bottom: 0.75rem;
+      transition: transform 0.2s;
+    }
+
+    .loader-card:hover svg {
+      transform: translateY(-4px);
+      color: var(--cyan);
+    }
+
+    .loader-card.hq:hover svg {
+      color: var(--purple);
+    }
+
+    .loader-title {
+      font-weight: 600;
+      font-size: 1rem;
+      color: var(--text-primary);
+      margin-bottom: 0.25rem;
+    }
+
+    .loader-subtitle {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    /* Tabs for comparison modes */
+    .tabs {
+      display: flex;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-color);
+      padding: 0.25rem;
+      border-radius: 12px;
+      margin-bottom: 1.5rem;
+      width: fit-content;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      padding: 0.6rem 1.2rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .tab-btn.active {
+      background: var(--cyan);
+      color: #000;
+      box-shadow: 0 2px 10px rgba(6, 182, 212, 0.3);
+    }
+
+    .tab-btn.active.purple {
+      background: var(--purple);
+      color: #fff;
+      box-shadow: 0 2px 10px rgba(139, 92, 246, 0.3);
+    }
+
+    /* Viewer styles */
+    .viewer-panel {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .comparison-container {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #000;
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      overflow: hidden;
+      position: relative;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+    }
+
+    /* Sync warning overlay */
+    .sync-warning {
+      position: absolute;
+      top: 1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(239, 68, 68, 0.9);
+      color: #fff;
+      padding: 0.5rem 1rem;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      z-index: 10;
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+    }
+
+    /* Video element base */
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      pointer-events: none; /* Let container overlay handle clicks */
+    }
+
+    /* Split Slider Mode */
+    .slider-view {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    .slider-video-bottom {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    .slider-video-top {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      clip-path: inset(0 50% 0 0); /* Modified dynamically */
+    }
+
+    .comparison-handle {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      width: 4px;
+      height: 100%;
+      background: #fff;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+      z-index: 3;
+      cursor: ew-resize;
+      transform: translateX(-50%);
+    }
+
+    .comparison-handle::after {
+      content: '↔';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 36px;
+      height: 36px;
+      background: #fff;
+      color: #000;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.1rem;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+      border: 3px solid var(--bg-dark);
+      transition: background 0.2s;
+    }
+
+    .comparison-handle:hover::after {
+      background: var(--cyan);
+    }
+
+    /* Side-by-Side Mode */
+    .side-by-side-view {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      width: 100%;
+      height: 100%;
+      background: #111;
+    }
+
+    .side-pane {
+      position: relative;
+      overflow: hidden;
+      aspect-ratio: 16/9;
+    }
+
+    /* Labels */
+    .video-label {
+      position: absolute;
+      top: 1rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      z-index: 4;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+
+    .video-label.a {
+      left: 1rem;
+      background: rgba(139, 92, 246, 0.85); /* Purple for HQ */
+      border: 1px solid rgba(139, 92, 246, 0.5);
+      color: #fff;
+    }
+
+    .video-label.b {
+      right: 1rem;
+      background: rgba(6, 182, 212, 0.85); /* Cyan for standard */
+      border: 1px solid rgba(6, 182, 212, 0.5);
+      color: #000;
+      color: #fff;
+    }
+
+    /* Blink Mode */
+    .blink-view {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    /* Inspector Controls Bar */
+    .controls-panel {
+      margin-top: 1.5rem;
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+
+    /* Timeline scrubber */
+    .scrub-container {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      width: 100%;
+    }
+
+    .timeline-bar {
+      flex-grow: 1;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      position: relative;
+      cursor: pointer;
+    }
+
+    .timeline-progress {
+      height: 100%;
+      background: linear-gradient(90deg, var(--purple) 0%, var(--cyan) 100%);
+      width: 0%;
+      border-radius: 3px;
+      position: relative;
+    }
+
+    .timeline-handle {
+      position: absolute;
+      right: -6px;
+      top: -3px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 5px rgba(0,0,0,0.5);
+      transition: transform 0.1s;
+    }
+
+    .timeline-bar:hover .timeline-handle {
+      transform: scale(1.3);
+    }
+
+    /* Control buttons grid */
+    .control-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .action-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s;
+    }
+
+    .action-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .action-btn.active-glow {
+      background: rgba(6, 182, 212, 0.1);
+      border-color: var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
+    }
+
+    .action-btn.active-glow.purple {
+      background: rgba(139, 92, 246, 0.1);
+      border-color: var(--purple);
+      color: var(--purple);
+      box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+    }
+
+    .action-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .action-btn.play-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      justify-content: center;
+      padding: 0;
+      background: #fff;
+      color: #000;
+      border: none;
+    }
+
+    .action-btn.play-btn:hover {
+      background: var(--cyan);
+      color: #000;
+      transform: scale(1.05);
+    }
+
+    .action-btn.play-btn svg {
+      width: 20px;
+      height: 20px;
+      fill: currentColor;
+    }
+
+    /* Info readout cards */
+    .metadata-panel {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      width: 100%;
+    }
+
+    .meta-readout {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .meta-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 0.25rem;
+    }
+
+    .meta-val {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .meta-val.cyan {
+      color: var(--cyan);
+    }
+
+    .meta-val.purple {
+      color: var(--purple);
+    }
+
+    .meta-subtext {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    /* Keyframe static gallery */
+    .gallery-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-top: 2rem;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .frame-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .frame-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--cyan);
+      box-shadow: 0 10px 20px rgba(6, 182, 212, 0.15);
+    }
+
+    .frame-thumb {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #111;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .frame-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.8;
+      transition: opacity 0.2s;
+    }
+
+    .frame-card:hover img {
+      opacity: 1;
+    }
+
+    .frame-badge {
+      position: absolute;
+      bottom: 0.5rem;
+      right: 0.5rem;
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+
+    .frame-info {
+      padding: 0.75rem;
+    }
+
+    .frame-name {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 0.15rem;
+    }
+
+    .frame-desc {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+
+    /* Instruction overlay */
+    .drop-message {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.4;
+      max-width: 450px;
+      margin: 0 auto;
+    }
+
+    .blink-status {
+      position: absolute;
+      top: 1rem;
+      left: 1rem;
+      background: rgba(0,0,0,0.85);
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      z-index: 4;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .blink-status.hq {
+      border-color: var(--purple);
+      color: var(--purple);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>AutoTube Frame Inspector</h1>
+      <p>Analyze pixel quality, compare renders, and step frame-by-frame.</p>
+    </div>
+    <div class="shortcuts-badge">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      <span>Keyboard: <kbd>Space</kbd> Play | <kbd>←</kbd> <kbd>→</kbd> Prev/Next Frame | <kbd>Shift + ←/→</kbd> 1s Skip | <kbd>D</kbd> View Mode</span>
+    </div>
+  </header>
+
+  <div class="app-container">
+    <!-- File Upload Section -->
+    <section class="setup-panel">
+      <!-- Video A Loader (High Quality / Raw Video) -->
+      <label class="glass-card loader-card hq" id="drop-zone-a">
+        <input type="file" id="file-a" accept="video/mp4,video/*">
+        <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+        </svg>
+        <div class="loader-title">Load Video A (Pristine Video-Only)</div>
+        <div class="loader-subtitle" id="filename-a">Select AutoTube-SpaceX-Fixed-HQ.mp4 (90MB)</div>
+      </label>
+
+      <!-- Video B Loader (Muxed Final Video) -->
+      <label class="glass-card loader-card" id="drop-zone-b">
+        <input type="file" id="file-b" accept="video/mp4,video/*">
+        <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+        </svg>
+        <div class="loader-title">Load Video B (Muxed Final Video)</div>
+        <div class="loader-subtitle" id="filename-b">Select AutoTube-SpaceX-Fixed.mp4 (15MB)</div>
+      </label>
+    </section>
+
+    <!-- Inspection Main Panel -->
+    <section class="glass-card viewer-panel" style="display: none;" id="viewer-panel">
+      <!-- Sync Warning Overlay -->
+      <div class="sync-warning" id="sync-warning">
+        <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+        <span>Videos have drifted! Synchronizing timelines...</span>
+      </div>
+
+      <!-- Comparison Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" id="tab-slider">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 3v18M4 12h16"/></svg>
+          Split Swipe Slider
+        </button>
+        <button class="tab-btn" id="tab-sbs">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h7v12H4zm9 0h7v12h-7z"/></svg>
+          Side-by-Side Grid
+        </button>
+        <button class="tab-btn" id="tab-blink">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+          Single Frame Blink
+        </button>
+      </div>
+
+      <!-- Main Video Container -->
+      <div class="comparison-container" id="video-box">
+        <!-- Split Slider View -->
+        <div class="slider-view" id="view-slider-container">
+          <div class="video-label a">VIDEO A: Visually Lossless (CRF 18)</div>
+          <div class="video-label b">VIDEO B: Muxed Transcoded (CRF 23)</div>
+          
+          <div class="slider-video-bottom">
+            <video id="video-b-slider" preload="auto" muted loop></video>
+          </div>
+          <div class="slider-video-top" id="slider-top-clip">
+            <video id="video-a-slider" preload="auto" muted loop></video>
+          </div>
+          
+          <div class="comparison-handle" id="swipe-handle"></div>
+        </div>
+
+        <!-- Side-by-Side View -->
+        <div class="side-by-side-view" id="view-sbs-container" style="display: none;">
+          <div class="side-pane">
+            <div class="video-label a">VIDEO A: Visually Lossless (CRF 18)</div>
+            <video id="video-a-sbs" preload="auto" muted loop></video>
+          </div>
+          <div class="side-pane">
+            <div class="video-label b">VIDEO B: Muxed Transcoded (CRF 23)</div>
+            <video id="video-b-sbs" preload="auto" muted loop></video>
+          </div>
+        </div>
+
+        <!-- Blink View -->
+        <div class="blink-view" id="view-blink-container" style="display: none;">
+          <div class="blink-status" id="blink-active-label">Video A (Raw Video-Only)</div>
+          <video id="video-blink" preload="auto" muted loop></video>
+        </div>
+      </div>
+
+      <!-- Controls Panel -->
+      <div class="controls-panel">
+        <!-- Timeline Bar -->
+        <div class="scrub-container">
+          <span style="font-family: monospace; font-size: 0.85rem;" id="time-current">00:00.00</span>
+          <div class="timeline-bar" id="timeline-bar">
+            <div class="timeline-progress" id="timeline-progress">
+              <div class="timeline-handle"></div>
+            </div>
+          </div>
+          <span style="font-family: monospace; font-size: 0.85rem;" id="time-duration">00:00.00</span>
+        </div>
+
+        <!-- Controls Row -->
+        <div class="control-row">
+          <!-- Playback and step controls -->
+          <div class="btn-group">
+            <button class="action-btn" id="btn-prev-10" title="Skip back 10 frames">
+              &lt;&lt; 10f
+            </button>
+            <button class="action-btn" id="btn-prev-1" title="Prev frame (Left Arrow)">
+              &lt; 1f
+            </button>
+            <button class="action-btn play-btn" id="btn-play" title="Play / Pause (Spacebar)">
+              <svg viewBox="0 0 24 24" id="play-icon"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button class="action-btn" id="btn-next-1" title="Next frame (Right Arrow)">
+              1f &gt;
+            </button>
+            <button class="action-btn" id="btn-next-10" title="Skip forward 10 frames">
+              10f &gt;&gt;
+            </button>
+          </div>
+
+          <!-- Blink toggle (in Blink mode) -->
+          <div class="btn-group" id="blink-toggle-group" style="display: none;">
+            <button class="action-btn active-glow purple" id="btn-blink-swap">
+              Blink Compare (Hold Tab or Click to Swap)
+            </button>
+          </div>
+
+          <!-- Audio options -->
+          <div class="btn-group">
+            <button class="action-btn" id="btn-mute" title="Toggle audio volume">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" id="volume-icon"><path d="M11 5L6 9H2v6h4l5 4V5z"/></svg>
+              Muted
+            </button>
+            <button class="action-btn" id="btn-resync">
+              Resync Timelines
+            </button>
+          </div>
+        </div>
+
+        <!-- Technical readouts -->
+        <div class="metadata-panel">
+          <div class="meta-readout">
+            <span class="meta-label">Current Frame</span>
+            <span class="meta-val cyan" id="readout-frame">0 / 0</span>
+            <span class="meta-subtext">At 24 frames per second</span>
+          </div>
+          <div class="meta-readout">
+            <span class="meta-label">Visual Quality Diff</span>
+            <span class="meta-val purple" id="readout-quality">83.3% loss</span>
+            <span class="meta-subtext">File sizes: 90.3MB vs 15.0MB</span>
+          </div>
+          <div class="meta-readout">
+            <span class="meta-label">Muxing Audio stream</span>
+            <span class="meta-val" id="readout-audio">Video B Only</span>
+            <span class="meta-subtext">48kHz stereo 192kbps AAC</span>
+          </div>
+          <div class="meta-readout">
+            <span class="meta-label">Muxing Video Copy</span>
+            <span class="meta-val cyan" style="color: #4ade80;">READY</span>
+            <span class="meta-subtext">Using -c:v copy (Instant)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Preset Keyframe Gallery -->
+    <section class="glass-card" style="margin-top: 1.5rem;">
+      <h2 class="gallery-title">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        Inspected Keyframe Gallery
+      </h2>
+      <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+        Click any pre-extracted frame below to immediately inspect that scene. Drag the split swipe slider to analyze details like color gradient mapping, fine text outlines, and encoding blocks.
+      </p>
+      
+      <div class="gallery-grid">
+        <div class="frame-card" onclick="jumpToSec(5)">
+          <div class="frame-thumb">
+            <img src="../test-recordings/frame_5.png" onerror="this.src='https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=400'" alt="Frame at 5s">
+            <span class="frame-badge">00:05.00</span>
+          </div>
+          <div class="frame-info">
+            <div class="frame-name">Intro Sequence</div>
+            <div class="frame-desc">Cold open dramatic narration</div>
+          </div>
+        </div>
+
+        <div class="frame-card" onclick="jumpToSec(15)">
+          <div class="frame-thumb">
+            <img src="../test-recordings/frame_15.png" onerror="this.src='https://images.unsplash.com/photo-1541185933-ef5d8ed016c2?w=400'" alt="Frame at 15s">
+            <span class="frame-badge">00:15.00</span>
+          </div>
+          <div class="frame-info">
+            <div class="frame-name">Title Transition</div>
+            <div class="frame-desc">Gradients & vector text</div>
+          </div>
+        </div>
+
+        <div class="frame-card" onclick="jumpToSec(30)">
+          <div class="frame-thumb">
+            <img src="../test-recordings/frame_30.png" onerror="this.src='https://images.unsplash.com/photo-1517976487492-5750f3195933?w=400'" alt="Frame at 30s">
+            <span class="frame-badge">00:30.00</span>
+          </div>
+          <div class="frame-info">
+            <div class="frame-name">SpaceX Falcon Heavy</div>
+            <div class="frame-desc">Complex high-contrast detail</div>
+          </div>
+        </div>
+
+        <div class="frame-card" onclick="jumpToSec(60)">
+          <div class="frame-thumb">
+            <img src="../test-recordings/frame_60.png" onerror="this.src='https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?w=400'" alt="Frame at 60s">
+            <span class="frame-badge">01:00.00</span>
+          </div>
+          <div class="frame-info">
+            <div class="frame-name">Orbit Mechanics</div>
+            <div class="frame-desc">Vector graphics & overlays</div>
+          </div>
+        </div>
+
+        <div class="frame-card" onclick="jumpToSec(90)">
+          <div class="frame-thumb">
+            <img src="../test-recordings/frame_90.png" onerror="this.src='https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?w=400'" alt="Frame at 90s">
+            <span class="frame-badge">01:30.00</span>
+          </div>
+          <div class="frame-info">
+            <div class="frame-name">Deep Space Future</div>
+            <div class="frame-desc">Ken Burns panning comparison</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // State management
+    let fileA = null;
+    let fileB = null;
+    let urlA = null;
+    let urlB = null;
+    let activeMode = 'slider'; // 'slider', 'sbs', 'blink'
+    let isPlaying = false;
+    let isMuted = true;
+    let blinkActive = 'a'; // 'a', 'b'
+
+    // DOM Elements
+    const fileInputA = document.getElementById('file-a');
+    const fileInputB = document.getElementById('file-b');
+    const filenameA = document.getElementById('filename-a');
+    const filenameB = document.getElementById('filename-b');
+    const dropZoneA = document.getElementById('drop-zone-a');
+    const dropZoneB = document.getElementById('drop-zone-b');
+    const viewerPanel = document.getElementById('viewer-panel');
+
+    // Video Elements
+    const videoASlider = document.getElementById('video-a-slider');
+    const videoBSlider = document.getElementById('video-b-slider');
+    const videoASbs = document.getElementById('video-a-sbs');
+    const videoBSbs = document.getElementById('video-b-sbs');
+    const videoBlink = document.getElementById('video-blink');
+    
+    const allVideos = [videoASlider, videoBSlider, videoASbs, videoBSbs, videoBlink];
+
+    // Views
+    const viewSlider = document.getElementById('view-slider-container');
+    const viewSbs = document.getElementById('view-sbs-container');
+    const viewBlink = document.getElementById('view-blink-container');
+
+    // Controls
+    const tabSlider = document.getElementById('tab-slider');
+    const tabSbs = document.getElementById('tab-sbs');
+    const tabBlink = document.getElementById('tab-blink');
+    const scrubBar = document.getElementById('timeline-bar');
+    const scrubProgress = document.getElementById('timeline-progress');
+    const timeCurrent = document.getElementById('time-current');
+    const timeDuration = document.getElementById('time-duration');
+    const btnPlay = document.getElementById('btn-play');
+    const playIcon = document.getElementById('play-icon');
+    const btnMute = document.getElementById('btn-mute');
+    const volumeIcon = document.getElementById('volume-icon');
+    const btnPrev1 = document.getElementById('btn-prev-1');
+    const btnNext1 = document.getElementById('btn-next-1');
+    const btnPrev10 = document.getElementById('btn-prev-10');
+    const btnNext10 = document.getElementById('btn-next-10');
+    const btnResync = document.getElementById('btn-resync');
+    const btnBlinkSwap = document.getElementById('btn-blink-swap');
+    const blinkToggleGroup = document.getElementById('blink-toggle-group');
+    const blinkLabel = document.getElementById('blink-active-label');
+
+    // Comparison handle elements
+    const swipeHandle = document.getElementById('swipe-handle');
+    const sliderClip = document.getElementById('slider-top-clip');
+    const videoBox = document.getElementById('video-box');
+
+    // Technical readouts
+    const readoutFrame = document.getElementById('readout-frame');
+    const readoutAudio = document.getElementById('readout-audio');
+    const syncWarning = document.getElementById('sync-warning');
+
+    // Handle File Loading
+    fileInputA.addEventListener('change', (e) => loadFile(e.target.files[0], 'a'));
+    fileInputB.addEventListener('change', (e) => loadFile(e.target.files[0], 'b'));
+
+    function loadFile(file, type) {
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      
+      if (type === 'a') {
+        fileA = file;
+        urlA = url;
+        filenameA.textContent = file.name + ' (' + (file.size / (1024 * 1024)).toFixed(1) + ' MB)';
+        dropZoneA.classList.add('has-file');
+        
+        videoASlider.src = url;
+        videoASbs.src = url;
+        if (blinkActive === 'a') {
+          videoBlink.src = url;
+        }
+      } else {
+        fileB = file;
+        urlB = url;
+        filenameB.textContent = file.name + ' (' + (file.size / (1024 * 1024)).toFixed(1) + ' MB)';
+        dropZoneB.classList.add('has-file');
+        
+        videoBSlider.src = url;
+        videoBSbs.src = url;
+        if (blinkActive === 'b') {
+          videoBlink.src = url;
+        }
+        // Enable audio from Video B (which contains audio)
+        videoBSlider.muted = true;
+        videoBSbs.muted = true;
+        videoBlink.muted = isMuted;
+        readoutAudio.textContent = "Video B Active";
+      }
+
+      // Check if both files loaded
+      if (fileA && fileB) {
+        viewerPanel.style.display = 'block';
+        resyncTimelines();
+        updateTimeReadouts();
+      }
+    }
+
+    // Drag-and-drop animations
+    [dropZoneA, dropZoneB].forEach(zone => {
+      zone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        zone.style.background = 'rgba(6, 182, 212, 0.05)';
+      });
+      zone.addEventListener('dragleave', () => {
+        zone.style.background = '';
+      });
+      zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zone.style.background = '';
+      });
+    });
+
+    // Sync controls
+    function resyncTimelines(time = 0) {
+      allVideos.forEach(vid => {
+        if (vid.src) {
+          vid.currentTime = time;
+        }
+      });
+      syncCheck();
+    }
+
+    function syncCheck() {
+      // Ensure A and B are within 50ms of each other
+      const mainTime = videoBSlider.currentTime;
+      let drift = false;
+
+      if (videoASlider.src && Math.abs(videoASlider.currentTime - mainTime) > 0.05) {
+        videoASlider.currentTime = mainTime;
+        drift = true;
+      }
+      if (videoASbs.src && Math.abs(videoASbs.currentTime - mainTime) > 0.05) {
+        videoASbs.currentTime = mainTime;
+        drift = true;
+      }
+      if (videoBSbs.src && Math.abs(videoBSbs.currentTime - mainTime) > 0.05) {
+        videoBSbs.currentTime = mainTime;
+        drift = true;
+      }
+
+      if (drift) {
+        syncWarning.style.display = 'flex';
+        setTimeout(() => { syncWarning.style.display = 'none'; }, 2000);
+      }
+    }
+
+    // Playback state toggle
+    function togglePlay() {
+      if (!fileA || !fileB) return;
+      
+      if (isPlaying) {
+        allVideos.forEach(v => { if (v.src) v.pause(); });
+        playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+        isPlaying = false;
+      } else {
+        // Sync before play
+        resyncTimelines(videoBSlider.currentTime);
+        
+        // Play appropriate videos based on active view
+        if (activeMode === 'slider') {
+          videoASlider.play();
+          videoBSlider.play();
+        } else if (activeMode === 'sbs') {
+          videoASbs.play();
+          videoBSbs.play();
+        } else if (activeMode === 'blink') {
+          videoBlink.play();
+        }
+        playIcon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+        isPlaying = true;
+      }
+    }
+
+    btnPlay.addEventListener('click', togglePlay);
+
+    // Mute/Unmute
+    btnMute.addEventListener('click', () => {
+      isMuted = !isMuted;
+      videoBlink.muted = isMuted;
+      
+      // Let's hook audio up to standard video element B
+      if (activeMode === 'slider') {
+        videoBSlider.muted = isMuted;
+      } else if (activeMode === 'sbs') {
+        videoBSbs.muted = isMuted;
+      }
+
+      if (isMuted) {
+        volumeIcon.innerHTML = '<path d="M11 5L6 9H2v6h4l5 4V5z"/>';
+        btnMute.classList.remove('active-glow');
+        btnMute.innerHTML = volumeIcon.outerHTML + ' Muted';
+      } else {
+        volumeIcon.innerHTML = '<path d="M11.5 3.03v2.06c2.89.86 5 3.54 5 6.91s-2.11 6.05-5 6.91v2.06c4.01-.91 7-4.49 7-8.97s-2.99-8.06-7-8.97zM11 5L6 9H2v6h4l5 4V5zm2 7c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>';
+        btnMute.classList.add('active-glow');
+        btnMute.innerHTML = volumeIcon.outerHTML + ' Playing (B)';
+      }
+    });
+
+    btnResync.addEventListener('click', () => {
+      resyncTimelines(videoBSlider.currentTime);
+    });
+
+    // Time scrubbing
+    scrubBar.addEventListener('click', (e) => {
+      if (!fileB) return;
+      const rect = scrubBar.getBoundingClientRect();
+      const pct = (e.clientX - rect.left) / rect.width;
+      const targetTime = pct * videoBSlider.duration;
+      resyncTimelines(targetTime);
+    });
+
+    // Synced progress update loop
+    function updateTimeReadouts() {
+      if (!fileB) return;
+      const curr = videoBSlider.currentTime;
+      const dur = videoBSlider.duration || 142;
+      
+      // Scrub progress bar
+      const pct = (curr / dur) * 100;
+      scrubProgress.style.width = pct + '%';
+      
+      // Format timestamps
+      timeCurrent.textContent = formatTime(curr);
+      timeDuration.textContent = formatTime(dur);
+
+      // Frame counting
+      const currentFrame = Math.round(curr * varGetFps());
+      const totalFrames = Math.round(dur * varGetFps());
+      readoutFrame.textContent = currentFrame + ' / ' + totalFrames;
+
+      requestAnimationFrame(updateTimeReadouts);
+    }
+
+    function varGetFps() {
+      return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--fps')) || 24;
+    }
+
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      const ms = Math.floor((sec % 1) * 100);
+      return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s + '.' + (ms < 10 ? '0' : '') + ms;
+    }
+
+    // Step Frame functions
+    function stepFrames(num) {
+      if (!fileB) return;
+      isPlaying && togglePlay(); // Pause first
+      
+      const frameDuration = 1 / varGetFps();
+      const newTime = Math.min(videoBSlider.duration, Math.max(0, videoBSlider.currentTime + num * frameDuration));
+      resyncTimelines(newTime);
+    }
+
+    btnPrev1.addEventListener('click', () => stepFrames(-1));
+    btnNext1.addEventListener('click', () => stepFrames(1));
+    btnPrev10.addEventListener('click', () => stepFrames(-10));
+    btnNext10.addEventListener('click', () => stepFrames(10));
+
+    function jumpToSec(sec) {
+      if (!fileA || !fileB) {
+        alert("Please load both Video A and Video B first to inspect that frame!");
+        return;
+      }
+      resyncTimelines(sec);
+    }
+
+    // Comparison mode swapping
+    function setMode(mode) {
+      activeMode = mode;
+      
+      // Toggle button classes
+      tabSlider.classList.remove('active');
+      tabSbs.classList.remove('active');
+      tabBlink.classList.remove('active');
+      
+      // Toggle containers
+      viewSlider.style.display = 'none';
+      viewSbs.style.display = 'none';
+      viewBlink.style.display = 'none';
+      blinkToggleGroup.style.display = 'none';
+
+      // Turn off videos
+      allVideos.forEach(v => { if (v.src && !v.paused) v.pause(); });
+
+      if (mode === 'slider') {
+        tabSlider.classList.add('active');
+        viewSlider.style.display = 'block';
+        if (isPlaying) {
+          videoASlider.play();
+          videoBSlider.play();
+        }
+        // Match mute state
+        videoASlider.muted = true;
+        videoBSlider.muted = isMuted;
+      } else if (mode === 'sbs') {
+        tabSbs.classList.add('active');
+        viewSbs.style.display = 'block';
+        if (isPlaying) {
+          videoASbs.play();
+          videoBSbs.play();
+        }
+        videoASbs.muted = true;
+        videoBSbs.muted = isMuted;
+      } else if (mode === 'blink') {
+        tabBlink.classList.add('active');
+        viewBlink.style.display = 'block';
+        blinkToggleGroup.style.display = 'flex';
+        
+        // Sync active blink element source
+        videoBlink.src = blinkActive === 'a' ? urlA : urlB;
+        videoBlink.currentTime = videoBSlider.currentTime;
+        if (isPlaying) {
+          videoBlink.play();
+        }
+        videoBlink.muted = isMuted;
+      }
+      
+      resyncTimelines(videoBSlider.currentTime);
+    }
+
+    tabSlider.addEventListener('click', () => setMode('slider'));
+    tabSbs.addEventListener('click', () => setMode('sbs'));
+    tabBlink.addEventListener('click', () => setMode('blink'));
+
+    // Split-Screen Swipe Drag Logic
+    let isDragging = false;
+
+    function moveHandle(x) {
+      const containerRect = videoBox.getBoundingClientRect();
+      let pos = (x - containerRect.left) / containerRect.width;
+      pos = Math.max(0, Math.min(1, pos));
+      
+      swipeHandle.style.left = (pos * 100) + '%';
+      sliderClip.style.clipPath = `inset(0 ${(1 - pos) * 100}% 0 0)`;
+    }
+
+    videoBox.addEventListener('mousedown', (e) => {
+      if (activeMode !== 'slider') return;
+      isDragging = true;
+      moveHandle(e.clientX);
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging || activeMode !== 'slider') return;
+      moveHandle(e.clientX);
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    // Touch support for swipe handle
+    videoBox.addEventListener('touchstart', (e) => {
+      if (activeMode !== 'slider') return;
+      isDragging = true;
+      moveHandle(e.touches[0].clientX);
+    });
+
+    window.addEventListener('touchmove', (e) => {
+      if (!isDragging || activeMode !== 'slider') return;
+      moveHandle(e.touches[0].clientX);
+    });
+
+    window.addEventListener('touchend', () => {
+      isDragging = false;
+    });
+
+    // Blink Compare Swap
+    function swapBlink() {
+      if (activeMode !== 'blink') return;
+      
+      const prevTime = videoBlink.currentTime;
+      const wasPlaying = !videoBlink.paused;
+      
+      if (blinkActive === 'a') {
+        blinkActive = 'b';
+        videoBlink.src = urlB;
+        blinkLabel.textContent = "Video B (Muxed / Transcoded)";
+        blinkLabel.className = "blink-status";
+        btnBlinkSwap.textContent = "Viewing Video B (Click to Swap)";
+        btnBlinkSwap.className = "action-btn active-glow";
+      } else {
+        blinkActive = 'a';
+        videoBlink.src = urlA;
+        blinkLabel.textContent = "Video A (Raw / Visually Lossless)";
+        blinkLabel.className = "blink-status hq";
+        btnBlinkSwap.textContent = "Viewing Video A (Click to Swap)";
+        btnBlinkSwap.className = "action-btn active-glow purple";
+      }
+      
+      videoBlink.currentTime = prevTime;
+      videoBlink.muted = isMuted;
+      if (wasPlaying) {
+        videoBlink.play();
+      }
+    }
+
+    btnBlinkSwap.addEventListener('click', swapBlink);
+
+    // Keyboard Shortcuts
+    window.addEventListener('keydown', (e) => {
+      // Ignore if typing inside file picker or anything
+      if (document.activeElement.tagName === 'INPUT') return;
+
+      switch(e.code) {
+        case 'Space':
+          e.preventDefault();
+          togglePlay();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          if (e.shiftKey) {
+            // skip 1 second back
+            const newTime = Math.max(0, videoBSlider.currentTime - 1);
+            resyncTimelines(newTime);
+          } else {
+            stepFrames(-1);
+          }
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          if (e.shiftKey) {
+            // skip 1 second forward
+            const newTime = Math.min(videoBSlider.duration, videoBSlider.currentTime + 1);
+            resyncTimelines(newTime);
+          } else {
+            stepFrames(1);
+          }
+          break;
+        case 'KeyD':
+          // Toggle modes
+          if (activeMode === 'slider') setMode('sbs');
+          else if (activeMode === 'sbs') setMode('blink');
+          else setMode('slider');
+          break;
+        case 'Tab':
+          // Swap blink video on Tab key press (in blink mode)
+          if (activeMode === 'blink') {
+            e.preventDefault();
+            swapBlink();
+          }
+          break;
+      }
+    });
+
+    // Start tick
+    requestAnimationFrame(updateTimeReadouts);
+  </script>
+</body>
+</html>

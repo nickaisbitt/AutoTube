@@ -18,7 +18,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -40,12 +40,12 @@ jobs:
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || contains(github.event.head_commit.message, '[e2e]')
+    if: github.event_name == 'schedule' || github.event_name == 'pull_request' || contains(github.event.head_commit.message, '[e2e]')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
       - run: npm ci
       - run: npx playwright install --with-deps

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generateThumbnailConcepts, ThumbnailConcept } from '../thumbnail';
+import { generateThumbnailConcepts } from '../thumbnail';
 
 describe('generateThumbnailConcepts', () => {
   // ─── Core: At least 3 variants (Requirement 2.20) ──────────────────────────

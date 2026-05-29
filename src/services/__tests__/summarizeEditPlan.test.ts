@@ -13,7 +13,6 @@ import type {
 
 let segCounter = 0;
 let assetCounter = 0;
-let narrationCounter = 0;
 
 function makeSegment(overrides: Partial<ScriptSegment> = {}): ScriptSegment {
   const id = overrides.id ?? `seg-${++segCounter}`;
@@ -40,21 +39,6 @@ function makeAsset(
     alt: 'generic image',
     source: 'DuckDuckGo',
     ...(overrides as Omit<Partial<MediaAsset>, 'segmentId'>),
-  };
-}
-
-function makeNarration(
-  overrides: Partial<NarrationClip> & { segmentId: string },
-): NarrationClip {
-  const id = overrides.id ?? `narr-${++narrationCounter}`;
-  return {
-    id,
-    segmentId: overrides.segmentId,
-    text: 'Some narration text.',
-    voice: 'default',
-    duration: 10,
-    status: 'ready',
-    ...(overrides as Omit<Partial<NarrationClip>, 'segmentId'>),
   };
 }
 
@@ -101,7 +85,6 @@ function makeSegmentEntry(
 beforeEach(() => {
   segCounter = 0;
   assetCounter = 0;
-  narrationCounter = 0;
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

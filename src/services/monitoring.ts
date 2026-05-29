@@ -3,6 +3,7 @@ interface MonitoringError {
   context?: Record<string, unknown>;
   timestamp: number;
   level?: 'info' | 'warning' | 'error';
+  user?: MonitoringUser;
 }
 
 interface MonitoringUser {

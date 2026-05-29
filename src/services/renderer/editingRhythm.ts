@@ -74,8 +74,8 @@ export interface SentenceBoundary {
 
 /** Default editing rhythm configuration */
 export const DEFAULT_EDITING_RHYTHM_CONFIG: EditingRhythmConfig = {
-  maxHoldTimeSec: 4,
-  openingMaxHoldTimeSec: 3,
+  maxHoldTimeSec: 3, // Reduced from 4s for better retention
+  openingMaxHoldTimeSec: 2.5, // Reduced from 3s for stronger hook
   maxAssetTimeSec: 7,
   minVisualChanges: 2,
   splitThresholdSec: 6,
@@ -276,9 +276,13 @@ export function detectSentenceBoundaries(narration: string, segmentDuration: num
     return [];
   }
 
-  // Split narration into sentences using regex: period, exclamation, or question mark
-  // followed by space or end of string
-  const sentenceRegex = /[^.!?]*[.!?]+(?:\s|$)|[^.!?]+$/g;
+  // Split narration into sentences using improved regex that handles:
+  // - Abbreviations (Dr., Mr., Mrs., Ms., Prof., etc.)
+  // - Decimal numbers (3.5 billion, 1.2 million)
+  // - Ellipses (...)
+  // - Standard sentence endings (.!?)
+  // Strategy: split on .!? that are NOT preceded by common abbreviations or digits
+  const sentenceRegex = /[^.!?]*(?:[.!?](?![a-zA-Z0-9])|\.\.\.)(?:\s|$)|[^.!?]+$/g;
   const matches = narration.match(sentenceRegex);
 
   if (!matches || matches.length === 0) {
@@ -540,7 +544,7 @@ export function alignCutsToSentences(
 // ---------------------------------------------------------------------------
 
 /** Maximum gap in seconds between pattern interrupts */
-const MAX_PATTERN_INTERRUPT_GAP_SEC = 20;
+const MAX_PATTERN_INTERRUPT_GAP_SEC = 12; // Reduced from 20s for Gen Z attention spans
 
 /**
  * Plans pattern interrupts across the entire video to ensure no gap > 20 seconds
@@ -637,8 +641,8 @@ export function shouldInsertContrastingTransition(beatA: NarrativeBeat, beatB: N
 function extractPatternInterruptText(segment: ScriptSegment): string {
   const narration = segment.narration;
 
+  // Priority 1: Statistical content (numbers, percentages, dollar amounts)
   if (narration && hasStatisticalContent(narration)) {
-    // Extract statistical text (numbers, percentages, dollar amounts)
     const dollarMatch = narration.match(/\$[\d,.]+\s*(?:billion|million|trillion)?/i);
     if (dollarMatch) return dollarMatch[0];
 
@@ -649,18 +653,36 @@ function extractPatternInterruptText(segment: ScriptSegment): string {
     if (largeNumMatch) return largeNumMatch[0];
   }
 
-  // Fall back to segment title
-  if (segment.title && segment.title.length > 0) {
-    return segment.title;
-  }
-
-  // Last resort: extract first few words of narration
+  // Priority 2: Extract impactful phrases (look for strong verbs, key claims)
   if (narration) {
-    const words = narration.split(/\s+/).slice(0, 4);
-    return words.join(' ');
+    const sentences = narration.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    const impactfulSentences = sentences.filter(s => {
+      const lower = s.toLowerCase();
+      return /\b(fail|crash|ban|monopol|dominat|control|crisis|warning|danger|threat|record|shock|surge|collapse)\b/i.test(lower);
+    });
+    if (impactfulSentences.length > 0) {
+      impactfulSentences.sort((a, b) => a.length - b.length);
+      return impactfulSentences[0].trim().substring(0, 50);
+    }
   }
 
-  return '';
+  // Priority 3: Segment title (cleaned up)
+  if (segment.title && segment.title.length > 0) {
+    const cleaned = segment.title.replace(/\b(The|A|An|Is|Are|Was|Were|Of|In|On|At|To|For)\b/gi, '').trim();
+    return cleaned || segment.title;
+  }
+
+  // Priority 4: Extract a meaningful summary from narration
+  if (narration) {
+    const sentences = narration.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    if (sentences.length > 0) {
+      const firstGood = sentences.find(s => s.trim().length > 10 && s.trim().length < 80);
+      if (firstGood) return firstGood.trim().substring(0, 60);
+      return sentences[0].trim().substring(0, 60);
+    }
+  }
+
+  return segment.type === 'intro' ? 'Wait for it...' : 'Key insight';
 }
 
 // ---------------------------------------------------------------------------

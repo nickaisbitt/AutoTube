@@ -1,5 +1,5 @@
 // ============================================================================
-// Vision Check — Reka Edge Quality Inspection via OpenRouter
+// Vision Check — LLM Quality Inspection via OpenRouter
 // ============================================================================
 
 import type { MediaCandidate } from './media';
@@ -8,27 +8,10 @@ import { extractJson } from '../utils/extractJson';
 import { logger } from './logger';
 
 // ---------------------------------------------------------------------------
-// Blocking & Go Criteria
+// Hard quality threshold — candidates below this quality score are rejected
 // ---------------------------------------------------------------------------
 
-export const VISION_BLOCKING_CRITERIA: string[] = [
-  'visible watermarks or stock photo text overlays',
-  'state media branding or logos (RT, Sputnik, CGTN, TASS, Xinhua, PressTV)',
-  'meme text overlays or Impact font captions',
-  'adult or graphic violence content',
-  'extremely low resolution or heavily compressed/artifacted images',
-  'screenshots of social media posts',
-  'AI-generated images with obvious artifacts',
-];
-
-export const VISION_GO_CRITERIA: string[] = [
-  'professional editorial photography',
-  'high resolution and sharp detail',
-  'relevant subject matter',
-  'clean background or professional setting',
-  'official or institutional imagery',
-  'news wire quality',
-];
+export const MIN_QUALITY_SCORE = 7; // 1-10 scale, 7+ = acceptable
 
 // ---------------------------------------------------------------------------
 // Result Interface
@@ -47,7 +30,7 @@ export interface VisionCheckResult {
 // ---------------------------------------------------------------------------
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
-const VISION_MODEL = 'rekaai/reka-edge';
+const VISION_MODEL = 'google/gemini-2.0-flash-001';
 const VISION_TIMEOUT_MS = 20_000;
 const VISION_MAX_RETRIES = 2;
 
@@ -57,33 +40,43 @@ export function buildVisionCheckPrompt(imageUrl: string): {
 } {
   const system = [
     'You are an image quality inspector for a professional video production pipeline.',
-    'Look at the provided image carefully and evaluate it honestly.',
+    'Your job is to REJECT low-quality images and PASS only top-quality ones.',
     '',
-    'ONLY flag an issue if you can CLEARLY SEE it in the image. Do NOT guess or assume.',
+    'Be strict. A video shown on a big screen needs crisp, professional images.',
     '',
-    'BLOCKING criteria (ONLY flag if you can visually confirm it):',
-    '  1. Visible text watermarks overlaid on the image (e.g., "Shutterstock", "Getty", agency names stamped on the photo)',
-    '  2. Visible logos of state media outlets burned into the image (RT logo, Sputnik logo, CGTN bug)',
-    '  3. Meme-style text overlaid on the image (Impact font, top/bottom text format)',
-    '  4. Explicit adult content or extreme graphic violence',
-    '  5. Image is so blurry or pixelated that no details are discernible',
-    '  6. The image is clearly a screenshot of a social media post (showing tweet UI, Facebook post UI)',
-    '  7. Obvious AI generation artifacts (extra fingers, melted faces, gibberish text)',
+    'REJECT the image if ANY of these are true:',
+    '  1. Blurry, out of focus, or pixelated — no discernible fine detail',
+    '  2. Visible text watermarks (Shutterstock, Getty, iStock, Adobe Stock stamps)',
+    '  3. Extremely low resolution — looks like a thumbnail or 480p or below',
+    '  4. Heavy JPEG compression artifacts (blocky, smeared colors)',
+    '  5. Screenshot of a website, social media post, or video frame',
+    '  6. AI-generated image with obvious artifacts (weird hands, melted faces, garbled text)',
+    '  7. Adult content or graphic violence',
+    '  8. Meme format or image macros',
+    '  9. Image is mostly text on a plain background (slide, document, tweet)',
+    ' 10. Image contains state media branding (RT, Sputnik, CGTN, Xinhua logos)',
     '',
-    'IMPORTANT: Most news photos, editorial images, and stock photos should PASS.',
-    'A photo having a small channel logo in the corner is NOT a watermark.',
-    'A photo of a press conference is NOT state media branding.',
-    'A medical or scientific image is NOT adult content.',
+    'PASS the image if it is:',
+    '  - A sharp, clear photograph suitable for a video background',
+    '  - Professional editorial or news photography',
+    '  - High resolution with good lighting and composition',
+    '  - An official press image, product shot, or institutional photo',
+    '',
+    'Scoring guide:',
+    '  quality_score 10: Perfect — crisp, well-composed, professional, high-res',
+    '  quality_score 8-9: Great — sharp, good composition, suitable for video',
+    '  quality_score 7: Acceptable — decent quality, usable, minor imperfections',
+    '  quality_score 5-6: Marginal — noticeable quality issues, only use if nothing better exists',
+    '  quality_score 1-4: Poor — blurry, low-res, watermarked, unusable in production',
     '',
     'Return a JSON object:',
     '{"pass": true/false, "confidence": 0-100, "issues": [], "quality_signals": [], "quality_score": 1-10}',
     '',
-    'If the image looks like a normal, usable photo, set pass to true.',
     'Return ONLY valid JSON.',
   ].join('\n');
 
   const user: Array<{ type: string; [key: string]: unknown }> = [
-    { type: 'text', text: 'Evaluate this image:' },
+    { type: 'text', text: 'Evaluate this image for professional video use:' },
     { type: 'image_url', image_url: { url: cleanImageUrl(imageUrl) } },
   ];
 
@@ -109,11 +102,10 @@ function cleanImageUrl(url: string): string {
 }
 
 /**
- * Check if a URL is fetchable by Reka Edge (must be an absolute public HTTPS URL).
- * Local proxy URLs, relative URLs, data URLs, and known hotlink-blocking domains cannot be fetched by Reka.
+ * Check if a URL is fetchable by Gemini Flash (must be an absolute public HTTPS URL).
  */
-const REKA_UNFETCHABLE_DOMAINS = [
-  'vecteezy.com', 'freepik.com', 'ftcdn.net', 'adobe.com',
+const UNFETCHABLE_DOMAINS = [
+  'vecteezy.com', 'freepik.com', 'ftcdn.net',
   'usatoday.com', 'cnn.com', 'bbc.com', 'bbc.co.uk',
   'nytimes.com', 'sky.com', '365dm.com',
   'walmartimages.com', 'aimwellbeing.com',
@@ -123,7 +115,7 @@ const REKA_UNFETCHABLE_DOMAINS = [
   'imageio.forbes.com',
 ];
 
-function isRekaFetchable(url: string): boolean {
+function isModelFetchable(url: string): boolean {
   if (!url) return false;
   if (url.startsWith('/')) return false;
   if (url.startsWith('data:')) return false;
@@ -132,7 +124,7 @@ function isRekaFetchable(url: string): boolean {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
     const hostname = parsed.hostname.toLowerCase();
-    return !REKA_UNFETCHABLE_DOMAINS.some(d => hostname.includes(d));
+    return !UNFETCHABLE_DOMAINS.some(d => hostname.includes(d));
   } catch {
     return false;
   }
@@ -143,8 +135,8 @@ export async function checkCandidateVision(
   apiKey: string,
   options?: { signal?: AbortSignal },
 ): Promise<VisionCheckResult | null> {
-  // Skip URLs that Reka Edge cannot fetch (relative, proxy, data URLs)
-  if (!isRekaFetchable(imageUrl)) {
+  // Skip URLs that the model cannot fetch
+  if (!isModelFetchable(imageUrl)) {
     return null;
   }
 
@@ -203,7 +195,7 @@ export async function checkCandidateVision(
       confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
       issues: Array.isArray(parsed.issues) ? parsed.issues.map(String) : [],
       qualitySignals: Array.isArray(parsed.quality_signals) ? parsed.quality_signals.map(String) : [],
-      qualityScore: typeof parsed.quality_score === 'number' ? parsed.quality_score : 5,
+      qualityScore: typeof parsed.quality_score === 'number' ? parsed.quality_score : 3,
     };
   } catch (err) {
     // Re-throw AbortError for cancellation support
@@ -227,8 +219,9 @@ export async function batchVisionCheck(
   apiKey: string,
   options?: { signal?: AbortSignal; concurrency?: number },
 ): Promise<Map<string, VisionCheckResult>> {
-  const concurrency = options?.concurrency ?? 3;
+  const concurrency = options?.concurrency ?? 5;
   const results = new Map<string, VisionCheckResult>();
+  const RATE_LIMIT_DELAY_MS = 200;
 
   // Process in batches of `concurrency`
   for (let i = 0; i < candidates.length; i += concurrency) {
@@ -245,6 +238,11 @@ export async function batchVisionCheck(
       if (result.status === 'fulfilled' && result.value !== null) {
         results.set(candidate.url, result.value);
       }
+    }
+
+    // Rate limit between batches
+    if (i + concurrency < candidates.length) {
+      await new Promise((r) => setTimeout(r, RATE_LIMIT_DELAY_MS));
     }
   }
 

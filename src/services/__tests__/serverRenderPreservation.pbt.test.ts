@@ -12,44 +12,14 @@
  * They should PASS on both unfixed and fixed code since the bug only affects
  * the output file extension, not these behaviors.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { join } from 'path';
-import { EventEmitter } from 'events';
 
 // ---------------------------------------------------------------------------
-// Mock types that simulate the Vite middleware request/response objects
-// ---------------------------------------------------------------------------
 
-interface MockResponse {
-  statusCode: number;
-  headers: Record<string, string>;
-  body: string;
-  ended: boolean;
-  setHeader(name: string, value: string): void;
-  end(data?: string): void;
-  write(data: string): void;
-}
 
-function createMockResponse(): MockResponse {
-  const res: MockResponse = {
-    statusCode: 200,
-    headers: {},
-    body: '',
-    ended: false,
-    setHeader(name: string, value: string) {
-      res.headers[name.toLowerCase()] = value;
-    },
-    end(data?: string) {
-      if (data) res.body += data;
-      res.ended = true;
-    },
-    write(data: string) {
-      res.body += data;
-    },
-  };
-  return res;
-}
+
 
 // ---------------------------------------------------------------------------
 // Extracted handler logic (mirrors vite.config.ts /api/server-render handler)
@@ -139,8 +109,7 @@ const tmpFilesArb = fc.array(
   { minLength: 0, maxLength: 5 },
 );
 
-/** Arbitrary for whether the main project file exists */
-const projectExistsArb = fc.boolean();
+
 
 /** Arbitrary for child process killed state */
 const childKilledArb = fc.boolean();

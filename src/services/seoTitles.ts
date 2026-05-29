@@ -210,7 +210,7 @@ export function extractKeyPhrase(hookLine: string): string {
  */
 export function generateTitleOptions(
   topic: string,
-  style: string = 'business_insider',
+  _style: string = 'business_insider',
   dataPoints: string[] = [],
   hookLine: string = '',
 ): TitleOption[] {

@@ -11,10 +11,16 @@ const RENDER_LIMIT = 10;
 const RENDER_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const TTS_LIMIT = 50;
 const TTS_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const PROXY_LIMIT = 100;
+const PROXY_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const SEARCH_LIMIT = 50;
+const SEARCH_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const MAX_SIZE = 10000;
 
 const RENDER_PATHS = ["/api/render-video", "/api/server-render"];
 const TTS_PATH = "/api/tts";
+const PROXY_PATHS = ["/api/proxy-image", "/api/download-clip"];
+const SEARCH_PATHS = ["/api/search-", "/api/static-map", "/api/press-release"];
 
 function getClientIp(req: IncomingMessage): string {
   return (
@@ -26,7 +32,15 @@ function getClientIp(req: IncomingMessage): string {
 
 function evictOldestIfNeeded(): void {
   while (rateLimitMap.size >= MAX_SIZE) {
-    const oldestKey = rateLimitMap.keys().next().value;
+    // Evict the entry with the earliest resetAt (expiry time), not insertion order
+    let oldestKey: string | undefined;
+    let oldestResetAt = Infinity;
+    for (const [key, entry] of rateLimitMap) {
+      if (entry.resetAt < oldestResetAt) {
+        oldestResetAt = entry.resetAt;
+        oldestKey = key;
+      }
+    }
     if (oldestKey !== undefined) {
       rateLimitMap.delete(oldestKey);
     }
@@ -34,17 +48,17 @@ function evictOldestIfNeeded(): void {
 }
 
 function checkLimit(
-  ip: string,
+  key: string,
   limit: number,
   windowMs: number,
 ): { allowed: boolean; retryAfterMs: number } {
   const now = Date.now();
-  let entry = rateLimitMap.get(ip);
+  let entry = rateLimitMap.get(key);
 
   if (!entry || now >= entry.resetAt) {
     entry = { count: 0, resetAt: now + windowMs };
     evictOldestIfNeeded();
-    rateLimitMap.set(ip, entry);
+    rateLimitMap.set(key, entry);
   }
 
   entry.count += 1;
@@ -59,9 +73,9 @@ function checkLimit(
 
 function cleanupExpiredEntries(): void {
   const now = Date.now();
-  for (const [ip, entry] of rateLimitMap) {
+  for (const [key, entry] of rateLimitMap) {
     if (now >= entry.resetAt) {
-      rateLimitMap.delete(ip);
+      rateLimitMap.delete(key);
     }
   }
 }
@@ -73,6 +87,10 @@ export function stopRateLimiterCleanup(): void {
   clearInterval(cleanupInterval);
 }
 
+function isLocalhost(ip: string): boolean {
+  return ip === "127.0.0.1" || ip === "::1" || ip === "localhost" || ip.startsWith("::ffff:127.0.0.1");
+}
+
 export function rateLimitMiddleware(
   req: IncomingMessage,
   res: ServerResponse,
@@ -80,9 +98,14 @@ export function rateLimitMiddleware(
 ): boolean {
   const ip = getClientIp(req);
 
+  // Bypass rate limiting for local development
+  if (isLocalhost(ip)) {
+    return false;
+  }
+
   // Check render rate limit
   if (RENDER_PATHS.some((p) => req.url?.startsWith(p))) {
-    const result = checkLimit(ip, RENDER_LIMIT, RENDER_WINDOW_MS);
+    const result = checkLimit(`${ip}:render`, RENDER_LIMIT, RENDER_WINDOW_MS);
     if (!result.allowed) {
       const retryAfterSec = Math.ceil(result.retryAfterMs / 1000);
       res.statusCode = 429;
@@ -100,7 +123,7 @@ export function rateLimitMiddleware(
 
   // Check TTS rate limit
   if (req.url?.startsWith(TTS_PATH)) {
-    const result = checkLimit(ip, TTS_LIMIT, TTS_WINDOW_MS);
+    const result = checkLimit(`${ip}:tts`, TTS_LIMIT, TTS_WINDOW_MS);
     if (!result.allowed) {
       const retryAfterSec = Math.ceil(result.retryAfterMs / 1000);
       res.statusCode = 429;
@@ -109,6 +132,42 @@ export function rateLimitMiddleware(
       res.end(
         JSON.stringify({
           error: "Rate limit exceeded — too many TTS requests",
+          retryAfter: retryAfterSec,
+        }),
+      );
+      return true; // handled
+    }
+  }
+
+  // Check proxy rate limit
+  if (PROXY_PATHS.some((p) => req.url?.startsWith(p))) {
+    const result = checkLimit(`${ip}:proxy`, PROXY_LIMIT, PROXY_WINDOW_MS);
+    if (!result.allowed) {
+      const retryAfterSec = Math.ceil(result.retryAfterMs / 1000);
+      res.statusCode = 429;
+      res.setHeader("Retry-After", String(retryAfterSec));
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          error: "Rate limit exceeded — too many proxy requests",
+          retryAfter: retryAfterSec,
+        }),
+      );
+      return true; // handled
+    }
+  }
+
+  // Check search rate limit
+  if (SEARCH_PATHS.some((p) => req.url?.startsWith(p))) {
+    const result = checkLimit(`${ip}:search`, SEARCH_LIMIT, SEARCH_WINDOW_MS);
+    if (!result.allowed) {
+      const retryAfterSec = Math.ceil(result.retryAfterMs / 1000);
+      res.statusCode = 429;
+      res.setHeader("Retry-After", String(retryAfterSec));
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          error: "Rate limit exceeded — too many search requests",
           retryAfter: retryAfterSec,
         }),
       );

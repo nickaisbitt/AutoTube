@@ -44,6 +44,11 @@ const TYPE_ICONS: Record<ToastType, ReactNode> = {
 let toastQueue: ToastItem[] = [];
 let listeners: Set<(toasts: ToastItem[]) => void> = new Set();
 
+export function resetToastQueue() {
+  toastQueue.length = 0;
+  listeners.clear();
+}
+
 function notify() {
   const visible = toastQueue.slice(0, MAX_VISIBLE);
   listeners.forEach((fn) => fn(visible));

@@ -283,6 +283,12 @@ const ALLOWED_TRANSITIONS = new Set<TransitionType>([
   'cut',
   'dissolve',
   'wipe',
+  'slide',
+  'zoom',
+  'glitch',
+  'flash',
+  'push',
+  'spin',
 ]);
 
 /**
@@ -665,7 +671,7 @@ Respond with ONLY the JSON object. No markdown fences, no commentary.`;
   if (project.visualPlans) {
     for (const [segId, plan] of Object.entries(project.visualPlans)) {
       visualPlanLines.push(
-        `  - segmentId: "${segId}", intent: "${plan.intent ?? ''}", visualConcept: "${plan.visualConcept ?? ''}", queries: [${(plan.queries ?? []).map((q) => `"${q}"`).join(', ')}]`,
+        `  - segmentId: "${segId}", beat: "${plan.beat ?? ''}", visualConcept: "${plan.visualConcept ?? ''}", queries: [${(plan.queries ?? []).map((q) => `"${q}"`).join(', ')}]`,
       );
     }
   }

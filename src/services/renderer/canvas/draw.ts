@@ -3,12 +3,11 @@ import { computeSafeZone } from '../../renderingShared';
 import { computeSaturationScore, computeAdaptiveFilter, CHART_KEYWORDS } from '../../captionUtils';
 import { logger } from '../../logger';
 import type { ImgCache, RenderableImage, RenderOptions } from '../orchestrator';
-import { hexToRgba, roundRect, wrapText, drawTechnicalLabel } from './text';
+import { hexToRgba, wrapText, drawTechnicalLabel } from './text';
 import { SCENE_LAYOUT_DISPATCH } from './scenes';
 
 // Requirement 8.1: Cache saturation scores keyed by image URL so the score is
 // computed at most once per image per render session.
-const MAX_SATURATION_CACHE_SIZE = 500;
 export const saturationCache = new Map<string, number>();
 
 // ── Procedural cinematic backgrounds ──
@@ -17,33 +16,77 @@ export function drawProceduralBackground(
   seg: ScriptSegment, progress: number,
   isRendering?: boolean,
 ): void {
-  // Topic-aware color palettes
+  // Topic-aware color palettes with segment-type variants
   const palettes: Record<string, { bg: string[]; accent: string; glow: string; secondary: string }> = {
+    // Segment type palettes
     intro: {
-      bg: ['#1a1a3e', '#2a1a5e', '#1a2a4e'],
+      bg: ['#0a0a1a', '#1a0a2e', '#0a1a2e'],
       accent: '#e74c3c',
       glow: '#ff6b6b',
       secondary: '#f39c12',
     },
     section: {
-      bg: ['#1a1a3e', '#1a2a5e', '#1a3a6e'],
+      bg: ['#0a0a1a', '#0a1a2e', '#0a2a3e'],
       accent: '#3498db',
       glow: '#5dade2',
       secondary: '#9b59b6',
     },
     transition: {
-      bg: ['#2a2a1a', '#3a2a1a', '#2a1a1a'],
+      bg: ['#1a1a0a', '#2a1a0a', '#1a0a0a'],
       accent: '#f39c12',
       glow: '#f5b041',
       secondary: '#e67e22',
     },
     outro: {
-      bg: ['#1a2a2a', '#1a3a2a', '#1a2a3a'],
+      bg: ['#0a1a0a', '#0a2a1a', '#0a1a2a'],
       accent: '#2ecc71',
       glow: '#58d68d',
       secondary: '#1abc9c',
     },
   };
+
+  // Topic-specific palette overrides (overrides segment type when topic matches)
+  const topicPalettes: Array<{ keywords: string[]; palette: typeof palettes['intro'] }> = [
+    {
+      keywords: ['tech', 'ai', 'software', 'computing', 'digital', 'cyber', 'robot'],
+      palette: { bg: ['#0a0a2e', '#0a1a3e', '#1a0a3e'], accent: '#00d4ff', glow: '#00f0ff', secondary: '#7c3aed' },
+    },
+    {
+      keywords: ['finance', 'money', 'crypto', 'stock', 'invest', 'economy', 'bitcoin', 'trading'],
+      palette: { bg: ['#0a1a0a', '#0a2a0a', '#1a2a0a'], accent: '#00ff88', glow: '#00ffaa', secondary: '#fbbf24' },
+    },
+    {
+      keywords: ['health', 'medical', 'disease', 'vaccine', 'doctor', 'medicine', 'mental'],
+      palette: { bg: ['#0a1a2a', '#0a2a3a', '#1a2a3a'], accent: '#22d3ee', glow: '#67e8f9', secondary: '#a78bfa' },
+    },
+    {
+      keywords: ['science', 'space', 'physics', 'quantum', 'nasa', 'universe', 'research'],
+      palette: { bg: ['#0a0a1a', '#1a0a2a', '#0a1a2a'], accent: '#a855f7', glow: '#c084fc', secondary: '#38bdf8' },
+    },
+    {
+      keywords: ['politics', 'government', 'election', 'law', 'policy', 'congress', 'senate'],
+      palette: { bg: ['#1a0a0a', '#2a0a0a', '#1a1a0a'], accent: '#ef4444', glow: '#f87171', secondary: '#3b82f6' },
+    },
+    {
+      keywords: ['climate', 'environment', 'earth', 'energy', 'solar', 'green', 'carbon'],
+      palette: { bg: ['#0a1a0a', '#0a2a1a', '#1a2a0a'], accent: '#10b981', glow: '#34d399', secondary: '#f59e0b' },
+    },
+    {
+      keywords: ['china', 'lithium', 'ev', 'battery', 'tesla', 'electric', 'vehicle'],
+      palette: { bg: ['#1a0a0a', '#2a0a1a', '#1a1a0a'], accent: '#ef4444', glow: '#fca5a5', secondary: '#fbbf24' },
+    },
+  ];
+
+  // Check if topic matches any topic-specific palette
+  const topicLower = (seg.type === 'intro' ? seg.title : seg.title + ' ' + (seg.narration || '')).toLowerCase();
+  for (const tp of topicPalettes) {
+    if (tp.keywords.some(kw => topicLower.includes(kw))) {
+      const palette = palettes[seg.type] || palettes.section;
+      // Blend topic palette with segment type palette for cohesion
+      Object.assign(palette, tp.palette);
+      break;
+    }
+  }
 
   const palette = palettes[seg.type] || palettes.section;
 
@@ -114,10 +157,12 @@ export function drawProceduralBackground(
     ctx.fill();
   }
 
-  // Enhanced particle system (100+ particles in preview; 30 during rendering for speed)
-  const particleCount = isRendering ? 30 : 120;
-  const sizeScale = isRendering ? 2 : 1;
-  const alphaScale = isRendering ? 4 : 1;
+  // Resolution-scaled particle count (more particles for higher resolutions)
+  const resolutionScale = Math.min(Math.max(w / 1280, h / 720), 3); // Cap at 3x for performance
+  const baseParticleCount = isRendering ? 80 : 150;
+  const particleCount = Math.round(baseParticleCount * resolutionScale);
+  const sizeScale = isRendering ? 1.5 : 1;
+  const alphaScale = isRendering ? 2 : 1;
   for (let i = 0; i < particleCount; i++) {
     const seed = i * 137.508;
     const px = ((Math.sin(seed + progress * 0.4 + i * 0.1) + 1) / 2) * w;
@@ -232,22 +277,39 @@ export function draw(
           ctx.drawImage(img, (w - vdw) / 2, (h - vdh) / 2, vdw, vdh);
           ctx.restore();
         } else {
-        const scale = Math.max(w / imgW, h / imgH) * (isSecondaryShot ? 1.12 : 1.08);
+        // ─ P1: Cinematic Ken Burns — punchy zoom + aggressive pan with Bezier easing ──
+        const scale = Math.max(w / imgW, h / imgH) * (isSecondaryShot ? 1.45 : 1.40);
         const dw = imgW * scale, dh = imgH * scale;
 
+        // Resolution-scaled pan amplitude
+        const resolutionScale = Math.max(w / 1280, h / 720);
+        const basePanX = isSecondaryShot ? 60 : 45;
+        const basePanY = isSecondaryShot ? 30 : 22;
+        const panAmplitudeX = basePanX * resolutionScale;
+        const panAmplitudeY = basePanY * resolutionScale;
+
+        // Cubic Bezier easing function for smoother cinematic motion
+        const easeInOutCubic = (t: number): number =>
+          t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+        // Alternate zoom direction per shot for visual variety
+        const zoomIn = !isSecondaryShot;
         let zoom: number;
         let panX: number;
         let panY: number;
         if (kenBurnsOverride) {
-          zoom = kenBurnsOverride.zoomStart + progress * (kenBurnsOverride.zoomEnd - kenBurnsOverride.zoomStart);
-          const panAmplitudeX = isSecondaryShot ? 18 : 12;
-          const panAmplitudeY = isSecondaryShot ? 9 : 6;
-          panX = Math.sin(progress * Math.PI) * kenBurnsOverride.panDirectionX * panAmplitudeX;
-          panY = Math.cos(progress * Math.PI) * kenBurnsOverride.panDirectionY * panAmplitudeY;
+          const easedProgress = easeInOutCubic(progress);
+          zoom = kenBurnsOverride.zoomStart + easedProgress * (kenBurnsOverride.zoomEnd - kenBurnsOverride.zoomStart);
+          panX = Math.sin(easedProgress * Math.PI) * kenBurnsOverride.panDirectionX * panAmplitudeX;
+          panY = Math.cos(easedProgress * Math.PI) * kenBurnsOverride.panDirectionY * panAmplitudeY;
         } else {
-          zoom = 1 + progress * (isSecondaryShot ? 0.08 : 0.06);
-          panX = Math.sin(progress * Math.PI * (isSecondaryShot ? 1.1 : 0.7)) * (isSecondaryShot ? 18 : 12);
-          panY = Math.cos(progress * Math.PI * (isSecondaryShot ? 0.6 : 0.4)) * (isSecondaryShot ? 9 : 6);
+          // Zoom in OR zoom out depending on shot index — cinematic variety with Bezier easing
+          const easedProgress = easeInOutCubic(progress);
+          zoom = zoomIn
+            ? 1.0 + easedProgress * (isSecondaryShot ? 0.45 : 0.40)
+            : 1.0 + (1 - easedProgress) * (isSecondaryShot ? 0.45 : 0.40);
+          panX = Math.sin(easedProgress * Math.PI * (isSecondaryShot ? 1.1 : 0.7)) * panAmplitudeX;
+          panY = Math.cos(easedProgress * Math.PI * (isSecondaryShot ? 0.6 : 0.4)) * panAmplitudeY;
         }
 
         // ── Requirement 5.1–5.7: Chart reveal — left-to-right progressive clip ──
@@ -268,7 +330,7 @@ export function draw(
         ctx.scale(zoom, zoom);
 
         // ── Requirement 3.1–3.6, 8.1: Adaptive colour grading ──
-        const DEFAULT_FILTER = 'saturate(1.15) contrast(1.12) brightness(1.08)';
+        const DEFAULT_FILTER = 'saturate(1.18) contrast(1.10) brightness(1.02)';
         let filterString = DEFAULT_FILTER;
         if (asset) {
           let score: number;
@@ -287,10 +349,6 @@ export function draw(
             } catch {
               // Requirement 3.6: fall back to score 0.5 (maps to default filter)
               score = 0.5;
-            }
-            if (saturationCache.size >= MAX_SATURATION_CACHE_SIZE) {
-              const oldestKey = saturationCache.keys().next().value;
-              saturationCache.delete(oldestKey);
             }
             saturationCache.set(asset.url, score);
           }
@@ -409,110 +467,113 @@ export function draw(
   ctx.fillRect(0, h - barH, w, barH);
 
   // ── Vignette overlay ──
-  const vigGrad = ctx.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, w * 0.75);
+  const vigGrad = ctx.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, w * 0.8);
   vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
-  vigGrad.addColorStop(0.7, 'rgba(0,0,0,0.15)');
-  vigGrad.addColorStop(1, 'rgba(0,0,0,0.55)');
+  vigGrad.addColorStop(0.75, 'rgba(0,0,0,0.08)');
+  vigGrad.addColorStop(1, 'rgba(0,0,0,0.25)');
   ctx.fillStyle = vigGrad;
   ctx.fillRect(0, 0, w, h);
 
-  // ── Film grain overlay (sparse, performant) ──
-  if (!isRendering) {
-    const grainIntensity = 0.04;
-    const grainStep = 8;
-    for (let gy = 0; gy < h; gy += grainStep) {
-      for (let gx = 0; gx < w; gx += grainStep) {
-        const noise = (Math.random() - 0.5) * grainIntensity;
-        ctx.fillStyle = `rgba(128,128,128,${Math.abs(noise)})`;
-        ctx.fillRect(gx, gy, grainStep, grainStep);
-      }
+  // ── Film grain overlay (animated per-frame for organic look) ──
+  const grainIntensity = 0.03;
+  const grainStep = isRendering ? 6 : 8;
+  const grainSeed = Math.random() * 1000;
+  for (let gy = 0; gy < h; gy += grainStep) {
+    for (let gx = 0; gx < w; gx += grainStep) {
+      const noise = (Math.sin(gx * 12.9898 + gy * 78.233 + grainSeed) * 43758.5453) % 1;
+      const absNoise = Math.abs(noise - 0.5) * grainIntensity;
+      ctx.fillStyle = noise > 0.5 ? `rgba(255,255,255,${absNoise})` : `rgba(0,0,0,${absNoise})`;
+      ctx.fillRect(gx, gy, grainStep, grainStep);
     }
   }
 
   // ── Requirement 4.1–4.5: Technical label badge ──
   drawTechnicalLabel(ctx, asset, barH, w);
 
-  // ── Lower-third title ──
-  const ltY = h - barH - 120;
-  const ltPadX = 60;
+  // ── P0: Bold lower-third — animated accent bar + dual-line title ──
+  const ltPadX = 56;
   const ltPadW = w - ltPadX * 2;
+  const ltBaseY = h - barH - 140;
 
-  const lineW = 40 + progress * 60;
+  // Animated accent bar (grows from left)
+  const accentBarW = Math.min(Math.round(progress * 120 + 40), 160);
   ctx.fillStyle = accentColor;
-  ctx.fillRect(ltPadX, ltY, Math.min(lineW, 100), 2);
+  ctx.fillRect(ltPadX, ltBaseY, accentBarW, 5);
 
+  // Title text — bold, large, with hard drop shadow (not just blur)
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-  ctx.shadowBlur = 16;
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 2;
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 36px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  ctx.font = 'bold 42px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  wrapText(ctx, seg.title, ltPadX, ltY + 12, ltPadW, 44, true);
+  // Hard offset shadow for depth
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillText(seg.title.substring(0, 50), ltPadX + 3, ltBaseY + 14);
+  // White text on top
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 3;
+  ctx.fillStyle = '#ffffff';
+  wrapText(ctx, seg.title, ltPadX, ltBaseY + 12, ltPadW, 50, true);
   ctx.restore();
 
-  // ── Subtitle / caption (sliding window) ──
+  // ── P0: MrBeast-style captions — large, outlined, active word highlighted ──
   const words = seg.narration.split(' ').filter(w => w.length > 0);
 
   if (words.length > 0) {
-    const wordIndex = Math.max(0, Math.floor(progress * words.length) - 1);
-    let start = Math.max(0, wordIndex - 6);
-    let end = Math.min(words.length, start + 12);
-    if (end - start < 12 && start > 0) {
-      start = Math.max(0, end - 12);
-    }
+    // Show 4-6 words at a time, centered on current spoken word
+    const activeWordIdx = Math.max(0, Math.min(Math.floor(progress * words.length), words.length - 1));
+    const windowSize = 5;
+    const halfW = Math.floor(windowSize / 2);
+    const start = Math.max(0, Math.min(activeWordIdx - halfW, words.length - windowSize));
+    const end = Math.min(words.length, start + windowSize);
     const visibleWords = words.slice(start, end);
-    const captionText = visibleWords.join(' ');
+    const activeInWindow = activeWordIdx - start;
 
-    const capY = h - barH - 60;
-    let capBgH = 44;
-    const capBgPad = 16;
-    const capBgW = Math.min(w * 0.7, 700);
-    const capBgX = (w - capBgW) / 2;
-    const captionFont = '500 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    const capFontSize = Math.round(h * 0.058); // ~56px at 1080p, scales with resolution
+    const capFont = `900 ${capFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    ctx.font = capFont;
 
-    ctx.font = captionFont;
-    const textWidth = ctx.measureText(captionText).width;
-    const needsTwoLines = textWidth > capBgW - 32;
+    // Calculate total width to center the group
+    const wordWidths = visibleWords.map(word => ctx.measureText(word).width);
+    const wordGap = Math.round(capFontSize * 0.3);
+    const totalW = wordWidths.reduce((a, b) => a + b, 0) + wordGap * (visibleWords.length - 1);
+    let wordX = (w - totalW) / 2;
+    const capCenterY = h - barH - Math.round(h * 0.09); // 9% from bottom bar
 
-    if (needsTwoLines) {
-      capBgH += 24;
-    }
+    visibleWords.forEach((word, idx) => {
+      const ww = wordWidths[idx];
+      const isActive = idx === activeInWindow;
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-    roundRect(ctx, capBgX, capY - capBgPad, capBgW, capBgH + capBgPad * 2, 8);
-    ctx.fill();
+      ctx.save();
+      ctx.font = capFont;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
 
-    ctx.fillStyle = accentColor + '80';
-    roundRect(ctx, capBgX, capY - capBgPad, capBgW, 2, 8);
-    ctx.fill();
+      // Black stroke outline (MrBeast style) — cap stroke width to prevent excessive outline on long words
+      const strokeWidth = Math.min(Math.round(capFontSize * 0.14), 12);
+      ctx.lineWidth = strokeWidth;
+      ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.strokeText(word, wordX, capCenterY);
 
-    ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = '#ffffff';
-    ctx.font = captionFont;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+      // Fill: highlight active word in accent color, others white
+      if (isActive) {
+        ctx.fillStyle = accentColor === '#e74c3c' ? '#FFD700' : accentColor; // yellow for red themes
+      } else {
+        ctx.fillStyle = '#ffffff';
+      }
+      ctx.fillText(word, wordX, capCenterY);
+      ctx.restore();
 
-    if (needsTwoLines) {
-      const mid = Math.ceil(visibleWords.length / 2);
-      const line1 = visibleWords.slice(0, mid).join(' ');
-      const line2 = visibleWords.slice(mid).join(' ');
-      ctx.fillText(line1, w / 2, capY + capBgH / 2 - 12);
-      ctx.fillText(line2, w / 2, capY + capBgH / 2 + 12);
-    } else {
-      ctx.fillText(captionText, w / 2, capY + capBgH / 2);
-    }
-
-    ctx.restore();
+      wordX += ww + wordGap;
+    });
   }
 
   // ── Subtle progress indicator ──
-  const progBarH = 2;
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+  const progBarH = 3;
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
   ctx.fillRect(0, h - progBarH, w, progBarH);
   ctx.fillStyle = accentColor;
   ctx.fillRect(0, h - progBarH, w * progress, progBarH);

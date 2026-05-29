@@ -1,6 +1,6 @@
 // Feature: codebase-refactor, Property 6: TTS engine delegation
 // Feature: codebase-refactor, Property 7: TTS engine fallback on failure
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fc from 'fast-check';
 import type { TTSConfig, TTSEngine } from '../interface';
 

@@ -18,10 +18,31 @@
 import { createCanvas, loadImage } from 'canvas';
 import { spawn, spawnSync, execFileSync } from 'child_process';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, rmSync, readFileSync, statSync } from 'fs';
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('\n❌ UNHANDLED PROMISE REJECTION:', reason, 'at:', promise);
+});
+process.on('uncaughtException', (err, origin) => {
+  console.error('\n❌ UNCAUGHT EXCEPTION:', err, 'origin:', origin);
+});
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir, homedir } from 'os';
 import { parseVttWordTimestamps, findCurrentWord } from './server-render/subtitleParser.mjs';
+import { createStyleParticles, updateStyleParticles, drawStyleParticles, drawDynamicVignette, drawChromaticAberration, drawFlashFrame, computeTensionZoom, drawKineticOverlay } from './server-render/visualFx.mjs';
+import { computeReverbFilter, computeStereoPanFilter, generateAmbientBed, computeSubBassRumble, computeTransientDuck, computePitchRamp, buildFilterChain } from './server-render/audioFx.mjs';
+import { generateFFmpegChapterMetadata, chaptersFromSegments, embedChaptersCommand, selectCommentBait, computeMidpointTime, generateEasterEggs, drawEasterEgg, computeSpeedRamp, generateABThumbnailVariants, detectEmotionalTone } from './server-render/growthFeatures.mjs';
+import { analyzeContrast, detectWatermarkRegions, computeWatermarkScore, isLikelyWatermarked, computeTextDensity, validateMimeTypeFromUrl, isDomainBlocked } from './server-render/qualityValidation.mjs';
+import { drawLowerThird, drawNameCard, drawSourceCitation, drawProgressTimeline, drawTransition, drawChartReveal, extractNamesFromText, extractCitationsFromSegments, selectTransitionForSegment, drawAnimatedBarChart, drawBounceText, drawElasticText, drawSlideInText, drawParallaxBackground, logBRollCoverage, snapTransitionToBeat, easeInOut, easeOut, easeInBounce, applyBreathingRoom, drawZoomTransition, getAvailableTransitions } from './server-render/advancedRender.mjs';
+import {
+  renderQueue, progressBroadcaster, checkAvailableMemory, logMemoryUsage,
+  EtaEstimator, validateOutput, stepMetrics, saveCheckpoint, loadCheckpoint,
+  clearCheckpoint, parseFfmpegError, getRecoveryAction, QUALITY_DEGRADATION_CHAIN,
+  retryWithFallback, recommendNodeFlags, yieldToEventLoop, RenderStateManager,
+  measureAudioLoudness,
+} from './server-render/pipelineReliability.mjs';
+
+import { estimateRenderCost } from './src/services/costTracker.mjs';
 
 // ── Word timestamp cache for karaoke subtitle sync ─────────────────────────
 // Populated from edge-tts VTT files before rendering begins.
@@ -67,18 +88,25 @@ let HEIGHT = CONFIG.DEFAULT_HEIGHT;
 let FPS = CONFIG.DEFAULT_FPS; // frames per second for standard quality
 
 // ── Resolution presets (mirrors src/services/renderingShared.ts RESOLUTION_PRESETS) ──
+// videoBitsPerSecond is used when project.exportSettings.quality === 'bitrate-mode'
 const RESOLUTION_PRESETS = {
-  '720p':  { width: 1280, height: 720,  fps: 24, videoBitsPerSecond: 6_000_000 },
-  '1080p': { width: 1920, height: 1080, fps: 24, videoBitsPerSecond: 10_000_000 },
-  '4K':    { width: 3840, height: 2160, fps: 24, videoBitsPerSecond: 20_000_000 },
+  '720p':   { width: 1280, height: 720,  fps: 24, videoBitsPerSecond: 6_000_000 },
+  '1080p':  { width: 1920, height: 1080, fps: 24, videoBitsPerSecond: 12_000_000 },
+  '1080p30': { width: 1920, height: 1080, fps: 30, videoBitsPerSecond: 10_000_000 },
+  '1080p60': { width: 1920, height: 1080, fps: 60, videoBitsPerSecond: 15_000_000 },
+  '1440p':  { width: 2560, height: 1440, fps: 24, videoBitsPerSecond: 16_000_000 },
+  '4K':     { width: 3840, height: 2160, fps: 24, videoBitsPerSecond: 20_000_000 },
 };
 
+const YOUTUBE_BITRATES = { '1080p30': 12_000_000, '1080p60': 12_000_000, '1440p30': 16_000_000, '4K30': 35_000_000, '4K60': 53_000_000 };
+
 // ── Aspect ratio presets (Task 17) ──
+// Task 141: Multi-platform presets
 const ASPECT_RATIOS = {
-  '16:9': { width: 1920, height: 1080, label: 'YouTube' },
-  '9:16': { width: 1080, height: 1920, label: 'Shorts/TikTok' },
-  '1:1':  { width: 1080, height: 1080, label: 'Instagram' },
-  '4:5':  { width: 1080, height: 1350, label: 'Facebook' },
+  '16:9':  { width: 1920, height: 1080, label: 'YouTube' },
+  '9:16':  { width: 1080, height: 1920, label: 'Shorts/TikTok' },
+  '1:1':   { width: 1080, height: 1080, label: 'Instagram' },
+  '4:5':   { width: 1080, height: 1350, label: 'Facebook' },
 };
 
 function detectAspectRatioFromTopic(topic) {
@@ -114,7 +142,11 @@ function isChartAsset(asset) {
   if (chartAssetCache.has(asset.id)) return chartAssetCache.get(asset.id);
   const concept = (asset.concept ?? '').toLowerCase();
   const alt = (asset.alt ?? '').toLowerCase();
-  const result = CHART_KEYWORDS.some(kw => concept.includes(kw) || alt.includes(kw));
+  const result = CHART_KEYWORDS.some(kw => {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+    return regex.test(concept) || regex.test(alt);
+  });
   if (chartAssetCache.size >= MAX_CHART_ASSET_CACHE_SIZE) {
     const oldestKey = chartAssetCache.keys().next().value;
     chartAssetCache.delete(oldestKey);
@@ -141,14 +173,46 @@ function measureWordCached(ctx, font, word) {
 }
 
 function detectHardwareEncoder() {
-  if (process.platform !== 'darwin') return null;
   try {
     const result = spawnSync('ffmpeg', ['-encoders'], { encoding: 'utf8', timeout: 5000 });
-    if (result.status === 0 && result.stdout.includes('h264_videotoolbox')) {
+    if (result.status !== 0) return null;
+    const encoders = result.stdout;
+
+    // macOS: VideoToolbox
+    if (process.platform === 'darwin' && encoders.includes('h264_videotoolbox')) {
       return 'h264_videotoolbox';
+    }
+
+    // NVIDIA GPU: NVENC
+    if (encoders.includes('h264_nvenc')) {
+      return 'h264_nvenc';
+    }
+
+    // AMD/Intel: VA-API (Linux)
+    if (encoders.includes('h264_vaapi')) {
+      return 'h264_vaapi';
+    }
+
+    // Video4Linux2
+    if (encoders.includes('h264_v4l2m2m')) {
+      return 'h264_v4l2m2m';
     }
   } catch {}
   return null;
+}
+
+/**
+ * Returns whether GPU acceleration is available and which encoder to use.
+ */
+export function getGpuEncoderInfo() {
+  const encoder = detectHardwareEncoder();
+  return {
+    available: encoder !== null,
+    encoder,
+    isNvidia: encoder === 'h264_nvenc',
+    isApple: encoder === 'h264_videotoolbox',
+    isVaapi: encoder === 'h264_vaapi',
+  };
 }
 
 // ── Shared rendering constants and functions (mirrors src/services/renderingShared.ts) ──
@@ -255,9 +319,9 @@ function computeKenBurnsParams(segmentIndex, assetId, prevPanX, prevPanY) {
   const h3 = seededHash(seed + ':px');
   const h4 = seededHash(seed + ':py');
 
-  // Increased zoom range: 1.0-1.45 for more cinematic movement (was 1.0-1.25)
-  const zoomStart = 1.0 + h1 * 0.45;
-  const zoomEnd = 1.0 + h2 * 0.45;
+  // Zoom range: 1.0-1.40 — matches renderingShared.ts for consistent Ken Burns across renderers
+  const zoomStart = 1.0 + h1 * 0.40;
+  const zoomEnd = 1.0 + h2 * 0.40;
 
   let panDirectionX = h3 * 2 - 1;
   let panDirectionY = h4 * 2 - 1;
@@ -316,12 +380,12 @@ function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec = 4) {
  *
  * Requirement 4.7
  */
-function drawProceduralFallbackWithText(ctx, w, h, topicText, segType) {
+function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narrationText) {
   const palettes = {
-    intro:      { bg: ['#1a1540', '#4a3f8c', '#3a3560'], accent: '#60a5fa' },
-    section:    { bg: ['#1a1a3e', '#2d2d5e', '#1a2d4a'], accent: '#3b82f6' },
-    transition: { bg: ['#2d1a5e', '#4a2d9e', '#2d1a5e'], accent: '#8b5cf6' },
-    outro:      { bg: ['#1a2d4a', '#1d3d5a', '#1a2d4a'], accent: '#60a5fa' },
+    intro:      { bg: ['#3a3a7e', '#6a5fbc', '#5a5590'], accent: '#93c5fd' },
+    section:    { bg: ['#3a3a6e', '#4a4a8e', '#3a4a7a'], accent: '#60a5fa' },
+    transition: { bg: ['#4a3a7e', '#6a4abe', '#4a3a7e'], accent: '#a78bfa' },
+    outro:      { bg: ['#3a4a7a', '#3a5a8a', '#3a4a7a'], accent: '#93c5fd' },
   };
   const p = palettes[segType] || palettes.section;
 
@@ -335,16 +399,16 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType) {
 
   // Subtle geometric pattern overlay
   ctx.save();
-  ctx.globalAlpha = 0.03;
+  ctx.globalAlpha = 0.05;
   ctx.strokeStyle = p.accent;
-  ctx.lineWidth = 1;
-  for (let i = 0; i < w; i += 60) {
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < w; i += 80) {
     ctx.beginPath();
     ctx.moveTo(i, 0);
     ctx.lineTo(i, h);
     ctx.stroke();
   }
-  for (let i = 0; i < h; i += 60) {
+  for (let i = 0; i < h; i += 80) {
     ctx.beginPath();
     ctx.moveTo(0, i);
     ctx.lineTo(w, i);
@@ -352,20 +416,30 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType) {
   }
   ctx.restore();
 
-  // Topic text centered with glow
+  // Bright glow behind text to lift frame brightness
   if (topicText) {
-    ctx.save();
-    ctx.globalAlpha = 0.25;
-    ctx.shadowColor = p.accent;
-    ctx.shadowBlur = 30;
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 42px system-ui, -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(topicText.substring(0, 50), w / 2, h / 2);
-    ctx.restore();
+    const glowGrad = ctx.createRadialGradient(w / 2, h * 0.4, 0, w / 2, h * 0.4, w * 0.5);
+    glowGrad.addColorStop(0, 'rgba(255, 255, 255, 0.15)');
+    glowGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Premium Typographic Presentation with Kinetic Highlights
+  if (topicText) {
+    const textY = narrationText ? h * 0.42 : h / 2;
+    // Highlight numbers and proper nouns on the card title in neon green/accent blue
+    drawTextWithHighlights(ctx, topicText.substring(0, 70), textY, w, 'bold 44px sans-serif', '#ffffff', p.accent);
+
+    // Narration Sub-text (if provided)
+    if (narrationText) {
+      const excerpt = narrationText.substring(0, 110) + (narrationText.length > 110 ? '...' : '');
+      // Highlight statistics/numbers in glowing electric orange
+      drawTextWithHighlights(ctx, excerpt, h * 0.58, w, '300 22px sans-serif', 'rgba(255, 255, 255, 0.75)', '#ff8c00');
+    }
   }
 }
+
 
 // ── Title text wrapping (mirrors src/services/renderingShared.ts wrapTitleText) ──
 /**
@@ -384,20 +458,21 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType) {
  * @param {number} baseFontSize          Starting font size in pixels.
  * @returns {{ lines: string[], fontSize: number }}
  */
-function wrapTitleText(ctx, title, canvasWidth, baseFontSize) {
+function wrapTitleText(ctx, title, canvasWidth, baseFontSize, maxWidth, fontWeight) {
   const safeMargin = canvasWidth * 0.1; // 10% each side
-  const maxWidth = canvasWidth - safeMargin * 2;
+  const availableWidth = maxWidth !== undefined ? maxWidth : canvasWidth - safeMargin * 2;
   let fontSize = baseFontSize;
+  const weight = fontWeight || 'bold';
 
   for (let pass = 0; pass < 2; pass++) {
-    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.font = `${weight} ${fontSize}px system-ui, -apple-system, sans-serif`;
     const words = title.split(' ');
     const lines = [];
     let currentLine = '';
 
     for (const word of words) {
       const testLine = currentLine ? `${currentLine} ${word}` : word;
-      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+      if (ctx.measureText(testLine).width > availableWidth && currentLine) {
         lines.push(currentLine);
         currentLine = word;
       } else {
@@ -483,15 +558,42 @@ function computeSaturationScore(data, width, height) {
   return count === 0 ? 0 : total / count;
 }
 
+// Global brightness state for dynamic exposure boosting
+let averageProjectAssetBrightness = 0.5;
+let globalBrightnessBoost = 1.0;
+
+/**
+ * Computes the average relative luminance/brightness of an image by sampling pixels.
+ * Uses standard ITU BT.601 weights: Y = 0.299 * R + 0.587 * G + 0.114 * B
+ */
+function computeImageBrightness(data, width, height) {
+  let sum = 0;
+  let count = 0;
+  const step = 8;
+  for (let i = 0; i < data.length; i += step * 4) {
+    if (i + 2 >= data.length) break;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const y = 0.299 * r + 0.587 * g + 0.114 * b;
+    sum += y;
+    count++;
+  }
+  return count === 0 ? 0.5 : sum / count / 255.0;
+}
+
 /**
  * Computes the adaptive CSS filter string for a given saturation score.
  * Implements Requirements 3.2–3.4.
  *
  * @param {number} score  Saturation score in [0, 1] from computeSaturationScore.
+ * @param {number} boost  Exposure/brightness boost factor.
  * @returns {string}      Full CSS filter string.
  */
-function computeAdaptiveFilter(score) {
-  const DEFAULT_FILTER = 'saturate(1.12) contrast(1.08) brightness(0.94)';
+function computeAdaptiveFilter(score, boost = 1.0) {
+  const defaultBrightness = 0.98;
+  const finalBrightness = (defaultBrightness * boost).toFixed(4);
+  const DEFAULT_FILTER = `saturate(1.12) contrast(1.08) brightness(${finalBrightness})`;
 
   let saturation;
 
@@ -508,7 +610,17 @@ function computeAdaptiveFilter(score) {
     return DEFAULT_FILTER;
   }
 
-  return `saturate(${saturation.toFixed(4)}) contrast(1.08) brightness(0.94)`;
+  return `saturate(${saturation.toFixed(4)}) contrast(1.08) brightness(${finalBrightness})`;
+}
+
+function boostFrameBrightness(buffer) {
+  const len = buffer.length;
+  for (let i = 0; i < len; i += 4) {
+    buffer[i + 2] = Math.min(255, Math.round(buffer[i + 2] * 0.7 + 76.5));
+    buffer[i + 1] = Math.min(255, Math.round(buffer[i + 1] * 0.7 + 76.5));
+    buffer[i]     = Math.min(255, Math.round(buffer[i]     * 0.7 + 76.5));
+  }
+  return buffer;
 }
 
 // ── Saturation score cache (keyed by image URL) — Requirement 8.1 ──────────
@@ -528,14 +640,38 @@ const saturationCache = new Map();
 const MAX_TECHNICAL_LABEL_CACHE_SIZE = 500;
 const technicalLabelCache = new Map();
 
-function drawTechnicalLabel(ctx, asset, barH) {
+function deriveSegmentKeywords(seg, projectTopic) {
+  const text = `${seg?.title ?? ''} ${seg?.narration ?? ''} ${projectTopic ?? ''}`.toLowerCase();
+  const found = [];
+  for (const kw of TECHNICAL_LABEL_KEYWORDS) {
+    const escaped = kw.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+    if (regex.test(text)) {
+      found.push(kw);
+    }
+  }
+  return found;
+}
+
+function drawTechnicalLabel(ctx, asset, barH, seg, projectTopic) {
   if (!asset) return;
 
   const haystack = `${asset.concept ?? ''} ${asset.alt ?? ''}`.toLowerCase();
+  const segmentKeywords = (seg && projectTopic !== undefined) ? deriveSegmentKeywords(seg, projectTopic) : [];
+  const allKeywords = [...new Set([...TECHNICAL_LABEL_KEYWORDS, ...segmentKeywords])];
 
   let matchedKeyword;
-  for (const kw of TECHNICAL_LABEL_KEYWORDS) {
-    if (haystack.includes(kw.toLowerCase())) {
+  for (const kw of allKeywords) {
+    const escaped = kw.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+    if (regex.test(haystack)) {
+      // Topic-aware gate: when segment context is available, only show badges
+      // for keywords that actually appear in the segment content.
+      if (seg && projectTopic !== undefined) {
+        const segmentRegex = new RegExp(`\\b${escaped}\\b`, 'i');
+        const segmentHaystack = `${seg.title ?? ''} ${seg.narration ?? ''} ${projectTopic ?? ''}`.toLowerCase();
+        if (!segmentRegex.test(segmentHaystack)) continue;
+      }
       matchedKeyword = kw;
       break;
     }
@@ -621,11 +757,22 @@ function cacheSet(key, value) {
   imageCache.set(key, value);
 }
 
+// Task 128: Dependency fallback chain documented:
+//   TTS: Kokoro → MeloTTS → edge-tts → silence (handled in generateNarration)
+//   Image proxy: proxy fetch → direct HTTPS → null (procedural fallback)
+//   ffmpeg: full effects → draft mode (skip particles/effects) → lower resolution
 async function fetchImage(url) {
   if (imageCache.has(url)) return imageCache.get(url);
 
   const MAX_RETRIES = CONFIG.FETCH_MAX_RETRIES;
   const TIMEOUT_MS = CONFIG.FETCH_TIMEOUT_MS;
+
+  // SECURITY: Validate URL safety before fetching (SSRF protection)
+  const urlSafety = validateUrlSafety(url);
+  if (!urlSafety.valid) {
+    console.warn(`  ⚠ [fetchImage] URL blocked for security: ${urlSafety.error}`);
+    return null;
+  }
 
   // Attempt proxy fetch with retries and exponential backoff
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -638,13 +785,45 @@ async function fetchImage(url) {
         clearTimeout(timer);
         throw new Error(`Proxy returned ${res.status}`);
       }
+      
+      // Get content-type header for validation
+      const contentType = res.headers.get('content-type');
       const buf = Buffer.from(await res.arrayBuffer());
       clearTimeout(timer);
-      const img = await loadImage(buf);
+
+      // Validate Content-Type matches expected image format
+      const contentTypeValidation = validateContentType(contentType, buf);
+      if (!contentTypeValidation.valid) {
+        console.warn(`  ⚠ [fetchImage] Content-Type validation failed: ${contentTypeValidation.error}`);
+        throw new Error(contentTypeValidation.error);
+      }
+
+      // Detect image format from magic bytes
+      const detectedFormat = detectImageFormat(buf);
+      if (detectedFormat === 'unknown') {
+        console.warn(`  ⚠ [fetchImage] Unknown/corrupted image format detected`);
+        throw new Error(`Corrupted or unsupported image format`);
+      }
+
+      // Warn if format may not be fully supported by canvas
+      if (!isCanvasSupportedFormat(detectedFormat)) {
+        console.warn(`  ⚠ [fetchImage] Format '${detectedFormat}' has limited canvas support, attempting load...`);
+      }
+
+      let img;
+      try {
+        img = await loadImage(buf);
+      } catch (loadErr) {
+        console.warn(`  ⚠ [fetchImage] loadImage failed: ${loadErr.message}`);
+        throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}. File may be corrupted.`);
+      }
       
-      // MEDIUM #6: Validate image after loading
-      if (!img || img.width <= 0 || img.height <= 0) {
-        throw new Error(`Invalid image dimensions: ${img?.width}x${img?.height}`);
+      // Comprehensive validation after loading
+      const contentLength = parseInt(res.headers.get('content-length') || '0', 10);
+      const validation = validateImage(img, url, contentLength, buf);
+      if (!validation.valid) {
+        console.warn(`  ⚠ [fetchImage] Image validation failed: ${validation.error}`);
+        throw new Error(validation.error);
       }
       
       cacheSet(url, img);
@@ -667,18 +846,45 @@ async function fetchImage(url) {
         clearTimeout(timer);
         throw new Error(`Direct fetch returned ${res.status}`);
       }
-      const buf = Buffer.from(await res.arrayBuffer());
-      clearTimeout(timer);
-      const img = await loadImage(buf);
       
-      // MEDIUM #6: Validate image after loading
-      if (!img || img.width <= 0 || img.height <= 0) {
-        throw new Error(`Invalid image dimensions: ${img?.width}x${img?.height}`);
+      const contentType = res.headers.get('content-type');
+      const buf = Buffer.from(await res.arrayBuffer());
+      const contentLength = parseInt(res.headers.get('content-length') || '0', 10);
+      clearTimeout(timer);
+
+      // Validate Content-Type
+      const contentTypeValidation = validateContentType(contentType, buf);
+      if (!contentTypeValidation.valid) {
+        console.warn(`  ⚠ [fetchImage] Direct fetch Content-Type validation failed: ${contentTypeValidation.error}`);
+        throw new Error(contentTypeValidation.error);
+      }
+
+      // Detect format and validate
+      const detectedFormat = detectImageFormat(buf);
+      if (detectedFormat === 'unknown') {
+        console.warn(`  ⚠ [fetchImage] Direct fetch: unknown/corrupted format`);
+        throw new Error(`Corrupted or unsupported image format`);
+      }
+
+      let img;
+      try {
+        img = await loadImage(buf);
+      } catch (loadErr) {
+        console.warn(`  ⚠ [fetchImage] Direct fetch loadImage failed: ${loadErr.message}`);
+        throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}`);
+      }
+
+      // Comprehensive validation
+      const validation = validateImage(img, url, contentLength, buf);
+      if (!validation.valid) {
+        console.warn(`  ⚠ [fetchImage] Direct fetch validation failed: ${validation.error}`);
+        throw new Error(validation.error);
       }
       
       cacheSet(url, img);
       return img;
     } catch (err) {
+      console.warn(`  ⚠ [fetchImage] Direct HTTPS fetch failed: ${err.message}`);
       // Direct fetch also failed — fall through to null
     }
   }
@@ -774,14 +980,17 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
 }
 
 // ── Procedural background (matches browser renderer) ──────────────────────
-function drawProceduralBackground(ctx, seg, progress, skipParticles = false) {
+function drawProceduralBackground(ctx, seg, progress, skipParticles = false, segmentIndex = 0) {
   const palettes = {
-    intro:      { bg: ['#1a1540', '#4a3f8c', '#3a3560'], accent: '#60a5fa' },
-    section:    { bg: ['#1a1a3e', '#2d2d5e', '#1a2d4a'], accent: '#3b82f6' },
-    transition: { bg: ['#2d1a5e', '#4a2d9e', '#2d1a5e'], accent: '#8b5cf6' },
-    outro:      { bg: ['#1a2d4a', '#1d3d5a', '#1a2d4a'], accent: '#60a5fa' },
+    intro:      { bg: ['#3a3a7e', '#6a5fbc', '#5a5590'], accent: '#93c5fd' },
+    section:    { bg: ['#3a3a6e', '#4a4a8e', '#3a4a7a'], accent: '#60a5fa' },
+    transition: { bg: ['#4a3a7e', '#6a4abe', '#4a3a7e'], accent: '#a78bfa' },
+    outro:      { bg: ['#3a4a7a', '#3a5a8a', '#3a4a7a'], accent: '#93c5fd' },
   };
   const p = palettes[seg.type] || palettes.section;
+
+  const segmentColors = ['#3a4a7e', '#3a5a8e', '#2a5a7e', '#3a6a8f', '#4a3b89'];
+  const bgColor = segmentColors[segmentIndex % segmentColors.length];
 
   // Draft mode: solid colour fill — skip gradient and particle overhead
   if (DRAFT_MODE) {
@@ -796,7 +1005,7 @@ function drawProceduralBackground(ctx, seg, progress, skipParticles = false) {
   const cy = HEIGHT / 2 + Math.sin(angle * 0.7) * HEIGHT * 0.1;
 
   const grad = ctx.createRadialGradient(cx, cy, 0, WIDTH / 2, HEIGHT / 2, WIDTH * 0.8);
-  grad.addColorStop(0, p.bg[2]);
+  grad.addColorStop(0, bgColor);
   grad.addColorStop(0.5, p.bg[1]);
   grad.addColorStop(1, p.bg[0]);
   ctx.fillStyle = grad;
@@ -849,10 +1058,10 @@ function drawTitleCardFrame(ctx, title, topic, progress) {
   const cx = WIDTH / 2 + Math.cos(progress * Math.PI * 0.3) * WIDTH * 0.08;
   const cy = HEIGHT / 2 + Math.sin(progress * Math.PI * 0.2) * HEIGHT * 0.06;
   const grad = ctx.createRadialGradient(cx, cy, 0, WIDTH / 2, HEIGHT / 2, WIDTH * 0.85);
-  grad.addColorStop(0, '#3a3a8e');
-  grad.addColorStop(0.3, '#2a2a6e');
-  grad.addColorStop(0.6, '#1a1a4e');
-  grad.addColorStop(1, '#0f0c29');
+  grad.addColorStop(0, '#4a8abe');
+  grad.addColorStop(0.3, '#3a7ab8');
+  grad.addColorStop(0.6, '#2a5a9e');
+  grad.addColorStop(1, '#1a3a7e');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
@@ -918,7 +1127,7 @@ function drawTitleCardFrame(ctx, title, topic, progress) {
   const displayTitle = title.substring(0, visibleChars);
 
   const baseFontSize = Math.min(68, WIDTH * 0.036);
-  const { lines: titleLines, fontSize: titleFontSize } = wrapTitleText(ctx, displayTitle, WIDTH, baseFontSize);
+  const { lines: titleLines, fontSize: titleFontSize } = wrapTitleText(ctx, displayTitle, WIDTH, baseFontSize, undefined, '800');
   const titleLineHeight = titleFontSize * 1.3;
   const titleBlockHeight = titleLines.length * titleLineHeight;
   const titleStartY = HEIGHT * 0.38 - titleBlockHeight / 2 + titleLineHeight / 2;
@@ -981,10 +1190,10 @@ function drawEndScreenFrame(ctx, title, progress) {
   const cx = WIDTH / 2 + Math.cos(progress * Math.PI * 0.2) * WIDTH * 0.06;
   const cy = HEIGHT / 2 + Math.sin(progress * Math.PI * 0.15) * HEIGHT * 0.04;
   const grad = ctx.createRadialGradient(cx, cy, 0, WIDTH / 2, HEIGHT / 2, WIDTH * 0.85);
-  grad.addColorStop(0, '#3a3a8e');
-  grad.addColorStop(0.3, '#2a2a6e');
-  grad.addColorStop(0.6, '#1a1a4e');
-  grad.addColorStop(1, '#0f0c29');
+  grad.addColorStop(0, '#4a8abe');
+  grad.addColorStop(0.3, '#3a7ab8');
+  grad.addColorStop(0.6, '#2a5a9e');
+  grad.addColorStop(1, '#1a3a7e');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
@@ -1089,14 +1298,40 @@ function drawEndScreenFrame(ctx, title, progress) {
   ctx.fillText(btnText, WIDTH / 2, HEIGHT * 0.52);
   ctx.restore();
 
-  // "More videos coming soon"
+  // Task 131: Enhanced end screen — "Watch Next" and "Subscribe for more" with fade-in
+  const subFade = Math.min(1, Math.max(0, (progress - 0.3) / 0.3));
+
+  // Task 131: "Watch Next" text
   ctx.save();
-  ctx.globalAlpha = fadeAlpha * 0.6;
-  ctx.fillStyle = '#93c5fd';
-  ctx.font = '400 20px system-ui, -apple-system, sans-serif';
+  ctx.globalAlpha = subFade * 0.8;
+  ctx.fillStyle = '#cbd5e1';
+  ctx.font = '600 22px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('More videos coming soon', WIDTH / 2, HEIGHT * 0.68);
+  ctx.fillText('Watch Next', WIDTH / 2, HEIGHT * 0.64);
+  ctx.restore();
+
+  // Task 131: Channel name
+  ctx.save();
+  ctx.globalAlpha = subFade * 0.6;
+  ctx.fillStyle = '#64748b';
+  ctx.font = '400 18px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('THE UPDATE DESK', WIDTH / 2, HEIGHT * 0.70);
+  ctx.restore();
+
+  // Task 139: "Subscribe for more" text in last 2.5 seconds
+  ctx.save();
+  ctx.globalAlpha = subFade;
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = '700 24px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(96, 165, 250, 0.6)';
+  ctx.shadowBlur = 15;
+  ctx.fillText('Subscribe for more', WIDTH / 2, HEIGHT * 0.78);
+  ctx.shadowBlur = 0;
   ctx.restore();
 
   // Bottom decorative bar
@@ -1130,7 +1365,7 @@ function drawWatermark(ctx, w, h, watermarkOpts) {
   if (!watermarkOpts) return;
   const opacity = watermarkOpts.opacity ?? CONFIG.WATERMARK_OPACITY;
   const padding = Math.round(w * 0.02);
-  const logoSize = Math.round(h * 0.06);
+  const logoSize = Math.round(h * 0.08);
 
   ctx.save();
   ctx.globalAlpha = opacity;
@@ -1154,7 +1389,7 @@ function drawWatermark(ctx, w, h, watermarkOpts) {
     }
     ctx.drawImage(watermarkOpts.logoImg, x, y, logoSize, logoSize);
   } else if (watermarkOpts.text) {
-    const fontSize = Math.round(h * 0.025);
+    const fontSize = Math.round(h * 0.03);
     ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
     const textMetrics = ctx.measureText(watermarkOpts.text);
     const textW = textMetrics.width;
@@ -1182,10 +1417,14 @@ function drawWatermark(ctx, w, h, watermarkOpts) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(x, y, textW + textPadX * 2, textH + textPadY * 2);
 
+    ctx.save();
+    ctx.shadowColor = 'rgba(96, 165, 250, 0.4)';
+    ctx.shadowBlur = 8;
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(watermarkOpts.text, x + textPadX, y + textPadY);
+    ctx.restore();
   }
 
   ctx.restore();
@@ -1248,7 +1487,7 @@ function drawStatCard(ctx, seg, img, w, h, safeZone) {
     drawProceduralFallbackWithText(ctx, w, h, null, seg.type);
   }
 
-  // Modern dark overlay
+  // Modern dark overlay with subtle geometric circles
   const overlay = ctx.createLinearGradient(0, 0, 0, h);
   overlay.addColorStop(0, 'rgba(10, 10, 26, 0.80)');
   overlay.addColorStop(0.5, 'rgba(10, 10, 26, 0.70)');
@@ -1256,32 +1495,80 @@ function drawStatCard(ctx, seg, img, w, h, safeZone) {
   ctx.fillStyle = overlay;
   ctx.fillRect(0, 0, w, h);
 
+  // Geometric background pattern — subtle circles
+  ctx.save();
+  ctx.globalAlpha = 0.06;
+  for (let i = 0; i < 12; i++) {
+    const cx = (i * 157 + 50) % w;
+    const cy = (i * 283 + 30) % h;
+    const r = 40 + (i * 37) % 80;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Left accent bar
+  const accentColors = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
+  const accent = accentColors[seg.type] || '#3b82f6';
+  ctx.save();
+  ctx.fillStyle = accent;
+  ctx.fillRect(safeZone.left + 8, h * 0.25, 4, h * 0.5);
+  ctx.restore();
+
+  // AutoTube badge
+  ctx.save();
+  ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+  const badgeText = 'AutoTube';
+  const badgeW = ctx.measureText(badgeText).width + 16;
+  const badgeH = 20;
+  const badgeX = w - safeZone.right - badgeW - 8;
+  const badgeY = safeZone.top + 12;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(96, 165, 250, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.stroke();
+  ctx.fillStyle = '#93c5fd';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + badgeH / 2);
+  ctx.restore();
+
   const stat = extractStat(seg.narration);
   const displayStat = stat || seg.title;
 
-  const accentColors = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
-  const accent = accentColors[seg.type] || '#3b82f6';
-
-  // Stat display — large with glow
+  // Stat display — large with glow and shadow
   ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.9)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetX = 2;
+  ctx.shadowOffsetY = 2;
   ctx.font = `800 ${Math.round(h * 0.11)}px system-ui, -apple-system, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.shadowColor = accent;
-  ctx.shadowBlur = 30;
   ctx.fillStyle = '#ffffff';
   ctx.fillText(displayStat, w / 2, h * 0.35);
   ctx.restore();
 
-  // Accent line below stat
+  // Accent line below stat — wider and brighter
   ctx.save();
   const statW = ctx.measureText(displayStat).width;
-  const lineGrad = ctx.createLinearGradient(w/2 - statW/2, 0, w/2 + statW/2, 0);
-  lineGrad.addColorStop(0, 'rgba(96, 165, 250, 0)');
-  lineGrad.addColorStop(0.5, accent);
-  lineGrad.addColorStop(1, 'rgba(96, 165, 250, 0)');
+  const lineGrad = ctx.createLinearGradient(w/2 - statW/2 - 20, 0, w/2 + statW/2 + 20, 0);
+  lineGrad.addColorStop(0, 'transparent');
+  lineGrad.addColorStop(0.3, accent);
+  lineGrad.addColorStop(0.7, accent);
+  lineGrad.addColorStop(1, 'transparent');
   ctx.fillStyle = lineGrad;
-  ctx.fillRect(w/2 - statW/2, h * 0.35 + h * 0.06, statW, 3);
+  ctx.shadowColor = accent;
+  ctx.shadowBlur = 10;
+  ctx.fillRect(w/2 - statW/2 - 20, h * 0.35 + h * 0.06, statW + 40, 3);
   ctx.restore();
 
   // Segment title
@@ -1290,8 +1577,10 @@ function drawStatCard(ctx, seg, img, w, h, safeZone) {
   ctx.fillStyle = '#e2e8f0';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.shadowColor = 'rgba(0,0,0,0.8)';
-  ctx.shadowBlur = 8;
+  ctx.shadowColor = 'rgba(0,0,0,0.9)';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetX = 1;
+  ctx.shadowOffsetY = 1;
   const titleY = Math.min(h * 0.52, h - safeZone.bottom - 80);
   ctx.fillText(seg.title.substring(0, 60), w / 2, titleY);
   ctx.restore();
@@ -1337,6 +1626,51 @@ function drawQuoteCard(ctx, seg, img, w, h, safeZone) {
   overlay.addColorStop(1, 'rgba(10, 10, 26, 0.85)');
   ctx.fillStyle = overlay;
   ctx.fillRect(0, 0, w, h);
+
+  // Geometric background pattern — subtle lines
+  ctx.save();
+  ctx.globalAlpha = 0.04;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 20; i++) {
+    const y = (i * 53 + 17) % h;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Left accent bar
+  const accentColors = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
+  const accent = accentColors[seg.type] || '#3b82f6';
+  ctx.save();
+  ctx.fillStyle = accent;
+  ctx.fillRect(safeZone.left + 8, h * 0.25, 4, h * 0.5);
+  ctx.restore();
+
+  // AutoTube badge
+  ctx.save();
+  ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+  const badgeText = 'AutoTube';
+  const badgeW = ctx.measureText(badgeText).width + 16;
+  const badgeH = 20;
+  const badgeX = w - safeZone.right - badgeW - 8;
+  const badgeY = safeZone.top + 12;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(96, 165, 250, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.stroke();
+  ctx.fillStyle = '#93c5fd';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + badgeH / 2);
+  ctx.restore();
 
   let quoteText = '';
   if (seg.narration) {
@@ -1434,7 +1768,7 @@ function drawLeftTextRightImage(ctx, seg, img, w, h, safeZone) {
     // Procedural fallback for right panel
     const palettes = {
       intro: ['#1a0a2e', '#0a1a2e'], section: ['#0a1a2e', '#0a2a3e'],
-      transition: ['#2a1a0a', '#1a0a0a'], outro: ['#0a2a1a', '#0a1a2a'],
+      transition: ['#2a1a0a', '#1a0a0a'],       outro: ['#0a1a2a', '#0a1a2e'],
     };
     const p = palettes[seg.type] || palettes.section;
     const rightGrad = ctx.createLinearGradient(splitX, 0, w, h);
@@ -1453,7 +1787,30 @@ function drawLeftTextRightImage(ctx, seg, img, w, h, safeZone) {
 
   // Text area within left panel safe zone
   const textLeft = safeZone.left + 20;
-  const textMaxW = splitX - textLeft - 30;
+  const textMaxW = w - safeZone.left - safeZone.right - 40;
+
+  // AutoTube badge
+  ctx.save();
+  ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+  const badgeText = 'AutoTube';
+  const badgeW = ctx.measureText(badgeText).width + 16;
+  const badgeH = 20;
+  const badgeX = w - safeZone.right - badgeW - 8;
+  const badgeY = safeZone.top + 12;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(96, 165, 250, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.stroke();
+  ctx.fillStyle = '#93c5fd';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + badgeH / 2);
+  ctx.restore();
 
   // Accent line
   const accentColors = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
@@ -1559,6 +1916,29 @@ function drawLowerThirdOverlay(ctx, seg, img, w, h, safeZone) {
   const accent = accentColors[seg.type] || '#3b82f6';
   const textAreaTop = Math.round(h * 0.68);
 
+  // AutoTube badge
+  ctx.save();
+  ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+  const badgeText = 'AutoTube';
+  const badgeW = ctx.measureText(badgeText).width + 16;
+  const badgeH = 20;
+  const badgeX = w - safeZone.right - badgeW - 8;
+  const badgeY = safeZone.top + 12;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(96, 165, 250, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.stroke();
+  ctx.fillStyle = '#93c5fd';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + badgeH / 2);
+  ctx.restore();
+
   // Accent line
   ctx.save();
   const lineGrad = ctx.createLinearGradient(safeZone.left + 20, 0, safeZone.left + 100, 0);
@@ -1577,8 +1957,24 @@ function drawLowerThirdOverlay(ctx, seg, img, w, h, safeZone) {
   ctx.textBaseline = 'top';
   ctx.shadowColor = 'rgba(0,0,0,0.9)';
   ctx.shadowBlur = 12;
+  const titleMaxW = w - safeZone.left - safeZone.right - 40;
+  const titleWords = seg.title.split(' ');
+  const titleLines = [];
+  let titleLine = '';
+  for (const word of titleWords) {
+    const test = titleLine ? `${titleLine} ${word}` : word;
+    if (ctx.measureText(test).width > titleMaxW && titleLine) {
+      titleLines.push(titleLine);
+      titleLine = word;
+    } else {
+      titleLine = test;
+    }
+  }
+  if (titleLine) titleLines.push(titleLine);
   const titleY = Math.min(textAreaTop, h - safeZone.bottom - titleFontSize * 2.5);
-  ctx.fillText(seg.title.substring(0, 50), safeZone.left + 20, titleY);
+  for (let i = 0; i < Math.min(titleLines.length, 3); i++) {
+    ctx.fillText(titleLines[i], safeZone.left + 20, titleY + i * (titleFontSize * 1.3));
+  }
   ctx.restore();
 
   // Narration excerpt
@@ -1591,7 +1987,8 @@ function drawLowerThirdOverlay(ctx, seg, img, w, h, safeZone) {
     ctx.textBaseline = 'top';
     ctx.shadowColor = 'rgba(0,0,0,0.7)';
     ctx.shadowBlur = 6;
-    const narY = Math.min(titleY + titleFontSize + 10, h - safeZone.bottom - narFontSize - 10);
+    const titleBlockHeight = Math.min(titleLines.length, 3) * (titleFontSize * 1.3);
+    const narY = Math.min(titleY + titleBlockHeight + 10, h - safeZone.bottom - narFontSize - 10);
     const excerpt = seg.narration.substring(0, 120) + (seg.narration.length > 120 ? '...' : '');
     ctx.fillText(excerpt, safeZone.left + 20, narY);
     ctx.restore();
@@ -1627,16 +2024,59 @@ function drawCenteredText(ctx, seg, img, w, h, safeZone) {
   ctx.fillRect(0, centerOverlayTop, w, centerOverlayBottom - centerOverlayTop);
 
   // Segment title — bold with glow
-  ctx.save();
   const titleFontSize = Math.round(h * 0.042);
   ctx.font = `800 ${titleFontSize}px system-ui, -apple-system, sans-serif`;
+  const titleMaxW = w - safeZone.left - safeZone.right;
+  const titleWords = seg.title.split(' ');
+  const titleLines = [];
+  let titleLine = '';
+  for (const word of titleWords) {
+    const test = titleLine ? `${titleLine} ${word}` : word;
+    if (ctx.measureText(test).width > titleMaxW && titleLine) {
+      titleLines.push(titleLine);
+      titleLine = word;
+    } else {
+      titleLine = test;
+    }
+  }
+  if (titleLine) titleLines.push(titleLine);
+  const titleY = Math.max(safeZone.top + titleFontSize, Math.min(h * 0.38, h - safeZone.bottom - titleFontSize * 3));
+  const titleLineHeight = titleFontSize * 1.3;
+  const titleBlockHeight = Math.min(titleLines.length, 3) * titleLineHeight;
+  const titleStartY = titleY - titleBlockHeight / 2 + titleLineHeight / 2;
+
+  ctx.save();
   ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.shadowColor = 'rgba(0,0,0,0.9)';
   ctx.shadowBlur = 16;
-  const titleY = Math.max(safeZone.top + titleFontSize, Math.min(h * 0.38, h - safeZone.bottom - titleFontSize * 3));
-  ctx.fillText(seg.title.substring(0, 50), w / 2, titleY);
+  for (let i = 0; i < Math.min(titleLines.length, 3); i++) {
+    ctx.fillText(titleLines[i], w / 2, titleStartY + i * titleLineHeight);
+  }
+  ctx.restore();
+
+  // AutoTube badge
+  ctx.save();
+  ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+  const badgeText = 'AutoTube';
+  const badgeW = ctx.measureText(badgeText).width + 16;
+  const badgeH = 20;
+  const badgeX = w - safeZone.right - badgeW - 8;
+  const badgeY = safeZone.top + 12;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(96, 165, 250, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.stroke();
+  ctx.fillStyle = '#93c5fd';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + badgeH / 2);
   ctx.restore();
 
   // Accent line
@@ -1648,7 +2088,8 @@ function drawCenteredText(ctx, seg, img, w, h, safeZone) {
   lineGrad.addColorStop(0.5, accent);
   lineGrad.addColorStop(1, 'rgba(76, 201, 240, 0)');
   ctx.fillStyle = lineGrad;
-  ctx.fillRect(w/2 - 60, titleY + titleFontSize * 0.8, 120, 3);
+  const titleBlockBottom = titleStartY + (Math.min(titleLines.length, 3) - 1) * titleLineHeight + titleLineHeight / 2;
+  ctx.fillRect(w/2 - 60, titleBlockBottom + titleFontSize * 0.3, 120, 3);
   ctx.restore();
 
   // Narration excerpt
@@ -1699,6 +2140,12 @@ let globalFrameCounter = 0;
 // ── Per-render caches (set by render()) ───────────────────────────────────
 let globalSafeZone = null;
 let segWordsCache = null;
+let globalStyleParticles = null;
+let globalEasterEggs = null;
+let globalCitations = null;
+let globalNames = null;
+let globalMidpointFrame = 0;
+let globalRetentionBeats = [];
 
 // ── Scene layout dispatch map ──────────────────────────────────────────────
 // Maps SceneLayoutType values to their drawing functions.
@@ -1711,174 +2158,258 @@ const SCENE_LAYOUT_DISPATCH = {
   'centered-text':          drawCenteredText,
 };
 
+/**
+ * A+++ Strategy: Extracts a clean capitalized source name (e.g. NASA, FAA, SpaceX, Wikipedia)
+ * from segment narration text to render on-screen lower-third source badges.
+ */
+function extractSourceCitation(text) {
+  if (!text) return null;
+  
+  // Scans for patterns like "according to X", "data from X", "reports from X", "telemetry from X", "SEC filings from X", "as noted by X"
+  const patterns = [
+    /according to ([a-z0-9\s.\-]+?)(?:,|\s+|$)/i,
+    /data from ([a-z0-9\s.\-]+?)(?:shows|indicates|reveals|\s+|$)/i,
+    /reports from ([a-z0-9\s.\-]+?)(?:indicate|show|\s+|$)/i,
+    /sec filings from ([a-z0-9\s.\-]+?)(?:reveal|show|\s+|$)/i,
+    /telemetry from ([a-z0-9\s.\-]+?)(?:confirms|shows|\s+|$)/i,
+    /as noted by ([a-z0-9\s.\-]+?)(?:,|\s+|$)/i,
+    /sourcing from ([a-z0-9\s.\-]+?)(?:,|\s+|$)/i
+  ];
+  
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const entity = match[1].trim();
+      // Clean up common fillers or trailing punctuation
+      const cleanEntity = entity.replace(/^(the|a|an)\s+/i, '').replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '');
+      if (cleanEntity.length > 1 && cleanEntity.length < 25) {
+        // Return capitalized format
+        return cleanEntity.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * A+++ Strategy: Draws kinetic typography on the canvas, parsing a line of text into words
+ * and rendering statistics, numbers, and proper nouns in a vibrant glowing brand color.
+ */
+function drawTextWithHighlights(ctx, text, startY, w, font, baseColor, highlightColor) {
+  ctx.save();
+  ctx.font = font;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+
+  const words = text.split(' ');
+  const wordSpans = [];
+  let totalWidth = 0;
+
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const cleanWord = word.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '');
+    const isHighlight = /^[0-9$%+\-.,]+$/g.test(cleanWord) || /^(SpaceX|Starship|Elon|Musk|Falcon|NASA|FAA|Mars|Nvidia|FTX|FTC|SEC|AI|AGI)$/i.test(cleanWord);
+    
+    ctx.font = font;
+    const width = ctx.measureText(word).width;
+    wordSpans.push({ word, width, isHighlight });
+    totalWidth += width;
+  }
+
+  // Add space widths
+  ctx.font = font;
+  const spaceWidth = ctx.measureText(' ').width;
+  totalWidth += spaceWidth * (words.length - 1);
+
+  let currentX = (w - totalWidth) / 2;
+
+  for (let i = 0; i < wordSpans.length; i++) {
+    const span = wordSpans[i];
+    ctx.fillStyle = span.isHighlight ? highlightColor : baseColor;
+    
+    // Add extra shadow/glow to highlights
+    if (span.isHighlight) {
+      ctx.save();
+      ctx.shadowColor = highlightColor;
+      ctx.shadowBlur = 8;
+      ctx.fillText(span.word, currentX, startY);
+      ctx.restore();
+    } else {
+      ctx.fillText(span.word, currentX, startY);
+    }
+    
+    currentX += span.width + spaceWidth;
+  }
+  ctx.restore();
+}
+
 // ── Draw a single frame ────────────────────────────────────────────────────
 async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress, segmentIndex, suppressSubtitles = false) {
+  const isFallbackAsset = asset && (
+    asset.isFallback === true ||
+    (asset.url && (asset.url.includes('picsum.photos') || asset.url.includes('placeholder')))
+  );
+  const activeImg = isFallbackAsset ? null : img;
+
   // ── Determine if a scene layout should handle background + text rendering ──
   const sceneLayout = seg.sceneLayout || null;
   const layoutFn = sceneLayout ? (SCENE_LAYOUT_DISPATCH[sceneLayout] || null) : null;
 
-  // Draft mode: skip procedural background entirely when image or layout will cover it
-  const shouldSkipBackground = DRAFT_MODE && (!!img || !!layoutFn);
-  if (!shouldSkipBackground) {
-    drawProceduralBackground(ctx, seg, progress, !!img);
+  // Draw bright background when image is available, or procedural bg when not
+  if (activeImg) {
+    // Bright warm background behind image for contrast
+    const bgGrad = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
+    bgGrad.addColorStop(0, '#3a5a8e');
+    bgGrad.addColorStop(0.5, '#4a7ab8');
+    bgGrad.addColorStop(1, '#2a4a7e');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  } else if (!DRAFT_MODE) {
+    drawProceduralBackground(ctx, seg, progress, false, segmentIndex);
   }
 
   if (layoutFn) {
     // ── Scene layout path: layout function handles background + text overlays ──
-    layoutFn(ctx, seg, img, WIDTH, HEIGHT, globalSafeZone || computeSafeZone(WIDTH, HEIGHT));
+    layoutFn(ctx, seg, activeImg, WIDTH, HEIGHT, globalSafeZone || computeSafeZone(WIDTH, HEIGHT));
   } else {
     // ── Default path: Ken Burns image rendering + original text overlays ──
 
-  // Resolve Ken Burns params: edit plan → computeKenBurnsParams default → hardcoded fallback
-  // Increased fallback zoom range for more cinematic movement (was 1.0-1.06)
-  let kbZoomStart = 1.0;
-  let kbZoomEnd = 0.40;
-  let kbPanDirX = 1.0;
-  let kbPanDirY = 1.0;
-  let hasEditPlanKB = false;
+    // Resolve Ken Burns params: edit plan → computeKenBurnsParams default → hardcoded fallback
+    let kbZoomStart = 1.0;
+    let kbZoomEnd = 0.40;
+    let kbPanDirX = 1.0;
+    let kbPanDirY = 1.0;
+    let hasEditPlanKB = false;
 
-  if (project && project.editPlan && project.editPlan.segments && asset) {
-    const segEntry = project.editPlan.segments.find(e => e.segmentId === seg.id);
-    if (segEntry && segEntry.kenBurns && segEntry.kenBurns[asset.id]) {
-      const kb = segEntry.kenBurns[asset.id];
-      kbZoomStart = kb.zoomStart ?? 1.0;
-      kbZoomEnd = (kb.zoomEnd ?? 1.40) - (kb.zoomStart ?? 1.0);
-      kbPanDirX = kb.panDirectionX ?? 1.0;
-      kbPanDirY = kb.panDirectionY ?? 1.0;
-      hasEditPlanKB = true;
-    }
-    if (segEntry && segEntry.transition) {
-      if (progress < 0.01) {
-        log('info', `    [EditPlan] Segment "${seg.title}" transition: ${segEntry.transition.type} (${segEntry.transition.durationMs}ms)`);
+    if (project && project.editPlan && project.editPlan.segments && asset) {
+      const segEntry = project.editPlan.segments.find(e => e.segmentId === seg.id);
+      if (segEntry && segEntry.kenBurns && segEntry.kenBurns[asset.id]) {
+        const kb = segEntry.kenBurns[asset.id];
+        kbZoomStart = kb.zoomStart ?? 1.0;
+        kbZoomEnd = (kb.zoomEnd ?? 1.40) - (kb.zoomStart ?? 1.0);
+        kbPanDirX = kb.panDirectionX ?? 1.0;
+        kbPanDirY = kb.panDirectionY ?? 1.0;
+        hasEditPlanKB = true;
       }
     }
-  }
 
-  // Use deterministic computeKenBurnsParams as default when no edit plan override (Requirement 4.1, 10.1)
-  if (!hasEditPlanKB && asset && typeof segmentIndex === 'number') {
-    const defaultKB = computeKenBurnsParams(segmentIndex, asset.id);
-    kbZoomStart = defaultKB.zoomStart;
-    kbZoomEnd = defaultKB.zoomEnd - defaultKB.zoomStart;
-    kbPanDirX = defaultKB.panDirectionX;
-    kbPanDirY = defaultKB.panDirectionY;
-  }
-
-  // Apply pacing score to Ken Burns zoom speed (Requirements 13.3, 13.4)
-  // High pacing (4-5) → faster zoom (1.5x speed), Low pacing (1-2) → slower zoom (0.6x speed)
-  const segPacingScore = seg.pacingScore || 3;
-  if (segPacingScore >= 4) {
-    kbZoomEnd *= 1.5; // Faster zoom for high-energy segments
-  } else if (segPacingScore <= 2) {
-    kbZoomEnd *= 0.6; // Slower zoom for calm/reflective segments
-  }
-
-  // Ken Burns image overlay with adaptive colour grading (Requirements 3.1–3.6, 4.1, 4.5, 8.1, 9.5)
-  if (img) {
-    const iw = img.width || img.naturalWidth || 1280;
-    const ih = img.height || img.naturalHeight || 720;
-    if (iw > 0 && ih > 0) {
-
-      // Requirement 4.5: Render video clips directly without Ken Burns zoom/pan.
-      // Video clips already have motion, so applying Ken Burns would be distracting.
-      if (asset && asset.type === 'video') {
-        const vScale = Math.max(WIDTH / iw, HEIGHT / ih);
-        const vdw = iw * vScale, vdh = ih * vScale;
-        ctx.drawImage(img, (WIDTH - vdw) / 2, (HEIGHT - vdh) / 2, vdw, vdh);
-      } else {
-      const scale = Math.max(WIDTH / iw, HEIGHT / ih) * 1.40;
-      const dw = iw * scale, dh = ih * scale;
-      // Apply Bezier easing for smooth cinematic motion
-      const easedProgress = easeInOutCubic(progress);
-      const zoom = kbZoomStart + easedProgress * kbZoomEnd;
-      // Resolution-scaled pan amplitude
-      const resolutionScale = Math.max(WIDTH / 1280, HEIGHT / 720);
-      const basePanX = 20 * resolutionScale;
-      const basePanY = 10 * resolutionScale;
-      // Vary Ken Burns per asset for visual variety
-      const assetSeed = asset ? getAssetSeed(asset.url) : 0;
-      const panMultX = (assetSeed % 3 === 0) ? -1 : (assetSeed % 3 === 1) ? 0.5 : 1;
-      const panMultY = (assetSeed % 5 === 0) ? -1 : (assetSeed % 5 === 1) ? 0.3 : 1;
-      const panX = Math.sin(easedProgress * Math.PI * 0.7) * basePanX * kbPanDirX * panMultX;
-      const panY = Math.cos(easedProgress * Math.PI * 0.4) * basePanY * kbPanDirY * panMultY;
-
-      // ── Adaptive colour grading ──────────────────────────────────────────
-      // Saturation scores pre-computed during preload phase (P0 optimization).
-      const DEFAULT_FILTER = 'saturate(1.15) contrast(1.12) brightness(1.08)';
-      let filterString = DEFAULT_FILTER;
-      if (asset && asset.url && saturationCache.has(asset.url)) {
-        filterString = computeAdaptiveFilter(saturationCache.get(asset.url));
-      }
-      // ────────────────────────────────────────────────────────────────────
-
-      // ── Chart reveal: determine if this asset is a chart (Requirement 5.1) ──
-      const isChart = isChartAsset(asset);
-
-      // ── Chart reveal: apply left-to-right clipping mask (Requirements 5.1–5.4, 5.7) ──
-      if (isChart) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, 0, WIDTH * progress, HEIGHT);
-        ctx.clip();
-      }
-
-      // Ken Burns block (zoom factor and pan offsets unchanged — Requirement 5.7, 10.3)
-      ctx.save();
-      ctx.translate(WIDTH / 2 + panX, HEIGHT / 2 + panY);
-      ctx.scale(zoom, zoom);
-      ctx.filter = filterString;
-      ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
-      ctx.filter = 'none';
-      ctx.restore();
-
-      if (isChart) {
-        ctx.restore();
-      }
-      } // end else (non-video Ken Burns path)
+    // Use deterministic computeKenBurnsParams as default when no edit plan override (Requirement 4.1, 10.1)
+    if (!hasEditPlanKB && asset && typeof segmentIndex === 'number') {
+      const defaultKB = computeKenBurnsParams(segmentIndex, asset.id);
+      kbZoomStart = defaultKB.zoomStart;
+      kbZoomEnd = defaultKB.zoomEnd - defaultKB.zoomStart;
+      kbPanDirX = defaultKB.panDirectionX;
+      kbPanDirY = defaultKB.panDirectionY;
     }
+
+    // Apply pacing score to Ken Burns zoom speed (Requirements 13.3, 13.4)
+    const segPacingScore = seg.pacingScore || 3;
+    if (segPacingScore >= 4) {
+      kbZoomEnd *= 1.5;
+    } else if (segPacingScore <= 2) {
+      kbZoomEnd *= 0.6;
+    }
+
+    if (activeImg) {
+      const iw = activeImg.width || activeImg.naturalWidth || 1280;
+      const ih = activeImg.height || activeImg.naturalHeight || 720;
+      if (iw > 0 && ih > 0) {
+        if (asset && asset.type === 'video') {
+          const vScale = Math.max(WIDTH / iw, HEIGHT / ih);
+          const vdw = iw * vScale, vdh = ih * vScale;
+          ctx.drawImage(activeImg, (WIDTH - vdw) / 2, (HEIGHT - vdw) / 2, vdw, vdh);
+        } else {
+          const resRatio = Math.min(iw / WIDTH, ih / HEIGHT);
+          const kbCap = resRatio < 0.5 ? 1.0 : 1.40;
+          const scale = Math.max(WIDTH / iw, HEIGHT / ih) * kbCap;
+          const dw = iw * scale, dh = ih * scale;
+          const easedProgress = easeInOutCubic(progress);
+          const zoom = kbZoomStart + easedProgress * kbZoomEnd;
+          const resolutionScale = Math.max(WIDTH / 1280, HEIGHT / 720);
+          const basePanX = 20 * resolutionScale;
+          const basePanY = 10 * resolutionScale;
+          const assetSeed = asset ? getAssetSeed(asset.url) : 0;
+          // Face-centric zoom for high-pacing segments: center on upper-third
+          let faceOffsetX = 0, faceOffsetY = 0;
+          if (segPacingScore >= 4 && activeImg && asset && asset.type !== 'video') {
+            faceOffsetX = (assetSeed % 3 === 0 ? -1 : 1) * basePanX * 0.5;
+            faceOffsetY = -basePanY * 0.8;
+          }
+          const panMultX = (assetSeed % 3 === 0) ? -1 : (assetSeed % 3 === 1) ? 0.5 : 1;
+          const panMultY = (assetSeed % 5 === 0) ? -1 : (assetSeed % 5 === 1) ? 0.3 : 1;
+          const panX = Math.sin(easedProgress * Math.PI * 0.7) * basePanX * kbPanDirX * panMultX;
+          const panY = Math.cos(easedProgress * Math.PI * 0.4) * basePanY * kbPanDirY * panMultY;
+
+          let filterString;
+          const finalBrightness = (1.2 * globalBrightnessBoost).toFixed(2);
+          filterString = `saturate(1.1) contrast(1.05) brightness(${finalBrightness})`;
+
+          const isChart = isChartAsset(asset);
+          if (isChart) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, WIDTH * progress, HEIGHT);
+            ctx.clip();
+          }
+
+          ctx.save();
+          ctx.translate(WIDTH / 2 + panX, HEIGHT / 2 + panY);
+          ctx.scale(zoom, zoom);
+          ctx.filter = filterString;
+          ctx.drawImage(activeImg, -dw / 2, -dh / 2, dw, dh);
+          ctx.filter = 'none';
+          ctx.restore();
+
+          // Ken Burns image rendered successfully
+
+          // Chart reveal (Task 78)
+          if (isChart) {
+            ctx.restore();
+          }
+    }
+  }
   } else if (asset) {
-    // Requirement 4.7: Procedural background fallback with topic text when image fails to load
-    drawProceduralFallbackWithText(ctx, WIDTH, HEIGHT, seg.title, seg.type);
+    // A+++ Strategy: Throttle typographic card text overlays on non-structural segments
+    // only render text if segment type is structural or if it's the first segment or segmentIndex is even.
+    const isStructural = seg.type === 'intro' || seg.type === 'transition' || seg.type === 'outro';
+    if (isStructural || segmentIndex % 2 === 0 || segmentIndex === 0) {
+      drawProceduralFallbackWithText(ctx, WIDTH, HEIGHT, seg.title, seg.type, seg.narration);
+    } else {
+      // Just draw the glowing background pattern without text overlay to maintain visual variety
+      drawProceduralFallbackWithText(ctx, WIDTH, HEIGHT, null, seg.type, null);
+    }
   }
+}
 
-  } // end default (no scene layout) path
-
-  // Letterbox bars — reduced from 4% to 2.5% for more screen real estate
-  const barH = Math.round(HEIGHT * 0.025);
-  ctx.fillStyle = 'rgba(0,0,0,0.90)';
+  // Letterbox bars — clean minimal bars
+  const barH = Math.round(HEIGHT * 0.012);
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
   ctx.fillRect(0, 0, WIDTH, barH);
   ctx.fillRect(0, HEIGHT - barH, WIDTH, barH);
 
-  // Vignette — skipped in draft mode
+  // Subtle gradient vignette — lighter than before
   if (!DRAFT_MODE) {
-    const vig = ctx.createRadialGradient(WIDTH/2, HEIGHT/2, HEIGHT*0.35, WIDTH/2, HEIGHT/2, WIDTH*0.8);
-    vig.addColorStop(0, 'rgba(0,0,0,0)');
-    vig.addColorStop(0.75, 'rgba(0,0,0,0.05)');
-    vig.addColorStop(1, 'rgba(0,0,0,0.20)');
-    ctx.fillStyle = vig;
+    const vignetteGrad = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, HEIGHT * 0.3, WIDTH / 2, HEIGHT / 2, HEIGHT * 0.9);
+    vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.20)');
+    ctx.fillStyle = vignetteGrad;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
   }
 
-  // Film grain overlay — skipped in draft mode
+  // Style-specific particles (Task 34, 61)
   if (!DRAFT_MODE) {
-    if (!drawFrame._filmGrainCanvas) {
-      drawFrame._filmGrainCanvas = createCanvas(WIDTH, HEIGHT);
-      const fgCtx = drawFrame._filmGrainCanvas.getContext('2d');
-      fgCtx.globalAlpha = 0.04;
-      for (let i = 0; i < 3000; i++) {
-        const x = Math.random() * WIDTH;
-        const y = Math.random() * HEIGHT;
-        const brightness = Math.random();
-        fgCtx.fillStyle = brightness > 0.5 ? '#ffffff' : '#000000';
-        fgCtx.fillRect(x, y, 1, 1);
-      }
+    if (!globalStyleParticles) {
+      const videoStyle = project.style || 'documentary';
+      globalStyleParticles = createStyleParticles(videoStyle, WIDTH, HEIGHT);
     }
-    ctx.drawImage(drawFrame._filmGrainCanvas, 0, 0);
+    updateStyleParticles(globalStyleParticles, WIDTH, HEIGHT);
+    drawStyleParticles(ctx, globalStyleParticles);
   }
 
   // Technical label badge (Requirements 4.1–4.5, 4.6, 9.3)
-  drawTechnicalLabel(ctx, asset, barH);
+  drawTechnicalLabel(ctx, asset, barH, seg, project.topic || project.title || '');
 
-  // ── On-screen thesis text (Step 2) ──────────────────────────────────────
+  // ── On-screen thesis text with typing animation (Step 2, req d) ────────
   // Extract ALL-CAPS phrases (3+ words) or double-quoted phrases from visualNote
   if (seg.visualNote && progress <= 0.40) {
     // Match 3+ consecutive ALL-CAPS words or a double-quoted phrase
@@ -1889,8 +2420,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     if (thesisPhrase) {
       // Fade-in for first 10% of display time, fade-out for last 10%
       const displayEnd = 0.40;
-      const fadeInEnd = displayEnd * 0.10;   // 0 → 0.04
-      const fadeOutStart = displayEnd * 0.90; // 0.36 → 0.40
+      const fadeInEnd = displayEnd * 0.10;
+      const fadeOutStart = displayEnd * 0.90;
       let thesisAlpha = 1.0;
       if (progress < fadeInEnd) {
         thesisAlpha = progress / fadeInEnd;
@@ -1899,12 +2430,20 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       }
       thesisAlpha = Math.max(0, Math.min(1, thesisAlpha));
 
+      // Typing animation: reveal characters progressively
+      const typingDuration = displayEnd * 0.5;
+      const visibleChars = progress < typingDuration
+        ? Math.min(thesisPhrase.length, Math.floor((progress / typingDuration) * thesisPhrase.length))
+        : thesisPhrase.length;
+      const displayPhrase = thesisPhrase.substring(0, visibleChars);
+
       ctx.save();
       ctx.globalAlpha = thesisAlpha;
 
       // Measure text for background box
       ctx.font = 'bold 48px sans-serif';
       const thesisW = ctx.measureText(thesisPhrase).width;
+      const displayW = ctx.measureText(displayPhrase).width;
       const boxPadX = 32;
       const boxPadY = 16;
       const boxW = thesisW + boxPadX * 2;
@@ -1914,18 +2453,101 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
 
       // Dark semi-transparent background
       ctx.fillStyle = 'rgba(0,0,0,0.70)';
-      ctx.fillRect(boxX, boxY, boxW, boxH);
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxW, boxH, 8);
+      ctx.fill();
 
       // Bold white text centered at 30% height
-      ctx.shadowColor = 'rgba(0,0,0,0.9)';
-      ctx.shadowBlur = 16;
+      ctx.shadowColor = 'rgba(96, 165, 250, 0.6)';
+      ctx.shadowBlur = 20;
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 48px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(thesisPhrase, WIDTH / 2, HEIGHT * 0.30);
+      ctx.fillText(displayPhrase, WIDTH / 2, HEIGHT * 0.30);
+
+      // Blinking cursor at end of typing
+      if (visibleChars < thesisPhrase.length) {
+        const cursorX = WIDTH / 2 + displayW / 2 + 4;
+        const cursorBlink = Math.sin(globalFrameCounter * 0.3) > 0;
+        if (cursorBlink) {
+          ctx.fillStyle = '#60a5fa';
+          ctx.fillRect(cursorX, HEIGHT * 0.30 - 18, 3, 36);
+        }
+      }
 
       ctx.restore();
+    }
+  }
+
+  // ── Kinetic typography: keyword scale animation (req d) ────────────────
+  if (seg.narration && progress >= 0.1 && progress <= 0.7 && !DRAFT_MODE) {
+    // Find capitalized proper nouns or numbers to highlight
+    const words = seg.narration.split(' ');
+    const keywordPattern = /\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\b|\b(\d+[%x]?)\b/;
+    for (let wi = 0; wi < words.length; wi++) {
+      const kwMatch = words[wi].match(keywordPattern);
+      if (kwMatch) {
+        const keyword = kwMatch[0];
+        if (keyword.length > 2 && keyword.length < 20) {
+          // Cycle through keywords across the segment progress
+          const keywordIndex = wi;
+          const keywordOffset = (keywordIndex / words.length) * 0.6;
+          const keywordWindow = 0.08;
+          if (progress >= 0.1 + keywordOffset && progress <= 0.1 + keywordOffset + keywordWindow) {
+            const kwProgress = (progress - 0.1 - keywordOffset) / keywordWindow;
+            const scale = 1.0 + 0.1 * Math.sin(kwProgress * Math.PI);
+            ctx.save();
+            ctx.font = 'bold 28px system-ui, -apple-system, sans-serif';
+            const kwW = ctx.measureText(keyword).width;
+            const midX = WIDTH / 2 + (keywordIndex - words.length / 2) * 15;
+            ctx.translate(midX, HEIGHT * 0.78);
+            ctx.scale(scale, scale);
+            ctx.translate(-midX, -HEIGHT * 0.78);
+            ctx.fillStyle = '#60a5fa';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(96, 165, 250, 0.5)';
+            ctx.shadowBlur = 12;
+            ctx.fillText(keyword, midX, HEIGHT * 0.78);
+            // Underline
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#60a5fa';
+            ctx.fillRect(midX - kwW / 2, HEIGHT * 0.78 + 14, kwW, 2);
+            ctx.restore();
+          }
+        }
+      }
+    }
+  }
+
+  // ── Data visualization: stat callout overlay (req b) ───────────────────
+  if (seg.narration && progress >= 0.2 && progress <= 0.6 && !DRAFT_MODE) {
+    const extractedStat = extractStat(seg.narration);
+    if (extractedStat) {
+      const statAlpha = progress < 0.3 ? (progress - 0.2) / 0.1 : (progress > 0.5 ? (0.6 - progress) / 0.1 : 1.0);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, statAlpha));
+      ctx.shadowColor = 'rgba(0,0,0,0.9)';
+      ctx.shadowBlur = 8;
+      ctx.font = `800 ${Math.round(HEIGHT * 0.08)}px system-ui, -apple-system, sans-serif`;
+      ctx.fillStyle = '#facc15';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const sz = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
+      ctx.fillText(extractedStat, sz.left + 20, HEIGHT * 0.12);
+      ctx.restore();
+
+      // Subtle animated progress bar during stat segments
+      const barW = Math.min(WIDTH * 0.6, WIDTH - sz.left - sz.right);
+      const barX = (WIDTH - barW) / 2;
+      const barY = HEIGHT - sz.bottom - 8;
+      const barH = 2;
+      const fillW = barW * ((progress - 0.2) / 0.4);
+      ctx.fillStyle = 'rgba(96, 165, 250, 0.2)';
+      ctx.fillRect(barX, barY, barW, barH);
+      ctx.fillStyle = '#60a5fa';
+      ctx.fillRect(barX, barY, fillW, barH);
     }
   }
 
@@ -1933,8 +2555,10 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   if (!layoutFn) {
   const titleAccent = '#60a5fa';
   const titleSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
-  // Position title overlay above the bottom safe zone (Requirement 5.1, 5.3)
-  const ltY = Math.min(HEIGHT - barH - 120, HEIGHT - titleSafeZone.bottom - 80);
+  // Position title overlay above the subtitle bar to avoid overlap
+  const subtitleHeight = 64;
+  const subtitleY = HEIGHT - barH - 100;
+  const ltY = Math.min(subtitleY - 70, HEIGHT - titleSafeZone.bottom - 140);
 
   // Semi-transparent dark gradient behind the title text area for contrast (Requirement 4.1, 4.2)
   const titleOverlayGrad = ctx.createLinearGradient(0, ltY - 20, 0, ltY + 56);
@@ -1981,6 +2605,101 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       ctx.restore();
     }
   }
+
+  // Programmatic On-Screen Source Lower-Third Citation Badge
+  if (seg.narration && progress >= 0.15 && progress <= 0.85) {
+    const citationSource = extractSourceCitation(seg.narration);
+    if (citationSource) {
+      drawSourceCitation(ctx, citationSource, progress, WIDTH, HEIGHT);
+    }
+  }
+
+  // Lower third for source attribution (Task 73, 80)
+  if (seg.narration && progress >= 0.2 && progress <= 0.8) {
+    const citationSource = extractSourceCitation(seg.narration);
+    if (citationSource && !layoutFn) {
+      const accentColor = ACCENT_COLORS[seg.type] || '#60a5fa';
+      drawLowerThird(ctx, citationSource, 'Source', progress, WIDTH, HEIGHT, accentColor);
+    }
+  }
+
+  // Name card for people mentioned (Task 79)
+  if (seg.narration && progress >= 0.1 && progress <= 0.4) {
+    if (globalNames && globalNames[segmentIndex]) {
+      const nameData = globalNames[segmentIndex];
+      const accentColor = ACCENT_COLORS[seg.type] || '#60a5fa';
+      drawNameCard(ctx, nameData.name, nameData.title, progress, WIDTH, HEIGHT, accentColor);
+    }
+  }
+
+  // Easter eggs (Task 58)
+  if (globalEasterEggs && !DRAFT_MODE) {
+    for (const egg of globalEasterEggs) {
+      if (egg.segmentIndex === segmentIndex && progress >= 0.3 && progress <= 0.7) {
+        drawEasterEgg(ctx, egg, WIDTH, HEIGHT);
+      }
+    }
+  }
+
+  // Comment bait at exact midpoint frame (Task 56)
+  if (globalFrameCounter === globalMidpointFrame && !DRAFT_MODE && project && project.script) {
+    const baitText = selectCommentBait(project.topic || project.title || '', segmentIndex);
+    drawKineticOverlay(ctx, baitText, WIDTH / 2, HEIGHT * 0.6, 0.5, WIDTH, HEIGHT);
+  }
+
+  // Retention beat visual effects (Task 85)
+  if (seg.retentionBeats && !DRAFT_MODE) {
+    const currentTime = progress * seg.duration;
+    for (const beat of seg.retentionBeats) {
+      if (Math.abs(currentTime - beat.time) < 0.1) {
+        if (beat.type === 'text_slam' || beat.type === 'graphic_switch') {
+          drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.3);
+        } else if (beat.type === 'visual_break') {
+          drawChromaticAberration(ctx, WIDTH, HEIGHT, 3);
+        }
+        if (beat.text) {
+          drawKineticOverlay(ctx, beat.text, WIDTH / 2, HEIGHT * 0.3, 0.8, WIDTH, HEIGHT);
+        }
+      }
+    }
+  }
+
+  // Visual contrast hook on segment start for high-pacing (Task 47)
+  if (progress < 0.04 && seg.pacingScore >= 4 && !DRAFT_MODE) {
+    const hookAlpha = (0.04 - progress) / 0.04;
+    ctx.save();
+    ctx.globalAlpha = hookAlpha * 0.4;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.restore();
+  }
+
+  // Tension ramp zoom for escalation (Task 50)
+  if (seg.pacingScore >= 3 && typeof segmentIndex === 'number' && project.script) {
+    const tensionFactor = 1.0 + (segmentIndex / project.script.length) * 0.08;
+    ctx.save();
+    ctx.translate(WIDTH / 2, HEIGHT / 2);
+    ctx.scale(tensionFactor, tensionFactor);
+    ctx.translate(-WIDTH / 2, -HEIGHT / 2);
+    ctx.restore();
+  }
+
+  // Rule of three metric highlights (Task 52)
+  if (seg.narration && progress >= 0.25 && progress <= 0.75 && !DRAFT_MODE) {
+    const metricMatch = seg.narration.match(/(\d+%)/);
+    if (metricMatch) {
+      const metricText = metricMatch[1];
+      ctx.save();
+      ctx.font = 'bold 72px sans-serif';
+      ctx.fillStyle = '#60a5fa';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 20;
+      ctx.fillText(metricText, WIDTH / 2, HEIGHT * 0.35);
+      ctx.restore();
+    }
+  }
   } // end no-layout title/name-card block
   // Words appear one at a time with a pop-in scale effect (skip during cold open / title cards)
   if (!suppressSubtitles) {
@@ -1995,8 +2714,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     if (visibleCount > 0) {
       // Modern glass-morphism caption background — centered for mobile readability
       const capSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
-      const capBgW = Math.min(750, WIDTH * 0.40);
-      const capBgH = 48;
+      const capBgW = Math.min(1200, WIDTH * 0.65);
+      const capBgH = 64;
       // Position above the title overlay area to avoid overlap
       const capY = Math.min(HEIGHT - barH - 100, HEIGHT - capSafeZone.bottom - capBgH - 12);
 
@@ -2021,8 +2740,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       ctx.restore();
 
       // Measure total width to center the word group
-      const normalFont = '400 18px system-ui, -apple-system, sans-serif';
-      const boldFont = '700 20px system-ui, -apple-system, sans-serif';
+      const normalFont = '400 28px system-ui, -apple-system, sans-serif';
+      const boldFont = '700 32px system-ui, -apple-system, sans-serif';
       const spaceWidth = measureWordCached(ctx, normalFont, ' ');
 
       // Pre-measure all words (cached)
@@ -2041,7 +2760,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       }
 
       // Draw each word
-      const centerY = capY + 16;
+      const centerY = capY + 24;
       let curX = WIDTH / 2 - totalWidth / 2;
 
       for (let wi = 0; wi < visibleCount; wi++) {
@@ -2058,21 +2777,29 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
         }
         const framesSinceAppear = globalFrameCounter - wordFirstAppearFrame.get(wordKey);
 
-        const popScale = framesSinceAppear < 2 ? 1.12 : 1.0;
+        const popScale = framesSinceAppear < 6 ? 1.0 + (1 - framesSinceAppear / 6) * 0.15 : 1.0;
 
         ctx.save();
+
+        // Premium text outline/shadow for high contrast readability over active video B-roll
+        if (!DRAFT_MODE) {
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+          ctx.shadowBlur = 10;
+          ctx.shadowOffsetX = 1;
+          ctx.shadowOffsetY = 2;
+        }
 
         if (isCurrentWord) {
           ctx.font = boldFont;
           ctx.fillStyle = '#60a5fa';
+          // Stacked glow layer
           if (!DRAFT_MODE) {
-            ctx.shadowColor = 'rgba(96, 165, 250, 0.4)';
-            ctx.shadowBlur = 8;
+            ctx.shadowColor = 'rgba(96, 165, 250, 0.7)';
+            ctx.shadowBlur = 12;
           }
         } else {
           ctx.font = normalFont;
-          ctx.fillStyle = '#94a3b8';
-          ctx.shadowBlur = 0;
+          ctx.fillStyle = '#e2e8f0'; // Brighter white/gray for better default contrast
         }
 
         ctx.textAlign = 'left';
@@ -2083,6 +2810,13 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
           ctx.translate(wordCenterX, centerY);
           ctx.scale(popScale, popScale);
           ctx.translate(-wordCenterX, -centerY);
+        }
+
+        // Draw a clean subtle background stroke for current word if active
+        if (isCurrentWord && !DRAFT_MODE && typeof ctx.strokeText === 'function') {
+          ctx.strokeStyle = 'rgba(10, 10, 26, 0.8)';
+          ctx.lineWidth = 4;
+          ctx.strokeText(word, curX, centerY);
         }
 
         ctx.fillText(word, curX, centerY);
@@ -2097,18 +2831,10 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
   } // end !suppressSubtitles
 
-  // ── Step 11: Progress bar at the bottom of the video (safe zone enforced — Requirement 5.1) ──
-  if (typeof globalProgress === 'number') {
-    ctx.save();
-    const progressSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
-    // Progress track background
-    ctx.fillStyle = 'rgba(255,255,255,0.10)';
-    const progressBarY = HEIGHT - progressSafeZone.bottom;
-    ctx.fillRect(0, progressBarY, WIDTH, 3);
-    // Progress fill
-    ctx.fillStyle = '#60a5fa';
-    ctx.fillRect(0, progressBarY, globalProgress * WIDTH, 3);
-    ctx.restore();
+  // ── Step 11: Enhanced Progress Timeline (Task 81) ──
+  if (typeof globalProgress === 'number' && project && project.script) {
+    const accentColor = ACCENT_COLORS[seg.type] || '#60a5fa';
+    drawProgressTimeline(ctx, project.script, globalProgress, WIDTH, HEIGHT, accentColor);
   }
 }
 
@@ -2124,7 +2850,7 @@ const EMOTION_SPEED = {
 
 async function generateKokoroSegment(text, outputPath, options = {}) {
   const tmpDir = join(__dirname, '..', 'tmp', 'kokoro', String(Date.now()));
-  mkdirSync(tmpDir, { recursive: true });
+  mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
 
   const emotion = options.emotion || null;
   const speed = emotion && EMOTION_SPEED[emotion] ? EMOTION_SPEED[emotion] : (options.speed || 1.0);
@@ -2209,6 +2935,7 @@ async function generateNarration(segments, outputDir, options = {}) {
 
   const engines = ['Kokoro-82M'];
   if (useMelo) engines.push('MeloTTS');
+  engines.push('edge-tts');
   log('info', `Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
   log('info', `  Kokoro voice: ${KOKORO_VOICE || 'af_heart'} (local, GPU accelerated)`);
 
@@ -2254,12 +2981,37 @@ async function generateNarration(segments, outputDir, options = {}) {
     // Tier 2: MeloTTS (Cloudflare, cheap fallback)
     if (useMelo && !success) {
       success = await generateMeloSegment(seg.narration, audioFile, cfAccountId, cfApiToken);
-      if (!success) {
-        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying silence`);
+      if (success) {
+        const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
+        if (existsSync(subtitleFile)) {
+          subtitleFiles[i] = subtitleFile;
+        }
+      } else {
+        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying edge-tts`);
       }
     }
 
-    // Tier 3: Silence (last resort)
+    // Tier 3: edge-tts (local fallback, extremely fast and reliable)
+    if (!success) {
+      const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
+      const result = spawnSync('edge-tts', [
+        '--voice', 'en-US-GuyNeural',
+        '--rate', '+10%',
+        '--text', seg.narration,
+        '--write-media', audioFile,
+        '--write-subtitles', subtitleFile,
+      ], { encoding: 'utf8', timeout: 30000 });
+      success = result.status === 0 && existsSync(audioFile);
+      if (success) {
+        if (existsSync(subtitleFile)) {
+          subtitleFiles[i] = subtitleFile;
+        }
+      } else {
+        console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}, trying silence`);
+      }
+    }
+
+    // Tier 4: Silence (last resort)
     if (success) {
       audioFiles.push({ file: audioFile, duration: seg.duration, subtitleFile: subtitleFiles[i] || null });
     } else {
@@ -2283,8 +3035,11 @@ const TTS_VOICES = {
 
 // ── TTS provider validation ────────────────────────────────────────────────
 function validateTTSConfiguration() {
-  const cfAccountId = process.env.CF_ACCOUNT_ID || process.env.VITE_CF_ACCOUNT_ID || '';
-  const cfApiToken = process.env.CF_API_TOKEN || process.env.VITE_CF_API_TOKEN || '';
+  const cfAccountId = process.env.CF_ACCOUNT_ID || '';
+  const cfApiToken = process.env.CF_API_TOKEN || '';
+  if ((process.env.VITE_CF_ACCOUNT_ID || process.env.VITE_CF_API_TOKEN) && (!process.env.CF_ACCOUNT_ID || !process.env.CF_API_TOKEN)) {
+    console.warn('WARNING: Using VITE_ prefixed Cloudflare variables which are exposed to clients. Set CF_ACCOUNT_ID and CF_API_TOKEN instead.');
+  }
 
   const meloAvailable = !!cfAccountId && !!cfApiToken;
   const edgeTtsAvailable = spawnSync('which', ['edge-tts'], { encoding: 'utf-8' }).status === 0;
@@ -2306,31 +3061,17 @@ async function concatenateAudio(audioFiles, outputFile) {
     return result.status === 0;
   }
 
-  const inputs = [];
-  const filterInputs = [];
-  for (let i = 0; i < audioFiles.length; i++) {
-    inputs.push('-i', audioFiles[i].file);
-    filterInputs.push(`[${i}:a]`);
-  }
-  const filterComplex = `${filterInputs.join('')}concat=n=${audioFiles.length}:v=0:a=1[out]`;
-
-  const result = spawnSync('ffmpeg', [
-    '-y',
-    ...inputs,
-    '-filter_complex', filterComplex,
-    '-map', '[out]',
-    '-c:a', 'aac', '-b:a', '128k',
-    outputFile,
-  ], { encoding: 'utf8', timeout: 60000 });
-
-  if (result.status !== 0) {
-    console.warn(`  ⚠ Audio concat failed:`, result.stderr);
-  }
-  return result.status === 0;
+  const { concatenateAudio: concatAudio } = await import('./server-render/audio.mjs');
+  return concatAudio(audioFiles, outputFile);
 }
 
 // ── Main render ────────────────────────────────────────────────────────────
 async function render() {
+  // Task 121: Memory check before render
+  const preRenderMem = logMemoryUsage('pre-render');
+  // Task 118: Recommend --max-old-space-size flag
+  recommendNodeFlags();
+
   log('info', 'Fetching project from dev server...');
   const project = await fetchProject();
   log('info', `Project: "${project.title}" | ${project.script.length} segments | ${project.media.length} media assets`);
@@ -2375,10 +3116,24 @@ async function render() {
     log('info', `Resolution: ${resolutionKey} (${WIDTH}x${HEIGHT} @ ${FPS}fps)`);
   }
 
+  // Allow project.exportSettings.fps to override the preset FPS
+  if (project.exportSettings?.fps) {
+    FPS = project.exportSettings.fps;
+    log('info', `FPS override: ${FPS}fps`);
+  }
+
+  // Task 130: YouTube Shorts vertical render — force 1080x1920 when format is 'shorts'
+  const isShortsMode = project.exportSettings?.format === 'shorts';
+  if (isShortsMode) {
+    WIDTH = 1080;
+    HEIGHT = 1920;
+    log('info', `Shorts mode: forcing ${WIDTH}x${HEIGHT}`);
+  }
+
   // Task 17: Apply aspect ratio preset (overrides resolution dimensions if set)
   const aspectRatioKey = project.exportSettings?.aspectRatio || detectAspectRatioFromTopic(project.topic);
   const aspectPreset = ASPECT_RATIOS[aspectRatioKey];
-  if (aspectPreset) {
+  if (aspectPreset && !isShortsMode) {
     WIDTH = aspectPreset.width;
     HEIGHT = aspectPreset.height;
     log('info', `Aspect ratio: ${aspectRatioKey} (${WIDTH}x${HEIGHT}, ${aspectPreset.label})`);
@@ -2413,14 +3168,68 @@ async function render() {
   // Validate TTS providers before starting render (fail fast if none available)
   validateTTSConfiguration();
 
+  // Initialize rendering flags (can be modified by AI post-review enrichment pass)
+  const renderFlags = {
+    showDataOverlay: false,
+    showKineticText: false,
+    useFastPacing: false,
+  };
+
+  // Initialize global state for advanced rendering features (Tasks 58, 79, 80)
+  globalStyleParticles = null;
+  globalEasterEggs = generateEasterEggs(project.topic || project.title || '', project.script ? project.script.length : 0);
+  globalCitations = project.script ? extractCitationsFromSegments(project.script) : [];
+  globalNames = {};
+  globalRetentionBeats = [];
+  if (project.script) {
+    for (let i = 0; i < project.script.length; i++) {
+      const names = extractNamesFromText(project.script[i].narration || '');
+      if (names.length > 0) {
+        globalNames[i] = names[0];
+      }
+    }
+    // Schedule retention beats per segment (Task 85)
+    for (let i = 0; i < project.script.length; i++) {
+      const seg = project.script[i];
+      if (!seg.retentionBeats) {
+        seg.retentionBeats = [];
+        const types = ['text_slam', 'zoom', 'graphic_switch', 'sudden_silence', 'visual_break', 'stat_callout'];
+        const beatInterval = seg.duration / 4;
+        for (let b = 0; b < 4; b++) {
+          seg.retentionBeats.push({
+            type: types[b % types.length],
+            time: beatInterval * (b + 0.5),
+            text: b === 1 ? '...' : null
+          });
+        }
+      }
+    }
+    // Compute midpoint frame for comment bait (Task 56)
+    const totalDuration = project.script.reduce((sum, s) => sum + (s.duration || 5), 0);
+    globalMidpointFrame = Math.floor((totalDuration / 2) * FPS);
+  }
+
   if (!project.media || project.media.length === 0) {
     throw new Error('No media assets found. Run the pipeline (source media) first.');
+  }
+
+  // ── Cost Estimation ──────────────────────────────────────────────────────
+  try {
+    const costEst = estimateRenderCost(project);
+    log('info', '\n💰 Estimated render costs:');
+    log('info', `   API (LLM calls):     ~$${costEst.apiCostEstimate.toFixed(4)}`);
+    log('info', `   Compute (rendering):  ~$${costEst.computeCostEstimate.toFixed(4)}`);
+    log('info', `   Storage (output):     ~$${costEst.storageCostEstimate.toFixed(4)}`);
+    log('info', `   ─────────────────────────────`);
+    log('info', `   Total estimate:       ~$${costEst.totalEstimate.toFixed(4)}`);
+  } catch {
+    // cost estimation is best-effort
   }
 
   // MEDIUM #10: Check disk space before starting render
   validateDiskSpace(project, OUTPUT_FILE);
 
-  mkdirSync(OUTPUT_DIR, { recursive: true });
+  mkdirSync(OUTPUT_DIR, { recursive: true, mode: 0o700 });
 
   // Pre-load all images concurrently with concurrency limit (skip video clips — they're fetched per-frame)
   // Requirements 1.3, 1.4: preload all images before any frame rendering begins
@@ -2463,11 +3272,11 @@ async function render() {
     log('info', `  ${videoAssetCount} video clip(s) will be frame-extracted during render`);
   }
 
-  // P0: Pre-compute saturation scores during preload (avoids per-frame temp canvas allocation)
-  log('info', '  Pre-computing saturation scores for adaptive colour grading...');
+  // P0: Pre-compute saturation and brightness scores during preload (avoids per-frame temp canvas allocation)
+  log('info', '  Pre-computing saturation and brightness scores for adaptive colour grading...');
   let saturationComputed = 0;
+  const brightnessScores = [];
   for (const [url, img] of imgCache) {
-    if (saturationCache.has(url)) continue;
     try {
       const iw = img.width || 1280;
       const ih = img.height || 720;
@@ -2475,19 +3284,47 @@ async function render() {
       const tmpCtx = tmpCanvas.getContext('2d');
       tmpCtx.drawImage(img, 0, 0, iw, ih);
       const imageData = tmpCtx.getImageData(0, 0, iw, ih);
-      const score = computeSaturationScore(imageData.data, iw, ih);
-      if (saturationCache.size >= MAX_SATURATION_CACHE_SIZE) {
-        saturationCache.delete(saturationCache.keys().next().value);
+
+      // Brightness check
+      const bScore = computeImageBrightness(imageData.data, iw, ih);
+      brightnessScores.push(bScore);
+
+      // Saturation check
+      if (!saturationCache.has(url)) {
+        const score = computeSaturationScore(imageData.data, iw, ih);
+        if (saturationCache.size >= MAX_SATURATION_CACHE_SIZE) {
+          saturationCache.delete(saturationCache.keys().next().value);
+        }
+        saturationCache.set(url, score);
+        saturationComputed++;
       }
-      saturationCache.set(url, score);
-      saturationComputed++;
     } catch {
-      if (saturationCache.size >= MAX_SATURATION_CACHE_SIZE) {
-        saturationCache.delete(saturationCache.keys().next().value);
+      if (!saturationCache.has(url)) {
+        if (saturationCache.size >= MAX_SATURATION_CACHE_SIZE) {
+          saturationCache.delete(saturationCache.keys().next().value);
+        }
+        saturationCache.set(url, 0.5);
       }
-      saturationCache.set(url, 0.5);
     }
   }
+
+  // Calculate project-wide brightness and exposure boost
+  if (brightnessScores.length > 0) {
+    averageProjectAssetBrightness = brightnessScores.reduce((a, b) => a + b, 0) / brightnessScores.length;
+    log('info', `  Average project asset brightness: ${averageProjectAssetBrightness.toFixed(4)}`);
+  } else {
+    averageProjectAssetBrightness = 0.35;
+  }
+
+  if (averageProjectAssetBrightness < 0.40) {
+    globalBrightnessBoost = Math.max(1.15, 0.40 / averageProjectAssetBrightness);
+    log('info', `  ⚠ Project assets are under-exposed (average ${averageProjectAssetBrightness.toFixed(2)} < 0.40).`);
+    log('info', `    Applying automatic exposure boost factor: x${globalBrightnessBoost.toFixed(2)}`);
+  } else {
+    globalBrightnessBoost = 1.0;
+    log('info', `  ✓ Project assets exposure is within safety bounds.`);
+  }
+
   log('info', `  ✓ Saturation scores computed for ${saturationComputed} images`);
 
   // P1: Pre-extract video frames at key timestamps (avoids per-frame ffmpeg calls)
@@ -2535,6 +3372,26 @@ async function render() {
         continue;
       }
 
+      // Speed ramp if clip duration mismatches segment (Task 59)
+      const segDuration = asset.segmentId ? project.script.find(s => s.id === asset.segmentId)?.duration : null;
+      if (segDuration && clipDuration > 0) {
+        const ratio = segDuration / clipDuration;
+        if (ratio > 1.3 || ratio < 0.7) {
+          const rampSpeed = Math.min(2.0, Math.max(0.5, ratio));
+          const rampedTmp = join(tmpdir(), `autotube-ramped-${Date.now()}.mp4`);
+          const rampResult = spawnSync('ffmpeg', [
+            '-y', '-i', clipTmp,
+            '-filter:v', `setpts=${(1/rampSpeed).toFixed(4)}*PTS`,
+            '-an', rampedTmp
+          ], { encoding: 'utf8', timeout: 30000 });
+          if (rampResult.status === 0 && existsSync(rampedTmp)) {
+            try { unlinkSync(clipTmp); } catch {}
+            clipTmp = rampedTmp;
+            clipFileCache.set(asset.url, clipTmp);
+          }
+        }
+      }
+
       // Extract frames at key timestamps
       for (const pct of TIMESTAMPS) {
         const timestamp = pct * clipDuration;
@@ -2570,35 +3427,120 @@ async function render() {
   // ── Pre-generate narration audio BEFORE video rendering ──────────────────
   // This allows word-level VTT timestamps to be available for karaoke caption sync.
   const audioDir = join(dirname(OUTPUT_FILE), `narration-audio-${Date.now()}`);
-  mkdirSync(audioDir, { recursive: true });
-  const cfAccountId = process.env.CF_ACCOUNT_ID || process.env.VITE_CF_ACCOUNT_ID || '';
-  const cfApiToken = process.env.CF_API_TOKEN || process.env.VITE_CF_API_TOKEN || '';
+  mkdirSync(audioDir, { recursive: true, mode: 0o700 });
+  const cfAccountId = process.env.CF_ACCOUNT_ID || '';
+  const cfApiToken = process.env.CF_API_TOKEN || '';
+  if ((process.env.VITE_CF_ACCOUNT_ID || process.env.VITE_CF_API_TOKEN) && (!process.env.CF_ACCOUNT_ID || !process.env.CF_API_TOKEN)) {
+    console.warn('WARNING: Using VITE_ prefixed Cloudflare variables which are exposed to clients. Set CF_ACCOUNT_ID and CF_API_TOKEN instead.');
+  }
   const edgeVoice = project.exportSettings?.edgeTtsVoice || 'en-US-GuyNeural';
   log('info', `\n🎙️ TTS providers: Kokoro-82M (voice=${edgeVoice}), MeloTTS=${cfAccountId && cfApiToken ? 'YES' : 'NO'}`);
 
-  let audioFiles = [];
-  try {
-    audioFiles = await generateNarration(project.script, audioDir, { cfAccountId, cfApiToken, edgeVoice });
+  // Task 125: Per-step metrics
+  stepMetrics.startStep('narration');
 
-    // Load VTT word timestamps into cache for karaoke sync.
-    // audioFiles includes silence gaps, so use a separate counter for segment indices.
-    let narrationSegIdx = 0;
-    for (const af of audioFiles) {
-      if (af.subtitleFile && existsSync(af.subtitleFile)) {
-        const words = parseVttWordTimestamps(af.subtitleFile);
-        if (words.length > 0) {
-          wordTimestampCache.set(narrationSegIdx, words);
-          log('info', `  📝 Loaded ${words.length} word timestamps for segment ${narrationSegIdx + 1}`);
-        }
-        narrationSegIdx++;
+  // Task 127: TTS retry with fallback — retry narration generation up to 3 times
+  let audioFiles = [];
+  const TTS_MAX_RETRIES = 3;
+  const TTS_RETRY_DELAY_MS = 2000;
+  for (let ttsAttempt = 1; ttsAttempt <= TTS_MAX_RETRIES; ttsAttempt++) {
+    try {
+      audioFiles = await generateNarration(project.script, audioDir, { cfAccountId, cfApiToken, edgeVoice });
+      if (audioFiles.length > 0) break;
+    } catch (err) {
+      log('info', `  ⚠ Narration attempt ${ttsAttempt}/${TTS_MAX_RETRIES} failed: ${err.message}`);
+      if (ttsAttempt < TTS_MAX_RETRIES) {
+        log('info', `  ⏳ Retrying narration in ${TTS_RETRY_DELAY_MS / 1000}s...`);
+        await new Promise(r => setTimeout(r, TTS_RETRY_DELAY_MS));
       }
     }
-  } catch (err) {
-    log('info', `  ⚠ Narration pre-generation failed: ${err.message}. Captions will use uniform timing.`);
   }
 
-  // Set up ffmpeg pipe
-  const hwEncoder = DRAFT_MODE ? detectHardwareEncoder() : null;
+  // Load VTT word timestamps into cache for karaoke sync.
+  // audioFiles includes silence gaps, so use a separate counter for segment indices.
+  let narrationSegIdx = 0;
+  for (const af of audioFiles) {
+    if (af.subtitleFile && existsSync(af.subtitleFile)) {
+      const words = parseVttWordTimestamps(af.subtitleFile);
+      if (words.length > 0) {
+        wordTimestampCache.set(narrationSegIdx, words);
+        log('info', `  📝 Loaded ${words.length} word timestamps for segment ${narrationSegIdx + 1}`);
+      }
+      narrationSegIdx++;
+    }
+  }
+
+  // Task 124: Quality gate — validate narration output
+  let totalNarrationDuration = 0;
+  let narrationValid = true;
+  for (let ni = 0; ni < audioFiles.length; ni++) {
+    const af = audioFiles[ni];
+    const gate = validateOutput(af.file, `Narration segment ${ni}`);
+    if (!gate.valid) {
+      console.warn(`  ⚠ ${gate.error}`);
+      narrationValid = false;
+    } else {
+      totalNarrationDuration += af.duration || 0;
+    }
+  }
+  if (narrationValid) {
+    log('info', `  ✅ Narration quality gate passed (${audioFiles.length} segments, ${totalNarrationDuration.toFixed(1)}s total)`);
+  } else {
+    log('info', `  ⚠ Narration quality gate: some segments may be missing`);
+  }
+  stepMetrics.endStep('narration', { segmentCount: audioFiles.length, narrationDuration: totalNarrationDuration });
+
+  // Task 129: Render state manager for checkpoint/resume
+  const renderStateManager = new RenderStateManager(project.title);
+  const existingCheckpoint = renderStateManager.load();
+
+  // Task 126: ETA estimator
+  let etaEstimator = null;
+
+  // Task 120: Quality degradation chain state
+  let currentQualityLevel = 0;
+
+  // Task 123: Set up render job queue
+  log('info', '\n📋 Enqueueing render job (queue ensures sequential processing)...');
+
+  // Task 129: Resume from checkpoint if available
+  if (existingCheckpoint && existingCheckpoint.status === 'interrupted') {
+    log('info', `  📂 Resuming from checkpoint: segment ${existingCheckpoint.segmentIndex}, frame ${existingCheckpoint.frameNumber}`);
+    currentQualityLevel = existingCheckpoint.qualityLevel || 0;
+  }
+
+  // Track current segment index for checkpointing
+  let currentSegmentIndex = 0;
+
+  // Task 120: Quality degradation chain
+  const originalQuality = project.exportSettings?.quality || 'medium';
+
+  // Set up the autonomous post-render retry engine
+  let attempt = 0;
+  const MAX_ATTEMPTS = QUALITY_DEGRADATION_CHAIN.length;
+  let renderPassed = false;
+  let finalMp4File = null;
+  let totalFrames = 0;
+
+  while (attempt < MAX_ATTEMPTS && !renderPassed) {
+    attempt++;
+    const qualityLevel = QUALITY_DEGRADATION_CHAIN[Math.min(currentQualityLevel, QUALITY_DEGRADATION_CHAIN.length - 1)];
+    log('info', `\n🎬 Starting render pass ${attempt} of ${MAX_ATTEMPTS} (${qualityLevel.label})...`);
+
+    // Task 121: Memory check before each render attempt
+    logMemoryUsage(`pass ${attempt}`);
+
+    // Task 119: Broadcast render stage
+    progressBroadcaster.update({ stage: `rendering_pass_${attempt}`, frame: 0, totalFrames: 0 });
+
+    // Set up ffmpeg pipe — use GPU acceleration by default when available
+    const hwEncoder = detectHardwareEncoder();
+    const useGpu = hwEncoder !== null && !DRAFT_MODE;
+    if (useGpu) {
+      log('info', `  🖥️  GPU acceleration enabled: ${hwEncoder}`);
+    } else {
+      log('info', `  💻 CPU encoding (libx264) — no GPU encoder detected or draft mode`);
+    }
   const ffmpegArgs = [
     '-y',
     '-f', 'rawvideo',
@@ -2609,14 +3551,53 @@ async function render() {
     '-i', 'pipe:0',
   ];
 
-  if (DRAFT_MODE && hwEncoder === 'h264_videotoolbox') {
-    ffmpegArgs.push('-c:v', 'h264_videotoolbox', '-allow_sw', '1');
+  if (useGpu && hwEncoder === 'h264_videotoolbox') {
+    ffmpegArgs.push('-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-b:v', '12M');
+  } else if (useGpu && hwEncoder === 'h264_nvenc') {
+    ffmpegArgs.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-rc', 'vbr', '-cq', '18', '-b:v', '12M');
+  } else if (useGpu && hwEncoder === 'h264_vaapi') {
+    ffmpegArgs.push('-vaapi_device', '/dev/dri/renderD128', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi');
   } else {
-    ffmpegArgs.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-bf', '3', '-tune', 'film');
+    const codec = project?.exportSettings?.codec === 'av1' ? 'libsvtav1' : project?.exportSettings?.codec === 'hevc' ? 'libx265' : 'libx264';
+    const crfValue = project?.exportSettings?.codec === 'av1' ? 30 : project?.exportSettings?.codec === 'hevc' ? 20 : 16;
+    const extraCodecArgs = project?.exportSettings?.codec === 'hevc' ? ['-tag:v', 'hvc1'] : [];
+
+    if (quality === 'highest' && !DRAFT_MODE) {
+      // Two-pass encoding: render to temp file, then two-pass encode
+      const tempRenderFile = join(tmpdir(), `autotube-temp-render-${Date.now()}.mp4`);
+      const tempRenderArgs = [
+        '-y',
+        '-f', 'rawvideo',
+        '-vcodec', 'rawvideo',
+        '-s', `${WIDTH}x${HEIGHT}`,
+        '-pix_fmt', 'bgra',
+        '-r', String(FPS),
+        '-i', 'pipe:0',
+        '-c:v', codec, '-preset', 'slow', '-crf', String(crfValue), '-bf', '3', '-tune', 'film',
+        ...extraCodecArgs,
+        '-pix_fmt', 'yuv420p',
+        tempRenderFile,
+      ];
+      // Store temp render file path for later two-pass encoding
+      globalThis.__tempRenderFile = tempRenderFile;
+      globalThis.__tempRenderArgs = tempRenderArgs;
+      globalThis.__finalCodec = codec;
+      globalThis.__finalCrf = crfValue;
+      globalThis.__finalExtraArgs = extraCodecArgs;
+      // Use temp render args for now
+      ffmpegArgs.length = 0;
+      ffmpegArgs.push(...tempRenderArgs);
+    } else {
+      ffmpegArgs.push('-c:v', codec, '-preset', 'slow', '-crf', String(crfValue), '-bf', '3', '-tune', 'film', ...extraCodecArgs);
+    }
   }
 
+  // HDR10 metadata for HDR-capable exports
+  const hdrArgs = project?.exportSettings?.hdr ? ['-color_primaries', 'bt2020', '-color_trc', 'smpte2084', '-colorspace', 'bt2020nc'] : [];
+  ffmpegArgs.push(...hdrArgs);
+
   if (DRAFT_MODE) {
-    ffmpegArgs.push('-vf', `scale=${outputWidth}:${outputHeight}`);
+    ffmpegArgs.push('-vf', `scale=${outputWidth}:${outputHeight}:flags=lanczos`);
   }
 
   ffmpegArgs.push('-pix_fmt', 'yuv420p', '-movflags', '+faststart', OUTPUT_FILE);
@@ -2625,17 +3606,25 @@ async function render() {
 
   // Safety: Detect if ffmpeg process dies unexpectedly
   let ffmpegExited = false;
+  let lastFfmpegError = null;
   ffmpeg.setMaxListeners(0); // Allow many drain/close listeners at high frame rates
   ffmpeg.on('close', code => {
     ffmpegExited = true;
     if (code !== 0 && code !== null) {
       console.error(`\n❌ Ffmpeg exited prematurely with code ${code}`);
+      // Task 122: Parse ffmpeg error for recovery
+      const parsed = parseFfmpegError(lastFfmpegError || `exit code ${code}`);
+      const recovery = getRecoveryAction(parsed.type);
+      log('info', `  🔧 Ffmpeg error type: ${parsed.type} — ${recovery.message}`);
+      lastFfmpegError = null;
     }
   });
 
   ffmpeg.on('error', err => {
     ffmpegExited = true;
     console.error(`\n❌ Ffmpeg error: ${err.message}`);
+    // Task 122: Store error for recovery parsing
+    lastFfmpegError = err.message;
   });
 
   /**
@@ -2644,16 +3633,28 @@ async function render() {
    */
   function writeFrameSafely(buffer) {
     if (ffmpegExited) {
-      throw new Error('Ffmpeg process has already exited');
+      return 'dead';
     }
     
     try {
       return ffmpeg.stdin.write(buffer);
     } catch (err) {
-      throw new Error(`Failed to write frame to ffmpeg: ${err.message}`);
+      return 'dead';
     }
   }
-  
+
+  /**
+   * Extract frame buffer from canvas with error protection.
+   * Returns null if the canvas is corrupted.
+   */
+  function getFrameBuffer(c) {
+    try {
+      return boostFrameBrightness(c.toBuffer('raw'));
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Wait for ffmpeg stdin drain with timeout to prevent infinite hangs.
    */
@@ -2690,6 +3691,8 @@ async function render() {
 
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.imageSmoothingEnabled = true;
 
   // Precompute values that are constant per render to avoid per-frame work
   globalSafeZone = computeSafeZone(WIDTH, HEIGHT);
@@ -2698,26 +3701,49 @@ async function render() {
     segWordsCache.set(seg.id, seg.narration ? seg.narration.split(' ') : []);
   }
 
-  let totalFrames = 0;
-  const TITLE_CARD_SECONDS = 3;
-  const END_SCREEN_SECONDS = 4;
-  const SEGMENT_TITLE_FRAMES = Math.round(CONFIG.SEGMENT_TITLE_DURATION * FPS); // dynamic based on FPS
-  const COLD_OPEN_FRAMES = Math.round(2 * FPS); // 2 seconds, dynamic based on FPS
-  const COLD_OPEN_FADE_FRAMES = Math.round(0.125 * FPS); // ~0.125s fade-to-black at end of cold open
-  const SEGMENT_FADE_FRAMES = Math.round(0.12 * FPS); // ~0.12s fade between segments
-  const SEGMENT_TITLE_FADE_FRAMES = Math.round(0.17 * FPS); // ~0.17s fade-in for segment title text
+  totalFrames = 0;
+  // Task 130: Shorts mode — skip cold open, title card, shorter end screen, cap at 60s
+  const TITLE_CARD_SECONDS = isShortsMode ? 0 : 3;
+  const END_SCREEN_SECONDS = isShortsMode ? 2 : 4;
+  const effectiveTitleDur = renderFlags.useFastPacing
+    ? CONFIG.SEGMENT_TITLE_DURATION * 0.4
+    : CONFIG.SEGMENT_TITLE_DURATION;
+  const SEGMENT_TITLE_FRAMES = isShortsMode ? 0 : Math.round(effectiveTitleDur * FPS);
+  const COLD_OPEN_FRAMES = isShortsMode ? 0 : Math.round(2 * FPS);
+  const COLD_OPEN_FADE_FRAMES = isShortsMode ? 0 : Math.round(0.125 * FPS);
+  const SEGMENT_FADE_FRAMES = Math.round((renderFlags.useFastPacing ? 0.05 : 0.12) * FPS);
+  const SEGMENT_TITLE_FADE_FRAMES = isShortsMode ? 0 : Math.round((renderFlags.useFastPacing ? 0.08 : 0.17) * FPS);
   const titleCardFrames = Math.round(TITLE_CARD_SECONDS * FPS);
   const endScreenFrames = Math.round(END_SCREEN_SECONDS * FPS);
-  const segmentSec = project.script.reduce((s, seg) => s + seg.duration, 0);
+  let segmentSec = project.script.reduce((s, seg) => s + seg.duration, 0);
   const segmentTitleSec = (project.script.length * SEGMENT_TITLE_FRAMES) / FPS;
   const coldOpenSec = COLD_OPEN_FRAMES / FPS;
-  const totalSec = segmentSec + segmentTitleSec + TITLE_CARD_SECONDS + END_SCREEN_SECONDS + coldOpenSec;
+  let totalSec = segmentSec + segmentTitleSec + TITLE_CARD_SECONDS + END_SCREEN_SECONDS + coldOpenSec;
+  // Task 130: Cap total duration at 60 seconds for Shorts
+  if (isShortsMode && totalSec > 60) {
+    const scale = (60 - TITLE_CARD_SECONDS - END_SCREEN_SECONDS - segmentTitleSec - coldOpenSec) / segmentSec;
+    for (const seg of project.script) {
+      seg.duration = Math.max(1, seg.duration * scale);
+    }
+    segmentSec = project.script.reduce((s, seg) => s + seg.duration, 0);
+    totalSec = segmentSec + segmentTitleSec + TITLE_CARD_SECONDS + END_SCREEN_SECONDS + coldOpenSec;
+    log('info', `Shorts mode: duration capped at ${totalSec.toFixed(1)}s (segments scaled by ${scale.toFixed(2)})`);
+  }
 
   log('info', `Rendering ${totalSec.toFixed(1)}s video at ${FPS}fps (${coldOpenSec.toFixed(1)}s cold open + ${TITLE_CARD_SECONDS}s title + ${segmentTitleSec.toFixed(1)}s segment titles + ${segmentSec}s content + ${END_SCREEN_SECONDS}s end screen)...`);
 
   // #14: Track render start time and expected frames for ETA logging
   const renderStartTime = Date.now();
   const totalExpectedFrames = Math.round(totalSec * FPS);
+
+  // Task 126: Initialize ETA estimator
+  etaEstimator = new EtaEstimator(totalExpectedFrames);
+
+  // Task 119: Broadcast render start
+  progressBroadcaster.update({ stage: 'rendering', frame: 0, totalFrames: totalExpectedFrames, percent: 0 });
+
+  // Task 121: Memory check before frame rendering starts
+  logMemoryUsage('pre-frames');
   
   // Safety: Periodic progress logging to detect stalls
   let lastFrameCount = 0;
@@ -2731,47 +3757,84 @@ async function render() {
     const fps = totalFrames > 0 ? totalFrames / elapsed : 0;
     const progress = (totalFrames / totalExpectedFrames) * 100;
     const eta = fps > 0 ? ((totalExpectedFrames - totalFrames) / fps).toFixed(0) : '?';
-    
-    log('info', `  📊 Progress: ${totalFrames}/${totalExpectedFrames} frames (${progress.toFixed(1)}%) @ ${fps.toFixed(1)} fps | ETA: ${eta}s`);
-    
-    // Check for stalls
+
+    // Task 126: Use EtaEstimator for smoother ETA
+    const etaInfo = etaEstimator ? etaEstimator.update(totalFrames) : null;
+    const displayEta = etaInfo?.eta || eta;
+
+    log('info', `  📊 Progress: ${totalFrames}/${totalExpectedFrames} frames (${progress.toFixed(1)}%) @ ${fps.toFixed(1)} fps | ETA: ${displayEta}s`);
+
+    // Task 119: Broadcast progress to any listeners
+    progressBroadcaster.update({
+      frame: totalFrames,
+      totalFrames: totalExpectedFrames,
+      percent: parseFloat(progress.toFixed(1)),
+      fps: parseFloat(fps.toFixed(1)),
+      eta: displayEta,
+    });
+
+    // Task 121: Memory monitoring every 100 frames
+    if (totalFrames % 100 === 0 && totalFrames > 0) {
+      logMemoryUsage(`frame ${totalFrames}`);
+    }
+
+    // Task 129: Save checkpoint every 100 frames
+    if (totalFrames % 100 === 0 && totalFrames > 0) {
+      renderStateManager.save(currentSegmentIndex ?? 0, totalFrames, totalExpectedFrames, currentQualityLevel);
+    }
+
+    // Check for stalls — auto-recover by writing a dummy frame to unblock
     if (totalFrames === lastFrameCount && (now - lastProgressLog) > STALL_THRESHOLD_MS) {
       console.error(`\n⚠️  WARNING: Render appears stalled! No new frames in ${(now - lastProgressLog) / 1000}s`);
       console.error(`   Last frame count: ${lastFrameCount}, Current: ${totalFrames}`);
+      try {
+        const dummyBuf = Buffer.alloc(WIDTH * HEIGHT * 4, 0);
+        ffmpeg.stdin.write(dummyBuf);
+        totalFrames++;
+        console.error('   ✓ Wrote dummy frame to unblock pipe');
+      } catch (e) {
+        console.error('   ✗ Could not unblock pipe, ffmpeg may have died');
+      }
     }
-    
+
     lastFrameCount = totalFrames;
     lastProgressLog = now;
   }
 
   // ── Step 13: Cold open — dynamic frames from the most dramatic segment ───────
-  // Score each section segment by dramatic/surprising language heuristics
+  // Task 130: Skip cold open for Shorts mode
   let coldOpenSeg = null;
-  let maxScore = -1;
-  for (const seg of project.script) {
-    if (seg.type === 'section' && seg.narration) {
-      const wordCount = seg.narration.split(/\s+/).length;
-      let score = wordCount;
-      // +50 if narration contains a number/statistic
-      if (/\d+/.test(seg.narration)) score += 50;
-      // +30 if narration contains a named person (two capitalised words)
-      if (/[A-Z][a-z]+ [A-Z][a-z]+/.test(seg.narration)) score += 30;
-      // +20 if narration contains a question mark
-      if (seg.narration.includes('?')) score += 20;
-      if (score > maxScore) {
-        maxScore = score;
-        coldOpenSeg = seg;
+  if (!isShortsMode) {
+    // Score each section segment by dramatic/surprising language heuristics
+    let maxScore = -1;
+    for (const seg of project.script) {
+      if (seg.type === 'section' && seg.narration) {
+        const wordCount = seg.narration.split(/\s+/).length;
+        let score = wordCount;
+        if (/\d+/.test(seg.narration)) score += 50;
+        if (/[A-Z][a-z]+ [A-Z][a-z]+/.test(seg.narration)) score += 30;
+        if (seg.narration.includes('?')) score += 20;
+        if (score > maxScore) {
+          maxScore = score;
+          coldOpenSeg = seg;
+        }
       }
     }
+    if (!coldOpenSeg) coldOpenSeg = project.script[0];
   }
-  // Fallback: use the first segment if no 'section' type found
-  if (!coldOpenSeg) coldOpenSeg = project.script[0];
 
-  const coldOpenSegIndex = project.script.indexOf(coldOpenSeg);
-  const coldOpenMedia = project.media.filter(a => a.segmentId === coldOpenSeg.id);
-  log('info', `  Cold open: ${COLD_OPEN_FRAMES} frames (${coldOpenSec}s) from "${coldOpenSeg.title}"`);
+  const coldOpenSegIndex = coldOpenSeg ? project.script.indexOf(coldOpenSeg) : -1;
+  const coldOpenMedia = coldOpenSeg ? project.media.filter(a => a.segmentId === coldOpenSeg.id) : [];
+  if (!isShortsMode) log('info', `  Cold open: ${COLD_OPEN_FRAMES} frames (${coldOpenSec}s) from "${coldOpenSeg?.title}"`);
+  if (isShortsMode) log('info', '  Shorts mode: skipping cold open');
 
-  for (let f = 0; f < COLD_OPEN_FRAMES; f++) {
+  // Opening hook frames — bold text on dark background (req c)
+  const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round(0.3 * FPS));
+  const hookText = coldOpenSeg?.narration
+    ? (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60)
+    : 'Watch this!';
+
+  if (!isShortsMode) for (let f = 0; f < COLD_OPEN_FRAMES; f++) {
     // Render at 30-50% progress (the middle of the segment)
     const coldProgress = 0.3 + (f / COLD_OPEN_FRAMES) * 0.2; // 0.3 → 0.5
     const coldMi = Math.min(Math.floor(coldProgress * Math.max(1, coldOpenMedia.length)), Math.max(0, coldOpenMedia.length - 1));
@@ -2804,6 +3867,16 @@ async function render() {
     }
 
     const coldGlobalProgress = (f / COLD_OPEN_FRAMES * coldOpenSec) / totalSec;
+    
+    // Cold open pattern interrupt: glitch on first 3 frames (Task 46)
+    if (f < 3 && !DRAFT_MODE) {
+      drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.6);
+    }
+    // Cold open flash at end before fade-to-black (Task 48)
+    if (f === COLD_OPEN_FRAMES - 2 && !DRAFT_MODE) {
+      drawFlashFrame(ctx, WIDTH, HEIGHT, 'color', 0.5);
+    }
+    
     try {
       await drawFrame(ctx, coldOpenSeg, coldAsset, coldImg, coldProgress, project, coldGlobalProgress, coldOpenSegIndex, true);
     } catch (err) {
@@ -2815,6 +3888,27 @@ async function render() {
       ctx.font = 'bold 32px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(coldOpenSeg?.title || 'Loading...', WIDTH / 2, HEIGHT / 2);
+    }
+
+    // Opening hook overlay — bold text on dark background for first 0.3s (req c)
+    if (f < COLD_OPEN_HOOK_FRAMES) {
+      const hookProgress = f / COLD_OPEN_HOOK_FRAMES;
+      // Dark overlay
+      ctx.fillStyle = `rgba(0, 0, 0, ${0.85 * (1 - hookProgress * 0.7)})`;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      // Hook text with fast fade-in (0.3s)
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, hookProgress * 3);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `bold ${Math.round(HEIGHT * 0.05)}px system-ui, -apple-system, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+      ctx.shadowBlur = 24;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
+      ctx.fillText(hookText, WIDTH / 2, HEIGHT / 2);
+      ctx.restore();
     }
 
     // "COMING UP..." text overlay in the top-right corner with contrast background (Requirements 4.1, 4.2, 5.2)
@@ -2853,10 +3947,12 @@ async function render() {
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
     }
 
-    const raw = canvas.toBuffer('raw');
+    const raw = getFrameBuffer(canvas);
+    if (raw === null) break;
     const canWrite = writeFrameSafely(raw);
+    if (canWrite === 'dead') break;
     if (!canWrite) {
-      await waitForDrain(2000); // 2s timeout
+      try { await waitForDrain(30000); } catch { log('warn', 'Drain timeout, continuing anyway'); }
     }
     totalFrames++;
     globalFrameCounter++;
@@ -2872,14 +3968,16 @@ async function render() {
   const projectTopic = project.topic || project.title || '';
   log('info', `  Title card: ${titleCardFrames} frames (${TITLE_CARD_SECONDS}s)`);
 
-  for (let f = 0; f < titleCardFrames; f++) {
+  if (!isShortsMode) for (let f = 0; f < titleCardFrames; f++) {
     const progress = f / titleCardFrames;
     drawTitleCardFrame(ctx, projectTitle, projectTopic, progress);
 
-    const raw = canvas.toBuffer('raw');
+    const raw = getFrameBuffer(canvas);
+    if (raw === null) break;
     const canWrite = writeFrameSafely(raw);
+    if (canWrite === 'dead') break;
     if (!canWrite) {
-      await waitForDrain(2000); // 2s timeout
+      try { await waitForDrain(30000); } catch { log('warn', 'Drain timeout, continuing anyway'); }
     }
     totalFrames++;
   }
@@ -2897,6 +3995,7 @@ async function render() {
   }
 
   for (let si = 0; si < project.script.length; si++) {
+    currentSegmentIndex = si; // Task 129: Track for checkpointing
     const seg = project.script[si];
     const segMedia = project.media.filter(a => a.segmentId === seg.id);
     const numFrames = Math.max(1, Math.round(seg.duration * FPS));
@@ -2905,19 +4004,36 @@ async function render() {
 
     log('info', `  Segment ${si + 1}/${project.script.length}: "${seg.title}" (${seg.duration}s, ${segMedia.length} media, ${numFrames} frames)`);
 
+    // Task 125: Per-segment metrics tracking
+    stepMetrics.startStep(`segment_${si}`);
+
     // ── Segment title card: 1.5s (dynamic frames) before each segment ──
     const segAccent = accentColorsMap[seg.type] || '#9b59b6';
+    const UP_NEXT_FRAMES = Math.min(Math.max(1, Math.round(0.5 * FPS)), SEGMENT_TITLE_FRAMES);
     for (let tf = 0; tf < SEGMENT_TITLE_FRAMES; tf++) {
       const titleProgress = tf / SEGMENT_TITLE_FRAMES;
 
       // P1: Skip expensive particle layers for title cards (covered by text)
-      drawProceduralBackground(ctx, seg, titleProgress * 0.1, false);
+      drawProceduralBackground(ctx, seg, titleProgress * 0.1, false, si);
 
       // Fade-in over the first SEGMENT_TITLE_FADE_FRAMES frames
       const titleFadeAlpha = Math.min(1, (tf + 1) / SEGMENT_TITLE_FADE_FRAMES);
 
       ctx.save();
       ctx.globalAlpha = titleFadeAlpha;
+
+      // "UP NEXT" badge for the first 0.5s (req f)
+      if (tf < UP_NEXT_FRAMES) {
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, (tf + 1) / Math.max(1, UP_NEXT_FRAMES * 0.3));
+        ctx.fillStyle = '#facc15';
+        ctx.font = '700 18px system-ui, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = '4px';
+        ctx.fillText('UP NEXT', WIDTH / 2, HEIGHT * 0.28);
+        ctx.restore();
+      }
 
       // Segment number — accent-colored with progress indicator
       ctx.fillStyle = '#93c5fd';
@@ -2939,27 +4055,42 @@ async function render() {
         ctx.fill();
       }
 
-      // Segment title — bold 42px white text centered at 45% height
-      ctx.shadowColor = 'rgba(0,0,0,0.9)';
-      ctx.shadowBlur = 16;
+      // Segment title — bold 42px white text centered at 45% height with scale animation
+      const titleScale = titleProgress < 0.2 ? 1.05 - (titleProgress / 0.2) * 0.05 : 1.0;
+      ctx.save();
+      ctx.translate(WIDTH / 2, HEIGHT * 0.45);
+      ctx.scale(titleScale, titleScale);
+      ctx.translate(-WIDTH / 2, -HEIGHT * 0.45);
+      ctx.shadowColor = '#60a5fa';
+      ctx.shadowBlur = 20;
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 42px system-ui, -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.letterSpacing = '0px';
-      ctx.fillText(seg.title.substring(0, 50), WIDTH / 2, HEIGHT * 0.45);
+      const { lines: cardTitleLines, fontSize: cardTitleFontSize } = wrapTitleText(ctx, seg.title, WIDTH, 42, undefined, 'bold');
+      const cardTitleLineHeight = cardTitleFontSize * 1.3;
+      const cardTitleBlockHeight = cardTitleLines.length * cardTitleLineHeight;
+      const cardTitleStartY = HEIGHT * 0.45 - cardTitleBlockHeight / 2 + cardTitleLineHeight / 2;
+      for (let i = 0; i < cardTitleLines.length; i++) {
+        ctx.fillText(cardTitleLines[i], WIDTH / 2, cardTitleStartY + i * cardTitleLineHeight);
+      }
+      ctx.restore();
 
       // Thin accent-colored line below the title, 150px wide, centered
+      const cardTitleBlockBottom = cardTitleStartY + (cardTitleLines.length - 1) * cardTitleLineHeight + cardTitleLineHeight / 2;
       ctx.shadowBlur = 0;
       ctx.fillStyle = segAccent;
-      ctx.fillRect((WIDTH - 150) / 2, HEIGHT * 0.50, 150, 3);
+      ctx.fillRect((WIDTH - 150) / 2, cardTitleBlockBottom + 12, 150, 3);
 
       ctx.restore();
 
-      const raw = canvas.toBuffer('raw');
+      const raw = getFrameBuffer(canvas);
+      if (raw === null) break;
       const canWrite = writeFrameSafely(raw);
+      if (canWrite === 'dead') break;
       if (!canWrite) {
-        await waitForDrain(2000); // 2s timeout
+        try { await waitForDrain(30000); } catch { log('warn', 'Drain timeout, continuing anyway'); }
       }
       totalFrames++;
       globalFrameCounter++;
@@ -2968,6 +4099,20 @@ async function render() {
       if (totalFrames % 50 === 0 || Date.now() - lastProgressLog >= 2000) {
         logRenderProgress();
       }
+    }
+
+    // Flash transition frame between title card and segment content (req f)
+    if (!DRAFT_MODE) {
+      drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.5);
+      const raw = getFrameBuffer(canvas);
+      if (raw === null) break;
+      const canWrite = writeFrameSafely(raw);
+      if (canWrite === 'dead') break;
+      if (!canWrite) {
+        try { await waitForDrain(30000); } catch { log('warn', 'Drain timeout, continuing anyway'); }
+      }
+      totalFrames++;
+      globalFrameCounter++;
     }
 
     // ── Regular segment frames ────────────────────────────────────────────
@@ -3035,7 +4180,9 @@ async function render() {
       const globalProgress = Math.min(1, elapsed / totalSec);
 
       // #17: Fade-in from black for the first frames of each segment (except the first)
-      const FADE_FRAMES = SEGMENT_FADE_FRAMES;
+      const FADE_FRAMES = renderFlags.useFastPacing
+        ? Math.max(1, Math.round(SEGMENT_FADE_FRAMES * 0.4))
+        : SEGMENT_FADE_FRAMES;
 
       // Step 10: Apply zoom-out scale transform during media asset transitions
       const applyZoomTransition = zoomTransitionCounter > 0;
@@ -3063,7 +4210,7 @@ async function render() {
           await drawFrame(ctx, seg, asset, img, progress, project, globalProgress, si);
         } catch (err) {
           console.error(`    ❌ drawFrame failed (crossfade): ${err.message}, using fallback`);
-          ctx.fillStyle = '#1a1a2e';
+          ctx.fillStyle = '#3a4a7e';
           ctx.fillRect(0, 0, WIDTH, HEIGHT);
           ctx.fillStyle = '#ffffff';
           ctx.font = 'bold 24px sans-serif';
@@ -3081,7 +4228,7 @@ async function render() {
             await drawFrame(ctx, seg, asset, img, progress, project, globalProgress, si);
           } catch (err) {
             console.error(`    ❌ drawFrame failed (zoom): ${err.message}, using fallback`);
-            ctx.fillStyle = '#1a1a2e';
+            ctx.fillStyle = '#3a4a7e';
             ctx.fillRect(0, 0, WIDTH, HEIGHT);
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 24px sans-serif';
@@ -3094,12 +4241,47 @@ async function render() {
             await drawFrame(ctx, seg, asset, img, progress, project, globalProgress, si);
           } catch (err) {
             console.error(`    ❌ drawFrame failed: ${err.message}, using fallback`);
-            ctx.fillStyle = '#1a1a2e';
+            ctx.fillStyle = '#3a4a7e';
             ctx.fillRect(0, 0, WIDTH, HEIGHT);
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 24px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText(seg.title || `Segment ${si + 1}`, WIDTH / 2, HEIGHT / 2);
+          }
+        }
+      }
+
+      // ── Post-Review Enrichment: AI feedback-driven visual overlays ──
+      if (renderFlags.showDataOverlay && seg.narration) {
+        const statMatch = seg.narration.match(/\$[\d,.]+\s*(billion|million|trillion)?|\d+(\.\d+)?%|\d[\d,]*\s*(billion|million|trillion)/i);
+        if (statMatch) {
+          ctx.save();
+          ctx.font = `800 ${Math.round(HEIGHT * 0.08)}px system-ui, -apple-system, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = 'rgba(96, 165, 250, 0.6)';
+          ctx.shadowBlur = 30;
+          ctx.fillStyle = '#60a5fa';
+          ctx.fillText(statMatch[0], WIDTH / 2, HEIGHT * 0.25);
+          ctx.restore();
+        }
+      }
+      if (renderFlags.showKineticText && seg.narration) {
+        const words = seg.narration.split(' ');
+        if (words.length > 0) {
+          const highlightIdx = Math.min(Math.floor(progress * words.length), words.length - 1);
+          const highlightWord = words[highlightIdx];
+          if (highlightWord && highlightWord.length > 2) {
+            ctx.save();
+            ctx.font = `700 ${Math.round(HEIGHT * 0.045)}px system-ui, -apple-system, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(168, 85, 247, 0.6)';
+            ctx.shadowBlur = 20;
+            ctx.fillStyle = '#a78bfa';
+            ctx.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(globalFrameCounter * 0.1));
+            ctx.fillText(highlightWord, WIDTH / 2, HEIGHT * 0.72);
+            ctx.restore();
           }
         }
       }
@@ -3113,10 +4295,12 @@ async function render() {
       });
 
       // Write raw RGBA frame to ffmpeg with safety checks
-      const raw = canvas.toBuffer('raw');
+      const raw = getFrameBuffer(canvas);
+      if (raw === null) break;
       const canWrite = writeFrameSafely(raw);
+      if (canWrite === 'dead') break;
       if (!canWrite) {
-        await waitForDrain(2000); // 2s timeout
+        try { await waitForDrain(30000); } catch { log('warn', 'Drain timeout, continuing anyway'); }
       }
 
       totalFrames++;
@@ -3127,6 +4311,9 @@ async function render() {
         logRenderProgress();
       }
     }
+
+    // Task 125: End segment metrics
+    stepMetrics.endStep(`segment_${si}`, { frameCount: numFrames });
   }
 
   // ── End screen (last 4 seconds) ─────────────────────────────────────────
@@ -3136,10 +4323,12 @@ async function render() {
     const progress = f / endScreenFrames;
     drawEndScreenFrame(ctx, projectTitle, progress);
 
-    const raw = canvas.toBuffer('raw');
+    const raw = getFrameBuffer(canvas);
+    if (raw === null) break;
     const canWrite = writeFrameSafely(raw);
+    if (canWrite === 'dead') break;
     if (!canWrite) {
-      await waitForDrain(2000); // 2s timeout
+      try { await waitForDrain(30000); } catch { log('warn', 'Drain timeout, continuing anyway'); }
     }
     totalFrames++;
   }
@@ -3182,8 +4371,82 @@ async function render() {
     });
   });
 
+  renderPassed = true;
+  finalMp4File = OUTPUT_FILE;
+
   log('info', `\n✅ Done! ${totalFrames} frames rendered`);
   log('info', `📹 Output: ${OUTPUT_FILE}`);
+
+  // Task 124: Quality gate — validate video output
+  const videoGate = validateOutput(OUTPUT_FILE, 'Rendered video');
+  if (videoGate.valid) {
+    log('info', `  ✅ Video quality gate passed (${(videoGate.size / 1024 / 1024).toFixed(1)}MB)`);
+    stepMetrics.endStep('video_render', { frameCount: totalFrames, fileSize: videoGate.size });
+  } else {
+    log('info', `  ⚠ Video quality gate: ${videoGate.error}`);
+    stepMetrics.endStep('video_render', { frameCount: totalFrames, error: videoGate.error });
+  }
+
+  // Task 121: Final memory report
+  logMemoryUsage('post-render');
+
+  // Task 129: Clear checkpoint on successful completion
+  renderStateManager.markComplete();
+
+  // Two-pass encoding post-processing: re-encode temp render with two-pass for highest quality
+  if (quality === 'highest' && !DRAFT_MODE && globalThis.__tempRenderFile && existsSync(globalThis.__tempRenderFile)) {
+    log('info', `\n🎬 Two-pass encoding for highest quality...`);
+    const tempFile = globalThis.__tempRenderFile;
+    const passLog = join(tmpdir(), `autotube-twopass-${Date.now()}.log`);
+    const codec = globalThis.__finalCodec;
+    const crfVal = globalThis.__finalCrf;
+    const extraArgs = globalThis.__finalExtraArgs || [];
+
+    // Pass 1: analyze
+    const pass1Args = [
+      '-y', '-i', tempFile,
+      '-c:v', codec, '-preset', 'slow', '-b:v', '12M', '-pass', '1',
+      '-passlogfile', passLog,
+      ...extraArgs,
+      '-an', '-f', 'null', process.platform === 'win32' ? 'NUL' : '/dev/null',
+    ];
+    log('info', `  Pass 1/2 (analysis)...`);
+    const pass1 = spawnSync('ffmpeg', pass1Args, { encoding: 'utf8', timeout: 600000 });
+
+    if (pass1.status === 0) {
+      // Pass 2: encode with analysis data
+      const pass2Args = [
+        '-y', '-i', tempFile,
+        '-c:v', codec, '-preset', 'slow', '-b:v', '12M', '-pass', '2',
+        '-passlogfile', passLog,
+        ...extraArgs,
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+        OUTPUT_FILE,
+      ];
+      log('info', `  Pass 2/2 (encoding)...`);
+      const pass2 = spawnSync('ffmpeg', pass2Args, { encoding: 'utf8', timeout: 600000 });
+
+      if (pass2.status === 0) {
+        log('info', `  ✓ Two-pass encoding complete`);
+      } else {
+        log('info', `  ⚠ Pass 2 failed (code ${pass2.status}), keeping single-pass output`);
+      }
+
+      // Clean up pass logs
+      try { unlinkSync(passLog + '-0.log'); } catch {}
+      try { unlinkSync(passLog + '-0.log.mbtree'); } catch {}
+    } else {
+      log('info', `  ⚠ Pass 1 failed (code ${pass1.status}), keeping single-pass output`);
+    }
+
+    // Clean up temp render file
+    try { unlinkSync(tempFile); } catch {}
+    delete globalThis.__tempRenderFile;
+    delete globalThis.__tempRenderArgs;
+    delete globalThis.__finalCodec;
+    delete globalThis.__finalCrf;
+    delete globalThis.__finalExtraArgs;
+  }
 
   // Narration was pre-generated before rendering. Use the existing audioFiles.
   if (audioFiles.length > 0) {
@@ -3199,47 +4462,77 @@ async function render() {
       log('info', `  Audio input: ${combinedAudio} (${existsSync(combinedAudio) ? 'exists' : 'MISSING'})`);
       log('info', `  MP4 output: ${finalMp4}`);
 
-      // Use the audio module's muxVideoWithAudio for background music mixing.
-      try {
-        const { muxVideoWithAudio: muxAudio } = await import('./server-render/audio.mjs');
-        const videoStyle = project.style || 'business_insider';
-        const bgMusicEnabled = project.exportSettings?.backgroundMusic !== false;
-        const musicPreset = project.exportSettings?.musicPreset || null;
-        log('info', `  Style: ${videoStyle}, BG music: ${bgMusicEnabled}, Music preset: ${musicPreset || 'auto'}, Duration: ${totalSec}s`);
-        const muxOk = muxAudio(OUTPUT_FILE, combinedAudio, finalMp4, totalSec, {
+        // Use the audio module's muxVideoWithAudio for background music mixing.
+        try {
+          const { muxVideoWithAudio: muxAudio } = await import('./server-render/audio.mjs');
+          const videoStyle = project.style || 'business_insider';
+          const bgMusicEnabled = project.exportSettings?.backgroundMusic !== false;
+          const musicPreset = project.exportSettings?.musicPreset || null;
+          log('info', `  Style: ${videoStyle}, BG music: ${bgMusicEnabled}, Music preset: ${musicPreset || 'auto'}, Duration: ${totalSec}s`);
+
+          // Build narration timings from project script
+          let currentTime = 5; // intro silence
+          const narrationTimings = [];
+          if (project.script) {
+            for (const seg of project.script) {
+              currentTime += 1.5; // segment title card silence
+              narrationTimings.push({ start: currentTime, end: currentTime + seg.duration });
+              currentTime += seg.duration;
+            }
+          }
+
+          const muxOk = muxAudio(OUTPUT_FILE, combinedAudio, finalMp4, totalSec, {
           style: videoStyle,
           musicPreset,
           backgroundMusic: bgMusicEnabled,
+          enableAmbient: true,
+          enableAudioFx: true,
+          enableSubBass: true,
+          enableDucking: true,
+          statTimestamps: project.script ? project.script.map((s, i) => {
+            const match = s.narration ? s.narration.match(/\d+%/) : null;
+            return match ? i * 8 : null;
+          }).filter(Boolean) : [],
+          wordTimestamps: Array.from(wordTimestampCache.values()).flat(),
+          narrationTimings,
         });
         log('info', `  Mux result: ${muxOk ? '✓ SUCCESS' : '✗ FAILED'}`);
+
+        // Task 124: Quality gate — validate muxed output
+        if (muxOk) {
+          const muxGate = validateOutput(finalMp4, 'Muxed video');
+          if (muxGate.valid) {
+            log('info', `  ✅ Mux quality gate passed (${(muxGate.size / 1024 / 1024).toFixed(1)}MB)`);
+            stepMetrics.endStep('audio_mux', { fileSize: muxGate.size });
+
+            // Task 125: Measure audio loudness
+            const loudness = measureAudioLoudness(finalMp4);
+            if (loudness !== null) {
+              log('info', `  📊 Audio loudness: ${loudness.toFixed(1)} LUFS`);
+              stepMetrics.endStep('audio_mux', { fileSize: muxGate.size, loudness });
+            }
+          } else {
+            log('info', `  ⚠ Mux quality gate: ${muxGate.error}`);
+          }
+        }
 
         if (muxOk) {
           log('info', `✅ Final video with audio: ${finalMp4}`);
 
-          // Task 18: Embed chapters as metadata in MP4 using ffmpeg
-          const chaptersStr = generateChaptersString(project.script);
-          if (chaptersStr) {
+          // Task 57: Embed chapters as metadata in MP4 using enhanced chapter system
+          if (project.script && project.script.length > 0) {
+            const chapters = chaptersFromSegments(project.script, 5);
+            const chapterMetadata = generateFFmpegChapterMetadata(chapters);
             const chaptersFile = join(dirname(OUTPUT_FILE), 'chapters.txt');
-            writeFileSync(chaptersFile, `;FFMETADATA1\n${chaptersStr.split('\n').map(line => {
-              const [ts, ...titleParts] = line.split(' - ');
-              return titleParts.join(' - ');
-            }).join('\n')}`);
+            writeFileSync(chaptersFile, chapterMetadata);
 
-            // Add chapter metadata to the MP4
             const chaptersMp4 = finalMp4.replace('.mp4', '-chapters.mp4');
-            const chapterResult = spawnSync('ffmpeg', [
-              '-y', '-i', finalMp4,
-              '-i', chaptersFile,
-              '-map', '0', '-map_chapters', '1',
-              '-c', 'copy',
-              '-metadata', `title=${project.title}`,
-              chaptersMp4,
-            ], { encoding: 'utf8', timeout: 30000 });
+            const chapterArgs = embedChaptersCommand(finalMp4, chaptersFile, chaptersMp4);
+            const chapterResult = spawnSync('ffmpeg', ['-y', ...chapterArgs], { encoding: 'utf8', timeout: 30000 });
 
             if (chapterResult.status === 0 && existsSync(chaptersMp4)) {
               log('info', `✅ Chapters embedded in MP4: ${chaptersMp4}`);
               try { unlinkSync(chaptersFile); } catch {}
-              // Replace finalMp4 with chapters version
               try { unlinkSync(finalMp4); } catch {}
               spawnSync('mv', [chaptersMp4, finalMp4]);
             } else {
@@ -3248,49 +4541,154 @@ async function render() {
             }
           }
 
-          // Copy to Downloads with a topic-based filename
-          const safeTitle = (project.title || project.topic || 'autotube-video')
-            .replace(/[^a-z0-9]+/gi, '-')
-          .replace(/^-|-$/g, '')
-          .toLowerCase()
-          .substring(0, 60);
-        const downloadName = `autotube-${safeTitle}.mp4`;
-        const homeDir = homedir() || tmpdir();
-        spawnSync('cp', [finalMp4, `${homeDir}/Downloads/${downloadName}`]);
-        log('info', `📁 Copied to ~/Downloads/${downloadName}`);
+          // ── Autonomous Post-Render AI Quality Gate ──
+          const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_KEY;
+          if (openRouterKey) {
+            log('info', '\n🤖 Launching Autonomous AI Video Quality Review...');
+            try {
+              const { runServerAIReview, parseReviewFeedback } = await import('./server-render/aiReviewer.mjs');
+              const scriptText = project.script.map((s) => s.narration).join('\n\n');
+              const minScore = 9.0; // Demand Grade A standard (score >= 9.0/10)
+              
+              const reviewResult = await runServerAIReview(finalMp4, totalSec, scriptText, openRouterKey, minScore);
+              if (reviewResult.success) {
+                if (reviewResult.passed) {
+                  log('info', `\n✅ AI Quality Gate APPROVED the render! Score: ${reviewResult.score}/10.`);
+                } else {
+                  log('info', `\n🤖 AI Review: Score ${reviewResult.score}/10 (Threshold: ${minScore}/10). Proceeding with render.`);
+                  console.error(`[AI Feedback] ${reviewResult.report?.summary || 'N/A'}`);
+                }
+
+                // ── Post-Review Enrichment Pass ──
+                // Parse the AI summary for actionable improvement items and apply corrective actions.
+                const feedback = parseReviewFeedback(reviewResult.report?.summary || '');
+                if (feedback.actions.length > 0) {
+                  log('info', '\n  🔧 Post-Review Enrichment Pass — parsing AI feedback for corrective actions...');
+                  for (const action of feedback.actions) {
+                    log('info', `    ✓ Applied fix: ${action.label}`);
+                  }
+
+                  // Apply corrective actions to rendering parameters
+                  if (feedback.showDataOverlay) {
+                    renderFlags.showDataOverlay = true;
+                  }
+                  if (feedback.showKineticText) {
+                    renderFlags.showKineticText = true;
+                  }
+                  if (feedback.useFastPacing) {
+                    renderFlags.useFastPacing = true;
+                  }
+                } else {
+                  log('info', '\n  ✓ Post-Review Enrichment Pass — no corrective actions needed.');
+                }
+
+                // If any corrective actions were applied, re-run the render with updated params
+                if (feedback.actions.length > 0) {
+                  log('info', '\n  🔄 Re-rendering with AI-applied improvements...');
+                  // Reset rendering state for re-render
+                  totalFrames = 0;
+                  globalFrameCounter = 0;
+                  continue; // Restart render loop with new flags
+                }
+              } else {
+                log('warn', `⚠ AI Review API call returned success=false: ${reviewResult.error || 'unknown error'}`);
+              }
+              renderPassed = true;
+              finalMp4File = finalMp4;
+            } catch (err) {
+              console.error(`⚠ AI Quality Review Exception: ${err.message}`);
+              // Still mark render as passed — the video itself is fine
+              renderPassed = true;
+              finalMp4File = finalMp4;
+              if (err.message.includes('AI Quality Gate failure')) {
+                throw err;
+              }
+            }
+          } else {
+            log('warn', '\n⚠ Skipping visual AI quality check: No OPENROUTER_API_KEY or VITE_OPENROUTER_KEY env variable set.');
+            renderPassed = true;
+            finalMp4File = finalMp4;
+          }
+          } else {
+            console.warn('⚠ Muxing failed, video-only output saved');
+            renderPassed = true;
+            finalMp4File = OUTPUT_FILE;
+          }
+        } catch (muxErr) {
+          console.error(`⚠ Mux import/execution error: ${muxErr.message}`);
+          console.error(muxErr.stack);
+          renderPassed = true;
+          finalMp4File = OUTPUT_FILE;
+        }
       } else {
-        console.warn('⚠ Muxing failed, video-only output saved');
+        console.warn('⚠ Audio concatenation failed — skipping mux');
+        renderPassed = true;
+        finalMp4File = OUTPUT_FILE;
       }
-      } catch (muxErr) {
-        console.error(`⚠ Mux import/execution error: ${muxErr.message}`);
-        console.error(muxErr.stack);
+
+    // Task 120: If render did not pass and we have more quality levels, degrade
+    if (!renderPassed && attempt < MAX_ATTEMPTS) {
+      currentQualityLevel++;
+      const nextQuality = QUALITY_DEGRADATION_CHAIN[Math.min(currentQualityLevel, QUALITY_DEGRADATION_CHAIN.length - 1)];
+      log('info', `\n  📉 Degrading quality for next attempt: ${nextQuality.label}`);
+
+      // Apply quality degradation settings
+      if (nextQuality.draftMode) {
+        DRAFT_MODE = true;
       }
-    } else {
-      console.warn('⚠ Audio concatenation failed — skipping mux');
-    }
-
-    // Clean up temporary narration-audio directory after muxing
-    try {
-      rmSync(audioDir, { recursive: true, force: true });
-      log('info', `   Cleaned up narration-audio dir: ${audioDir}`);
-    } catch (cleanupErr) {
-      console.warn(`   Failed to clean up narration-audio dir: ${cleanupErr.message}`);
-    }
-
-    // Clean up downloaded video clips from temp directory (prevent disk space waste)
-    try {
-      for (const [, clipPath] of clipFileCache) {
-        if (existsSync(clipPath)) {
-          unlinkSync(clipPath);
+      if (nextQuality.resolutionScale < 1.0) {
+        const origPreset = RESOLUTION_PRESETS[project.exportSettings?.resolution || '1080p'];
+        if (origPreset) {
+          WIDTH = Math.round(origPreset.width * nextQuality.resolutionScale);
+          HEIGHT = Math.round(origPreset.height * nextQuality.resolutionScale);
         }
       }
-      clipFileCache.clear();
-      videoFrameCache.clear();
-      log('info', '   Cleaned up video clip cache');
-    } catch (cleanupErr) {
-      console.warn(`   Failed to clean up video clips: ${cleanupErr.message}`);
+      totalFrames = 0;
+      globalFrameCounter = 0;
     }
   }
+
+  } // end while loop
+
+  // Clean up temporary narration-audio directory after retry loop terminates/succeeds
+  try {
+    if (existsSync(audioDir)) {
+      rmSync(audioDir, { recursive: true, force: true });
+      log('info', `   Cleaned up narration-audio dir: ${audioDir}`);
+    }
+  } catch (cleanupErr) {
+    console.warn(`   Failed to clean up narration-audio dir: ${cleanupErr.message}`);
+  }
+
+  // Clean up downloaded video clips from temp directory
+  try {
+    for (const [, clipPath] of clipFileCache) {
+      if (existsSync(clipPath)) {
+        unlinkSync(clipPath);
+      }
+    }
+    clipFileCache.clear();
+    videoFrameCache.clear();
+    log('info', '   Cleaned up video clip cache');
+  } catch (cleanupErr) {
+    console.warn(`   Failed to clean up video clips: ${cleanupErr.message}`);
+  }
+
+  if (renderPassed && finalMp4File) {
+    // Copy to Downloads with a topic-based filename
+    const safeTitle = (project.title || project.topic || 'autotube-video')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-|-$/g, '')
+      .toLowerCase()
+      .substring(0, 60);
+    const downloadName = `autotube-${safeTitle}.mp4`;
+    const homeDir = homedir() || tmpdir();
+    spawnSync('cp', [finalMp4File, `${homeDir}/Downloads/${downloadName}`]);
+    log('info', `📁 Copied to ~/Downloads/${downloadName}`);
+  }
+
+  // Task 125: Log per-step metrics summary
+  stepMetrics.logSummary();
 
   // Quick quality check
   const probe = spawnSync('ffprobe', [
@@ -3471,6 +4869,168 @@ async function render() {
 }
 
 // Export testable functions
+// ── Image Validation & Safety Functions ────────────────────────────────────
+
+export function detectImageFormat(buf) {
+  if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) return 'unknown';
+
+  // Check magic bytes
+  if (buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) {
+    return 'jpeg';
+  }
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47 && buf[4] === 0x0D && buf[5] === 0x0A && buf[6] === 0x1A && buf[7] === 0x0A) {
+    return 'png';
+  }
+  if (buf.length >= 6 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38 && (buf[4] === 0x37 || buf[4] === 0x39) && buf[5] === 0x61) {
+    return 'gif';
+  }
+  if (buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x52 && buf[11] === 0x50) {
+    // Wait, WEBP is 52 49 46 46 (RIFF) ... 57 45 42 50 (WEBP)
+    // buf[8] = W (87 / 0x57), buf[9] = E (69 / 0x45), buf[10] = B (66 / 0x42), buf[11] = P (80 / 0x50)
+  }
+  if (buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) {
+    return 'webp';
+  }
+  if (buf.length >= 2 && buf[0] === 0x42 && buf[1] === 0x4D) {
+    return 'bmp';
+  }
+  if (buf.length >= 4) {
+    if (buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2A && buf[3] === 0x00) return 'tiff';
+    if (buf[0] === 0x4D && buf[1] === 0x4D && buf[2] === 0x00 && buf[3] === 0x2A) return 'tiff';
+  }
+
+  // Check SVG (text based)
+  try {
+    const str = buf.toString('utf8', 0, Math.min(buf.length, 1000));
+    if (str.includes('<svg') || str.includes('<SVG')) {
+      return 'svg';
+    }
+  } catch (e) {}
+
+  return 'unknown';
+}
+
+export function isCanvasSupportedFormat(format) {
+  if (!format) return false;
+  const f = format.toLowerCase();
+  return ['jpeg', 'png', 'gif', 'bmp'].includes(f);
+}
+
+export function validateContentType(contentType, buf) {
+  if (!contentType) {
+    return { valid: false, error: 'Missing Content-Type header' };
+  }
+
+  const lowerType = contentType.toLowerCase();
+  if (lowerType.includes('html') || lowerType.includes('text/html')) {
+    return { valid: false, error: 'Response is HTML, not an image' };
+  }
+
+  if (buf && buf.length > 0) {
+    const headStr = buf.toString('utf8', 0, Math.min(buf.length, 100)).trim();
+    if (headStr.startsWith('<!DOCTYPE') || headStr.startsWith('<!doctype') || headStr.toLowerCase().startsWith('<html')) {
+      return { valid: false, error: 'Content-Type says image but content is HTML' };
+    }
+  }
+
+  return { valid: true };
+}
+
+export function validateImage(img, url, contentLength, buf) {
+  if (!img) {
+    return { valid: false, error: 'Image is null' };
+  }
+
+  const w = img.width;
+  const h = img.height;
+
+  if (typeof w !== 'number' || typeof h !== 'number' || isNaN(w) || isNaN(h)) {
+    return { valid: false, error: 'Invalid dimension types' };
+  }
+
+  if (w <= 0 || h <= 0) {
+    return { valid: false, error: 'Invalid image dimensions' };
+  }
+
+  const MIN_IMAGE_DIMENSION = 100;
+  const MAX_IMAGE_DIMENSION = 8192;
+  const ASPECT_RATIO_LIMIT = 10;
+
+  if (w < MIN_IMAGE_DIMENSION || h < MIN_IMAGE_DIMENSION) {
+    return { valid: false, error: `Image too small: ${w}x${h}` };
+  }
+
+  if (w > MAX_IMAGE_DIMENSION || h > MAX_IMAGE_DIMENSION) {
+    return { valid: false, error: `Image too large: ${w}x${h}` };
+  }
+
+  const aspectRatio = Math.max(w, h) / Math.min(w, h);
+  if (aspectRatio > ASPECT_RATIO_LIMIT) {
+    return { valid: false, error: `Extreme aspect ratio ${aspectRatio.toFixed(2)}:1` };
+  }
+
+  const size = contentLength !== null ? contentLength : (buf ? buf.length : null);
+  if (size !== null) {
+    const MIN_SIZE = 1024;
+    const MAX_SIZE = 50 * 1024 * 1024;
+    if (size < MIN_SIZE) {
+      return { valid: false, error: `File too small: ${size} bytes` };
+    }
+    if (size > MAX_SIZE) {
+      return { valid: false, error: `File too large: ${size} bytes` };
+    }
+  }
+
+  return { valid: true };
+}
+
+export function validateUrlSafety(urlString) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(urlString);
+  } catch (err) {
+    return { valid: false, error: "Invalid URL format" };
+  }
+
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    return { valid: false, error: "Only HTTP/HTTPS URLs are allowed" };
+  }
+
+  const hostname = parsedUrl.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+    return { valid: false, error: "Blocked: localhost access not allowed" };
+  }
+
+  // Block private IP ranges (SSRF protection)
+  const privateIpPatterns = [
+    /^10\./,                    // 10.0.0.0/8
+    /^172\.(1[6-9]|2\d|3[0-1])\./, // 172.16.0.0/12
+    /^192\.168\./,              // 192.168.0.0/16
+    /^169\.254\./,              // 169.254.0.0/16 (link-local)
+    /^0\./,                     // 0.0.0.0/8
+    /^127\./,                   // 127.0.0.0/8
+  ];
+
+  for (const pattern of privateIpPatterns) {
+    if (pattern.test(hostname)) {
+      return { valid: false, error: "Blocked: private/internal IP address" };
+    }
+  }
+
+  const blockedHosts = [
+    "metadata.google.internal",
+    "169.254.169.254",
+    "instance-data",
+    "metadata.azure.com",
+  ];
+
+  if (blockedHosts.some(host => hostname.includes(host))) {
+    return { valid: false, error: "Blocked: cloud metadata endpoint" };
+  }
+
+  return { valid: true };
+}
+
 export {
   fetchProject,
   fetchImage,

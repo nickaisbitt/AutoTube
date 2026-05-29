@@ -6,11 +6,26 @@
  */
 
 // Script generation
-export { generateAIScript, generateHookVariants, DEFAULT_SCRIPT_MODEL } from './scriptGenerator';
+export { generateAIScript, generateHookVariants, DEFAULT_SCRIPT_MODEL, validateScriptSpecificity, buildSpecificityFixPrompt } from './scriptGenerator';
 export type { HookVariant } from './scriptGenerator';
 
 // Script review
-export { reviewAndImproveScript } from './scriptReviewer';
+export { reviewAndImproveScript, refineScriptMultiPass } from './scriptReviewer';
+
+// Series metadata
+export { generateSeriesMetadata } from './seriesGenerator';
+
+// Pinned comment generation
+export { generatePinnedComments } from './pinnedComments';
+
+// Hashtag generation
+export { generateHashtags } from './hashtagGenerator';
+
+// Emotional arc mapping
+export { mapEmotionalArc } from './emotionalArc';
+
+// Story arc validation
+export { validateStoryArc } from './storyArcValidator';
 
 // Title generation
 export { generateVideoTitle } from './titleGenerator';

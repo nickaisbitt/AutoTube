@@ -9,7 +9,7 @@ import type { MediaCandidate } from './media';
 // ---------------------------------------------------------------------------
 
 export const DOMAIN_BLOCKLIST = new Map<string, string[]>([
-  ['propaganda', ['sputniknews', 'sputnikglobe', 'sputnik', 'presstv', 'cgtn', 'tass', 'xinhua', 'globalresearch']],
+  ['propaganda', ['sputniknews', 'sputnikglobe', 'presstv', 'cgtn', 'tass', 'xinhua', 'globalresearch', 'zerohedge', 'breitbart', 'infowars', 'newsmax', 'epochtimes', 'farsnews', 'alalam', 'almanar', 'cctv', 'informationclearinghouse', 'activistpost', 'beforeitsnews', 'naturalnews', 'prisonplanet']],
   ['watermarked-stock', ['shutterstock', 'gettyimages', 'istockphoto', '123rf', 'dreamstime', 'depositphotos', 'alamy']],
   ['low-quality', ['9gag', 'imgur', 'memegenerator', 'knowyourmeme', 'ifunny', 'cheezburger', 'buzzfeed']],
   ['adult-content', ['pornhub', 'xvideos', 'xhamster', 'redtube', 'youporn']],
@@ -49,6 +49,12 @@ export function isDomainBlocked(url: string): { blocked: boolean; pattern?: stri
   // (walmartimages.com, iheart.com, etc.). Check for exact match or subdomain.
   if (hostname === 'rt.com' || hostname.endsWith('.rt.com') || hostname === 'www.rt.com' || hostname.includes('mrtl.ru')) {
     return { blocked: true, pattern: 'rt.com', category: 'propaganda' };
+  }
+
+  // sputnik — exclude sputnikmusic.com to avoid false positives
+  if (hostname.includes('sputnik') && !hostname.includes('sputnikmusic')) {
+    const matchedPattern = ['sputniknews', 'sputnikglobe'].find(p => hostname.includes(p)) || 'sputnik';
+    return { blocked: true, pattern: matchedPattern, category: 'propaganda' };
   }
 
   for (const [category, patterns] of DOMAIN_BLOCKLIST) {

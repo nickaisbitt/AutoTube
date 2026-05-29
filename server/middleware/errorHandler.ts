@@ -1,10 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "http";
+import crypto from "crypto";
 
 /**
- * Global error handler — catches unhandled errors from route handlers
- * and returns a structured JSON response.
- *
- * Connect-style error middleware (4 arguments: err, req, res, next).
+ * Global error handler — catches unhandled errors from route handlers,
+ * assigns trace IDs, and prevents stack traces or internal messages from leaking in production.
  */
 export function errorHandler(
   err: Error & { statusCode?: number },
@@ -12,7 +11,14 @@ export function errorHandler(
   res: ServerResponse,
   _next: () => void,
 ): void {
-  console.error("[API Error]", err);
+  const requestId = crypto.randomUUID();
+  console.error(`[API Error] [Request ID: ${requestId}]`, err);
+
+  if (res.headersSent) {
+    // Response already started — cannot send structured error; just close the connection
+    res.end();
+    return;
+  }
 
   let statusCode = err.statusCode;
   if (!statusCode) {
@@ -30,5 +36,25 @@ export function errorHandler(
 
   res.statusCode = statusCode;
   res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify({ error: err.message || "Internal server error" }));
+  res.setHeader("X-Request-ID", requestId);
+
+  const isProduction = process.env.NODE_ENV === "production";
+
+  if (statusCode === 500) {
+    res.end(
+      JSON.stringify({
+        error: "Internal server error",
+        code: "INTERNAL_ERROR",
+        requestId,
+        ...(!isProduction && { details: err.message, stack: err.stack }),
+      }),
+    );
+  } else {
+    res.end(
+      JSON.stringify({
+        error: err.message || "Bad request",
+        requestId,
+      }),
+    );
+  }
 }

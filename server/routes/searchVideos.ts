@@ -10,12 +10,27 @@ export async function handleSearchVideos(
   res: ServerResponse,
 ): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
-  const query = url.searchParams.get("q");
+  const qParam = url.searchParams.get("q");
 
-  if (!query) {
+  if (!qParam) {
     res.statusCode = 400;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: 'Missing query parameter "q"' }));
+    return;
+  }
+
+  if (qParam.length > 200) {
+    res.statusCode = 400;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Query too long (maximum 200 characters)" }));
+    return;
+  }
+
+  const query = qParam.replace(/[^a-zA-Z0-9\s\-_."']/g, "").trim();
+  if (!query) {
+    res.statusCode = 400;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Query contains no valid search characters" }));
     return;
   }
 

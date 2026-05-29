@@ -1,6 +1,8 @@
 /**
  * Two-tier media cache: localStorage for persistent URL/vision data,
  * in-memory Map for session-scoped image data.
+ *
+ * Supports shared cache across batch renders via URL hashing.
  */
 
 export interface CacheEntry<T> {
@@ -8,17 +10,39 @@ export interface CacheEntry<T> {
   timestamp: number;
 }
 
-/** 24-hour TTL for all cache entries. */
-export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** 7-day TTL for all cache entries. */
+export const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type CacheTier = 'persistent' | 'memory';
+
+/**
+ * Generates a short hash for a URL to use as cache key.
+ * Prevents storing full URLs in localStorage keys.
+ */
+export function hashUrl(url: string): string {
+  let hash = 0;
+  for (let i = 0; i < url.length; i++) {
+    hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+/**
+ * Shared in-memory cache instance for batch media sourcing.
+ * Multiple video generation runs on similar topics share this cache.
+ */
+const sharedMemoryCache = new Map<string, CacheEntry<unknown>>();
+
+export function getSharedMemoryCache(): Map<string, CacheEntry<unknown>> {
+  return sharedMemoryCache;
+}
 
 export class MediaCache {
   private memoryCache: Map<string, CacheEntry<unknown>>;
   private readonly storagePrefix: string;
 
   constructor(storagePrefix = 'atube_cache_') {
-    this.memoryCache = new Map();
+    this.memoryCache = sharedMemoryCache;
     this.storagePrefix = storagePrefix;
   }
 
@@ -110,27 +134,27 @@ export class MediaCache {
   // ── Convenience methods ──────────────────────────────────────────────
 
   getCachedResolution(originalUrl: string): { resolvedUrl: string; width?: number; height?: number; changed: boolean } | null {
-    return this.get(`res:${originalUrl}`, 'persistent');
+    return this.get(`res:${hashUrl(originalUrl)}`, 'persistent');
   }
 
   setCachedResolution(originalUrl: string, result: { resolvedUrl: string; width?: number; height?: number; changed: boolean }): void {
-    this.set(`res:${originalUrl}`, result, 'persistent');
+    this.set(`res:${hashUrl(originalUrl)}`, result, 'persistent');
   }
 
   getCachedVisionResult(imageUrl: string): unknown | null {
-    return this.get(`vis:${imageUrl}`, 'persistent');
+    return this.get(`vis:${hashUrl(imageUrl)}`, 'persistent');
   }
 
   setCachedVisionResult(imageUrl: string, result: unknown): void {
-    this.set(`vis:${imageUrl}`, result, 'persistent');
+    this.set(`vis:${hashUrl(imageUrl)}`, result, 'persistent');
   }
 
   getCachedImageData(url: string): Blob | null {
-    return this.get<Blob>(`img:${url}`, 'memory');
+    return this.get<Blob>(`img:${hashUrl(url)}`, 'memory');
   }
 
   setCachedImageData(url: string, data: Blob): void {
-    this.set(`img:${url}`, data, 'memory');
+    this.set(`img:${hashUrl(url)}`, data, 'memory');
   }
 
   // ── Internal helpers ─────────────────────────────────────────────────

@@ -3,8 +3,8 @@
  *
  * Tests the background music fallback logic:
  * - Known styles resolve to their specific file when it exists
- * - Missing style-specific files fall back to ambient-bg.aac
- * - Unknown styles fall back to ambient-bg.aac
+ * - Missing style-specific files fall back to bg-neutral.aac
+ * - Unknown styles fall back to bg-neutral.aac
  * - null is returned when neither style-specific nor fallback file exists
  *
  * Validates: Requirements 8.1, 8.2
@@ -46,7 +46,7 @@ describe('resolveBackgroundMusicPath', () => {
 
   describe('known styles resolve to their specific file when it exists', () => {
     it('returns style-specific path for business_insider when file exists', () => {
-      const stylePath = join(PROJECT_ROOT, 'public', 'audio', 'bg-business-insider.aac');
+      const stylePath = join(PROJECT_ROOT, 'public', 'audio', 'bg-neutral.aac');
       mockExistsSync.mockImplementation((p: unknown) => String(p) === stylePath);
 
       const result = resolveBackgroundMusicPath('business_insider');
@@ -54,7 +54,7 @@ describe('resolveBackgroundMusicPath', () => {
     });
 
     it('returns style-specific path for warfront when file exists', () => {
-      const stylePath = join(PROJECT_ROOT, 'public', 'audio', 'bg-warfront.aac');
+      const stylePath = join(PROJECT_ROOT, 'public', 'audio', 'bg-tense.aac');
       mockExistsSync.mockImplementation((p: unknown) => String(p) === stylePath);
 
       const result = resolveBackgroundMusicPath('warfront');
@@ -62,7 +62,7 @@ describe('resolveBackgroundMusicPath', () => {
     });
 
     it('returns style-specific path for documentary when file exists', () => {
-      const stylePath = join(PROJECT_ROOT, 'public', 'audio', 'bg-documentary.aac');
+      const stylePath = join(PROJECT_ROOT, 'public', 'audio', 'bg-neutral.aac');
       mockExistsSync.mockImplementation((p: unknown) => String(p) === stylePath);
 
       const result = resolveBackgroundMusicPath('documentary');
@@ -70,7 +70,7 @@ describe('resolveBackgroundMusicPath', () => {
     });
 
     it('returns style-specific path for explainer when file exists', () => {
-      const stylePath = join(PROJECT_ROOT, 'public', 'audio', 'bg-explainer.aac');
+      const stylePath = join(PROJECT_ROOT, 'public', 'audio', 'bg-uplifting.aac');
       mockExistsSync.mockImplementation((p: unknown) => String(p) === stylePath);
 
       const result = resolveBackgroundMusicPath('explainer');
@@ -78,17 +78,17 @@ describe('resolveBackgroundMusicPath', () => {
     });
   });
 
-  describe('missing style-specific files fall back to ambient-bg.aac', () => {
-    it('falls back to ambient-bg.aac when business_insider file is missing', () => {
-      const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'ambient-bg.aac');
+  describe('missing style-specific files fall back to bg-neutral.aac', () => {
+    it('falls back to bg-neutral.aac when business_insider file is missing', () => {
+      const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'bg-neutral.aac');
       mockExistsSync.mockImplementation((p: unknown) => String(p) === fallbackPath);
 
       const result = resolveBackgroundMusicPath('business_insider');
       expect(result).toBe(fallbackPath);
     });
 
-    it('falls back to ambient-bg.aac when warfront file is missing', () => {
-      const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'ambient-bg.aac');
+    it('falls back to bg-neutral.aac when warfront file is missing', () => {
+      const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'bg-neutral.aac');
       mockExistsSync.mockImplementation((p: unknown) => String(p) === fallbackPath);
 
       const result = resolveBackgroundMusicPath('warfront');
@@ -96,17 +96,17 @@ describe('resolveBackgroundMusicPath', () => {
     });
   });
 
-  describe('unknown styles fall back to ambient-bg.aac', () => {
-    it('falls back to ambient-bg.aac for an unknown style', () => {
-      const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'ambient-bg.aac');
+  describe('unknown styles fall back to bg-neutral.aac', () => {
+    it('falls back to bg-neutral.aac for an unknown style', () => {
+      const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'bg-neutral.aac');
       mockExistsSync.mockImplementation((p: unknown) => String(p) === fallbackPath);
 
       const result = resolveBackgroundMusicPath('unknown_style');
       expect(result).toBe(fallbackPath);
     });
 
-    it('falls back to ambient-bg.aac for empty string style', () => {
-      const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'ambient-bg.aac');
+    it('falls back to bg-neutral.aac for empty string style', () => {
+      const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'bg-neutral.aac');
       mockExistsSync.mockImplementation((p: unknown) => String(p) === fallbackPath);
 
       const result = resolveBackgroundMusicPath('');

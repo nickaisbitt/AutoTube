@@ -102,6 +102,28 @@ function formatVTTTime(seconds: number): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}`;
 }
 
+// ---------------------------------------------------------------------------
+// Task 134: Caption package — produces both SRT and VTT from segments
+// ---------------------------------------------------------------------------
+
+interface CaptionPackage {
+  srt: string;
+  vtt: string;
+}
+
+/**
+ * Generates both SRT and VTT subtitle content from segments.
+ */
+export function generateCaptionPackage(
+  segments: Array<{ narration: string; duration: number }>,
+  startTimeOffset = 0,
+): CaptionPackage {
+  return {
+    srt: generateSRTSubtitles(segments, startTimeOffset),
+    vtt: generateVTTSubtitles(segments, startTimeOffset),
+  };
+}
+
 /**
  * Downloads subtitle content as a file.
  */

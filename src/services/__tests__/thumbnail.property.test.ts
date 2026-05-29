@@ -49,59 +49,6 @@ const wordStringArb: fc.Arbitrary<string> = fc.array(
   { minLength: 1, maxLength: 10 },
 ).map(words => words.join(' '));
 
-/** Arbitrary for RGBA pixel data representing a mostly-black image */
-function blackImageDataArb(pixelCount: number, blackPercentage: number): fc.Arbitrary<Uint8ClampedArray> {
-  return fc.nat({ max: 255 }).chain(() => {
-    const totalPixels = pixelCount;
-    const blackPixelCount = Math.ceil(totalPixels * blackPercentage);
-    const nonBlackPixelCount = totalPixels - blackPixelCount;
-
-    return fc.tuple(
-      // Near-black pixel values (R, G, B each within 0-10)
-      fc.array(
-        fc.tuple(
-          fc.integer({ min: 0, max: 10 }),
-          fc.integer({ min: 0, max: 10 }),
-          fc.integer({ min: 0, max: 10 }),
-        ),
-        { minLength: blackPixelCount, maxLength: blackPixelCount },
-      ),
-      // Non-black pixel values (at least one channel > 10)
-      fc.array(
-        fc.tuple(
-          fc.integer({ min: 11, max: 255 }),
-          fc.integer({ min: 0, max: 255 }),
-          fc.integer({ min: 0, max: 255 }),
-        ),
-        { minLength: nonBlackPixelCount, maxLength: nonBlackPixelCount },
-      ),
-    ).map(([blackPixels, nonBlackPixels]) => {
-      const data = new Uint8ClampedArray(totalPixels * 4);
-      let offset = 0;
-
-      // Write black pixels first
-      for (const [r, g, b] of blackPixels) {
-        data[offset] = r;
-        data[offset + 1] = g;
-        data[offset + 2] = b;
-        data[offset + 3] = 255; // alpha
-        offset += 4;
-      }
-
-      // Write non-black pixels
-      for (const [r, g, b] of nonBlackPixels) {
-        data[offset] = r;
-        data[offset + 1] = g;
-        data[offset + 2] = b;
-        data[offset + 3] = 255; // alpha
-        offset += 4;
-      }
-
-      return data;
-    });
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Property 8: Thumbnail background asset selection
 // ---------------------------------------------------------------------------
@@ -210,30 +157,28 @@ describe('Feature: blind-review-quality-fixes, Property 9: Thumbnail text word c
     );
   });
 
-  it('returns 2-5 words for empty string input', () => {
+  it('returns 2-4 words for empty string input', () => {
     const result = validateThumbnailText('');
     const wordCount = result.trim().split(/\s+/).length;
 
     expect(wordCount).toBeGreaterThanOrEqual(2);
-    expect(wordCount).toBeLessThanOrEqual(5);
+    expect(wordCount).toBeLessThanOrEqual(4);
   });
 
-  it('preserves text unchanged when already 2-5 words', () => {
+  it('preserves text unchanged when already 2-4 words', () => {
     fc.assert(
       fc.property(
         fc.array(
           fc.stringMatching(/^[a-zA-Z]{2,8}$/),
-          { minLength: 2, maxLength: 5 },
+          { minLength: 2, maxLength: 4 },
         ),
         (words) => {
           const input = words.join(' ');
           const result = validateThumbnailText(input);
           const resultWordCount = result.trim().split(/\s+/).length;
 
-          // Should still be within 2-5 words
           expect(resultWordCount).toBeGreaterThanOrEqual(2);
-          expect(resultWordCount).toBeLessThanOrEqual(5);
-          // Should preserve the original text
+          expect(resultWordCount).toBeLessThanOrEqual(4);
           expect(result).toBe(input);
         },
       ),
@@ -241,21 +186,20 @@ describe('Feature: blind-review-quality-fixes, Property 9: Thumbnail text word c
     );
   });
 
-  it('truncates text longer than 5 words to exactly 5 words', () => {
+  it('truncates text longer than 4 words to exactly 4 words', () => {
     fc.assert(
       fc.property(
         fc.array(
           fc.stringMatching(/^[a-zA-Z]{2,8}$/),
-          { minLength: 6, maxLength: 10 },
+          { minLength: 5, maxLength: 10 },
         ),
         (words) => {
           const input = words.join(' ');
           const result = validateThumbnailText(input);
           const resultWordCount = result.trim().split(/\s+/).length;
 
-          expect(resultWordCount).toBe(5);
-          // The result should be the first 5 words
-          expect(result).toBe(words.slice(0, 5).join(' '));
+          expect(resultWordCount).toBe(4);
+          expect(result).toBe(words.slice(0, 4).join(' '));
         },
       ),
       { numRuns: 30 },

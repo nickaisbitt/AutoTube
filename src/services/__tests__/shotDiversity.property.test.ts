@@ -12,7 +12,6 @@ import fc from 'fast-check';
 import {
   checkShotTypeDominance,
   enforceWindowDiversity,
-  classifyShotType,
   type StoryboardSegmentBlock,
   type StoryboardFrame,
   type ShotTypeCategory,
@@ -41,6 +40,7 @@ const VISUAL_CUE_MAP: Record<ShotTypeCategory, string[]> = {
   'map': ['map geographic', 'globe infrastructure', 'strategic map'],
   'typography': ['typography title card', 'text headline overlay', 'lower third text'],
   'wide': ['wide aerial panorama', 'establishing landscape', 'wide shot'],
+  'unknown': ['unknown shot description', 'generic visual'],
 };
 
 /** Build a visual cue string that classifies to the given shot type */

@@ -65,10 +65,6 @@ describe('Property 9: Retention Beats Cover Every 25-Second Window', () => {
           // Skip windows that are very short (less than 1 second remaining)
           if (windowEnd - windowStart < 1) continue;
 
-          const hasBeatInWindow = beatTimes.some(
-            (t) => t >= windowStart && t < windowEnd,
-          );
-
           // The first 25 seconds may not need a beat if the total is short,
           // but since total > 30s and segments have no hooks, the algorithm
           // should insert beats to cover gaps > 25s from lastBeatTime (which starts at 0).

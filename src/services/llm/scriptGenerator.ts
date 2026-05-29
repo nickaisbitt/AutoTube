@@ -23,7 +23,7 @@ export async function generateAIScript(
   model = DEFAULT_SCRIPT_MODEL,
   signal?: AbortSignal,
 ): Promise<ScriptSegment[]> {
-  const totalSegments = Math.max(6, Math.min(8, config.targetDuration * 2));
+  const totalSegments = Math.max(12, Math.min(15, Math.round(config.targetDuration * 2.5)));
   const needsTransition = totalSegments > 4;
   const tone = config.tone || 'informative';
 
@@ -64,11 +64,12 @@ ${toneRules}
 
 DEPTH PER SEGMENT (CRITICAL):
 Each segment narration MUST be 5-8 sentences long. No 2-3 sentence segments. Every segment must contain:
-- At least TWO concrete details with numbers (dollar amounts, percentages, dates, quantities, or named entities)
+- At least 3 specific statistics with hard numbers — dates, dollar amounts, percentages, quantities, growth rates. Not "a lot of money" but "$4.5 billion in 2024". Not "recently" but "as of March 2025". Every number needs a date and a source.
+- At least 2 named entities — real companies (Nvidia, OpenAI, Tesla), real people (Jensen Huang, Satya Nadella, Sam Altman), real places (California, Shenzhen, Wall Street), or real products (ChatGPT, H100, Cybertruck). No "a major company" or "one executive" — name names.
 - At least one sentence of analysis or opinion (why this matters)
 - At least one forward-looking or connecting statement
 If a segment feels thin, add context, consequences, or competitive dynamics — never pad with filler.
-NEVER write a segment without at least 2 specific numbers or quantifiable claims. If you can't find real numbers, use estimates with attribution ("roughly", "approximately", "estimates suggest").
+Write each segment as a MINI-STORY with a narrative arc: set the scene, introduce the tension, deliver the payoff. A segment should not read like a Wikipedia summary — it should feel like a scene in a documentary: specific, vivid, and purposeful.
 
 NO REPETITION RULE:
 NEVER repeat the same phrase, sentence, or key descriptor across segments. Each segment must introduce NEW information, a NEW angle, or a NEW consequence. If you used "worth $X billion" in segment 1, do NOT use that same figure again. If you described something as "unprecedented" once, find a different word next time. Scan your full output before finalizing — if any phrase appears verbatim in two segments, rewrite one.
@@ -77,7 +78,8 @@ COMPETITIVE CONTEXT RULE:
 When discussing a company, technology, or product, you MUST mention at least one competitor, alternative, or market rival for balanced analysis. Examples: discussing Nvidia → mention AMD, Intel, Google TPUs. Discussing OpenAI → mention Anthropic, Google DeepMind, Meta AI. Discussing Tesla → mention BYD, Rivian, legacy automakers. This gives the viewer market context and shows you understand the landscape.
 
 SOURCE ATTRIBUTION RULE:
-When citing numbers, dollar amounts, percentages, or factual claims, include attribution phrases like "according to...", "reports indicate...", "data from X shows...", "leaked documents reveal...", "SEC filings show...". NEVER state a specific statistic as a bare unattributed fact. The viewer needs to know WHERE the information comes from to trust it.
+When citing numbers, dollar amounts, percentages, or factual claims, you MUST include clear attribution phrases in the narration text. Use explicit formats that are easy to parse, such as: "according to [Source]", "data from [Source] shows", "reports from [Source] indicate", "SEC filings from [Source] reveal", "telemetry from [Source] confirms", or "as noted by [Source]". NEVER state a specific statistic as a bare unattributed fact. The viewer needs to know WHERE the information comes from to trust it.
+
 
 PACING RULES:
 - Start with the CONSEQUENCE, then reveal the cause. Don't open with backstory — open with the payoff, then explain how we got there.
@@ -94,12 +96,6 @@ Address the viewer directly using "you", "your", or "you're" at least 3 times ac
 
 CRITICAL STRUCTURE RULE:
 Do NOT survey the topic broadly with many equal examples. Pick ONE central story, case, or example as your anchor. Build the ENTIRE video around proving that one thing. Other examples are brief supporting evidence only (1-2 sentences max each).
-
-MANDATORY THESIS RULE (CRITICAL):
-Every script MUST have a single, clear THESIS — a central claim that the entire video argues FOR or AGAINST. The thesis must be debatable, not a bland summary. Examples of good theses: "SpaceX's 2026 Mars timeline is unrealistic because...", "This company is secretly losing the AI race", "The cybersecurity industry is selling you false comfort." The thesis should be implied or stated in the intro and proven by the outro. NEVER produce a script that neutrally summarizes a topic without taking a position.
-
-CONTRARIAN ANGLE RULE:
-The intro must present a TENSION or COUNTERINTUITIVE CLAIM — something the viewer didn't expect or already believe the opposite of. Don't open with what everyone already knows. Open with what they DON'T know, or what they think is true but ISN'T. Examples: "Everyone thinks X is safe. It's not." "The experts said Y would never happen. It just did." "This looks like good news. It's actually terrifying."
 
 STAKES ESCALATION RULE:
 Each segment MUST feel heavier and more urgent than the last. Escalate the stakes like a thriller — start with curiosity, build to concern, arrive at alarm. Use explicit bridge lines between segments to signal escalation:
@@ -152,7 +148,6 @@ ENDING AND CTA RULES (CRITICAL):
 - The next-video teaser must feel like an IRRESISTIBLE CONTINUATION, not a generic "stay tuned." Connect it to an unanswered thread from this video — a question raised but not resolved, a bigger player hinted at, or a consequence that deserves its own deep dive. The viewer should feel they're missing out if they don't watch the next one.
 - The ending must feel EMPOWERING, not only alarming — the viewer should leave feeling informed AND capable. Balance the fear with a clear survival path. They should feel: "This is serious, but I know what to do."
 - NEVER end on pure fear without action. Every alarming conclusion must be followed by a concrete survival path — specific, actionable, achievable steps that make the viewer feel in control. Fear without agency causes click-away, not click-through.
-- BANNED ENDING PHRASES: "the question is not if, but when", "the possibilities are endless", "only time will tell", "the future is bright", "this is just the beginning", "stay tuned for more", "thanks for watching", "like and subscribe". These are stock AI closers — they sound robotic and lazy. End with a SPECIFIC, SURPRISING, or ACTIONABLE line instead.
 
 AUDIENCE ADAPTATION (CRITICAL):
 - Use SIMPLE language throughout — no jargon, no acronyms without immediate plain-English explanation.
@@ -164,6 +159,26 @@ AUDIENCE ADAPTATION (CRITICAL):
 - Ensure viewers feel concerned but NOT helpless — every fear beat must be followed by a survival path within 2 segments.
 - Provide a clear survival path alongside fear to maintain shareability and satisfaction.
 - The viewer should leave thinking "this is serious AND I know what to do" — never pure dread without agency.
+
+PAYOFF LADDER RULE (CRITICAL):
+Each segment MUST follow a mini-arc of setup → conflict → payoff. Within every segment:
+- SETUP (1-2 sentences): Establish context, introduce the subject, or set the scene.
+- CONFLICT (2-4 sentences): Present the problem, tension, contradiction, or complication. This is where the viewer leans in.
+- PAYOFF (1-2 sentences): Deliver the resolution, insight, or consequence that makes the setup and conflict worth it.
+Never end a segment without a payoff — the viewer must feel they earned something by watching that segment. The payoff of one segment often becomes the setup for the next.
+
+COUNTER-INTUITIVE HOOK RULE:
+Open the intro with a counter-intuitive claim or common misconception. Challenge what the viewer already believes: "Everyone thinks X, but actually Y." Start with a statement that contradicts conventional wisdom to immediately grab attention and create cognitive dissonance the viewer must resolve.
+
+DATA VISUALIZATION PROMPT RULE:
+When a segment contains statistical data, percentages, dollar amounts, or quantitative comparisons, you MUST include a visualNote that describes a specific chart or graph that would visualize this data. Examples: "Animated bar chart comparing market share: Nvidia 80%, AMD 15%, Intel 5%", "Line graph showing ransomware attacks climbing from $11B in 2020 to $20B in 2025", "Pie chart of breach causes: phishing 35%, credentials 25%, vulnerabilities 20%, other 20%". The visualNote for stat segments MUST name the chart type, the data points, and the labels — not just "data visualization" or "statistics on screen".
+
+QUOTE ATTRIBUTION RULE:
+When including a quote from any source, ALWAYS format it with proper attribution using one of these patterns:
+- "According to [Name], [quote]" — e.g., "According to Jensen Huang, 'AI is the new electricity.'"
+- "[Name], [title] at [Organization], [quote]" — e.g., "Satya Nadella, CEO at Microsoft, said '[quote]'"
+- "[Name] ([Title], [Organization]) warned that [paraphrased quote]" — for paraphrased attributions.
+NEVER present a quote without identifying who said it and their role/organization.
 
 HUMAN STORY COLD OPEN RULE:
 The first two segments (intro + first section) MUST lead with a named person's story or a real human example. Do NOT open with abstract analysis, statistics without a face, or broad industry trends. Start with a PERSON — their name, what happened to them, why it matters. The viewer needs someone to root for (or against) before you zoom out to the bigger picture.
@@ -183,6 +198,16 @@ On-screen text in the intro MUST reinforce the spoken hook so the video works wi
 
 HOOK-FIRST INTRO (CRITICAL):
 The first segment (type "intro") MUST open with a specific, attention-grabbing claim, statistic, or question derived from the TOPIC CONTEXT DATA provided below — NOT a generic introduction like "Welcome to", "In this video", "Today we're looking at", or "Let's talk about". Pull a real number, date, event, or consequence from the provided context data and lead with it. If no context data is available, use the topic name itself with style-appropriate dramatic framing — but NEVER fabricate a specific statistic.
+The very first sentence of the entire script is your HOOK — it must grab attention immediately. A good hook is a specific, surprising, or counter-intuitive statement that makes the viewer think "I need to hear the rest of this." Bad hooks: generic welcomes, questions the viewer can answer with "no", or vague teases. Good hooks: "In 2024, Nvidia made more profit than the entire US postal service." or "By the time you finish this sentence, hackers will have attempted 300 new attacks."
+
+FIRST 15 SECONDS RULE (Task 135):
+Deliver substantive value within the first 15 seconds. Open with the most compelling fact, number, or consequence — not context or backstory. The viewer must feel they've already learned something valuable by the 15-second mark.
+
+SESSION HOOKS (Task 136):
+The outro MUST include a teaser for the next video or playlist. Connect it to an unanswered thread from this video — a question raised but not resolved, a bigger player hinted at, or a consequence that deserves its own deep dive. The viewer should feel they're missing out if they don't watch the next one.
+
+SHAREABLE MOMENTS (Task 137):
+Include at least one shareable moment — a quotable line or surprising fact that viewers will want to screenshot and share. Place it in a segment where it has maximum narrative impact. The quotable line must be self-contained and make sense without context.
 
 DATA-DRIVEN CONTENT (CRITICAL):
 At least ONE segment MUST contain a specific numeric data point — a dollar amount, percentage, date, or quantity — sourced from the TOPIC CONTEXT DATA below. When citing this data, attribute it: "according to...", "reports indicate...", "data shows...", "Wikipedia notes...". Do NOT state numbers as bare unattributed facts.
@@ -243,6 +268,37 @@ Target Duration: ${config.targetDuration} minutes`;
     fetchTopicContext(safeTopic),
   ]);
 
+  // Task 144: SEO keyword research — search YouTube for topic, extract keywords from top results
+  let seoKeywordsBlock = '';
+  try {
+    const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(safeTopic)}`;
+    const ytRes = await fetchWithTimeout(ytSearchUrl, { method: 'GET' }, { timeoutMs: 8000, maxRetries: 1 });
+    if (ytRes.ok) {
+      const html = await ytRes.text();
+      // Extract keywords from video titles in search results
+      const titleMatches = html.match(/"title":\s*\{"runs":\s*\[\{"text":\s*"([^"]+)"/g) || [];
+      const extractedWords = new Map<string, number>();
+      for (const match of titleMatches.slice(0, 10)) {
+        const text = match.replace(/.*"text":\s*"/, '').replace(/"$/, '');
+        const words = text.split(/\s+/).filter(w => w.length > 3 && !/^(https?|www|com|http)/i.test(w));
+        for (const w of words) {
+          const lower = w.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (lower.length > 3) extractedWords.set(lower, (extractedWords.get(lower) || 0) + 1);
+        }
+      }
+      // Sort by frequency and take top keywords
+      const sorted = [...extractedWords.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+      if (sorted.length > 0) {
+        seoKeywordsBlock = `\n=== SEO KEYWORDS (from YouTube search results for "${safeTopic}") ===\n`;
+        seoKeywordsBlock += `Top keywords: ${sorted.map(([w]) => w).join(', ')}\n`;
+        seoKeywordsBlock += `Weave these naturally into the script.\n`;
+        seoKeywordsBlock += `=== END SEO KEYWORDS ===\n`;
+      }
+    }
+  } catch {
+    // SEO keyword extraction is best-effort — continue without it
+  }
+
   // Build the topic context data block for the LLM
   const hasExtract = wikiCtx.extract.length > 0;
   const hasDescription = wikiCtx.description.length > 0;
@@ -257,7 +313,7 @@ Target Duration: ${config.targetDuration} minutes`;
   }
 
   const userPrompt = `Write a ${config.targetDuration}-minute video script about: "${safeTopic}"
-${topicDataBlock}${webContext}
+${topicDataBlock}${seoKeywordsBlock}${webContext}
 CRITICAL RULES:
 1. HOOK-FIRST: The intro MUST open with a specific claim, statistic, or consequence derived from the TOPIC CONTEXT DATA above — NOT "Welcome to", "In this video", or any generic opener. If context data is available, pull a real number or fact from it and attribute it. If no context data is available, use dramatic framing around the topic name without fabricating statistics.
 2. Pick ONE central story/example and build the whole video around it. Don't list 5+ equal examples.
@@ -268,7 +324,8 @@ CRITICAL RULES:
 7. NARRATIVE CALLBACK: The outro MUST reference the hook from segment 1. Echo the opening claim and show how the video deepened the viewer's understanding. The conclusion should feel like the payoff of the opening.
 8. DEPTH: Each segment MUST be at least 5 sentences. No thin 2-3 sentence segments. Every segment introduces new information — never repeat a phrase or key fact from another segment.
 9. COMPETITIVE CONTEXT: When discussing a company or technology, mention at least one competitor or alternative. Nvidia → AMD/Intel/Google TPUs. Tesla → BYD/Rivian. OpenAI → Anthropic/Google. This shows market awareness.
-10. SOURCE ATTRIBUTION: When citing numbers or claims, use "according to...", "reports indicate...", "data from X shows..." — never state specific statistics as bare unattributed facts.
+10. SOURCE ATTRIBUTION: When citing numbers or claims, you MUST use clear, parseable attribution phrases, such as: "according to [Source]", "data from [Source] shows", "reports from [Source] indicate", "SEC filings from [Source] reveal", "telemetry from [Source] confirms", or "as noted by [Source]". Never state specific statistics as bare unattributed facts.
+
 11. NO REPETITION: Never repeat the same phrase, sentence, or key descriptor across segments. Each segment must introduce NEW information. Scan your output — if any phrase appears verbatim in two segments, rewrite one.${needsTransition ? `
 12. TRANSITION: Include at least one segment with type "transition" that bridges two thematic sections with a forward-looking statement.` : ''}
 13. Your PREDICTION must be bold, specific, AND backed by 2-3 concrete data points or trends. Not just "within five years" — say WHY with evidence.
@@ -281,8 +338,20 @@ CRITICAL RULES:
 20. Every technical term, acronym, or jargon MUST be followed immediately by a vivid metaphor or analogy — not just a parenthetical definition.
 21. NO "Part X of Y", "Section X", or "Segment X" labels in narration text. Use the "chapterLabel" field for on-screen chapter markers instead.
 22. BANNED: "imagine", "what if", "all eyes on", "game changer", "critical moment", "time will tell", "remains to be seen", "no seriously", "at best", "basically", "let me know your thoughts", "let's be serious", "thanks for watching", "find out what happens next", "stay tuned", "more videos coming soon", "Welcome to", "In this video"
+
+TRIMMING PASS RULE (CRITICAL):
+After writing each segment, mentally review every sentence. Remove any sentence that does not advance the story. Ask for each sentence: Does it (a) advance the argument, (b) provide a concrete detail, (c) create emotional impact, (d) re-hook the viewer, or (e) give practical value? If NONE of these, DELETE it. Every sentence must earn its place. Density equals retention — no filler, no throat-clearing, no throat-clearing transitions like "Let's think about that" or "It's worth noting."
 23. Each segment MUST be 15-25 seconds. If your narration is longer than 25 seconds of spoken content, split it into two segments or cut it down.
 24. Write for the target audience: ${config.audience || 'general viewers'}. Adjust vocabulary, examples, and depth accordingly.
+25. KEYWORD MENTION: The primary topic keyword (e.g. the core subject of the video) MUST appear naturally within the first 2-3 sentences of the intro segment. This ensures the topic is established immediately for both viewers and algorithm indexing. Do NOT force it awkwardly — weave it into the hook naturally.
+
+26. SPECIFICITY: Every segment MUST contain at least 2 specific statistics with numbers (dates, dollar amounts, percentages, quantities) AND at least 2 named entities (real companies, people, places by name). No segment should be purely qualitative — concrete data and named entities create credibility and retention. If a segment lacks these, ADD specific data points with attribution.
+
+27. MINI-STORY FORMAT: Each segment must read like a mini-story with a narrative arc — setup, tension, payoff. Not a Wikipedia summary. Not a list of facts. Each segment should feel like a scene in a documentary: specific, vivid, and purposeful. The viewer should feel they learned a complete mini-story in each segment, not a collection of disconnected facts.
+
+28. HOOK REQUIREMENT: The first sentence of the intro MUST be a specific attention-grabbing hook — a surprising statistic, a counter-intuitive claim, or a concrete consequence. It MUST NOT be a generic welcome, a rhetorical question, or a vague teaser. The hook must be immediately understandable and make the viewer NEED to continue watching.
+
+SEO KEYWORD INJECTION (Task 144): The TOPIC CONTEXT DATA above contains keywords extracted from top YouTube search results for this topic. Weave these keywords naturally into the narration text throughout the script — at least 3 distinct keywords from the list must appear across different segments. Use them as you would naturally discuss the topic; do not force or repeat them awkwardly. These keywords improve discoverability by aligning with what viewers actually search for.
 
 Total segments: ${totalSegments}`;
 
@@ -336,6 +405,45 @@ Total segments: ${totalSegments}`;
     let segments = parseSegmentsFromContent(rawContent);
     // Safety net: inject a transition segment if the LLM forgot one (Requirement 1.2)
     segments = injectTransitionIfMissing(segments);
+
+    // Post-generation specificity validation — retry if too generic
+    const specificityIssues = validateScriptSpecificity(segments);
+    if (specificityIssues.length > 0 && !signal?.aborted) {
+      logger.warn('OpenRouter', `Specificity check: ${specificityIssues.length} issue(s) found. Retrying with specificity instructions.`);
+      const fixPrompt = buildSpecificityFixPrompt(segments, safeTopic, specificityIssues);
+      try {
+        const retryResponse = await fetchWithTimeout(OPENROUTER_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://autotube.video',
+            'X-Title': 'AutoTube AI Generator',
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: finalSystemPrompt },
+              { role: 'user', content: fixPrompt },
+            ],
+            response_format: { type: 'json_object' },
+          }),
+        }, { timeoutMs: 30_000, maxRetries: 1, signal });
+        if (retryResponse.ok) {
+          const retryData = await retryResponse.json();
+          const retryContent: unknown = retryData?.choices?.[0]?.message?.content;
+          if (typeof retryContent === 'string' && retryContent.trim()) {
+            const retrySegments = parseSegmentsFromContent(retryContent);
+            segments = injectTransitionIfMissing(retrySegments);
+            logger.success('OpenRouter', 'Specificity retry produced improved segments');
+          }
+        }
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') throw err;
+        logger.warn('OpenRouter', 'Specificity retry failed, keeping original segments');
+      }
+    }
+
     // Enforce duration cap — LLM sometimes ignores the 25s constraint
     for (const seg of segments) {
       if (seg.duration > 25) seg.duration = 25;
@@ -384,7 +492,7 @@ export interface HookVariant {
  */
 export function generateHookVariants(
   topic: string,
-  style: string,
+  _style: string,
   audience: string,
 ): HookVariant[] {
   const safeTopic = sanitiseTopic(topic);
@@ -520,4 +628,75 @@ AUDIENCE-SPECIFIC ADAPTATION — CONSUMERS:
 - Connect larger threats to daily life: "when a hospital gets hacked, YOUR medical records end up for sale on the dark web."
 - Balance fear with agency: after every scary example, immediately show what they can do TODAY to protect themselves.
 - Avoid ALL jargon — no "vectors," "exploits," "zero-days," "lateral movement." Use plain English: "hackers get in through," "they spread to other devices," "a flaw nobody knew about."`;
+}
+
+// ---------------------------------------------------------------------------
+// Post-generation specificity validation + retry
+// ---------------------------------------------------------------------------
+
+interface SpecificityIssue {
+  segmentIndex: number;
+  issue: 'no_numbers' | 'no_named_entities' | 'generic_hook';
+}
+
+/**
+ * Validates that generated segments meet minimum specificity requirements.
+ * Returns a list of issues found. Skips validation for very short content
+ * (under 30 total chars of narration) to avoid false positives on test data.
+ */
+export function validateScriptSpecificity(segments: ScriptSegment[]): SpecificityIssue[] {
+  const issues: SpecificityIssue[] = [];
+  const totalNarrationLen = segments.reduce((sum, s) => sum + s.narration.length, 0);
+  if (totalNarrationLen < 30) return issues;
+
+  const numberRegex = /\$\d[\d,.]*(?:\s*(?:billion|million|trillion|thousand))?|\d+(?:\.\d+)?%|\b(?:19|20)\d{2}\b|\d[\d,]*\s*(?:billion|million|trillion|thousand)/i;
+  const entityRegex = /[A-Z][a-z]+\s+[A-Z][a-z]+/;
+  const acronymRegex = /\b[A-Z]{2,}\b/;
+
+  const segmentsWithIssues: number[] = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const hasNumber = numberRegex.test(seg.narration);
+    const hasEntity = entityRegex.test(seg.narration);
+    const hasAcronym = acronymRegex.test(seg.narration);
+
+    if (!hasNumber && !hasEntity && !hasAcronym) {
+      segmentsWithIssues.push(i);
+      issues.push({ segmentIndex: i, issue: 'no_specificity' });
+    }
+  }
+
+  const firstNarration = (segments[0]?.narration || '').toLowerCase();
+  const genericOpeners = ['welcome to', 'in this video', 'today we', "let's talk about", "let us talk about", 'we\'re looking at', 'we are looking at'];
+  if (genericOpeners.some(o => firstNarration.startsWith(o))) {
+    issues.push({ segmentIndex: 0, issue: 'generic_hook' });
+  }
+
+  return issues;
+}
+
+/**
+ * Builds a fix prompt for the LLM retry when specificity validation fails.
+ * Lists each issue found and instructs the LLM to add specific data and examples.
+ */
+export function buildSpecificityFixPrompt(
+  segments: ScriptSegment[],
+  topic: string,
+  issues: SpecificityIssue[],
+): string {
+  const issueDescriptions = issues.map(issue => {
+    const seg = segments[issue.segmentIndex];
+    const segLabel = `Segment ${issue.segmentIndex + 1} (${seg.type}, "${seg.title}")`;
+    switch (issue.issue) {
+      case 'no_numbers':
+        return `${segLabel}: Lacks specific statistics with numbers. Add dates, dollar amounts, percentages, or quantities.`;
+      case 'no_named_entities':
+        return `${segLabel}: Lacks named entities. Mention real companies, people, or places by name. No "a major company" — name names like Nvidia, OpenAI, Jensen Huang, etc.`;
+      case 'generic_hook':
+        return `${segLabel}: The first sentence opens with a generic phrase. Replace it with a specific, attention-grabbing claim or statistic.`;
+    }
+  }).join('\n');
+
+  return `The following script about "${topic}" has specificity issues that must be fixed:\n\n${JSON.stringify(segments.map(s => ({ type: s.type, title: s.title, narration: s.narration, visualNote: s.visualNote, duration: s.duration })))}\n\nISSUES TO FIX:\n${issueDescriptions}\n\nCRITICAL FIX INSTRUCTIONS:\n- Add specific data and examples, make it less generic\n- Every segment MUST contain at least 2 specific statistics with numbers (dates, dollar amounts, percentages)\n- Every segment MUST mention at least 2 named entities (real companies, people, places)\n- The first segment MUST open with a hook — a specific attention-grabbing claim, not a generic welcome\n- Each segment should feel like a mini-story with setup, conflict, and payoff, not a Wikipedia summary\n\nReturn ONLY a valid JSON array of the fixed segments. No markdown, no preamble.`;
 }

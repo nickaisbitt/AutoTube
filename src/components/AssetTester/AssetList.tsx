@@ -154,7 +154,7 @@ export default function AssetList({
                 <td className="px-2 py-1.5">
                   <div className="h-8 w-12 bg-surface-800 overflow-hidden">
                     {c.type === 'image' && (
-                      <img src={c.thumbnailUrl || c.url} alt={c.title || "Asset thumbnail"} className="h-full w-full object-cover" loading="lazy" />
+                      <img src={c.thumbnailUrl || c.url} alt={c.alt || "Asset thumbnail"} className="h-full w-full object-cover" loading="lazy" />
                     )}
                   </div>
                 </td>

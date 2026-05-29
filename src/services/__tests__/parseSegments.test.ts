@@ -1,7 +1,7 @@
 // Feature: codebase-robustness-audit, Property 16: parseSegmentsFromContent handles multiple formats
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { parseSegmentsFromContent, validateSegment, stripPartLabels } from '../llm/index';
+import { parseSegmentsFromContent, stripPartLabels } from '../llm/index';
 import type { ScriptSegment } from '../../types';
 
 /**

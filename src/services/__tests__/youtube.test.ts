@@ -46,6 +46,7 @@ function makeProject(overrides: Partial<VideoProject> = {}): VideoProject {
     narration: [],
     status: 'complete',
     createdAt: new Date(),
+    version: 1,
     ...overrides,
   };
 }

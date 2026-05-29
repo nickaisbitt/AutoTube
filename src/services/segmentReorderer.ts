@@ -33,7 +33,7 @@ import { CHART_KEYWORDS } from './captionUtils';
  */
 export function reorderForHook(project: VideoProject): VideoProject {
   // ── Step 1: O(n) pass to find the best chart asset ──────────────────────
-  let bestChartAsset = project.media[0] !== undefined ? undefined : undefined;
+  let bestChartAsset: VideoProject['media'][number] | undefined = undefined;
   let bestScore = -Infinity;
 
   for (const asset of project.media) {

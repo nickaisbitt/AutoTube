@@ -11,7 +11,26 @@ import type { TopicConfig, ScriptSegment } from '../../types';
 vi.mock('../../services/llm', () => ({
   generateAIScript: vi.fn(),
   reviewAndImproveScript: vi.fn((segs: unknown) => Promise.resolve(segs)),
+  refineScriptMultiPass: vi.fn((segs: unknown) => Promise.resolve(segs)),
   generateVideoTitle: vi.fn(() => Promise.resolve('Test Title')),
+  generateSeriesMetadata: vi.fn(),
+  generatePinnedComments: vi.fn(),
+  generateHashtags: vi.fn(),
+  mapEmotionalArc: vi.fn(() => [{ emotion: 'curiosity', segmentIndex: 0, intensity: 0.5 }]),
+  validateStoryArc: vi.fn(() => ({ passed: true, score: 100, issues: [] })),
+}));
+
+vi.mock('../../services/llm/titleGenerator', () => ({
+  generateTitleVariants: vi.fn(() => Promise.resolve({
+    direct: 'Direct Title',
+    curiosityGap: 'Curiosity Gap Title',
+    emotionalUrgent: 'Emotional Urgent Title',
+  })),
+}));
+
+vi.mock('../../services/renderingShared', () => ({
+  assignSceneLayouts: vi.fn((segs: unknown[]) => (segs as unknown[]).map(() => 'centered-text')),
+  scheduleRetentionBeats: vi.fn(() => []),
 }));
 
 vi.mock('../../services/tts', () => ({
@@ -77,6 +96,11 @@ vi.mock('../../services/projectMigrations', () => ({
 
 vi.mock('../../services/tts/grokEngine', () => ({
   generateGrokTts: vi.fn(),
+}));
+
+vi.mock('../../services/tts', () => ({
+  generateGrokTts: vi.fn(),
+  generateMeloTts: vi.fn(),
 }));
 
 vi.mock('../../services/blindReview', () => ({
@@ -154,8 +178,6 @@ describe('Abort signal propagation through the store', () => {
   // ── Requirement 2.4: Cancelling during script generation aborts the fetch ──
 
   it('cancelling during script generation aborts the fetch via AbortSignal', async () => {
-    const segments = makeSegments();
-
     // Make generateAIScript hang until the signal is aborted
     generateAIScript.mockImplementation(
       (_config: TopicConfig, _key: string, _model: unknown, signal?: AbortSignal) => {
@@ -247,7 +269,7 @@ describe('Abort signal propagation through the store', () => {
       (...args: unknown[]) => {
         const signal = args[6] as AbortSignal | undefined;
         capturedSignal = signal;
-        return new Promise((resolve, reject) => {
+        return new Promise((_resolve, reject) => {
           if (signal?.aborted) {
             reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
             return;
@@ -376,8 +398,6 @@ describe('Abort signal propagation through the store', () => {
   // ── Requirement 2.6: Step status resets to 'active' after cancel ──
 
   it('cancelCurrentOperation resets step status to active and clears progress', async () => {
-    const segments = makeSegments();
-
     // Make generateAIScript hang
     generateAIScript.mockImplementation(
       (_config: TopicConfig, _key: string, _model: unknown, signal?: AbortSignal) => {

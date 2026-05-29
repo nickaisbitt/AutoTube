@@ -16,7 +16,7 @@
  */
 
 import { chromium } from 'playwright';
-import { mkdirSync, existsSync } from 'fs';
+import { mkdirSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 
@@ -25,6 +25,9 @@ const args = process.argv.slice(2);
 let topic = 'The Rise of Nvidia';
 let style = 'business_insider';
 let duration = '3';
+let output = '';
+let headless = args.includes('--headless') || !!process.env.CI;
+const devServer = process.env.DEV_SERVER_URL || 'http://localhost:5173';
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--style' && args[i + 1]) {
@@ -32,6 +35,9 @@ for (let i = 0; i < args.length; i++) {
     i++;
   } else if (args[i] === '--duration' && args[i + 1]) {
     duration = args[i + 1];
+    i++;
+  } else if (args[i] === '--output' && args[i + 1]) {
+    output = args[i + 1];
     i++;
   } else if (!args[i].startsWith('--')) {
     topic = args[i];
@@ -47,7 +53,7 @@ const videoDir = `test-recordings/run-${new Date().toISOString().replace(/[:.]/g
 mkdirSync(videoDir, { recursive: true });
 
 const browser = await chromium.launch({
-  headless: false,
+  headless: headless,
 });
 const context = await browser.newContext({
   recordVideo: { dir: videoDir, size: { width: 1280, height: 720 } },
@@ -69,12 +75,14 @@ page.on('console', msg => {
   }
 });
 
-// Set localStorage before page loads
+// Set localStorage before page loads — dismiss onboarding and clear any saved project
+// so the app always starts fresh on step 1 (topic input), not a mid-pipeline restore.
 await page.addInitScript(() => {
   localStorage.setItem('autotube_onboarding_seen', 'true');
+  localStorage.removeItem('autotube_project');
 });
 
-await page.goto('http://localhost:5173', { waitUntil: 'networkidle' });
+await page.goto(devServer, { waitUntil: 'networkidle' });
 await page.screenshot({ path: join(videoDir, '01-initial.png') });
 
 // Ensure onboarding is dismissed
@@ -87,8 +95,16 @@ const hasModal = await page.locator('text=API Keys Required').isVisible({ timeou
 if (hasModal) {
   console.log('Onboarding modal detected, clicking through...');
 
+  // Load real OpenRouter key if available
+  let openRouterKey = 'sk-or-v1-test-dummy-key-for-testing-only';
+  try {
+    const envContent = readFileSync('.env.local', 'utf8');
+    const match = envContent.match(/VITE_OPENROUTER_KEY=([^\s]+)/);
+    if (match) openRouterKey = match[1].replace(/['"]/g, '');
+  } catch {}
+
   const pwdInputs = page.locator('input[type="password"]');
-  await pwdInputs.nth(0).fill('sk-or-v1-test-dummy-key-for-testing-only');
+  await pwdInputs.nth(0).fill(openRouterKey);
   await pwdInputs.nth(1).fill('sk-test-dummy-openai-key-for-testing-only');
   await page.waitForTimeout(300);
 
@@ -106,7 +122,7 @@ if (hasModal) {
     if (isDisabled) {
       const inputs = page.locator('input[type="password"]');
       const cnt = await inputs.count();
-      for (let i = 0; i < cnt; i++) await inputs.nth(i).fill('sk-or-v1-test-dummy-key-for-testing-only');
+      for (let i = 0; i < cnt; i++) await inputs.nth(i).fill(openRouterKey);
       await page.waitForTimeout(300);
     }
     await getStarted.click();
@@ -134,7 +150,7 @@ await page.getByTestId('generate-script-only').click();
 await page.screenshot({ path: join(videoDir, '02-topic-submitted.png') });
 
 // ── Step 2: Script ─────────────────────────────────────────────────────────
-await page.waitForSelector('text=Step 2 — Complete', { timeout: 60000 });
+await page.waitForSelector('text=Step 2 — Complete', { timeout: 180000 });
 console.log('✓ Script generated');
 await page.screenshot({ path: join(videoDir, '03-script-done.png') });
 
@@ -178,10 +194,15 @@ await page.screenshot({ path: join(videoDir, '06-assembled.png') });
 
 // ── Step 6: Server-side render for high-quality MP4 ────────────────────────
 console.log('\n🎥 Running server-side render for MP4 output...');
-const serverRenderResult = spawnSync('node', ['server-render/index.mjs'], {
+const renderArgs = ['server-render/index.mjs'];
+if (output) {
+  renderArgs.push(output);
+}
+const serverRenderResult = spawnSync('node', renderArgs, {
   encoding: 'utf8',
   timeout: 600000, // 10 min timeout
   stdio: ['inherit', 'pipe', 'pipe'],
+  env: { ...process.env, DEV_SERVER_URL: devServer },
 });
 
 if (serverRenderResult.stdout) {

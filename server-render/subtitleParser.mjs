@@ -32,7 +32,13 @@ import { readFileSync, existsSync } from 'fs';
 export function parseVttWordTimestamps(vttPath) {
   if (!existsSync(vttPath)) return [];
 
-  const content = readFileSync(vttPath, 'utf8');
+  let content;
+  try {
+    content = readFileSync(vttPath, 'utf8');
+  } catch (err) {
+    console.error(`  ⚠ Failed to read VTT file: ${vttPath}: ${err.message}`);
+    return [];
+  }
   const lines = content.split('\n');
 
   /** @type {WordTimestamp[]} */
@@ -79,18 +85,24 @@ export function parseVttWordTimestamps(vttPath) {
  * @returns {number}
  */
 function parseVttTimestamp(str) {
-  const parts = str.split(':');
+  const normalized = str.replace(',', '.');
+  const parts = normalized.split(':');
   let seconds = 0;
 
   if (parts.length === 3) {
-    // HH:MM:SS.mmm
-    seconds = parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+    const h = parseFloat(parts[0]);
+    const m = parseFloat(parts[1]);
+    const s = parseFloat(parts[2]);
+    if (isNaN(h) || isNaN(m) || isNaN(s)) return NaN;
+    seconds = h * 3600 + m * 60 + s;
   } else if (parts.length === 2) {
-    // MM:SS.mmm
-    seconds = parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+    const m = parseFloat(parts[0]);
+    const s = parseFloat(parts[1]);
+    if (isNaN(m) || isNaN(s)) return NaN;
+    seconds = m * 60 + s;
   } else if (parts.length === 1) {
-    // SS.mmm
     seconds = parseFloat(parts[0]);
+    if (isNaN(seconds)) return NaN;
   }
 
   return seconds;
@@ -101,23 +113,30 @@ function parseVttTimestamp(str) {
  * Falls back to uniform distribution if no timestamps available.
  *
  * @param {number} progress - 0 to 1 progress within the segment
- * @param {number} segmentDuration - Total segment duration in seconds
+ * @param {number} segmentDuration - Total segment duration in seconds (planned video timeline)
  * @param {WordTimestamp[]} wordTimestamps - Word timestamps from VTT (may be empty)
  * @param {number} totalWords - Total word count (for fallback uniform distribution)
+ * @param {number} [lastIndex=0] - Index to start scanning from (optimization)
+ * @param {number} [actualAudioDuration] - Actual audio duration in seconds (from audio metadata)
  * @returns {{ wordIndex: number, windowStart: number, windowEnd: number }}
  */
-export function findCurrentWord(progress, segmentDuration, wordTimestamps, totalWords) {
+export function findCurrentWord(progress, segmentDuration, wordTimestamps, totalWords, lastIndex = 0, actualAudioDuration) {
   // If we have real word timestamps, use them
   if (wordTimestamps.length > 0 && segmentDuration > 0) {
     // Map progress (0-1 within segment) to video time, then find the word.
     // segmentDuration is the planned segment length (e.g. 6s).
     // VTT timestamps are relative to audio start, which aligns with segment start.
-    // Even if Kokoro audio is shorter/longer, progress maps to video timeline.
-    const currentTime = progress * segmentDuration;
+    // If actualAudioDuration differs from segmentDuration, scale accordingly.
+    const duration = actualAudioDuration && actualAudioDuration > 0 ? actualAudioDuration : segmentDuration;
+    const currentTime = progress * duration;
 
-    // Find the word that contains currentTime
-    let wordIndex = 0;
-    for (let i = 0; i < wordTimestamps.length; i++) {
+    // Optimize: start scanning from lastIndex (avoid O(n) scan per frame)
+    let wordIndex = lastIndex;
+    // If lastIndex is past currentTime, scan backwards
+    if (wordTimestamps[lastIndex] && wordTimestamps[lastIndex].start > currentTime) {
+      wordIndex = 0;
+    }
+    for (let i = wordIndex; i < wordTimestamps.length; i++) {
       if (wordTimestamps[i].start <= currentTime) {
         wordIndex = i;
       } else {

@@ -165,7 +165,7 @@ export function parseSrcset(srcset: string): { url: string; width: number } | nu
  */
 export function extractBestImageUrl(
   html: string,
-  originalUrl: string,
+  _originalUrl: string,
   baseUrl: string,
 ): { url: string; width?: number; height?: number } | null {
   const candidates: Array<{ url: string; width?: number; height?: number; priority: number }> = [];

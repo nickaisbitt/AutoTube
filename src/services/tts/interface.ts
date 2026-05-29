@@ -22,6 +22,7 @@ export interface TTSEngine {
     voice: string,
     options?: {
       signal?: AbortSignal;
+      apiKey?: string;
       serverUrl?: string;
       cloudflareAccountId?: string;
       cloudflareApiToken?: string;
@@ -47,4 +48,7 @@ export interface TTSConfig {
 
   /** Kokoro TTS server URL (local or remote endpoint) */
   kokoroServerUrl?: string;
+
+  /** xAI API Key for Grok TTS */
+  xaiApiKey?: string;
 }

@@ -62,4 +62,14 @@ export interface MediaAsset {
   resolvedWidth?: number;
   resolvedHeight?: number;
   resolvedUrl?: string;
+  width?: number;
+  height?: number;
+  /** License tracking (Task 156) */
+  license?: {
+    source: string;
+    licenseType: string;
+    attributionRequired: boolean;
+    attributionText?: string;
+    commercialUse: boolean;
+  };
 }

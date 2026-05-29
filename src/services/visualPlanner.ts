@@ -164,10 +164,15 @@ async function fetchWikiSummary(query: string, depth = 0): Promise<WikiSummary |
       const broader = query.split(' ').slice(0, -1).join(' ');
       const broaderSum = await fetchWikiSummary(broader, depth + 1);
       if (broaderSum?.thumbnail) {
-        return {
-          ...sum,
-          thumbnail: broaderSum.thumbnail
-        };
+        const broaderContent = `${broaderSum.title} ${broaderSum.description || ''} ${broaderSum.extract || ''}`.toLowerCase();
+        const queryLower = query.toLowerCase();
+        const isRelevant = broaderContent.includes(queryLower) || queryLower.includes(broaderSum.title.toLowerCase());
+        if (isRelevant) {
+          return {
+            ...sum,
+            thumbnail: broaderSum.thumbnail
+          };
+        }
       }
     }
 
@@ -348,6 +353,50 @@ export async function resolveTopicContext(topic: string, signal?: AbortSignal): 
   };
 }
 
+/**
+ * Enrich a topic context with live press release + news data (non-blocking).
+ */
+export async function enrichWithPressReleases(ctx: TopicContext, signal?: AbortSignal): Promise<TopicContext> {
+  if (!ctx.coreSubject || signal?.aborted) return ctx;
+  try {
+    // Fetch press releases
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const [pressRes, newsRes] = await Promise.allSettled([
+      fetch(`${baseUrl}/api/press-release?q=${encodeURIComponent(ctx.coreSubject)}`, { signal }),
+      fetch(`${baseUrl}/api/search-bing-news?q=${encodeURIComponent(ctx.coreSubject)}`, { signal }),
+    ]);
+
+    const allNews: { source: string; headline: string; snippet: string; url: string; date?: string }[] = [];
+
+    if (pressRes.status === 'fulfilled' && pressRes.value.ok) {
+      const data = await pressRes.value.json();
+      if (data.releases && Array.isArray(data.releases)) {
+        for (const r of data.releases) {
+          allNews.push({ source: r.source || 'Press Release', headline: r.title, snippet: (r.snippet || '').substring(0, 300), url: r.url, date: r.date });
+        }
+      }
+    }
+
+    if (newsRes.status === 'fulfilled' && newsRes.value.ok) {
+      const data = await newsRes.value.json();
+      if (data.results && Array.isArray(data.results)) {
+        for (const r of data.results) {
+          if (!allNews.some(n => n.url === r.url)) {
+            allNews.push({ source: r.source || 'News', headline: r.title, snippet: (r.snippet || '').substring(0, 300), url: r.url, date: r.date });
+          }
+        }
+      }
+    }
+
+    if (allNews.length > 0) {
+      return { ...ctx, recentNews: allNews.slice(0, 8) };
+    }
+  } catch {
+    // Non-blocking
+  }
+  return ctx;
+}
+
 const BEAT_SIGNALS: { beat: NarrativeBeat; test: (t: string) => boolean }[] = [
   { beat: 'hook', test: (t) => /\b(?:welcome|today|intro|imagine|ever wonder|meet)\b/i.test(t) },
   { beat: 'data', test: (t) => /\d+(?:[.,]\d+)?\s?(?:%|billion|million|trillion|dollars|bn|mn)|(?:\$|€|£)\s?\d+/i.test(t) || /\b(?:revenue|earnings|stock|market cap|growth|increase|decrease|rate|statistics|numbers)\b/i.test(t) },
@@ -413,107 +462,137 @@ export function extractNounPhrases(narration: string): string[] {
 export function generateQueries(beat: NarrativeBeat, entities: string[], ctx: TopicContext, narration: string, segmentTitle?: string, visualNote?: string): string[] {
   const queries: string[] = [];
 
-  // Extract key noun phrases from narration for more specific queries
   const nounPhrases = extractNounPhrases(narration);
   const topNounPhrase = nounPhrases[0] || '';
 
-  // Build a list of meaningful search terms from the topic context
-  // Use the resolved Wikipedia title if available, otherwise use the original topic
   const topicTitle = ctx.resolvedTitle || ctx.coreSubject || ctx.topic;
-  
-  // Extract proper nouns and key entities from the topic itself
   const topicEntities = extractCapitalizedEntities(topicTitle);
-  
-  // Also try to extract entities from the original topic (before clickbait stripping)
   const originalEntities = extractCapitalizedEntities(ctx.topic);
-  
-  // Combine all entity sources, prioritizing original topic entities
   const allEntities = [...new Set([...originalEntities, ...topicEntities, ...entities])];
-  
-  // Filter out useless anchors
   const meaningfulEntities = allEntities.filter(e => !isUselessAnchor(e));
 
   const primaryEntity = meaningfulEntities[0] || topicTitle;
   const secondaryEntity = meaningfulEntities[1] || '';
+  const thirdEntity = meaningfulEntities[2] || '';
 
-  // Clean the segment title: remove generic words to get the meaningful core
   const cleanedTitle = segmentTitle
     ? segmentTitle.replace(/^(the|a|an)\s+/i, '').trim()
     : '';
 
-  // Build a title+entity combo for more specific queries (e.g. "WeWork S-1 filing")
-  const titleEntityCombo = cleanedTitle && !cleanedTitle.toLowerCase().includes(primaryEntity.toLowerCase())
-    ? `${primaryEntity} ${cleanedTitle}`
-    : cleanedTitle || primaryEntity;
+  // === STRATEGY 1: Core entity queries (bread & butter) ===
+  if (cleanedTitle) queries.push(cleanedTitle);
+  if (primaryEntity && !queries.includes(primaryEntity)) queries.push(primaryEntity);
+  if (secondaryEntity) queries.push(`${primaryEntity} ${secondaryEntity}`);
+  if (thirdEntity) queries.push(`${primaryEntity} ${thirdEntity}`);
 
+  // === STRATEGY 2: Beat-specific themed queries ===
   switch (beat) {
     case 'hook':
-      // For hooks, use dramatic but relevant imagery
-      if (cleanedTitle) queries.push(titleEntityCombo);
-      if (secondaryEntity) {
-        queries.push(`${primaryEntity} ${secondaryEntity}`);
-        queries.push(`${primaryEntity} dramatic`);
-      } else {
-        queries.push(`${primaryEntity}`);
-        queries.push(`${primaryEntity} cinematic`);
-      }
+      queries.push(`${primaryEntity} cinematic`);
+      queries.push(`${primaryEntity} aerial view`);
+      if (secondaryEntity) queries.push(`${primaryEntity} ${secondaryEntity} launch`);
       break;
     case 'data':
-      if (cleanedTitle) queries.push(titleEntityCombo);
-      queries.push(`${primaryEntity} chart`);
+      queries.push(`${primaryEntity} chart graph`);
       queries.push(`${primaryEntity} data visualization`);
-      queries.push(`${primaryEntity} graph statistics`);
-      if (secondaryEntity) queries.push(`${primaryEntity} ${secondaryEntity} numbers`);
+      if (topNounPhrase) queries.push(`${topNounPhrase} chart`);
       break;
     case 'quote':
-      if (cleanedTitle) queries.push(titleEntityCombo);
-      if (meaningfulEntities.length > 0) {
-        queries.push(`${meaningfulEntities[0]} portrait`);
-        queries.push(`${meaningfulEntities[0]} speaker interview`);
-      }
-      queries.push(`${primaryEntity} person face`);
+      queries.push(`${primaryEntity} portrait`);
       queries.push(`${primaryEntity} press conference`);
+      if (secondaryEntity) queries.push(`${secondaryEntity} interview`);
       break;
     case 'event':
-      if (cleanedTitle) queries.push(titleEntityCombo);
-      queries.push(`${primaryEntity} launch`);
-      queries.push(`${primaryEntity} event`);
-      if (secondaryEntity) queries.push(`${primaryEntity} ${secondaryEntity}`);
+      queries.push(`${primaryEntity} event launch`);
+      queries.push(`${primaryEntity} construction`);
+      queries.push(`${primaryEntity} unveiling`);
       break;
     case 'analysis':
-      if (cleanedTitle) queries.push(titleEntityCombo);
-      queries.push(`${primaryEntity} analysis`);
+      queries.push(`${primaryEntity} analysis report`);
       queries.push(`${primaryEntity} expert`);
       if (topNounPhrase) queries.push(topNounPhrase);
       break;
     default:
-      // For context beats, use the most specific entity available
-      if (cleanedTitle) queries.push(titleEntityCombo);
-      if (secondaryEntity) {
-        queries.push(`${primaryEntity} ${secondaryEntity}`);
-      }
-      queries.push(primaryEntity);
-      if (topNounPhrase && !queries.includes(topNounPhrase)) {
-        queries.push(topNounPhrase);
-      }
+      if (topNounPhrase) queries.push(topNounPhrase);
+      queries.push(`${primaryEntity} overview`);
   }
 
-  // Ensure at least one query is derived directly from narration noun phrases (Requirement 3.2)
+  // === STRATEGY 3: Official & press release searches ===
+  if (primaryEntity) {
+    // Try company/org press rooms
+    queries.push(`${primaryEntity} press release`);
+    queries.push(`${primaryEntity} official announcement`);
+    queries.push(`${primaryEntity} news 2025`);
+    queries.push(`${primaryEntity} news 2026`);
+
+    // Site-specific searches (work with DDG/Bing/Google indexes)
+    const domainGuess = guessDomain(primaryEntity);
+    if (domainGuess) {
+      queries.push(`site:${domainGuess} ${primaryEntity}`);
+      queries.push(`site:${domainGuess} press`);
+    }
+
+    // Broad press release sources
+    queries.push(`${primaryEntity} prnewswire`);
+    queries.push(`${primaryEntity} businesswire`);
+  }
+
+  // === STRATEGY 4: Related entity & context queries ===
+  if (ctx.kind) {
+    queries.push(`${primaryEntity} ${ctx.kind}`);
+  }
+  if (ctx.extract) {
+    const extractEntities = extractCapitalizedEntities(ctx.extract);
+    for (const ee of extractEntities) {
+      if (ee !== primaryEntity && !isUselessAnchor(ee) && !queries.some(q => q.toLowerCase().includes(ee.toLowerCase()))) {
+        queries.push(`${primaryEntity} ${ee}`);
+        if (queries.length > 14) break; // cap at 15 total
+      }
+    }
+  }
+
+  // === STRATEGY 5: Map/location queries (for geographic topics) ===
+  // Check if the topic or narration mentions a place
+  const locationIndicators = ['city', 'port', 'harbor', 'bay', 'coast', 'beach', 'island', 'mountain',
+    'river', 'lake', 'ocean', 'sea', 'gulf', 'street', 'avenue', 'road', 'highway', 'route',
+    'park', 'museum', 'stadium', 'airport', 'station', 'terminal', 'port', 'shipyard'];
+  const allContextText = `${narration} ${ctx.extract || ''} ${ctx.description || ''} ${topicTitle}`.toLowerCase();
+  if (locationIndicators.some(li => allContextText.includes(li))) {
+    queries.push(`${primaryEntity} location map`);
+    queries.push(`${primaryEntity} aerial`);
+    if (secondaryEntity) queries.push(`${secondaryEntity} port`);
+    if (ctx.coreSubject && ctx.coreSubject !== primaryEntity) {
+      queries.push(`${ctx.coreSubject} map`);
+    }
+  }
+
+  // === STRATEGY 6: Narration-driven noun phrase queries ===
   if (topNounPhrase) {
-    // First, ensure the noun phrase appears in at least one query (combined with entity for specificity)
     if (!queries.some(q => q.toLowerCase().includes(topNounPhrase.toLowerCase()))) {
       queries.push(`${primaryEntity} ${topNounPhrase}`);
     }
-    // Also add the noun phrase standalone if it's multi-word (purely narration-derived)
     if (topNounPhrase.includes(' ') && !queries.some(q => q.toLowerCase() === topNounPhrase.toLowerCase())) {
       queries.push(topNounPhrase);
     }
   }
 
-  // Ensure segment title appears in at least one query (Requirement 3.4)
-  // If cleanedTitle was used via titleEntityCombo above, this is already satisfied.
-  // But if the title was not included (e.g., cleanedTitle was empty after stripping articles),
-  // ensure the original title's significant words appear in at least one query.
+  // === STRATEGY 7: Visual note integration ===
+  if (visualNote) {
+    const isCustomGraphic = /animated|screenshot|diagram|infographic|split.screen/i.test(visualNote);
+    if (!isCustomGraphic) {
+      const visualNotePhrases = extractNounPhrases(visualNote);
+      let vnAdded = 0;
+      for (const phrase of visualNotePhrases) {
+        if (vnAdded >= 2) break;
+        if (!queries.some(q => q.toLowerCase().includes(phrase.toLowerCase()))) {
+          queries.push(phrase);
+          vnAdded++;
+        }
+      }
+    }
+  }
+
+  // === STRATEGY 8: Ensure segment title appears ===
   if (segmentTitle && segmentTitle.length > 2) {
     const titleSignificantWords = segmentTitle
       .replace(/^(the|a|an)\s+/i, '')
@@ -528,31 +607,105 @@ export function generateQueries(beat: NarrativeBeat, entities: string[], ctx: To
     }
   }
 
-  // Add visualNote-derived noun phrases for more targeted search queries.
-  // Skip visualNotes that describe custom/animated content (e.g. "Animated graphic
-  // illustrating…", "Screenshot of…", "Diagram of…") — these can't be fulfilled
-  // by stock image search and produce poor results. Use narration-based queries instead.
-  if (visualNote) {
-    const isCustomGraphic = /animated|graphic|screenshot|diagram|illustration|infographic|split.screen/i.test(visualNote);
-    if (!isCustomGraphic) {
-      const visualNotePhrases = extractNounPhrases(visualNote);
-      let vnAdded = 0;
-      for (const phrase of visualNotePhrases) {
-        if (vnAdded >= 2) break;
-        if (!queries.some(q => q.toLowerCase().includes(phrase.toLowerCase()))) {
-          queries.push(phrase);
-          vnAdded++;
-        }
-      }
-    }
-  }
-
-  // Always add a fallback with the full topic title
+  // === STRATEGY 9: Full topic as ultimate fallback ===
   if (!queries.includes(ctx.topic)) {
     queries.push(ctx.topic);
   }
 
   return Array.from(new Set(queries.filter(q => q.length > 2)));
+}
+
+/** Guess a likely domain for an entity name (e.g. "NCL" → "ncl.com") */
+function guessDomain(entity: string): string | null {
+  const entityLower = entity.toLowerCase().trim();
+  // Known mappings for common entities
+  const knownDomains: Record<string, string> = {
+    'ncl': 'ncl.com',
+    'ncl luna': 'ncl.com',
+    'norwegian cruise line': 'ncl.com',
+    'fincantieri': 'fincantieri.com',
+    'boeing': 'boeing.com',
+    'airbus': 'airbus.com',
+    'tesla': 'tesla.com',
+    'spacex': 'spacex.com',
+    'microsoft': 'microsoft.com',
+    'apple': 'apple.com',
+    'google': 'google.com',
+    'meta': 'meta.com',
+    'amazon': 'amazon.com',
+    'netflix': 'netflix.com',
+    'wework': 'wework.com',
+    'nvidia': 'nvidia.com',
+    'openai': 'openai.com',
+    'twitter': 'twitter.com',
+    'x': 'x.com',
+    'youtube': 'youtube.com',
+    'instagram': 'instagram.com',
+    'tiktok': 'tiktok.com',
+    'snapchat': 'snapchat.com',
+    'pinterest': 'pinterest.com',
+    'reddit': 'reddit.com',
+    'linkedin': 'linkedin.com',
+    'uber': 'uber.com',
+    'lyft': 'lyft.com',
+    'airbnb': 'airbnb.com',
+    'stripe': 'stripe.com',
+    'shopify': 'shopify.com',
+    'square': 'square.com',
+    'paypal': 'paypal.com',
+    'robinhood': 'robinhood.com',
+    'coinbase': 'coinbase.com',
+    'disney': 'disney.com',
+    'warner bros': 'warnerbros.com',
+    'paramount': 'paramount.com',
+    'sony': 'sony.com',
+    'nintendo': 'nintendo.com',
+    'samsung': 'samsung.com',
+    'huawei': 'huawei.com',
+    'intel': 'intel.com',
+    'amd': 'amd.com',
+    'ibm': 'ibm.com',
+    'oracle': 'oracle.com',
+    'salesforce': 'salesforce.com',
+    'adobe': 'adobe.com',
+    'vmware': 'vmware.com',
+    'cisco': 'cisco.com',
+    'p&g': 'pg.com',
+    'coca-cola': 'cocacola.com',
+    'pepsi': 'pepsi.com',
+    'nike': 'nike.com',
+    'adidas': 'adidas.com',
+    'mcdonalds': 'mcdonalds.com',
+    'starbucks': 'starbucks.com',
+    'walmart': 'walmart.com',
+    'target': 'target.com',
+    'costco': 'costco.com',
+    'pfizer': 'pfizer.com',
+    'moderna': 'moderna.com',
+    'johnson & johnson': 'jnj.com',
+    'united airlines': 'united.com',
+    'delta': 'delta.com',
+    'american airlines': 'aa.com',
+    'southwest airlines': 'southwest.com',
+    'royal caribbean': 'royalcaribbean.com',
+    'carnival': 'carnival.com',
+    'msc': 'msccruises.com',
+    'princess cruises': 'princess.com',
+    'holland america': 'hollandamerica.com',
+    'celebrity cruises': 'celebritycruises.com',
+    'virgin voyages': 'virginvoyages.com',
+  };
+
+  if (knownDomains[entityLower]) return knownDomains[entityLower];
+
+  // For multi-word entities, try the last word as domain
+  const words = entityLower.split(/\s+/);
+  const lastWord = words[words.length - 1];
+  if (lastWord && lastWord.length > 2) {
+    return `${lastWord}.com`;
+  }
+
+  return null;
 }
 
 export function buildFallbackShots(
@@ -564,8 +717,8 @@ export function buildFallbackShots(
   const topicTitle = ctx.resolvedTitle || ctx.coreSubject || ctx.topic;
   const primaryEntity = entities.find((entity) => !isUselessAnchor(entity)) || topicTitle;
   const secondaryEntity = entities.find((entity) => !isUselessAnchor(entity) && entity !== primaryEntity) || ctx.coreSubject || topicTitle;
-  const primaryQueries = queries.slice(0, 2);
-  const secondaryQueries = queries.slice(1, 4);
+  const primaryQueries = queries.slice(0, 5);
+  const secondaryQueries = queries.slice(3, 10);
 
   const shotMap: Record<NarrativeBeat, { primary: string; secondary: string; primaryVibe: string; secondaryVibe: string }> = {
     hook: {
@@ -652,7 +805,7 @@ export async function planSegmentVisuals(
         entities,
         visualAction: aiPlan.intent,
         queries: aiPlan.queries,
-        visualConcept: aiPlan.visualConcept as any,
+        visualConcept: aiPlan.visualConcept,
         reasoning: `AI Director Intent: ${aiPlan.intent}\nConcept: ${aiPlan.visualConcept}`,
         shots: aiPlan.shots,
         concepts: aiPlan.queries.map((q) => ({
@@ -675,7 +828,7 @@ export async function planSegmentVisuals(
     entities,
     visualAction: `Show ${beat} for ${entities[0] || topicContext.topic}`,
     queries,
-    visualConcept: 'professional-editorial' as any,
+    visualConcept: 'professional-editorial',
     reasoning: `Beat detected: ${beat}. Built a two-shot fallback to keep the cut pace moving.`,
     shots,
     concepts: shots.map((shot, index) => ({

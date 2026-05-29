@@ -61,7 +61,7 @@ existsSync: mockExistsSync,
   });
 
   describe('concatenateAudio', () => {
-    it('writes concat list file and spawns ffmpeg', async () => {
+    it('normalizes files and spawns ffmpeg acrossfade complex filter', async () => {
       const files = [
         { file: '/tmp/a.mp3', duration: 5 },
         { file: '/tmp/b.mp3', duration: 3 },
@@ -70,12 +70,12 @@ existsSync: mockExistsSync,
       expect(result).toBe(true);
       expect(mockWriteFileSync).toHaveBeenCalledOnce();
       const listContent = mockWriteFileSync.mock.calls[0][1] as string;
-      expect(listContent).toContain("file '/tmp/a.mp3'");
-      expect(listContent).toContain("file '/tmp/b.mp3'");
-      expect(mockSpawnSync).toHaveBeenCalledOnce();
-      const args = mockSpawnSync.mock.calls[0][1] as string[];
-      expect(args).toContain('-f');
-      expect(args).toContain('concat');
+      expect(listContent).toContain("autotube-norm");
+      
+      const lastCall = mockSpawnSync.mock.calls[mockSpawnSync.mock.calls.length - 1];
+      const args = lastCall[1] as string[];
+      expect(args).toContain('-filter_complex');
+      expect(args.some(a => a.includes('acrossfade'))).toBe(true);
       expect(args).toContain('-c:a');
       expect(args).toContain('aac');
     });
@@ -86,12 +86,10 @@ existsSync: mockExistsSync,
       expect(result).toBe(false);
     });
 
-    it('handles empty file list gracefully', async () => {
+    it('handles empty file list gracefully by returning false early', async () => {
       const result = await concatenateAudio([], '/tmp/out.aac');
-      expect(result).toBe(true);
-      expect(mockWriteFileSync).toHaveBeenCalledOnce();
-      const listContent = mockWriteFileSync.mock.calls[0][1] as string;
-      expect(listContent).toBe('');
+      expect(result).toBe(false);
+      expect(mockWriteFileSync).not.toHaveBeenCalled();
     });
 
     it('handles single file', async () => {
@@ -126,7 +124,9 @@ existsSync: mockExistsSync,
     it('spawns ffmpeg with amix filter', () => {
       const result = mixNarrationWithBgMusic('/tmp/narration.aac', '/tmp/music.aac', '/tmp/out.aac', 0.15);
       expect(result).toBe(true);
-      const args = mockSpawnSync.mock.calls[0][1] as string[];
+      const mixCall = mockSpawnSync.mock.calls.find((c: any) => c[1].includes('-filter_complex'));
+      expect(mixCall).toBeDefined();
+      const args = mixCall[1] as string[];
       expect(args).toContain('-i');
       expect(args).toContain('/tmp/narration.aac');
       expect(args).toContain('-stream_loop');
@@ -144,7 +144,7 @@ existsSync: mockExistsSync,
       expect(result).toBe(true);
       const args = mockSpawnSync.mock.calls[0][1] as string[];
       expect(args).toContain('-c:v');
-      expect(args).toContain('libx264');
+      expect(args).toContain('copy');
     });
 
     it('uses background music only when narration is missing', () => {
@@ -176,12 +176,12 @@ existsSync: mockExistsSync,
   });
 
   describe('computeBgMusicVolume', () => {
-    it('returns 0.15 when narration is present', () => {
-      expect(computeBgMusicVolume(true)).toBe(0.15);
+    it('returns correct ducking level when narration is present', () => {
+      expect(computeBgMusicVolume(true)).toBeCloseTo(0.120, 3);
     });
 
-    it('returns 0.60 when no narration', () => {
-      expect(computeBgMusicVolume(false)).toBe(0.60);
+    it('returns correct peak level when no narration', () => {
+      expect(computeBgMusicVolume(false)).toBeCloseTo(0.398, 3);
     });
   });
 

@@ -40,6 +40,10 @@ vi.mock('../visualPlanner', () => ({
   }),
 }));
 
+// Prevent real network calls (e.g., Flickr scrapeSearch uses raw fetch())
+const mockGlobalFetch = vi.fn().mockRejectedValue(new Error('Network disabled in test'));
+globalThis.fetch = mockGlobalFetch as unknown as typeof globalThis.fetch;
+
 // Import after mocks are set up
 import { sourceSegmentMedia } from '../media';
 import type { ScriptSegment, SegmentVisualPlan, TopicContext, AppConfig } from '../../types';
@@ -138,68 +142,70 @@ const fetchFailureModeArb = fc.constantFrom(
  * Each mode represents a realistic failure scenario.
  */
 function configureFetchMock(mode: string): void {
+  // Use mockImplementation so every fetch call within sourceSegmentMedia
+  // gets the same treatment, regardless of how many calls are made.
   switch (mode) {
     case 'network-error':
-      mockFetchWithTimeout.mockRejectedValue(new TypeError('Failed to fetch'));
+      mockFetchWithTimeout.mockImplementation(() => Promise.reject(new TypeError('Failed to fetch')));
       break;
     case 'timeout':
-      mockFetchWithTimeout.mockRejectedValue(
+      mockFetchWithTimeout.mockImplementation(() => Promise.reject(
         new DOMException('The operation was aborted.', 'AbortError'),
-      );
+      ));
       break;
     case 'invalid-json':
-      mockFetchWithTimeout.mockResolvedValue({
+      mockFetchWithTimeout.mockImplementation(() => Promise.resolve({
         ok: true,
         status: 200,
         json: async () => { throw new SyntaxError('Unexpected token < in JSON'); },
         text: async () => '<html>Error</html>',
-      });
+      }));
       break;
     case 'non-ok-response':
-      mockFetchWithTimeout.mockResolvedValue({
+      mockFetchWithTimeout.mockImplementation(() => Promise.resolve({
         ok: false,
         status: 500,
         json: async () => ({}),
         text: async () => 'Internal Server Error',
-      });
+      }));
       break;
     case 'null-response':
-      mockFetchWithTimeout.mockResolvedValue({
+      mockFetchWithTimeout.mockImplementation(() => Promise.resolve({
         ok: true,
         status: 200,
         json: async () => null,
         text: async () => 'null',
-      });
+      }));
       break;
     case 'throws-string':
-      mockFetchWithTimeout.mockRejectedValue('string error');
+      mockFetchWithTimeout.mockImplementation(() => Promise.reject('string error'));
       break;
     case 'throws-undefined':
-      mockFetchWithTimeout.mockRejectedValue(undefined);
+      mockFetchWithTimeout.mockImplementation(() => Promise.reject(undefined));
       break;
     case 'returns-empty-body':
-      mockFetchWithTimeout.mockResolvedValue({
+      mockFetchWithTimeout.mockImplementation(() => Promise.resolve({
         ok: true,
         status: 200,
         json: async () => ({}),
         text: async () => '',
-      });
+      }));
       break;
     case 'returns-html':
-      mockFetchWithTimeout.mockResolvedValue({
+      mockFetchWithTimeout.mockImplementation(() => Promise.resolve({
         ok: true,
         status: 200,
         json: async () => { throw new SyntaxError('Unexpected token <'); },
         text: async () => '<!DOCTYPE html><html><body>502 Bad Gateway</body></html>',
-      });
+      }));
       break;
     default:
-      mockFetchWithTimeout.mockResolvedValue({
+      mockFetchWithTimeout.mockImplementation(() => Promise.resolve({
         ok: false,
         status: 404,
         json: async () => ({}),
         text: async () => 'Not Found',
-      });
+      }));
   }
 }
 
@@ -270,9 +276,9 @@ describe('Property 3: sourceSegmentMedia never throws', () => {
           const controller = new AbortController();
           controller.abort();
 
-          mockFetchWithTimeout.mockRejectedValue(
+          mockFetchWithTimeout.mockImplementation(() => Promise.reject(
             new DOMException('The operation was aborted.', 'AbortError'),
-          );
+          ));
 
           const usedUrls = new Set<string>();
 

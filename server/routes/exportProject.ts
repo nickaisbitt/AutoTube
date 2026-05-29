@@ -13,9 +13,17 @@ export async function handleExportProject(
     const url = new URL(req.url!, `http://${req.headers.host}`);
     const projectId = url.searchParams.get("id");
 
+    if (projectId && projectId.length > 100) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Project ID too long (maximum 100 characters)" }));
+      return;
+    }
+
     let projectPath: string;
     if (projectId) {
-      projectPath = `/tmp/autotube-project-${projectId}.json`;
+      const sanitizedId = projectId.replace(/[^a-zA-Z0-9-_]/g, "");
+      projectPath = `/tmp/autotube-project-${sanitizedId}.json`;
     } else {
       // Backward compat: try fixed path first, then find the most recent project file
       projectPath = "/tmp/autotube-project.json";

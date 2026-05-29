@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import TopicStep from '../../components/TopicStep';
 import type { TopicConfig } from '../../types';
@@ -216,7 +216,7 @@ describe('TopicStep loading, error, and no-key states', () => {
       />,
     );
 
-    expect(screen.getByTestId('generate-script-only').disabled).toBe(true);
+    expect((screen.getByTestId('generate-script-only') as HTMLButtonElement).disabled).toBe(true);
 
     rerender(
       <TopicStep
@@ -225,7 +225,7 @@ describe('TopicStep loading, error, and no-key states', () => {
       />,
     );
 
-    expect(screen.getByTestId('generate-script-only').disabled).toBe(false);
+    expect((screen.getByTestId('generate-script-only') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('calls onGenerate when Generate Script Only button is clicked', () => {

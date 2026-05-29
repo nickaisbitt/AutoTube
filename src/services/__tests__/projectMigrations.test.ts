@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { migrateProject, CURRENT_PROJECT_VERSION, registerMigration } from '../projectMigrations';
+import { migrateProject, CURRENT_PROJECT_VERSION } from '../projectMigrations';
 
 describe('Property 4: Migration system brings any older version to current', () => {
   it('migrates version 0 projects to current version', () => {

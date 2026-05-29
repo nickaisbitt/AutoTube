@@ -157,7 +157,13 @@ test.describe('Full Pipeline E2E', () => {
         break;
       }
       if (i === 59) console.log('⚠ Media still processing, continuing...');
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise<void>((r) => {
+        const timer = setTimeout(r, 1000);
+        if (i === 59) {
+          // Ensure timer doesn't outlive the test
+          timer.unref?.();
+        }
+      });
     }
 
     // ── STEP 3: Narration ──
@@ -174,7 +180,10 @@ test.describe('Full Pipeline E2E', () => {
         break;
       }
       if (i === 29) console.log('⚠ Narration still processing, continuing...');
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise<void>((r) => {
+        const timer = setTimeout(r, 1000);
+        timer.unref?.();
+      });
     }
 
     // ── STEP 4: Assembly ──
@@ -207,7 +216,10 @@ test.describe('Full Pipeline E2E', () => {
         const pct = await page.locator('text=% complete').first().textContent().catch(() => '...');
         console.log(`  Rendering: ${pct}`);
       }
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise<void>((r) => {
+        const timer = setTimeout(r, 1000);
+        timer.unref?.();
+      });
     }
 
     if (!renderDone) {

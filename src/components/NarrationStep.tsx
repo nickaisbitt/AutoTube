@@ -233,7 +233,6 @@ export default function NarrationStep({ project, status, progress, message, onGe
       {/* TTS Fallback Chain Status */}
       {(() => {
         const hasKokoro = !!(import.meta.env.VITE_KOKORO_SERVER_URL);
-        const hasMelo = !!(import.meta.env.VITE_CF_ACCOUNT_ID && import.meta.env.VITE_CF_API_TOKEN);
         return (
           <div className="flex items-center gap-4 border-2 border-surface-700 bg-surface-800 px-4 py-3">
             <Mic2 className="h-5 w-5 flex-shrink-0 text-brand-500" />

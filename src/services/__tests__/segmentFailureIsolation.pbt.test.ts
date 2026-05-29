@@ -38,6 +38,10 @@ vi.mock('../visualPlanner', () => ({
   }),
 }));
 
+// Prevent real network calls (e.g., Flickr scrapeSearch uses raw fetch())
+const mockGlobalFetch = vi.fn().mockRejectedValue(new Error('Network disabled in test'));
+globalThis.fetch = mockGlobalFetch as unknown as typeof globalThis.fetch;
+
 import { sourceSegmentMedia } from '../media';
 import type { ScriptSegment, SegmentVisualPlan, TopicContext, AppConfig } from '../../types';
 
@@ -118,22 +122,18 @@ describe('Property 2: Segment-level failure isolation', () => {
           // For others, configure fetch to return a non-ok response (empty results).
           const results: { segmentId: string; assetsLength: number }[] = [];
 
+          // Use mockImplementation so every fetch call within sourceSegmentMedia
+          // gets the same response, regardless of how many calls are made.
+          mockFetchWithTimeout.mockImplementation(() => Promise.resolve({
+            ok: false,
+            status: 404,
+            json: async () => ({}),
+            text: async () => 'Not Found',
+          }));
+
           for (let i = 0; i < uniqueSegments.length; i++) {
             const segment = uniqueSegments[i];
             const plan = { ...planTemplate, segmentId: segment.id };
-
-            if (i === failIndex) {
-              // Simulate a hard failure — fetch throws
-              mockFetchWithTimeout.mockRejectedValue(new Error('Simulated segment failure'));
-            } else {
-              // Simulate empty results (non-ok response)
-              mockFetchWithTimeout.mockResolvedValue({
-                ok: false,
-                status: 404,
-                json: async () => ({}),
-                text: async () => 'Not Found',
-              });
-            }
 
             // sourceSegmentMedia should NEVER throw (Property 3 guarantees this)
             const result = await sourceSegmentMedia(

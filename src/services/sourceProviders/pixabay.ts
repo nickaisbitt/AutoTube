@@ -1,3 +1,4 @@
+// NOTE: Not registered in index.ts. Available for future use if API keys are provided.
 // ============================================================================
 // Pixabay Source Provider — Free Stock Photography
 // ============================================================================

@@ -219,9 +219,9 @@ describe('generateVideoDescription', () => {
 
     // First chapter should start at 00:00
     expect(result.chapters).toContain('00:00');
-    // Should contain segment titles
-    expect(result.chapters).toContain('Introduction');
-    expect(result.chapters).toContain('The GPU Revolution');
+    // Should contain curiosity-gap transformed titles
+    expect(result.chapters).toContain('What They Don\'t Want You to Know');
+    expect(result.chapters).toContain('Why The GPU Revolution Matters More Than You Think');
   });
 
   it('chapters timestamps match cumulative segment durations', () => {
@@ -280,6 +280,6 @@ describe('generateVideoDescription', () => {
     const result = generateVideoDescription(segments, 'Nvidia', ctx, 'business_insider');
 
     expect(result.summary.length).toBeGreaterThan(0);
-    expect(result.chapters).toContain('Main Content');
+    expect(result.chapters).toContain('Why Main Content Matters More Than You Think');
   });
 });

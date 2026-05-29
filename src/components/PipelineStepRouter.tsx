@@ -15,6 +15,17 @@ interface PipelineStepRouterProps {
   onOpenExport: () => void;
 }
 
+class StepErrorBoundary extends React.Component<{children: React.ReactNode; stepName: string}, {hasError: boolean}> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() {
+    if (this.state.hasError) {
+      return <div className="p-8 text-center"><h2 className="text-xl font-bold text-red-400">{this.props.stepName} crashed</h2><p className="text-surface-400">Something went wrong in this step. Try restarting it.</p></div>;
+    }
+    return this.props.children;
+  }
+}
+
 export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterProps) {
   const {
     currentStep,
@@ -89,23 +100,21 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
     if (!project) return;
     const bgMusic = options?.backgroundMusic !== false;
     const selectedQuality = options?.quality ?? 'standard';
-    const projectWithBgMusic: VideoProject = {
-      ...project,
-      exportSettings: {
-        ...project.exportSettings,
-        quality: selectedQuality,
-        format: project.exportSettings?.format ?? 'mp4',
-        width: project.exportSettings?.width ?? 1920,
-        height: project.exportSettings?.height ?? 1080,
-        resolution: project.exportSettings?.resolution ?? '1080p',
-        mimeType: project.exportSettings?.mimeType ?? 'video/mp4',
-        fileName: project.exportSettings?.fileName ?? 'video.mp4',
-        backgroundMusic: bgMusic,
-        musicPreset: options?.musicPreset,
-      },
+    const clonedProject = structuredClone(project);
+    clonedProject.exportSettings = {
+      ...clonedProject.exportSettings,
+      quality: selectedQuality,
+      format: clonedProject.exportSettings?.format ?? 'mp4',
+      width: clonedProject.exportSettings?.width ?? 1920,
+      height: clonedProject.exportSettings?.height ?? 1080,
+      resolution: clonedProject.exportSettings?.resolution ?? '1080p',
+      mimeType: clonedProject.exportSettings?.mimeType ?? 'video/mp4',
+      fileName: clonedProject.exportSettings?.fileName ?? 'video.mp4',
+      backgroundMusic: bgMusic,
+      musicPreset: options?.musicPreset,
     };
     setCurrentStep('assembly');
-    await assembleVideoWithOptions({ quality: selectedQuality }, projectWithBgMusic);
+    await assembleVideoWithOptions({ quality: selectedQuality }, clonedProject);
   }, [project, assembleVideoWithOptions, setCurrentStep]);
 
   const handleRetryAssemble = useCallback(async () => {
@@ -115,89 +124,103 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
   switch (currentStep) {
     case 'topic':
       return (
-        <>
-          <TopicStep
-            config={topicConfig}
-            onConfigChange={setTopicConfig}
-            onGenerate={handleGenerate}
-            onGenerateFull={handleGenerateFull}
-            apiKey={appConfig.openRouterKey}
-          />
-          <BatchProcessor
-            onGenerate={batchGenerate}
-            isProcessing={isBatchProcessing}
-            batchJobs={batchJobs}
-          />
-        </>
+        <StepErrorBoundary stepName="Topic">
+          <>
+            <TopicStep
+              config={topicConfig}
+              onConfigChange={setTopicConfig}
+              onGenerate={handleGenerate}
+              onGenerateFull={handleGenerateFull}
+              apiKey={appConfig.openRouterKey}
+            />
+            <BatchProcessor
+              onGenerate={batchGenerate}
+              isProcessing={isBatchProcessing}
+              batchJobs={batchJobs}
+            />
+          </>
+        </StepErrorBoundary>
       );
     case 'script':
       return (
-        <ScriptStep
-          project={project}
-          status={stepStatuses.script}
-          progress={processingProgress}
-          message={processingMessage}
-          onNext={handleSourceMedia}
-          onUpdateNarration={updateNarrationText}
-          onRegenerate={() => generateScript(topicConfig)}
-        />
+        <StepErrorBoundary stepName="Script">
+          <ScriptStep
+            project={project}
+            status={stepStatuses.script}
+            progress={processingProgress}
+            message={processingMessage}
+            onNext={handleSourceMedia}
+            onUpdateNarration={updateNarrationText}
+            onRegenerate={() => generateScript(topicConfig)}
+          />
+        </StepErrorBoundary>
       );
     case 'media':
       return (
-        <MediaStep
-          project={project}
-          status={stepStatuses.media}
-          progress={processingProgress}
-          message={processingMessage}
-          onNext={handleGenerateNarration}
-          onReplace={handleReplaceMedia}
-          onRetry={handleSourceMedia}
-        />
+        <StepErrorBoundary stepName="Media">
+          <MediaStep
+            project={project}
+            status={stepStatuses.media}
+            progress={processingProgress}
+            message={processingMessage}
+            onNext={handleGenerateNarration}
+            onReplace={handleReplaceMedia}
+            onRetry={handleSourceMedia}
+          />
+        </StepErrorBoundary>
       );
     case 'narration':
       return (
-        <NarrationStep
-          project={project}
-          status={stepStatuses.narration}
-          progress={processingProgress}
-          message={processingMessage}
-          onGenerateNarration={handleGenerateNarration}
-          onNext={handleRunAIEdit}
-          appConfig={appConfig}
-        />
+        <StepErrorBoundary stepName="Narration">
+          <NarrationStep
+            project={project}
+            status={stepStatuses.narration}
+            progress={processingProgress}
+            message={processingMessage}
+            onGenerateNarration={handleGenerateNarration}
+            onNext={handleRunAIEdit}
+            appConfig={appConfig}
+          />
+        </StepErrorBoundary>
       );
     case 'ai_edit':
       return (
-        <AIEditStep
-          project={project}
-          status={stepStatuses.ai_edit}
-          progress={processingProgress}
-          message={processingMessage}
-          onRunAIEdit={handleRunAIEdit}
-          onSkipAIEdit={handleSkipAIEdit}
-          onNext={handleAssembleVideo}
-        />
+        <StepErrorBoundary stepName="AI Edit">
+          <AIEditStep
+            project={project}
+            status={stepStatuses.ai_edit}
+            progress={processingProgress}
+            message={processingMessage}
+            onRunAIEdit={handleRunAIEdit}
+            onSkipAIEdit={handleSkipAIEdit}
+            onNext={handleAssembleVideo}
+          />
+        </StepErrorBoundary>
       );
     case 'assembly':
       return (
-        <AssemblyStep
-          project={project}
-          status={stepStatuses.assembly}
-          progress={processingProgress}
-          message={processingMessage}
-          onAssemble={handleAssembleVideo}
-          onNext={() => setCurrentStep('preview')}
-          onCancel={cancelRender}
-          onRetry={handleRetryAssemble}
-        />
+        <StepErrorBoundary stepName="Assembly">
+          <AssemblyStep
+            project={project}
+            status={stepStatuses.assembly}
+            progress={processingProgress}
+            message={processingMessage}
+            onAssemble={handleAssembleVideo}
+            onNext={() => setCurrentStep('preview')}
+            onCancel={cancelRender}
+            onRetry={handleRetryAssemble}
+          />
+        </StepErrorBoundary>
       );
     case 'preview':
       return (
-        <PreviewStep
-          project={project}
-          onReset={resetProject}
-          onOpenExport={onOpenExport}
-        />
+        <StepErrorBoundary stepName="Preview">
+          <PreviewStep
+            project={project}
+            onReset={resetProject}
+            onOpenExport={onOpenExport}
+          />
+        </StepErrorBoundary>
       );
     default:
       return null;

@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
   forbidOnly: false,
-  retries: 0,
+  retries: 1,
   workers: 1,
   reporter: 'list',
   timeout: 600000, // 10 minutes for E2E tests

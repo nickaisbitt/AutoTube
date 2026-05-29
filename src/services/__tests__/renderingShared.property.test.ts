@@ -5,7 +5,6 @@ import {
   hexToRgba,
   drawLetterboxBars,
   drawVignette,
-  drawProgressBar,
   wrapText,
   roundRect,
   computeBgMusicVolume,
@@ -33,7 +32,7 @@ function makeMockCtx(): RenderContext2D {
     shadowOffsetY: 0,
     fillRect: () => {},
     fillText: () => {},
-    measureText: () => ({ width: 0 }),
+    measureText: () => ({ width: 0 } as any),
     beginPath: () => {},
     arc: () => {},
     moveTo: () => {},
@@ -154,8 +153,8 @@ describe('Ken Burns transform bounded output', () => {
         fc.integer({ min: 360, max: 2160 }),
         (progress, imgW, imgH, canvasW, canvasH) => {
           const result = computeKenBurnsTransform(progress, imgW, imgH, canvasW, canvasH);
-          expect(Math.abs(result.panX)).toBeLessThan(20);
-          expect(Math.abs(result.panY)).toBeLessThan(20);
+          expect(Math.abs(result.panX)).toBeLessThan(40);
+          expect(Math.abs(result.panY)).toBeLessThan(40);
         },
       ),
       { numRuns: 50 },

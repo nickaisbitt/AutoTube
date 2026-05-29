@@ -40,6 +40,8 @@ export function usePlayback(
   const lastNarratedSegment = useRef<number>(-1);
   const seekingRef = useRef<boolean>(false);
   const preloadedUrls = useRef<Set<string>>(new Set());
+  const currentTimeRef = useRef(0);
+  const totalDurationRef = useRef(0);
   const [audioRef] = useState(() => new Audio());
 
   useEffect(() => {
@@ -49,6 +51,7 @@ export function usePlayback(
       audioRef.removeEventListener('ended', handleEnd);
       audioRef.pause();
       audioRef.src = '';
+      audioRef.load();
       stopSpeaking();
     };
   }, [audioRef]);
@@ -75,7 +78,7 @@ export function usePlayback(
     audioRef.pause();
     setIsNarrating(false);
     setIsPlaying(false);
-  }, [audioRef, previewMode]);
+  }, [previewMode]);
 
   const totalDuration = useMemo(() => {
     if (!project) return 0;
@@ -94,6 +97,10 @@ export function usePlayback(
   useEffect(() => {
     setSpeechSupported(hasSpeechSupport());
   }, []);
+
+  // Keep refs in sync for keyboard handler
+  currentTimeRef.current = currentTime;
+  totalDurationRef.current = totalDuration;
 
   const animate = useCallback((time: number) => {
     if (!startTimeRef.current) startTimeRef.current = time;
@@ -146,6 +153,7 @@ export function usePlayback(
     const mediaToPreload = project.media.filter(a => segIdsToPreload.includes(a.segmentId));
     for (const asset of mediaToPreload) {
       if (asset.url && !preloadedUrls.current.has(asset.url)) {
+        if (preloadedUrls.current.size > 500) preloadedUrls.current.clear();
         const img = new Image();
         img.src = asset.url;
         preloadedUrls.current.add(asset.url);
@@ -179,7 +187,7 @@ export function usePlayback(
         }
       }
     }
-  }, [currentSegmentIndex, isPlaying, project, audioRef]);
+  }, [currentSegmentIndex, isPlaying, project]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -193,11 +201,11 @@ export function usePlayback(
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          jumpToTime(Math.max(0, currentTime - 5));
+          jumpToTime(Math.max(0, currentTimeRef.current - 5));
           break;
         case 'ArrowRight':
           e.preventDefault();
-          jumpToTime(Math.min(totalDuration, currentTime + 5));
+          jumpToTime(Math.min(totalDurationRef.current, currentTimeRef.current + 5));
           break;
         case 'm':
           e.preventDefault();
@@ -212,7 +220,7 @@ export function usePlayback(
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentTime, totalDuration]);
+  }, []);
 
   useEffect(() => {
     if (!isPlaying || isMuted) {
@@ -220,7 +228,7 @@ export function usePlayback(
       audioRef.pause();
       setIsNarrating(false);
     }
-  }, [isMuted, isPlaying, audioRef]);
+  }, [isMuted, isPlaying]);
 
   const formatTime = useCallback((seconds: number) => {
     seconds = Math.max(0, seconds);

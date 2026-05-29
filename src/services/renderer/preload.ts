@@ -102,6 +102,13 @@ export function loadImage(url: string, alt: string, blobUrls: string[] = []): Pr
             const img = new Image();
             // Blob URLs are same-origin — do NOT set crossOrigin, it causes taint
             img.onload = () => {
+              // Validate image dimensions after load (MEDIUM #6)
+              if (img.naturalWidth <= 0 || img.naturalHeight <= 0) {
+                logger.warn('Renderer', `Image loaded but has invalid dimensions ${img.naturalWidth}x${img.naturalHeight}: ${src.substring(0, 80)}`);
+                URL.revokeObjectURL(blobUrl);
+                trySource(index + 1);
+                return;
+              }
               (img as RenderableImage).safeForCanvas = true;
               (img as RenderableImage).naturalW = img.naturalWidth;
               (img as RenderableImage).naturalH = img.naturalHeight;
@@ -137,7 +144,15 @@ export function loadImage(url: string, alt: string, blobUrls: string[] = []): Pr
 
       img.onload = () => {
         clearTimeout(timeout);
+        // Validate image dimensions after load (MEDIUM #6)
+        if (img.naturalWidth <= 0 || img.naturalHeight <= 0) {
+          logger.warn('Renderer', `Image loaded but has invalid dimensions ${img.naturalWidth}x${img.naturalHeight}: ${src.substring(0, 80)}`);
+          trySource(index + 1);
+          return;
+        }
         (img as RenderableImage).safeForCanvas = isCanvasSafeSource(src);
+        (img as RenderableImage).naturalW = img.naturalWidth;
+        (img as RenderableImage).naturalH = img.naturalHeight;
         resolve(img);
       };
       

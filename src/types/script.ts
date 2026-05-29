@@ -37,6 +37,10 @@ export interface ScriptSegment {
   pacingScore?: number;
   sceneLayout?: SceneLayoutType;
   audioDirection?: AudioDirection;
+  /** Task 93: Describes chart/graph visualization for stat segments */
+  dataVisualization?: string;
+  /** Task 89: Timestamp (in seconds) where CTA overlay should appear */
+  ctaTimestamp?: number;
 }
 
 export type NarrativeBeat =
@@ -61,6 +65,8 @@ export interface TopicContext {
   heroImageUrl?: string;
   parseReasoning: string;
   thumbnailUrl?: string;
+  /** Live web research results — press releases and recent news scraped during topic resolution */
+  recentNews?: { source: string; headline: string; snippet: string; url: string; date?: string }[];
 }
 
 export interface TopicConfig {
@@ -69,6 +75,8 @@ export interface TopicConfig {
   targetDuration: number;
   tone: 'informative' | 'dramatic' | 'casual' | 'urgent';
   audience: string;
+  /** User-provided corrections / known facts that override LLM training data */
+  corrections?: string;
 }
 
 export interface NarrationClip {

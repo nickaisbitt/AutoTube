@@ -1,0 +1,59 @@
+# Dependencies (Railpack installs its own)
+node_modules
+
+# Test data (448MB!)
+test-recordings
+test-results
+e2e
+tests
+coverage
+
+# Build output (rebuilt during deploy)
+dist
+
+# Tool configs
+.opencode
+.kiro
+.lingma
+.vscode
+.github
+
+# Generated files
+narration-audio-*
+server-render
+powers
+scratch
+scripts
+
+# Logs and temp files
+*.log
+*.pid
+*.txt
+journey*.log
+dev.log
+
+# Media files
+*.mp4
+*.webm
+*.mp3
+*.aac
+test-output*
+test-final*
+
+# Markdown docs
+*.md
+
+# Misc
+.DS_Store
+Thumbs.db
+Dockerfile
+docker-compose.yml
+.env
+.env.local
+.env*.local
+*.tsbuildinfo
+.eslintcache
+playwright.config.ts
+vitest.config.ts
+tsconfig.json
+vite.config.ts

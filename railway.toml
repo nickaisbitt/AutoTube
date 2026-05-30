@@ -1,6 +1,9 @@
 [build]
-buildCommand = "npm run build && npm prune --omit=dev"
+builder = "railpack"
+buildCommand = "npm ci && npm run build && npm prune --omit=dev"
 
 [deploy]
 startCommand = "npx tsx server.mjs"
 healthcheckPath = "/api/health"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10

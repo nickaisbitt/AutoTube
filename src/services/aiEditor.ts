@@ -289,6 +289,7 @@ const ALLOWED_TRANSITIONS = new Set<TransitionType>([
   'flash',
   'push',
   'spin',
+  'cross-dissolve',
 ]);
 
 /**

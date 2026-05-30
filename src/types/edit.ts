@@ -1,4 +1,4 @@
-export type TransitionType = 'crossfade' | 'cut' | 'dissolve' | 'wipe' | 'slide' | 'zoom' | 'glitch' | 'flash' | 'push' | 'spin';
+export type TransitionType = 'crossfade' | 'cut' | 'dissolve' | 'wipe' | 'slide' | 'zoom' | 'glitch' | 'flash' | 'push' | 'spin' | 'cross-dissolve';
 
 export interface KenBurnsParams {
   zoomStart: number;

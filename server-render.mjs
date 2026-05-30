@@ -116,6 +116,22 @@ function detectAspectRatioFromTopic(topic) {
 }
 
 const ACCENT_COLORS = { intro: '#60a5fa', section: '#3b82f6', transition: '#8b5cf6', outro: '#60a5fa' };
+
+function hexToRgba(hex, alpha) {
+  let r = 0, g = 0, b = 0;
+  const h = hex.replace('#', '');
+  if (h.length === 3) {
+    r = parseInt(h[0] + h[0], 16);
+    g = parseInt(h[1] + h[1], 16);
+    b = parseInt(h[2] + h[2], 16);
+  } else if (h.length >= 6) {
+    r = parseInt(h.substring(0, 2), 16);
+    g = parseInt(h.substring(2, 4), 16);
+    b = parseInt(h.substring(4, 6), 16);
+  }
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 let DRAFT_MODE = false;
 
 // ── Caches to avoid per-frame allocations ──────────────────────────────────
@@ -396,6 +412,28 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narration
   grad.addColorStop(1, p.bg[2]);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
+
+  // Animated wave layers
+  const pulse = Math.sin(progress * Math.PI * 2) * 0.3 + 0.7;
+  for (let layer = 0; layer < 3; layer++) {
+    const waveOffset = progress * Math.PI * 2 + layer * Math.PI * 0.8;
+    const waveY = h * (0.3 + layer * 0.15);
+    const waveAmp = h * (0.02 + layer * 0.01);
+    const waveFreq = 0.003 + layer * 0.002;
+
+    ctx.beginPath();
+    ctx.moveTo(0, waveY);
+    for (let x = 0; x <= w; x += 5) {
+      const y = waveY + Math.sin(x * waveFreq + waveOffset) * waveAmp * pulse;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(w, h);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    const waveAlphas = ['30', '22', '15'];
+    ctx.fillStyle = p.accent + waveAlphas[layer];
+    ctx.fill();
+  }
 
   // Subtle geometric pattern overlay
   ctx.save();
@@ -2381,17 +2419,26 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 }
 
-  // Letterbox bars — clean minimal bars
-  const barH = Math.round(HEIGHT * 0.012);
-  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  // Letterbox bars — black bars with subtle accent inner edge glow
+  const barH = Math.round(HEIGHT * 0.04);
+  const accentHex = ACCENT_COLORS[seg.type] || '#ffffff';
+  // Black bars
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
   ctx.fillRect(0, 0, WIDTH, barH);
   ctx.fillRect(0, HEIGHT - barH, WIDTH, barH);
+  // Subtle accent inner edge glow
+  const accentRgba = hexToRgba(accentHex, 0.5);
+  ctx.fillStyle = accentRgba;
+  ctx.fillRect(0, barH - 2, WIDTH, 2);
+  ctx.fillRect(0, HEIGHT - barH, WIDTH, 2);
 
-  // Subtle gradient vignette — lighter than before
+  // Subtle gradient vignette — stronger stops for cinematic depth
   if (!DRAFT_MODE) {
-    const vignetteGrad = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, HEIGHT * 0.3, WIDTH / 2, HEIGHT / 2, HEIGHT * 0.9);
+    const vignetteGrad = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, HEIGHT * 0.35, WIDTH / 2, HEIGHT / 2, WIDTH * 0.8);
     vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.20)');
+    vignetteGrad.addColorStop(0.6, 'rgba(0,0,0,0.0)');
+    vignetteGrad.addColorStop(0.85, 'rgba(0,0,0,0.15)');
+    vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.45)');
     ctx.fillStyle = vignetteGrad;
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
   }

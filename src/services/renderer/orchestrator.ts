@@ -5,7 +5,7 @@ import { getMusicPresetUrl } from '../audioMixer';
 import { computeVisualStyle, getFrameSampleRate } from './animation';
 import { draw, drawProceduralBackground, saturationCache } from './canvas/draw';
 import { drawKineticTextOverlay, drawDiagramOverlay } from './canvas/overlays';
-import { renderTransition, getTransitionConfigForSectionChange } from './canvas/transitions';
+import { renderTransition, getTransitionConfigForSectionChange, selectTransitionForSegment } from './canvas/transitions';
 import { planSegmentShots, alternateFraming, planPatternInterrupts, shouldInsertContrastingTransition, DEFAULT_EDITING_RHYTHM_CONFIG } from './editingRhythm';
 import type { ShotPlan, TextCardEntry } from './editingRhythm';
 import { preload } from './preload';
@@ -199,7 +199,7 @@ export async function renderVideoToBlob(
     const needsContrastingTransition = contrastingTransitionIndices.has(i);
     const transitionType: TransitionType = needsContrastingTransition
       ? 'wipe'
-      : (editEntry?.transition?.type ?? 'crossfade');
+      : selectTransitionForSegment(seg, i, project.script.length);
     const transitionDurationMs: number = sectionTransitionConfig?.durationMs ?? editEntry?.transition?.durationMs ?? 500;
     const transitionFrames = editEntry?.transition || sectionTransitionConfig
       ? Math.min(Math.round(transitionDurationMs / 1000 * fps), Math.floor(totalFrames * 0.3))

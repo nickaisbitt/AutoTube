@@ -218,8 +218,11 @@ export function applyKenBurnsEffect(
   };
   const cfg = config ?? defaults;
 
-  // Linear interpolation for zoom
-  const zoom = cfg.zoomStart + progress * (cfg.zoomEnd - cfg.zoomStart);
+  // Cubic ease-in-out for zoom
+  const ease = progress < 0.5
+    ? 4 * progress * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+  const zoom = cfg.zoomStart + ease * (cfg.zoomEnd - cfg.zoomStart);
 
   // Sinusoidal pan for smooth motion
   const panAmplitudeX = 12;
@@ -419,6 +422,48 @@ export function getTransitionConfigForSectionChange(
 }
 
 /**
+ * Randomly selects a transition type based on segment type and position.
+ * 
+ * - Intro segments: always use cold open / flash
+ * - Section transitions: cross-dissolve (60%) or wipe (40%)
+ * - Tension moments (outro/high pacing): flash cut
+ * - Final segment: cross-dissolve to black
+ * 
+ * @param seg - Current segment
+ * @param index - Segment index
+ * @param totalSegments - Total number of segments
+ * @returns TransitionType - The selected transition type
+ */
+export function selectTransitionForSegment(
+  seg: ScriptSegment,
+  index: number,
+  totalSegments: number,
+): TransitionType {
+  // Intro segment: cold open flash
+  if (seg.type === 'intro' || index === 0) {
+    return 'flash';
+  }
+  
+  // Final segment: cross-dissolve to black
+  if (index === totalSegments - 1 || seg.type === 'outro') {
+    return 'cross-dissolve';
+  }
+  
+  // Tension moments: flash cut (high pacing or transition type)
+  if (seg.type === 'transition' || (seg.pacingScore && seg.pacingScore >= 4)) {
+    return 'flash';
+  }
+  
+  // Section transitions: 60% cross-dissolve, 40% wipe
+  if (seg.type === 'section') {
+    return Math.random() < 0.6 ? 'cross-dissolve' : 'wipe';
+  }
+  
+  // Default: cross-dissolve
+  return 'cross-dissolve';
+}
+
+/**
  * Determines whether a segment should display a statistical text card.
  * Returns the recommended duration (2–3 seconds) or 0 if no card needed.
  *
@@ -485,8 +530,18 @@ export function renderTransition(
 
   switch (transitionType) {
     case 'cut':
-      // Instant switch: show incoming frame immediately (no blending)
+      // Instant switch with brief white flash (2 frames) at cut point for impact
       draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+      // 2-frame white flash at the cut point (progress 0.4-0.6 approximately)
+      if (progress > 0.4 && progress < 0.6) {
+        const flashIntensity = 1 - Math.abs(progress - 0.5) * 10;
+        if (flashIntensity > 0) {
+          ctx.save();
+          ctx.fillStyle = `rgba(255,255,255,${flashIntensity * 0.8})`;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.restore();
+        }
+      }
       break;
 
     case 'dissolve': {
@@ -503,9 +558,9 @@ export function renderTransition(
     }
 
     case 'wipe': {
-      // Horizontal wipe: left-to-right boundary sweep
-      // As progress goes 0→1, the incoming frame is revealed from left to right
+      // Horizontal wipe: left-to-right boundary sweep with soft 20px feather
       const boundary = Math.round(progress * w);
+      const feather = 20;
       // Draw outgoing frame fully
       draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
       // Clip to the left portion (0 to boundary) and draw incoming frame over it
@@ -515,6 +570,18 @@ export function renderTransition(
       ctx.clip();
       draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
       ctx.restore();
+      // Apply soft feathered edge at the split point
+      if (boundary > 0 && boundary < w) {
+        const featherGrad = ctx.createLinearGradient(
+          Math.max(0, boundary - feather), 0,
+          Math.min(w, boundary + feather), 0
+        );
+        featherGrad.addColorStop(0, 'rgba(0,0,0,0)');
+        featherGrad.addColorStop(0.5, 'rgba(0,0,0,0.15)');
+        featherGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = featherGrad;
+        ctx.fillRect(Math.max(0, boundary - feather), 0, feather * 2, canvas.height);
+      }
       break;
     }
 
@@ -665,6 +732,32 @@ export function renderTransition(
       ctx.translate(w / 2, canvas.height / 2);
       ctx.rotate(-rotation);
       ctx.translate(-w / 2, -canvas.height / 2);
+      draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
+      ctx.restore();
+      break;
+    }
+
+    case 'cross-dissolve': {
+      // Professional cross-dissolve: smooth fade with 1.02x zoom for dynamism
+      const easeProgress = progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      
+      // Draw outgoing frame with slight zoom out (1.02x)
+      const zoomScale = 1.02;
+      const centerX = w / 2;
+      const centerY = canvas.height / 2;
+      
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.scale(zoomScale - easeProgress * 0.02, zoomScale - easeProgress * 0.02);
+      ctx.translate(-centerX, -centerY);
+      draw(ctx, canvas, seg, outgoingAsset, cache, 1, watermark, isRendering, bgCache, outgoingKenBurns);
+      ctx.restore();
+      
+      // Draw incoming frame with alpha blend
+      ctx.save();
+      ctx.globalAlpha = easeProgress;
       draw(ctx, canvas, seg, incomingAsset, cache, progress, watermark, isRendering, bgCache, incomingKenBurns);
       ctx.restore();
       break;

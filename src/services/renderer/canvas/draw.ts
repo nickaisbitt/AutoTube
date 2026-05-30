@@ -138,7 +138,8 @@ export function drawProceduralBackground(
     ctx.lineTo(w, h);
     ctx.lineTo(0, h);
     ctx.closePath();
-    ctx.fillStyle = palette.accent + '0' + Math.max(0, Math.floor(8 - layer * 2));
+    const waveAlphas = ['30', '22', '15'];
+    ctx.fillStyle = palette.accent + waveAlphas[layer];
     ctx.fill();
   }
 
@@ -353,6 +354,49 @@ export function draw(
             saturationCache.set(asset.url, score);
           }
           filterString = computeAdaptiveFilter(score);
+
+          // Segment-type colour grading overrides
+          const baseSaturate = 1.18;
+          const baseContrast = 1.10;
+          const baseBrightness = 1.02;
+          let sat = baseSaturate;
+          let ctr = baseContrast;
+          let bri = baseBrightness;
+          let hueRotate = 0;
+
+          switch (seg.type) {
+            case 'intro':
+              // Cooler temperature for urgency
+              hueRotate = -8;
+              sat = baseSaturate + 0.05;
+              bri = baseBrightness - 0.01;
+              break;
+            case 'section':
+              // Neutral/warm for trust
+              hueRotate = 5;
+              sat = baseSaturate + 0.08;
+              bri = baseBrightness + 0.02;
+              break;
+            case 'transition':
+              // Tension: desaturate + increase contrast for drama
+              sat = baseSaturate - 0.20;
+              ctr = baseContrast + 0.15;
+              bri = baseBrightness - 0.02;
+              break;
+            default:
+              break;
+          }
+
+          // Detect stat segments: narration has numbers
+          if (/\$[\d,.]+|\d+%|\d+\s*(billion|million|trillion)/i.test(seg.narration)) {
+            // Boost vibrancy for data impact
+            sat = baseSaturate + 0.15;
+            ctr = baseContrast + 0.05;
+            bri = baseBrightness + 0.03;
+            hueRotate = 0;
+          }
+
+          filterString = `saturate(${sat}) contrast(${ctr}) brightness(${bri}) hue-rotate(${hueRotate}deg)`;
         }
 
         ctx.filter = filterString;
@@ -459,18 +503,22 @@ export function draw(
 
   // ── Cinematic letterbox bars ──
   const barH = Math.round(h * 0.04);
-  const letterboxColor = accentColors[seg.type]
-    ? hexToRgba(accentColors[seg.type], 0.85)
-    : 'rgba(0, 0, 0, 0.85)';
-  ctx.fillStyle = letterboxColor;
+  const accentHex = accentColors[seg.type] || '#ffffff';
+  // Black bars
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
   ctx.fillRect(0, 0, w, barH);
   ctx.fillRect(0, h - barH, w, barH);
+  // Subtle accent inner edge glow
+  ctx.fillStyle = hexToRgba(accentHex, 0.5);
+  ctx.fillRect(0, barH - 2, w, 2);
+  ctx.fillRect(0, h - barH, w, 2);
 
   // ── Vignette overlay ──
   const vigGrad = ctx.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, w * 0.8);
   vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
-  vigGrad.addColorStop(0.75, 'rgba(0,0,0,0.08)');
-  vigGrad.addColorStop(1, 'rgba(0,0,0,0.25)');
+  vigGrad.addColorStop(0.6, 'rgba(0,0,0,0.0)');
+  vigGrad.addColorStop(0.85, 'rgba(0,0,0,0.15)');
+  vigGrad.addColorStop(1, 'rgba(0,0,0,0.45)');
   ctx.fillStyle = vigGrad;
   ctx.fillRect(0, 0, w, h);
 
@@ -485,6 +533,17 @@ export function draw(
       ctx.fillStyle = noise > 0.5 ? `rgba(255,255,255,${absNoise})` : `rgba(0,0,0,${absNoise})`;
       ctx.fillRect(gx, gy, grainStep, grainStep);
     }
+  }
+
+  // ── Film scratch effect (organic vertical white lines) ──
+  const scratchCount = 1 + Math.floor(Math.random() * 2); // 1-2 scratches per frame
+  for (let s = 0; s < scratchCount; s++) {
+    const scratchX = Math.random() * w;
+    const scratchAlpha = 0.03 + Math.random() * 0.05; // 0.03-0.08 opacity
+    const scratchH = h * (0.3 + Math.random() * 0.4); // 30-70% of height
+    const scratchY = Math.random() * (h - scratchH);
+    ctx.fillStyle = `rgba(255, 255, 255, ${scratchAlpha})`;
+    ctx.fillRect(Math.floor(scratchX), Math.floor(scratchY), 1, Math.floor(scratchH));
   }
 
   // ── Requirement 4.1–4.5: Technical label badge ──
@@ -523,7 +582,7 @@ export function draw(
   if (words.length > 0) {
     // Show 4-6 words at a time, centered on current spoken word
     const activeWordIdx = Math.max(0, Math.min(Math.floor(progress * words.length), words.length - 1));
-    const windowSize = 5;
+    const windowSize = 7;
     const halfW = Math.floor(windowSize / 2);
     const start = Math.max(0, Math.min(activeWordIdx - halfW, words.length - windowSize));
     const end = Math.min(words.length, start + windowSize);
@@ -572,9 +631,19 @@ export function draw(
   }
 
   // ── Subtle progress indicator ──
-  const progBarH = 3;
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+  const progBarH = 2;
+  // Fade out during last 10% of segment
+  const fadeProgress = Math.max(0, Math.min(1, (1 - progress) / 0.1));
+  const barAlpha = fadeProgress;
+  // Background track
+  ctx.fillStyle = `rgba(255, 255, 255, ${0.10 * barAlpha})`;
   ctx.fillRect(0, h - progBarH, w, progBarH);
+  // Progress fill with glow effect
+  ctx.save();
+  ctx.shadowColor = accentColor;
+  ctx.shadowBlur = 8;
   ctx.fillStyle = accentColor;
+  ctx.globalAlpha = barAlpha;
   ctx.fillRect(0, h - progBarH, w * progress, progBarH);
+  ctx.restore();
 }

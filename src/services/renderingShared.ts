@@ -279,11 +279,26 @@ export function getBackgroundMusicPath(style: string): string | null {
 /**
  * Computes the background music volume level.
  *
- * - 0.15 when narration is present (music stays underneath speech)
- * - 0.60 when there is no narration (music is the primary audio)
+ * - During narration: duck by 8dB (factor 0.158) for clear speech
+ * - During transitions (no narration): boost by 3dB (factor 1.413)
+ * - Base volume when no narration: 0.60
+ *
+ * dB conversion: 10^(dB/20) → -8dB = 0.158, +3dB = 1.413
  */
-export function computeBgMusicVolume(hasNarration: boolean): number {
-  return hasNarration ? 0.15 : 0.60;
+export function computeBgMusicVolume(
+  hasNarration: boolean,
+  isTransition?: boolean,
+): number {
+  if (hasNarration) {
+    // Duck music by 8dB during narration for clear speech
+    return 0.60 * 0.158; // ≈ 0.095
+  }
+  // No narration — music is primary
+  if (isTransition) {
+    // Boost by 3dB for more impactful transitions
+    return 0.60 * 1.413; // ≈ 0.848
+  }
+  return 0.60;
 }
 
 // ---------------------------------------------------------------------------

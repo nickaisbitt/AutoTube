@@ -92,31 +92,37 @@ export async function handleServerRender(
   const protocol = 'http';
   const devServerUrl = `${protocol}://${host}`;
 
-  const child = spawn("node", ["server-render/index.mjs", outputMp4], {
+  // Check if Remotion renderer is available
+  const remotionPath = join(PROJECT_ROOT, "remotion", "render.mjs");
+  const useRemotion = existsSync(remotionPath);
+
+  if (useRemotion) {
+    sendEvent({ type: "progress", message: "Using Remotion renderer...", pct: 1 });
+  }
+
+  const renderScript = useRemotion
+    ? join("remotion", "render.mjs")
+    : join("server-render", "index.mjs");
+
+  const child = spawn("node", [renderScript, projectPath || "/tmp/autotube-project.json", outputMp4], {
     cwd: PROJECT_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...envVars, DEV_SERVER_URL: devServerUrl },
+    env: { ...process.env, ...envVars, DEV_SERVER_URL: devServerUrl, REMOTION_SERVE_URL: useRemotion ? devServerUrl : undefined },
   });
 
   let stderr = "";
   child.stdout.on("data", (data: Buffer) => {
     const line = data.toString().trim();
     if (!line) return;
-    // Parse progress from server-render.mjs stdout
-    const segMatch = line.match(/Segment (\d+)\/(\d+)/);
-    if (segMatch) {
-      const pct = Math.round(
-        (parseInt(segMatch[1]) / parseInt(segMatch[2])) * 80,
-      );
-      sendEvent({ type: "progress", message: line, pct });
-    } else if (line.includes("Generating narration")) {
-      sendEvent({ type: "progress", message: line, pct: 82 });
-    } else if (line.includes("Muxing")) {
-      sendEvent({ type: "progress", message: line, pct: 90 });
-    } else if (line.includes("Autonomous AI Video Quality Review")) {
-      sendEvent({ type: "progress", message: line, pct: 94 });
-    } else if (line.includes("Final video")) {
+    // Parse progress from renderer stdout
+    if (line.includes("Bundle:") || line.includes("Render:")) {
+      const pctMatch = line.match(/(\d+)%/);
+      if (pctMatch) sendEvent({ type: "progress", message: line, pct: parseInt(pctMatch[1]) });
+    } else if (line.includes("Done!") || line.includes("Final video")) {
       sendEvent({ type: "progress", message: line, pct: 98 });
+    } else {
+      sendEvent({ type: "progress", message: line, pct: undefined });
+    }
     }
   });
   child.stderr.on("data", (data: Buffer) => {

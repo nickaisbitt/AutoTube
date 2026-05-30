@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import { spawn } from "child_process";
 import { join, dirname } from "path";
-import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -20,9 +20,11 @@ export async function handleServerRender(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const outputDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data/autotube-output";
-  mkdirSync(outputDir, { recursive: true });
-  const outputMp4 = join(outputDir, `server-render-${Date.now()}.mp4`);
+  const outputMp4 = join(
+    PROJECT_ROOT,
+    "test-recordings",
+    `server-render-${Date.now()}.mp4`,
+  );
 
   // Ensure the project is saved before spawning
   if (!existsSync("/tmp/autotube-project.json")) {
@@ -85,45 +87,42 @@ export async function handleServerRender(
     /* .env.local may not exist */
   }
 
-  // Fallback to process.env for production (Railway sets env vars, not .env.local)
-  if (!envVars["VITE_OPENROUTER_KEY"]) {
-    const key = process.env.VITE_OPENROUTER_KEY || process.env.OPENROUTER_API_KEY || "";
-    if (key) {
-      envVars["VITE_OPENROUTER_KEY"] = key;
-      envVars["OPENROUTER_API_KEY"] = key;
-    }
-  }
-
   // Determine the dev server URL from the incoming request
   const host = req.headers.host || 'localhost:5173';
   const protocol = 'http';
   const devServerUrl = `${protocol}://${host}`;
 
-  const child = spawn("node", ["server-render/index.mjs", outputMp4], {
+  // Check if Remotion renderer is available
+  const remotionPath = join(PROJECT_ROOT, "remotion", "render.mjs");
+  const useRemotion = existsSync(remotionPath);
+
+  if (useRemotion) {
+    sendEvent({ type: "progress", message: "Using Remotion renderer...", pct: 1 });
+  }
+
+  const renderScript = useRemotion
+    ? join("remotion", "render.mjs")
+    : join("server-render", "index.mjs");
+
+  const child = spawn("node", [renderScript, projectPath || "/tmp/autotube-project.json", outputMp4], {
     cwd: PROJECT_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...envVars, DEV_SERVER_URL: devServerUrl },
+    env: { ...process.env, ...envVars, DEV_SERVER_URL: devServerUrl, REMOTION_SERVE_URL: useRemotion ? devServerUrl : undefined },
   });
 
   let stderr = "";
   child.stdout.on("data", (data: Buffer) => {
     const line = data.toString().trim();
     if (!line) return;
-    // Parse progress from server-render.mjs stdout
-    const segMatch = line.match(/Segment (\d+)\/(\d+)/);
-    if (segMatch) {
-      const pct = Math.round(
-        (parseInt(segMatch[1]) / parseInt(segMatch[2])) * 80,
-      );
-      sendEvent({ type: "progress", message: line, pct });
-    } else if (line.includes("Generating narration")) {
-      sendEvent({ type: "progress", message: line, pct: 82 });
-    } else if (line.includes("Muxing")) {
-      sendEvent({ type: "progress", message: line, pct: 90 });
-    } else if (line.includes("Autonomous AI Video Quality Review")) {
-      sendEvent({ type: "progress", message: line, pct: 94 });
-    } else if (line.includes("Final video")) {
+    // Parse progress from renderer stdout
+    if (line.includes("Bundle:") || line.includes("Render:")) {
+      const pctMatch = line.match(/(\d+)%/);
+      if (pctMatch) sendEvent({ type: "progress", message: line, pct: parseInt(pctMatch[1]) });
+    } else if (line.includes("Done!") || line.includes("Final video")) {
       sendEvent({ type: "progress", message: line, pct: 98 });
+    } else {
+      sendEvent({ type: "progress", message: line, pct: undefined });
+    }
     }
   });
   child.stderr.on("data", (data: Buffer) => {
@@ -156,7 +155,10 @@ export async function handleServerRender(
     }
 
     // Send the file path so the client can fetch it.
-    const relPath = fileToReturn.replace(outputDir + "/", "");
+    const relPath = join(
+      "test-recordings",
+      fileToReturn.split("test-recordings/")[1] || "",
+    );
     sendEvent({
       type: "complete",
       message: `Server render complete${hasAudio ? ' with audio' : ' (video only)'}!`,

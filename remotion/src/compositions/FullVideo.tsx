@@ -4,6 +4,7 @@ import { ColdOpen } from './ColdOpen';
 import { TitleCard } from './TitleCard';
 import { MainVideo } from './MainVideo';
 import { EndScreen } from './EndScreen';
+import { RenderAudio } from '../audio/RenderAudio';
 
 export const FullVideo: React.FC<ProjectProps> = (props) => {
   const coldOpenFrames = 72; // 3s at 24fps
@@ -13,6 +14,7 @@ export const FullVideo: React.FC<ProjectProps> = (props) => {
 
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
+      {/* Visual layers */}
       <Series>
         <Series.Sequence durationInFrames={coldOpenFrames}>
           <ColdOpen {...props} />
@@ -27,6 +29,9 @@ export const FullVideo: React.FC<ProjectProps> = (props) => {
           <EndScreen {...props} />
         </Series.Sequence>
       </Series>
+
+      {/* Audio layer (narration) */}
+      <RenderAudio project={props} />
     </AbsoluteFill>
   );
 };

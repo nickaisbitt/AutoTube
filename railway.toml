@@ -1,6 +1,6 @@
 [build]
 builder = "railpack"
-buildCommand = "npm ci && npm run build && npm prune --omit=dev"
+rootDirectory = "deploy"
 
 [deploy]
 startCommand = "npx tsx server.mjs"

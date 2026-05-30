@@ -2,9 +2,16 @@
 // Web image search utilities — Bing Images scraper
 // ============================================================================
 
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-puppeteer.use(StealthPlugin());
+let _puppeteer: typeof import("puppeteer-extra") | null = null;
+async function getPuppeteer() {
+  if (!_puppeteer) {
+    const puppeteer = (await import("puppeteer-extra")).default;
+    const { default: StealthPlugin } = await import("puppeteer-extra-plugin-stealth");
+    puppeteer.use(StealthPlugin());
+    _puppeteer = puppeteer;
+  }
+  return _puppeteer;
+}
 
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -469,7 +476,7 @@ async function fetchGoogleImagesHeadless(query: string): Promise<WebImageResult[
     || "/usr/bin/google-chrome"
     || "/usr/bin/chromium";
 
-  const browser = await puppeteer.launch({
+  const browser = await (await getPuppeteer()).launch({
     headless: true,
     executablePath: CHROME_PATH,
     args: [

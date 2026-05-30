@@ -123,7 +123,6 @@ export async function handleServerRender(
     } else {
       sendEvent({ type: "progress", message: line, pct: undefined });
     }
-    }
   });
   child.stderr.on("data", (data: Buffer) => {
     stderr += data.toString();

@@ -6,6 +6,8 @@
     "start": "npx tsx server.mjs"
   },
   "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "canvas": "^3.1.0",
     "clsx": "2.1.1",
     "js-yaml": "^4.1.1",
     "lucide-react": "^1.8.0",

@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import { spawn } from "child_process";
 import { join, dirname } from "path";
-import { readFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -20,9 +20,10 @@ export async function handleServerRender(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
+  const outputDir = "/tmp/autotube-output";
+  mkdirSync(outputDir, { recursive: true });
   const outputMp4 = join(
-    PROJECT_ROOT,
-    "test-recordings",
+    outputDir,
     `server-render-${Date.now()}.mp4`,
   );
 
@@ -87,6 +88,15 @@ export async function handleServerRender(
     /* .env.local may not exist */
   }
 
+  // Fallback: in production, env vars come from process.env
+  if (!envVars["VITE_OPENROUTER_KEY"]) {
+    const key = process.env.VITE_OPENROUTER_KEY || process.env.OPENROUTER_API_KEY;
+    if (key) {
+      envVars["VITE_OPENROUTER_KEY"] = key;
+      envVars["OPENROUTER_API_KEY"] = key;
+    }
+  }
+
   // Determine the dev server URL from the incoming request
   const host = req.headers.host || 'localhost:5173';
   const protocol = 'http';
@@ -149,10 +159,7 @@ export async function handleServerRender(
     }
 
     // Send the file path so the client can fetch it.
-    const relPath = join(
-      "test-recordings",
-      fileToReturn.split("test-recordings/")[1] || "",
-    );
+    const relPath = fileToReturn.split("/tmp/autotube-output/")[1] || fileToReturn;
     sendEvent({
       type: "complete",
       message: `Server render complete${hasAudio ? ' with audio' : ' (video only)'}!`,

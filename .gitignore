@@ -31,3 +31,4 @@ coverage*.txt
 server-render.mjs.backup*
 server-render.mjs.current
 server-render/
+!deploy/server-render/

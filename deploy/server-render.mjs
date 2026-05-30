@@ -396,13 +396,34 @@ function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec = 4) {
  *
  * Requirement 4.7
  */
-function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narrationText) {
+function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narrationText, projectTopic) {
   const palettes = {
-    intro:      { bg: ['#3a3a7e', '#6a5fbc', '#5a5590'], accent: '#93c5fd' },
-    section:    { bg: ['#3a3a6e', '#4a4a8e', '#3a4a7a'], accent: '#60a5fa' },
-    transition: { bg: ['#4a3a7e', '#6a4abe', '#4a3a7e'], accent: '#a78bfa' },
-    outro:      { bg: ['#3a4a7a', '#3a5a8a', '#3a4a7a'], accent: '#93c5fd' },
+    intro:      { bg: ['#0a0a1a', '#1a0a2e', '#0a1a2e'], accent: '#e74c3c', glow: '#ff6b6b' },
+    section:    { bg: ['#0a0a1a', '#0a1a2e', '#0a2a3e'], accent: '#3498db', glow: '#5dade2' },
+    transition: { bg: ['#1a1a0a', '#2a1a0a', '#1a0a0a'], accent: '#f39c12', glow: '#f5b041' },
+    outro:      { bg: ['#0a1a0a', '#0a2a1a', '#0a1a2a'], accent: '#2ecc71', glow: '#58d68d' },
   };
+
+  // Topic-specific palette overrides
+  const topicPalettes = [
+    { keywords: ['finance', 'money', 'crypto', 'stock', 'invest', 'economy', 'bitcoin', 'trading', 'bank', 'fund', 'wealth'], palette: { bg: ['#0a1a2e', '#0a2a4e', '#1a2a3e'], accent: '#ffd700', glow: '#ffec80' } },
+    { keywords: ['tech', 'ai', 'software', 'computing', 'digital', 'cyber', 'robot', 'startup', 'data', 'cloud', 'code'], palette: { bg: ['#0a0a2e', '#0a1a3e', '#1a0a3e'], accent: '#00d4ff', glow: '#00f0ff' } },
+    { keywords: ['health', 'medical', 'disease', 'vaccine', 'doctor', 'medicine', 'mental', 'wellness', 'nutrition', 'exercise'], palette: { bg: ['#1a1a1a', '#2a2a2a', '#1a2a1a'], accent: '#22c55e', glow: '#4ade80' } },
+    { keywords: ['science', 'space', 'physics', 'quantum', 'nasa', 'universe', 'research', 'biology', 'chemistry', 'experiment'], palette: { bg: ['#0a0a1a', '#1a0a2a', '#0a1a2a'], accent: '#a855f7', glow: '#c084fc' } },
+    { keywords: ['politics', 'government', 'election', 'law', 'policy', 'congress', 'senate', 'vote', 'democrat', 'republican'], palette: { bg: ['#1a0a0a', '#0a0a1a', '#1a1a0a'], accent: '#dc2626', glow: '#f87171' } },
+  ];
+
+  const topicLower = `${topicText || ''} ${narrationText || ''} ${projectTopic || ''}`.toLowerCase();
+  let topicMatched = false;
+  for (const tp of topicPalettes) {
+    if (tp.keywords.some(kw => topicLower.includes(kw))) {
+      const p = palettes[segType] || palettes.section;
+      Object.assign(p, tp.palette);
+      topicMatched = true;
+      break;
+    }
+  }
+
   const p = palettes[segType] || palettes.section;
 
   // Richer multi-stop gradient background
@@ -413,10 +434,10 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narration
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
 
-  // Animated wave layers
-  const pulse = Math.sin(progress * Math.PI * 2) * 0.3 + 0.7;
+  // Animated wave layers (static since this is a fallback without frame progress)
+  const pulse = 0.7;
   for (let layer = 0; layer < 3; layer++) {
-    const waveOffset = progress * Math.PI * 2 + layer * Math.PI * 0.8;
+    const waveOffset = layer * Math.PI * 0.8;
     const waveY = h * (0.3 + layer * 0.15);
     const waveAmp = h * (0.02 + layer * 0.01);
     const waveFreq = 0.003 + layer * 0.002;
@@ -1020,11 +1041,30 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
 // ── Procedural background (matches browser renderer) ──────────────────────
 function drawProceduralBackground(ctx, seg, progress, skipParticles = false, segmentIndex = 0) {
   const palettes = {
-    intro:      { bg: ['#3a3a7e', '#6a5fbc', '#5a5590'], accent: '#93c5fd' },
-    section:    { bg: ['#3a3a6e', '#4a4a8e', '#3a4a7a'], accent: '#60a5fa' },
-    transition: { bg: ['#4a3a7e', '#6a4abe', '#4a3a7e'], accent: '#a78bfa' },
-    outro:      { bg: ['#3a4a7a', '#3a5a8a', '#3a4a7a'], accent: '#93c5fd' },
+    intro:      { bg: ['#0a0a1a', '#1a0a2e', '#0a1a2e'], accent: '#e74c3c', glow: '#ff6b6b' },
+    section:    { bg: ['#0a0a1a', '#0a1a2e', '#0a2a3e'], accent: '#3498db', glow: '#5dade2' },
+    transition: { bg: ['#1a1a0a', '#2a1a0a', '#1a0a0a'], accent: '#f39c12', glow: '#f5b041' },
+    outro:      { bg: ['#0a1a0a', '#0a2a1a', '#0a1a2a'], accent: '#2ecc71', glow: '#58d68d' },
   };
+
+  // Topic-specific palette overrides
+  const topicPalettes = [
+    { keywords: ['finance', 'money', 'crypto', 'stock', 'invest', 'economy', 'bitcoin', 'trading', 'bank', 'fund', 'wealth'], palette: { bg: ['#0a1a2e', '#0a2a4e', '#1a2a3e'], accent: '#ffd700', glow: '#ffec80' } },
+    { keywords: ['tech', 'ai', 'software', 'computing', 'digital', 'cyber', 'robot', 'startup', 'data', 'cloud', 'code'], palette: { bg: ['#0a0a2e', '#0a1a3e', '#1a0a3e'], accent: '#00d4ff', glow: '#00f0ff' } },
+    { keywords: ['health', 'medical', 'disease', 'vaccine', 'doctor', 'medicine', 'mental', 'wellness', 'nutrition', 'exercise'], palette: { bg: ['#1a1a1a', '#2a2a2a', '#1a2a1a'], accent: '#22c55e', glow: '#4ade80' } },
+    { keywords: ['science', 'space', 'physics', 'quantum', 'nasa', 'universe', 'research', 'biology', 'chemistry', 'experiment'], palette: { bg: ['#0a0a1a', '#1a0a2a', '#0a1a2a'], accent: '#a855f7', glow: '#c084fc' } },
+    { keywords: ['politics', 'government', 'election', 'law', 'policy', 'congress', 'senate', 'vote', 'democrat', 'republican'], palette: { bg: ['#1a0a0a', '#0a0a1a', '#1a1a0a'], accent: '#dc2626', glow: '#f87171' } },
+  ];
+
+  const topicLower = `${seg.title || ''} ${seg.narration || ''}`.toLowerCase();
+  for (const tp of topicPalettes) {
+    if (tp.keywords.some(kw => topicLower.includes(kw))) {
+      const p = palettes[seg.type] || palettes.section;
+      Object.assign(p, tp.palette);
+      break;
+    }
+  }
+
   const p = palettes[seg.type] || palettes.section;
 
   const segmentColors = ['#3a4a7e', '#3a5a8e', '#2a5a7e', '#3a6a8f', '#4a3b89'];
@@ -1485,6 +1525,63 @@ function generateChaptersString(segments) {
   return chapters.join('\n');
 }
 
+// ── Smart image cropping for aspect ratio mismatches ──────────────────────
+function smartCropImage(imgW, imgH, targetW, targetH) {
+  const imgAspect = imgW / imgH;
+  const targetAspect = targetW / targetH;
+
+  let sx = 0, sy = 0, sw = imgW, sh = imgH;
+
+  if (imgAspect > targetAspect) {
+    // Image is wider than target: crop from center horizontally
+    sw = imgH * targetAspect;
+    sx = (imgW - sw) / 2;
+  } else if (imgAspect < targetAspect) {
+    // Image is taller than target: crop from center vertically (upper 60% — heads are usually in top half)
+    sh = imgW / targetAspect;
+    // Bias crop toward top 60% of image where subjects typically are
+    const maxTopOffset = imgH - sh;
+    sy = Math.min(maxTopOffset * 0.6, maxTopOffset * 0.4); // Upper 40% of available range
+  }
+
+  return { sx, sy, sw, sh };
+}
+
+// ── Dynamic segment pacing (mirrors src/services/renderingShared.ts) ──────
+const PACING_RANGES = {
+  intro: { min: 4, max: 6 },
+  stat: { min: 6, max: 8 },
+  emotional: { min: 5, max: 7 },
+  tension: { min: 3, max: 4 },
+  transition: { min: 2, max: 4 },
+  outro: { min: 4, max: 6 },
+  section: { min: 5, max: 8 },
+};
+
+function classifyPacingCategory(seg) {
+  if (seg.type === 'intro') return 'intro';
+  if (seg.type === 'outro') return 'outro';
+  if (seg.type === 'transition') return 'transition';
+
+  const text = `${seg.title || ''} ${seg.narration || ''}`.toLowerCase();
+
+  if (/\$[\d,.]+|\d+%|\d+\s*(billion|million|trillion)/i.test(text)) return 'stat';
+  if (/\b(emotion|feel|heart|soul|passion|love|hate|fear|hope|dream|inspire|sad|happy|angry)\b/.test(text)) return 'emotional';
+  if (/\b(risk|threat|danger|warning|urgent|critical|breaking|shocking|now|immediate|alert|emergency)\b/.test(text)) return 'tension';
+
+  if (seg.purposeTag === 'risk') return 'tension';
+  if (seg.purposeTag === 'stat_hook') return 'stat';
+  if (seg.purposeTag === 'human_story') return 'emotional';
+
+  return 'section';
+}
+
+function computeDynamicSegmentDuration(seg) {
+  const category = classifyPacingCategory(seg);
+  const range = PACING_RANGES[category] || PACING_RANGES.section;
+  return Math.max(range.min, Math.min(range.max, seg.duration));
+}
+
 // ── Scene layout drawing functions (Requirements 3.1, 3.5, 4.1, 5.3) ──────
 // Each function accepts (ctx, seg, img, w, h, safeZone) and draws a complete
 // scene layout including background, overlay, and text within safe zone bounds.
@@ -1520,7 +1617,8 @@ function drawStatCard(ctx, seg, img, w, h, safeZone) {
     const ih = img.height || img.naturalHeight || 720;
     const scale = Math.max(w / iw, h / ih);
     const dw = iw * scale, dh = ih * scale;
-    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    const crop = smartCropImage(iw, ih, dw, dh);
+    ctx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, (w - dw) / 2, (h - dh) / 2, dw, dh);
   } else {
     drawProceduralFallbackWithText(ctx, w, h, null, seg.type);
   }
@@ -1652,7 +1750,8 @@ function drawQuoteCard(ctx, seg, img, w, h, safeZone) {
     const ih = img.height || img.naturalHeight || 720;
     const scale = Math.max(w / iw, h / ih);
     const dw = iw * scale, dh = ih * scale;
-    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    const crop = smartCropImage(iw, ih, dw, dh);
+    ctx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, (w - dw) / 2, (h - dh) / 2, dw, dh);
   } else {
     drawProceduralFallbackWithText(ctx, w, h, null, seg.type);
   }
@@ -1796,22 +1895,25 @@ function drawLeftTextRightImage(ctx, seg, img, w, h, safeZone) {
     const rightW = w - splitX;
     const scale = Math.max(rightW / iw, h / ih);
     const dw = iw * scale, dh = ih * scale;
+    const crop = smartCropImage(iw, ih, dw, dh);
     ctx.save();
     ctx.beginPath();
     ctx.rect(splitX, 0, rightW, h);
     ctx.clip();
-    ctx.drawImage(img, splitX + (rightW - dw) / 2, (h - dh) / 2, dw, dh);
+    ctx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, splitX + (rightW - dw) / 2, (h - dh) / 2, dw, dh);
     ctx.restore();
   } else {
     // Procedural fallback for right panel
     const palettes = {
-      intro: ['#1a0a2e', '#0a1a2e'], section: ['#0a1a2e', '#0a2a3e'],
-      transition: ['#2a1a0a', '#1a0a0a'],       outro: ['#0a1a2a', '#0a1a2e'],
+      intro:      { bg: ['#0a0a1a', '#1a0a2e', '#0a1a2e'], accent: '#e74c3c' },
+      section:    { bg: ['#0a0a1a', '#0a1a2e', '#0a2a3e'], accent: '#3498db' },
+      transition: { bg: ['#1a1a0a', '#2a1a0a', '#1a0a0a'], accent: '#f39c12' },
+      outro:      { bg: ['#0a1a0a', '#0a2a1a', '#0a1a2a'], accent: '#2ecc71' },
     };
     const p = palettes[seg.type] || palettes.section;
     const rightGrad = ctx.createLinearGradient(splitX, 0, w, h);
-    rightGrad.addColorStop(0, p[0]);
-    rightGrad.addColorStop(1, p[1]);
+    rightGrad.addColorStop(0, p.bg[0]);
+    rightGrad.addColorStop(1, p.bg[1]);
     ctx.fillStyle = rightGrad;
     ctx.fillRect(splitX, 0, w - splitX, h);
   }
@@ -1936,7 +2038,8 @@ function drawLowerThirdOverlay(ctx, seg, img, w, h, safeZone) {
     const ih = img.height || img.naturalHeight || 720;
     const scale = Math.max(w / iw, h / ih);
     const dw = iw * scale, dh = ih * scale;
-    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    const crop = smartCropImage(iw, ih, dw, dh);
+    ctx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, (w - dw) / 2, (h - dh) / 2, dw, dh);
   } else {
     drawProceduralFallbackWithText(ctx, w, h, null, seg.type);
   }
@@ -2045,7 +2148,8 @@ function drawCenteredText(ctx, seg, img, w, h, safeZone) {
     const ih = img.height || img.naturalHeight || 720;
     const scale = Math.max(w / iw, h / ih);
     const dw = iw * scale, dh = ih * scale;
-    ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    const crop = smartCropImage(iw, ih, dw, dh);
+    ctx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, (w - dw) / 2, (h - dh) / 2, dw, dh);
   } else {
     drawProceduralFallbackWithText(ctx, w, h, null, seg.type);
   }
@@ -2394,7 +2498,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
           ctx.translate(WIDTH / 2 + panX, HEIGHT / 2 + panY);
           ctx.scale(zoom, zoom);
           ctx.filter = filterString;
-          ctx.drawImage(activeImg, -dw / 2, -dh / 2, dw, dh);
+          const crop = smartCropImage(iw, ih, dw, dh);
+          ctx.drawImage(activeImg, crop.sx, crop.sy, crop.sw, crop.sh, -dw / 2, -dh / 2, dw, dh);
           ctx.filter = 'none';
           ctx.restore();
 
@@ -3762,6 +3867,12 @@ async function render() {
   const SEGMENT_TITLE_FADE_FRAMES = isShortsMode ? 0 : Math.round((renderFlags.useFastPacing ? 0.08 : 0.17) * FPS);
   const titleCardFrames = Math.round(TITLE_CARD_SECONDS * FPS);
   const endScreenFrames = Math.round(END_SCREEN_SECONDS * FPS);
+
+  // Apply dynamic pacing: adjust segment durations based on content type
+  for (const seg of project.script) {
+    seg.duration = computeDynamicSegmentDuration(seg);
+  }
+
   let segmentSec = project.script.reduce((s, seg) => s + seg.duration, 0);
   const segmentTitleSec = (project.script.length * SEGMENT_TITLE_FRAMES) / FPS;
   const coldOpenSec = COLD_OPEN_FRAMES / FPS;

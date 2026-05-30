@@ -1,6 +1,5 @@
 [build]
 builder = "railpack"
-rootDirectory = "deploy"
 
 [deploy]
 startCommand = "npx tsx server.mjs"

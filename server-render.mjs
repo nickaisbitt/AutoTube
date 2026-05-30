@@ -434,10 +434,10 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narration
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
 
-  // Animated wave layers
-  const pulse = Math.sin(progress * Math.PI * 2) * 0.3 + 0.7;
+  // Animated wave layers (static since this is a fallback without frame progress)
+  const pulse = 0.7;
   for (let layer = 0; layer < 3; layer++) {
-    const waveOffset = progress * Math.PI * 2 + layer * Math.PI * 0.8;
+    const waveOffset = layer * Math.PI * 0.8;
     const waveY = h * (0.3 + layer * 0.15);
     const waveAmp = h * (0.02 + layer * 0.01);
     const waveFreq = 0.003 + layer * 0.002;

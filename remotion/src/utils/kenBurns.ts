@@ -17,6 +17,15 @@ export function computeKenBurnsTransform(
   return `scale(${zoom}) translate(${panX}px, ${panY}px)`;
 }
 
+export function getKenBurnsTransform(
+  params: KenBurnsParams,
+  progress: number,
+  width: number,
+  height: number
+): string {
+  return computeKenBurnsTransform(params, progress, width, height);
+}
+
 export function getKenBurnsParams(segmentId: string, assetId: string): KenBurnsParams {
   // Deterministic based on IDs
   const hash = segmentId.split('').reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0);

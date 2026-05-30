@@ -1,11 +1,45 @@
+import React from 'react';
 import { AbsoluteFill, useCurrentFrame, interpolate, Easing } from 'remotion';
 import { SegmentProps, ProjectProps } from '../types';
 import { getTopicPalette, hexToRgba } from '../utils/colors';
+
+// Backgrounds
+import { ProceduralBackground } from '../backgrounds/ProceduralBackground';
+import { ImageBackground } from '../backgrounds/ImageBackground';
+
+// Layouts
+import { StatCardLayout } from '../layouts/StatCardLayout';
+import { QuoteCardLayout } from '../layouts/QuoteCardLayout';
+import { LeftTextRightImageLayout } from '../layouts/LeftTextRightImageLayout';
+import { LowerThirdOverlayLayout } from '../layouts/LowerThirdOverlayLayout';
+import { CenteredTextLayout } from '../layouts/CenteredTextLayout';
+
+// Effects
+import { Vignette } from '../effects/Vignette';
+import { FilmGrain } from '../effects/FilmGrain';
+import { FilmScratch } from '../effects/FilmScratch';
+import { FlashFrame } from '../effects/FlashFrame';
+
+// Segment components
+import { SegmentTitleCard } from './SegmentTitleCard';
 
 interface SegmentSequenceProps extends ProjectProps {
   segment: SegmentProps;
   index: number;
   totalSegments: number;
+}
+
+function resolveLayout(segment: SegmentProps) {
+  const layout = (segment.sceneLayout || '').toLowerCase();
+  if (layout.includes('stat') || layout.includes('data')) return 'stat';
+  if (layout.includes('quote') || layout.includes('cite')) return 'quote';
+  if (layout.includes('split') || layout.includes('left')) return 'split';
+  if (layout.includes('lower') || layout.includes('third') || layout.includes('overlay')) return 'lowerThird';
+  if (layout.includes('center') || layout.includes('title')) return 'centered';
+  // Default: pick based on segment type
+  if (segment.type === 'intro' || segment.type === 'outro') return 'centered';
+  if (segment.type === 'transition') return 'titleCard';
+  return 'centered';
 }
 
 export const SegmentSequence: React.FC<SegmentSequenceProps> = (props) => {
@@ -15,116 +49,120 @@ export const SegmentSequence: React.FC<SegmentSequenceProps> = (props) => {
   const progress = frame / totalFrames;
   const palette = getTopicPalette(topic);
 
-  // Title slide-in animation (first 15 frames)
-  const titleOpacity = interpolate(frame, [0, 15], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-  const titleX = interpolate(frame, [0, 15], [-50, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic) });
+  const mediaSrc = segment.media?.url;
+  const hasMedia = !!mediaSrc && mediaSrc.length > 0;
+  const layout = resolveLayout(segment);
 
-  // Narration text fade in
-  const narrationOpacity = interpolate(frame, [15, 30], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-
-  // Split narration into words for karaoke
+  // Karaoke word timings
+  const hasWordTimings = segment.narrationWordTimings && segment.narrationWordTimings.length > 0;
   const words = segment.narration.split(/\s+/);
-  const msPerWord = (segment.duration * 1000) / words.length;
-  const currentTimeMs = (frame / fps) * 1000;
-  const currentWordIndex = Math.min(Math.floor(currentTimeMs / msPerWord), words.length - 1);
 
   // Progress bar
   const barWidth = interpolate(progress, [0, 1], [0, 100], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
 
+  // Determine if we should show a title card (transition segments or explicit layout)
+  const showTitleCard = segment.type === 'transition' || layout === 'titleCard';
+
   return (
     <AbsoluteFill>
-      {/* Background gradient */}
-      <AbsoluteFill style={{
-        background: `linear-gradient(135deg, ${palette.bg[0]}, ${palette.bg[1]}, ${palette.bg[2]})`,
-      }} />
+      {/* ── Background ── */}
+      {hasMedia ? (
+        <ImageBackground
+          src={mediaSrc!}
+          kenBurns={{ zoomStart: 1.02, zoomEnd: 1.12, panDirectionX: (index % 3) - 1, panDirectionY: ((index * 7) % 5) - 2 }}
+          width={1920}
+          height={1080}
+          brightness={0.55}
+        />
+      ) : (
+        <ProceduralBackground topic={topic} accentColor={brand.accentColor} />
+      )}
 
-      {/* Animated background glow */}
-      <AbsoluteFill style={{
-        background: `radial-gradient(circle at ${50 + Math.sin(frame * 0.02) * 10}% ${50 + Math.cos(frame * 0.015) * 10}%, ${hexToRgba(palette.accent, 0.08)}, transparent 60%)`,
-      }} />
+      {/* ── Main layout content ── */}
+      {showTitleCard ? (
+        <SegmentTitleCard
+          segment={segment}
+          index={index}
+          totalSegments={totalSegments}
+          brand={brand}
+          topic={topic}
+        />
+      ) : layout === 'stat' ? (
+        <StatCardLayout segment={segment} brand={brand} topic={topic} mediaSrc={mediaSrc} />
+      ) : layout === 'quote' ? (
+        <QuoteCardLayout segment={segment} brand={brand} />
+      ) : layout === 'split' ? (
+        <LeftTextRightImageLayout segment={segment} brand={brand} mediaSrc={mediaSrc} />
+      ) : layout === 'lowerThird' ? (
+        <LowerThirdOverlayLayout segment={segment} brand={brand} />
+      ) : (
+        <CenteredTextLayout segment={segment} brand={brand} />
+      )}
 
-      {/* Particles */}
-      <AbsoluteFill style={{ opacity: 0.15 }}>
-        {Array.from({ length: 30 }, (_, i) => {
-          const x = ((i * 67 + frame * 0.2) % 1920);
-          const y = ((i * 43 + frame * 0.15) % 1080);
-          const size = 1 + (i % 2);
-          return (
-            <div key={i} style={{
-              position: 'absolute', left: x, top: y,
-              width: size, height: size,
-              borderRadius: '50%', backgroundColor: `rgba(255,255,255,0.3)`,
-            }} />
-          );
-        })}
-      </AbsoluteFill>
+      {/* ── Karaoke subtitles ── */}
+      {segment.type !== 'transition' && (
+        <AbsoluteFill style={{ justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 60 }}>
+          <div style={{
+            maxWidth: '85%',
+            textAlign: 'center',
+            lineHeight: 1.5,
+            display: 'flex',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+            gap: '2px 6px',
+          }}>
+            {hasWordTimings
+              ? segment.narrationWordTimings!.map((wt, i) => {
+                  const currentTimeMs = (frame / fps) * 1000;
+                  const isActive = currentTimeMs >= wt.startMs && currentTimeMs <= wt.endMs;
+                  const isPast = currentTimeMs > wt.endMs;
+                  return (
+                    <span key={i} style={{
+                      fontSize: 26,
+                      fontFamily: brand.fontFamily,
+                      fontWeight: isActive ? 700 : 400,
+                      color: isActive ? brand.accentColor : isPast ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.8)',
+                      textShadow: isActive ? `0 0 16px ${hexToRgba(brand.accentColor, 0.5)}` : 'none',
+                    }}>
+                      {wt.word}
+                    </span>
+                  );
+                })
+              : (() => {
+                  const msPerWord = (segment.duration * 1000) / words.length;
+                  const currentTimeMs = (frame / fps) * 1000;
+                  const currentWordIndex = Math.min(Math.floor(currentTimeMs / msPerWord), words.length - 1);
+                  return words.map((word, i) => {
+                    const isActive = i === currentWordIndex;
+                    const isPast = i < currentWordIndex;
+                    return (
+                      <span key={i} style={{
+                        fontSize: 26,
+                        fontFamily: brand.fontFamily,
+                        fontWeight: isActive ? 700 : 400,
+                        color: isActive ? brand.accentColor : isPast ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.8)',
+                        textShadow: isActive ? `0 0 16px ${hexToRgba(brand.accentColor, 0.5)}` : 'none',
+                      }}>
+                        {word}{' '}
+                      </span>
+                    );
+                  });
+                })()}
+          </div>
+        </AbsoluteFill>
+      )}
 
-      {/* Main content area */}
-      <AbsoluteFill style={{ justifyContent: 'center', alignItems: 'center', padding: 80 }}>
-        {/* Segment title */}
-        <div style={{
-          opacity: titleOpacity,
-          transform: `translateX(${titleX}px)`,
-          color: 'white',
-          fontSize: 56,
-          fontWeight: 800,
-          fontFamily: brand.fontFamily,
-          textAlign: 'center',
-          marginBottom: 30,
-          textShadow: '0 2px 20px rgba(0,0,0,0.5)',
-        }}>
-          {segment.title}
-        </div>
+      {/* ── Effects ── */}
+      <Vignette intensity={0.45} />
+      <FilmGrain opacity={0.035} />
+      <FilmScratch count={2} />
 
-        {/* Accent line */}
-        <div style={{
-          width: interpolate(titleOpacity, [0, 1], [0, 120]),
-          height: 3,
-          backgroundColor: brand.accentColor,
-          borderRadius: 2,
-          marginBottom: 30,
-        }} />
+      {/* Flash frame at segment start */}
+      {frame < 3 && (
+        <FlashFrame color={brand.accentColor} peakOpacity={0.4} duration={3} />
+      )}
 
-        {/* Karaoke narration */}
-        <div style={{
-          opacity: narrationOpacity,
-          maxWidth: '80%',
-          textAlign: 'center',
-          lineHeight: 1.6,
-        }}>
-          {words.map((word, i) => {
-            const isActive = i === currentWordIndex;
-            const isPast = i < currentWordIndex;
-            return (
-              <span key={i} style={{
-                fontSize: 28,
-                fontFamily: brand.fontFamily,
-                fontWeight: isActive ? 700 : 400,
-                color: isActive ? brand.accentColor : isPast ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.8)',
-                textShadow: isActive ? `0 0 20px ${hexToRgba(brand.accentColor, 0.5)}` : 'none',
-                transition: 'none',
-                margin: '0 4px',
-              }}>
-                {word}{' '}
-              </span>
-            );
-          })}
-        </div>
-      </AbsoluteFill>
-
-      {/* Chapter indicator */}
-      <div style={{
-        position: 'absolute', top: 40, left: 40,
-        color: 'rgba(255,255,255,0.5)',
-        fontSize: 14,
-        fontFamily: brand.fontFamily,
-        letterSpacing: 2,
-        textTransform: 'uppercase',
-      }}>
-        CHAPTER {index + 1} OF {totalSegments}
-      </div>
-
-      {/* Letterbox bars */}
+      {/* ── Letterbox bars ── */}
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0, height: 40,
         backgroundColor: 'rgba(0,0,0,0.92)',
@@ -143,13 +181,19 @@ export const SegmentSequence: React.FC<SegmentSequenceProps> = (props) => {
         backgroundColor: hexToRgba(brand.accentColor, 0.4),
       }} />
 
-      {/* Vignette */}
-      <AbsoluteFill style={{
-        background: 'radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.45) 100%)',
-        pointerEvents: 'none',
-      }} />
+      {/* ── Chapter indicator ── */}
+      <div style={{
+        position: 'absolute', top: 48, left: 40,
+        color: 'rgba(255,255,255,0.5)',
+        fontSize: 13,
+        fontFamily: brand.fontFamily,
+        letterSpacing: 2,
+        textTransform: 'uppercase',
+      }}>
+        CHAPTER {index + 1} OF {totalSegments}
+      </div>
 
-      {/* Progress bar */}
+      {/* ── Progress bar ── */}
       <div style={{
         position: 'absolute', bottom: 50, left: '10%', right: '10%', height: 2,
         backgroundColor: 'rgba(255,255,255,0.1)',
@@ -164,7 +208,7 @@ export const SegmentSequence: React.FC<SegmentSequenceProps> = (props) => {
         }} />
       </div>
 
-      {/* Watermark */}
+      {/* ── Watermark ── */}
       <div style={{
         position: 'absolute', bottom: 50, right: 40,
         color: 'rgba(255,255,255,0.4)',

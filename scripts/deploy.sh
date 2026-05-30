@@ -7,23 +7,38 @@ set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEPLOY_DIR="$ROOT/deploy"
 
-# Sync server code into deploy/
-rsync -av --delete \
+echo "Syncing server code..."
+# Sync server code into deploy/ (no --delete to avoid wiping other dirs)
+rsync -av \
   --exclude='__tests__/' \
   --exclude='quality-check/' \
   --exclude='node_modules/' \
   "$ROOT/server/" "$DEPLOY_DIR/server/"
 
+echo "Syncing server-render..."
+rsync -av \
+  --exclude='__pycache__/' \
+  --exclude='node_modules/' \
+  "$ROOT/server-render/" "$DEPLOY_DIR/server-render/"
+
+# Sync server-render.mjs
+cp "$ROOT/server-render.mjs" "$DEPLOY_DIR/"
+
 # Sync monitoring.ts (only src file the server imports)
 mkdir -p "$DEPLOY_DIR/src/services"
 cp "$ROOT/src/services/monitoring.ts" "$DEPLOY_DIR/src/services/"
 
-# Sync dist/ if it exists and is newer
+# Sync dist/ (carefully - only update, don't delete)
 if [ -d "$ROOT/dist" ]; then
-  rsync -av --delete "$ROOT/dist/" "$DEPLOY_DIR/"
+  echo "Syncing dist..."
+  rsync -av "$ROOT/dist/" "$DEPLOY_DIR/"
 fi
 
+# Sync server.mjs
+cp "$ROOT/server.mjs" "$DEPLOY_DIR/"
+
 # Deploy
+echo "Deploying to Railway..."
 cd "$DEPLOY_DIR"
 railway up
 echo ""

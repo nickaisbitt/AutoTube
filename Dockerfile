@@ -1,4 +1,6 @@
-FROM node:22-alpine AS builder
+FROM node:22-alpine
+
+RUN apk add --no-cache curl
 
 WORKDIR /app
 
@@ -8,20 +10,6 @@ RUN npm ci
 COPY . .
 
 RUN npm run build
-
-FROM node:22-alpine
-
-RUN apk add --no-cache curl
-
-WORKDIR /app
-
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/server ./server
-COPY --from=builder /app/server.mjs ./server.mjs
-COPY --from=builder /app/tsconfig*.json ./
 
 RUN mkdir -p /app/test-recordings /app/tmp /app/output
 

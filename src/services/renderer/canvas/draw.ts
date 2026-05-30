@@ -6,6 +6,33 @@ import type { ImgCache, RenderableImage, RenderOptions } from '../orchestrator';
 import { hexToRgba, wrapText, drawTechnicalLabel } from './text';
 import { SCENE_LAYOUT_DISPATCH } from './scenes';
 
+// ── Smart image cropping for aspect ratio mismatches ──
+function smartCropImage(
+  imgW: number,
+  imgH: number,
+  targetW: number,
+  targetH: number,
+): { sx: number; sy: number; sw: number; sh: number } {
+  const imgAspect = imgW / imgH;
+  const targetAspect = targetW / targetH;
+
+  let sx = 0, sy = 0, sw = imgW, sh = imgH;
+
+  if (imgAspect > targetAspect) {
+    // Image is wider than target: crop from center horizontally
+    sw = imgH * targetAspect;
+    sx = (imgW - sw) / 2;
+  } else if (imgAspect < targetAspect) {
+    // Image is taller than target: crop from center vertically (upper 60% — heads are usually in top half)
+    sh = imgW / targetAspect;
+    // Bias crop toward top 60% of image where subjects typically are
+    const maxTopOffset = imgH - sh;
+    sy = Math.min(maxTopOffset * 0.6, maxTopOffset * 0.4); // Upper 40% of available range
+  }
+
+  return { sx, sy, sw, sh };
+}
+
 // Requirement 8.1: Cache saturation scores keyed by image URL so the score is
 // computed at most once per image per render session.
 export const saturationCache = new Map<string, number>();
@@ -48,24 +75,24 @@ export function drawProceduralBackground(
   // Topic-specific palette overrides (overrides segment type when topic matches)
   const topicPalettes: Array<{ keywords: string[]; palette: typeof palettes['intro'] }> = [
     {
-      keywords: ['tech', 'ai', 'software', 'computing', 'digital', 'cyber', 'robot'],
+      keywords: ['tech', 'ai', 'software', 'computing', 'digital', 'cyber', 'robot', 'startup', 'data', 'cloud', 'code'],
       palette: { bg: ['#0a0a2e', '#0a1a3e', '#1a0a3e'], accent: '#00d4ff', glow: '#00f0ff', secondary: '#7c3aed' },
     },
     {
-      keywords: ['finance', 'money', 'crypto', 'stock', 'invest', 'economy', 'bitcoin', 'trading'],
-      palette: { bg: ['#0a1a0a', '#0a2a0a', '#1a2a0a'], accent: '#00ff88', glow: '#00ffaa', secondary: '#fbbf24' },
+      keywords: ['finance', 'money', 'crypto', 'stock', 'invest', 'economy', 'bitcoin', 'trading', 'bank', 'fund', 'wealth'],
+      palette: { bg: ['#0a1a2e', '#0a2a4e', '#1a2a3e'], accent: '#ffd700', glow: '#ffec80', secondary: '#1e90ff' },
     },
     {
-      keywords: ['health', 'medical', 'disease', 'vaccine', 'doctor', 'medicine', 'mental'],
-      palette: { bg: ['#0a1a2a', '#0a2a3a', '#1a2a3a'], accent: '#22d3ee', glow: '#67e8f9', secondary: '#a78bfa' },
+      keywords: ['health', 'medical', 'disease', 'vaccine', 'doctor', 'medicine', 'mental', 'wellness', 'nutrition', 'exercise'],
+      palette: { bg: ['#1a1a1a', '#2a2a2a', '#1a2a1a'], accent: '#22c55e', glow: '#4ade80', secondary: '#f5f5dc' },
     },
     {
-      keywords: ['science', 'space', 'physics', 'quantum', 'nasa', 'universe', 'research'],
+      keywords: ['science', 'space', 'physics', 'quantum', 'nasa', 'universe', 'research', 'biology', 'chemistry', 'experiment'],
       palette: { bg: ['#0a0a1a', '#1a0a2a', '#0a1a2a'], accent: '#a855f7', glow: '#c084fc', secondary: '#38bdf8' },
     },
     {
-      keywords: ['politics', 'government', 'election', 'law', 'policy', 'congress', 'senate'],
-      palette: { bg: ['#1a0a0a', '#2a0a0a', '#1a1a0a'], accent: '#ef4444', glow: '#f87171', secondary: '#3b82f6' },
+      keywords: ['politics', 'government', 'election', 'law', 'policy', 'congress', 'senate', 'vote', 'democrat', 'republican'],
+      palette: { bg: ['#1a0a0a', '#0a0a1a', '#1a1a0a'], accent: '#dc2626', glow: '#f87171', secondary: '#3b82f6' },
     },
     {
       keywords: ['climate', 'environment', 'earth', 'energy', 'solar', 'green', 'carbon'],
@@ -405,7 +432,9 @@ export function draw(
           const crop = asset.cropMetadata;
           ctx.drawImage(img, crop.x, crop.y, crop.width, crop.height, -dw / 2, -dh / 2, dw, dh);
         } else {
-          ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+          // Smart crop: center crop with subject-aware heuristics
+          const crop = smartCropImage(imgW, imgH, dw, dh);
+          ctx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, -dw / 2, -dh / 2, dw, dh);
         }
         ctx.filter = 'none';
         ctx.restore();
@@ -559,22 +588,83 @@ export function draw(
   ctx.fillStyle = accentColor;
   ctx.fillRect(ltPadX, ltBaseY, accentBarW, 5);
 
-  // Title text — bold, large, with hard drop shadow (not just blur)
-  ctx.save();
-  ctx.font = 'bold 42px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  // Hard offset shadow for depth
-  ctx.fillStyle = 'rgba(0,0,0,0.85)';
-  ctx.fillText(seg.title.substring(0, 50), ltPadX + 3, ltBaseY + 14);
-  // White text on top
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
-  ctx.shadowBlur = 12;
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 3;
-  ctx.fillStyle = '#ffffff';
-  wrapText(ctx, seg.title, ltPadX, ltBaseY + 12, ltPadW, 50, true);
-  ctx.restore();
+  // ── Animated lower-third title card ──
+  const fps = 24;
+  const totalFrames = Math.round(seg.duration * fps);
+  const currentFrame = Math.round(progress * totalFrames);
+
+  // Slide-in animation from left (first 15 frames: -100% → 0%)
+  const slideInFrames = 15;
+  let slideOffsetX = 0;
+  if (currentFrame < slideInFrames) {
+    const t = currentFrame / slideInFrames;
+    // Ease-out cubic for smooth deceleration
+    const eased = 1 - Math.pow(1 - t, 3);
+    slideOffsetX = -ltPadW * (1 - eased);
+  }
+
+  // Fade out in last 10 frames
+  const fadeOutFrames = 10;
+  let titleAlpha = 1;
+  if (currentFrame > totalFrames - fadeOutFrames) {
+    const fadeT = (currentFrame - (totalFrames - fadeOutFrames)) / fadeOutFrames;
+    titleAlpha = 1 - fadeT;
+  }
+
+  if (titleAlpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = titleAlpha;
+
+    // Semi-transparent background blur effect behind title
+    const bgPadX = ltPadX - 16;
+    const bgPadY = ltBaseY - 8;
+    const bgWidth = Math.min(ltPadW + 32, w - bgPadX * 2);
+    const bgHeight = 80;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.beginPath();
+    ctx.moveTo(bgPadX + 8, bgPadY);
+    ctx.lineTo(bgPadX + bgWidth - 8, bgPadY);
+    ctx.arcTo(bgPadX + bgWidth, bgPadY, bgPadX + bgWidth, bgPadY + 8, 8);
+    ctx.lineTo(bgPadX + bgWidth, bgPadY + bgHeight - 8);
+    ctx.arcTo(bgPadX + bgWidth, bgPadY + bgHeight, bgPadX + bgWidth - 8, bgPadY + bgHeight, 8);
+    ctx.lineTo(bgPadX + 8, bgPadY + bgHeight);
+    ctx.arcTo(bgPadX, bgPadY + bgHeight, bgPadX, bgPadY + bgHeight - 8, 8);
+    ctx.lineTo(bgPadX, bgPadY + 8);
+    ctx.arcTo(bgPadX, bgPadY, bgPadX + 8, bgPadY, 8);
+    ctx.closePath();
+    ctx.fill();
+
+    // Title text — bold, large, with hard drop shadow (not just blur)
+    ctx.font = 'bold 42px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    const titleX = ltPadX + slideOffsetX;
+
+    // Gradient text effect: draw shadow first, then white text with accent glow
+    // Shadow layer
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillText(seg.title.substring(0, 50), titleX + 3, ltBaseY + 14);
+
+    // Main white text with shadow
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 3;
+    ctx.fillStyle = '#ffffff';
+    wrapText(ctx, seg.title, titleX, ltBaseY + 12, ltPadW, 50, true);
+
+    // Subtle accent glow layer on top
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.globalAlpha = titleAlpha * 0.15;
+    ctx.fillStyle = accentColor;
+    wrapText(ctx, seg.title, titleX, ltBaseY + 12, ltPadW, 50, true);
+
+    ctx.restore();
+  }
 
   // ── P0: MrBeast-style captions — large, outlined, active word highlighted ──
   const words = seg.narration.split(' ').filter(w => w.length > 0);

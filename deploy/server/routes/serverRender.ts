@@ -20,7 +20,7 @@ export async function handleServerRender(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const outputDir = "/tmp/autotube-output";
+  const outputDir = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data/autotube-output";
   mkdirSync(outputDir, { recursive: true });
   const outputMp4 = join(outputDir, `server-render-${Date.now()}.mp4`);
 

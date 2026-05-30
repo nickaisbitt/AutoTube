@@ -7,7 +7,7 @@
  * with both browser CanvasRenderingContext2D and node-canvas's Context2d.
  */
 
-import type { VideoProject, SegmentPurposeTag, SceneLayoutType, AudioDirection } from '../types';
+import type { VideoProject, SegmentPurposeTag, SceneLayoutType, AudioDirection, ScriptSegment } from '../types';
 
 // ---------------------------------------------------------------------------
 // Generic 2D rendering context interface
@@ -1074,4 +1074,93 @@ export function scaleToResolution(
 ): number {
   if (baseWidth === 0) return 0;
   return baseDimension * (targetWidth / baseWidth);
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic segment pacing
+// ---------------------------------------------------------------------------
+
+/**
+ * Pacing category ranges in seconds.
+ * These control how long each type of segment should feel natural.
+ */
+const PACING_RANGES: Record<string, { min: number; max: number }> = {
+  intro: { min: 4, max: 6 },         // Hook fast
+  stat: { min: 6, max: 8 },          // Let viewers absorb data
+  emotional: { min: 5, max: 7 },     // Let emotion land
+  tension: { min: 3, max: 4 },       // Build urgency
+  transition: { min: 2, max: 4 },    // Brief bridges
+  outro: { min: 4, max: 6 },         // Standard wrap-up
+  section: { min: 5, max: 8 },       // Default content
+};
+
+/**
+ * Classify a segment into a pacing category based on its type,
+ * purpose tag, and narration content.
+ */
+function classifyPacingCategory(seg: ScriptSegment): string {
+  if (seg.type === 'intro') return 'intro';
+  if (seg.type === 'outro') return 'outro';
+  if (seg.type === 'transition') return 'transition';
+
+  const text = `${seg.title || ''} ${seg.narration || ''}`.toLowerCase();
+
+  // Stat/data segments: let viewers absorb
+  if (/\$[\d,.]+|\d+%|\d+\s*(billion|million|trillion)/i.test(text)) {
+    return 'stat';
+  }
+
+  // Emotional segments: let emotion land
+  if (/\b(emotion|feel|heart|soul|passion|love|hate|fear|hope|dream|inspire|sad|happy|angry)\b/.test(text)) {
+    return 'emotional';
+  }
+
+  // Tension segments: build urgency
+  if (/\b(risk|threat|danger|warning|urgent|critical|breaking|shocking|now|immediate|alert|emergency)\b/.test(text)) {
+    return 'tension';
+  }
+
+  // Check purpose tag for additional context
+  if (seg.purposeTag === 'risk') return 'tension';
+  if (seg.purposeTag === 'stat_hook') return 'stat';
+  if (seg.purposeTag === 'human_story') return 'emotional';
+
+  return 'section';
+}
+
+/**
+ * Compute a dynamically-paced duration for a segment based on its content type.
+ *
+ * Different content types feel natural at different durations:
+ * - Intro segments: 4-6 seconds (hook fast)
+ * - Stat/data segments: 6-8 seconds (let viewers absorb)
+ * - Emotional segments: 5-7 seconds (let emotion land)
+ * - Tension segments: 3-4 seconds (build urgency)
+ * - Transitions: 2-4 seconds (brief bridges)
+ * - Outro: 4-6 seconds (standard wrap-up)
+ *
+ * The function clamps the original duration within the appropriate range,
+ * making the video feel more natural and less robotic.
+ *
+ * @param segment - The script segment to compute duration for
+ * @returns Adjusted duration in seconds
+ */
+export function computeDynamicSegmentDuration(segment: ScriptSegment): number {
+  const category = classifyPacingCategory(segment);
+  const range = PACING_RANGES[category] || PACING_RANGES.section;
+  return Math.max(range.min, Math.min(range.max, segment.duration));
+}
+
+/**
+ * Apply dynamic pacing to all segments in a script.
+ * Returns a new array with adjusted durations (does not mutate input).
+ *
+ * @param segments - Array of script segments
+ * @returns New array with dynamically-paced durations
+ */
+export function applyDynamicPacing(segments: ScriptSegment[]): ScriptSegment[] {
+  return segments.map(seg => ({
+    ...seg,
+    duration: computeDynamicSegmentDuration(seg),
+  }));
 }

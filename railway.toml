@@ -1,0 +1,6 @@
+[build]
+buildCommand = "npm run build && npm prune --omit=dev"
+
+[deploy]
+startCommand = "npx tsx server.mjs"
+healthcheckPath = "/api/health"

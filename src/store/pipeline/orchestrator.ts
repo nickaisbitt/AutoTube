@@ -314,14 +314,16 @@ export async function executeSourceMedia(
     visualPlans,
   };
 
-  // Save project for server-side renderer
+  // Save project for server-side renderer — AWAITED so the file is on disk
+  // before this function returns. The server render reads the project from
+  // /tmp and must see the full media list, not the script-only version.
   try {
-    fetch(`/api/save-project?id=${encodeURIComponent(updatedProject.id)}`, {
+    await fetch(`/api/save-project?id=${encodeURIComponent(updatedProject.id)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedProject),
-    }).catch(() => {});
-  } catch { /* ignore */ }
+    });
+  } catch { /* ignore — dev server may not be running in test environments */ }
 
   return updatedProject;
 }

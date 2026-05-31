@@ -85,6 +85,7 @@ export function parseVttWordTimestamps(vttPath) {
  * @returns {number}
  */
 function parseVttTimestamp(str) {
+  if (!str || typeof str !== 'string') return 0;
   const normalized = str.replace(',', '.');
   const parts = normalized.split(':');
   let seconds = 0;
@@ -121,6 +122,9 @@ function parseVttTimestamp(str) {
  * @returns {{ wordIndex: number, windowStart: number, windowEnd: number }}
  */
 export function findCurrentWord(progress, segmentDuration, wordTimestamps, totalWords, lastIndex = 0, actualAudioDuration) {
+  if (!totalWords || totalWords <= 0) {
+    return { wordIndex: 0, windowStart: 0, windowEnd: 0 };
+  }
   // If we have real word timestamps, use them
   if (wordTimestamps.length > 0 && segmentDuration > 0) {
     // Map progress (0-1 within segment) to video time, then find the word.

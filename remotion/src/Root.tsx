@@ -53,7 +53,7 @@ export const RemotionRoot: React.FC = () => {
   return (
     <Composition
       id="FullVideo"
-      component={FullVideo}
+      component={FullVideo as any}
       durationInFrames={defaultProps.totalDurationFrames}
       fps={defaultProps.fps}
       width={defaultProps.width}

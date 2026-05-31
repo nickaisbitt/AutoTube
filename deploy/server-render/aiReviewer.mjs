@@ -339,7 +339,17 @@ function runVisualQualityCheck(videoPath) {
 
     const width = stream.width ?? 0;
     const height = stream.height ?? 0;
-    const fps = eval(stream.frame_rate ?? '0');
+    
+    let fps = 0;
+    const rateStr = stream.frame_rate ?? '0';
+    if (rateStr.includes('/')) {
+      const parts = rateStr.split('/');
+      fps = parts.length === 2 ? (parseFloat(parts[0]) / parseFloat(parts[1])) : 0;
+    } else {
+      fps = parseFloat(rateStr);
+    }
+    if (isNaN(fps)) fps = 0;
+
     const bitrate = parseInt(stream.bit_rate ?? '0', 10);
     const pixelFormat = stream.pix_fmt ?? 'unknown';
 

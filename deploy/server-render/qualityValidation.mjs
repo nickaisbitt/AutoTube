@@ -159,6 +159,16 @@ export function computeTextDensity(imageData, w, h) {
 }
 
 export function validateMimeTypeFromUrl(url, expectedType) {
+  if (url.startsWith('data:')) {
+    const match = url.match(/^data:([^;]+);base64/);
+    if (match) {
+      const mime = match[1];
+      const type = mime.split('/')[0];
+      return { isValid: type === expectedType, mimeType: mime };
+    }
+    return { isValid: false, mimeType: 'unknown' };
+  }
+
   const lower = url.toLowerCase();
   const ext = lower.split('.').pop().split('?')[0];
   

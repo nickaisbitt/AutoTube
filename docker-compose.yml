@@ -7,6 +7,10 @@ services:
       - ./public/audio:/app/public/audio
     environment:
       - VITE_OPENROUTER_KEY=${VITE_OPENROUTER_KEY}
+      - KOKORO_SERVER_URL=http://tts:5000
+    depends_on:
+      tts:
+        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:
@@ -18,3 +22,19 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  tts:
+    build: ./tts-service
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

@@ -17,7 +17,7 @@
 
 import { createCanvas, loadImage } from 'canvas';
 import { spawn, spawnSync, execFileSync } from 'child_process';
-import { existsSync, mkdirSync, writeFileSync, unlinkSync, rmSync, readFileSync, statSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, rmSync, readFileSync, statSync, readdirSync, copyFileSync } from 'fs';
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('\n❌ UNHANDLED PROMISE REJECTION:', reason, 'at:', promise);
@@ -28,11 +28,10 @@ process.on('uncaughtException', (err, origin) => {
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir, homedir } from 'os';
+import { generateNarration } from './server-render/narration.mjs';
 import { parseVttWordTimestamps, findCurrentWord } from './server-render/subtitleParser.mjs';
 import { createStyleParticles, updateStyleParticles, drawStyleParticles, drawDynamicVignette, drawChromaticAberration, drawFlashFrame, computeTensionZoom, drawKineticOverlay } from './server-render/visualFx.mjs';
-import { computeReverbFilter, computeStereoPanFilter, generateAmbientBed, computeSubBassRumble, computeTransientDuck, computePitchRamp, buildFilterChain } from './server-render/audioFx.mjs';
 import { generateFFmpegChapterMetadata, chaptersFromSegments, embedChaptersCommand, selectCommentBait, computeMidpointTime, generateEasterEggs, drawEasterEgg, computeSpeedRamp, generateABThumbnailVariants, detectEmotionalTone } from './server-render/growthFeatures.mjs';
-import { analyzeContrast, detectWatermarkRegions, computeWatermarkScore, isLikelyWatermarked, computeTextDensity, validateMimeTypeFromUrl, isDomainBlocked } from './server-render/qualityValidation.mjs';
 import { drawLowerThird, drawNameCard, drawSourceCitation, drawProgressTimeline, drawTransition, drawChartReveal, extractNamesFromText, extractCitationsFromSegments, selectTransitionForSegment, drawAnimatedBarChart, drawBounceText, drawElasticText, drawSlideInText, drawParallaxBackground, logBRollCoverage, snapTransitionToBeat, easeInOut, easeOut, easeInBounce, applyBreathingRoom, drawZoomTransition, getAvailableTransitions } from './server-render/advancedRender.mjs';
 import {
   renderQueue, progressBroadcaster, checkAvailableMemory, logMemoryUsage,
@@ -68,9 +67,12 @@ const CONFIG = {
   LOG_INTERVAL_MS: 5000,
   STALL_THRESHOLD_MS: 30000,
   CONCURRENCY_LIMIT: 15,
-  SEGMENT_TITLE_DURATION: 1.5,
+  SEGMENT_TITLE_DURATION: 0,
   WATERMARK_OPACITY: 0.6,
 };
+
+const RENDER_DEBUG_OVERLAYS = false;
+
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = join(__dirname, 'test-recordings');
@@ -673,14 +675,10 @@ function computeAdaptiveFilter(score, boost = 1.0) {
 }
 
 function boostFrameBrightness(buffer) {
-  const len = buffer.length;
-  for (let i = 0; i < len; i += 4) {
-    buffer[i + 2] = Math.min(255, Math.round(buffer[i + 2] * 0.7 + 76.5));
-    buffer[i + 1] = Math.min(255, Math.round(buffer[i + 1] * 0.7 + 76.5));
-    buffer[i]     = Math.min(255, Math.round(buffer[i]     * 0.7 + 76.5));
-  }
+  // Return the buffer directly to restore full-contrast, vivid original colors
   return buffer;
 }
+
 
 // ── Saturation score cache (keyed by image URL) — Requirement 8.1 ──────────
 const MAX_SATURATION_CACHE_SIZE = 500;
@@ -786,13 +784,40 @@ function drawTechnicalLabel(ctx, asset, barH, seg, projectTopic) {
 }
 
 // ── Fetch project from dev server ─────────────────────────────────────────
+// IMPORTANT: Always pick the MOST RECENTLY MODIFIED project file so we never
+// accidentally render a stale project from a previous pipeline run.
+// The legacy /tmp/autotube-project.json path is intentionally skipped here
+// because it is never updated when the client uses ?id= (UUID-keyed) saves.
 async function fetchProject() {
-  // Try loading from /tmp first (saved by /api/save-project)
-  const tmpPath = '/tmp/autotube-project.json';
-  if (existsSync(tmpPath)) {
-    log('info', 'Loading project from /tmp/autotube-project.json');
-    return JSON.parse(readFileSync(tmpPath, 'utf8'));
+  // Find the most recently modified autotube project file in /tmp
+  let bestPath = null;
+  let bestMtime = 0;
+
+  try {
+    const tmpFiles = readdirSync('/tmp').filter(
+      (f) => f.startsWith('autotube-project') && f.endsWith('.json'),
+    );
+    for (const f of tmpFiles) {
+      const fullPath = `/tmp/${f}`;
+      try {
+        const st = statSync(fullPath);
+        if (st.mtimeMs > bestMtime) {
+          bestMtime = st.mtimeMs;
+          bestPath = fullPath;
+        }
+      } catch { /* skip unreadable files */ }
+    }
+  } catch { /* /tmp not readable, fall through to dev server */ }
+
+  if (bestPath) {
+    const ageMs = Date.now() - bestMtime;
+    const ageMin = (ageMs / 60000).toFixed(1);
+    log('info', `Loading project from ${bestPath} (modified ${ageMin} min ago)`);
+    const project = JSON.parse(readFileSync(bestPath, 'utf8'));
+    log('info', `Project topic: "${project.topic || project.title || 'unknown'}"`);
+    return project;
   }
+
   log('info', `Fetching project from dev server (${DEV_SERVER})...`);
   const res = await fetch(`${DEV_SERVER}/api/export-project`);
   if (!res.ok) throw new Error(`Failed to fetch project: ${res.status} ${await res.text()}`);
@@ -957,6 +982,7 @@ const MAX_VIDEO_FRAME_CACHE_SIZE = 500;
 const videoFrameCache = new Map();
 const MAX_CLIP_FILE_CACHE_SIZE = 500;
 const clipFileCache = new Map(); // Maps clip URLs → cached file paths on disk
+const videoFramesDirectories = new Map(); // Maps clip URLs → directories of extracted JPEGs
 
 /**
  * Downloads a video clip via the proxy and extracts a single frame at the
@@ -2484,7 +2510,12 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
 
           let filterString;
           const finalBrightness = (1.2 * globalBrightnessBoost).toFixed(2);
-          filterString = `saturate(1.1) contrast(1.05) brightness(${finalBrightness})`;
+          if (asset && asset.url && saturationCache.has(asset.url)) {
+            const score = saturationCache.get(asset.url);
+            filterString = computeAdaptiveFilter(score, globalBrightnessBoost * 1.22);
+          } else {
+            filterString = `saturate(1.1) contrast(1.05) brightness(${finalBrightness})`;
+          }
 
           const isChart = isChartAsset(asset);
           if (isChart) {
@@ -2558,8 +2589,11 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     drawStyleParticles(ctx, globalStyleParticles);
   }
 
-  // Technical label badge (Requirements 4.1–4.5, 4.6, 9.3)
-  drawTechnicalLabel(ctx, asset, barH, seg, project.topic || project.title || '');
+  // Technical label badge (only if debug overlays are enabled)
+  if (RENDER_DEBUG_OVERLAYS) {
+    drawTechnicalLabel(ctx, asset, barH, seg, project.topic || project.title || '');
+  }
+
 
   // ── On-screen thesis text with typing animation (Step 2, req d) ────────
   // Extract ALL-CAPS phrases (3+ words) or double-quoted phrases from visualNote
@@ -2890,10 +2924,9 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
       ctx.stroke();
       ctx.restore();
-
       // Measure total width to center the word group
-      const normalFont = '400 28px system-ui, -apple-system, sans-serif';
-      const boldFont = '700 32px system-ui, -apple-system, sans-serif';
+      const normalFont = '900 30px system-ui, Montserrat, Impact, sans-serif';
+      const boldFont = '900 34px system-ui, Montserrat, Impact, sans-serif';
       const spaceWidth = measureWordCached(ctx, normalFont, ' ');
 
       // Pre-measure all words (cached)
@@ -2901,7 +2934,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       const wordWidths = new Array(visibleCount);
       for (let wi = 0; wi < visibleCount; wi++) {
         const isCurrentWord = (windowStart + wi) === currentWordIdx;
-        const word = words[windowStart + wi];
+        const rawWord = words[windowStart + wi] || '';
+        const word = rawWord.toUpperCase();
         const font = isCurrentWord ? boldFont : normalFont;
         const ww = measureWordCached(ctx, font, word);
         wordWidths[wi] = ww;
@@ -2918,7 +2952,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       for (let wi = 0; wi < visibleCount; wi++) {
         const globalWordIdx = windowStart + wi;
         const isCurrentWord = globalWordIdx === currentWordIdx;
-        const word = words[globalWordIdx];
+        const rawWord = words[globalWordIdx] || '';
+        const displayWord = rawWord.toUpperCase();
 
         const wordKey = `${seg.id}:${globalWordIdx}`;
         if (!wordFirstAppearFrame.has(wordKey)) {
@@ -2933,25 +2968,18 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
 
         ctx.save();
 
-        // Premium text outline/shadow for high contrast readability over active video B-roll
-        if (!DRAFT_MODE) {
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
-          ctx.shadowBlur = 10;
-          ctx.shadowOffsetX = 1;
-          ctx.shadowOffsetY = 2;
-        }
+        // Premium high-contrast text drop shadow
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = 3;
 
         if (isCurrentWord) {
           ctx.font = boldFont;
-          ctx.fillStyle = '#60a5fa';
-          // Stacked glow layer
-          if (!DRAFT_MODE) {
-            ctx.shadowColor = 'rgba(96, 165, 250, 0.7)';
-            ctx.shadowBlur = 12;
-          }
+          ctx.fillStyle = '#ff5500'; // High-retention orange brand highlight
         } else {
           ctx.font = normalFont;
-          ctx.fillStyle = '#e2e8f0'; // Brighter white/gray for better default contrast
+          ctx.fillStyle = '#ffffff'; // Clean high-readability white
         }
 
         ctx.textAlign = 'left';
@@ -2964,14 +2992,14 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
           ctx.translate(-wordCenterX, -centerY);
         }
 
-        // Draw a clean subtle background stroke for current word if active
-        if (isCurrentWord && !DRAFT_MODE && typeof ctx.strokeText === 'function') {
-          ctx.strokeStyle = 'rgba(10, 10, 26, 0.8)';
-          ctx.lineWidth = 4;
-          ctx.strokeText(word, curX, centerY);
+        // Draw thick solid black stroke behind every word for absolute legibility
+        if (typeof ctx.strokeText === 'function') {
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 5;
+          ctx.strokeText(displayWord, curX, centerY);
         }
 
-        ctx.fillText(word, curX, centerY);
+        ctx.fillText(displayWord, curX, centerY);
         ctx.restore();
 
         curX += wordWidths[wi];
@@ -2990,200 +3018,6 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 }
 
-// ── Generate narration audio with Kokoro-82M ──────────────────────────────
-
-const KOKORO_SCRIPT = join(__dirname, 'server-render', 'kokoro_generate.py');
-const KOKORO_PYTHON = '/tmp/tts-env/bin/python';
-const KOKORO_VOICE = 'af_heart';
-
-const EMOTION_SPEED = {
-  calm: 0.8, neutral: 1.0, excited: 1.2, urgent: 1.3, serious: 0.9, sad: 0.85, angry: 1.15,
-};
-
-async function generateKokoroSegment(text, outputPath, options = {}) {
-  const tmpDir = join(__dirname, '..', 'tmp', 'kokoro', String(Date.now()));
-  mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
-
-  const emotion = options.emotion || null;
-  const speed = emotion && EMOTION_SPEED[emotion] ? EMOTION_SPEED[emotion] : (options.speed || 1.0);
-
-  const batchInput = join(tmpDir, 'batch.json');
-  writeFileSync(batchInput, JSON.stringify({
-    segments: [{ id: 'current', text, speed }],
-    voice: KOKORO_VOICE,
-    output_dir: tmpDir,
-  }));
-
-  const env = { ...process.env, PYTORCH_ENABLE_MPS_FALLBACK: '1' };
-  const result = spawnSync(KOKORO_PYTHON, [KOKORO_SCRIPT, batchInput], {
-    encoding: 'utf8', timeout: 300000, env,
-  });
-
-  const wavPath = join(tmpDir, 'current.wav');
-  const vttPath = join(tmpDir, 'current.vtt');
-  if (result.status === 0 && existsSync(wavPath)) {
-    const convertResult = spawnSync('ffmpeg', [
-      '-y', '-i', wavPath, '-c:a', 'libmp3lame', '-b:a', '128k', outputPath,
-    ], { encoding: 'utf8', timeout: 30000 });
-
-    if (convertResult.status === 0 && existsSync(outputPath)) {
-      // Copy aligned subtitles from Kokoro's output
-      if (existsSync(vttPath)) {
-        const subtitlePath = outputPath.replace(/\.\w+$/, '.vtt');
-        spawnSync('cp', [vttPath, subtitlePath]);
-      }
-      try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-      return true;
-    }
-  }
-  try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-  return false;
-}
-
-async function generateMeloSegment(text, outputPath, accountId, apiToken) {
-  try {
-    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/myshell-ai/melotts`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ prompt: text, lang: 'en' }),
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      console.warn(`  ⚠ MeloTTS API returned ${response.status}: ${errText.substring(0, 100)}`);
-      return false;
-    }
-    const contentType = response.headers.get('content-type') || '';
-    let buffer;
-    if (contentType.includes('application/json')) {
-      const data = await response.json();
-      const base64Audio = data?.result?.audio;
-      if (!base64Audio) {
-        console.warn('  ⚠ MeloTTS: No audio in JSON response');
-        return false;
-      }
-      buffer = Buffer.from(base64Audio, 'base64');
-    } else {
-      buffer = Buffer.from(await response.arrayBuffer());
-    }
-    if (buffer.length === 0) return false;
-    writeFileSync(outputPath, buffer);
-    return existsSync(outputPath);
-  } catch (err) {
-    console.warn(`  ⚠ MeloTTS request failed: ${err.message}`);
-    return false;
-  }
-}
-
-async function generateNarration(segments, outputDir, options = {}) {
-  const { cfAccountId, cfApiToken } = options;
-  const useMelo = !!cfAccountId && !!cfApiToken;
-  const audioFiles = [];
-  const subtitleFiles = {};
-
-  const engines = ['Kokoro-82M'];
-  if (useMelo) engines.push('MeloTTS');
-  engines.push('edge-tts');
-  log('info', `Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
-  log('info', `  Kokoro voice: ${KOKORO_VOICE || 'af_heart'} (local, GPU accelerated)`);
-
-  // Generate initial silence for cold open (2s) + title card (3s) = 5s
-  const introSilenceFile = join(outputDir, 'silence-intro.mp3');
-  spawnSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '5', introSilenceFile], { encoding: 'utf8', timeout: 10000 });
-  if (existsSync(introSilenceFile)) {
-    audioFiles.push({ file: introSilenceFile, duration: 5 });
-  }
-
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-
-    // Generate 1.5s silence for the segment title card (must match CONFIG.SEGMENT_TITLE_DURATION)
-    const silenceFile = join(outputDir, `silence-${i}.mp3`);
-    spawnSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', String(CONFIG.SEGMENT_TITLE_DURATION), silenceFile], { encoding: 'utf8', timeout: 5000 });
-    if (existsSync(silenceFile)) {
-      audioFiles.push({ file: silenceFile, duration: CONFIG.SEGMENT_TITLE_DURATION });
-    }
-
-    const audioFile = join(outputDir, `narration-${i}.mp3`);
-    
-    process.stdout.write(`\r  Segment ${i + 1}/${segments.length}: "${seg.title.substring(0, 30)}"...`);
-    
-    let success = false;
-
-    // Tier 1: Kokoro-82M (local, GPU accelerated, RTF ~0.25)
-    if (!success) {
-      success = await generateKokoroSegment(seg.narration, audioFile, {
-        emotion: seg.emotion || null,
-        speed: seg.speed || 1.0,
-      });
-      if (success) {
-        const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
-        if (existsSync(subtitleFile)) {
-          subtitleFiles[i] = subtitleFile;
-        }
-      } else {
-        console.warn(`\n  ⚠ Kokoro failed for segment ${i + 1}, trying next engine`);
-      }
-    }
-
-    // Tier 2: MeloTTS (Cloudflare, cheap fallback)
-    if (useMelo && !success) {
-      success = await generateMeloSegment(seg.narration, audioFile, cfAccountId, cfApiToken);
-      if (success) {
-        const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
-        if (existsSync(subtitleFile)) {
-          subtitleFiles[i] = subtitleFile;
-        }
-      } else {
-        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying edge-tts`);
-      }
-    }
-
-    // Tier 3: edge-tts (local fallback, extremely fast and reliable)
-    if (!success) {
-      const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
-      const result = spawnSync('edge-tts', [
-        '--voice', 'en-US-GuyNeural',
-        '--rate', '+10%',
-        '--text', seg.narration,
-        '--write-media', audioFile,
-        '--write-subtitles', subtitleFile,
-      ], { encoding: 'utf8', timeout: 30000 });
-      success = result.status === 0 && existsSync(audioFile);
-      if (success) {
-        if (existsSync(subtitleFile)) {
-          subtitleFiles[i] = subtitleFile;
-        }
-      } else {
-        console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}, trying silence`);
-      }
-    }
-
-    // Tier 4: Silence (last resort)
-    if (success) {
-      audioFiles.push({ file: audioFile, duration: seg.duration, subtitleFile: subtitleFiles[i] || null });
-    } else {
-      console.warn(`\n  ⚠ All TTS engines failed for segment ${i + 1}, using silence`);
-      spawnSync('ffmpeg', [
-        '-y', '-f', 'lavfi', '-i', `anullsrc=r=44100:cl=stereo`,
-        '-t', String(seg.duration), audioFile,
-      ], { encoding: 'utf8', timeout: 10000 });
-      if (existsSync(audioFile)) audioFiles.push({ file: audioFile, duration: seg.duration });
-    }
-  }
-  log('info', `\n  ✓ Generated ${audioFiles.length} audio segments (chain: ${engines.join(' → ')})`);
-  return audioFiles;
-}
-
-// ── TTS Voice presets per engine ──
-const TTS_VOICES = {
-  melotts: ['default'],
-  kokoro: ['af_heart', 'af_bella', 'af_nicole', 'bf_emma', 'am_michael'],
-};
 
 // ── TTS provider validation ────────────────────────────────────────────────
 function validateTTSConfiguration() {
@@ -3544,7 +3378,26 @@ async function render() {
         }
       }
 
-      // Extract frames at key timestamps
+      // Smooth 24 fps Video Frame Extraction
+      const framesDir = join(tmpdir(), `autotube-frames-${Date.now()}-${Math.random().toString(36).substring(7)}`);
+      mkdirSync(framesDir, { recursive: true });
+      log('info', `    ↳ Extracting all frames at 24fps to ${framesDir}...`);
+      const extractAllResult = spawnSync('ffmpeg', [
+        '-y',
+        '-i', clipTmp,
+        '-vf', 'fps=24,scale=1920:1080',
+        '-q:v', '2',
+        join(framesDir, 'frame_%04d.jpg')
+      ], { encoding: 'utf8', timeout: 60000 });
+
+      if (extractAllResult.status === 0) {
+        videoFramesDirectories.set(asset.url, framesDir);
+        log('info', `      ✓ Extracted smooth frames to disk`);
+      } else {
+        log('warn', `      ⚠ Ffmpeg extract smooth frames failed: ${extractAllResult.stderr || 'unknown error'}`);
+      }
+
+      // Extract frames at key timestamps for backwards compatibility & fallback
       for (const pct of TIMESTAMPS) {
         const timestamp = pct * clipDuration;
         const cacheKey = `${asset.url}@${timestamp.toFixed(2)}`;
@@ -3554,7 +3407,7 @@ async function render() {
             '-i', clipTmp,
             '-frames:v', '1',
             '-f', 'image2pipe',
-            '-vcodec', 'png',
+            '-vcodec', 'mjpeg',
             '-',
           ], { encoding: 'buffer', timeout: CONFIG.FETCH_TIMEOUT_MS });
 
@@ -3854,23 +3707,28 @@ async function render() {
   }
 
   totalFrames = 0;
-  // Task 130: Shorts mode — skip cold open, title card, shorter end screen, cap at 60s
-  const TITLE_CARD_SECONDS = isShortsMode ? 0 : 3;
+  const TITLE_CARD_SECONDS = 0; // Skips the low-energy intro title slide
   const END_SCREEN_SECONDS = isShortsMode ? 2 : 4;
-  const effectiveTitleDur = renderFlags.useFastPacing
-    ? CONFIG.SEGMENT_TITLE_DURATION * 0.4
-    : CONFIG.SEGMENT_TITLE_DURATION;
-  const SEGMENT_TITLE_FRAMES = isShortsMode ? 0 : Math.round(effectiveTitleDur * FPS);
-  const COLD_OPEN_FRAMES = isShortsMode ? 0 : Math.round(2 * FPS);
-  const COLD_OPEN_FADE_FRAMES = isShortsMode ? 0 : Math.round(0.125 * FPS);
+  const effectiveTitleDur = 0; // Skips full-screen blank chapter transition cards
+  const SEGMENT_TITLE_FRAMES = 0;
+  const COLD_OPEN_FRAMES = 0; // Start visual segments immediately
+  const COLD_OPEN_FADE_FRAMES = 0;
   const SEGMENT_FADE_FRAMES = Math.round((renderFlags.useFastPacing ? 0.05 : 0.12) * FPS);
-  const SEGMENT_TITLE_FADE_FRAMES = isShortsMode ? 0 : Math.round((renderFlags.useFastPacing ? 0.08 : 0.17) * FPS);
-  const titleCardFrames = Math.round(TITLE_CARD_SECONDS * FPS);
+  const SEGMENT_TITLE_FADE_FRAMES = 0;
+  const titleCardFrames = 0;
   const endScreenFrames = Math.round(END_SCREEN_SECONDS * FPS);
 
+
   // Apply dynamic pacing: adjust segment durations based on content type
-  for (const seg of project.script) {
-    seg.duration = computeDynamicSegmentDuration(seg);
+  // ONLY if the project does not have pre-generated narration matching the script.
+  const hasNarration = project.narration && project.narration.length > 0;
+  if (!hasNarration) {
+    log('info', '  No narration found. Applying dynamic pacing ranges to segment durations...');
+    for (const seg of project.script) {
+      seg.duration = computeDynamicSegmentDuration(seg);
+    }
+  } else {
+    log('info', '  Narration voiceover detected. Keeping original script durations for audio synchronization.');
   }
 
   let segmentSec = project.script.reduce((s, seg) => s + seg.duration, 0);
@@ -4278,9 +4136,10 @@ async function render() {
     let zoomTransitionCounter = -1; // Counts down from 3 when mi changes
 
     // Pacing-based asset alternation interval (Requirements 13.3, 13.4)
-    // High pacing (4-5) → shorter intervals (2s), Low pacing (1-2) → longer intervals (6s)
+    // Capped to a strict 3-second ceiling for premium documentary engagement
     const pacingScore = seg.pacingScore || 3;
-    const assetAlternationInterval = pacingScore >= 4 ? 2 : pacingScore <= 2 ? 6 : 4;
+    const assetAlternationInterval = Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
+
 
     for (let f = 0; f < numFrames; f++) {
       // Use computeActiveAssetIndex for multi-asset alternation (Requirement 4.4)
@@ -4293,26 +4152,45 @@ async function render() {
 
       if (asset) {
         if (asset.type === 'video') {
-          // P1: Use pre-extracted frames from cache (avoids per-frame ffmpeg spawnSync)
+          // Try loading smooth 24fps frame from disk cache first
+          const framesDir = videoFramesDirectories.get(asset.url);
           const clipDuration = asset.duration || 10;
           const progress = f / numFrames;
           const timestamp = progress * clipDuration;
-          // Find closest pre-extracted frame (key timestamps: 0%, 25%, 50%, 75%, 95%)
-          const keyTimestamps = [0, 0.25, 0.5, 0.75, 0.95];
-          const closestPct = keyTimestamps.reduce((best, pct) =>
-            Math.abs(pct - progress) < Math.abs(best - progress) ? pct : best
-          );
-          const cacheKey = `${asset.url}@${(closestPct * clipDuration).toFixed(2)}`;
-          img = videoFrameCache.get(cacheKey) || null;
 
-          // Fallback: try fetchVideoFrame if pre-extraction missed (e.g., cold open with different progress)
+          if (framesDir) {
+            const frameIndex = Math.min(
+              Math.max(1, Math.floor(progress * clipDuration * 24) + 1),
+              Math.max(1, Math.floor(clipDuration * 24))
+            );
+            const framePath = join(framesDir, `frame_${String(frameIndex).padStart(4, '0')}.jpg`);
+            if (existsSync(framePath)) {
+              try {
+                img = await loadImage(framePath);
+              } catch (e) {
+                // fall through to fallback caches
+              }
+            }
+          }
+
           if (!img) {
-            try {
-              img = await fetchVideoFrame(asset.url, timestamp, asset.thumbnailUrl);
-            } catch {
-              // Fallback to thumbnail image
-              if (asset.thumbnailUrl) {
-                img = imgCache.get(asset.thumbnailUrl) || null;
+            // Find closest pre-extracted frame (key timestamps: 0%, 25%, 50%, 75%, 95%)
+            const keyTimestamps = [0, 0.25, 0.5, 0.75, 0.95];
+            const closestPct = keyTimestamps.reduce((best, pct) =>
+              Math.abs(pct - progress) < Math.abs(best - progress) ? pct : best
+            );
+            const cacheKey = `${asset.url}@${(closestPct * clipDuration).toFixed(2)}`;
+            img = videoFrameCache.get(cacheKey) || null;
+
+            // Fallback: try fetchVideoFrame if pre-extraction missed (e.g., cold open with different progress)
+            if (!img) {
+              try {
+                img = await fetchVideoFrame(asset.url, timestamp, asset.thumbnailUrl);
+              } catch {
+                // Fallback to thumbnail image
+                if (asset.thumbnailUrl) {
+                  img = imgCache.get(asset.thumbnailUrl) || null;
+                }
               }
             }
           }
@@ -4444,13 +4322,16 @@ async function render() {
         }
       }
 
-      // Task 16: Draw watermark/branding on every frame
-      const wmChannelName = project.exportSettings?.channelName || 'THE UPDATE DESK';
-      drawWatermark(ctx, WIDTH, HEIGHT, {
-        text: wmChannelName,
-        position: 'bottom-right',
-        opacity: 0.7,
-      });
+      // Task 16: Draw watermark/branding on every frame (only if debug overlays are enabled)
+      if (RENDER_DEBUG_OVERLAYS) {
+        const wmChannelName = project.exportSettings?.channelName || 'THE UPDATE DESK';
+        drawWatermark(ctx, WIDTH, HEIGHT, {
+          text: wmChannelName,
+          position: 'bottom-right',
+          opacity: 0.7,
+        });
+      }
+
 
       // Write raw RGBA frame to ffmpeg with safety checks
       const raw = getFrameBuffer(canvas);
@@ -4629,15 +4510,17 @@ async function render() {
           log('info', `  Style: ${videoStyle}, BG music: ${bgMusicEnabled}, Music preset: ${musicPreset || 'auto'}, Duration: ${totalSec}s`);
 
           // Build narration timings from project script
-          let currentTime = 5; // intro silence
+          // Build narration timings from project script matching transition configurations
+          let currentTime = TITLE_CARD_SECONDS + COLD_OPEN_FRAMES / FPS;
           const narrationTimings = [];
           if (project.script) {
             for (const seg of project.script) {
-              currentTime += 1.5; // segment title card silence
+              currentTime += CONFIG.SEGMENT_TITLE_DURATION;
               narrationTimings.push({ start: currentTime, end: currentTime + seg.duration });
               currentTime += seg.duration;
             }
           }
+
 
           const muxOk = muxAudio(OUTPUT_FILE, combinedAudio, finalMp4, totalSec, {
           style: videoStyle,
@@ -4746,6 +4629,14 @@ async function render() {
                   // Reset rendering state for re-render
                   totalFrames = 0;
                   globalFrameCounter = 0;
+                  
+                  // Clean up temporary smooth video frames directories
+                  for (const dir of videoFramesDirectories.values()) {
+                    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+                  }
+                  videoFramesDirectories.clear();
+                  clipFileCache.clear();
+                  
                   continue; // Restart render loop with new flags
                 }
               } else {
@@ -4827,6 +4718,15 @@ async function render() {
     }
     clipFileCache.clear();
     videoFrameCache.clear();
+    
+    // Clean up temporary smooth video frames directories
+    for (const dir of videoFramesDirectories.values()) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {}
+    }
+    videoFramesDirectories.clear();
+    
     log('info', '   Cleaned up video clip cache');
   } catch (cleanupErr) {
     console.warn(`   Failed to clean up video clips: ${cleanupErr.message}`);
@@ -4841,8 +4741,12 @@ async function render() {
       .substring(0, 60);
     const downloadName = `autotube-${safeTitle}.mp4`;
     const homeDir = homedir() || tmpdir();
-    spawnSync('cp', [finalMp4File, `${homeDir}/Downloads/${downloadName}`]);
-    log('info', `📁 Copied to ~/Downloads/${downloadName}`);
+    try {
+      copyFileSync(finalMp4File, `${homeDir}/Downloads/${downloadName}`);
+      log('info', `📁 Copied to ~/Downloads/${downloadName}`);
+    } catch (copyErr) {
+      console.warn(`  ⚠ Could not copy video to downloads folder: ${copyErr.message}`);
+    }
   }
 
   // Task 125: Log per-step metrics summary
@@ -5019,8 +4923,12 @@ async function render() {
     const thumbDownloadName = `autotube-${safeTopic}-thumbnail.png`;
     const homeDir = homedir() || tmpdir();
     const thumbDownloadPath = `${homeDir}/Downloads/${thumbDownloadName}`;
-    spawnSync('cp', [thumbPath, thumbDownloadPath]);
-    log('info', `📁 Thumbnail copied to ~/Downloads/${thumbDownloadName}`);
+    try {
+      copyFileSync(thumbPath, thumbDownloadPath);
+      log('info', `📁 Thumbnail copied to ~/Downloads/${thumbDownloadName}`);
+    } catch (copyErr) {
+      console.warn(`  ⚠ Could not copy to downloads folder: ${copyErr.message}`);
+    }
   } catch (thumbErr) {
     console.warn('⚠ Thumbnail generation failed:', thumbErr.message);
   }

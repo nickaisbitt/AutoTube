@@ -6,6 +6,8 @@ import { getTopicPalette, hexToRgba } from '../utils/colors';
 // Backgrounds
 import { ProceduralBackground } from '../backgrounds/ProceduralBackground';
 import { ImageBackground } from '../backgrounds/ImageBackground';
+import { VideoBackground } from '../backgrounds/VideoBackground';
+import { getKenBurnsParams } from '../utils/kenBurns';
 
 // Layouts
 import { StatCardLayout } from '../layouts/StatCardLayout';
@@ -43,15 +45,43 @@ function resolveLayout(segment: SegmentProps) {
 }
 
 export const SegmentSequence: React.FC<SegmentSequenceProps> = (props) => {
-  const { segment, index, totalSegments, fps, brand, topic } = props;
+  const { segment, index, totalSegments, fps, brand, topic, editPlan } = props;
   const frame = useCurrentFrame();
   const totalFrames = Math.round(segment.duration * fps);
   const progress = frame / totalFrames;
   const palette = getTopicPalette(topic);
 
   const mediaSrc = segment.media?.url;
+  const mediaType = segment.media?.type || 'image';
+  const isFallback = segment.media?.isFallback || false;
+  const shotType = segment.media?.shotType || 'primary';
   const hasMedia = !!mediaSrc && mediaSrc.length > 0;
   const layout = resolveLayout(segment);
+
+  // Find edit plan for this segment
+  const segEditPlan = editPlan?.find(ep => ep.segmentId === segment.id);
+  const mediaAssetId = segment.media?.id || '';
+  const kbPlanParams = segEditPlan?.kenBurns?.[mediaAssetId];
+
+  // Resolve Ken Burns parameters
+  let kenBurns = kbPlanParams;
+  if (!kenBurns) {
+    const baseParams = getKenBurnsParams(segment.id, mediaAssetId);
+    if (shotType === 'secondary') {
+      // Secondary shots should have a distinct Ken Burns profile (reverse pan and zoom direction)
+      kenBurns = {
+        zoomStart: baseParams.zoomEnd,
+        zoomEnd: baseParams.zoomStart,
+        panDirectionX: -baseParams.panDirectionX,
+        panDirectionY: -baseParams.panDirectionY,
+      };
+    } else {
+      kenBurns = baseParams;
+    }
+  }
+
+  // Fallback assets get slightly dimmed to improve readability/premium feel
+  const brightness = isFallback ? 0.42 : 0.55;
 
   // Karaoke word timings
   const hasWordTimings = segment.narrationWordTimings && segment.narrationWordTimings.length > 0;
@@ -67,13 +97,23 @@ export const SegmentSequence: React.FC<SegmentSequenceProps> = (props) => {
     <AbsoluteFill>
       {/* ── Background ── */}
       {hasMedia ? (
-        <ImageBackground
-          src={mediaSrc!}
-          kenBurns={{ zoomStart: 1.02, zoomEnd: 1.12, panDirectionX: (index % 3) - 1, panDirectionY: ((index * 7) % 5) - 2 }}
-          width={1920}
-          height={1080}
-          brightness={0.55}
-        />
+        mediaType === 'video' ? (
+          <VideoBackground
+            src={mediaSrc!}
+            kenBurns={kenBurns}
+            width={1920}
+            height={1080}
+            brightness={brightness}
+          />
+        ) : (
+          <ImageBackground
+            src={mediaSrc!}
+            kenBurns={kenBurns}
+            width={1920}
+            height={1080}
+            brightness={brightness}
+          />
+        )
       ) : (
         <ProceduralBackground topic={topic} accentColor={brand.accentColor} />
       )}
@@ -92,7 +132,7 @@ export const SegmentSequence: React.FC<SegmentSequenceProps> = (props) => {
       ) : layout === 'quote' ? (
         <QuoteCardLayout segment={segment} brand={brand} />
       ) : layout === 'split' ? (
-        <LeftTextRightImageLayout segment={segment} brand={brand} mediaSrc={mediaSrc} />
+        <LeftTextRightImageLayout segment={segment} brand={brand} mediaSrc={mediaSrc} mediaType={mediaType} />
       ) : layout === 'lowerThird' ? (
         <LowerThirdOverlayLayout segment={segment} brand={brand} />
       ) : (

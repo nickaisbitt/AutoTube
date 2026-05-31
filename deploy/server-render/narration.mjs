@@ -264,7 +264,7 @@ export function generateSilence(outputPath, durationSec) {
 function generateBreathSound(outputPath) {
   const result = spawnSync('ffmpeg', [
     '-y', '-f', 'lavfi', '-i', 'anoisesrc=d=0.25:c=pink:a=0.005',
-    '-ar', '24000', outputPath,
+    '-ar', '48000', outputPath,
   ], { encoding: 'utf8', timeout: 10000 });
   return result.status === 0 && existsSync(outputPath);
 }
@@ -459,41 +459,81 @@ export async function generateKokoroSegment(text, outputPath, options = {}) {
   const targetDuration = options.targetDuration || null;
 
   for (const voice of voiceOptions) {
-    // Create batch JSON
-    const batchInput = join(tmpDir, 'batch.json');
-    const config = {
-      segments: [{ id: 'current', text: processedText, speed }],
-      voice,
-      output_dir: tmpDir,
-    };
-    writeFileSync(batchInput, JSON.stringify(config));
-
-    // Generate audio via Kokoro Python wrapper (async to avoid blocking event loop)
-    const env = { ...process.env, PYTORCH_ENABLE_MPS_FALLBACK: '1' };
-    const kokoroPromise = new Promise((resolve) => {
-      const child = spawn(KOKORO_PYTHON, [KOKORO_SCRIPT, batchInput], {
-        encoding: 'utf8',
-        timeout: 300000,
-        env,
-      });
-      let stdout = '';
-      let stderr = '';
-      child.stdout?.on('data', (d) => { stdout += d; });
-      child.stderr?.on('data', (d) => { stderr += d; });
-      child.on('close', (code) => {
-        resolve({ status: code ?? 1, stdout, stderr });
-      });
-      child.on('error', (err) => {
-        resolve({ status: 1, stdout, stderr: err.message });
-      });
-    });
-    const result = await kokoroPromise;
-
-    // Read the generated WAV
     const wavPath = join(tmpDir, 'current.wav');
     const vttPath = join(tmpDir, 'current.vtt');
+    let generatedWav = false;
 
-    if (result.status === 0 && existsSync(wavPath)) {
+    // Try self-hosted Kokoro ONNX HTTP API first
+    const serverUrl = process.env.KOKORO_SERVER_URL;
+    if (serverUrl) {
+      try {
+        console.log(`\n  [Kokoro-API] Querying self-hosted TTS server: ${serverUrl} (voice=${voice}, speed=${speed})`);
+        const endpoint = serverUrl.replace(/\/$/, '') + '/generate';
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: processedText,
+            voice,
+            speed,
+          }),
+          signal: AbortSignal.timeout(30000), // 30s timeout
+        });
+
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          writeFileSync(wavPath, buffer);
+          generatedWav = existsSync(wavPath);
+          if (generatedWav) {
+            console.log(`  ✓ [Kokoro-API] Speech generated successfully (${(buffer.length / 1024).toFixed(1)} KB)`);
+          }
+        } else {
+          const errText = await response.text().catch(() => '');
+          console.warn(`  ⚠ [Kokoro-API] HTTP ${response.status}: ${errText.substring(0, 100)}`);
+        }
+      } catch (err) {
+        console.warn(`  ⚠ [Kokoro-API] Failed to fetch from TTS server: ${err.message}`);
+      }
+    }
+
+    // Fall back to local python execution if HTTP API failed or was not configured
+    if (!generatedWav) {
+      // Create batch JSON
+      const batchInput = join(tmpDir, 'batch.json');
+      const config = {
+        segments: [{ id: 'current', text: processedText, speed }],
+        voice,
+        output_dir: tmpDir,
+      };
+      writeFileSync(batchInput, JSON.stringify(config));
+
+      // Generate audio via Kokoro Python wrapper (async to avoid blocking event loop)
+      const env = { ...process.env, PYTORCH_ENABLE_MPS_FALLBACK: '1' };
+      const kokoroPromise = new Promise((resolve) => {
+        const child = spawn(KOKORO_PYTHON, [KOKORO_SCRIPT, batchInput], {
+          encoding: 'utf8',
+          timeout: 300000,
+          env,
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout?.on('data', (d) => { stdout += d; });
+        child.stderr?.on('data', (d) => { stderr += d; });
+        child.on('close', (code) => {
+          resolve({ status: code ?? 1, stdout, stderr });
+        });
+        child.on('error', (err) => {
+          resolve({ status: 1, stdout, stderr: err.message });
+        });
+      });
+      const result = await kokoroPromise;
+      generatedWav = result.status === 0 && existsSync(wavPath);
+    }
+
+    if (generatedWav) {
       // Task 13: Keep as WAV — no MP3 conversion. Pad to target duration if needed.
       let processingPath = wavPath;
 
@@ -554,10 +594,68 @@ export async function generateKokoroSegment(text, outputPath, options = {}) {
   return false;
 }
 
+function getAudioDuration(filePath) {
+  try {
+    const result = spawnSync('ffprobe', [
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      filePath
+    ], { encoding: 'utf8', timeout: 5000 });
+    if (result.status === 0 && result.stdout) {
+      const parsed = parseFloat(result.stdout.trim());
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+  } catch (e) {
+    console.warn(`  ⚠ getAudioDuration failed for ${filePath}: ${e.message}`);
+  }
+  return null;
+}
+
+async function generateMeloSegment(text, outputPath, accountId, apiToken) {
+  try {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/myshell-ai/melotts`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt: text, lang: 'en' }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      console.warn(`  ⚠ MeloTTS API returned ${response.status}: ${errText.substring(0, 100)}`);
+      return false;
+    }
+    const contentType = response.headers.get('content-type') || '';
+    let buffer;
+    if (contentType.includes('application/json')) {
+      const data = await response.json();
+      const base64Audio = data?.result?.audio;
+      if (!base64Audio) {
+        console.warn('  ⚠ MeloTTS: No audio in JSON response');
+        return false;
+      }
+      buffer = Buffer.from(base64Audio, 'base64');
+    } else {
+      buffer = Buffer.from(await response.arrayBuffer());
+    }
+    if (buffer.length === 0) return false;
+    writeFileSync(outputPath, buffer);
+    return existsSync(outputPath);
+  } catch (err) {
+    console.warn(`  ⚠ MeloTTS request failed: ${err.message}`);
+    return false;
+  }
+}
+
 /**
  * Generate narration audio for all segments using a fallback chain:
  *   1. Kokoro-82M (local, free, GPU accelerated)
- *   2. Silence (last resort)
+ *   2. MeloTTS (Cloudflare cheap fallback)
+ *   3. edge-tts (local reliable fallback)
+ *   4. Silence (last resort)
  *
  * Includes silence gaps for cold open (5s) and segment title cards (1.5s each).
  * Task 18: Inserts breathing sounds between segments.
@@ -570,9 +668,14 @@ export async function generateKokoroSegment(text, outputPath, options = {}) {
  * @returns {Promise<Array<{file: string, duration: number}>>}
  */
 export async function generateNarration(segments, outputDir, options = {}) {
+  const { cfAccountId, cfApiToken, edgeVoice } = options;
+  const useMelo = !!cfAccountId && !!cfApiToken;
   const audioFiles = [];
 
   const engines = ['Kokoro-82M'];
+  if (useMelo) engines.push('MeloTTS');
+  engines.push('edge-tts');
+  engines.push('silence');
   console.log(`Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
 
   // Generate initial silence for cold open (2s) + title card (3s) = 5s
@@ -594,6 +697,7 @@ export async function generateNarration(segments, outputDir, options = {}) {
     }
 
     const audioFile = join(outputDir, `narration-${i}.wav`);
+    const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
     const segTitle = seg.title || `Segment ${i + 1}`;
     process.stdout.write(`\r  Segment ${i + 1}/${segments.length}: "${segTitle.substring(0, 30)}"...`);
 
@@ -623,11 +727,38 @@ export async function generateNarration(segments, outputDir, options = {}) {
       }
     }
 
+    // Tier 2: MeloTTS (Cloudflare, cheap fallback)
+    if (useMelo && !success) {
+      success = await generateMeloSegment(seg.narration, audioFile, cfAccountId, cfApiToken);
+      if (!success) {
+        console.warn(`\n  ⚠ MeloTTS failed for segment ${i + 1}, trying edge-tts`);
+      }
+    }
+
+    // Tier 3: edge-tts (local fallback, extremely fast and reliable)
+    if (!success) {
+      const voice = edgeVoice || 'en-US-GuyNeural';
+      const result = spawnSync('edge-tts', [
+        '--voice', voice,
+        '--rate', '+10%',
+        '--text', seg.narration,
+        '--write-media', audioFile,
+        '--write-subtitles', subtitleFile,
+      ], { encoding: 'utf8', timeout: 30000 });
+      success = result.status === 0 && existsSync(audioFile);
+      if (!success) {
+        console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}, trying silence`);
+      }
+    }
+
     if (success) {
-      // Task 25: Generate WebVTT captions from narration text
-      const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
+      // Get the actual duration of generated audio for precise synchronization
+      const actualDuration = getAudioDuration(audioFile) || segDuration;
+      seg.duration = actualDuration;
+
+      // Task 25: Generate WebVTT captions from narration text if not already created by the engine
       if (!existsSync(subtitleFile) && seg.narration) {
-        generateWebVTT(seg.narration, segDuration, subtitleFile);
+        generateWebVTT(seg.narration, actualDuration, subtitleFile);
       }
 
       // Task 18: Insert breathing sound between segments (not after last segment)
@@ -645,26 +776,23 @@ export async function generateNarration(segments, outputDir, options = {}) {
         // Insert 0.4s silence between paragraphs (estimated within segment duration)
         const paraPausePath = join(outputDir, `para-pause-${i}.wav`);
         generateSilence(paraPausePath, 0.4);
-        // Note: actual concatenation of paragraph sub-segments happens in the final mix.
-        // For now, we add a metadata marker that the concatenation step can use.
         audioFiles.push({
           file: audioFile,
-          duration: segDuration,
+          duration: actualDuration,
           subtitleFile: existsSync(subtitleFile) ? subtitleFile : null,
           paragraphPauses: paragraphs.length - 1,
         });
       } else {
         audioFiles.push({
           file: audioFile,
-          duration: segDuration,
+          duration: actualDuration,
           subtitleFile: existsSync(subtitleFile) ? subtitleFile : null,
         });
       }
     } else {
-      // Tier 2: Silence (last resort)
+      // Tier 4: Silence (last resort)
       console.warn(`\n  ⚠ All TTS engines failed for segment ${i + 1}, using silence`);
       if (generateSilence(audioFile, segDuration)) {
-        const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
         writeFileSync(subtitleFile, 'WEBVTT\n\n');
         audioFiles.push({ file: audioFile, duration: segDuration, subtitleFile });
       }

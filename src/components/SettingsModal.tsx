@@ -14,6 +14,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [orVal, setOrVal] = useState(config.openRouterKey);
   const [sourceTypeVal, setSourceTypeVal] = useState(config.sourceType);
   const [flickrVal, setFlickrVal] = useState(config.flickrKey || '');
+  const [pexelsVal, setPexelsVal] = useState(config.pexelsKey || '');
+  const [pixabayVal, setPixabayVal] = useState(config.pixabayKey || '');
   const [showAssetTester, setShowAssetTester] = useState(false);
   const [status, setStatus] = useState<Record<string, 'idle' | 'testing' | 'valid' | 'invalid'>>({
     openRouter: 'idle',
@@ -29,6 +31,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setOrVal(config.openRouterKey);
       setSourceTypeVal(config.sourceType);
       setFlickrVal(config.flickrKey || '');
+      setPexelsVal(config.pexelsKey || '');
+      setPixabayVal(config.pixabayKey || '');
     }
   }, [isOpen, config]);
 
@@ -100,6 +104,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       openRouterKey: orVal.trim(),
       sourceType: sourceTypeVal,
       flickrKey: flickrVal.trim(),
+      pexelsKey: pexelsVal.trim(),
+      pixabayKey: pixabayVal.trim(),
       ttsVoice: config.ttsVoice,
     });
     onClose();
@@ -196,6 +202,40 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   value={flickrVal}
                   onChange={(e) => setFlickrVal(e.target.value)}
                   placeholder="Enter Flickr key..."
+                  className="w-full border-2 border-surface-700 bg-surface-800 px-3 py-2 text-xs font-mono text-white placeholder-surface-600 focus:border-brand-500 focus:outline-none"
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="pexelsKey" className="text-[11px] font-mono font-medium text-surface-400 flex items-center justify-between">
+                  Pexels API Key (Optional — adds premium stock photos)
+                  <a href="https://www.pexels.com/api/" target="_blank" rel="noopener" className="text-brand-400 hover:underline flex items-center gap-1">
+                    Get Key <ExternalLink className="h-2 w-2" />
+                  </a>
+                </label>
+                <input
+                  id="pexelsKey"
+                  name="pexelsKey"
+                  type="password"
+                  value={pexelsVal}
+                  onChange={(e) => setPexelsVal(e.target.value)}
+                  placeholder="Enter Pexels key..."
+                  className="w-full border-2 border-surface-700 bg-surface-800 px-3 py-2 text-xs font-mono text-white placeholder-surface-600 focus:border-brand-500 focus:outline-none"
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="pixabayKey" className="text-[11px] font-mono font-medium text-surface-400 flex items-center justify-between">
+                  Pixabay API Key (Optional — adds free stock photos & videos)
+                  <a href="https://pixabay.com/api/docs/" target="_blank" rel="noopener" className="text-brand-400 hover:underline flex items-center gap-1">
+                    Get Key <ExternalLink className="h-2 w-2" />
+                  </a>
+                </label>
+                <input
+                  id="pixabayKey"
+                  name="pixabayKey"
+                  type="password"
+                  value={pixabayVal}
+                  onChange={(e) => setPixabayVal(e.target.value)}
+                  placeholder="Enter Pixabay key..."
                   className="w-full border-2 border-surface-700 bg-surface-800 px-3 py-2 text-xs font-mono text-white placeholder-surface-600 focus:border-brand-500 focus:outline-none"
                 />
               </div>

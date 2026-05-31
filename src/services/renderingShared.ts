@@ -290,8 +290,8 @@ export function computeBgMusicVolume(
   isTransition?: boolean,
 ): number {
   if (hasNarration) {
-    // Duck music by 8dB during narration for clear speech
-    return 0.60 * 0.158; // ≈ 0.095
+    // Duck music during narration for clear speech
+    return 0.15;
   }
   // No narration — music is primary
   if (isTransition) {

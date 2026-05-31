@@ -325,11 +325,11 @@ function mapAppConfigToProviderConfig(
       break;
     case 'Pexels':
     case 'Pexels Videos':
-      apiKey = (config as unknown as Record<string, unknown>).pexelsKey as string | undefined;
+      apiKey = config.pexelsKey;
       break;
     case 'Pixabay':
     case 'Pixabay Videos':
-      apiKey = (config as unknown as Record<string, unknown>).pixabayKey as string | undefined;
+      apiKey = config.pixabayKey;
       break;
     default:
       apiKey = undefined;
@@ -337,3 +337,98 @@ function mapAppConfigToProviderConfig(
 
   return { apiKey, signal };
 }
+
+export interface ProviderHealthReport {
+  name: string;
+  status: 'success' | 'failed' | 'skipped' | 'timeout';
+  resultCount: number;
+  durationMs: number;
+  error?: string;
+}
+
+export interface ProvidersResult {
+  candidates: MediaCandidate[];
+  health: ProviderHealthReport[];
+}
+
+export async function queryAllProvidersWithHealth(
+  query: string,
+  config: AppConfig,
+  signal?: AbortSignal,
+): Promise<ProvidersResult> {
+  const health: ProviderHealthReport[] = [];
+
+  // Report skipped providers
+  for (const provider of allProviders) {
+    const providerConfig = mapAppConfigToProviderConfig(provider, config);
+    if (!provider.isAvailable(providerConfig)) {
+      health.push({
+        name: provider.name,
+        status: 'skipped',
+        resultCount: 0,
+        durationMs: 0,
+        error: provider.requiresKey ? 'API key not configured' : 'Provider unavailable',
+      });
+    }
+  }
+
+  const available = getAvailableProviders(config);
+
+  const results = await Promise.allSettled(
+    available.map(async (provider) => {
+      const providerConfig = mapAppConfigToProviderConfig(provider, config, signal);
+      const start = performance.now();
+
+      const providerSignal = signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+        : AbortSignal.timeout(8_000);
+
+      try {
+        const candidates = await provider.search(query, { ...providerConfig, signal: providerSignal });
+        const durationMs = Math.round(performance.now() - start);
+        health.push({
+          name: provider.name,
+          status: 'success',
+          resultCount: candidates.length,
+          durationMs,
+        });
+        return candidates;
+      } catch (err) {
+        const durationMs = Math.round(performance.now() - start);
+        if (err instanceof Error && err.name === 'AbortError') {
+          health.push({ name: provider.name, status: 'timeout', resultCount: 0, durationMs, error: 'Request timed out' });
+          throw err;
+        }
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          health.push({ name: provider.name, status: 'timeout', resultCount: 0, durationMs, error: 'Request timed out' });
+          throw err;
+        }
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        health.push({ name: provider.name, status: 'failed', resultCount: 0, durationMs, error: errorMsg });
+        logger.warn('ProviderRegistry', `${provider.name} failed for "${query}": ${errorMsg}`);
+        return [] as MediaCandidate[];
+      }
+    }),
+  );
+
+  if (signal?.aborted) return { candidates: [], health };
+
+  const allCandidates: MediaCandidate[] = [];
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      allCandidates.push(...result.value);
+    }
+  }
+
+  const deduplicated = deduplicateCandidates(allCandidates);
+  const filtered = filterWatermarked(deduplicated);
+
+  // Log summary
+  const succeeded = health.filter(h => h.status === 'success').length;
+  const failed = health.filter(h => h.status === 'failed').length;
+  const skipped = health.filter(h => h.status === 'skipped').length;
+  logger.info('ProviderRegistry', `Query "${query}": ${succeeded} succeeded, ${failed} failed, ${skipped} skipped → ${filtered.length} candidates`);
+
+  return { candidates: filtered, health };
+}
+

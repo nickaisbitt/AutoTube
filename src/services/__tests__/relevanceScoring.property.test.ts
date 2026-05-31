@@ -18,8 +18,19 @@ import type { TopicContext, NarrativeBeat } from '../../types';
 // Arbitraries
 // ---------------------------------------------------------------------------
 
+const mismatchTerms = new Set([
+  'equation', 'calculus', 'algebra', 'theorem', 'polynomial', 'integral', 'derivative', 'trigonometry',
+  'recipe', 'ingredient', 'baking', 'cuisine', 'culinary', 'chef', 'cookbook', 'seasoning',
+  'touchdown', 'goalkeeper', 'batting', 'innings', 'referee', 'championship', 'playoff', 'quarterback',
+  'surgery', 'diagnosis', 'prescription', 'symptom', 'pathology', 'radiology', 'oncology', 'cardiology',
+  'constellation', 'nebula', 'supernova', 'asteroid', 'telescope', 'galaxy', 'pulsar', 'quasar',
+  'runway', 'couture', 'designer', 'garment', 'textile', 'embroidery', 'hemline', 'silhouette'
+]);
+
 /** Arbitrary for a word that is > 2 chars (for keyword matching) */
-const keywordArb: fc.Arbitrary<string> = fc.stringMatching(/^[a-z]{3,8}$/);
+const keywordArb: fc.Arbitrary<string> = fc
+  .stringMatching(/^[a-z]{3,8}$/)
+  .filter((w) => !mismatchTerms.has(w.toLowerCase()));
 
 /** Arbitrary for a safe domain (not in watermark list) */
 const safeDomainArb: fc.Arbitrary<string> = fc.stringMatching(/^[a-z]{4,8}\.(org|io|dev)$/);

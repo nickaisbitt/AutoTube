@@ -5,7 +5,7 @@
  */
 
 import { createCanvas } from 'canvas';
-import { writeFileSync } from 'fs';
+import { writeFileSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { homedir, tmpdir } from 'os';
@@ -134,8 +134,12 @@ export async function generateThumbnail(project, imgCache, fetchImage, fetchVide
       .substring(0, 60);
     const thumbDownloadName = `autotube-${safeTopic}-thumbnail.png`;
     const thumbDownloadPath = `${homedir() || tmpdir()}/Downloads/${thumbDownloadName}`;
-    spawnSync('cp', [thumbPath, thumbDownloadPath]);
-    console.log(`📁 Thumbnail copied to ~/Downloads/${thumbDownloadName}`);
+    try {
+      copyFileSync(thumbPath, thumbDownloadPath);
+      console.log(`📁 Thumbnail copied to ~/Downloads/${thumbDownloadName}`);
+    } catch (copyErr) {
+      console.warn(`  ⚠ Could not copy to downloads folder: ${copyErr.message}`);
+    }
 
     return thumbPath;
   } catch (thumbErr) {

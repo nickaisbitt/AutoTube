@@ -51,6 +51,8 @@ async function main() {
         source: media.source || '',
         thumbnailUrl: media.thumbnailUrl || undefined,
         duration: media.duration || undefined,
+        isFallback: media.isFallback || false,
+        shotType: media.shotType || 'primary',
       } : undefined,
       narrationAudioUrl: narration?.audioUrl || undefined,
       narrationWordTimings: undefined,

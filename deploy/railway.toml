@@ -1,0 +1,8 @@
+[build]
+builder = "railpack"
+
+[deploy]
+startCommand = "npx tsx server.mjs"
+healthcheckPath = "/api/health"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10

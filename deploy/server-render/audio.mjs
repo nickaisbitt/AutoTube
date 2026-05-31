@@ -193,7 +193,7 @@ export function computeBgMusicVolume(hasNarration, options = {}) {
  * @returns {boolean} True if ducking succeeded.
  */
 export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, totalDuration, options = {}) {
-  const { duckingLevel = -18, peakLevel = -8, fadeDuration = 0.3, lookAhead = 0.1 } = options;
+  const { duckingLevel = -24, peakLevel = -14, fadeDuration = 0.3, lookAhead = 0.1 } = options;
 
   console.log(`  🎚️ Applying dynamic ducking envelope (${narrationTimings.length} narration segments)...`);
 
@@ -406,7 +406,7 @@ export function generateSubBassTrack(statTimestamps, totalDuration, outputPath) 
   for (let i = 0; i < Math.min(statTimestamps.length, 10); i++) {
     const ts = statTimestamps[i];
     filterParts.push(`sine=frequency=50:duration=0.8[s${i}]`);
-    filterParts.push(`[s${i}]afade=t=in:st=0:d=0.1,afade=t=out:st=0.6:d=0.2,volume=0.08:enable='between(t,${ts.toFixed(2)},${(ts + 0.8).toFixed(2)}[r${i}]`);
+    filterParts.push(`[s${i}]afade=t=in:st=0:d=0.1,afade=t=out:st=0.6:d=0.2,volume=0.08:enable='between(t,${ts.toFixed(2)},${(ts + 0.8).toFixed(2)})'[r${i}]`);
     inputCount++;
   }
   if (inputCount === 0) return false;
@@ -429,7 +429,7 @@ export function generateTransientDuckingTrack(wordTimestamps, impactWords, total
   }
   if (events.length === 0) return false;
   const filterParts = events.map((e, i) =>
-    `sine=frequency=80:duration=${e.duration}[d${i}],[d${i}]volume=${e.depth}:enable='between(t,${e.time.toFixed(3)},${(e.time + e.duration).toFixed(3)}[dd${i}]`
+    `sine=frequency=80:duration=${e.duration}[d${i}],[d${i}]volume=${e.depth}:enable='between(t,${e.time.toFixed(3)},${(e.time + e.duration).toFixed(3)})'[dd${i}]`
   );
   const mixInputs = events.map((_, i) => `[dd${i}]`).join('');
   filterParts.push(`anullsrc=r=48000:cl=stereo[base]`);
@@ -454,7 +454,7 @@ export function generateAmbientBedForStyle(style, duration, outputPath) {
 }
 
 export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, bgVolume, options = {}) {
-  const { normalize = true, targetLUFS = -16, style = 'documentary', enableAudioFx = true, enableAmbient = false, enableSubBass = false, enableDucking = false, statTimestamps = null, wordTimestamps = null, narrationTimings = [] } = options;
+  const { normalize = true, targetLUFS = -14, style = 'documentary', enableAudioFx = true, enableAmbient = false, enableSubBass = false, enableDucking = false, statTimestamps = null, wordTimestamps = null, narrationTimings = [] } = options;
 
   console.log(`  🎵 Mixing background music at volume ${bgVolume.toFixed(3)} (${bgMusicPath})`);
 
@@ -697,7 +697,7 @@ export function createBgMusicOnlyTrack(bgMusicPath, outputFile, duration, bgVolu
   // Apply EBU R128 normalization if requested
   if (normalize) {
     const normalizedOutput = join(tmpdir(), `autotube-bgnorm-${Date.now()}.aac`);
-    const normResult = normalizeAudioEBUR128(outputFile, normalizedOutput, { targetLUFS: -16 });
+    const normResult = normalizeAudioEBUR128(outputFile, normalizedOutput, { targetLUFS: -14 });
     
     if (normResult.success) {
       try {
@@ -859,7 +859,7 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
   
   // Normalize narration to -16 LUFS before muxing
   const normalizedNarration = join(tmpdir(), `autotube-narrnorm-${Date.now()}.aac`);
-  const normResult = normalizeAudioEBUR128(narrationFile, normalizedNarration, { targetLUFS: -16 });
+  const normResult = normalizeAudioEBUR128(narrationFile, normalizedNarration, { targetLUFS: -14 });
   
   const narrationToMux = normResult.success ? normalizedNarration : narrationFile;
   

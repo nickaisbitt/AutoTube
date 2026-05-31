@@ -37,9 +37,14 @@ fi
 # Sync server.mjs
 cp "$ROOT/server.mjs" "$DEPLOY_DIR/"
 
+# Sync config files for Railway
+cp "$ROOT/railway.toml" "$DEPLOY_DIR/"
+cp "$ROOT/nixpacks.toml" "$DEPLOY_DIR/"
+
 # Deploy
 echo "Deploying to Railway..."
 cd "$DEPLOY_DIR"
 railway up
 echo ""
-echo "Deployed! Check: https://autotube-app-production.up.railway.app/api/health"
+echo "Deployed! Check: https://autotube-production.up.railway.app/api/health"
+

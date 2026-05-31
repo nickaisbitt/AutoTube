@@ -22,6 +22,8 @@ export interface AppConfig {
   openRouterKey: string;
   sourceType: 'stock' | 'raw';
   flickrKey?: string;
+  pexelsKey?: string;
+  pixabayKey?: string;
   ttsVoice?: string;
 }
 

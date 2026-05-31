@@ -121,6 +121,20 @@ const KNOWN_LICENSES: Record<string, LicenseInfo> = {
     commercialUse: true,
     modificationsAllowed: true,
   },
+  unsplash: {
+    source: 'unsplash',
+    licenseType: 'Unsplash License',
+    attributionRequired: false,
+    commercialUse: true,
+    modificationsAllowed: true,
+  },
+  picsum: {
+    source: 'picsum',
+    licenseType: 'Pexels/Pixabay-style',
+    attributionRequired: false,
+    commercialUse: true,
+    modificationsAllowed: true,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -182,6 +196,8 @@ export function determineLicense(source: string, sourceUrl?: string): LicenseInf
     : detectedSource === 'nasa' ? 'nasa_pd'
     : detectedSource === 'pexels' ? 'pexels'
     : detectedSource === 'pixabay' ? 'pixabay'
+    : detectedSource === 'unsplash' ? 'unsplash'
+    : detectedSource === 'picsum' ? 'picsum'
     : null;
 
   if (baseKey && KNOWN_LICENSES[baseKey]) {

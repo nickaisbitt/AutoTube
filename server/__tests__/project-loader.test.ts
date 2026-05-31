@@ -14,11 +14,15 @@ describe('fetchProject', () => {
   let fetchProject: () => Promise<Record<string, unknown>>;
   let mockExistsSync: ReturnType<typeof vi.fn>;
   let mockReadFileSync: ReturnType<typeof vi.fn>;
+  let mockReaddirSync: ReturnType<typeof vi.fn>;
+  let mockStatSync: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.resetModules();
     mockExistsSync = vi.fn();
     mockReadFileSync = vi.fn();
+    mockReaddirSync = vi.fn().mockReturnValue([]); // default to no files
+    mockStatSync = vi.fn();
 
     vi.doMock('fs', () => ({
       existsSync: mockExistsSync,
@@ -27,17 +31,17 @@ describe('fetchProject', () => {
       writeFileSync: vi.fn(),
       unlinkSync: vi.fn(),
       rmSync: vi.fn(),
-      statSync: vi.fn(),
-      readdirSync: vi.fn(),
+      statSync: mockStatSync,
+      readdirSync: mockReaddirSync,
       default: {
-existsSync: mockExistsSync,
-      readFileSync: mockReadFileSync,
-      mkdirSync: vi.fn(),
-      writeFileSync: vi.fn(),
-      unlinkSync: vi.fn(),
-      rmSync: vi.fn(),
-      statSync: vi.fn(),
-      readdirSync: vi.fn(),
+        existsSync: mockExistsSync,
+        readFileSync: mockReadFileSync,
+        mkdirSync: vi.fn(),
+        writeFileSync: vi.fn(),
+        unlinkSync: vi.fn(),
+        rmSync: vi.fn(),
+        statSync: mockStatSync,
+        readdirSync: mockReaddirSync,
       },
     }));
 
@@ -79,12 +83,14 @@ existsSync: mockExistsSync,
 
   it('loads from /tmp/autotube-project.json when it exists', async () => {
     const project = { title: 'Test Project', script: [], media: [] };
-    mockExistsSync.mockImplementation((p: string) => p === '/tmp/autotube-project.json');
+    mockReaddirSync.mockReturnValue(['autotube-project.json']);
+    mockStatSync.mockReturnValue({ mtimeMs: 1000 });
     mockReadFileSync.mockReturnValue(JSON.stringify(project));
 
     const result = await fetchProject();
     expect(result).toEqual(project);
-    expect(mockExistsSync).toHaveBeenCalledWith('/tmp/autotube-project.json');
+    expect(mockReaddirSync).toHaveBeenCalledWith('/tmp');
+    expect(mockStatSync).toHaveBeenCalledWith('/tmp/autotube-project.json');
     expect(mockReadFileSync).toHaveBeenCalledWith('/tmp/autotube-project.json', 'utf8');
   });
 
@@ -116,7 +122,8 @@ existsSync: mockExistsSync,
   });
 
   it('throws when the project file contains invalid JSON', async () => {
-    mockExistsSync.mockImplementation((p: string) => p === '/tmp/autotube-project.json');
+    mockReaddirSync.mockReturnValue(['autotube-project.json']);
+    mockStatSync.mockReturnValue({ mtimeMs: 1000 });
     mockReadFileSync.mockReturnValue('not valid json');
 
     await expect(fetchProject()).rejects.toThrow(SyntaxError);

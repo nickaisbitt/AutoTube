@@ -139,6 +139,7 @@ export function drawChromaticAberration(ctx, w, h, intensity) {
   
   const imageData = ctx.getImageData(0, 0, w, h);
   const data = imageData.data;
+  const sourceData = new Uint8ClampedArray(data);
   const offset = Math.round(intensity * 3);
   
   for (let y = 0; y < h; y++) {
@@ -148,8 +149,8 @@ export function drawChromaticAberration(ctx, w, h, intensity) {
       const rIdx = (y * w + Math.max(0, x - offset)) * 4;
       const bIdx = (y * w + Math.min(w - 1, x + offset)) * 4;
       
-      data[idx] = data[rIdx];
-      data[idx + 2] = data[bIdx + 2];
+      data[idx] = sourceData[rIdx];
+      data[idx + 2] = sourceData[bIdx + 2];
     }
   }
   
@@ -208,6 +209,7 @@ export function applyMotionBlur(ctx, w, h, direction, intensity) {
   if (intensity <= 0) return;
   const imageData = ctx.getImageData(0, 0, w, h);
   const data = imageData.data;
+  const sourceData = new Uint8ClampedArray(data);
   const offset = Math.round(intensity * 8);
   const dirX = direction === 'left' ? -1 : direction === 'right' ? 1 : 0;
   const dirY = direction === 'up' ? -1 : direction === 'down' ? 1 : 0;
@@ -222,18 +224,18 @@ export function applyMotionBlur(ctx, w, h, direction, intensity) {
         const sy = Math.round(y - dirY * s);
         if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
           const sIdx = (sy * w + sx) * 4;
-          sr += data[sIdx];
-          sg += data[sIdx + 1];
-          sb += data[sIdx + 2];
+          sr += sourceData[sIdx];
+          sg += sourceData[sIdx + 1];
+          sb += sourceData[sIdx + 2];
           count++;
         }
       }
       
       if (count > 0) {
         const blend = 1 - intensity * 0.5;
-        data[idx] = Math.round(data[idx] * blend + (sr / count) * (1 - blend));
-        data[idx + 1] = Math.round(data[idx + 1] * blend + (sg / count) * (1 - blend));
-        data[idx + 2] = Math.round(data[idx + 2] * blend + (sb / count) * (1 - blend));
+        data[idx] = Math.round(sourceData[idx] * blend + (sr / count) * (1 - blend));
+        data[idx + 1] = Math.round(sourceData[idx + 1] * blend + (sg / count) * (1 - blend));
+        data[idx + 2] = Math.round(sourceData[idx + 2] * blend + (sb / count) * (1 - blend));
       }
     }
   }
@@ -405,6 +407,7 @@ export function applyAnamorphicEffect(ctx, w, h, intensity) {
   if (intensity <= 0) return;
   const imageData = ctx.getImageData(0, 0, w, h);
   const data = imageData.data;
+  const sourceData = new Uint8ClampedArray(data);
   
   const centerX = w / 2;
   const centerY = h / 2;
@@ -423,9 +426,9 @@ export function applyAnamorphicEffect(ctx, w, h, intensity) {
       if (srcX >= 0 && srcX < w && srcY >= 0 && srcY < h) {
         const dstIdx = (y * w + x) * 4;
         const srcIdx = (srcY * w + srcX) * 4;
-        data[dstIdx] = data[srcIdx];
-        data[dstIdx + 1] = data[srcIdx + 1];
-        data[dstIdx + 2] = data[srcIdx + 2];
+        data[dstIdx] = sourceData[srcIdx];
+        data[dstIdx + 1] = sourceData[srcIdx + 1];
+        data[dstIdx + 2] = sourceData[srcIdx + 2];
       }
     }
   }

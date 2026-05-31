@@ -377,15 +377,6 @@ export async function batchResolve(
   const maxConcurrency = options?.domainConcurrency ?? DEFAULT_DOMAIN_CONCURRENCY;
   const results = new Map<string, ResolveResult>();
 
-  // Group candidates by domain for rate limiting
-  const domainQueues = new Map<string, MediaCandidate[]>();
-  for (const candidate of candidates) {
-    const domain = extractDomain(candidate.sourceUrl || candidate.url);
-    const queue = domainQueues.get(domain) || [];
-    queue.push(candidate);
-    domainQueues.set(domain, queue);
-  }
-
   // Process each domain's queue with concurrency limit
   const domainSemaphores = new Map<string, number>();
 

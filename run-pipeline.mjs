@@ -16,7 +16,7 @@
  */
 
 import { chromium } from 'playwright';
-import { mkdirSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 
@@ -156,9 +156,19 @@ await page.screenshot({ path: join(videoDir, '03-script-done.png') });
 
 // ── Step 3: Media ──────────────────────────────────────────────────────────
 await page.locator('button:has-text("Source Media Assets")').click();
-for (let i = 0; i < 120; i++) {
+// Media sourcing can take 5-15 minutes depending on segment count and vision checks.
+// Allow up to 20 minutes (600 × 2s) to complete.
+for (let i = 0; i < 600; i++) {
   if (await page.locator('button:has-text("Prepare Narration")').isVisible().catch(() => false)) break;
-  if (i % 10 === 0) process.stdout.write('.');
+  if (i % 30 === 0) {
+    const msg = await page.locator('[data-testid="dynamic-message"]').textContent().catch(() => '');
+    process.stdout.write(`\n  [${Math.round(i * 2 / 60)}min] ${msg || '...'} `);
+  } else if (i % 5 === 0) {
+    process.stdout.write('.');
+  }
+  if (i === 599) {
+    console.log('\n⚠ Media sourcing timeout (20min) — proceeding with whatever was collected');
+  }
   await page.waitForTimeout(2000);
 }
 console.log('\n✓ Media sourced');
@@ -166,12 +176,16 @@ await page.screenshot({ path: join(videoDir, '04-media-done.png') });
 
 // ── Step 4: Narration ──────────────────────────────────────────────────────
 const nb = page.locator('button:has-text("Prepare Narration")');
-if (await nb.isVisible({ timeout: 3000 }).catch(() => false)) {
+if (await nb.isVisible({ timeout: 5000 }).catch(() => false)) {
   await nb.click();
-  for (let i = 0; i < 60; i++) {
+  // Narration generation can take 3-5 minutes for Kokoro TTS
+  for (let i = 0; i < 150; i++) {
     if (await page.locator('text=Step 4 — Complete').isVisible().catch(() => false)) break;
+    if (i % 30 === 0 && i > 0) process.stdout.write(`\n  [narration ${i * 2}s]`);
     await page.waitForTimeout(2000);
   }
+} else {
+  console.log('  (Prepare Narration button not found — skipping narration step)');
 }
 console.log('✓ Narration done');
 await page.screenshot({ path: join(videoDir, '05-narration-done.png') });
@@ -192,7 +206,57 @@ if (await ab.isVisible({ timeout: 5000 }).catch(() => false)) {
 }
 await page.screenshot({ path: join(videoDir, '06-assembled.png') });
 
-// ── Step 6: Server-side render for high-quality MP4 ────────────────────────
+// ── Step 6: Extract project from browser and save to disk ─────────────────
+// The browser holds the TRUE project state in localStorage (always up to date).
+// We read it directly here so the server render always gets the real project
+// with media assets, bypassing any async save/HMR race conditions.
+console.log('\n⏳ Extracting final project state from browser...');
+
+let extractedProject = null;
+try {
+  extractedProject = await page.evaluate(() => {
+    const stored = localStorage.getItem('autotube_project');
+    if (!stored) return null;
+    const data = JSON.parse(stored);
+    return data?.project ?? null;
+  });
+} catch (e) {
+  console.log(`  (localStorage extraction failed: ${e.message})`);
+}
+
+const mediaCount = (extractedProject?.media || []).length;
+const narrationCount = (extractedProject?.narration || []).length;
+const extractedTopic = extractedProject?.topic || extractedProject?.title || '?';
+
+if (extractedProject && mediaCount > 0) {
+  // Write the browser-extracted project to /tmp so server-render picks it up
+  const dumpPath = `/tmp/autotube-project-pipeline-${Date.now()}.json`;
+  writeFileSync(dumpPath, JSON.stringify(extractedProject), 'utf8');
+  console.log(`✓ Extracted project: "${extractedTopic}" | ${mediaCount} media | ${narrationCount} narration`);
+  console.log(`  Saved to ${dumpPath}`);
+} else {
+  // Fallback: wait up to 15s for the API to have a project with media
+  console.log(`⚠ Browser has ${mediaCount} media assets — polling API as fallback...`);
+  const fallbackStart = Date.now();
+  while (Date.now() - fallbackStart < 15000) {
+    try {
+      const r = await fetch(`${devServer}/api/export-project`);
+      if (r.ok) {
+        const p = await r.json();
+        if ((p.media || []).length > 0) {
+          console.log(`✓ API fallback: "${p.topic || p.title}" | ${p.media.length} media`);
+          break;
+        }
+      }
+    } catch { /* ignore */ }
+    await new Promise((r2) => setTimeout(r2, 1500));
+  }
+  if (mediaCount === 0) {
+    console.log('⚠ Proceeding with 0 media — render will use procedural fallback visuals.');
+  }
+}
+
+// ── Step 7: Server-side render for high-quality MP4 ────────────────────────
 console.log('\n🎥 Running server-side render for MP4 output...');
 const renderArgs = ['server-render/index.mjs'];
 if (output) {
@@ -200,7 +264,7 @@ if (output) {
 }
 const serverRenderResult = spawnSync('node', renderArgs, {
   encoding: 'utf8',
-  timeout: 600000, // 10 min timeout
+  timeout: 1800000, // 30 min timeout to allow long/complex renders to complete
   stdio: ['inherit', 'pipe', 'pipe'],
   env: { ...process.env, DEV_SERVER_URL: devServer },
 });

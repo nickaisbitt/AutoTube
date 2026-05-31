@@ -2,6 +2,8 @@
 
 A fully automated YouTube video generator that creates professional-quality videos from a single topic prompt.
 
+> 📚 **Documentation Map:** A comprehensive directory of all project markdown files, guides, and strategic handbooks is plainly laid out in [DOCUMENTATION.md](file:///Users/nickaisbitt/AutoTube/DOCUMENTATION.md).
+
 ## Features
 
 - **AI Script Generation** - Uses OpenRouter (Gemini 2.0 Flash) to generate engaging, rapid-paced scripts
@@ -80,6 +82,20 @@ The Vite dev server (`npm run dev`) runs a local proxy at `/api/search` and `/ap
 - CORS-free image loading into the Canvas renderer (prevents blank video output)
 
 **In production** (the static `dist/index.html` from `npm run build`) these proxy routes are unavailable. The app automatically falls back to Wikimedia Commons, Unsplash, and Picsum for media sourcing, and uses external CORS proxies (weserv.nl, allorigins.win) for canvas-safe image loading. For best results in production, provide a Pexels API key in Settings.
+
+## 🚀 Deployment to Railway
+
+This project is optimized out-of-the-box for seamless cloud hosting on **Railway** using standard nixpacks builders:
+
+1. **System Provisioning (`nixpacks.toml`):** Configures the container with all native canvas-compiling libraries (`cairo`, `pango`, `giflib`, `libjpeg`, `librsvg`, `pixman`, `pkg-config`), `ffmpeg` for professional media rendering, and system-level `chromium` with Playwright browser bindings.
+2. **Dynamic Bindings (`server.mjs`):** Automatically reads Railway's dynamic port mapping (`process.env.PORT`) to handle incoming production requests.
+3. **Continuous Deployment (`railway.toml`):** Provisions automatic start triggers using `npx tsx server.mjs`, active failover restarts, and system health audits (`/api/health`).
+
+To deploy your workspace changes instantly:
+```bash
+# Push master branch commits and trigger automatic Railway cloud build
+railway up
+```
 
 ## Security
 

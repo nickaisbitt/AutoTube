@@ -1,5 +1,5 @@
 import React from 'react';
-import { AbsoluteFill, Img, useCurrentFrame, interpolate, Easing } from 'remotion';
+import { AbsoluteFill, Img, OffthreadVideo, useCurrentFrame, interpolate, Easing } from 'remotion';
 import { SegmentProps, ProjectProps } from '../types';
 import { getKenBurnsTransform } from '../utils/kenBurns';
 
@@ -7,12 +7,14 @@ interface LeftTextRightImageLayoutProps {
   segment: SegmentProps;
   brand: ProjectProps['brand'];
   mediaSrc?: string;
+  mediaType?: 'image' | 'video';
 }
 
 export const LeftTextRightImageLayout: React.FC<LeftTextRightImageLayoutProps> = ({
   segment,
   brand,
   mediaSrc,
+  mediaType = 'image',
 }) => {
   const frame = useCurrentFrame();
 
@@ -74,14 +76,26 @@ export const LeftTextRightImageLayout: React.FC<LeftTextRightImageLayoutProps> =
           overflow: 'hidden',
           border: '1px solid rgba(255,255,255,0.1)',
         }}>
-          <Img
-            src={mediaSrc}
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-            }}
-          />
+          {mediaType === 'video' ? (
+            <OffthreadVideo
+              src={mediaSrc}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+              }}
+              muted
+            />
+          ) : (
+            <Img
+              src={mediaSrc}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+              }}
+            />
+          )}
         </div>
       )}
     </AbsoluteFill>

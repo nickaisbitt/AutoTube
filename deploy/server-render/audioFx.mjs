@@ -87,8 +87,8 @@ export function computeTransientDuck(wordTimestamps, impactWords) {
   const events = [];
   
   for (const wt of wordTimestamps) {
-    const word = wt.word.toLowerCase();
-    if (impactWords.some(iw => word.includes(iw))) {
+    const word = (wt && typeof wt.word === 'string') ? wt.word.toLowerCase() : '';
+    if (word && impactWords.some(iw => word.includes(iw))) {
       events.push({
         time: wt.start,
         duration: 0.15,

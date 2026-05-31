@@ -1,0 +1,30 @@
+[phases.setup]
+nixPkgs = [
+  "ffmpeg",
+  "chromium",
+  "cairo",
+  "pango",
+  "libjpeg",
+  "giflib",
+  "librsvg",
+  "pkg-config",
+  "pixman",
+  "python3",
+  "python3Packages.pip"
+]
+
+[phases.install]
+cacheDirectories = [
+  "node_modules",
+  "~/.npm"
+]
+
+[phases.build]
+cmds = [
+  "pip install --break-system-packages edge-tts",
+  "npm run build"
+]
+
+[variables]
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+CHROME_BIN = "/usr/bin/chromium"

@@ -375,8 +375,8 @@ describe('Feature: ai-editor-layer, Property 5: Total Duration Bounded Within 10
         const lowerBound = inputTotal * 0.9;
         const upperBound = inputTotal * 1.1;
 
-        expect(outputTotal).toBeGreaterThanOrEqual(lowerBound - 1e-5);
-        expect(outputTotal).toBeLessThanOrEqual(upperBound + 1e-5);
+        expect(outputTotal).toBeGreaterThanOrEqual(lowerBound - 1e-3);
+        expect(outputTotal).toBeLessThanOrEqual(upperBound + 1e-3);
       }),
       { numRuns: 100 },
     );

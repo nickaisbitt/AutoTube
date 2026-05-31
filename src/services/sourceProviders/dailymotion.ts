@@ -1,6 +1,7 @@
 import type { MediaCandidate } from '../media';
 import type { SourceProvider, SourceProviderConfig } from './types';
 import { logger } from '../logger';
+import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 
 interface DailymotionSearchResult {
   url: string;
@@ -20,7 +21,7 @@ export class DailymotionProvider implements SourceProvider {
   async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
     try {
       const apiUrl = `/api/search-dailymotion?q=${encodeURIComponent(query)}`;
-      const response = await fetch(apiUrl, { signal: config.signal });
+      const response = await fetchWithTimeout(apiUrl, {}, { timeoutMs: 10000, maxRetries: 1, signal: config.signal });
 
       if (!response.ok) {
         logger.warn('Dailymotion', `API returned status ${response.status} for "${query}"`);

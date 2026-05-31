@@ -30,7 +30,10 @@ export interface MediaAssetProps {
   source: string;
   thumbnailUrl?: string;
   duration?: number;
+  isFallback?: boolean;
+  shotType?: 'primary' | 'secondary';
 }
+
 
 export interface WordTiming {
   word: string;

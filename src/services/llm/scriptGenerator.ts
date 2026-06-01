@@ -11,7 +11,7 @@ import { fetchWikiContext, fetchTopicContext } from './topicContext';
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 // Default model — can be overridden via AppConfig in the future.
-export const DEFAULT_SCRIPT_MODEL = 'google/gemini-2.0-flash-001';
+export const DEFAULT_SCRIPT_MODEL = 'openai/gpt-5.4-nano';
 
 /**
  * Generates a full video script using OpenRouter.

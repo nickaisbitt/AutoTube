@@ -30,7 +30,7 @@ export interface VisionCheckResult {
 // ---------------------------------------------------------------------------
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
-const VISION_MODEL = 'google/gemini-2.0-flash-001';
+const VISION_MODEL = 'openai/gpt-5.4-mini';
 const VISION_TIMEOUT_MS = 20_000;
 const VISION_MAX_RETRIES = 2;
 
@@ -102,7 +102,7 @@ function cleanImageUrl(url: string): string {
 }
 
 /**
- * Check if a URL is fetchable by Gemini Flash (must be an absolute public HTTPS URL).
+ * Check if a URL is fetchable by the vision model (must be an absolute public HTTPS URL).
  */
 const UNFETCHABLE_DOMAINS = [
   'vecteezy.com', 'freepik.com', 'ftcdn.net',

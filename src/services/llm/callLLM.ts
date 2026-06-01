@@ -8,7 +8,7 @@ import { logger } from '../logger';
 import { trackOpenRouterCost } from '../costTracker';
 
 const DEFAULT_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_MODEL = 'google/gemini-2.0-flash-001';
+const DEFAULT_MODEL = 'openai/gpt-5.4-nano';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 3;
 

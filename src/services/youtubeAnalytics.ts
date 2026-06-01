@@ -401,7 +401,7 @@ export async function analyzeCommentSentiment(
     ].join('\n');
 
     const body = JSON.stringify({
-      model: 'google/gemini-2.0-flash-001',
+      model: 'openai/gpt-5.4-nano',
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
     });

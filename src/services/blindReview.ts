@@ -296,7 +296,7 @@ export function buildBlindReviewPrompt(
 // ── API Call ──
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
-const BLIND_REVIEW_MODEL = 'google/gemini-2.0-flash-001';
+const BLIND_REVIEW_MODEL = 'openai/gpt-5.4-nano';
 const BLIND_REVIEW_TIMEOUT_MS = 60_000;
 const BLIND_REVIEW_MAX_RETRIES = 2;
 

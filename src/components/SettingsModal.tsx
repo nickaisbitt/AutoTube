@@ -174,7 +174,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 )}
                 <p className="text-[10px] font-mono text-surface-500">
-                  Powers script generation (Gemini Flash), visual planning, AI editing, blind review, and image quality checks (Reka Edge). ~$0.10/M tokens.
+                  Powers script generation (GPT-5.4-nano), visual planning, AI editing, blind review, and image quality checks (GPT-5.4-mini). ~$0.10/M tokens.
                 </p>
               </div>
             </div>

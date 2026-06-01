@@ -102,7 +102,7 @@ function cleanImageUrl(url: string): string {
 }
 
 /**
- * Check if a URL is fetchable by Gemini Flash (must be an absolute public HTTPS URL).
+ * Check if a URL is fetchable by the vision model (must be an absolute public HTTPS URL).
  */
 const UNFETCHABLE_DOMAINS = [
   'vecteezy.com', 'freepik.com', 'ftcdn.net',

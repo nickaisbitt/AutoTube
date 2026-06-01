@@ -6,7 +6,7 @@ A fully automated YouTube video generator that creates professional-quality vide
 
 ## Features
 
-- **AI Script Generation** - Uses OpenRouter (Gemini 2.0 Flash) to generate engaging, rapid-paced scripts
+- **AI Script Generation** - Uses OpenRouter (GPT-5.4-nano) to generate engaging, rapid-paced scripts
 - **Smart Media Sourcing** - Automatically finds relevant images via DuckDuckGo with AI-powered visual planning
 - **Text-to-Speech Narration** - Generates professional voiceover using OpenAI TTS
 - **Canvas Video Rendering** - Renders videos with Ken Burns effects, gradient overlays, and text captions

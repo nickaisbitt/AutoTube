@@ -30,5 +30,11 @@ dev.pid
 coverage*.txt
 server-render.mjs.backup*
 server-render.mjs.current
+.env.production
+reviews/
+*.pyc
+__pycache__/
+test-output*.mp4
+test-final-check.mp4
 server-render/
 !deploy/server-render/

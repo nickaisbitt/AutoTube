@@ -1,5 +1,6 @@
 import { logger } from './logger';
 import { safeSetItem, safeGetItem } from '../utils/storage';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -405,14 +406,14 @@ export async function analyzeCommentSentiment(
       response_format: { type: 'json_object' },
     });
 
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${llmApiKey}`,
         'Content-Type': 'application/json',
       },
       body,
-    });
+    }, { timeoutMs: 30_000, maxRetries: 1 });
 
     if (!res.ok) {
       logger.error('CommentSentiment', `LLM API failed: ${res.status}`);

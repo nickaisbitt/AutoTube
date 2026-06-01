@@ -636,7 +636,7 @@ AUDIENCE-SPECIFIC ADAPTATION — CONSUMERS:
 
 interface SpecificityIssue {
   segmentIndex: number;
-  issue: 'no_numbers' | 'no_named_entities' | 'generic_hook';
+  issue: 'no_numbers' | 'no_named_entities' | 'generic_hook' | 'no_specificity';
 }
 
 /**

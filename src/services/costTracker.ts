@@ -27,6 +27,8 @@ const MODEL_COSTS_PER_TOKEN: Record<string, { prompt: number; completion: number
   'anthropic/claude-3-haiku': { prompt: 0.00000025, completion: 0.00000125 },
   'openai/gpt-4o-mini': { prompt: 0.00000015, completion: 0.0000006 },
   'openai/gpt-4o': { prompt: 0.0000025, completion: 0.00001 },
+  'openai/gpt-5.4-nano': { prompt: 0.0000001, completion: 0.0000004 },
+  'openai/gpt-5.4-mini': { prompt: 0.00000015, completion: 0.0000006 },
 };
 
 function loadLog(): CostsLog {

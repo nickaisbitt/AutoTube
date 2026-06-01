@@ -702,7 +702,7 @@ Analyze this project and return the EditPlan JSON.`;
 
 // ── OpenRouter configuration ────────────────────────────────────────────────
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_EDIT_MODEL = 'google/gemini-2.0-flash-001';
+const DEFAULT_EDIT_MODEL = 'openai/gpt-5.4-nano';
 
 /**
  * Runs the full AI editing pass on a VideoProject.

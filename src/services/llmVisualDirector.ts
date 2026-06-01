@@ -5,7 +5,7 @@ import { extractJson } from '../utils/extractJson';
 import { sanitiseTopic } from './llm/index';
 
 // Default model — matches the script generator for consistency.
-export const DEFAULT_VISUAL_MODEL = 'google/gemini-2.0-flash-001';
+export const DEFAULT_VISUAL_MODEL = 'openai/gpt-5.4-mini';
 
 // ---------------------------------------------------------------------------
 // Types

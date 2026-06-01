@@ -3584,11 +3584,11 @@ async function render() {
         tempRenderFile,
       ];
       // Store temp render file path for later two-pass encoding
-      globalThis.__tempRenderFile = tempRenderFile;
-      globalThis.__tempRenderArgs = tempRenderArgs;
-      globalThis.__finalCodec = codec;
-      globalThis.__finalCrf = crfValue;
-      globalThis.__finalExtraArgs = extraCodecArgs;
+      twoPassState.tempFile = tempRenderFile;
+      twoPassState.tempArgs = tempRenderArgs;
+      twoPassState.finalCodec = codec;
+      twoPassState.finalCrf = crfValue;
+      twoPassState.finalExtraArgs = extraCodecArgs;
       // Use temp render args for now
       ffmpegArgs.length = 0;
       ffmpegArgs.push(...tempRenderArgs);
@@ -3607,17 +3607,16 @@ async function render() {
 
   ffmpegArgs.push('-pix_fmt', 'yuv420p', '-movflags', '+faststart', OUTPUT_FILE);
 
-  const ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'inherit', 'inherit'] });
+  ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'inherit', 'pipe'] });
 
   // Safety: Detect if ffmpeg process dies unexpectedly
-  let ffmpegExited = false;
-  let lastFfmpegError = null;
+  ffmpegExited = false;
+  lastFfmpegError = null;
   ffmpeg.setMaxListeners(0); // Allow many drain/close listeners at high frame rates
   ffmpeg.on('close', code => {
     ffmpegExited = true;
     if (code !== 0 && code !== null) {
       console.error(`\n❌ Ffmpeg exited prematurely with code ${code}`);
-      // Task 122: Parse ffmpeg error for recovery
       const parsed = parseFfmpegError(lastFfmpegError || `exit code ${code}`);
       const recovery = getRecoveryAction(parsed.type);
       log('info', `  🔧 Ffmpeg error type: ${parsed.type} — ${recovery.message}`);
@@ -3628,8 +3627,12 @@ async function render() {
   ffmpeg.on('error', err => {
     ffmpegExited = true;
     console.error(`\n❌ Ffmpeg error: ${err.message}`);
-    // Task 122: Store error for recovery parsing
     lastFfmpegError = err.message;
+  });
+
+  ffmpeg.stderr.on('data', chunk => {
+    const text = chunk.toString();
+    lastFfmpegError = text.slice(-4096);
   });
 
   /**
@@ -3801,16 +3804,8 @@ async function render() {
 
     // Check for stalls — auto-recover by writing a dummy frame to unblock
     if (totalFrames === lastFrameCount && (now - lastProgressLog) > STALL_THRESHOLD_MS) {
-      console.error(`\n⚠️  WARNING: Render appears stalled! No new frames in ${(now - lastProgressLog) / 1000}s`);
-      console.error(`   Last frame count: ${lastFrameCount}, Current: ${totalFrames}`);
-      try {
-        const dummyBuf = Buffer.alloc(WIDTH * HEIGHT * 4, 0);
-        ffmpeg.stdin.write(dummyBuf);
-        totalFrames++;
-        console.error('   ✓ Wrote dummy frame to unblock pipe');
-      } catch (e) {
-        console.error('   ✗ Could not unblock pipe, ffmpeg may have died');
-      }
+      console.warn(`\n⚠️  WARNING: Render appears stalled! No new frames in ${(now - lastProgressLog) / 1000}s`);
+      console.warn(`   Last frame count: ${lastFrameCount}, Current: ${totalFrames} — skipping frame`);
     }
 
     lastFrameCount = totalFrames;
@@ -4433,13 +4428,13 @@ async function render() {
   renderStateManager.markComplete();
 
   // Two-pass encoding post-processing: re-encode temp render with two-pass for highest quality
-  if (quality === 'highest' && !DRAFT_MODE && globalThis.__tempRenderFile && existsSync(globalThis.__tempRenderFile)) {
+  if (quality === 'highest' && !DRAFT_MODE && twoPassState.tempFile && existsSync(twoPassState.tempFile)) {
     log('info', `\n🎬 Two-pass encoding for highest quality...`);
-    const tempFile = globalThis.__tempRenderFile;
+    const tempFile = twoPassState.tempFile;
     const passLog = join(tmpdir(), `autotube-twopass-${Date.now()}.log`);
-    const codec = globalThis.__finalCodec;
-    const crfVal = globalThis.__finalCrf;
-    const extraArgs = globalThis.__finalExtraArgs || [];
+    const codec = twoPassState.finalCodec;
+    const crfVal = twoPassState.finalCrf;
+    const extraArgs = twoPassState.finalExtraArgs || [];
 
     // Pass 1: analyze
     const pass1Args = [
@@ -4480,11 +4475,11 @@ async function render() {
 
     // Clean up temp render file
     try { unlinkSync(tempFile); } catch {}
-    delete globalThis.__tempRenderFile;
-    delete globalThis.__tempRenderArgs;
-    delete globalThis.__finalCodec;
-    delete globalThis.__finalCrf;
-    delete globalThis.__finalExtraArgs;
+    twoPassState.tempFile = null;
+    twoPassState.tempArgs = null;
+    twoPassState.finalCodec = null;
+    twoPassState.finalCrf = null;
+    twoPassState.finalExtraArgs = null;
   }
 
   // Narration was pre-generated before rendering. Use the existing audioFiles.
@@ -5124,7 +5119,7 @@ if (isMainModule) {
     console.error(err.stack);
     
     // Cleanup: Kill ffmpeg if still running
-    if (typeof ffmpeg !== 'undefined' && !ffmpegExited) {
+    if (ffmpeg && !ffmpegExited) {
       log('info', '   Killing ffmpeg process...');
       try {
         ffmpeg.kill('SIGKILL');

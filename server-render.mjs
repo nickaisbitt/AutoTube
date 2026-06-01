@@ -3567,7 +3567,7 @@ async function render() {
     const crfValue = project?.exportSettings?.codec === 'av1' ? 30 : project?.exportSettings?.codec === 'hevc' ? 20 : 16;
     const extraCodecArgs = project?.exportSettings?.codec === 'hevc' ? ['-tag:v', 'hvc1'] : [];
 
-    if (quality === 'highest' && !DRAFT_MODE) {
+    if ((quality === 'high' || quality === 'highest') && !DRAFT_MODE) {
       // Two-pass encoding: render to temp file, then two-pass encode
       const tempRenderFile = join(tmpdir(), `autotube-temp-render-${Date.now()}.mp4`);
       const tempRenderArgs = [
@@ -4433,7 +4433,7 @@ async function render() {
   renderStateManager.markComplete();
 
   // Two-pass encoding post-processing: re-encode temp render with two-pass for highest quality
-  if (quality === 'highest' && !DRAFT_MODE && globalThis.__tempRenderFile && existsSync(globalThis.__tempRenderFile)) {
+  if ((quality === 'high' || quality === 'highest') && !DRAFT_MODE && globalThis.__tempRenderFile && existsSync(globalThis.__tempRenderFile)) {
     log('info', `\n🎬 Two-pass encoding for highest quality...`);
     const tempFile = globalThis.__tempRenderFile;
     const passLog = join(tmpdir(), `autotube-twopass-${Date.now()}.log`);

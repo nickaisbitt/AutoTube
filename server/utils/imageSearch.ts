@@ -5,10 +5,15 @@
 let _puppeteer: typeof import("puppeteer-extra") | null = null;
 async function getPuppeteer() {
   if (!_puppeteer) {
-    const puppeteer = (await import("puppeteer-extra")).default;
-    const { default: StealthPlugin } = await import("puppeteer-extra-plugin-stealth");
-    puppeteer.use(StealthPlugin());
-    _puppeteer = puppeteer;
+    try {
+      const puppeteer = (await import("puppeteer-extra")).default;
+      const { default: StealthPlugin } = await import("puppeteer-extra-plugin-stealth");
+      puppeteer.use(StealthPlugin());
+      _puppeteer = puppeteer;
+    } catch (e) {
+      console.warn('[Puppeteer] Optional dependency not installed, falling back to fetch scraping');
+      _puppeteer = null;
+    }
   }
   return _puppeteer;
 }

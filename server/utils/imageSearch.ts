@@ -2,6 +2,8 @@
 // Web image search utilities — Bing Images scraper
 // ============================================================================
 
+import { waitForDomain } from './domainRateLimit';
+
 let _puppeteer: typeof import("puppeteer-extra") | null = null;
 async function getPuppeteer() {
   if (!_puppeteer) {
@@ -82,6 +84,7 @@ function isLowQualityDomain(url: string): boolean {
 // ---------------------------------------------------------------------------
 
 export async function fetchBingImages(query: string): Promise<WebImageResult[]> {
+  await waitForDomain('www.bing.com');
   const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&form=HDRSC2&first=1&count=35`;
 
   const res = await fetch(searchUrl, {
@@ -199,6 +202,7 @@ export async function fetchBingImages(query: string): Promise<WebImageResult[]> 
 // ---------------------------------------------------------------------------
 
 export async function fetchDuckDuckGoImages(query: string): Promise<WebImageResult[]> {
+  await waitForDomain('duckduckgo.com');
   const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`;
 
   const res = await fetch(searchUrl, {
@@ -299,6 +303,7 @@ export async function fetchDuckDuckGoImages(query: string): Promise<WebImageResu
 // ---------------------------------------------------------------------------
 
 export async function fetchGoogleImages(query: string): Promise<WebImageResult[]> {
+  await waitForDomain('www.google.com');
   const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=2`;
 
   const res = await fetch(searchUrl, {
@@ -1283,6 +1288,7 @@ export async function fetchDailymotionVideos(query: string): Promise<Dailymotion
 // ---------------------------------------------------------------------------
 
 export async function fetchUnsplashImages(query: string): Promise<WebImageResult[]> {
+  await waitForDomain('unsplash.com');
   const apiUrl = `https://unsplash.com/napi/search/photos?query=${encodeURIComponent(query)}&per_page=20`;
 
   const res = await fetch(apiUrl, {

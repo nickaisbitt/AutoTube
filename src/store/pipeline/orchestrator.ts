@@ -44,7 +44,7 @@ import { runAIEditPass } from '../../services/aiEditor';
 import { extractHookLine } from '../../services/seoTitles';
 import { logger } from '../../services/logger';
 import { runBlindReview } from '../../services/blindReview';
-import { generateGrokTts, generateMeloTts } from '../../services/tts';
+import { kokoroEngine, generateMeloTts } from '../../services/tts';
 import { CURRENT_PROJECT_VERSION } from '../../services/projectMigrations';
 
 // LR-1 fix: use crypto.randomUUID() for guaranteed uniqueness
@@ -396,11 +396,11 @@ export async function executeGenerateNarration(
   setProcessingProgress(6);
   setProcessingMessage('Checking TTS options...');
 
-  const xaiKey = import.meta.env.VITE_XAI_KEY || '';
+  const kokoroServerUrl = import.meta.env.VITE_KOKORO_SERVER_URL || '';
   const cfAccountId = import.meta.env.VITE_CF_ACCOUNT_ID || '';
   const cfApiToken = import.meta.env.VITE_CF_API_TOKEN || '';
 
-  const hasGrok = !!xaiKey;
+  const hasKokoro = !!kokoroServerUrl;
   const hasMelo = !!cfAccountId && !!cfApiToken;
 
   const supported = hasSpeechSupport();
@@ -408,7 +408,7 @@ export async function executeGenerateNarration(
   const selectedVoice = pickPreferredVoice(voices);
 
   const engines: string[] = [];
-  if (hasGrok) engines.push('Grok TTS');
+  if (hasKokoro) engines.push('Kokoro TTS');
   if (hasMelo) engines.push('MeloTTS');
   engines.push('Browser TTS');
   logger.info('Store', `TTS fallback chain: ${engines.join(' → ')}`);
@@ -436,26 +436,26 @@ export async function executeGenerateNarration(
     let engineUsed = 'browser';
     let status: NarrationClip['status'] = 'ready';
 
-    // Tier 1: Grok TTS
-    if (hasGrok) {
-      const grokUrl = await generateGrokTts(segment.narration, xaiKey, {
-        voice: appConfig.ttsVoice,
+    // Tier 1: Kokoro TTS (Railway)
+    if (hasKokoro) {
+      const kokoroUrl = await kokoroEngine.generate(segment.narration, appConfig.ttsVoice || '', {
+        serverUrl: kokoroServerUrl,
         signal,
       });
-      if (grokUrl) {
-        audioUrl = grokUrl;
-        voiceUsed = `Grok TTS (${appConfig.ttsVoice || 'Sal'})`;
+      if (kokoroUrl) {
+        audioUrl = kokoroUrl;
+        voiceUsed = `Kokoro TTS (${appConfig.ttsVoice || 'af_heart'})`;
         clipMode = 'exported_file';
-        engineUsed = 'grok';
+        engineUsed = 'kokoro';
 
         try {
-          const measured = await measureAudioDuration(grokUrl);
+          const measured = await measureAudioDuration(kokoroUrl);
           if (measured && measured > 0) {
             estimatedDuration = Math.ceil(measured);
           }
         } catch { /* Keep estimated duration */ }
       } else {
-        logger.warn('Store', `Grok TTS failed for segment "${segment.title}", trying next engine`);
+        logger.warn('Store', `Kokoro TTS failed for segment "${segment.title}", trying next engine`);
       }
     }
 
@@ -490,7 +490,7 @@ export async function executeGenerateNarration(
     return { audioUrl, voiceUsed, clipMode, engineUsed, estimatedDuration, status };
   }
 
-  const useParallel = hasGrok || hasMelo;
+  const useParallel = hasKokoro || hasMelo;
   const ttsResults: TtsResult[] = [];
 
   if (useParallel) {

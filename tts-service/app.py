@@ -2,6 +2,7 @@ import os
 import io
 import logging
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from kokoro_onnx import Kokoro
@@ -13,9 +14,19 @@ logger = logging.getLogger("tts-service")
 
 app = FastAPI(title="AutoTube Kokoro ONNX TTS Service")
 
+CORS_ALLOW_ORIGINS = os.environ.get("CORS_ALLOW_ORIGINS", "*")
+allow_origins = ["*"] if CORS_ALLOW_ORIGINS.strip() == "*" else [o.strip() for o in CORS_ALLOW_ORIGINS.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Paths to the model files
-MODEL_PATH = os.environ.get("KOKORO_MODEL_PATH", "kokoro-v0_19.onnx")
-VOICES_PATH = os.environ.get("KOKORO_VOICES_PATH", "voices.bin")
+MODEL_PATH = os.environ.get("KOKORO_MODEL_PATH", "kokoro-v1.0.onnx")
+VOICES_PATH = os.environ.get("KOKORO_VOICES_PATH", "voices-v1.0.bin")
 
 # Global placeholder for the Kokoro instance
 kokoro_engine = None
@@ -81,4 +92,4 @@ async def generate(request: TTSRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8080")))

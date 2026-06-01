@@ -94,12 +94,10 @@ vi.mock('../../services/projectMigrations', () => ({
   migrateProject: vi.fn((p: unknown) => p),
 }));
 
-vi.mock('../../services/tts/grokEngine', () => ({
-  generateGrokTts: vi.fn(),
-}));
-
 vi.mock('../../services/tts', () => ({
-  generateGrokTts: vi.fn(),
+  kokoroEngine: {
+    generate: vi.fn(),
+  },
   generateMeloTts: vi.fn(),
 }));
 

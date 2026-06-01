@@ -17,7 +17,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   openRouterKey: import.meta.env.VITE_OPENROUTER_KEY || '',
   sourceType: 'stock',
   flickrKey: '',
-  ttsVoice: 'Leo',
+  ttsVoice: 'af_heart',
 };
 
 export interface ConfigSliceState {

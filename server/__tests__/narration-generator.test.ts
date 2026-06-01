@@ -103,7 +103,7 @@ describe('narration.mjs', () => {
 
     it('uses Kokoro-82M first regardless of options', async () => {
       const segments = [{ title: 'Test', narration: 'Hello world', duration: 5 }];
-      await generateNarration(segments, '/tmp/audio', { xaiKey: 'test-key', ttsVoice: 'Leo' });
+      await generateNarration(segments, '/tmp/audio', { ttsVoice: 'af_heart' });
       // Kokoro is always tier 1
       const kokoroCalls = mockSpawn.mock.calls.filter(c =>
         Array.isArray(c[1]) && c[1].some(a => a.includes('kokoro_generate'))

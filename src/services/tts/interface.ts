@@ -49,6 +49,4 @@ export interface TTSConfig {
   /** Kokoro TTS server URL (local or remote endpoint) */
   kokoroServerUrl?: string;
 
-  /** xAI API Key for Grok TTS */
-  xaiApiKey?: string;
 }

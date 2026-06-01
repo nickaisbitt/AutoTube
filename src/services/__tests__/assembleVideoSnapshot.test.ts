@@ -46,11 +46,11 @@ vi.mock('../../services/projectMigrations', () => ({
 }));
 
 vi.mock('../../services/tts', () => ({
-  generateGrokTts: vi.fn(),
+  kokoroEngine: {
+    generate: vi.fn(),
+  },
   generateMeloTts: vi.fn(),
 }));
-
-vi.mock('../../services/tts', () => ({}));
 
 vi.mock('../../services/media', () => ({
   sourceSegmentMedia: vi.fn(),

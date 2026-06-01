@@ -80,16 +80,14 @@ vi.mock('../../services/projectMigrations', () => ({
   migrateProject: vi.fn((p: unknown) => p),
 }));
 
-vi.mock('../../services/tts/grokEngine', () => ({
-  grokEngine: {
-    name: 'grok',
-    voices: [{ id: 'Sal', description: 'Smooth & balanced' }],
-    isAvailable: vi.fn(() => false),
+vi.mock('../../services/tts', () => ({
+  kokoroEngine: {
+    name: 'kokoro',
+    voices: [{ id: 'af_heart', description: 'Female conversational' }],
+    isAvailable: vi.fn(() => true),
     generate: vi.fn(() => Promise.resolve(null)),
   },
-  GROK_VOICES: [{ id: 'Sal', description: 'Smooth & balanced' }],
-  setGrokApiKey: vi.fn(),
-  generateGrokTts: vi.fn(),
+  generateMeloTts: vi.fn(),
 }));
 
 vi.mock('../../services/blindReview', () => ({

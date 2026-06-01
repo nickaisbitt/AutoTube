@@ -54,8 +54,6 @@ export async function generateNarration(
   return result;
 }
 
-export { generateGrokTts } from './grokEngine';
-
 export async function generateMeloTts(
   text: string,
   accountId: string,
@@ -81,4 +79,3 @@ export async function generateMeloTts(
     return null;
   }
 }
-

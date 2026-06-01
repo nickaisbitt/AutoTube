@@ -261,7 +261,7 @@ describe('Property 2: State slice isolation', () => {
             openRouterKey: key,
             sourceType: 'stock',
             flickrKey: '',
-            ttsVoice: 'Leo',
+            ttsVoice: 'af_heart',
           });
         });
 

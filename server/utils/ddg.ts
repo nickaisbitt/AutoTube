@@ -16,9 +16,17 @@ export async function fetchDDGVQD(query: string): Promise<string> {
     },
   );
   const text = await initialRes.text();
-  const vqdMatch = text.match(/vqd=([^&'"]+)/)
-    || text.match(/vqd=["']?([^&'"]+)["']/)
-    || text.match(/"vqd":"([^"]+)"/);
+  const patterns = [
+    /vqd=([^&'"]+)/,
+    /vqd=["']?([^&'"]+)["']/,
+    /"vqd":"([^"]+)"/,
+    /vqd['"]?\s*:\s*['"]([^'"]+)/,
+  ];
+  let vqdMatch: RegExpMatchArray | null = null;
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) { vqdMatch = match; break; }
+  }
   if (!vqdMatch) throw new Error("Could not extract VQD token from DuckDuckGo");
   return vqdMatch[1];
 }

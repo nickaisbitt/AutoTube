@@ -27,6 +27,12 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       include: ['src/services/**/*.ts', 'src/utils/**/*.ts', 'server/routes/**/*.ts', 'server/middleware/**/*.ts', 'server/utils/**/*.ts'],
+      thresholds: {
+        statements: 60,
+        branches: 50,
+        functions: 50,
+        lines: 60,
+      },
     },
   },
   resolve: {

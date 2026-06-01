@@ -161,7 +161,7 @@ export async function renderVideoToBlob(
 
   const frameInterval = Math.max(1, Math.round(fps / frameSampleRate));
   const MAX_CAPTURED_FRAMES = MAX_FRAMES;
-  const RENDER_DEADLINE = Date.now() + 5 * 60 * 1000;
+  const RENDER_DEADLINE = Date.now() + Math.max(totalSec * 3000, 300000);
   const isRenderingFlag = true;
 
   let elapsed = 0;

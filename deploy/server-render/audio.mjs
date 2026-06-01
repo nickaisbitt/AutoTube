@@ -8,7 +8,7 @@
  * Audio Quality Targets:
  * - Sample rate: 48kHz stereo throughout pipeline
  * - Bitrate: 320kbps AAC
- * - Loudness: -14 LUFS integrated (web video standard)
+ * - Loudness: -16 LUFS integrated (web video standard)
  * - True peak: -1.5 dBTP maximum
  * - Background music ducking: -18dB during narration, -8dB during gaps
  */
@@ -65,7 +65,7 @@ export function resolveBackgroundMusicPath(style) {
  * @returns {{success: boolean, measuredLUFS?: number}} Result with measured loudness.
  */
 export function normalizeAudioEBUR128(inputFile, outputFile, options = {}) {
-  const { targetLUFS = -14, truePeak = -1.5, loudnessRange = 11 } = options;
+  const { targetLUFS = -16, truePeak = -1.5, loudnessRange = 11 } = options;
 
   console.log(`  📊 Measuring audio loudness for normalization...`);
 
@@ -454,7 +454,7 @@ export function generateAmbientBedForStyle(style, duration, outputPath) {
 }
 
 export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, bgVolume, options = {}) {
-  const { normalize = true, targetLUFS = -14, style = 'documentary', enableAudioFx = true, enableAmbient = false, enableSubBass = false, enableDucking = false, statTimestamps = null, wordTimestamps = null, narrationTimings = [] } = options;
+  const { normalize = true, targetLUFS = -16, style = 'documentary', enableAudioFx = true, enableAmbient = false, enableSubBass = false, enableDucking = false, statTimestamps = null, wordTimestamps = null, narrationTimings = [] } = options;
 
   console.log(`  🎵 Mixing background music at volume ${bgVolume.toFixed(3)} (${bgMusicPath})`);
 
@@ -697,7 +697,7 @@ export function createBgMusicOnlyTrack(bgMusicPath, outputFile, duration, bgVolu
   // Apply EBU R128 normalization if requested
   if (normalize) {
     const normalizedOutput = join(tmpdir(), `autotube-bgnorm-${Date.now()}.aac`);
-    const normResult = normalizeAudioEBUR128(outputFile, normalizedOutput, { targetLUFS: -14 });
+    const normResult = normalizeAudioEBUR128(outputFile, normalizedOutput, { targetLUFS: -16 });
     
     if (normResult.success) {
       try {
@@ -793,7 +793,7 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
       '-i', bgOnlyAudio,
       '-c:v', 'copy',
       '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
-      '-shortest',
+      '-t', String(videoDuration),
       outputFile,
     ], { encoding: 'utf8', timeout: 300000 });
     
@@ -845,7 +845,7 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
         '-i', mixedAudio,
         '-c:v', 'copy',
         '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
-        '-shortest',
+        '-t', String(videoDuration),
         outputFile,
       ], { encoding: 'utf8', timeout: 300000 });
       
@@ -859,7 +859,7 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
   
   // Normalize narration to -16 LUFS before muxing
   const normalizedNarration = join(tmpdir(), `autotube-narrnorm-${Date.now()}.aac`);
-  const normResult = normalizeAudioEBUR128(narrationFile, normalizedNarration, { targetLUFS: -14 });
+  const normResult = normalizeAudioEBUR128(narrationFile, normalizedNarration, { targetLUFS: -16 });
   
   const narrationToMux = normResult.success ? normalizedNarration : narrationFile;
   
@@ -869,7 +869,7 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
     '-i', narrationToMux,
     '-c:v', 'copy',
     '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
-    '-shortest',
+    '-t', String(videoDuration),
     outputFile,
   ], { encoding: 'utf8', timeout: 300000 });
   

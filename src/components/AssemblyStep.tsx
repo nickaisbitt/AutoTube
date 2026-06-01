@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Film, ChevronRight, X, Music, Monitor } from 'lucide-react';
 import type { VideoProject, StepStatus } from '../types';
 import { MUSIC_PRESETS } from '../services/audioMixer';
@@ -28,14 +28,14 @@ export default function AssemblyStep({ project, status, progress, message, onAss
   const [musicPreset, setMusicPreset] = useState('neutral');
   const [quality, setQuality] = useState<'draft' | 'standard' | 'high'>('standard');
 
-  // Record start time when processing begins
-  if (status === 'processing' && startTime === null) {
-    setStartTime(Date.now());
-  }
-  // Reset when not processing
-  if (status !== 'processing' && startTime !== null) {
-    setStartTime(null);
-  }
+  useEffect(() => {
+    if (status === 'processing' && startTime === null) {
+      setStartTime(Date.now());
+    }
+    if (status !== 'processing' && startTime !== null) {
+      setStartTime(null);
+    }
+  }, [status, startTime]);
 
   // Compute ETA from segment progress
   const currentSeg = segmentMatch ? parseInt(segmentMatch[1], 10) : 0;

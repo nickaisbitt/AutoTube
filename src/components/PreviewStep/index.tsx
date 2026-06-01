@@ -16,6 +16,7 @@ import QualityCheck from './QualityCheck';
 import BlindReviewCard from './BlindReviewCard';
 import YouTubeSEOSection from './YouTubeSEOSection';
 import { usePlayback } from './usePlayback';
+import { useConfirmDialog } from '../ConfirmDialog';
 
 interface PreviewStepProps {
   project: VideoProject | null;
@@ -30,6 +31,7 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
   const [isRegeneratingThumbnail, setIsRegeneratingThumbnail] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const { confirm, dialog: confirmDialog } = useConfirmDialog('new-video-reset');
 
   const {
     isPlaying,
@@ -118,6 +120,17 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
     }
   }, [project]);
 
+  const handleNewVideo = useCallback(async () => {
+    const confirmed = await confirm({
+      title: 'Create New Video',
+      description: 'This will reset your current project and start over. Any unsaved progress will be lost.',
+      confirmLabel: 'New Video',
+      cancelLabel: 'Cancel',
+      variant: 'danger',
+    });
+    if (confirmed) onReset();
+  }, [confirm, onReset]);
+
   if (!project) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -179,7 +192,7 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
             </button>
           </div>
           <button
-            onClick={onReset}
+            onClick={handleNewVideo}
             className="flex items-center gap-2 border-2 border-surface-700 bg-surface-900 px-4 py-2 text-sm font-mono text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
             aria-label="Create new video"
             title="Create new video"
@@ -246,6 +259,8 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
         currentSegmentIndex={currentSegmentIndex}
         onJumpToTime={jumpToTime}
       />
+
+      {confirmDialog}
     </div>
   );
 }

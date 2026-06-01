@@ -38,3 +38,5 @@ test-output*.mp4
 test-final-check.mp4
 server-render/
 !deploy/server-render/
+
+reviews/

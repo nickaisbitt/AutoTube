@@ -104,7 +104,7 @@ export async function handleServerRender(
     ? join("remotion", "render.mjs")
     : join("server-render", "index.mjs");
 
-  const child = spawn("node", [renderScript, projectPath || "/tmp/autotube-project.json", outputMp4], {
+  const child = spawn("node", [renderScript, join('/tmp', 'autotube-project.json'), outputMp4], {
     cwd: PROJECT_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...envVars, DEV_SERVER_URL: devServerUrl, REMOTION_SERVE_URL: useRemotion ? devServerUrl : undefined },

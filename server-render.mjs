@@ -4742,7 +4742,9 @@ async function render() {
     const downloadName = `autotube-${safeTitle}.mp4`;
     const homeDir = homedir() || tmpdir();
     try {
-      copyFileSync(finalMp4File, `${homeDir}/Downloads/${downloadName}`);
+    // Ensure Downloads directory exists
+    mkdirSync(join(homeDir, 'Downloads'), { recursive: true });
+    copyFileSync(finalMp4File, `${homeDir}/Downloads/${downloadName}`);
       log('info', `📁 Copied to ~/Downloads/${downloadName}`);
     } catch (copyErr) {
       console.warn(`  ⚠ Could not copy video to downloads folder: ${copyErr.message}`);

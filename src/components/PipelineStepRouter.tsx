@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { useVideoProject } from '../store';
-import { TopicConfig, VideoProject } from '../types';
+import { TopicConfig } from '../types';
 
 import TopicStep from './TopicStep';
 import ScriptStep from './ScriptStep';
@@ -91,11 +91,6 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
     skipAIEdit();
   }, [skipAIEdit]);
 
-  const assembleVideoWithOptions = assembleVideo as unknown as (
-    exportOptions?: { quality?: 'draft' | 'standard' | 'high'; format?: 'webm' | 'mp4' },
-    projectOverride?: VideoProject,
-  ) => Promise<VideoProject | null>;
-
   const handleAssembleVideo = useCallback(async (options?: { backgroundMusic?: boolean; musicPreset?: string; quality?: 'draft' | 'standard' | 'high' }) => {
     if (!project) return;
     const bgMusic = options?.backgroundMusic !== false;
@@ -114,8 +109,8 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
       musicPreset: options?.musicPreset,
     };
     setCurrentStep('assembly');
-    await assembleVideoWithOptions({ quality: selectedQuality }, clonedProject);
-  }, [project, assembleVideoWithOptions, setCurrentStep]);
+    await assembleVideo({ quality: selectedQuality }, clonedProject);
+  }, [project, assembleVideo, setCurrentStep]);
 
   const handleRetryAssemble = useCallback(async () => {
     await retryAssemble();

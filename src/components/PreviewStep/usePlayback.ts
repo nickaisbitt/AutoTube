@@ -189,55 +189,6 @@ export function usePlayback(
     }
   }, [currentSegmentIndex, isPlaying, project]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-      switch (e.key) {
-        case ' ':
-          e.preventDefault();
-          handlePlayPause();
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          jumpToTime(Math.max(0, currentTimeRef.current - 5));
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          jumpToTime(Math.min(totalDurationRef.current, currentTimeRef.current + 5));
-          break;
-        case 'm':
-          e.preventDefault();
-          setIsMuted(prev => !prev);
-          break;
-        case 'r':
-          e.preventDefault();
-          jumpToTime(0);
-          break;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  useEffect(() => {
-    if (!isPlaying || isMuted) {
-      stopSpeaking();
-      audioRef.pause();
-      setIsNarrating(false);
-    }
-  }, [isMuted, isPlaying]);
-
-  const formatTime = useCallback((seconds: number) => {
-    seconds = Math.max(0, seconds);
-    const minutes = Math.floor(seconds / 60);
-    const remaining = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 100);
-    return `${minutes}:${remaining.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
-  }, []);
-
   const handlePlayPause = () => {
     if (isPlaying) {
       setIsPlaying(false);
@@ -273,6 +224,58 @@ export function usePlayback(
     audioRef.pause();
     setIsNarrating(false);
   };
+
+  const handlersRef = useRef({ handlePlayPause, jumpToTime });
+  handlersRef.current = { handlePlayPause, jumpToTime };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          handlersRef.current.handlePlayPause();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          handlersRef.current.jumpToTime(Math.max(0, currentTimeRef.current - 5));
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          handlersRef.current.jumpToTime(Math.min(totalDurationRef.current, currentTimeRef.current + 5));
+          break;
+        case 'm':
+          e.preventDefault();
+          setIsMuted(prev => !prev);
+          break;
+        case 'r':
+          e.preventDefault();
+          handlersRef.current.jumpToTime(0);
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!isPlaying || isMuted) {
+      stopSpeaking();
+      audioRef.pause();
+      setIsNarrating(false);
+    }
+  }, [isMuted, isPlaying]);
+
+  const formatTime = useCallback((seconds: number) => {
+    seconds = Math.max(0, seconds);
+    const minutes = Math.floor(seconds / 60);
+    const remaining = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 100);
+    return `${minutes}:${remaining.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+  }, []);
 
   return {
     isPlaying,

@@ -82,8 +82,8 @@ async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
 
   // Handle { "topics": [...] } wrapper or bare array
   if (parsed && !Array.isArray(parsed) && typeof parsed === 'object') {
-    const key = Object.keys(parsed).find(k => Array.isArray((parsed as Record<string, any>)[k]));
-    parsed = key ? (parsed as Record<string, any>)[key] : [];
+    const key = Object.keys(parsed).find(k => Array.isArray((parsed as Record<string, unknown>)[k]));
+    parsed = key ? (parsed as Record<string, unknown>)[key] as unknown[] : [];
   }
 
   if (!Array.isArray(parsed)) {
@@ -107,7 +107,6 @@ const TONES: { key: TopicConfig['tone']; label: string; emoji: string }[] = [
 ];
 
 export default function TopicStep({ config, onConfigChange, onGenerate, onGenerateFull, apiKey }: TopicStepProps) {
-  const [, setIsHovering] = useState<number | null>(null);
   const [suggestedTopics, setSuggestedTopics] = useState<SuggestedTopic[]>([]);
   const [isLoadingTopics, setIsLoadingTopics] = useState(false);
   const [topicError, setTopicError] = useState<string | null>(null);
@@ -217,8 +216,6 @@ export default function TopicStep({ config, onConfigChange, onGenerate, onGenera
                 <button
                   key={topic.label}
                   onClick={() => onConfigChange({ ...config, topic: topic.label })}
-                  onMouseEnter={() => setIsHovering(i)}
-                  onMouseLeave={() => setIsHovering(null)}
                   className={`flex items-center gap-3 border-2 px-3.5 py-2.5 text-left text-sm ${
                     config.topic === topic.label
                       ? 'border-brand-500 bg-brand-500 text-black'

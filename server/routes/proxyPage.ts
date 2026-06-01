@@ -90,7 +90,7 @@ export async function handleProxyPage(
     const contentType = pageRes.headers.get("Content-Type") || "text/html";
     
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Cache-Control", "public, max-age=3600");

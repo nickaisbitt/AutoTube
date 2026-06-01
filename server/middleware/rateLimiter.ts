@@ -23,11 +23,11 @@ const PROXY_PATHS = ["/api/proxy-image", "/api/download-clip"];
 const SEARCH_PATHS = ["/api/search-", "/api/static-map", "/api/press-release"];
 
 function getClientIp(req: IncomingMessage): string {
-  return (
-    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
-    req.socket.remoteAddress ||
-    "127.0.0.1"
-  );
+  if (process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY === '1') {
+    const forwarded = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim();
+    if (forwarded) return forwarded;
+  }
+  return req.socket?.remoteAddress || 'unknown';
 }
 
 function evictOldestIfNeeded(): void {

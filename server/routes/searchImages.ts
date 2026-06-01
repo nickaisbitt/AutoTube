@@ -47,7 +47,7 @@ export async function handleSearchBingImages(
     console.log(`[Bing Images] Searching for: "${query}"`);
     const results = await fetchBingImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Bing Images] Error:", error);
@@ -86,7 +86,7 @@ export async function handleSearchGoogleImages(
     console.log(`[Google Images] Searching for: "${query}"`);
     const results = await fetchGoogleImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Google Images] Error:", error);
@@ -125,7 +125,7 @@ export async function handleSearchYandexImages(
     console.log(`[Startpage Images] Searching for: "${query}"`);
     const results = await fetchYandexImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Startpage Images] Error:", error);
@@ -164,7 +164,7 @@ export async function handleSearchDuckDuckGoImages(
     console.log(`[DuckDuckGo Images] Searching for: "${query}"`);
     const results = await fetchDuckDuckGoImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[DuckDuckGo Images] Error:", error);
@@ -203,7 +203,7 @@ export async function handleSearchFlickr(
     console.log(`[Flickr] Searching for: "${query}"`);
     const results = await fetchFlickrImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Flickr] Error:", error);
@@ -242,7 +242,7 @@ export async function handleSearchBingVideos(
     console.log(`[Bing Videos] Searching for: "${query}"`);
     const results = await fetchBingVideos(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Bing Videos] Error:", error);
@@ -281,7 +281,7 @@ export async function handleSearchGoogleVideos(
     console.log(`[Google Videos] Searching for: "${query}"`);
     const results = await fetchGoogleVideos(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Google Videos] Error:", error);
@@ -334,7 +334,7 @@ export async function handleSearchArchive(
     if (!searchRes.ok) {
       console.warn(`[Archive.org] Search HTTP ${searchRes.status}`);
       res.setHeader("Content-Type", "application/json");
-      res.setHeader("Access-Control-Allow-Origin", "*");
+  
       res.end(JSON.stringify({ results: [] }));
       return;
     }
@@ -344,7 +344,7 @@ export async function handleSearchArchive(
     if (!docs || docs.length === 0) {
       console.log(`[Archive.org] No results for "${query}"`);
       res.setHeader("Content-Type", "application/json");
-      res.setHeader("Access-Control-Allow-Origin", "*");
+  
       res.end(JSON.stringify({ results: [] }));
       return;
     }
@@ -405,7 +405,7 @@ export async function handleSearchArchive(
 
     console.log(`[Archive.org] Found ${results.length} videos for "${query}"`);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Archive.org] Error:", error);
@@ -444,7 +444,7 @@ export async function handleSearchUnsplash(
     console.log(`[Unsplash] Searching for: "${query}"`);
     const results = await fetchUnsplashImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Unsplash] Error:", error);
@@ -483,7 +483,7 @@ export async function handleSearchBingNews(
     console.log(`[Bing News] Searching for: "${query}"`);
     const results = await fetchBingNews(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Bing News] Error:", error);
@@ -522,7 +522,7 @@ export async function handleSearchVimeo(
     console.log(`[Vimeo] Searching for: "${query}"`);
     const results = await fetchVimeoVideos(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Vimeo] Error:", error);
@@ -561,7 +561,7 @@ export async function handleSearchDailymotion(
     console.log(`[Dailymotion] Searching for: "${query}"`);
     const results = await fetchDailymotionVideos(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Dailymotion] Error:", error);
@@ -600,7 +600,7 @@ export async function handleSearchGiphy(
     console.log(`[Giphy] Searching for: "${query}"`);
     const results = await fetchGiphyGifs(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[Giphy] Error:", error);
@@ -639,7 +639,7 @@ export async function handleSearchNASA(
     console.log(`[NASA] Searching for: "${query}"`);
     const results = await fetchNASAImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[NASA] Error:", error);
@@ -678,7 +678,7 @@ export async function handleSearchGovPress(
     console.log(`[GovPress] Searching for: "${query}"`);
     const results = await fetchGovPressImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[GovPress] Error:", error);
@@ -717,7 +717,7 @@ export async function handleSearchHybrid(
     console.log(`[HybridScraper] Searching for: "${query}"`);
     const results = await fetchHybridScraperImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results }));
   } catch (error) {
     console.error("[HybridScraper] Error:", error);

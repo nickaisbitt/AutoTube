@@ -112,7 +112,7 @@ export async function handleDownloadClip(
     if (cachedPath && existsSync(cachedPath)) {
       const stat = statSync(cachedPath);
       res.setHeader("Content-Type", "video/mp4");
-      res.setHeader("Access-Control-Allow-Origin", "*");
+
       res.setHeader("Cache-Control", "public, max-age=86400");
       res.setHeader("Content-Length", stat.size);
       createReadStream(cachedPath).pipe(res);
@@ -221,7 +221,6 @@ export async function handleDownloadClip(
     setCachedPath(hash, outputPath);
     const stat = statSync(outputPath);
     res.setHeader("Content-Type", "video/mp4");
-    res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.setHeader("Content-Length", stat.size);
     createReadStream(outputPath).pipe(res);

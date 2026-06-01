@@ -1,6 +1,6 @@
 import { createServer } from "http";
 import { readFileSync, existsSync, statSync } from "fs";
-import { join, extname } from "path";
+import { join, extname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { apiMiddleware } from "./server/index.ts";
 
@@ -31,6 +31,14 @@ const MIME_TYPES = {
 
 function serveStatic(req, res) {
   let filePath = join(DIST_DIR, req.url === "/" ? "index.html" : req.url);
+
+  const resolved = resolve(filePath);
+  if (!resolved.startsWith(resolve(DIST_DIR) + "/")) {
+    res.statusCode = 403;
+    res.setHeader("Content-Type", "text/plain");
+    res.end("Forbidden");
+    return;
+  }
 
   if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
     filePath = join(DIST_DIR, "index.html");

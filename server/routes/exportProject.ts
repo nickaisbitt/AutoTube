@@ -53,7 +53,7 @@ export async function handleExportProject(
 
     const data = readFileSync(projectPath, "utf8");
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(data);
   } catch (err) {
     res.statusCode = 500;

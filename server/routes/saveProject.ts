@@ -33,7 +33,7 @@ export async function handleSaveProject(
         const body = Buffer.concat(chunks).toString();
         writeFileSync(projectPath, body, "utf8");
         res.setHeader("Content-Type", "application/json");
-        res.setHeader("Access-Control-Allow-Origin", "*");
+
         res.end(JSON.stringify({ ok: true, path: projectPath }));
         resolve();
       } catch (err) {

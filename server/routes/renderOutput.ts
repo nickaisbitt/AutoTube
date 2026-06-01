@@ -45,7 +45,7 @@ export async function handleRenderOutput(
   const resolvedPath = resolve(filePath);
 
   // Security: ensure the resolved path stays within the project directory
-  if (!resolvedPath.startsWith(RESOLVED_PROJECT_ROOT) || !existsSync(resolvedPath)) {
+  if (!resolvedPath.startsWith(RESOLVED_PROJECT_ROOT + "/") || !existsSync(resolvedPath)) {
     res.statusCode = 404;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: "File not found" }));
@@ -56,7 +56,7 @@ export async function handleRenderOutput(
   const stat = statSync(resolvedPath);
 
   res.setHeader("Content-Type", mimeType);
-  res.setHeader("Access-Control-Allow-Origin", "*");
+
   res.setHeader("Content-Length", stat.size);
   res.setHeader("Cache-Control", "public, max-age=86400");
 

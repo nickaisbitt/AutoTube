@@ -66,6 +66,6 @@ export async function handleDocs(
   res: ServerResponse,
 ): Promise<void> {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+
   res.end(await getSwaggerHtml());
 }

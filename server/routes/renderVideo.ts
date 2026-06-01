@@ -71,7 +71,7 @@ export async function handleRenderVideo(
       const videoBuffer = readFileSync(outFile);
       const mimeType = format === "mp4" ? "video/mp4" : "video/webm";
       res.setHeader("Content-Type", mimeType);
-      res.setHeader("Access-Control-Allow-Origin", "*");
+
       res.setHeader("Content-Length", videoBuffer.length);
       res.end(videoBuffer);
 

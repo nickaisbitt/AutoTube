@@ -23,7 +23,7 @@ export async function handleSearch(
     console.log(`[Local Search] Scraping DDG for: "${query}"`);
     const results = await fetchDDGImages(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify(results));
   } catch (error) {
     console.error("[Local Search] Error:", error);

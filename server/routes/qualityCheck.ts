@@ -68,7 +68,7 @@ export async function handleQualityCheck(
   // SECURITY: Strictly verify resolved path resides inside PROJECT_ROOT
   const resolvedPath = resolve(videoPath);
   const resolvedRoot = resolve(PROJECT_ROOT);
-  if (!resolvedPath.startsWith(resolvedRoot)) {
+  if (!resolvedPath.startsWith(resolvedRoot + "/")) {
     res.statusCode = 403;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: "Access denied: file must reside inside the project directory" }));
@@ -114,7 +114,7 @@ export async function handleQualityCheck(
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+
 
   const sendEvent = (data: Record<string, unknown>) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);

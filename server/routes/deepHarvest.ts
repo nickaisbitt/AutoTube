@@ -272,7 +272,7 @@ export async function handleDeepHarvest(
     if (articleUrls.length === 0) {
       console.log(`[Deep Harvest] No articles found, returning empty result`);
       res.setHeader("Content-Type", "application/json");
-      res.setHeader("Access-Control-Allow-Origin", "*");
+
       res.end(JSON.stringify({
         query,
         articlesSearched: 0,
@@ -327,7 +327,6 @@ export async function handleDeepHarvest(
     console.log(`[Deep Harvest] Total: ${uniqueImages.length} unique images extracted`);
 
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
     res.end(JSON.stringify({
       query,
       articlesSearched: articleUrls.length,

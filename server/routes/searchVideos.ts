@@ -38,7 +38,7 @@ export async function handleSearchVideos(
     console.log(`[Video Search] Scraping DDG videos for: "${query}"`);
     const results = await fetchDDGVideos(query);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify(results));
   } catch (error) {
     console.error("[Video Search] Error:", error);

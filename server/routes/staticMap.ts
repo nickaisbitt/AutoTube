@@ -47,7 +47,7 @@ export async function handleStaticMap(
 
     const candidates = buildMapCandidates(query, geo);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Origin", "*");
+
     res.end(JSON.stringify({ results: candidates, geo }));
   } catch (error) {
     console.error("[Static Map] Error:", error);

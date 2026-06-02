@@ -2,8 +2,15 @@ import { Download, Upload, FileText } from 'lucide-react';
 import type { VideoProject } from '../../types';
 import { generateSRTSubtitles, generateVTTSubtitles, downloadSubtitles } from '../../services/subtitles';
 import { openYouTubeUpload, generateYouTubeMetadata } from '../../services/youtube';
-import { generateThumbnail, generateSplitScreenThumbnail, downloadThumbnail } from '../../services/thumbnail';
+import {
+  generateThumbnail,
+  generateSplitScreenThumbnail,
+  downloadThumbnail,
+  getBestThumbnailOverlay,
+} from '../../services/thumbnail';
 import { extractHookLine } from '../../services/seoTitles';
+import { getExportBlockStatus } from '../../store/pipeline/orchestrator';
+import { toast } from '../../hooks/useToast';
 
 export interface ExportActionsProps {
   project: VideoProject;
@@ -16,6 +23,8 @@ export default function ExportActions({
   thumbnailPreviewUrl,
   thumbnailPreviewFailed,
 }: ExportActionsProps) {
+  const exportBlock = getExportBlockStatus(project);
+
   return (
     <div className="space-y-3">
       <button
@@ -28,7 +37,8 @@ export default function ExportActions({
           // Try to generate split-screen thumbnail for upload
           try {
             const hookLine = extractHookLine(project.script);
-            const thumbBlob = await generateSplitScreenThumbnail(project, project.title, hookLine);
+            const overlayText = getBestThumbnailOverlay(project, hookLine);
+            const thumbBlob = await generateSplitScreenThumbnail(project, project.title, overlayText);
             const thumbFile = new File([thumbBlob], `${sanitizedTitle}_thumbnail.png`, { type: 'image/png' });
             openYouTubeUpload(videoBlob, { ...metadata, thumbnail: thumbFile });
           } catch {
@@ -50,6 +60,10 @@ export default function ExportActions({
       </button>
       <button
         onClick={() => {
+          if (exportBlock.blocked) {
+            toast(exportBlock.reason ?? 'Export blocked by quality gate', 'error');
+            return;
+          }
           if (!project?.thumbnail) return;
           const a = document.createElement('a');
           a.href = project.thumbnail;
@@ -59,8 +73,14 @@ export default function ExportActions({
           a.click();
           document.body.removeChild(a);
         }}
-        className="flex w-full items-center gap-3 border-2 border-surface-700 bg-surface-900 px-4 py-3 text-sm font-medium text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
+        disabled={exportBlock.blocked}
+        className={`flex w-full items-center gap-3 border-2 px-4 py-3 text-sm font-medium ${
+          exportBlock.blocked
+            ? 'cursor-not-allowed border-surface-800 bg-surface-950 text-surface-600'
+            : 'border-surface-700 bg-surface-900 text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black'
+        }`}
         data-testid="download-video-button"
+        title={exportBlock.blocked ? exportBlock.reason : undefined}
       >
         <Download className="h-5 w-5" />
         Download Video
@@ -109,7 +129,8 @@ export default function ExportActions({
           let thumbBlob: Blob;
           try {
             const hookLine = extractHookLine(project.script);
-            thumbBlob = await generateSplitScreenThumbnail(project, project.title, hookLine);
+            const overlayText = getBestThumbnailOverlay(project, hookLine);
+            thumbBlob = await generateSplitScreenThumbnail(project, project.title, overlayText);
           } catch {
             thumbBlob = await generateThumbnail(project.title, project.topic);
           }

@@ -355,6 +355,71 @@ export function generateThumbnailConcepts(
   return concepts;
 }
 
+const DEFAULT_THUMBNAIL_AUDIENCE = 'general consumers';
+
+function pickBestScoredConcept(concepts: ThumbnailConcept[]): ThumbnailConcept {
+  let best = concepts[0];
+  let bestScore = scoreVisualHierarchy(best).score;
+
+  for (let i = 1; i < concepts.length; i++) {
+    const score = scoreVisualHierarchy(concepts[i]).score;
+    if (score > bestScore) {
+      best = concepts[i];
+      bestScore = score;
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Picks the highest-scoring thumbnail concept by visual hierarchy score.
+ */
+export function selectBestThumbnailConcept(
+  topic: string,
+  style: string,
+  audience: string = DEFAULT_THUMBNAIL_AUDIENCE,
+): ThumbnailConcept {
+  const concepts = generateThumbnailConcepts(topic, style, audience);
+  const best = pickBestScoredConcept(concepts);
+  logger.info('Thumbnail', `Selected "${best.variant}" concept for topic: "${topic}"`);
+  return best;
+}
+
+/**
+ * Generates all thumbnail concepts and returns the best-scoring variant.
+ */
+export function prepareThumbnailConcepts(
+  topic: string,
+  style: string,
+  audience: string = DEFAULT_THUMBNAIL_AUDIENCE,
+): { concepts: ThumbnailConcept[]; selected: ThumbnailConcept } {
+  const concepts = generateThumbnailConcepts(topic, style, audience);
+  const selected = pickBestScoredConcept(concepts);
+  logger.info('Thumbnail', `Prepared ${concepts.length} concepts; selected "${selected.variant}" for topic: "${topic}"`);
+  return { concepts, selected };
+}
+
+type ThumbnailOverlayProject = Pick<
+  VideoProject,
+  'topic' | 'style' | 'selectedThumbnailConcept'
+>;
+
+/**
+ * Resolves the text overlay for thumbnail rendering, preferring the
+ * pre-selected concept or the highest-scored variant.
+ */
+export function getBestThumbnailOverlay(
+  project: ThumbnailOverlayProject,
+  fallbackHookLine?: string,
+  audience: string = DEFAULT_THUMBNAIL_AUDIENCE,
+): string {
+  const selected =
+    project.selectedThumbnailConcept ??
+    selectBestThumbnailConcept(project.topic, project.style, audience);
+  return selected.textOverlay || fallbackHookLine?.trim() || project.topic;
+}
+
 /**
  * Selects the highest-scored non-fallback MediaAsset from an array.
  * Returns undefined if no non-fallback assets exist.

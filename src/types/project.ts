@@ -95,4 +95,24 @@ export interface VideoProject {
     score: number;
     issues: string[];
   };
+  /** Thumbnail concept variants (fear / curiosity / authority) generated pre-export */
+  thumbnailConcepts?: Array<{
+    variant: 'fear' | 'curiosity' | 'authority';
+    signifier: string;
+    emotionalAngle: string;
+    textOverlay: string;
+    colorAccent: string;
+    dominantSubject: string;
+    searchQueries: string[];
+  }>;
+  /** Best-scoring thumbnail concept selected before export */
+  selectedThumbnailConcept?: {
+    variant: 'fear' | 'curiosity' | 'authority';
+    signifier: string;
+    emotionalAngle: string;
+    textOverlay: string;
+    colorAccent: string;
+    dominantSubject: string;
+    searchQueries: string[];
+  };
 }

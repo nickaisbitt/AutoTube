@@ -6,7 +6,12 @@ import {
 } from 'lucide-react';
 import type { VideoProject } from '../../types';
 import { extractHookLine } from '../../services/seoTitles';
-import { generateThumbnail, generateSplitScreenThumbnail } from '../../services/thumbnail';
+import {
+  generateThumbnail,
+  generateSplitScreenThumbnail,
+  getBestThumbnailOverlay,
+} from '../../services/thumbnail';
+import { getExportBlockStatus } from '../../store/pipeline/orchestrator';
 import VideoPlayer from './VideoPlayer';
 import type { PreviewMode } from './VideoPlayer';
 import Timeline from './Timeline';
@@ -59,7 +64,8 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
     const generate = async () => {
       try {
         const hookLine = extractHookLine(project.script);
-        const blob = await generateSplitScreenThumbnail(project, project.title, hookLine);
+        const overlayText = getBestThumbnailOverlay(project, hookLine);
+        const blob = await generateSplitScreenThumbnail(project, project.title, overlayText);
         localObjectUrl = URL.createObjectURL(blob);
         if (cancelled) {
           URL.revokeObjectURL(localObjectUrl);
@@ -102,7 +108,8 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
     setThumbnailPreviewFailed(false);
     try {
       const hookLine = extractHookLine(project.script);
-      const blob = await generateSplitScreenThumbnail(project, project.title, hookLine);
+      const overlayText = getBestThumbnailOverlay(project, hookLine);
+      const blob = await generateSplitScreenThumbnail(project, project.title, overlayText);
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = URL.createObjectURL(blob);
       setThumbnailPreviewUrl(objectUrlRef.current);
@@ -139,6 +146,8 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
     );
   }
 
+  const exportBlock = getExportBlockStatus(project);
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-6 py-8" data-testid="preview-step">
       {/* Header */}
@@ -154,9 +163,14 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
           {onOpenExport && (
             <button
               onClick={onOpenExport}
-              className="flex items-center gap-2 bg-brand-500 px-3 py-2 text-xs font-bold uppercase text-black shadow-hard-sm hover:bg-brand-400"
-              aria-label="Open export settings"
-              title="Open export settings"
+              disabled={exportBlock.blocked}
+              className={`flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase shadow-hard-sm ${
+                exportBlock.blocked
+                  ? 'cursor-not-allowed bg-surface-700 text-surface-500'
+                  : 'bg-brand-500 text-black hover:bg-brand-400'
+              }`}
+              aria-label={exportBlock.blocked ? 'Export blocked by quality gate' : 'Open export settings'}
+              title={exportBlock.blocked ? exportBlock.reason : 'Open export settings'}
               data-testid="preview-export-button"
             >
               <Download className="h-4 w-4" />

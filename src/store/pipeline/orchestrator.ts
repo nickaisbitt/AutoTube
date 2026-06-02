@@ -42,6 +42,7 @@ import { reorderForHook } from '../../services/segmentReorderer';
 import { CHART_KEYWORDS } from '../../services/captionUtils';
 import { runAIEditPass } from '../../services/aiEditor';
 import { extractHookLine } from '../../services/seoTitles';
+import { prepareThumbnailConcepts } from '../../services/thumbnail';
 import { logger } from '../../services/logger';
 import { runBlindReview } from '../../services/blindReview';
 import { generateGrokTts, generateMeloTts } from '../../services/tts';
@@ -631,6 +632,14 @@ export async function executeAssembleVideo(
 ): Promise<VideoProject | null> {
   const { setProcessingProgress, setProcessingMessage } = callbacks;
 
+  const isReExport = activeProject.status === 'complete' && !!activeProject.thumbnail;
+  if (isReExport) {
+    const block = getExportBlockStatus(activeProject);
+    if (block.blocked) {
+      throw new Error(block.reason ?? 'Export blocked by quality gate');
+    }
+  }
+
   // Deep-clone the project so the render operates on an immutable snapshot
   const renderSnapshot = structuredClone(activeProject);
 
@@ -648,6 +657,13 @@ export async function executeAssembleVideo(
     )
   );
   let projectToRender = hasChartAsset ? reorderForHook(renderSnapshot) : renderSnapshot;
+
+  // Select best thumbnail concept (fear / curiosity / authority) before export
+  const { concepts: thumbnailConcepts, selected: selectedThumbnailConcept } = prepareThumbnailConcepts(
+    projectToRender.topic,
+    projectToRender.style,
+  );
+  projectToRender = { ...projectToRender, thumbnailConcepts, selectedThumbnailConcept };
 
   let updatedProject: VideoProject | null = null;
 
@@ -1006,6 +1022,52 @@ export function evaluateQualityGate(
     warnings,
     recommendations,
   };
+}
+
+/** Whether quality-gate export blocking is disabled (CI / E2E via SKIP_QUALITY_BLOCK). */
+export function isQualityExportBlockBypassed(): boolean {
+  const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
+  const skip =
+    env?.SKIP_QUALITY_BLOCK ??
+    env?.VITE_SKIP_QUALITY_BLOCK ??
+    (typeof process !== 'undefined' ? process.env.SKIP_QUALITY_BLOCK : undefined);
+  return skip === '1' || skip === 'true';
+}
+
+export interface ExportBlockStatus {
+  blocked: boolean;
+  reason?: string;
+}
+
+/**
+ * Returns whether export/download should be blocked due to failed assembly quality gates.
+ * Bypass when SKIP_QUALITY_BLOCK=1 (CI/E2E).
+ */
+export function getExportBlockStatus(project: VideoProject): ExportBlockStatus {
+  if (isQualityExportBlockBypassed()) {
+    return { blocked: false };
+  }
+
+  const gate = evaluateQualityGate(project, 'assembly');
+  if (gate.passed) {
+    return { blocked: false };
+  }
+
+  const criticalMessages = gate.warnings
+    .filter((w) => w.severity === 'critical')
+    .map((w) => w.message);
+
+  const reason =
+    criticalMessages.length > 0
+      ? criticalMessages.join('; ')
+      : 'Quality gate failed — blind review or assembly scores below threshold';
+
+  return { blocked: true, reason };
+}
+
+/** Convenience wrapper for UI export buttons. */
+export function isExportBlocked(project: VideoProject): boolean {
+  return getExportBlockStatus(project).blocked;
 }
 
 // ─── Phase-specific evaluators (internal helpers) ────────────────────────────

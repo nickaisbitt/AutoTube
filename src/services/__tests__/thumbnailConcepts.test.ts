@@ -5,7 +5,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { generateThumbnailConcepts } from '../thumbnail';
+import {
+  generateThumbnailConcepts,
+  prepareThumbnailConcepts,
+  scoreVisualHierarchy,
+  selectBestThumbnailConcept,
+} from '../thumbnail';
 
 describe('generateThumbnailConcepts', () => {
   // ─── Core: At least 3 variants (Requirement 2.20) ──────────────────────────
@@ -152,5 +157,20 @@ describe('generateThumbnailConcepts', () => {
       expect(concept.textOverlay.trim().split(/\s+/).length).toBeLessThanOrEqual(5);
       expect(concept.colorAccent).toMatch(/^#[0-9a-fA-F]{6}$/);
     }
+  });
+});
+
+describe('selectBestThumbnailConcept', () => {
+  it('returns one of the generated variants with the highest hierarchy score', () => {
+    const { concepts, selected } = prepareThumbnailConcepts('cybercrime hacking', 'business_insider', 'general consumers');
+    const bestScore = Math.max(...concepts.map((c) => scoreVisualHierarchy(c).score));
+    expect(scoreVisualHierarchy(selected).score).toBe(bestScore);
+  });
+
+  it('selectBestThumbnailConcept matches prepareThumbnailConcepts selected variant', () => {
+    const selected = selectBestThumbnailConcept('ransomware attacks', 'warfront', 'small business owners');
+    const prepared = prepareThumbnailConcepts('ransomware attacks', 'warfront', 'small business owners');
+    expect(selected.variant).toBe(prepared.selected.variant);
+    expect(selected.textOverlay).toBe(prepared.selected.textOverlay);
   });
 });

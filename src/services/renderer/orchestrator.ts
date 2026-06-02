@@ -42,7 +42,7 @@ export async function renderVideoToBlob(
   project: VideoProject,
   options: RenderOptions = {},
 ): Promise<Blob | RenderResult> {
-  const quality = options.quality || 'standard';
+  const quality = options.quality || 'high';
   const requestedFormat = options.format || 'webm';
 
   // Resolution presets: use project.exportSettings.resolution if set, default to 1080p
@@ -160,7 +160,9 @@ export async function renderVideoToBlob(
   }
 
   const frameInterval = Math.max(1, Math.round(fps / frameSampleRate));
-  const MAX_CAPTURED_FRAMES = MAX_FRAMES;
+  // Scale frame budget with video duration so 5–8 min videos aren't truncated at ~83s
+  const estimatedFrameBudget = Math.ceil(totalSec * frameSampleRate * 1.15);
+  const MAX_CAPTURED_FRAMES = Math.min(12_000, Math.max(MAX_FRAMES, estimatedFrameBudget));
   const RENDER_DEADLINE = Date.now() + Math.max(totalSec * 3000, 300000);
   const isRenderingFlag = true;
 

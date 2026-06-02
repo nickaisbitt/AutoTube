@@ -92,12 +92,16 @@ export async function handleServerRender(
   const protocol = 'http';
   const devServerUrl = `${protocol}://${host}`;
 
-  // Check if Remotion renderer is available
+  // Prefer the full server-render pipeline (node-canvas + effects + AI review).
+  // Remotion is opt-in via USE_REMOTION_RENDER=true — it lacks many quality features.
   const remotionPath = join(PROJECT_ROOT, "remotion", "render.mjs");
-  const useRemotion = existsSync(remotionPath);
+  const useRemotion =
+    process.env.USE_REMOTION_RENDER === "true" && existsSync(remotionPath);
 
   if (useRemotion) {
     sendEvent({ type: "progress", message: "Using Remotion renderer...", pct: 1 });
+  } else {
+    sendEvent({ type: "progress", message: "Using server-render pipeline...", pct: 1 });
   }
 
   const renderScript = useRemotion

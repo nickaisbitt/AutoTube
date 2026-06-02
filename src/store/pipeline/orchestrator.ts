@@ -179,7 +179,7 @@ export async function executeGenerateScript(
     logger.warn('Store', 'Hashtag generation failed');
   }
 
-  const newProject: VideoProject = {
+  let newProject: VideoProject = {
     version: CURRENT_PROJECT_VERSION,
     id: generateId(),
     title: videoTitle,
@@ -202,6 +202,14 @@ export async function executeGenerateScript(
       issues: arcValidation.issues,
     },
   };
+
+  newProject = await refineUntilQualityGatePasses(
+    newProject,
+    'script',
+    appConfig,
+    signal,
+    callbacks,
+  );
 
   return newProject;
 }
@@ -307,12 +315,20 @@ export async function executeSourceMedia(
     }
   }
 
-  const updatedProject: VideoProject = {
+  let updatedProject: VideoProject = {
     ...activeProject,
     media,
     topicContext,
     visualPlans,
   };
+
+  updatedProject = await refineUntilQualityGatePasses(
+    updatedProject,
+    'media',
+    appConfig,
+    signal,
+    callbacks,
+  );
 
   // Save project for server-side renderer — AWAITED so the file is on disk
   // before this function returns. The server render reads the project from
@@ -631,106 +647,275 @@ export async function executeAssembleVideo(
         (a.alt ?? '').toLowerCase().includes(kw.toLowerCase())
     )
   );
-  const projectToRender = hasChartAsset ? reorderForHook(renderSnapshot) : renderSnapshot;
+  let projectToRender = hasChartAsset ? reorderForHook(renderSnapshot) : renderSnapshot;
 
-  const renderResult = await renderVideoToBlob(projectToRender, {
-    quality,
-    format,
-    width: preset.width,
-    height: preset.height,
-    onProgress: (pct, message) => {
-      setProcessingProgress(pct);
-      setProcessingMessage(message);
-    },
-    signal,
-  });
+  let updatedProject: VideoProject | null = null;
 
-  // Revoke old thumbnail blob URL to prevent memory leak
-  if (renderSnapshot.thumbnail?.startsWith('blob:')) URL.revokeObjectURL(renderSnapshot.thumbnail);
+  for (let assemblyIter = 0; assemblyIter < MAX_QUALITY_ITERATIONS; assemblyIter++) {
+    if (signal.aborted) return null;
 
-  // Determine video source: streaming URL for server renders, blob URL for browser renders
-  let url: string;
-  let mimeType: string;
-  let resolvedFormat: 'webm' | 'mp4';
-  let isServerRender = false;
-  let fileSize = 0;
-
-  if (renderResult && 'url' in renderResult && 'isServerRender' in renderResult) {
-    // Server-side render result — use streaming URL directly
-    const rr = renderResult as RenderResult;
-    url = rr.url;
-    isServerRender = rr.isServerRender;
-    // Infer format from URL
-    resolvedFormat = url.includes('.mp4') ? 'mp4' : 'webm';
-    mimeType = resolvedFormat === 'mp4' ? 'video/mp4' : 'video/webm';
-    // File size unknown for streaming; estimate from total frames * quality
-    fileSize = projectToRender.script.reduce((s, seg) => s + seg.duration, 0) * 1024 * 1024;
-  } else {
-    // Browser-side render result — create blob URL
-    const blob = renderResult as Blob;
-    url = URL.createObjectURL(blob);
-    mimeType = blob.type || 'video/webm';
-    resolvedFormat = mimeType.includes('mp4') ? 'mp4' : 'webm';
-    fileSize = blob.size;
-  }
-
-  const fileName = `${projectToRender.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${resolvedFormat}`;
-
-  const updatedProject: VideoProject = {
-    ...projectToRender,
-    status: 'complete',
-    thumbnail: url,
-    exportSettings: {
+    const renderResult = await renderVideoToBlob(projectToRender, {
       quality,
-      format: resolvedFormat,
+      format,
       width: preset.width,
       height: preset.height,
-      mimeType,
-      fileName,
-      backgroundMusic: projectToRender.exportSettings?.backgroundMusic,
-      isStreaming: isServerRender,
-    },
-  };
-
-  trackVideoGeneration({
-    videoId: renderSnapshot.id,
-    title: renderSnapshot.title,
-    topic: renderSnapshot.topic,
-    createdAt: new Date().toISOString(),
-    renderTime: Math.max(0, (performance.now() - renderStartedAt) / 1000),
-    fileSize,
-    duration: renderSnapshot.script.reduce((sum, seg) => sum + seg.duration, 0),
-    segments: renderSnapshot.script.length,
-    mediaCount: renderSnapshot.media.length,
-    narrationClips: renderSnapshot.narration.length,
-    quality,
-    exportFormat: resolvedFormat,
-  });
-
-  // Blind Review Step
-  setProcessingProgress(96);
-  setProcessingMessage('Running blind quality review...');
-  try {
-    const report = await runBlindReview(updatedProject, appConfig.openRouterKey, {
-      signal,
-      onProgress: (pct, msg) => {
-        const overallPct = 96 + Math.round(pct * 0.03);
-        setProcessingProgress(overallPct);
-        setProcessingMessage(msg);
+      onProgress: (pct, message) => {
+        setProcessingProgress(pct);
+        setProcessingMessage(message);
       },
+      signal,
     });
-    if (report) {
-      updatedProject.blindReview = report;
+
+    // Revoke old thumbnail blob URL to prevent memory leak
+    if (projectToRender.thumbnail?.startsWith('blob:')) URL.revokeObjectURL(projectToRender.thumbnail);
+
+    // Determine video source: streaming URL for server renders, blob URL for browser renders
+    let url: string;
+    let mimeType: string;
+    let resolvedFormat: 'webm' | 'mp4';
+    let isServerRender = false;
+    let fileSize = 0;
+
+    if (renderResult && 'url' in renderResult && 'isServerRender' in renderResult) {
+      const rr = renderResult as RenderResult;
+      url = rr.url;
+      isServerRender = rr.isServerRender;
+      resolvedFormat = url.includes('.mp4') ? 'mp4' : 'webm';
+      mimeType = resolvedFormat === 'mp4' ? 'video/mp4' : 'video/webm';
+      fileSize = projectToRender.script.reduce((s, seg) => s + seg.duration, 0) * 1024 * 1024;
+    } else {
+      const blob = renderResult as Blob;
+      url = URL.createObjectURL(blob);
+      mimeType = blob.type || 'video/webm';
+      resolvedFormat = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      fileSize = blob.size;
     }
-  } catch (err) {
-    if ((err as Error).name === 'AbortError') throw err;
-    logger.warn('Store', 'Blind review failed, continuing to preview', err);
+
+    const fileName = `${projectToRender.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${resolvedFormat}`;
+
+    updatedProject = {
+      ...projectToRender,
+      status: 'complete',
+      thumbnail: url,
+      exportSettings: {
+        quality,
+        format: resolvedFormat,
+        width: preset.width,
+        height: preset.height,
+        mimeType,
+        fileName,
+        backgroundMusic: projectToRender.exportSettings?.backgroundMusic,
+        isStreaming: isServerRender,
+      },
+    };
+
+    trackVideoGeneration({
+      videoId: renderSnapshot.id,
+      title: renderSnapshot.title,
+      topic: renderSnapshot.topic,
+      createdAt: new Date().toISOString(),
+      renderTime: Math.max(0, (performance.now() - renderStartedAt) / 1000),
+      fileSize,
+      duration: renderSnapshot.script.reduce((sum, seg) => sum + seg.duration, 0),
+      segments: renderSnapshot.script.length,
+      mediaCount: renderSnapshot.media.length,
+      narrationClips: renderSnapshot.narration.length,
+      quality,
+      exportFormat: resolvedFormat,
+    });
+
+    // Blind review → quality gate → optional re-render
+    setProcessingProgress(96);
+    setProcessingMessage('Running blind quality review...');
+    try {
+      const report = await runBlindReview(updatedProject, appConfig.openRouterKey, {
+        signal,
+        onProgress: (pct, msg) => {
+          const overallPct = 96 + Math.round(pct * 0.03);
+          setProcessingProgress(overallPct);
+          setProcessingMessage(msg);
+        },
+      });
+      if (report) {
+        updatedProject.blindReview = report;
+      }
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err;
+      logger.warn('Store', 'Blind review failed, continuing to preview', err);
+    }
+
+    const assemblyGate = evaluateQualityGate(updatedProject, 'assembly');
+    if (assemblyGate.passed) {
+      if (assemblyIter > 0) {
+        logger.success('QualityGate', `Assembly passed after ${assemblyIter + 1} render attempt(s)`);
+      }
+      break;
+    }
+
+    if (assemblyIter >= MAX_QUALITY_ITERATIONS - 1 || assemblyGate.recommendations.length === 0) {
+      logger.warn('QualityGate', `Assembly quality gate still failing after ${assemblyIter + 1} attempt(s) — delivering best result`);
+      break;
+    }
+
+    setProcessingMessage(`Quality below threshold — refining and re-rendering (${assemblyIter + 2}/${MAX_QUALITY_ITERATIONS})...`);
+    const refined = await applyQualityRecommendations(
+      updatedProject,
+      assemblyGate.recommendations,
+      appConfig,
+      signal,
+      callbacks,
+    );
+    projectToRender = structuredClone(refined);
   }
 
   return updatedProject;
 }
 
 // ─── Quality Gates ───────────────────────────────────────────────────────────
+
+/** Max render → quality-check → refine iterations per pipeline phase. */
+export const MAX_QUALITY_ITERATIONS = 3;
+
+/**
+ * Iteratively applies quality-gate recommendations until thresholds pass
+ * or max iterations is reached.
+ */
+export async function refineUntilQualityGatePasses(
+  project: VideoProject,
+  phase: QualityGatePhase,
+  appConfig: AppConfig,
+  signal: AbortSignal,
+  callbacks: ProgressCallbacks,
+): Promise<VideoProject> {
+  let current = project;
+
+  for (let iter = 0; iter < MAX_QUALITY_ITERATIONS; iter++) {
+    const gate = evaluateQualityGate(current, phase);
+    if (gate.passed) {
+      if (iter > 0) {
+        logger.success('QualityGate', `${phase} phase passed after ${iter} refinement(s)`);
+      }
+      return current;
+    }
+
+    if (gate.recommendations.length === 0) {
+      logger.warn('QualityGate', `${phase} phase has warnings but no actionable recommendations`);
+      return current;
+    }
+
+    if (iter >= MAX_QUALITY_ITERATIONS - 1) {
+      logger.warn('QualityGate', `${phase} phase still below threshold after ${MAX_QUALITY_ITERATIONS} iterations — proceeding`);
+      return current;
+    }
+
+    callbacks.setProcessingMessage(
+      `Quality gate (${phase}): auto-refining (${iter + 2}/${MAX_QUALITY_ITERATIONS})...`,
+    );
+    logger.info('QualityGate', `${phase} iteration ${iter + 1}: ${gate.recommendations.map((r) => r.action).join(', ')}`);
+
+    current = await applyQualityRecommendations(
+      current,
+      gate.recommendations,
+      appConfig,
+      signal,
+      callbacks,
+    );
+  }
+
+  return current;
+}
+
+/**
+ * Applies actionable recommendations from a failed quality gate.
+ */
+export async function applyQualityRecommendations(
+  project: VideoProject,
+  recommendations: QualityGateRecommendation[],
+  appConfig: AppConfig,
+  signal: AbortSignal,
+  callbacks: ProgressCallbacks,
+): Promise<VideoProject> {
+  let updated = project;
+  const uniqueActions = [...new Set(recommendations.map((r) => r.action))];
+
+  for (const action of uniqueActions) {
+    if (signal.aborted) break;
+
+    switch (action) {
+      case 'rewrite_hook':
+      case 'simplify_language':
+      case 'add_arc_bridge': {
+        callbacks.setProcessingMessage(`Refining script: ${action.replace(/_/g, ' ')}...`);
+        try {
+          const refined = await refineScriptMultiPass(
+            updated.script,
+            updated.topic,
+            appConfig.openRouterKey,
+            signal,
+          );
+          updated = { ...updated, script: refined };
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') throw err;
+          logger.warn('QualityGate', `Script refinement for ${action} failed`, err);
+        }
+        break;
+      }
+
+      case 'regenerate_thumbnail':
+      case 'diversify_visuals': {
+        const assetIds = findAssetsNeedingReplacement(updated, action);
+        for (const assetId of assetIds.slice(0, 3)) {
+          if (signal.aborted) break;
+          callbacks.setProcessingMessage(`Replacing weak visual asset...`);
+          const replaced = await executeReplaceMediaAsset(updated, assetId, appConfig);
+          if (replaced) updated = replaced;
+        }
+        break;
+      }
+
+      case 'add_sources':
+        // Requires dedicated fact-check pass — logged for manual review
+        logger.info('QualityGate', 'add_sources recommendation noted — requires OpenRouter fact-check pass');
+        break;
+    }
+  }
+
+  return updated;
+}
+
+/** Picks media assets to replace based on quality-gate recommendations. */
+function findAssetsNeedingReplacement(
+  project: VideoProject,
+  action: QualityGateRecommendation['action'],
+): string[] {
+  const ids: string[] = [];
+
+  if (action === 'regenerate_thumbnail' && project.script.length > 0) {
+    const firstSegId = project.script[0].id;
+    const firstAssets = project.media.filter((a) => a.segmentId === firstSegId);
+    const weakest = firstAssets
+      .filter((a) => !a.isFallback)
+      .sort((a, b) => (a.qualityFactors?.relevance ?? a.score ?? 0) - (b.qualityFactors?.relevance ?? b.score ?? 0))[0];
+    if (weakest) ids.push(weakest.id);
+  }
+
+  if (action === 'diversify_visuals') {
+    const conceptCounts = new Map<string, string[]>();
+    for (const asset of project.media) {
+      const concept = asset.concept || asset.query || 'unknown';
+      const list = conceptCounts.get(concept) || [];
+      list.push(asset.id);
+      conceptCounts.set(concept, list);
+    }
+    for (const [, assetList] of conceptCounts) {
+      if (assetList.length > 2) {
+        ids.push(...assetList.slice(1));
+      }
+    }
+  }
+
+  return ids;
+}
 
 /**
  * Configurable thresholds for quality gate evaluation.

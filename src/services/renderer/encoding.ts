@@ -87,9 +87,9 @@ export async function tryServerRender(
       return null;
     }
 
-    // Timeout server-render after 3 min so we fall back to browser render
+    // Timeout server-render after 10 min (high-quality 8-min videos need headroom)
     const serverTimeout = new AbortController();
-    serverTimeoutId = setTimeout(() => serverTimeout.abort(), 180_000);
+    serverTimeoutId = setTimeout(() => serverTimeout.abort(), 600_000);
     if (signal) {
       signal.addEventListener('abort', () => serverTimeout.abort(), { once: true });
     }

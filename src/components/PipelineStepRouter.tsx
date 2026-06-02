@@ -94,7 +94,7 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
   const handleAssembleVideo = useCallback(async (options?: { backgroundMusic?: boolean; musicPreset?: string; quality?: 'draft' | 'standard' | 'high' }) => {
     if (!project) return;
     const bgMusic = options?.backgroundMusic !== false;
-    const selectedQuality = options?.quality ?? 'standard';
+    const selectedQuality = options?.quality ?? 'high';
     const clonedProject = structuredClone(project);
     clonedProject.exportSettings = {
       ...clonedProject.exportSettings,

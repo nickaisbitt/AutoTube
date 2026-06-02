@@ -16,10 +16,18 @@ rsync -av \
   "$ROOT/server/" "$DEPLOY_DIR/server/"
 
 echo "Syncing server-render..."
-rsync -av \
-  --exclude='__pycache__/' \
-  --exclude='node_modules/' \
-  "$ROOT/server-render/" "$DEPLOY_DIR/server-render/"
+# Canonical modules may live only under deploy/ — ensure root path exists for local dev
+if [ ! -d "$ROOT/server-render" ] && [ -d "$ROOT/deploy/server-render" ]; then
+  ln -sf deploy/server-render "$ROOT/server-render"
+fi
+if [ -d "$ROOT/server-render" ]; then
+  rsync -av \
+    --exclude='__pycache__/' \
+    --exclude='node_modules/' \
+    "$ROOT/server-render/" "$DEPLOY_DIR/server-render/"
+else
+  echo "WARN: server-render/ not found at repo root or deploy/"
+fi
 
 # Sync server-render.mjs
 cp "$ROOT/server-render.mjs" "$DEPLOY_DIR/"

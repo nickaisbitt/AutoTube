@@ -39,8 +39,8 @@ function score(path) {
   const size = statSync(path).size;
   const duration = probeDuration(path) ?? 0;
   const mtime = statSync(path).mtimeMs;
-  const nameBonus = path.includes('FINAL-OUTPUT') || path.includes('FINAL-VIDEO') ? 1_000_000 : 0;
-  return duration * 10_000 + size + nameBonus + mtime / 1e6;
+  // Prefer newest render with long duration — avoid overwriting fresh mux with stale copies
+  return mtime * 1_000 + duration * 10_000 + size;
 }
 
 mkdirSync(RECORDINGS, { recursive: true });

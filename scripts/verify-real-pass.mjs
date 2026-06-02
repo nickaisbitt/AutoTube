@@ -1,128 +1,152 @@
 #!/usr/bin/env node
 /**
- * R7 — Seven-point Real Pass verification (partial implementation).
- * A2: output duration matches script narration sum within ±10%.
+ * R7 — Seven-point Real Pass verification (merge gate).
+ *
+ * Enforces all 7 acceptance criteria from scripts/squad/ROSTER.md.
+ * Exits 0 only when every check passes.
  *
  * Usage:
- *   node scripts/verify-real-pass.mjs --mp4 path/to-final.mp4 --project path/to-project.json
- *   node scripts/verify-real-pass.mjs --mp4 test-recordings/FINAL-OUTPUT-final.mp4 --min-seconds 30
+ *   npm run verify:real-pass
+ *   node scripts/verify-real-pass.mjs --mp4 test-recordings/FINAL-OUTPUT-final.mp4 --project /tmp/autotube-project.json
+ *   REAL_PASS_FIXTURE=1 MIN_DURATION_SEC=30 npm run verify:real-pass
+ *
+ * See scripts/squad/R7-real-pass.md for the full checklist and env var reference.
  */
 import { existsSync, statSync } from 'fs';
-import { join } from 'path';
+import { loadProject } from './lib/duration-check.mjs';
 import {
-  DURATION_TOLERANCE,
-  expectedRenderDuration,
-  loadProject,
-  probeMediaDuration,
-  verifyOutputDuration,
-} from './lib/duration-check.mjs';
+  parseRealPassConfig,
+  printHelp,
+  resolveMp4Path,
+  resolveProjectPath,
+  resolveRenderLogPath,
+  resolveManifestPath,
+} from './lib/real-pass-config.mjs';
+import {
+  readManifest,
+  readRenderLog,
+  check1PipelineDuration,
+  check2NoSilentTts,
+  check3CpuSafeEncode,
+  check4MediaPreload,
+  check5BackgroundMusic,
+  check6SizeDuration,
+  check7QualityGates,
+} from './lib/real-pass-checks.mjs';
 
-const ROOT = process.cwd();
+const ICON = { pass: '✅', fail: '❌', skip: '⏭' };
 
-function parseArgs(argv) {
-  const args = {
-    mp4: null,
-    project: null,
-    minSeconds: null,
-    tolerance: DURATION_TOLERANCE,
-  };
-  for (let i = 2; i < argv.length; i++) {
-    const key = argv[i];
-    const val = argv[i + 1];
-    if (key === '--mp4' && val) args.mp4 = val;
-    if (key === '--project' && val) args.project = val;
-    if (key === '--min-seconds' && val) args.minSeconds = parseFloat(val);
-    if (key === '--tolerance' && val) args.tolerance = parseFloat(val);
+/**
+ * @param {import('./lib/real-pass-checks.mjs').CheckResult} check
+ */
+function formatCheckLine(check) {
+  const icon = check.skipped ? ICON.skip : check.ok ? ICON.pass : ICON.fail;
+  const status = check.skipped ? 'SKIP' : check.ok ? 'PASS' : 'FAIL';
+  return `${icon} [${check.id}/7] ${check.title}: ${status}\n    ${check.message}`;
+}
+
+/**
+ * @param {import('./lib/real-pass-checks.mjs').CheckResult[]} checks
+ */
+function printSummary(config, mp4Path, projectPath, logPath, checks) {
+  const passed = checks.filter((c) => c.ok && !c.skipped).length;
+  const skipped = checks.filter((c) => c.skipped).length;
+  const failed = checks.filter((c) => !c.ok).length;
+  const allOk = failed === 0;
+
+  console.log('\n═══════════════════════════════════════════════════════════');
+  console.log(' R7 Real Pass — Seven-point verification');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log(` MP4:     ${mp4Path}`);
+  console.log(` Project: ${projectPath ?? '(none — duration ±10% may be skipped)'}`);
+  console.log(` Log:     ${logPath ?? '(none — preload/encode hints from MP4 only)'}`);
+  console.log(` Mode:    ${config.fixtureMode ? 'fixture/short' : 'full merge gate'} (min ${config.minSeconds}s, min ${(config.minSizeBytes / 1024 / 1024).toFixed(2)} MB)`);
+  console.log('───────────────────────────────────────────────────────────\n');
+
+  for (const check of checks) {
+    console.log(formatCheckLine(check));
   }
-  return args;
-}
 
-function resolveMp4(pathArg) {
-  if (!pathArg) return null;
-  if (existsSync(pathArg)) return pathArg;
-  const fromRoot = join(ROOT, pathArg);
-  return existsSync(fromRoot) ? fromRoot : null;
-}
+  console.log('\n───────────────────────────────────────────────────────────');
+  console.log(` Result: ${allOk ? `${ICON.pass} REAL PASS` : `${ICON.fail} REAL PASS BLOCKED`}`);
+  console.log(` Checks: ${passed} passed, ${failed} failed, ${skipped} skipped (of 7)`);
+  console.log('═══════════════════════════════════════════════════════════\n');
 
-function defaultMp4Candidates() {
-  return [
-    join(ROOT, 'test-recordings', 'FINAL-OUTPUT-final.mp4'),
-    join(ROOT, 'test-recordings', 'FINAL-OUTPUT.mp4'),
-  ];
-}
-
-function checkFileSize(mp4Path, minBytes = 100_000) {
-  if (!existsSync(mp4Path)) return { ok: false, message: `Missing MP4: ${mp4Path}` };
-  const size = statSync(mp4Path).size;
-  if (size < minBytes) {
-    return { ok: false, message: `MP4 too small (${size} bytes)` };
-  }
-  return { ok: true, size };
+  return allOk;
 }
 
 function main() {
-  const args = parseArgs(process.argv);
-  let mp4Path = resolveMp4(args.mp4);
+  const config = parseRealPassConfig(process.argv);
+
+  if (config.help) {
+    printHelp();
+    process.exit(0);
+  }
+
+  const mp4Path = resolveMp4Path(config.mp4);
   if (!mp4Path) {
-    for (const candidate of defaultMp4Candidates()) {
-      if (existsSync(candidate)) {
-        mp4Path = candidate;
-        break;
-      }
-    }
-  }
-
-  if (!mp4Path) {
-    console.error('❌ R7: No MP4 found. Pass --mp4 <path> or render test-recordings/FINAL-OUTPUT-final.mp4 first.');
+    console.error(`${ICON.fail} R7: No MP4 found. Pass --mp4 <path> or run npm run generate:video / npm run render:fixture first.`);
     process.exit(1);
   }
 
-  const sizeCheck = checkFileSize(mp4Path);
-  if (!sizeCheck.ok) {
-    console.error(`❌ R7 size gate: ${sizeCheck.message}`);
+  if (!existsSync(mp4Path)) {
+    console.error(`${ICON.fail} R7: MP4 not found: ${mp4Path}`);
     process.exit(1);
   }
 
-  const actualSec = probeMediaDuration(mp4Path);
-  if (actualSec == null) {
-    console.error(`❌ R7: ffprobe could not read duration for ${mp4Path}`);
+  const size = statSync(mp4Path).size;
+  if (size < 1024) {
+    console.error(`${ICON.fail} R7: MP4 too small (${size} bytes) — likely failed render`);
     process.exit(1);
   }
 
-  console.log(`📹 MP4: ${mp4Path}`);
-  console.log(`   Size: ${(sizeCheck.size / 1024 / 1024).toFixed(2)} MB`);
-  console.log(`   ffprobe duration: ${actualSec.toFixed(2)}s`);
-
-  if (args.minSeconds != null && actualSec < args.minSeconds) {
-    console.error(`❌ R7 min duration: ${actualSec.toFixed(1)}s < ${args.minSeconds}s`);
-    process.exit(1);
-  }
-
+  const projectPath = resolveProjectPath(config.project);
   let project = null;
-  if (args.project) {
-    const projectPath = resolveMp4(args.project) ?? args.project;
-    if (!existsSync(projectPath)) {
-      console.error(`❌ R7: project file not found: ${args.project}`);
+  if (projectPath && existsSync(projectPath)) {
+    try {
+      project = loadProject(projectPath);
+    } catch (err) {
+      console.error(`${ICON.fail} R7: Invalid project JSON at ${projectPath}: ${err.message}`);
       process.exit(1);
     }
-    project = loadProject(projectPath);
-  } else if (existsSync('/tmp/autotube-project.json')) {
-    project = loadProject('/tmp/autotube-project.json');
   }
 
-  if (project?.script?.length) {
-    const durationCheck = verifyOutputDuration(mp4Path, project, { tolerance: args.tolerance });
-    const expectedSec = durationCheck.expectedSec;
-    console.log(`   Expected (script sum + end screen): ${expectedSec.toFixed(2)}s`);
-    console.log(`   ${durationCheck.message}`);
-    if (!durationCheck.ok) {
-      process.exit(1);
-    }
-  } else {
-    console.log('   ℹ No project JSON — skipped ±10% script duration check (use --project)');
+  const logPath = resolveRenderLogPath(config.log);
+  const manifestPath = resolveManifestPath(config.manifest);
+  const renderLog = readRenderLog(logPath);
+  const manifest = readManifest(manifestPath);
+
+  const checks = [
+    check1PipelineDuration(config, mp4Path, project),
+    check2NoSilentTts(config, mp4Path, project, renderLog),
+    check3CpuSafeEncode(config, mp4Path, renderLog, manifest),
+    check4MediaPreload(config, renderLog, manifest),
+    check5BackgroundMusic(mp4Path, project, renderLog, manifest),
+    check6SizeDuration(config, mp4Path),
+    check7QualityGates(config),
+  ];
+
+  if (config.jsonOutput) {
+    const payload = {
+      ok: checks.every((c) => c.ok),
+      mp4Path,
+      projectPath,
+      logPath,
+      manifestPath,
+      config: {
+        minSeconds: config.minSeconds,
+        minSizeBytes: config.minSizeBytes,
+        fixtureMode: config.fixtureMode,
+        skipGateTest: config.skipGateTest,
+      },
+      checks,
+    };
+    console.log(JSON.stringify(payload, null, 2));
+    process.exit(payload.ok ? 0 : 1);
   }
 
-  console.log('✅ R7 duration gate passed');
+  const allOk = printSummary(config, mp4Path, projectPath, logPath, checks);
+  process.exit(allOk ? 0 : 1);
 }
 
 main();

@@ -3,9 +3,10 @@
  * Render a complete fixture project to final MP4 (no LLM / no browser UI).
  * Usage: node scripts/render-fixture-video.mjs
  */
-import { writeFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
+import { writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
+import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../server-render/pipelineReliability.mjs';
 
 const ROOT = process.cwd();
 const OUT = join(ROOT, 'test-recordings', 'FINAL-OUTPUT.mp4');
@@ -106,22 +107,33 @@ const result = spawnSync('node', ['server-render.mjs', OUT], {
   stdio: ['inherit', 'pipe', 'pipe'],
 });
 
+const renderLogPath = join(ROOT, 'test-recordings', 'latest-render.log');
+const renderLogBody = `${result.stdout || ''}\n${result.stderr || ''}`;
+writeFileSync(renderLogPath, renderLogBody);
+
 if (result.stdout) process.stdout.write(result.stdout.slice(-3000));
 if (result.stderr) process.stderr.write(result.stderr.slice(-1500));
+console.log(`📋 Render log: ${renderLogPath}`);
+
+if (result.status !== 0 && result.status !== null) {
+  console.error(`\n❌ server-render exited with code ${result.status}`);
+  process.exit(result.status);
+}
 
 const finalPath = OUT.replace('.mp4', '-final.mp4');
 const produced = existsSync(finalPath) ? finalPath : existsSync(OUT) ? OUT : null;
 
 if (!produced) {
   console.error('\n❌ No output file');
-  process.exit(result.status ?? 1);
-}
-
-const size = statSync(produced).size;
-if (size < 100_000) {
-  console.error(`\n❌ Output too small (${size} bytes) — render likely failed`);
   process.exit(1);
 }
+
+const gate = validateOutput(produced, 'Render output', { minBytes: MIN_RENDER_OUTPUT_BYTES });
+if (!gate.valid) {
+  console.error(`\n❌ ${gate.error}`);
+  process.exit(1);
+}
+const size = gate.size;
 console.log(`\n✅ FINAL VIDEO: ${produced}`);
 console.log(`   Size: ${(size / 1024 / 1024).toFixed(2)} MB`);
 

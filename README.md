@@ -71,7 +71,22 @@ Screenshots for each pipeline step are saved alongside the MP4 in the same `full
 npm run render:fixture
 ```
 
-### Configuration
+### Real Pass verification (R7 merge gate)
+
+Seven-point checklist enforced by `scripts/verify-real-pass.mjs`:
+
+```bash
+npm run verify:real-pass
+```
+
+**Fixture / short CI run** (30s minimum instead of 180s):
+
+```bash
+REAL_PASS_FIXTURE=1 MIN_DURATION_SEC=30 npm run verify:real-pass
+```
+
+Key env vars: `MIN_DURATION_SEC`, `MIN_SIZE_BYTES`, `FORCE_CPU` / `AUTOTUBE_FORCE_CPU`, `SKIP_GATE_TEST`, `RENDER_LOG`. Full checklist and example output: [`scripts/squad/R7-real-pass.md`](scripts/squad/R7-real-pass.md).
+
 
 1. Open the app in your browser
 2. Click the ⚙️ Settings button

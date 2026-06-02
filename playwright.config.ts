@@ -22,5 +22,8 @@ export default defineConfig({
     url: 'http://localhost:5173',
     reuseExistingServer: true,
     timeout: 30000,
+    env: {
+      AUTOTUBE_FORCE_CPU: process.env.AUTOTUBE_FORCE_CPU ?? '1',
+    },
   },
 });

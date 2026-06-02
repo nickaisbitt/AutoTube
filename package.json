@@ -12,6 +12,7 @@
     "test:app": "playwright test tests/app.spec.ts",
     "test:journey": "playwright test tests/user-journey.spec.ts",
     "test:e2e:smoke": "playwright test e2e/basic-flow.spec.ts",
+    "test:e2e:full": "playwright test e2e/full-pipeline.spec.ts",
     "generate:video": "node scripts/generate-full-video.mjs",
     "render:fixture": "node scripts/render-fixture-video.mjs",
     "verify:real-pass": "node scripts/verify-real-pass.mjs",

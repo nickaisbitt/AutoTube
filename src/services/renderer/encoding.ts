@@ -75,15 +75,25 @@ export async function tryServerRender(
     const saveTimeout = new AbortController();
     const saveTimer = setTimeout(() => saveTimeout.abort(), 10_000);
     const saveSignal = signal ? AbortSignal.any([signal, saveTimeout.signal]) : saveTimeout.signal;
-    const saveRes = await fetch('/api/save-project', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(project),
-      signal: saveSignal,
-    });
+    const saveRes = await fetch(
+      `/api/save-project?id=${encodeURIComponent(project.id)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(project),
+        signal: saveSignal,
+      },
+    );
     clearTimeout(saveTimer);
     if (!saveRes.ok) {
       logger.error('Renderer', `Failed to save project for server render: ${saveRes.status}`);
+      return null;
+    }
+
+    const saveData = (await saveRes.json()) as { path?: string };
+    const projectPath = saveData.path;
+    if (!projectPath) {
+      logger.error('Renderer', 'Save-project response missing path');
       return null;
     }
 
@@ -99,7 +109,7 @@ export async function tryServerRender(
     const res = await fetch('/api/server-render', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: project.id || '' }),
+      body: JSON.stringify({ projectPath }),
       signal: combinedSignal,
     });
     if (!res.ok || !res.body) {

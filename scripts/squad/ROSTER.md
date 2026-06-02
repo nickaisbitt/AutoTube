@@ -4,6 +4,14 @@
 **Role:** Assign tasks, resolve conflicts, track deliverables, gate merge on 7-point Real Pass.  
 **Reports to:** PR #17 branch `cursor/video-quality-pipeline-dbd4`
 
+**Commands:**
+- `npm run squad:status` — all 17 agents + status
+- `npm run squad:assign` — wave assignments
+- `npm run squad:gate` — R7 merge gate (strict)
+- `npm run squad:gate:fixture` — R7 in CI/fixture mode
+
+**Manifest:** `scripts/squad/agents.json` · **Orchestrator:** `scripts/squad/manager.mjs`
+
 ## Specialists (15 failure points)
 
 | ID | Owner | Mission |

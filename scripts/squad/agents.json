@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "branch": "cursor/video-quality-pipeline-dbd4",
+  "pr": 17,
+  "agents": [
+    {
+      "id": "M0",
+      "role": "manager",
+      "title": "Squad Manager",
+      "mission": "Assign tasks, track deliverables, gate merge on R7",
+      "brief": "scripts/squad/manager-brief.md",
+      "commands": ["node scripts/squad/manager.mjs status", "node scripts/squad/manager.mjs gate"]
+    },
+    {
+      "id": "A1",
+      "role": "specialist",
+      "title": "E2E Product Path",
+      "mission": "Full UI/CLI topic→MP4 (not fixture-only)",
+      "files": ["scripts/generate-full-video.mjs", "src/store/pipeline/orchestrator.ts"],
+      "evidence": "npm run generate:video -- \"Test topic\"",
+      "realPass": [1]
+    },
+    {
+      "id": "A2",
+      "role": "specialist",
+      "title": "Duration Match",
+      "mission": "Output duration within ±10% of script sum",
+      "files": ["server-render.mjs", "scripts/lib/duration-check.mjs"],
+      "evidence": "node scripts/lib/duration-check.mjs --mp4 test-recordings/FINAL-OUTPUT-final.mp4",
+      "realPass": [1]
+    },
+    {
+      "id": "A3",
+      "role": "specialist",
+      "title": "TTS Reliability",
+      "mission": "Kokoro/edge-tts chain, no silent segments",
+      "brief": "scripts/squad/A3-tts-setup.md",
+      "files": ["deploy/server-render/narration.mjs"],
+      "evidence": "python3 -m edge_tts --version",
+      "realPass": [2]
+    },
+    {
+      "id": "A4",
+      "role": "specialist",
+      "title": "CPU Encode Fallback",
+      "mission": "Auto libx264 when NVENC/VAAPI fails",
+      "files": ["server-render.mjs", "src/services/renderer/encoding.ts"],
+      "evidence": "AUTOTUBE_FORCE_CPU=1 npm run render:fixture",
+      "realPass": [3]
+    },
+    {
+      "id": "A5",
+      "role": "specialist",
+      "title": "ffmpeg Scope + Cleanup",
+      "mission": "Scoped ffmpeg, activeFfmpeg cleanup, deploy sync",
+      "files": ["server-render.mjs", "deploy/server-render.mjs", "scripts/ensure-server-render.mjs"],
+      "evidence": "npm run render:fixture",
+      "realPass": [3]
+    },
+    {
+      "id": "A6",
+      "role": "specialist",
+      "title": "Visual Preload",
+      "mission": "≥90% image preload before frame loop",
+      "files": ["server-render.mjs", "src/services/mediaQualityGate.ts"],
+      "evidence": "grep MediaPreload test-recordings/latest-render.log",
+      "realPass": [4]
+    },
+    {
+      "id": "A7",
+      "role": "specialist",
+      "title": "Background Music",
+      "mission": "Ship AAC assets, wire musicPreset mux",
+      "files": ["public/audio/*.aac", "deploy/server-render/audio.mjs"],
+      "evidence": "ls public/audio/bg-*.aac",
+      "realPass": [5]
+    },
+    {
+      "id": "A8",
+      "role": "specialist",
+      "title": "Hook / Cold Open",
+      "mission": "Cold-open frames + hook overlay in first 0.3s",
+      "files": ["server-render.mjs", "deploy/server-render.mjs"],
+      "evidence": "grep -i cold.open test-recordings/latest-render.log",
+      "realPass": []
+    },
+    {
+      "id": "A9",
+      "role": "specialist",
+      "title": "Quality Gates",
+      "mission": "Block export on gate failure; fix AI reviewer inflation",
+      "files": ["src/store/pipeline/orchestrator.ts", "deploy/server-render/aiReviewer.mjs"],
+      "evidence": "npm run test:unit -- src/store/__tests__/qualityGates.test.ts",
+      "realPass": [7]
+    },
+    {
+      "id": "A10",
+      "role": "specialist",
+      "title": "E2E CI",
+      "mission": "Playwright full journey + MP4 assertions",
+      "files": ["e2e/full-pipeline.spec.ts", "e2e/mp4-gates.ts"],
+      "evidence": "npm run test:e2e:full",
+      "realPass": [6]
+    },
+    {
+      "id": "A11",
+      "role": "specialist",
+      "title": "Success Signals",
+      "mission": "No success on 0-byte; propagate exit codes",
+      "files": ["server/routes/serverRender.ts", "scripts/generate-full-video.mjs"],
+      "evidence": "grep MIN_RENDER_OUTPUT server/routes/serverRender.ts",
+      "realPass": [6]
+    },
+    {
+      "id": "A12",
+      "role": "specialist",
+      "title": "OpenRouter Mocks",
+      "mission": "Context-aware E2E mock routing",
+      "files": ["e2e/openRouterMock.mjs", "e2e/fixtures.ts"],
+      "evidence": "npm run test:e2e:smoke",
+      "realPass": []
+    },
+    {
+      "id": "A13",
+      "role": "specialist",
+      "title": "Viral Packaging",
+      "mission": "Thumbnail concepts + title variants wired",
+      "files": ["src/services/thumbnail.ts", "src/store/pipeline/orchestrator.ts"],
+      "evidence": "grep thumbnailConcept src/store/pipeline/orchestrator.ts",
+      "realPass": []
+    },
+    {
+      "id": "A14",
+      "role": "specialist",
+      "title": "Ops / Save Project",
+      "mission": "Stable save-project path contract",
+      "files": ["server/utils/projectPaths.ts", "server/routes/serverRender.ts"],
+      "evidence": "grep resolveSavedProjectPath server/",
+      "realPass": []
+    },
+    {
+      "id": "A15",
+      "role": "specialist",
+      "title": "P0 Checklist Automation",
+      "mission": "Automate bugfix spec 2.216–2.225 subset",
+      "files": ["src/services/videoQualityChecklist.ts", "scripts/lib/video-quality-checklist.mjs"],
+      "evidence": "npm run test:unit -- src/services/__tests__/videoQualityChecklist.unit.test.ts",
+      "realPass": []
+    },
+    {
+      "id": "R7",
+      "role": "verifier",
+      "title": "Real Pass (7-point)",
+      "mission": "Enforce all 7 merge-gate criteria",
+      "brief": "scripts/squad/R7-real-pass.md",
+      "files": ["scripts/verify-real-pass.mjs", "scripts/lib/real-pass-*.mjs"],
+      "evidence": "npm run verify:real-pass",
+      "realPass": [1, 2, 3, 4, 5, 6, 7]
+    }
+  ],
+  "waves": [
+    { "name": "Wave 0", "agents": ["M0", "A12"] },
+    { "name": "Wave 1", "agents": ["A5", "A14"] },
+    { "name": "Wave 2", "agents": ["A4", "A11"] },
+    { "name": "Wave 3", "agents": ["A3", "A6", "A7"] },
+    { "name": "Wave 4", "agents": ["A2", "A1", "A8", "A13"] },
+    { "name": "Wave 5", "agents": ["A9", "A10"] },
+    { "name": "Wave 6", "agents": ["R7", "A15", "M0"] }
+  ]
+}

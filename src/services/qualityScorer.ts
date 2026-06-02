@@ -6,6 +6,20 @@ import type { MediaCandidate } from './media';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { repairTruncatedJson } from '../utils/jsonRepair';
 import { logger } from './logger';
+import {
+  GENERIC_HOOK_PHRASES,
+  runVideoQualityChecklist,
+  checklistCriticalFailures,
+  type ChecklistCheckResult,
+  type ProjectChecklistInput,
+} from './videoQualityChecklist';
+
+export {
+  runVideoQualityChecklist,
+  checklistCriticalFailures,
+  type ChecklistCheckResult,
+  type ProjectChecklistInput,
+} from './videoQualityChecklist';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -367,16 +381,8 @@ export function generateMustReplaceWarnings(
 
   // Generic opening warning
   if (openingNarration) {
-    const genericPhrases = [
-      'in today\'s video',
-      'welcome back',
-      'hey guys',
-      'what\'s up',
-      'in this video',
-      'let me tell you',
-    ];
     const lower = openingNarration.toLowerCase();
-    const isGeneric = genericPhrases.some((p) => lower.includes(p));
+    const isGeneric = GENERIC_HOOK_PHRASES.some((p) => lower.includes(p));
     if (isGeneric) {
       warnings.push({
         section: 'opening',
@@ -544,4 +550,22 @@ function buildClipReason(
   parts.push(`Supports narration: "${firstWords}…"`);
 
   return parts.join('. ');
+}
+
+/**
+ * Run P0 video-quality checklist gates (duration, hook, cliché media, segments).
+ * Used by verify-real-pass and pre-export validation.
+ */
+export function validateVideoQualityChecklist(options: {
+  actualDurationSec?: number | null;
+  minDurationSec?: number;
+  project?: ProjectChecklistInput;
+}): { passed: boolean; results: ChecklistCheckResult[]; failures: ChecklistCheckResult[] } {
+  const results = runVideoQualityChecklist(options);
+  const failures = checklistCriticalFailures(results);
+  return {
+    passed: failures.length === 0,
+    results,
+    failures,
+  };
 }

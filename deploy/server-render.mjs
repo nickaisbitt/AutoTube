@@ -35,7 +35,7 @@ import { generateFFmpegChapterMetadata, chaptersFromSegments, embedChaptersComma
 import { drawLowerThird, drawNameCard, drawSourceCitation, drawProgressTimeline, drawTransition, drawChartReveal, extractNamesFromText, extractCitationsFromSegments, selectTransitionForSegment, drawAnimatedBarChart, drawBounceText, drawElasticText, drawSlideInText, drawParallaxBackground, logBRollCoverage, snapTransitionToBeat, easeInOut, easeOut, easeInBounce, applyBreathingRoom, drawZoomTransition, getAvailableTransitions } from './server-render/advancedRender.mjs';
 import {
   renderQueue, progressBroadcaster, checkAvailableMemory, logMemoryUsage,
-  EtaEstimator, validateOutput, stepMetrics, saveCheckpoint, loadCheckpoint,
+  EtaEstimator, validateOutput, assertRenderOutput, stepMetrics, saveCheckpoint, loadCheckpoint,
   clearCheckpoint, parseFfmpegError, getRecoveryAction, QUALITY_DEGRADATION_CHAIN,
   retryWithFallback, recommendNodeFlags, yieldToEventLoop, RenderStateManager,
   measureAudioLoudness,
@@ -4822,6 +4822,12 @@ async function render() {
   } catch (cleanupErr) {
     console.warn(`   Failed to clean up video clips: ${cleanupErr.message}`);
   }
+
+  if (!renderPassed || !finalMp4File) {
+    throw new Error('Render failed: pipeline did not produce output');
+  }
+  const finalOutputGate = assertRenderOutput(finalMp4File, 'Final render output');
+  log('info', `  ✅ Final output validated (${(finalOutputGate.size / 1024 / 1024).toFixed(1)}MB)`);
 
   if (renderPassed && finalMp4File) {
     // Copy to Downloads with a topic-based filename

@@ -296,18 +296,35 @@ export class EtaEstimator {
   }
 }
 
-// ── Quality Gates (Task 124) ───────────────────────────────────────────────
-export function validateOutput(path, label) {
+// ── Quality Gates (Task 124 / A11) ─────────────────────────────────────────
+/** Minimum bytes for a final MP4 artifact to count as a successful render. */
+export const MIN_RENDER_OUTPUT_BYTES = 100_000;
+
+export function validateOutput(path, label, options = {}) {
+  const minBytes = options.minBytes ?? 100;
   if (!path) return { valid: false, error: `${label}: path is null/undefined` };
   if (!existsSync(path)) return { valid: false, error: `${label}: file does not exist at ${path}` };
   try {
     const stats = statSync(path);
     if (stats.size === 0) return { valid: false, error: `${label}: file is empty (0 bytes)` };
-    if (stats.size < 100) return { valid: false, error: `${label}: file suspiciously small (${stats.size} bytes)` };
+    if (stats.size < minBytes) {
+      return { valid: false, error: `${label}: file too small (${stats.size} bytes, minimum ${minBytes})` };
+    }
     return { valid: true, size: stats.size };
   } catch (err) {
     return { valid: false, error: `${label}: stat failed: ${err.message}` };
   }
+}
+
+/** Throws if the final render output is missing, empty, or below MIN_RENDER_OUTPUT_BYTES. */
+export function assertRenderOutput(path, label = 'Final render output') {
+  const gate = validateOutput(path, label, { minBytes: MIN_RENDER_OUTPUT_BYTES });
+  if (!gate.valid) {
+    const err = new Error(gate.error);
+    err.code = 'INVALID_RENDER_OUTPUT';
+    throw err;
+  }
+  return gate;
 }
 
 // ── Per-Step Metrics (Task 125) ────────────────────────────────────────────

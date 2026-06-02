@@ -1,47 +1,65 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import { spawn } from "child_process";
 import { join, dirname } from "path";
-import { readFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, existsSync, statSync } from "fs";
 import { fileURLToPath } from "url";
+import { resolveSavedProjectPath } from "../utils/projectPaths.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // Project root is two levels up from server/routes/
 const PROJECT_ROOT = join(__dirname, "..", "..");
 
+/** Must match MIN_RENDER_OUTPUT_BYTES in deploy/server-render/pipelineReliability.mjs */
+const MIN_RENDER_OUTPUT_BYTES = 100_000;
+
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  return new Promise((resolve, reject) => {
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => {
+      try {
+        const raw = Buffer.concat(chunks).toString();
+        resolve(raw ? (JSON.parse(raw) as Record<string, unknown>) : {});
+      } catch {
+        resolve({});
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
 /**
  * POST /api/server-render
  * Full server-side render (node-canvas + edge-tts + ffmpeg).
  * Spawns server-render.mjs as a child process. The project must
- * already be saved to /tmp/autotube-project.json (via /api/save-project).
+ * already be saved via /api/save-project; pass the returned `path`
+ * in the request body as `projectPath`.
  * Returns SSE progress events and the final file path on success.
  */
 export async function handleServerRender(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
+  const body = await readJsonBody(req);
+  const projectPath = resolveSavedProjectPath(body);
+
+  if (!projectPath) {
+    res.statusCode = 400;
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        error: "No project saved. Call /api/save-project first.",
+      }),
+    );
+    return;
+  }
+
   const outputMp4 = join(
     PROJECT_ROOT,
     "test-recordings",
     `server-render-${Date.now()}.mp4`,
   );
-
-  // Ensure the project is saved before spawning
-  if (!existsSync("/tmp/autotube-project.json")) {
-    const tmpFiles = readdirSync("/tmp").filter(
-      (f: string) => f.startsWith("autotube-project") && f.endsWith(".json"),
-    );
-    if (tmpFiles.length === 0) {
-      res.statusCode = 400;
-      res.setHeader("Content-Type", "application/json");
-      res.end(
-        JSON.stringify({
-          error: "No project saved. Call /api/save-project first.",
-        }),
-      );
-      return;
-    }
-  }
 
   // Set SSE headers for progress streaming
   res.setHeader("Content-Type", "text/event-stream");
@@ -108,7 +126,7 @@ export async function handleServerRender(
     ? join("remotion", "render.mjs")
     : join("server-render", "index.mjs");
 
-  const child = spawn("node", [renderScript, join('/tmp', 'autotube-project.json'), outputMp4], {
+  const child = spawn("node", [renderScript, projectPath, outputMp4], {
     cwd: PROJECT_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...envVars, DEV_SERVER_URL: devServerUrl, REMOTION_SERVE_URL: useRemotion ? devServerUrl : undefined },
@@ -152,6 +170,36 @@ export async function handleServerRender(
       sendEvent({
         type: "error",
         message: "Render completed but output file not found",
+      });
+      res.end();
+      return;
+    }
+
+    let outputSize: number;
+    try {
+      outputSize = statSync(fileToReturn).size;
+    } catch (err) {
+      sendEvent({
+        type: "error",
+        message: `Render completed but output file is unreadable: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      res.end();
+      return;
+    }
+
+    if (outputSize === 0) {
+      sendEvent({
+        type: "error",
+        message: "Render completed but output file is empty (0 bytes)",
+      });
+      res.end();
+      return;
+    }
+
+    if (outputSize < MIN_RENDER_OUTPUT_BYTES) {
+      sendEvent({
+        type: "error",
+        message: `Render output too small (${outputSize} bytes, minimum ${MIN_RENDER_OUTPUT_BYTES})`,
       });
       res.end();
       return;

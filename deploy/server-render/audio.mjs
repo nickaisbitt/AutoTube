@@ -21,7 +21,7 @@ import { fileURLToPath } from 'url';
 import { computeReverbFilter, computeStereoPanFilter, generateAmbientBed, computeSubBassRumble, buildFilterChain } from './audioFx.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = join(__dirname, '..');
+const PROJECT_ROOT = join(__dirname, '..', '..');
 
 /** Style-to-filename mapping for background music tracks. */
 const BG_MUSIC_MAP = {
@@ -31,24 +31,43 @@ const BG_MUSIC_MAP = {
   explainer: 'bg-uplifting.aac',
 };
 
+/** User-selected music preset → filename (matches src/services/audioMixer.ts). */
+const MUSIC_PRESET_MAP = {
+  tense: 'bg-tense.aac',
+  uplifting: 'bg-uplifting.aac',
+  neutral: 'bg-neutral.aac',
+  ambient: 'bg-neutral.aac',
+};
+
 /**
- * Resolves the background music file path for a given video style.
- * Returns the absolute path if the style-specific file exists.
- * Falls back to the generic neutral track if the style-specific file is missing.
- * Returns null only if neither file exists on disk.
+ * Resolves the background music file path for a given video style and/or preset.
+ * musicPreset takes priority over style when provided.
+ * Falls back to the generic neutral track if the preferred file is missing.
+ * Returns null only if no bg music file exists on disk.
  *
- * @param {string} style  The video style (e.g. 'business_insider').
+ * @param {string|null} style  The video style (e.g. 'business_insider').
+ * @param {string|null} [musicPreset]  Explicit preset id (e.g. 'tense', 'neutral').
  * @returns {string|null}
  */
-export function resolveBackgroundMusicPath(style) {
-  const filename = BG_MUSIC_MAP[style];
-  if (filename) {
-    const stylePath = join(PROJECT_ROOT, 'public', 'audio', filename);
-    if (existsSync(stylePath)) return stylePath;
+export function resolveBackgroundMusicPath(style, musicPreset = null) {
+  const candidates = [];
+
+  if (musicPreset && MUSIC_PRESET_MAP[musicPreset]) {
+    candidates.push(MUSIC_PRESET_MAP[musicPreset]);
   }
-  // Fallback to generic neutral track
-  const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'bg-neutral.aac');
-  return existsSync(fallbackPath) ? fallbackPath : null;
+
+  if (style && BG_MUSIC_MAP[style]) {
+    candidates.push(BG_MUSIC_MAP[style]);
+  }
+
+  candidates.push('bg-neutral.aac');
+
+  for (const filename of candidates) {
+    const filePath = join(PROJECT_ROOT, 'public', 'audio', filename);
+    if (existsSync(filePath)) return filePath;
+  }
+
+  return null;
 }
 
 /**
@@ -737,6 +756,7 @@ export function createBgMusicOnlyTrack(bgMusicPath, outputFile, duration, bgVolu
  * @param {number} videoDuration   Total video duration in seconds.
  * @param {object} [options]       Additional options.
  * @param {string} [options.style] Video style for bg music selection.
+ * @param {string} [options.musicPreset] Explicit music preset (overrides style mapping).
  * @param {boolean} [options.backgroundMusic=true] Whether to include background music.
  * @param {Array<{start: number, end: number}>} [options.narrationTimings] Narration segments for dynamic ducking.
  * @returns {boolean} True if muxing succeeded.
@@ -744,18 +764,20 @@ export function createBgMusicOnlyTrack(bgMusicPath, outputFile, duration, bgVolu
 export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDuration, options = {}) {
   const { 
     style = null, 
+    musicPreset = null,
     backgroundMusic = true,
     narrationTimings = [] 
   } = options;
   
   const hasNarration = narrationFile && existsSync(narrationFile);
 
-  // Resolve background music path based on style
+  // Resolve background music path (preset overrides style when set)
   let bgMusicPath = null;
-  if (backgroundMusic && style) {
-    bgMusicPath = resolveBackgroundMusicPath(style);
+  if (backgroundMusic) {
+    bgMusicPath = resolveBackgroundMusicPath(style, musicPreset);
     if (bgMusicPath) {
-      console.log(`  🎼 Background music resolved: ${bgMusicPath}`);
+      const source = musicPreset ? `preset=${musicPreset}` : (style ? `style=${style}` : 'default');
+      console.log(`  🎼 Background music resolved (${source}): ${bgMusicPath}`);
     }
   }
 

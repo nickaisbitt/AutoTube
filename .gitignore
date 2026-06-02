@@ -24,6 +24,7 @@ narration-audio-*/
 *.mp3
 !public/audio/**
 *.aac
+!public/audio/*.aac
 output/
 tmp/
 dev.pid

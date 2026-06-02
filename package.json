@@ -14,6 +14,7 @@
     "test:e2e:smoke": "playwright test e2e/basic-flow.spec.ts",
     "generate:video": "node scripts/generate-full-video.mjs",
     "render:fixture": "node scripts/render-fixture-video.mjs",
+    "verify:real-pass": "node scripts/verify-real-pass.mjs",
     "test:unit": "vitest run --passWithNoTests",
     "test:unit:watch": "vitest",
     "test:unit:coverage": "vitest run --coverage",

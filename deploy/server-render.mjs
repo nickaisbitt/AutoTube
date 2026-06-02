@@ -5191,7 +5191,6 @@ export function validateUrlSafety(urlString) {
 export {
   fetchProject,
   fetchImage,
-  buildImageFetchSources,
   imageCache,
   cacheSet,
   MAX_CACHE_SIZE,

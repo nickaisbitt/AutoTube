@@ -4,9 +4,9 @@ import AppModals from './components/AppModals';
 import PipelineStepRouter from './components/PipelineStepRouter';
 import RenderProgressDashboard from './components/RenderProgressDashboard';
 import ToastContainer from './components/Toast';
-import { useVideoProject } from './store';
+import { StoreProvider, useVideoProject } from './store/StoreContext';
 
-export default function App() {
+function AppContent() {
   const { appConfig, loadProject, project, assembleVideo } = useVideoProject();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -57,5 +57,13 @@ export default function App() {
       />
       <ToastContainer />
     </AppShell>
+  );
+}
+
+export default function App() {
+  return (
+    <StoreProvider>
+      <AppContent />
+    </StoreProvider>
   );
 }

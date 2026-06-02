@@ -1,4 +1,4 @@
-import { useVideoProject } from '../store';
+import { useVideoProject } from '../store/StoreContext';
 import OnboardingModal from './OnboardingModal';
 import SettingsModal from './SettingsModal';
 import ExportModal from './ExportModal';

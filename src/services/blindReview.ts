@@ -489,7 +489,9 @@ export function parseQualityReport(raw: unknown): QualityReport {
       parsed = raw as Record<string, unknown>;
     }
   } catch (err) {
-    console.warn('Blind review analysis parse failed:', err);
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('Blind review analysis parse failed:', err);
+    }
     // If parsing fails, use empty object — all defaults will apply
   }
 

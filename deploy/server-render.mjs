@@ -2574,7 +2574,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
             const score = saturationCache.get(asset.url);
             filterString = computeAdaptiveFilter(score, globalBrightnessBoost * 1.22);
           } else {
-            filterString = `saturate(1.1) contrast(1.05) brightness(${finalBrightness})`;
+            filterString = `saturate(1.18) contrast(1.12) brightness(${finalBrightness})`;
           }
 
           const isChart = isChartAsset(asset);
@@ -2615,8 +2615,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 }
 
-  // Letterbox bars — black bars with subtle accent inner edge glow
-  const barH = Math.round(HEIGHT * 0.04);
+  // Slim cinematic bars (was 4% — felt dated and ate caption space)
+  const barH = Math.round(HEIGHT * 0.012);
   const accentHex = ACCENT_COLORS[seg.type] || '#ffffff';
   // Black bars
   ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
@@ -2823,7 +2823,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     ctx.shadowBlur = 16;
   }
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
+  const segmentTitlePx = Math.round(HEIGHT * 0.042);
+  ctx.font = `bold ${segmentTitlePx}px system-ui, Montserrat, Impact, sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText(seg.title.substring(0, 50), titleSafeZone.left + 12, ltY + 10);
@@ -2960,14 +2961,17 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     if (visibleCount > 0) {
       // Modern glass-morphism caption background — centered for mobile readability
       const capSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
-      const capBgW = Math.min(1200, WIDTH * 0.65);
-      const capBgH = 64;
-      // Position above the title overlay area to avoid overlap
-      const capY = Math.min(HEIGHT - barH - 100, HEIGHT - capSafeZone.bottom - capBgH - 12);
+      const capBgW = Math.min(1400, WIDTH * 0.88);
+      const capBgH = Math.round(HEIGHT * 0.11);
+      const capFontPx = Math.round(HEIGHT * 0.052);
+      const capFontCurrentPx = Math.round(HEIGHT * 0.062);
+      const capStrokePx = Math.max(6, Math.round(HEIGHT * 0.007));
+      // Position in lower third — YouTube-style readable zone
+      const capY = Math.min(HEIGHT - barH - capBgH - 28, HEIGHT - capSafeZone.bottom - capBgH - 20);
 
       // Glass background with rounded corners
       ctx.save();
-      ctx.fillStyle = 'rgba(10, 10, 26, 0.80)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
       if (!DRAFT_MODE) {
         ctx.shadowColor = 'rgba(96, 165, 250, 0.15)';
         ctx.shadowBlur = 20;
@@ -2985,8 +2989,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       ctx.stroke();
       ctx.restore();
       // Measure total width to center the word group
-      const normalFont = '900 30px system-ui, Montserrat, Impact, sans-serif';
-      const boldFont = '900 34px system-ui, Montserrat, Impact, sans-serif';
+      const normalFont = `900 ${capFontPx}px system-ui, Montserrat, Impact, sans-serif`;
+      const boldFont = `900 ${capFontCurrentPx}px system-ui, Montserrat, Impact, sans-serif`;
       const spaceWidth = measureWordCached(ctx, normalFont, ' ');
 
       // Pre-measure all words (cached)
@@ -3006,7 +3010,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       }
 
       // Draw each word
-      const centerY = capY + 24;
+      const centerY = capY + Math.round(capBgH * 0.42);
       let curX = WIDTH / 2 - totalWidth / 2;
 
       for (let wi = 0; wi < visibleCount; wi++) {
@@ -3055,7 +3059,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
         // Draw thick solid black stroke behind every word for absolute legibility
         if (typeof ctx.strokeText === 'function') {
           ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 5;
+          ctx.lineWidth = capStrokePx;
           ctx.strokeText(displayWord, curX, centerY);
         }
 
@@ -3994,7 +3998,7 @@ async function render() {
       ctx.save();
       ctx.globalAlpha = Math.min(1, hookProgress * 3);
       ctx.fillStyle = '#ffffff';
-      ctx.font = `bold ${Math.round(HEIGHT * 0.05)}px system-ui, -apple-system, sans-serif`;
+      ctx.font = `bold ${Math.round(HEIGHT * 0.078)}px system-ui, Montserrat, Impact, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
@@ -4009,7 +4013,8 @@ async function render() {
     const comingUpSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
     ctx.save();
     ctx.globalAlpha = 0.8;
-    ctx.font = '600 14px system-ui, -apple-system, sans-serif';
+    const comingUpPx = Math.round(HEIGHT * 0.022);
+    ctx.font = `700 ${comingUpPx}px system-ui, Montserrat, sans-serif`;
     ctx.letterSpacing = '2px';
     const comingUpW = ctx.measureText('COMING UP...').width;
     const comingUpPadX = 10;
@@ -4625,10 +4630,10 @@ async function render() {
           style: videoStyle,
           musicPreset,
           backgroundMusic: bgMusicEnabled,
-          enableAmbient: true,
+          enableAmbient: false,
           enableAudioFx: true,
-          enableSubBass: true,
-          enableDucking: true,
+          enableSubBass: false,
+          enableDucking: false,
           statTimestamps: project.script ? project.script.map((s, i) => {
             const match = s.narration ? s.narration.match(/\d+%/) : null;
             return match ? i * 8 : null;

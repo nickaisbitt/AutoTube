@@ -149,7 +149,7 @@ export function findCurrentWord(progress, segmentDuration, wordTimestamps, total
     }
 
     // Sliding window: show surrounding words centered on current
-    const windowSize = 7;
+    const windowSize = 5;
     const windowStart = Math.max(0, Math.min(wordIndex - Math.floor(windowSize / 2), wordTimestamps.length - windowSize));
     const windowEnd = Math.min(wordTimestamps.length, windowStart + windowSize);
 
@@ -158,7 +158,7 @@ export function findCurrentWord(progress, segmentDuration, wordTimestamps, total
 
   // Fallback: uniform distribution (existing behavior)
   const wordIndex = Math.min(Math.floor(progress * totalWords), totalWords - 1);
-  const windowSize = 7;
+  const windowSize = 5;
   const windowStart = Math.max(0, Math.min(wordIndex - Math.floor(windowSize / 2), totalWords - windowSize));
   const windowEnd = Math.min(totalWords, windowStart + windowSize);
 

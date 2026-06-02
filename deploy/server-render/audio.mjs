@@ -190,7 +190,7 @@ export function convertAudioFormat(inputFile, outputFile, options = {}) {
  * @returns {number} Linear volume multiplier (0.0–1.0).
  */
 export function computeBgMusicVolume(hasNarration, options = {}) {
-  const { duckingLevel = -18.4, peakLevel = -8 } = options;
+  const { duckingLevel = -28, peakLevel = -14 } = options;
 
   // Convert dB to linear scale: linear = 10^(dB/20)
   const dbValue = hasNarration ? duckingLevel : peakLevel;
@@ -212,7 +212,7 @@ export function computeBgMusicVolume(hasNarration, options = {}) {
  * @returns {boolean} True if ducking succeeded.
  */
 export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, totalDuration, options = {}) {
-  const { duckingLevel = -24, peakLevel = -14, fadeDuration = 0.3, lookAhead = 0.1 } = options;
+  const { duckingLevel = -32, peakLevel = -18, fadeDuration = 0.35, lookAhead = 0.1 } = options;
 
   console.log(`  🎚️ Applying dynamic ducking envelope (${narrationTimings.length} narration segments)...`);
 
@@ -518,10 +518,11 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
   // Build filter chain with audio FX
   const narrationFilter = [
     '[0:a]aresample=48000:async=1:min_hard_comp=0.100000',
-    'highpass=f=80',
-    'compand=attacks=0.1:decays=0.1:points=-20/-20|-10/-5|0/0',
-    'equalizer=f=3000:t=q:w=1:g=2',
-    'adelay=1500|1500',
+    'highpass=f=100',
+    'lowpass=f=12000',
+    'compand=attacks=0.05:decays=0.2:points=-25/-25|-12/-8|0/-2|20/-5',
+    'equalizer=f=2500:t=q:w=1.2:g=4',
+    'equalizer=f=180:t=q:w=0.8:g=-2',
   ].join(',');
   const filterParts = [
     `${narrationFilter}[narration]`,
@@ -538,7 +539,8 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
     '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
     roomToneFile,
   ], { encoding: 'utf8', timeout: 30000 });
-  const hasRoomTone = rtResult.status === 0 && existsSync(roomToneFile);
+  const enableRoomTone = process.env.AUTOTUBE_ROOM_TONE === '1';
+  const hasRoomTone = enableRoomTone && rtResult.status === 0 && existsSync(roomToneFile);
 
   // Build input list for ffmpeg
   const inputFiles = [narrationFile, bgMusicPath];
@@ -584,14 +586,13 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
   const mixInputs = mixLabels.map(l => `[${l}]`).join('');
   const inputCount = mixLabels.length;
 
-  // Account for 1.5s adelay in total duration
-  const actualDuration = totalDur + 1.5;
+  const actualDuration = totalDur;
   const fadeDuration = 2;
   const fadeStart = Math.max(0, actualDuration - fadeDuration);
 
   if (enableAudioFx) {
-    const reverbFilter = computeReverbFilter('subtle');
-    filterParts.push(`[narration]${reverbFilter}[narration_fx]`);
+    // Dry voice-first mix — reverb was muddying narration on laptop speakers
+    filterParts.push('[narration]aresample=48000:async=1[narration_fx]');
     
     const panDirection = style === 'warfront' ? 'left-to-right' : style === 'cyber' ? 'right-to-left' : 'center';
     if (panDirection !== 'center') {
@@ -601,10 +602,10 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
       filterParts.push('[bg]aresample=48000:async=1[bg_fx]');
     }
     
-    const weights = ['1', '0.5', ...extraInputs.map(() => '0.1'), ...noiseLabels.map(() => '0.08')].join(' ');
+    const weights = ['1.6', '0.22', ...extraInputs.map(() => '0.06'), ...noiseLabels.map(() => '0.04')].join(' ');
     filterParts.push(`${mixInputs}amix=inputs=${inputCount}:duration=first:dropout_transition=3:weights="${weights}",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);
   } else {
-    filterParts.push(`[narration][bg]amix=inputs=2:duration=first:dropout_transition=3:weights="1 0.5",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);
+    filterParts.push(`[narration][bg]amix=inputs=2:duration=first:dropout_transition=3:weights="1.6 0.22",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);
   }
 
   const filterChain = filterParts.join(';');

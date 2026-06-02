@@ -782,7 +782,7 @@ function generateEdgeTtsSegment(text, audioFile, subtitleFile, voice, edgeRunner
   const edgeArgs = [
     ...runner.prefixArgs,
     '--voice', voice,
-    '--rate', '+10%',
+    '--rate', '+0%',
     '--text', text,
     '--write-media', audioFile,
     '--write-subtitles', subtitleFile,
@@ -838,10 +838,13 @@ export async function generateNarration(segments, outputDir, options = {}) {
     // Validate seg.duration to prevent ffmpeg crashes from NaN/undefined
     const segDuration = (typeof seg.duration === 'number' && !isNaN(seg.duration) && seg.duration > 0) ? seg.duration : 10;
 
-    // Generate 1.5s silence for the segment title card
-    const silenceFile = join(outputDir, `silence-${i}.wav`);
-    if (generateSilence(silenceFile, 1.5)) {
-      audioFiles.push({ file: silenceFile, duration: 1.5 });
+    // Brief pause between segments (video has no segment title cards — keep A/V in sync)
+    const segmentGapSec = parseFloat(process.env.AUTOTUBE_SEGMENT_GAP_SEC || '0.25');
+    if (segmentGapSec > 0) {
+      const silenceFile = join(outputDir, `silence-${i}.wav`);
+      if (generateSilence(silenceFile, segmentGapSec)) {
+        audioFiles.push({ file: silenceFile, duration: segmentGapSec });
+      }
     }
 
     const audioFile = join(outputDir, `narration-${i}.wav`);

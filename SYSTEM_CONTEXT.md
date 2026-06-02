@@ -82,6 +82,12 @@ The system incorporates four massive technical upgrades implemented to ensure ab
 * **Incident:** MeloTTS (Cloudflare Workers) was listed in engine fallback chains but had been removed from `TTS_ENGINES`, causing inconsistent state.
 * **Resolution:** Removed MeloTTS from `ENGINE_PRIORITY`, deleted `meloEngine.ts`, cleaned all credential references (`CF_ACCOUNT_ID`, `CF_API_TOKEN`), and updated tests. TTS fallback is now Kokoro-82M → Browser SpeechSynthesis.
 
+### 8. StoreContext Architectural Fix (Fixed — PR #14)
+* **Incident:** The composed `useVideoProject()` hook assembles 5 slice hooks (project, pipeline, config, narration, ui) that each internally call `useState`. Without a React Context provider, every component that called `useVideoProject()` (`App`, `AppShell`, `PipelineStepRouter`, `AppModals`, `OnboardingModal`, `SettingsModal`) was getting its **own independent `useState` instance**. `generateScript` in `PipelineStepRouter` updated `stepStatuses.script = 'complete'` in its own copy, but the `PipelineSidebar` rendered by `AppShell` still saw `'idle'` — the button stayed `[disabled]` even after the script generated. The script data also lived in `PipelineStepRouter`'s isolated instance.
+* **Resolution:** Added `src/store/StoreContext.tsx` with `StoreProvider` (creates the store once at the top of the tree) and a `useVideoProject()` wrapper that reads from Context when a provider exists, otherwise falls back to a local instance. `App` is now wrapped in `StoreProvider`. All 6 component consumers migrated to the new wrapper. Test files (`src/services/__tests__/`) still import the original hook from `src/store/index.ts` and rely on the fallback-to-local behavior — `renderHook(useVideoProject)` continues working without a provider.
+* **Files changed:** `src/store/StoreContext.tsx` (new, 53 lines), `src/App.tsx` (12 lines), 5 component import lines.
+* **Verification:** 1706/1706 unit tests pass, 3/3 E2E tests pass in 6.7s.
+
 ---
 
 ## 4. Deployment to Railway & Server Configuration
@@ -226,22 +232,23 @@ A comprehensive 8-domain review of the AutoTube codebase was conducted on 2026-0
 
 ## 9. Superseded Documents
 
-The following root-level markdown files have been reviewed and reconciled into this document. They are retained in the repository for historical reference.
+The following root-level markdown files have been reviewed and reconciled into this document. **As of 2026-06-02 (PR #15), all 14 SUPERSEDED root-level audit files have been moved to `reviews/_archive/`.** They are retained on disk (not deleted) for historical reference and to support `git log` archaeology. The table below is now a historical index, not a live file map.
 
-| File | Status |
-|---|---|
-| `AUDIT-SWOT.md` | [SUPERSEDED — incorporated into this document (Sections 2, 3, 8)] |
-| `COMPREHENSIVE_REVIEW_AND_IMPROVEMENT_PLAN.md` | [SUPERSEDED — Phase 1 stability fixes completed; Phase 3 observability completed; remaining phases tracked in Section 8] |
-| `RENDER_AUDIT.md` | [SUPERSEDED — all 30 identified issues addressed in Sections 3, 8] |
-| `VIDEO_QUALITY_AUDIT_REPORT.md` | [SUPERSEDED — C1 (color space), C2 (audio sample rate), C3 (hardware encoding) fixed; C4 (bg music), C5 (image validation), C7 (ffmpeg death detection) fixed; see Section 3] |
-| `HONEST_AUDIT_REPORT.md` | [SUPERSEDED — 90-task implementation verified and documented in Section 8] |
-| `IMPLEMENTATION_REPORT.md` | [SUPERSEDED — 99 TypeScript files + 5 .mjs wrappers documented in Section 8] |
-| `FINAL_VERIFICATION_REPORT.md` | [SUPERSEDED — 90/90 tests passing, end-to-end render verified; status noted in Section 8] |
-| `PHASE_1_COMPLETION_SUMMARY.md` | [SUPERSEDED — per-frame error handling, checkpointing, image downscaling, stall detection all documented in Sections 2, 3] |
-| `PHASE_3_COMPLETION_SUMMARY.md` | [SUPERSEDED — structured logging and progress dashboard documented in Section 8, Domain 6] |
-| `C4_BACKGROUND_MUSIC_FIX_SUMMARY.md` | [SUPERSEDED — background music overhaul documented in Sections 2C, 3.6, 5C] |
-| `C5_IMAGE_VALIDATION_FIX_SUMMARY.md` | [SUPERSEDED — image validation gate documented in Section 3.3] |
-| `C7_FFMPEG_DEATH_DETECTION_IMPLEMENTATION.md` | [SUPERSEDED — ffmpeg death detection documented in Section 3.2] |
-| `DOCUMENTATION.md` | [STILL RELEVANT — retained as file-level documentation index] |
-| `audit-changelist.md` | [STILL RELEVANT — retained as granular 84-item change inventory reference] |
-| `viral_growth_strategies.md` | [STILL RELEVANT — retained as 90-task strategy blueprint reference] |
+| File (historical location) | Status (as of archive) | Current Location |
+|---|---|---|
+| `AUDIT-SWOT.md` | [SUPERSEDED — incorporated into Sections 2, 3, 8] | `reviews/_archive/AUDIT-SWOT.md` |
+| `COMPREHENSIVE_REVIEW_AND_IMPROVEMENT_PLAN.md` | [SUPERSEDED — Phase 1 stability + Phase 3 observability completed] | `reviews/_archive/COMPREHENSIVE_REVIEW_AND_IMPROVEMENT_PLAN.md` |
+| `RENDER_AUDIT.md` | [SUPERSEDED — all 30 issues addressed] | `reviews/_archive/RENDER_AUDIT.md` |
+| `VIDEO_QUALITY_AUDIT_REPORT.md` | [SUPERSEDED — C1–C5, C7 fixed; see Section 3] | `reviews/_archive/VIDEO_QUALITY_AUDIT_REPORT.md` |
+| `HONEST_AUDIT_REPORT.md` | [SUPERSEDED — 90-task implementation verified] | `reviews/_archive/HONEST_AUDIT_REPORT.md` |
+| `IMPLEMENTATION_REPORT.md` | [SUPERSEDED — 99 TS files + 5 .mjs wrappers documented] | `reviews/_archive/IMPLEMENTATION_REPORT.md` |
+| `FINAL_VERIFICATION_REPORT.md` | [SUPERSEDED — superseded by current test counts in Section 8] | `reviews/_archive/FINAL_VERIFICATION_REPORT.md` |
+| `PHASE_1_COMPLETION_SUMMARY.md` | [SUPERSEDED — error handling, checkpointing, stall detection in Section 2/3] | `reviews/_archive/PHASE_1_COMPLETION_SUMMARY.md` |
+| `PHASE_3_COMPLETION_SUMMARY.md` | [SUPERSEDED — logging and progress dashboard in Section 8 Domain 6] | `reviews/_archive/PHASE_3_COMPLETION_SUMMARY.md` |
+| `C4_BACKGROUND_MUSIC_FIX_SUMMARY.md` | [SUPERSEDED — bg music overhaul in Sections 2C, 3.6, 5C] | `reviews/_archive/C4_BACKGROUND_MUSIC_FIX_SUMMARY.md` |
+| `C5_IMAGE_VALIDATION_FIX_SUMMARY.md` | [SUPERSEDED — image validation in Section 3.3] | `reviews/_archive/C5_IMAGE_VALIDATION_FIX_SUMMARY.md` |
+| `C7_FFMPEG_DEATH_DETECTION_IMPLEMENTATION.md` | [SUPERSEDED — ffmpeg death detection in Section 3.2] | `reviews/_archive/C7_FFMPEG_DEATH_DETECTION_IMPLEMENTATION.md` |
+| `audit-changelist.md` | [STILL RELEVANT — 84-item change inventory; archived 2026-06-02 to reduce root noise] | `reviews/_archive/audit-changelist.md` |
+| `viral_growth_strategies.md` | [STILL RELEVANT — 90-task strategy blueprint; archived 2026-06-02 to reduce root noise] | `reviews/_archive/viral_growth_strategies.md` |
+
+**Live root-level files (not archived):** `README.md`, `CONTRIBUTING.md`, `DOCUMENTATION.md`, `SYSTEM_CONTEXT.md`.

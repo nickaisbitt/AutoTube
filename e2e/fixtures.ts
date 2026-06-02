@@ -9,25 +9,25 @@ export const MOCK_SCRIPT_SEGMENTS = [
     type: 'intro',
     title: 'Introduction',
     narration:
-      'Your bank account could be drained in seconds by a single phishing click. In this video we break down how AI is changing healthcare — and what it means for your money, your records, and your family.',
+      'In 2024, hospitals paid $2.3 billion in ransomware settlements. Your bank account could be drained in seconds by a single phishing click. In this video we break down how AI is changing healthcare — and what it means for your money, your records, and your family.',
     visualNote: 'Worried person at laptop, hospital corridor',
-    duration: 12,
+    duration: 22,
   },
   {
     type: 'section',
     title: 'The Threat',
     narration:
-      'Hospitals lost billions to ransomware last year. AI tools can spot attacks faster than humans — but they also create new ways for criminals to target your identity and medical files.',
+      'Epic Systems and UnitedHealth lost patient data access during major cyber incidents. AI tools can spot attacks 40% faster than humans — but criminals also use ChatGPT to target your identity and medical files at scale.',
     visualNote: 'Hospital data breach headline, security dashboard',
-    duration: 14,
+    duration: 24,
   },
   {
     type: 'outro',
     title: 'Protect Yourself',
     narration:
-      'Here are three steps to protect your medical records starting today: enable two-factor authentication, audit app permissions, and ask your provider what AI tools touch your data.',
+      'Here are three steps to protect your medical records starting today: enable two-factor authentication, audit app permissions, and ask your provider what AI tools touch your data. The FDA cleared 950 AI medical devices in 2025.',
     visualNote: 'Checklist on screen, person relieved',
-    duration: 10,
+    duration: 20,
   },
 ];
 
@@ -78,8 +78,15 @@ export async function installOpenRouterMock(page: Page): Promise<void> {
         content = JSON.stringify({
           comments: [{ text: 'What surprised you most?', type: 'question_prompt' }],
         });
-      } else if (text.includes('hashtag') && text.includes('generate')) {
+      } else if (text.includes('hashtag') && (text.includes('generate') || text.includes('seo expert'))) {
         content = JSON.stringify({ hashtags: ['#AI', '#Healthcare', '#CyberSecurity'] });
+      } else if (text.includes('playlist strategist') || text.includes('series metadata')) {
+        content = JSON.stringify({
+          seriesName: 'Healthcare AI Deep Dive',
+          episodeNumber: 1,
+          playlistDescription: 'Exploring AI in modern healthcare.',
+          episodeTitle: 'Ep. 1: AI Healthcare Risks',
+        });
       } else if (text.includes('blind review') && text.includes('thumbnaileffectiveness')) {
         content = JSON.stringify({
           scores: {
@@ -105,7 +112,13 @@ export async function installOpenRouterMock(page: Page): Promise<void> {
           concepts: [{ description: 'Hospital security breach', searchTerms: ['hospital cybersecurity'] }],
           classification: 'personal',
         });
-      } else if (text.includes('return only a valid json array')) {
+      } else if (
+        text.includes('return only a valid json array') ||
+        text.includes('json array of segments') ||
+        text.includes('polish this script') ||
+        text.includes('trim this script') ||
+        text.includes('specificity issues')
+      ) {
         content = JSON.stringify(MOCK_SCRIPT_SEGMENTS);
       }
 
@@ -182,6 +195,10 @@ export async function installMediaMocks(page: Page): Promise<void> {
         },
       }),
     });
+  });
+
+  await page.route(/https:\/\/www\.youtube\.com\/.*/, async (route) => {
+    await route.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' });
   });
 
   const png = Buffer.from(

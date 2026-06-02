@@ -42,6 +42,7 @@ import {
 } from './server-render/pipelineReliability.mjs';
 
 import { estimateRenderCost } from './src/services/costTracker.mjs';
+import { isYouTubeExportMode, captionMetrics, hookFontPx } from './server-render/youtubeProfile.mjs';
 
 // ── Word timestamp cache for karaoke subtitle sync ─────────────────────────
 // Populated from edge-tts VTT files before rendering begins.
@@ -142,6 +143,7 @@ function hexToRgba(hex, alpha) {
 }
 
 let DRAFT_MODE = false;
+let YOUTUBE_MODE = false;
 
 // ── Caches to avoid per-frame allocations ──────────────────────────────────
 const MAX_ASSET_SEED_CACHE_SIZE = 500;
@@ -549,13 +551,13 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narration
   if (topicText) {
     const textY = narrationText ? h * 0.42 : h / 2;
     // Highlight numbers and proper nouns on the card title in neon green/accent blue
-    drawTextWithHighlights(ctx, topicText.substring(0, 70), textY, w, 'bold 44px sans-serif', '#ffffff', p.accent);
+    const titlePx = Math.round(h * (YOUTUBE_MODE ? 0.065 : 0.041));
+    const bodyPx = Math.round(h * (YOUTUBE_MODE ? 0.032 : 0.02));
+    drawTextWithHighlights(ctx, topicText.substring(0, 70), textY, w, `bold ${titlePx}px Impact, sans-serif`, '#ffffff', p.accent);
 
-    // Narration Sub-text (if provided)
     if (narrationText) {
       const excerpt = narrationText.substring(0, 110) + (narrationText.length > 110 ? '...' : '');
-      // Highlight statistics/numbers in glowing electric orange
-      drawTextWithHighlights(ctx, excerpt, h * 0.58, w, '300 22px sans-serif', 'rgba(255, 255, 255, 0.75)', '#ff8c00');
+      drawTextWithHighlights(ctx, excerpt, h * 0.58, w, `600 ${bodyPx}px sans-serif`, 'rgba(255, 255, 255, 0.9)', '#ff8c00');
     }
   }
 }
@@ -2473,10 +2475,8 @@ function drawTextWithHighlights(ctx, text, startY, w, font, baseColor, highlight
 
 // ── Draw a single frame ────────────────────────────────────────────────────
 async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress, segmentIndex, suppressSubtitles = false) {
-  const isFallbackAsset = asset && (
-    asset.isFallback === true ||
-    (asset.url && (asset.url.includes('picsum.photos') || asset.url.includes('placeholder')))
-  );
+  // Only skip assets explicitly marked fallback — picsum/placeholders are valid when they load.
+  const isFallbackAsset = asset?.isFallback === true;
   const activeImg = isFallbackAsset ? null : img;
 
   // ── Determine if a scene layout should handle background + text rendering ──
@@ -2484,13 +2484,15 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   const layoutFn = sceneLayout ? (SCENE_LAYOUT_DISPATCH[sceneLayout] || null) : null;
 
   // Draw bright background when image is available, or procedural bg when not
-  if (activeImg) {
-    // Bright warm background behind image for contrast
+  if (activeImg && !YOUTUBE_MODE) {
     const bgGrad = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
     bgGrad.addColorStop(0, '#3a5a8e');
     bgGrad.addColorStop(0.5, '#4a7ab8');
     bgGrad.addColorStop(1, '#2a4a7e');
     ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  } else if (activeImg && YOUTUBE_MODE) {
+    ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
   } else if (!DRAFT_MODE) {
     drawProceduralBackground(ctx, seg, progress, false, segmentIndex);
@@ -2615,8 +2617,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 }
 
-  // Slim cinematic bars (was 4% — felt dated and ate caption space)
-  const barH = Math.round(HEIGHT * 0.012);
+  const barH = YOUTUBE_MODE ? 0 : Math.round(HEIGHT * 0.012);
   const accentHex = ACCENT_COLORS[seg.type] || '#ffffff';
   // Black bars
   ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
@@ -2797,8 +2798,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     }
   }
 
-  // Title overlay — only rendered when no scene layout is active (layouts handle their own titles)
-  if (!layoutFn) {
+  // Title overlay — hidden in YouTube mode (captions carry the story; less clutter)
+  if (!layoutFn && !YOUTUBE_MODE) {
   const titleAccent = '#60a5fa';
   const titleSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
   // Position title overlay above the subtitle bar to avoid overlap
@@ -2959,62 +2960,78 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     const visibleCount = currentWordIdx - windowStart + 1;
 
     if (visibleCount > 0) {
-      // Modern glass-morphism caption background — centered for mobile readability
       const capSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
-      const capBgW = Math.min(1400, WIDTH * 0.88);
-      const capBgH = Math.round(HEIGHT * 0.11);
-      const capFontPx = Math.round(HEIGHT * 0.052);
-      const capFontCurrentPx = Math.round(HEIGHT * 0.062);
-      const capStrokePx = Math.max(6, Math.round(HEIGHT * 0.007));
-      // Position in lower third — YouTube-style readable zone
-      const capY = Math.min(HEIGHT - barH - capBgH - 28, HEIGHT - capSafeZone.bottom - capBgH - 20);
+      const yt = YOUTUBE_MODE ? captionMetrics(HEIGHT, WIDTH) : null;
+      const capBgW = YOUTUBE_MODE ? yt.barWidth : Math.min(1400, WIDTH * 0.88);
+      const capBgH = YOUTUBE_MODE ? Math.round(HEIGHT * 0.14) : Math.round(HEIGHT * 0.11);
+      const capFontPx = YOUTUBE_MODE ? yt.basePx : Math.round(HEIGHT * 0.052);
+      const capFontCurrentPx = YOUTUBE_MODE ? yt.currentPx : Math.round(HEIGHT * 0.062);
+      const capStrokePx = YOUTUBE_MODE ? yt.strokePx : Math.max(6, Math.round(HEIGHT * 0.007));
+      const capY = YOUTUBE_MODE
+        ? HEIGHT - yt.bottomPad - capBgH
+        : Math.min(HEIGHT - barH - capBgH - 28, HEIGHT - capSafeZone.bottom - capBgH - 20);
 
-      // Glass background with rounded corners
-      ctx.save();
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
-      if (!DRAFT_MODE) {
-        ctx.shadowColor = 'rgba(96, 165, 250, 0.15)';
-        ctx.shadowBlur = 20;
+      if (YOUTUBE_MODE) {
+        const grad = ctx.createLinearGradient(0, capY - 20, 0, HEIGHT);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(0.35, 'rgba(0,0,0,0.55)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.75)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, capY - 24, WIDTH, HEIGHT - capY + 24);
+      } else {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
+        if (!DRAFT_MODE) {
+          ctx.shadowColor = 'rgba(96, 165, 250, 0.15)';
+          ctx.shadowBlur = 20;
+        }
+        ctx.beginPath();
+        ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(96, 165, 250, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
+        ctx.stroke();
+        ctx.restore();
       }
-      ctx.beginPath();
-      ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
-      ctx.fill();
 
-      // Subtle accent border
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(96, 165, 250, 0.15)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
-      ctx.stroke();
-      ctx.restore();
-      // Measure total width to center the word group
-      const normalFont = `900 ${capFontPx}px system-ui, Montserrat, Impact, sans-serif`;
-      const boldFont = `900 ${capFontCurrentPx}px system-ui, Montserrat, Impact, sans-serif`;
+      let drawStart = windowStart;
+      let drawCount = visibleCount;
+      if (YOUTUBE_MODE) {
+        const maxW = yt.maxWords;
+        const half = Math.floor(maxW / 2);
+        const cur = currentWordIdx;
+        drawStart = Math.max(0, Math.min(cur - half, words.length - maxW));
+        drawCount = Math.min(maxW, words.length - drawStart);
+      }
+
+      const normalFont = `900 ${capFontPx}px Impact, "Arial Black", system-ui, sans-serif`;
+      const boldFont = `900 ${capFontCurrentPx}px Impact, "Arial Black", system-ui, sans-serif`;
       const spaceWidth = measureWordCached(ctx, normalFont, ' ');
 
       // Pre-measure all words (cached)
       let totalWidth = 0;
-      const wordWidths = new Array(visibleCount);
-      for (let wi = 0; wi < visibleCount; wi++) {
-        const isCurrentWord = (windowStart + wi) === currentWordIdx;
-        const rawWord = words[windowStart + wi] || '';
+      const wordWidths = new Array(drawCount);
+      for (let wi = 0; wi < drawCount; wi++) {
+        const isCurrentWord = (drawStart + wi) === currentWordIdx;
+        const rawWord = words[drawStart + wi] || '';
         const word = rawWord.toUpperCase();
         const font = isCurrentWord ? boldFont : normalFont;
         const ww = measureWordCached(ctx, font, word);
         wordWidths[wi] = ww;
         totalWidth += ww;
-        if (wi < visibleCount - 1) {
+        if (wi < drawCount - 1) {
           totalWidth += spaceWidth;
         }
       }
 
-      // Draw each word
-      const centerY = capY + Math.round(capBgH * 0.42);
+      const centerY = capY + Math.round(capBgH * 0.48);
       let curX = WIDTH / 2 - totalWidth / 2;
 
-      for (let wi = 0; wi < visibleCount; wi++) {
-        const globalWordIdx = windowStart + wi;
+      for (let wi = 0; wi < drawCount; wi++) {
+        const globalWordIdx = drawStart + wi;
         const isCurrentWord = globalWordIdx === currentWordIdx;
         const rawWord = words[globalWordIdx] || '';
         const displayWord = rawWord.toUpperCase();
@@ -3040,10 +3057,10 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
 
         if (isCurrentWord) {
           ctx.font = boldFont;
-          ctx.fillStyle = '#ff5500'; // High-retention orange brand highlight
+          ctx.fillStyle = YOUTUBE_MODE ? '#FFE135' : '#ff5500';
         } else {
           ctx.font = normalFont;
-          ctx.fillStyle = '#ffffff'; // Clean high-readability white
+          ctx.fillStyle = '#ffffff';
         }
 
         ctx.textAlign = 'left';
@@ -3075,8 +3092,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
   } // end !suppressSubtitles
 
-  // ── Step 11: Enhanced Progress Timeline (Task 81) ──
-  if (typeof globalProgress === 'number' && project && project.script) {
+  if (typeof globalProgress === 'number' && project && project.script && !YOUTUBE_MODE) {
     const accentColor = ACCENT_COLORS[seg.type] || '#60a5fa';
     drawProgressTimeline(ctx, project.script, globalProgress, WIDTH, HEIGHT, accentColor);
   }
@@ -3213,7 +3229,16 @@ async function render() {
   }
 
   // Draft quality: halve render resolution and let ffmpeg upscale (4x fewer pixel ops)
-  const quality = project.exportSettings?.quality || 'medium';
+  YOUTUBE_MODE = isYouTubeExportMode(project);
+  if (YOUTUBE_MODE) {
+    process.env.AUTOTUBE_YOUTUBE_MODE = '1';
+    log('info', '  YouTube export profile: full-bleed visuals, large captions, voice-first mix');
+    if (!project.exportSettings) project.exportSettings = {};
+    project.exportSettings.quality = 'highest';
+    project.exportSettings.youtubeMode = true;
+  }
+
+  const quality = project.exportSettings?.quality || (YOUTUBE_MODE ? 'highest' : 'medium');
   DRAFT_MODE = quality === 'draft';
   const outputWidth = WIDTH;
   const outputHeight = HEIGHT;
@@ -3609,6 +3634,13 @@ async function render() {
   let finalMp4File = null;
   let totalFrames = 0;
   let forceCpuThisPass = false;
+  const twoPassState = {
+    tempFile: null,
+    tempArgs: null,
+    finalCodec: null,
+    finalCrf: null,
+    finalExtraArgs: null,
+  };
 
   while (attempt < MAX_ATTEMPTS && !renderPassed) {
     attempt++;
@@ -3647,7 +3679,7 @@ async function render() {
     ffmpegArgs.push('-vaapi_device', '/dev/dri/renderD128', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi');
   } else {
     const codec = project?.exportSettings?.codec === 'av1' ? 'libsvtav1' : project?.exportSettings?.codec === 'hevc' ? 'libx265' : 'libx264';
-    const crfValue = project?.exportSettings?.codec === 'av1' ? 30 : project?.exportSettings?.codec === 'hevc' ? 20 : 16;
+    const crfValue = project?.exportSettings?.codec === 'av1' ? 30 : project?.exportSettings?.codec === 'hevc' ? 20 : (YOUTUBE_MODE ? 14 : 16);
     const extraCodecArgs = project?.exportSettings?.codec === 'hevc' ? ['-tag:v', 'hvc1'] : [];
 
     if (quality === 'highest' && !DRAFT_MODE) {
@@ -3920,7 +3952,7 @@ async function render() {
   if (isShortsMode) log('info', '  Shorts mode: skipping cold open');
 
   // Opening hook frames — bold text on dark background (req c)
-  const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round(0.3 * FPS));
+  const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round((YOUTUBE_MODE ? 1.2 : 0.3) * FPS));
   const COLD_OPEN_BEAT_FRAMES = Math.max(1, Math.round(0.5 * FPS)); // ~5 beats in 2.5s
   const hookText = coldOpenSeg?.narration
     ? (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60)
@@ -3998,7 +4030,7 @@ async function render() {
       ctx.save();
       ctx.globalAlpha = Math.min(1, hookProgress * 3);
       ctx.fillStyle = '#ffffff';
-      ctx.font = `bold ${Math.round(HEIGHT * 0.078)}px system-ui, Montserrat, Impact, sans-serif`;
+      ctx.font = `bold ${hookFontPx(HEIGHT)}px Impact, "Arial Black", system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';

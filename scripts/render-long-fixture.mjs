@@ -44,6 +44,7 @@ const result = spawnSync('node', ['server-render.mjs', OUT], {
     DEV_SERVER_URL: devServer,
     AUTOTUBE_FORCE_CPU: process.env.AUTOTUBE_FORCE_CPU ?? '1',
     AUTOTUBE_PROJECT_PATH: projectPath,
+    AUTOTUBE_YOUTUBE_MODE: '1',
   },
   encoding: 'utf8',
   timeout: 3_600_000,

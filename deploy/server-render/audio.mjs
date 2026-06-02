@@ -212,7 +212,8 @@ export function computeBgMusicVolume(hasNarration, options = {}) {
  * @returns {boolean} True if ducking succeeded.
  */
 export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, totalDuration, options = {}) {
-  const { duckingLevel = -32, peakLevel = -18, fadeDuration = 0.35, lookAhead = 0.1 } = options;
+  const yt = process.env.AUTOTUBE_YOUTUBE_MODE === '1';
+  const { duckingLevel = yt ? -36 : -32, peakLevel = yt ? -22 : -18, fadeDuration = 0.35, lookAhead = 0.1 } = options;
 
   console.log(`  🎚️ Applying dynamic ducking envelope (${narrationTimings.length} narration segments)...`);
 
@@ -602,7 +603,8 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
       filterParts.push('[bg]aresample=48000:async=1[bg_fx]');
     }
     
-    const weights = ['1.6', '0.22', ...extraInputs.map(() => '0.06'), ...noiseLabels.map(() => '0.04')].join(' ');
+    const bgWeight = process.env.AUTOTUBE_YOUTUBE_MODE === '1' ? '0.12' : '0.22';
+    const weights = ['1.8', bgWeight, ...extraInputs.map(() => '0.06'), ...noiseLabels.map(() => '0.04')].join(' ');
     filterParts.push(`${mixInputs}amix=inputs=${inputCount}:duration=first:dropout_transition=3:weights="${weights}",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);
   } else {
     filterParts.push(`[narration][bg]amix=inputs=2:duration=first:dropout_transition=3:weights="1.6 0.22",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);

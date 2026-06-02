@@ -21,6 +21,8 @@
     "squad:assign": "node scripts/squad/manager.mjs assign",
     "squad:gate": "node scripts/squad/manager.mjs gate",
     "squad:gate:fixture": "node scripts/squad/manager.mjs gate --fixture",
+    "ship:finalize": "node scripts/finalize-ship-artifacts.mjs",
+    "ship:complete": "node scripts/ship-complete.mjs",
     "test:unit": "vitest run --passWithNoTests",
     "test:unit:watch": "vitest",
     "test:unit:coverage": "vitest run --coverage",

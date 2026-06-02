@@ -18,9 +18,13 @@
 
 ## Phase 3 — Ship criteria
 
-- [ ] `npm run squad:gate` exit 0 (≥180s, music when enabled, all 7 checks)
-- [ ] `npm run test:e2e:smoke` green
-- [ ] Human watch of `test-recordings/FINAL-OUTPUT-final.mp4`
+- [x] `npm run squad:gate` exit 0 (≥180s, music when enabled, all 7 checks)
+- [x] `npm run test:e2e:smoke` green
+- [x] `npm run test:e2e:full` green (209.5s MP4)
+- [x] Canonical artifact `test-recordings/FINAL-VIDEO-final.mp4`
+- [x] `npm run generate:video` (product path — see generate-video.log)
+- [x] `npm run ship:complete` (finalize + R7 + smoke + unit)
+- [ ] Human watch of final MP4 before marketing release
 - [ ] PR #17 ready for review (not draft)
 
 ## Phase 4 — Post-ship (quality bar)

@@ -14,7 +14,8 @@
  *
  * Output:
  *   test-recordings/full-<timestamp>/final-video-final.mp4
- *   test-recordings/FINAL-OUTPUT.mp4  (latest copy)
+ *   test-recordings/FINAL-VIDEO-final.mp4  (canonical ship artifact)
+ *   test-recordings/FINAL-OUTPUT-final.mp4 (alias for R7)
  */
 
 import { chromium } from 'playwright';
@@ -22,7 +23,11 @@ import { mkdirSync, writeFileSync, existsSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../server-render/pipelineReliability.mjs';
-import { MOCK_SCRIPT_SEGMENTS, mockOpenRouterHttpBody } from '../e2e/openRouterMock.mjs';
+import {
+  MOCK_LONG_SCRIPT_SEGMENTS,
+  mockOpenRouterHttpBody,
+} from '../e2e/openRouterMock.mjs';
+import { readdirSync, unlinkSync } from 'fs';
 
 const topic = process.argv[2] || 'Why AI will change healthcare';
 const devServer = process.env.DEV_SERVER_URL || 'http://localhost:5173';
@@ -73,7 +78,7 @@ await page.route('**/openrouter.ai/**', async (route) => {
   await route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: mockOpenRouterHttpBody(post, MOCK_SCRIPT_SEGMENTS),
+    body: mockOpenRouterHttpBody(post, MOCK_LONG_SCRIPT_SEGMENTS),
   });
 });
 
@@ -196,7 +201,21 @@ if (!project || !(project.media?.length > 0)) {
   process.exit(1);
 }
 
-const projectPath = `/tmp/autotube-project-${runId}.json`;
+project.exportSettings = {
+  ...(typeof project.exportSettings === 'object' && project.exportSettings ? project.exportSettings : {}),
+  quality: 'high',
+  backgroundMusic: true,
+  musicPreset: 'neutral',
+  resolution: '1080p',
+};
+
+try {
+  for (const f of readdirSync('/tmp')) {
+    if (f.startsWith('autotube-project') && f.endsWith('.json')) unlinkSync(`/tmp/${f}`);
+  }
+} catch { /* ignore */ }
+
+const projectPath = `/tmp/autotube-project.json`;
 writeFileSync(projectPath, JSON.stringify(project, null, 2));
 console.log(
   `\n📝 Saved project: ${projectPath} (${project.media.length} media, ${project.narration?.length ?? 0} narration clips)`,
@@ -210,6 +229,7 @@ const render = spawnSync('node', ['server-render.mjs', mp4Out], {
     ...process.env,
     DEV_SERVER_URL: devServer,
     AUTOTUBE_FORCE_CPU: process.env.AUTOTUBE_FORCE_CPU || '1',
+    AUTOTUBE_PROJECT_PATH: projectPath,
   },
   encoding: 'utf8',
   timeout: 1_800_000,
@@ -231,7 +251,6 @@ if (render.status !== 0 && render.status !== null) {
 }
 
 const finalMp4 = mp4Out.replace('.mp4', '-final.mp4');
-const artifactMp4 = join(process.cwd(), 'test-recordings', 'FINAL-OUTPUT.mp4');
 const produced = existsSync(finalMp4) ? finalMp4 : existsSync(mp4Out) ? mp4Out : null;
 
 if (!produced) {
@@ -246,8 +265,23 @@ if (!gate.valid) {
 }
 const size = gate.size;
 
-copyFileSync(produced, artifactMp4);
-console.log(`\n✅ FINAL VIDEO: ${produced}`);
+const probe = spawnSync(
+  'ffprobe',
+  ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', produced],
+  { encoding: 'utf8' },
+);
+const durationSec = probe.stdout ? parseFloat(probe.stdout.trim()) : NaN;
+
+copyFileSync(produced, join(outDir, 'FINAL-VIDEO-final.mp4'));
+
+const finalize = spawnSync('node', ['scripts/finalize-ship-artifacts.mjs'], {
+  cwd: process.cwd(),
+  stdio: 'inherit',
+});
+if (finalize.status !== 0) process.exit(finalize.status ?? 1);
+
+console.log(`\n✅ FINAL VIDEO (product path): ${produced}`);
 console.log(`   Size: ${(size / 1024 / 1024).toFixed(2)} MB`);
-console.log(`   Copy: ${artifactMp4}`);
+if (Number.isFinite(durationSec)) console.log(`   Duration: ${durationSec.toFixed(1)}s`);
+console.log(`   Canonical: test-recordings/FINAL-VIDEO-final.mp4`);
 process.exit(0);

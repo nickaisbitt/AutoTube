@@ -99,6 +99,7 @@ export function resolvePath(pathArg) {
 
 export function defaultMp4Candidates() {
   return [
+    join(ROOT, 'test-recordings', 'FINAL-VIDEO-final.mp4'),
     join(ROOT, 'test-recordings', 'FINAL-OUTPUT-final.mp4'),
     join(ROOT, 'test-recordings', 'FINAL-OUTPUT.mp4'),
   ];

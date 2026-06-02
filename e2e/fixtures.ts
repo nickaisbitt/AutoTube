@@ -1,35 +1,14 @@
 import type { Page, Route } from '@playwright/test';
+import {
+  MOCK_SCRIPT_SEGMENTS,
+  MOCK_LONG_SCRIPT_SEGMENTS,
+  mockOpenRouterHttpBody,
+} from './openRouterMock.mjs';
 
 /** Dummy key so generateScript passes; OpenRouter is mocked in tests. */
 export const E2E_OPENROUTER_KEY = 'sk-or-v1-e2e-test-key-not-real';
 
-/** Compact script fixture — 3 segments for fast E2E / renders. */
-export const MOCK_SCRIPT_SEGMENTS = [
-  {
-    type: 'intro',
-    title: 'Introduction',
-    narration:
-      'In 2024, hospitals paid $2.3 billion in ransomware settlements. Your bank account could be drained in seconds by a single phishing click. In this video we break down how AI is changing healthcare — and what it means for your money, your records, and your family.',
-    visualNote: 'Worried person at laptop, hospital corridor',
-    duration: 22,
-  },
-  {
-    type: 'section',
-    title: 'The Threat',
-    narration:
-      'Epic Systems and UnitedHealth lost patient data access during major cyber incidents. AI tools can spot attacks 40% faster than humans — but criminals also use ChatGPT to target your identity and medical files at scale.',
-    visualNote: 'Hospital data breach headline, security dashboard',
-    duration: 24,
-  },
-  {
-    type: 'outro',
-    title: 'Protect Yourself',
-    narration:
-      'Here are three steps to protect your medical records starting today: enable two-factor authentication, audit app permissions, and ask your provider what AI tools touch your data. The FDA cleared 950 AI medical devices in 2025.',
-    visualNote: 'Checklist on screen, person relieved',
-    duration: 20,
-  },
-];
+export { MOCK_SCRIPT_SEGMENTS, MOCK_LONG_SCRIPT_SEGMENTS };
 
 export async function dismissOnboarding(page: Page): Promise<void> {
   await page.addInitScript((key: string) => {
@@ -46,85 +25,25 @@ export async function dismissOnboarding(page: Page): Promise<void> {
   }, E2E_OPENROUTER_KEY);
 }
 
-function openRouterCompletion(content: string, model = 'openai/gpt-5.4-nano') {
-  return JSON.stringify({
-    id: `mock-${Date.now()}`,
-    model,
-    choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }],
-  });
-}
-
-/** Context-aware OpenRouter mock for script, refine, titles, visual director, blind review. */
-export async function installOpenRouterMock(page: Page): Promise<void> {
+/**
+ * Context-aware OpenRouter mock — routing rules documented in e2e/openRouterMock.mjs.
+ * Signatures mirror production prompts; blind/title routes require full system phrases
+ * to avoid false positives from segment titles or visualNote fields.
+ */
+export async function installOpenRouterMock(
+  page: Page,
+  scriptSegments: typeof MOCK_SCRIPT_SEGMENTS = MOCK_SCRIPT_SEGMENTS,
+): Promise<void> {
   await page.route('**/openrouter.ai/**', async (route: Route) => {
-    let body = '';
+    let body: string;
     try {
       const post = route.request().postDataJSON() as {
         model?: string;
         messages?: { role: string; content: string }[];
       } | null;
-      const text = (post?.messages ?? []).map((m) => m.content).join('\n').toLowerCase();
-      const model = post?.model ?? 'openai/gpt-5.4-nano';
-
-      let content = JSON.stringify({ segments: MOCK_SCRIPT_SEGMENTS });
-
-      if (text.includes('youtube title optimization expert')) {
-        content = JSON.stringify({
-          direct: 'AI Healthcare: What You Must Know',
-          curiosityGap: 'The AI Healthcare Risk Nobody Warns You About',
-          emotionalUrgent: 'Your Medical Records Are Not Safe',
-        });
-      } else if (text.includes('pinned comment') && text.includes('json')) {
-        content = JSON.stringify({
-          comments: [{ text: 'What surprised you most?', type: 'question_prompt' }],
-        });
-      } else if (text.includes('hashtag') && (text.includes('generate') || text.includes('seo expert'))) {
-        content = JSON.stringify({ hashtags: ['#AI', '#Healthcare', '#CyberSecurity'] });
-      } else if (text.includes('playlist strategist') || text.includes('series metadata')) {
-        content = JSON.stringify({
-          seriesName: 'Healthcare AI Deep Dive',
-          episodeNumber: 1,
-          playlistDescription: 'Exploring AI in modern healthcare.',
-          episodeTitle: 'Ep. 1: AI Healthcare Risks',
-        });
-      } else if (text.includes('blind review') && text.includes('thumbnaileffectiveness')) {
-        content = JSON.stringify({
-          scores: {
-            visualQuality: 8,
-            pacing: 8,
-            narrativeClarity: 8,
-            thumbnailEffectiveness: 8,
-            overallProductionValue: 8,
-          },
-          feedback: {
-            visualQuality: 'Strong',
-            pacing: 'Good',
-            narrativeClarity: 'Clear',
-            thumbnailEffectiveness: 'Effective',
-            overallProductionValue: 'Professional',
-          },
-          letterGrade: 'B+',
-          summary: 'Solid explainer with clear hook.',
-        });
-      } else if (text.includes('visual director') || text.includes('segment visual plan')) {
-        content = JSON.stringify({
-          beat: 'hook',
-          concepts: [{ description: 'Hospital security breach', searchTerms: ['hospital cybersecurity'] }],
-          classification: 'personal',
-        });
-      } else if (
-        text.includes('return only a valid json array') ||
-        text.includes('json array of segments') ||
-        text.includes('polish this script') ||
-        text.includes('trim this script') ||
-        text.includes('specificity issues')
-      ) {
-        content = JSON.stringify(MOCK_SCRIPT_SEGMENTS);
-      }
-
-      body = openRouterCompletion(content, model);
+      body = mockOpenRouterHttpBody(post, scriptSegments);
     } catch {
-      body = openRouterCompletion(JSON.stringify({ segments: MOCK_SCRIPT_SEGMENTS }));
+      body = mockOpenRouterHttpBody(null, scriptSegments);
     }
 
     await route.fulfill({ status: 200, contentType: 'application/json', body });
@@ -213,5 +132,12 @@ export async function installMediaMocks(page: Page): Promise<void> {
 export async function installE2EFixtures(page: Page): Promise<void> {
   await dismissOnboarding(page);
   await installOpenRouterMock(page);
+  await installMediaMocks(page);
+}
+
+/** Long-form mocks for full topic → -final.mp4 pipeline (Real Pass #6). */
+export async function installFullPipelineFixtures(page: Page): Promise<void> {
+  await dismissOnboarding(page);
+  await installOpenRouterMock(page, MOCK_LONG_SCRIPT_SEGMENTS);
   await installMediaMocks(page);
 }

@@ -18,9 +18,11 @@
  */
 
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync, existsSync, copyFileSync, readFileSync, statSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
+import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../server-render/pipelineReliability.mjs';
+import { MOCK_SCRIPT_SEGMENTS, mockOpenRouterHttpBody } from '../e2e/openRouterMock.mjs';
 
 const topic = process.argv[2] || 'Why AI will change healthcare';
 const devServer = process.env.DEV_SERVER_URL || 'http://localhost:5173';
@@ -28,114 +30,7 @@ const runId = Date.now();
 const outDir = join(process.cwd(), 'test-recordings', `full-${runId}`);
 mkdirSync(outDir, { recursive: true });
 
-const MOCK_SEGMENTS = [
-  {
-    type: 'intro',
-    title: 'Hook',
-    narration:
-      'In 2024, hospitals paid $2.3 billion in ransomware settlements according to industry reports. Your bank account and medical records could be drained in seconds by one wrong click. Today we explain how artificial intelligence is reshaping healthcare — and what that means for your identity, your files, and your family at Mayo Clinic scale.',
-    visualNote: 'Person at laptop, urgent hospital lighting',
-    duration: 22,
-  },
-  {
-    type: 'section',
-    title: 'The Stakes',
-    narration:
-      'Epic Systems and UnitedHealth lost patient data access overnight during major cyber incidents. AI can detect threats 40% faster than human analysts, but criminals also use tools like ChatGPT to target your medical data at scale across 150 million exposed records.',
-    visualNote: 'Hospital server room, security alert on screen',
-    duration: 24,
-  },
-  {
-    type: 'outro',
-    title: 'Your Action Plan',
-    narration:
-      'Protect yourself in three steps starting today: turn on two-factor authentication for health portals, review app permissions quarterly, and ask your doctor which AI tools access your records. The FDA cleared 950 AI medical devices in 2025 — know which ones touch your data.',
-    visualNote: 'Checklist graphic, calm resolution shot',
-    duration: 20,
-  },
-];
-
-function openRouterBody(content, model = 'openai/gpt-5.4-nano') {
-  return JSON.stringify({
-    id: `mock-${Date.now()}`,
-    model,
-    choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }],
-  });
-}
-
-function mockOpenRouterContent(post) {
-  const text = post.toLowerCase();
-
-  if (text.includes('youtube title optimization expert')) {
-    return JSON.stringify({
-      direct: 'AI in Healthcare Explained',
-      curiosityGap: 'The AI Risk Hospitals Are Hiding',
-      emotionalUrgent: 'Your Medical Records Are Exposed',
-    });
-  }
-  if (text.includes('pinned comment') && text.includes('json')) {
-    return JSON.stringify({
-      comments: [{ text: 'What surprised you most?', type: 'question_prompt' }],
-    });
-  }
-  if (text.includes('hashtag') && (text.includes('generate') || text.includes('seo expert'))) {
-    return JSON.stringify({ hashtags: ['#AI', '#Healthcare', '#CyberSecurity'] });
-  }
-  if (text.includes('playlist strategist') || text.includes('series metadata')) {
-    return JSON.stringify({
-      seriesName: 'Healthcare AI Deep Dive',
-      episodeNumber: 1,
-      playlistDescription: 'Exploring AI in modern healthcare.',
-      episodeTitle: 'Ep. 1: AI Healthcare Risks',
-    });
-  }
-  if (text.includes('blind review') && text.includes('thumbnaileffectiveness')) {
-    return JSON.stringify({
-      scores: {
-        visualQuality: 8,
-        pacing: 8,
-        narrativeClarity: 8,
-        thumbnailEffectiveness: 8,
-        overallProductionValue: 8,
-      },
-      feedback: {
-        visualQuality: 'Strong',
-        pacing: 'Good',
-        narrativeClarity: 'Clear',
-        thumbnailEffectiveness: 'Effective',
-        overallProductionValue: 'Professional',
-      },
-      letterGrade: 'B+',
-      summary: 'Solid explainer with clear hook.',
-    });
-  }
-  if (text.includes('visual director') || text.includes('segment visual plan')) {
-    return JSON.stringify({
-      beat: 'hook',
-      concepts: [{ description: 'Hospital security breach', searchTerms: ['hospital cybersecurity'] }],
-      classification: 'personal',
-    });
-  }
-  if (
-    text.includes('return only a valid json array') ||
-    text.includes('json array of segments') ||
-    text.includes('quality checklist') ||
-    text.includes('polish this script') ||
-    text.includes('trim this script') ||
-    text.includes('specificity issues') ||
-    text.includes('video script')
-  ) {
-    return JSON.stringify(MOCK_SEGMENTS);
-  }
-  if (text.includes('visual') || text.includes('concept')) {
-    return JSON.stringify({
-      beat: 'hook',
-      concepts: [{ description: 'Healthcare cybersecurity', searchTerms: ['hospital security'] }],
-      classification: 'personal',
-    });
-  }
-  return JSON.stringify({ segments: MOCK_SEGMENTS });
-}
+/** OpenRouter routing — see e2e/openRouterMock.mjs for documented rules. */
 
 async function checkServer() {
   try {
@@ -174,18 +69,11 @@ await page.addInitScript(() => {
 });
 
 await page.route('**/openrouter.ai/**', async (route) => {
-  const post =
-    route
-      .request()
-      .postDataJSON()
-      ?.messages?.map((m) => m.content)
-      .join('\n') ?? '';
-  const model = route.request().postDataJSON()?.model ?? 'openai/gpt-5.4-nano';
-  const content = mockOpenRouterContent(post);
+  const post = route.request().postDataJSON();
   await route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: openRouterBody(content, model),
+    body: mockOpenRouterHttpBody(post, MOCK_SCRIPT_SEGMENTS),
   });
 });
 
@@ -328,8 +216,19 @@ const render = spawnSync('node', ['server-render.mjs', mp4Out], {
   stdio: ['inherit', 'pipe', 'pipe'],
 });
 
+const renderLogPath = join(process.cwd(), 'test-recordings', 'latest-render.log');
+const renderLogBody = `${render.stdout || ''}\n${render.stderr || ''}`;
+writeFileSync(renderLogPath, renderLogBody);
+writeFileSync(join(outDir, 'render.log'), renderLogBody);
+
 if (render.stdout) console.log(render.stdout.slice(-3000));
 if (render.stderr) console.error(render.stderr.slice(-1500));
+console.log(`📋 Render log: ${renderLogPath}`);
+
+if (render.status !== 0 && render.status !== null) {
+  console.error(`\n❌ server-render exited with code ${render.status}`);
+  process.exit(render.status);
+}
 
 const finalMp4 = mp4Out.replace('.mp4', '-final.mp4');
 const artifactMp4 = join(process.cwd(), 'test-recordings', 'FINAL-OUTPUT.mp4');
@@ -337,17 +236,18 @@ const produced = existsSync(finalMp4) ? finalMp4 : existsSync(mp4Out) ? mp4Out :
 
 if (!produced) {
   console.error('\n❌ Server render failed — no output file');
-  process.exit(render.status ?? 1);
-}
-
-const size = statSync(produced).size;
-if (size < 50_000) {
-  console.error(`\n❌ Output too small (${size} bytes) — render likely failed`);
   process.exit(1);
 }
+
+const gate = validateOutput(produced, 'Render output', { minBytes: MIN_RENDER_OUTPUT_BYTES });
+if (!gate.valid) {
+  console.error(`\n❌ ${gate.error}`);
+  process.exit(1);
+}
+const size = gate.size;
 
 copyFileSync(produced, artifactMp4);
 console.log(`\n✅ FINAL VIDEO: ${produced}`);
 console.log(`   Size: ${(size / 1024 / 1024).toFixed(2)} MB`);
 console.log(`   Copy: ${artifactMp4}`);
-process.exit(render.status === 0 || render.status === null ? 0 : render.status);
+process.exit(0);

@@ -6,7 +6,9 @@
 import { writeFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
+import { writeFileSync as writePkg } from 'fs';
 import { buildLongFixtureProject } from './lib/long-fixture-project.mjs';
+import { buildPackagingSuggestions } from './lib/youtube-packaging.mjs';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../server-render/pipelineReliability.mjs';
 
 const ROOT = process.cwd();
@@ -29,6 +31,10 @@ try {
 
 const projectPath = '/tmp/autotube-project.json';
 writeFileSync(projectPath, JSON.stringify(project, null, 2));
+writePkg(
+  join(ROOT, 'test-recordings', 'SHIP_PACKAGE.json'),
+  JSON.stringify(buildPackagingSuggestions(project), null, 2),
+);
 
 const scriptSec = project.script.reduce((s, seg) => s + seg.duration, 0);
 console.log(`📝 Long fixture: ${project.script.length} segments, ~${scriptSec}s script target`);

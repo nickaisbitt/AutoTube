@@ -1408,7 +1408,8 @@ function drawEndScreenFrame(ctx, title, progress) {
   ctx.font = '800 52px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Thanks for watching', WIDTH / 2, HEIGHT * 0.30);
+  const thanksLine = YOUTUBE_MODE ? 'Before you go…' : 'Thanks for watching';
+  ctx.fillText(thanksLine, WIDTH / 2, HEIGHT * 0.30);
   ctx.restore();
 
   // Accent line
@@ -1437,7 +1438,7 @@ function drawEndScreenFrame(ctx, title, progress) {
   // "Subscribe" pill button — modern with glow
   ctx.save();
   ctx.globalAlpha = fadeAlpha;
-  const btnText = 'Subscribe';
+  const btnText = YOUTUBE_MODE ? 'SUBSCRIBE' : 'Subscribe';
   ctx.font = '700 26px system-ui, -apple-system, sans-serif';
   const btnTextW = ctx.measureText(btnText).width;
   const btnW = btnTextW + 60;
@@ -1481,7 +1482,7 @@ function drawEndScreenFrame(ctx, title, progress) {
   ctx.font = '600 22px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Watch Next', WIDTH / 2, HEIGHT * 0.64);
+  ctx.fillText(YOUTUBE_MODE ? 'WATCH NEXT →' : 'Watch Next', WIDTH / 2, HEIGHT * 0.64);
   ctx.restore();
 
   // Task 131: Channel name

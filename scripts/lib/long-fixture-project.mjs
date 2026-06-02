@@ -52,7 +52,7 @@ export function buildLongFixtureProject(options = {}) {
     media,
     narration: [],
     exportSettings: {
-      quality: 'highest',
+      quality: 'high',
       youtubeMode: true,
       format: 'mp4',
       resolution: '1080p',

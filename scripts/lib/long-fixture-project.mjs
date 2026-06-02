@@ -20,18 +20,21 @@ export function buildLongFixtureProject(options = {}) {
     duration: seg.duration ?? 32,
   }));
 
-  const media = script.map((seg, i) => {
-    const stock = STOCK_HEALTHCARE_IMAGES[i % STOCK_HEALTHCARE_IMAGES.length];
-    return {
-      id: `m-${i}`,
-      segmentId: seg.id,
-      type: 'image',
-      url: stock.url,
-      alt: stock.alt,
-      source: 'unsplash',
-      concept: seg.visualNote ?? seg.title,
-      score: 200 - i,
-    };
+  const media = [];
+  script.forEach((seg, i) => {
+    for (let v = 0; v < 3; v++) {
+      const stock = STOCK_HEALTHCARE_IMAGES[(i * 3 + v) % STOCK_HEALTHCARE_IMAGES.length];
+      media.push({
+        id: `m-${i}-${v}`,
+        segmentId: seg.id,
+        type: 'image',
+        url: stock.url,
+        alt: stock.alt,
+        source: 'unsplash',
+        concept: seg.visualNote ?? seg.title,
+        score: 200 - i - v,
+      });
+    }
   });
 
   const targetDuration = script.reduce((s, seg) => s + (seg.duration ?? 0), 0);

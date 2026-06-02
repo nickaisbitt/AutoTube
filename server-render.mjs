@@ -42,7 +42,14 @@ import {
 } from './server-render/pipelineReliability.mjs';
 
 import { estimateRenderCost } from './src/services/costTracker.mjs';
-import { isYouTubeExportMode, captionMetrics, hookFontPx } from './server-render/youtubeProfile.mjs';
+import {
+  isYouTubeExportMode,
+  captionMetrics,
+  hookFontPx,
+  buildRetentionHook,
+  tokenizeCaptionWords,
+  assetCutIntervalSec,
+} from './server-render/youtubeProfile.mjs';
 
 // ── Word timestamp cache for karaoke subtitle sync ─────────────────────────
 // Populated from edge-tts VTT files before rendering begins.
@@ -3017,7 +3024,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
       for (let wi = 0; wi < drawCount; wi++) {
         const isCurrentWord = (drawStart + wi) === currentWordIdx;
         const rawWord = words[drawStart + wi] || '';
-        const word = rawWord.toUpperCase();
+        const word = /^[a-zA-Z]/.test(rawWord) ? rawWord.toUpperCase() : rawWord;
         const font = isCurrentWord ? boldFont : normalFont;
         const ww = measureWordCached(ctx, font, word);
         wordWidths[wi] = ww;
@@ -3034,7 +3041,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
         const globalWordIdx = drawStart + wi;
         const isCurrentWord = globalWordIdx === currentWordIdx;
         const rawWord = words[globalWordIdx] || '';
-        const displayWord = rawWord.toUpperCase();
+        const displayWord = /^[a-zA-Z]/.test(rawWord) ? rawWord.toUpperCase() : rawWord;
 
         const wordKey = `${seg.id}:${globalWordIdx}`;
         if (!wordFirstAppearFrame.has(wordKey)) {
@@ -3084,7 +3091,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
         ctx.restore();
 
         curX += wordWidths[wi];
-        if (wi < visibleCount - 1) {
+        if (wi < drawCount - 1 && /^[a-zA-Z0-9]/.test(words[drawStart + wi + 1] || '')) {
           curX += spaceWidth;
         }
       }
@@ -3825,7 +3832,7 @@ async function render() {
   globalSafeZone = computeSafeZone(WIDTH, HEIGHT);
   segWordsCache = new Map();
   for (const seg of project.script) {
-    segWordsCache.set(seg.id, seg.narration ? seg.narration.split(' ') : []);
+    segWordsCache.set(seg.id, seg.narration ? tokenizeCaptionWords(seg.narration) : []);
   }
 
   totalFrames = 0;
@@ -3955,7 +3962,7 @@ async function render() {
   const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round((YOUTUBE_MODE ? 1.2 : 0.3) * FPS));
   const COLD_OPEN_BEAT_FRAMES = Math.max(1, Math.round(0.5 * FPS)); // ~5 beats in 2.5s
   const hookText = coldOpenSeg?.narration
-    ? (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60)
+    ? (YOUTUBE_MODE ? buildRetentionHook(coldOpenSeg.narration) : (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60))
     : 'Watch this!';
 
   if (!isShortsMode) for (let f = 0; f < COLD_OPEN_FRAMES; f++) {
@@ -4252,9 +4259,12 @@ async function render() {
 
     // Pacing-based asset alternation — faster cuts in intro segment (checklist: opener pacing)
     const pacingScore = seg.pacingScore || 3;
-    const assetAlternationInterval = si === 0
-      ? Math.min(1.5, pacingScore >= 4 ? 1.0 : 1.5)
-      : Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
+    const ytCut = assetCutIntervalSec(project);
+    const assetAlternationInterval = ytCut != null
+      ? ytCut
+      : si === 0
+        ? Math.min(1.5, pacingScore >= 4 ? 1.0 : 1.5)
+        : Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
 
 
     for (let f = 0; f < numFrames; f++) {

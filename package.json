@@ -23,6 +23,7 @@
     "squad:gate:fixture": "node scripts/squad/manager.mjs gate --fixture",
     "ship:finalize": "node scripts/finalize-ship-artifacts.mjs",
     "ship:complete": "node scripts/ship-complete.mjs",
+    "export:review": "node scripts/export-youtube-review.mjs",
     "test:unit": "vitest run --passWithNoTests",
     "test:unit:watch": "vitest",
     "test:unit:coverage": "vitest run --coverage",

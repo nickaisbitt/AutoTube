@@ -28,7 +28,7 @@ process.on('uncaughtException', (err, origin) => {
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir, homedir } from 'os';
-import { generateNarration } from './server-render/narration.mjs';
+import { generateNarration, assertTtsAvailable, detectTtsProviders } from './server-render/narration.mjs';
 import { parseVttWordTimestamps, findCurrentWord } from './server-render/subtitleParser.mjs';
 import { createStyleParticles, updateStyleParticles, drawStyleParticles, drawDynamicVignette, drawChromaticAberration, drawFlashFrame, computeTensionZoom, drawKineticOverlay } from './server-render/visualFx.mjs';
 import { generateFFmpegChapterMetadata, chaptersFromSegments, embedChaptersCommand, selectCommentBait, computeMidpointTime, generateEasterEggs, drawEasterEgg, computeSpeedRamp, generateABThumbnailVariants, detectEmotionalTone } from './server-render/growthFeatures.mjs';
@@ -69,7 +69,10 @@ const CONFIG = {
   CONCURRENCY_LIMIT: 15,
   SEGMENT_TITLE_DURATION: 0,
   WATERMARK_OPACITY: 0.6,
+  MIN_MEDIA_LOAD_RATE: 0.9,
 };
+
+const STRICT_MEDIA = process.env.STRICT_MEDIA === '1';
 
 const RENDER_DEBUG_OVERLAYS = false;
 
@@ -194,30 +197,82 @@ function measureWordCached(ctx, font, word) {
   return w;
 }
 
+/** Encoders that failed probe or runtime encode — skipped for the rest of this process. */
+const disabledHardwareEncoders = new Set();
+
+function getForceCpuEncoding() {
+  return process.env.AUTOTUBE_FORCE_CPU === '1' || process.env.AUTOTUBE_FORCE_CPU === 'true';
+}
+
+function listHardwareEncoderCandidates(encoders) {
+  const candidates = [];
+  if (process.platform === 'darwin' && encoders.includes('h264_videotoolbox')) {
+    candidates.push('h264_videotoolbox');
+  }
+  if (encoders.includes('h264_nvenc')) {
+    candidates.push('h264_nvenc');
+  }
+  if (encoders.includes('h264_vaapi')) {
+    candidates.push('h264_vaapi');
+  }
+  if (encoders.includes('h264_v4l2m2m')) {
+    candidates.push('h264_v4l2m2m');
+  }
+  return candidates;
+}
+
+function buildHardwareEncoderProbeArgs(encoder) {
+  const nullSink = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  const base = ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=0.04', '-frames:v', '1'];
+  switch (encoder) {
+    case 'h264_videotoolbox':
+      return [...base, '-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-f', 'null', nullSink];
+    case 'h264_nvenc':
+      return [...base, '-c:v', 'h264_nvenc', '-preset', 'p4', '-f', 'null', nullSink];
+    case 'h264_vaapi':
+      return ['-hide_banner', '-loglevel', 'error', '-vaapi_device', '/dev/dri/renderD128', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=0.04', '-frames:v', '1', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi', '-f', 'null', nullSink];
+    case 'h264_v4l2m2m':
+      return [...base, '-c:v', 'h264_v4l2m2m', '-f', 'null', nullSink];
+    default:
+      return null;
+  }
+}
+
+function probeHardwareEncoder(encoder) {
+  if (!encoder || disabledHardwareEncoders.has(encoder)) return false;
+  const args = buildHardwareEncoderProbeArgs(encoder);
+  if (!args) return false;
+  try {
+    const result = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 15000 });
+    if (result.status === 0) return true;
+    const detail = (result.stderr || result.stdout || '').trim();
+    if (detail) {
+      log('warn', `  ⚠ Hardware encoder probe failed for ${encoder}: ${detail.slice(0, 200)}`);
+    }
+    disabledHardwareEncoders.add(encoder);
+    return false;
+  } catch (err) {
+    log('warn', `  ⚠ Hardware encoder probe error for ${encoder}: ${err.message}`);
+    disabledHardwareEncoders.add(encoder);
+    return false;
+  }
+}
+
+function isHardwareEncoderError(stderr) {
+  if (!stderr) return false;
+  const lower = stderr.toLowerCase();
+  return /nvenc|vaapi|videotoolbox|v4l2|cannot load libcuda|no device|encoder.*not found|unknown encoder|error while opening encoder|could not open encoder|device creation failed|cuda|hwupload/i.test(lower);
+}
+
 function detectHardwareEncoder() {
   try {
     const result = spawnSync('ffmpeg', ['-encoders'], { encoding: 'utf8', timeout: 5000 });
     if (result.status !== 0) return null;
     const encoders = result.stdout;
 
-    // macOS: VideoToolbox
-    if (process.platform === 'darwin' && encoders.includes('h264_videotoolbox')) {
-      return 'h264_videotoolbox';
-    }
-
-    // NVIDIA GPU: NVENC
-    if (encoders.includes('h264_nvenc')) {
-      return 'h264_nvenc';
-    }
-
-    // AMD/Intel: VA-API (Linux)
-    if (encoders.includes('h264_vaapi')) {
-      return 'h264_vaapi';
-    }
-
-    // Video4Linux2
-    if (encoders.includes('h264_v4l2m2m')) {
-      return 'h264_v4l2m2m';
+    for (const candidate of listHardwareEncoderCandidates(encoders)) {
+      if (disabledHardwareEncoders.has(candidate)) continue;
+      if (probeHardwareEncoder(candidate)) return candidate;
     }
   } catch {}
   return null;
@@ -847,133 +902,126 @@ function cacheSet(key, value) {
 
 // Task 128: Dependency fallback chain documented:
 //   TTS: Kokoro → MeloTTS → edge-tts → silence (handled in generateNarration)
-//   Image proxy: proxy fetch → direct HTTPS → null (procedural fallback)
+//   Image proxy: proxy → weserv → corsproxy → direct HTTPS → null (procedural fallback)
 //   ffmpeg: full effects → draft mode (skip particles/effects) → lower resolution
+
+/** Build ordered fetch sources for an asset URL (mirrors browser buildImageSources). */
+export function buildImageFetchSources(originalUrl) {
+  if (!/^https?:\/\//i.test(originalUrl)) {
+    const fetchUrl = originalUrl.startsWith('http')
+      ? originalUrl
+      : `${DEV_SERVER}${originalUrl.startsWith('/') ? '' : '/'}${originalUrl}`;
+    return [{ fetchUrl, label: 'local', retries: 1 }];
+  }
+
+  return [
+    {
+      fetchUrl: `${DEV_SERVER}/api/proxy-image?url=${encodeURIComponent(originalUrl)}`,
+      label: 'proxy',
+      retries: CONFIG.FETCH_MAX_RETRIES,
+    },
+    {
+      fetchUrl: `https://images.weserv.nl/?url=${encodeURIComponent(originalUrl)}&w=1920&output=jpg`,
+      label: 'weserv',
+      retries: 2,
+    },
+    {
+      fetchUrl: `https://corsproxy.io/?${encodeURIComponent(originalUrl)}`,
+      label: 'corsproxy',
+      retries: 1,
+    },
+    {
+      fetchUrl: originalUrl,
+      label: 'direct',
+      retries: 1,
+    },
+  ];
+}
+
+async function fetchImageResponse(fetchUrl, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(fetchUrl, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const contentType = res.headers.get('content-type');
+    const buf = Buffer.from(await res.arrayBuffer());
+    const contentLength = parseInt(res.headers.get('content-length') || String(buf.length), 10);
+    return { buf, contentType, contentLength };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function decodeFetchedImage(buf, contentType, contentLength, originalUrl) {
+  const contentTypeValidation = validateContentType(contentType, buf);
+  if (!contentTypeValidation.valid) {
+    throw new Error(contentTypeValidation.error);
+  }
+
+  const detectedFormat = detectImageFormat(buf);
+  if (detectedFormat === 'unknown') {
+    throw new Error('Corrupted or unsupported image format');
+  }
+
+  if (!isCanvasSupportedFormat(detectedFormat)) {
+    console.warn(`  ⚠ [fetchImage] Format '${detectedFormat}' has limited canvas support, attempting load...`);
+  }
+
+  let img;
+  try {
+    img = await loadImage(buf);
+  } catch (loadErr) {
+    throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}`);
+  }
+
+  const validation = validateImage(img, originalUrl, contentLength, buf);
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
+  return img;
+}
+
 async function fetchImage(url) {
   if (imageCache.has(url)) return imageCache.get(url);
 
-  const MAX_RETRIES = CONFIG.FETCH_MAX_RETRIES;
   const TIMEOUT_MS = CONFIG.FETCH_TIMEOUT_MS;
 
   // SECURITY: Validate URL safety before fetching (SSRF protection)
-  const urlSafety = validateUrlSafety(url);
-  if (!urlSafety.valid) {
-    console.warn(`  ⚠ [fetchImage] URL blocked for security: ${urlSafety.error}`);
-    return null;
-  }
-
-  // Attempt proxy fetch with retries and exponential backoff
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const proxyUrl = `${DEV_SERVER}/api/proxy-image?url=${encodeURIComponent(url)}`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-      const res = await fetch(proxyUrl, { signal: controller.signal });
-      if (!res.ok) {
-        clearTimeout(timer);
-        throw new Error(`Proxy returned ${res.status}`);
-      }
-      
-      // Get content-type header for validation
-      const contentType = res.headers.get('content-type');
-      const buf = Buffer.from(await res.arrayBuffer());
-      clearTimeout(timer);
-
-      // Validate Content-Type matches expected image format
-      const contentTypeValidation = validateContentType(contentType, buf);
-      if (!contentTypeValidation.valid) {
-        console.warn(`  ⚠ [fetchImage] Content-Type validation failed: ${contentTypeValidation.error}`);
-        throw new Error(contentTypeValidation.error);
-      }
-
-      // Detect image format from magic bytes
-      const detectedFormat = detectImageFormat(buf);
-      if (detectedFormat === 'unknown') {
-        console.warn(`  ⚠ [fetchImage] Unknown/corrupted image format detected`);
-        throw new Error(`Corrupted or unsupported image format`);
-      }
-
-      // Warn if format may not be fully supported by canvas
-      if (!isCanvasSupportedFormat(detectedFormat)) {
-        console.warn(`  ⚠ [fetchImage] Format '${detectedFormat}' has limited canvas support, attempting load...`);
-      }
-
-      let img;
-      try {
-        img = await loadImage(buf);
-      } catch (loadErr) {
-        console.warn(`  ⚠ [fetchImage] loadImage failed: ${loadErr.message}`);
-        throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}. File may be corrupted.`);
-      }
-      
-      // Comprehensive validation after loading
-      const contentLength = parseInt(res.headers.get('content-length') || '0', 10);
-      const validation = validateImage(img, url, contentLength, buf);
-      if (!validation.valid) {
-        console.warn(`  ⚠ [fetchImage] Image validation failed: ${validation.error}`);
-        throw new Error(validation.error);
-      }
-      
-      cacheSet(url, img);
-      return img;
-    } catch (err) {
-      if (attempt < MAX_RETRIES) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
-        await new Promise(r => setTimeout(r, delay));
-      }
+  if (/^https?:\/\//i.test(url)) {
+    const urlSafety = validateUrlSafety(url);
+    if (!urlSafety.valid) {
+      console.warn(`  ⚠ [fetchImage] URL blocked for security: ${urlSafety.error}`);
+      return null;
     }
   }
 
-  // Secondary fallback: direct HTTPS fetch (bypasses proxy)
-  if (url.startsWith('https://')) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-      const res = await fetch(url, { signal: controller.signal });
-      if (!res.ok) {
-        clearTimeout(timer);
-        throw new Error(`Direct fetch returned ${res.status}`);
-      }
-      
-      const contentType = res.headers.get('content-type');
-      const buf = Buffer.from(await res.arrayBuffer());
-      const contentLength = parseInt(res.headers.get('content-length') || '0', 10);
-      clearTimeout(timer);
+  const sources = buildImageFetchSources(url);
 
-      // Validate Content-Type
-      const contentTypeValidation = validateContentType(contentType, buf);
-      if (!contentTypeValidation.valid) {
-        console.warn(`  ⚠ [fetchImage] Direct fetch Content-Type validation failed: ${contentTypeValidation.error}`);
-        throw new Error(contentTypeValidation.error);
-      }
-
-      // Detect format and validate
-      const detectedFormat = detectImageFormat(buf);
-      if (detectedFormat === 'unknown') {
-        console.warn(`  ⚠ [fetchImage] Direct fetch: unknown/corrupted format`);
-        throw new Error(`Corrupted or unsupported image format`);
-      }
-
-      let img;
+  for (const source of sources) {
+    const maxAttempts = source.retries ?? 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        img = await loadImage(buf);
-      } catch (loadErr) {
-        console.warn(`  ⚠ [fetchImage] Direct fetch loadImage failed: ${loadErr.message}`);
-        throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}`);
+        const { buf, contentType, contentLength } = await fetchImageResponse(source.fetchUrl, TIMEOUT_MS);
+        const img = await decodeFetchedImage(buf, contentType, contentLength, url);
+        cacheSet(url, img);
+        if (source.label !== 'proxy') {
+          log('info', `  ↳ [fetchImage] Loaded via ${source.label} fallback: ${url.substring(0, 60)}`);
+        }
+        return img;
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        if (attempt < maxAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+          console.warn(`  ⚠ [fetchImage] ${source.label} attempt ${attempt}/${maxAttempts} failed: ${detail}`);
+          await new Promise(r => setTimeout(r, delay));
+        } else {
+          console.warn(`  ⚠ [fetchImage] ${source.label} failed after ${maxAttempts} attempt(s): ${detail}`);
+        }
       }
-
-      // Comprehensive validation
-      const validation = validateImage(img, url, contentLength, buf);
-      if (!validation.valid) {
-        console.warn(`  ⚠ [fetchImage] Direct fetch validation failed: ${validation.error}`);
-        throw new Error(validation.error);
-      }
-      
-      cacheSet(url, img);
-      return img;
-    } catch (err) {
-      console.warn(`  ⚠ [fetchImage] Direct HTTPS fetch failed: ${err.message}`);
-      // Direct fetch also failed — fall through to null
     }
   }
 
@@ -3031,16 +3079,18 @@ function validateTTSConfiguration() {
     console.warn('WARNING: Using VITE_ prefixed Cloudflare variables which are exposed to clients. Set CF_ACCOUNT_ID and CF_API_TOKEN instead.');
   }
 
-  const meloAvailable = !!cfAccountId && !!cfApiToken;
-  const edgeTtsAvailable = spawnSync('which', ['edge-tts'], { encoding: 'utf-8' }).status === 0;
+  const providers = assertTtsAvailable({ cfAccountId, cfApiToken });
+  log('info', `TTS providers: Kokoro-82M=${providers.kokoro ? 'YES' : 'NO'}, MeloTTS=${providers.melo ? 'YES' : 'NO'}, edge-tts=${providers.edgeTts ? 'YES' : 'NO'}`);
 
-  log('info', `TTS providers: MeloTTS=${meloAvailable ? 'YES' : 'NO'}, Kokoro-82M=YES (primary), edge-tts subtitles=${edgeTtsAvailable ? 'YES' : 'NO'}`);
-
-  if (!meloAvailable) {
+  if (!providers.melo) {
     console.warn('⚠ MeloTTS not configured (optional). Set CF_ACCOUNT_ID and CF_API_TOKEN for MeloTTS fallback.');
   }
 
-  return { meloAvailable, edgeTtsAvailable };
+  return {
+    meloAvailable: providers.melo,
+    edgeTtsAvailable: providers.edgeTts,
+    kokoroAvailable: providers.kokoro,
+  };
 }
 
 // ── Concatenate audio files ────────────────────────────────────────────────
@@ -3262,7 +3312,17 @@ async function render() {
 
   await preloadWithConcurrency(uniqueUrls, CONCURRENCY_LIMIT);
 
-  log('info', `\n  ✓ Image preloading complete: ${loadedCount} loaded, ${failedCount} failed out of ${uniqueUrls.length} unique URLs`);
+  const totalUnique = uniqueUrls.length;
+  const loadRate = totalUnique > 0 ? loadedCount / totalUnique : 1;
+  const loadRatePct = (loadRate * 100).toFixed(1);
+  log('info', `\n  ✓ Image preloading complete: ${loadedCount} loaded, ${failedCount} failed out of ${totalUnique} unique URLs`);
+  log('info', `  [MediaPreload] load rate: ${loadRatePct}% (${loadedCount}/${totalUnique} succeeded, ${failedCount} → gradient fallback)`);
+
+  if (STRICT_MEDIA && loadRate < CONFIG.MIN_MEDIA_LOAD_RATE) {
+    const msg = `STRICT_MEDIA: image preload load rate ${loadRatePct}% is below ${(CONFIG.MIN_MEDIA_LOAD_RATE * 100).toFixed(0)}% threshold (${loadedCount}/${totalUnique} loaded)`;
+    console.error(`  ❌ ${msg}`);
+    throw new Error(msg);
+  }
   const videoAssetCount = project.media.filter(a => a.type === 'video').length;
   if (videoAssetCount > 0) {
     log('info', `  ${videoAssetCount} video clip(s) will be frame-extracted during render`);
@@ -3536,6 +3596,7 @@ async function render() {
   let renderPassed = false;
   let finalMp4File = null;
   let totalFrames = 0;
+  let forceCpuThisPass = false;
 
   while (attempt < MAX_ATTEMPTS && !renderPassed) {
     attempt++;
@@ -3728,22 +3789,28 @@ async function render() {
   const END_SCREEN_SECONDS = isShortsMode ? 2 : 4;
   const effectiveTitleDur = 0; // Skips full-screen blank chapter transition cards
   const SEGMENT_TITLE_FRAMES = 0;
-  const COLD_OPEN_FRAMES = 0; // Start visual segments immediately
-  const COLD_OPEN_FADE_FRAMES = 0;
+  // Hook packaging: 2–3s cold open before intro narration (sync with narration intro silence)
+  const COLD_OPEN_SECONDS = isShortsMode ? 0 : 2.5;
+  const COLD_OPEN_FRAMES = Math.round(COLD_OPEN_SECONDS * FPS);
+  const COLD_OPEN_FADE_FRAMES = isShortsMode ? 0 : Math.max(1, Math.round(0.25 * FPS));
   const SEGMENT_FADE_FRAMES = Math.round((renderFlags.useFastPacing ? 0.05 : 0.12) * FPS);
   const SEGMENT_TITLE_FADE_FRAMES = 0;
   const titleCardFrames = 0;
   const endScreenFrames = Math.round(END_SCREEN_SECONDS * FPS);
 
 
-  // Apply dynamic pacing: adjust segment durations based on content type
-  // ONLY if the project does not have pre-generated narration matching the script.
-  const hasNarration = project.narration && project.narration.length > 0;
-  if (!hasNarration) {
-    log('info', '  No narration found. Applying dynamic pacing ranges to segment durations...');
+  // Apply dynamic pacing only when segment durations were not measured from narration audio.
+  // generateNarration() runs before this block and sets seg.duration from ffprobe on each WAV.
+  const hasPrebuiltNarration = project.narration && project.narration.length > 0;
+  const hasTtsNarration = audioFiles.some((af) => af.file && /narration-\d+\.wav$/i.test(af.file));
+  if (!hasPrebuiltNarration && !hasTtsNarration) {
+    log('info', '  No narration audio. Applying dynamic pacing ranges to segment durations...');
     for (const seg of project.script) {
       seg.duration = computeDynamicSegmentDuration(seg);
     }
+  } else if (hasTtsNarration) {
+    const measuredSec = project.script.reduce((s, seg) => s + seg.duration, 0);
+    log('info', `  TTS narration measured (${measuredSec.toFixed(1)}s content). Using audio durations for frame timing.`);
   } else {
     log('info', '  Narration voiceover detected. Keeping original script durations for audio synchronization.');
   }
@@ -3826,43 +3893,33 @@ async function render() {
     lastProgressLog = now;
   }
 
-  // ── Step 13: Cold open — dynamic frames from the most dramatic segment ───────
+  // ── Step 13: Cold open — intro segment hook with fast visual beats ───────────
   // Task 130: Skip cold open for Shorts mode
   let coldOpenSeg = null;
   if (!isShortsMode) {
-    // Score each section segment by dramatic/surprising language heuristics
-    let maxScore = -1;
-    for (const seg of project.script) {
-      if (seg.type === 'section' && seg.narration) {
-        const wordCount = seg.narration.split(/\s+/).length;
-        let score = wordCount;
-        if (/\d+/.test(seg.narration)) score += 50;
-        if (/[A-Z][a-z]+ [A-Z][a-z]+/.test(seg.narration)) score += 30;
-        if (seg.narration.includes('?')) score += 20;
-        if (score > maxScore) {
-          maxScore = score;
-          coldOpenSeg = seg;
-        }
-      }
-    }
-    if (!coldOpenSeg) coldOpenSeg = project.script[0];
+    // First-second impact: always use intro segment (script[0]) for hook packaging
+    coldOpenSeg = project.script[0] ?? null;
   }
 
   const coldOpenSegIndex = coldOpenSeg ? project.script.indexOf(coldOpenSeg) : -1;
-  const coldOpenMedia = coldOpenSeg ? project.media.filter(a => a.segmentId === coldOpenSeg.id) : [];
+  const coldOpenMediaRaw = coldOpenSeg ? project.media.filter(a => a.segmentId === coldOpenSeg.id) : [];
+  const coldOpenMedia = [...coldOpenMediaRaw].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   if (!isShortsMode) log('info', `  Cold open: ${COLD_OPEN_FRAMES} frames (${coldOpenSec}s) from "${coldOpenSeg?.title}"`);
   if (isShortsMode) log('info', '  Shorts mode: skipping cold open');
 
   // Opening hook frames — bold text on dark background (req c)
   const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round(0.3 * FPS));
+  const COLD_OPEN_BEAT_FRAMES = Math.max(1, Math.round(0.5 * FPS)); // ~5 beats in 2.5s
   const hookText = coldOpenSeg?.narration
     ? (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60)
     : 'Watch this!';
 
   if (!isShortsMode) for (let f = 0; f < COLD_OPEN_FRAMES; f++) {
-    // Render at 30-50% progress (the middle of the segment)
-    const coldProgress = 0.3 + (f / COLD_OPEN_FRAMES) * 0.2; // 0.3 → 0.5
-    const coldMi = Math.min(Math.floor(coldProgress * Math.max(1, coldOpenMedia.length)), Math.max(0, coldOpenMedia.length - 1));
+    // Fast visual beats: highest-scored assets first, ~0.5s per beat (checklist: 3–5 beats pre-narration)
+    const beatIndex = Math.floor(f / COLD_OPEN_BEAT_FRAMES);
+    const coldMi = coldOpenMedia.length > 0 ? Math.min(beatIndex, coldOpenMedia.length - 1) : 0;
+    const beatPhase = (f % COLD_OPEN_BEAT_FRAMES) / COLD_OPEN_BEAT_FRAMES;
+    const coldProgress = 0.05 + beatPhase * 0.25; // early impactful frames, not mid-clip
     const coldAsset = coldOpenMedia[coldMi] || null;
     let coldImg = null;
 
@@ -3896,6 +3953,10 @@ async function render() {
     // Cold open pattern interrupt: glitch on first 3 frames (Task 46)
     if (f < 3 && !DRAFT_MODE) {
       drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.6);
+    }
+    // Beat-cut flash when cycling to next asset (~0.5s intervals)
+    if (f > 0 && f % COLD_OPEN_BEAT_FRAMES === 0 && !DRAFT_MODE) {
+      drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.35);
     }
     // Cold open flash at end before fade-to-black (Task 48)
     if (f === COLD_OPEN_FRAMES - 2 && !DRAFT_MODE) {
@@ -4144,10 +4205,11 @@ async function render() {
     let prevMi = -1; // Track previous media index for zoom/pan transitions (Step 10)
     let zoomTransitionCounter = -1; // Counts down from 3 when mi changes
 
-    // Pacing-based asset alternation interval (Requirements 13.3, 13.4)
-    // Capped to a strict 3-second ceiling for premium documentary engagement
+    // Pacing-based asset alternation — faster cuts in intro segment (checklist: opener pacing)
     const pacingScore = seg.pacingScore || 3;
-    const assetAlternationInterval = Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
+    const assetAlternationInterval = si === 0
+      ? Math.min(1.5, pacingScore >= 4 ? 1.0 : 1.5)
+      : Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
 
 
     for (let f = 0; f < numFrames; f++) {
@@ -4239,7 +4301,7 @@ async function render() {
         zoomTransitionCounter--;
       }
 
-      if (si > 0 && f < FADE_FRAMES) {
+      if ((si > 0 || COLD_OPEN_FRAMES > 0) && f < FADE_FRAMES) {
         // Crossfade transition: blend outgoing black with incoming frame using
         // computeCrossfadeAlpha for consistent blending (Requirements 4.3, 4.6, 10.2)
         ctx.fillStyle = '#000000';
@@ -4387,37 +4449,57 @@ async function render() {
   const ENCODING_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max for encoding
   log('info', `\n⏳ Encoding video (timeout: ${ENCODING_TIMEOUT_MS / 1000}s)...`);
 
-  await new Promise((resolve, reject) => {
-    let settled = false;
-    const timeoutId = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        console.error(`\n❌ Ffmpeg encoding timed out after ${ENCODING_TIMEOUT_MS / 1000}s`);
-        ffmpeg.kill('SIGKILL');
-        reject(new Error(`Ffmpeg encoding timed out after ${ENCODING_TIMEOUT_MS / 1000}s`));
-      }
-    }, ENCODING_TIMEOUT_MS);
-
-    ffmpeg.on('close', code => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutId);
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`ffmpeg exited with code ${code}`));
+  let encodeFailed = false;
+  try {
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const timeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          console.error(`\n❌ Ffmpeg encoding timed out after ${ENCODING_TIMEOUT_MS / 1000}s`);
+          ffmpeg.kill('SIGKILL');
+          reject(new Error(`Ffmpeg encoding timed out after ${ENCODING_TIMEOUT_MS / 1000}s`));
         }
-      }
-    });
+      }, ENCODING_TIMEOUT_MS);
 
-    ffmpeg.on('error', err => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutId);
-        reject(err);
-      }
+      ffmpeg.on('close', code => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`ffmpeg exited with code ${code}`));
+          }
+        }
+      });
+
+      ffmpeg.on('error', err => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(err);
+        }
+      });
     });
-  });
+  } catch (err) {
+    if (useGpu && isHardwareEncoderError(lastFfmpegError || err.message)) {
+      disabledHardwareEncoders.add(hwEncoder);
+      log('warn', `  ⚠ GPU encoder ${hwEncoder} failed during render — falling back to libx264`);
+      encodeFailed = true;
+    } else {
+      throw err;
+    }
+  }
+
+  if (encodeFailed) {
+    attempt--;
+    forceCpuThisPass = true;
+    totalFrames = 0;
+    globalFrameCounter = 0;
+    try { if (ffmpeg && !ffmpeg.killed) ffmpeg.kill('SIGKILL'); } catch {}
+    continue;
+  }
 
   renderPassed = true;
   finalMp4File = OUTPUT_FILE;
@@ -5109,6 +5191,7 @@ export function validateUrlSafety(urlString) {
 export {
   fetchProject,
   fetchImage,
+  buildImageFetchSources,
   imageCache,
   cacheSet,
   MAX_CACHE_SIZE,

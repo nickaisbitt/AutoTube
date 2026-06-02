@@ -113,7 +113,7 @@ export async function handleProxyImage(
     
     // Set headers
     res.setHeader("Content-Type", contentType);
-
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Cache-Control", "public, max-age=86400");
@@ -141,20 +141,7 @@ export async function handleProxyImage(
       return;
     }
     
-    // Simple magic-byte validation for common image formats
-    const magic = buffer.slice(0, 4);
-    const isJpeg = magic[0] === 0xFF && magic[1] === 0xD8;
-    const isPng = magic[0] === 0x89 && magic[1] === 0x50 && magic[2] === 0x4E && magic[3] === 0x47;
-    const isGif = magic[0] === 0x47 && magic[1] === 0x49 && magic[2] === 0x46;
-    if (!isJpeg && !isPng && !isGif) {
-      res.statusCode = 415;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({
-        error: 'Invalid image content: magic bytes do not match JPEG/PNG/GIF',
-        detectedType: contentType,
-      }));
-      return;
-    }
+    res.end(buffer);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     const isDev = process.env.NODE_ENV !== 'production';

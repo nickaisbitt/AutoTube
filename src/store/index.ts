@@ -637,7 +637,10 @@ export function useVideoProject() {
         const narrationProject = await generateNarration(mediaProject);
         if (!narrationProject) throw new Error('Narration generation failed');
         const editedProject = await runAIEdit(narrationProject);
-        const assembled = await assembleVideo(undefined, editedProject ?? narrationProject);
+        const assembled = await assembleVideo(
+          { quality: 'high', format: 'mp4' },
+          editedProject ?? narrationProject,
+        );
         if (!assembled) throw new Error('Assembly failed');
 
         initialJobs[i] = { ...initialJobs[i], status: 'complete', project: assembled, completedAt: new Date() };
@@ -666,7 +669,10 @@ export function useVideoProject() {
 
     const editedProject = await runAIEdit(narrationProject);
 
-    return await assembleVideo(undefined, editedProject ?? narrationProject);
+    return await assembleVideo(
+      { quality: 'high', format: 'mp4' },
+      editedProject ?? narrationProject,
+    );
   }, [generateScript, sourceMedia, generateNarration, runAIEdit, assembleVideo]);
 
   return {

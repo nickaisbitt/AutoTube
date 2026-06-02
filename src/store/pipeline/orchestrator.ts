@@ -923,9 +923,13 @@ function findAssetsNeedingReplacement(
  */
 export const QUALITY_THRESHOLDS = {
   /** Minimum thumbnail composite score (0-10) before auto-regeneration is recommended. */
-  thumbnailMinScore: 5,
+  thumbnailMinScore: 6,
   /** Minimum hook clarity/intensity score (0-10) before rewrite is flagged. */
-  hookMinScore: 5,
+  hookMinScore: 6,
+  /** Minimum blind-review visual quality (0-10) before re-render is triggered. */
+  visualQualityMinScore: 6,
+  /** Minimum blind-review overall production value (0-10) before re-render is triggered. */
+  overallProductionMinScore: 7,
   /** Minimum number of distinct story arc phases required (personal, institutional, geopolitical). */
   minArcPhases: 2,
   /** Minimum clarity score (0-10) for script content. */
@@ -974,13 +978,12 @@ export interface QualityGateResult {
 /**
  * Evaluate quality gate for a project after a given pipeline phase.
  *
- * This is an opt-in utility that CAN be called by the orchestrator but does NOT
- * modify the existing orchestration flow. It inspects the project state and returns
- * a pass/fail result with specific warnings and recommendations.
+ * Called automatically by the orchestrator after script, media, and assembly
+ * (with up to MAX_QUALITY_ITERATIONS refine/re-render loops).
  *
  * - After 'script' phase: validates hook quality, story arc, clarity, credibility
  * - After 'media' phase: validates thumbnail quality, visual diversity
- * - After 'assembly' phase: validates overall production, problem-to-solution arc
+ * - After 'assembly' phase: blind-review scores, problem-to-solution arc
  */
 export function evaluateQualityGate(
   project: VideoProject,
@@ -1040,11 +1043,16 @@ function evaluateScriptPhase(
     // Check for concrete risk indicators in hook
     const riskIndicators = ['money', 'files', 'identity', 'account', 'password', 'bank', 'stolen', 'hacked', 'lost', 'locked'];
     const hasConcreteRisk = riskIndicators.some((r) => narration.includes(r));
-    if (!hasConcreteRisk && !isGenericHook) {
+    if (!hasConcreteRisk) {
       warnings.push({
         dimension: 'hook',
-        message: 'Hook lacks concrete personal risk — consider adding specific threat language',
-        severity: 'warning',
+        message: 'Hook lacks concrete personal risk — add money, identity, or account stakes in the first 15 seconds',
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'rewrite_hook',
+        reason: 'Viral hooks need immediate personal stakes — replace abstract setup with concrete threat language',
+        affectedSegments: [intro.id],
       });
     }
   }
@@ -1149,11 +1157,39 @@ function evaluateAssemblyPhase(
       });
     }
 
+    if (scores.visualQuality < QUALITY_THRESHOLDS.visualQualityMinScore) {
+      warnings.push({
+        dimension: 'visual_quality',
+        message: `Visual quality score (${scores.visualQuality}) below threshold (${QUALITY_THRESHOLDS.visualQualityMinScore})`,
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'diversify_visuals',
+        reason: 'Blind review rated visuals below threshold — swap weak assets and re-render',
+      });
+    }
+
+    if (scores.overallProductionValue < QUALITY_THRESHOLDS.overallProductionMinScore) {
+      warnings.push({
+        dimension: 'production_value',
+        message: `Overall production score (${scores.overallProductionValue}) below viral threshold (${QUALITY_THRESHOLDS.overallProductionMinScore})`,
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'rewrite_hook',
+        reason: 'Production value too low for YouTube retention — refine script and visuals then re-render',
+      });
+    }
+
     if (scores.pacing < QUALITY_THRESHOLDS.hookMinScore) {
       warnings.push({
         dimension: 'pacing',
         message: `Pacing score (${scores.pacing}) below threshold — retention risk`,
-        severity: 'warning',
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'simplify_language',
+        reason: 'Pacing too slow for short-form retention — tighten script and re-render',
       });
     }
 

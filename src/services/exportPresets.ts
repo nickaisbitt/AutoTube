@@ -35,7 +35,7 @@ const DEFAULT_PRESETS: ExportPreset[] = [
     isDefault: true,
     createdAt: new Date().toISOString(),
     settings: {
-      quality: 'standard',
+      quality: 'high',
       format: 'mp4',
       resolution: '1080p',
       aspectRatio: '16:9',

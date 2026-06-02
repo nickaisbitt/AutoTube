@@ -164,6 +164,21 @@ describe('evaluateQualityGate', () => {
       expect(result.warnings.some((w) => w.dimension === 'story_arc')).toBe(true);
     });
 
+    it('fails when blind review production value is below viral threshold', () => {
+      const project = makeProject({
+        blindReview: {
+          scores: { visualQuality: 8, pacing: 8, narrativeClarity: 8, thumbnailEffectiveness: 8, overallProductionValue: 5 },
+          feedback: { visualQuality: '', pacing: '', narrativeClarity: '', thumbnailEffectiveness: '', overallProductionValue: '' },
+          letterGrade: 'C',
+          summary: 'Mediocre',
+          reviewedAt: new Date().toISOString(),
+        },
+      });
+      const result = evaluateQualityGate(project, 'assembly');
+      expect(result.passed).toBe(false);
+      expect(result.warnings.some((w) => w.dimension === 'production_value')).toBe(true);
+    });
+
     it('passes when blind review scores are all above threshold', () => {
       const project = makeProject({
         blindReview: {
@@ -181,8 +196,10 @@ describe('evaluateQualityGate', () => {
 
   describe('QUALITY_THRESHOLDS', () => {
     it('exports configurable thresholds', () => {
-      expect(QUALITY_THRESHOLDS.thumbnailMinScore).toBe(5);
-      expect(QUALITY_THRESHOLDS.hookMinScore).toBe(5);
+      expect(QUALITY_THRESHOLDS.thumbnailMinScore).toBe(6);
+      expect(QUALITY_THRESHOLDS.hookMinScore).toBe(6);
+      expect(QUALITY_THRESHOLDS.visualQualityMinScore).toBe(6);
+      expect(QUALITY_THRESHOLDS.overallProductionMinScore).toBe(7);
       expect(QUALITY_THRESHOLDS.minArcPhases).toBe(2);
       expect(QUALITY_THRESHOLDS.clarityMinScore).toBe(4);
       expect(QUALITY_THRESHOLDS.credibilityMinScore).toBe(4);

@@ -101,7 +101,12 @@ console.log(`🎥 Rendering → ${OUT}\n`);
 const devServer = process.env.DEV_SERVER_URL || 'http://localhost:5173';
 const result = spawnSync('node', ['server-render.mjs', OUT], {
   cwd: ROOT,
-  env: { ...process.env, DEV_SERVER_URL: devServer, AUTOTUBE_FORCE_CPU: '1' },
+  env: {
+    ...process.env,
+    DEV_SERVER_URL: devServer,
+    AUTOTUBE_FORCE_CPU: '1',
+    AUTOTUBE_PROJECT_PATH: projectPath,
+  },
   encoding: 'utf8',
   timeout: 1_800_000,
   stdio: ['inherit', 'pipe', 'pipe'],

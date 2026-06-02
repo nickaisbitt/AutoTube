@@ -10,10 +10,10 @@
 
 | ID | Owner | Status | Priority | Files (primary) | Acceptance criteria | Dependencies |
 |----|-------|--------|----------|-----------------|---------------------|--------------|
-| **M0** | Manager | in_progress | P0 | `scripts/squad/manager.mjs`, `agents.json`, `status.json`, `TASK_BOARD.md` | 17-agent roster + wave plan; `npm run squad:status`; merge blocked until full R7 green | — |
+| **M0** | Manager | done | P0 | `scripts/squad/manager.mjs`, `agents.json`, `status.json`, `TASK_BOARD.md` | 17-agent roster + wave plan; `npm run squad:status`; merge blocked until full R7 green | — |
 | **A5** | ffmpeg scope + cleanup | done | P0 | `server-render.mjs`, `deploy/server-render.mjs`, `activeFfmpeg` cleanup, `scripts/ensure-server-render.mjs` | ffmpeg scoped; deploy sync; non-zero on failure | M0 |
 | **A4** | Encode CPU fallback | done | P0 | `server-render.mjs`, `src/services/renderer/encoding.ts` | NVENC probe + libx264 fallback; `AUTOTUBE_FORCE_CPU=1` | A5 |
-| **A11** | Success signals | in_progress | P0 | `server/routes/serverRender.ts`, `pipelineReliability.mjs` | 0-byte rejected; `MIN_RENDER_OUTPUT_BYTES` on API path | A5 |
+| **A11** | Success signals | done | P0 | `server/routes/serverRender.ts`, `pipelineReliability.mjs` | 0-byte rejected; `MIN_RENDER_OUTPUT_BYTES` on API path | A5 |
 | **A3** | TTS reliability | done | P1 | `deploy/server-render/narration.mjs`, `scripts/squad/A3-tts-setup.md` | edge-tts chain; fail-fast; Real Pass #2 green on fixture | A5 |
 | **A7** | Background music | done | P1 | `public/audio/bg-*.aac`, `deploy/server-render/audio.mjs` | Assets shipped; musicPreset mux wired | A5, A3 |
 | **A6** | Visual preload | done | P2 | `server-render.mjs` | `[MediaPreload] load rate` logged; 100% on fixture run | A5 |
@@ -24,9 +24,9 @@
 | **A9** | Quality gates | done | P3 | `orchestrator.ts`, `aiReviewer.mjs` | Export blocked on gate fail; no +2.0 inflation | A1 |
 | **A8** | Hook / cold-open | done | P3 | `server-render.mjs` | `COLD_OPEN_SECONDS=2.5`, hook overlay 0.3s | A5, A6 |
 | **A13** | Viral packaging | done | P3 | `thumbnail.ts`, `orchestrator.ts` | Thumbnail concepts wired pre-export | A1, A9 |
-| **A15** | P0 checklist automation | in_progress | P3 | `videoQualityChecklist.ts`, `qualityScorer.ts` | P0 subset automated; unit tests added | A9, R7 |
+| **A15** | P0 checklist automation | done | P3 | `videoQualityChecklist.ts`, `qualityScorer.ts` | P0 subset automated; unit tests added | A9, R7 |
 | **A12** | OpenRouter mocks | done | P4 | `e2e/openRouterMock.mjs`, `e2e/fixtures.ts` | Context routing; smoke 3/3 | M0 |
-| **A14** | Ops / save-project | in_progress | P4 | `server/utils/projectPaths.ts`, `serverRender.ts` | `resolveSavedProjectPath` contract | A5 |
+| **A14** | Ops / save-project | done | P4 | `server/utils/projectPaths.ts`, `serverRender.ts` | `resolveSavedProjectPath` contract | A5 |
 
 ---
 

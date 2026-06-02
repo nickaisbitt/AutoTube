@@ -101,8 +101,9 @@ export function readManifest(manifestPath) {
  * @param {import('./real-pass-config.mjs').RealPassConfig} config
  * @param {string} mp4Path
  * @param {object|null} project
+ * @param {string} [renderLog]
  */
-export function check1PipelineDuration(config, mp4Path, project) {
+export function check1PipelineDuration(config, mp4Path, project, renderLog = '') {
   const size = statSync(mp4Path).size;
   const durationSec = probeMediaDuration(mp4Path);
   const isFinalName = /-final\.mp4$/i.test(mp4Path) || mp4Path.includes('FINAL-OUTPUT');
@@ -130,7 +131,10 @@ export function check1PipelineDuration(config, mp4Path, project) {
 
   let durationSub = '';
   if (project?.script?.length) {
-    const durationCheck = verifyOutputDuration(mp4Path, project, { tolerance: config.tolerance });
+    const durationCheck = verifyOutputDuration(mp4Path, project, {
+      tolerance: config.tolerance,
+      renderLog,
+    });
     if (!durationCheck.ok) {
       return result(1, 'pipeline', 'Full pipeline → -final.mp4 ≥ min duration', false,
         `${durationCheck.message} (A2 duration match)`,

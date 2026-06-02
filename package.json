@@ -15,6 +15,7 @@
     "test:e2e:full": "playwright test e2e/full-pipeline.spec.ts",
     "generate:video": "node scripts/generate-full-video.mjs",
     "render:fixture": "node scripts/render-fixture-video.mjs",
+    "render:fixture:full": "node scripts/render-long-fixture.mjs",
     "verify:real-pass": "node scripts/verify-real-pass.mjs",
     "squad:status": "node scripts/squad/manager.mjs status",
     "squad:assign": "node scripts/squad/manager.mjs assign",

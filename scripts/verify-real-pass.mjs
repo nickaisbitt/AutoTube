@@ -117,7 +117,7 @@ function main() {
   const manifest = readManifest(manifestPath);
 
   const checks = [
-    check1PipelineDuration(config, mp4Path, project),
+    check1PipelineDuration(config, mp4Path, project, renderLog),
     check2NoSilentTts(config, mp4Path, project, renderLog),
     check3CpuSafeEncode(config, mp4Path, renderLog, manifest),
     check4MediaPreload(config, renderLog, manifest),

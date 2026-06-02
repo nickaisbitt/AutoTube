@@ -8,7 +8,21 @@ import { existsSync, readFileSync } from 'fs';
 /** End-screen padding mirrored from server-render.mjs (non-shorts). */
 export const END_SCREEN_SECONDS = 4;
 export const SHORTS_END_SCREEN_SECONDS = 2;
+/** Cold open mirrored from server-render.mjs (non-shorts). */
+export const COLD_OPEN_SECONDS = 2.5;
 export const DURATION_TOLERANCE = 0.1;
+
+/**
+ * Parse measured narration duration from server-render stdout (A2 / TTS path).
+ * @param {string} [renderLog]
+ */
+export function parseMeasuredNarrationSec(renderLog) {
+  if (!renderLog) return null;
+  const m = renderLog.match(/TTS narration measured \(([\d.]+)s content\)/i);
+  if (!m) return null;
+  const parsed = parseFloat(m[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 /**
  * @param {string} filePath
@@ -37,9 +51,9 @@ export function probeMediaDuration(filePath) {
  */
 export function estimateSegmentSpeechSec(seg) {
   const words = (seg.narration || '').split(/\s+/).filter(Boolean).length;
-  if (words > 0) return (words / 165) * 60;
-  const d = typeof seg.duration === 'number' && seg.duration > 0 ? seg.duration : 0;
-  return d;
+  const fromWords = words > 0 ? (words / 165) * 60 : 0;
+  const fromPlanner = typeof seg.duration === 'number' && seg.duration > 0 ? seg.duration : 0;
+  return Math.max(fromWords, fromPlanner);
 }
 
 /**
@@ -50,6 +64,13 @@ export function estimateSegmentSpeechSec(seg) {
  */
 export function expectedRenderDuration(script, options = {}) {
   if (!Array.isArray(script) || script.length === 0) return 0;
+  const isShorts = options.isShorts === true;
+  const measuredNarration = options.measuredNarrationSec;
+  if (typeof measuredNarration === 'number' && measuredNarration > 0) {
+    const coldOpen = isShorts ? 0 : COLD_OPEN_SECONDS;
+    const endScreen = isShorts ? SHORTS_END_SCREEN_SECONDS : END_SCREEN_SECONDS;
+    return measuredNarration + coldOpen + endScreen;
+  }
   const hasNarrationText = script.some((seg) => (seg.narration || '').trim().length > 0);
   const segmentSec = script.reduce((sum, seg) => {
     const d = hasNarrationText ? estimateSegmentSpeechSec(seg) : (
@@ -57,8 +78,9 @@ export function expectedRenderDuration(script, options = {}) {
     );
     return sum + d;
   }, 0);
-  const endScreen = options.isShorts ? SHORTS_END_SCREEN_SECONDS : END_SCREEN_SECONDS;
-  return segmentSec + endScreen;
+  const coldOpen = isShorts ? 0 : COLD_OPEN_SECONDS;
+  const endScreen = isShorts ? SHORTS_END_SCREEN_SECONDS : END_SCREEN_SECONDS;
+  return segmentSec + coldOpen + endScreen;
 }
 
 /**
@@ -84,7 +106,11 @@ export function durationWithinTolerance(actualSec, expectedSec, tolerance = DURA
 export function verifyOutputDuration(mp4Path, project, options = {}) {
   const tolerance = options.tolerance ?? DURATION_TOLERANCE;
   const isShorts = project?.exportSettings?.format === 'shorts';
-  const expectedSec = expectedRenderDuration(project?.script ?? [], { isShorts });
+  const measuredNarration = parseMeasuredNarrationSec(options.renderLog ?? '');
+  const expectedSec = expectedRenderDuration(project?.script ?? [], {
+    isShorts,
+    measuredNarrationSec: measuredNarration ?? undefined,
+  });
   const actualSec = probeMediaDuration(mp4Path);
   const check = durationWithinTolerance(actualSec ?? NaN, expectedSec, tolerance);
 

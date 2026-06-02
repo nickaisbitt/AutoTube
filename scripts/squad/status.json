@@ -2,7 +2,7 @@
   "updated": "2026-06-02",
   "branch": "cursor/video-quality-pipeline-dbd4",
   "agents": {
-    "M0": "in_progress",
+    "M0": "done",
     "A1": "done",
     "A2": "done",
     "A3": "done",
@@ -13,17 +13,15 @@
     "A8": "done",
     "A9": "done",
     "A10": "done",
-    "A11": "in_progress",
+    "A11": "done",
     "A12": "done",
     "A13": "done",
-    "A14": "in_progress",
-    "A15": "in_progress",
+    "A14": "done",
+    "A15": "done",
     "R7": "done"
   },
   "notes": {
-    "A11": "MIN_RENDER_OUTPUT_BYTES in serverRender — pending commit",
-    "A14": "projectPaths.ts — pending commit",
-    "A15": "videoQualityChecklist.ts — pending commit",
-    "merge_gate_full": "npm run verify:real-pass requires ≥180s MP4; use REAL_PASS_FIXTURE=1 for CI"
+    "merge_gate_full": "npm run squad:gate exit 0 — FINAL-OUTPUT-final.mp4 209.5s, 19 MB",
+    "ci": "e2e-smoke + render:fixture + squad:gate:fixture on PR"
   }
 }

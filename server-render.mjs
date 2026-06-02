@@ -848,6 +848,14 @@ function drawTechnicalLabel(ctx, asset, barH, seg, projectTopic) {
 // The legacy /tmp/autotube-project.json path is intentionally skipped here
 // because it is never updated when the client uses ?id= (UUID-keyed) saves.
 async function fetchProject() {
+  const explicitPath = process.env.AUTOTUBE_PROJECT_PATH?.trim();
+  if (explicitPath && existsSync(explicitPath)) {
+    log('info', `Loading project from AUTOTUBE_PROJECT_PATH: ${explicitPath}`);
+    const project = JSON.parse(readFileSync(explicitPath, 'utf8'));
+    log('info', `Project topic: "${project.topic || project.title || 'unknown'}"`);
+    return project;
+  }
+
   // Find the most recently modified autotube project file in /tmp
   let bestPath = null;
   let bestMtime = 0;

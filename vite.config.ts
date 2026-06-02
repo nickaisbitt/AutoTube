@@ -43,5 +43,9 @@ export default defineConfig({
   define: {
     "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV || 'development'),
     "process.env.DEV_SERVER_URL": JSON.stringify(process.env.DEV_SERVER_URL || ''),
+    "import.meta.env.SKIP_QUALITY_BLOCK": JSON.stringify(process.env.SKIP_QUALITY_BLOCK || ''),
+    "import.meta.env.VITE_SKIP_QUALITY_BLOCK": JSON.stringify(
+      process.env.VITE_SKIP_QUALITY_BLOCK || process.env.SKIP_QUALITY_BLOCK || '',
+    ),
   },
 });

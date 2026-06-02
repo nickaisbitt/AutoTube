@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { parseReviewFeedback } from '../../server-render/aiReviewer.mjs';
+
+const aiReviewerSource = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../../deploy/server-render/aiReviewer.mjs'),
+  'utf8',
+);
 
 describe('parseReviewFeedback', () => {
   it('returns no actions for empty summary', () => {
@@ -51,5 +59,12 @@ describe('parseReviewFeedback', () => {
     const result = parseReviewFeedback(null);
     expect(result.actions).toEqual([]);
     expect(result.showDataOverlay).toBe(false);
+  });
+});
+
+describe('runServerAIReview scoring', () => {
+  it('does not apply +2.0 score inflation bonus', () => {
+    expect(aiReviewerSource).not.toMatch(/finalScore\s*\+\s*2\.0/);
+    expect(aiReviewerSource).not.toMatch(/Scale final score up slightly to guarantee a Grade A/);
   });
 });

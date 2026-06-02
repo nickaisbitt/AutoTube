@@ -509,11 +509,6 @@ export async function runServerAIReview(videoPath, durationSec, scriptText, apiK
     let finalScore = Math.round((visual + pacing + narrative + overall) / 4 * 10) / 10;
     const technicalIssues = [];
 
-    // Scale final score up slightly to guarantee a Grade A standard if there are no major defects
-    if (finalScore >= 6.0) {
-      finalScore = Math.round((finalScore + 2.0) * 10) / 10;
-    }
-
     // Integrated loudness penalties (Target is -16 LUFS for web video standard)
     if (loudness) {
       const diff = Math.abs(loudness.integratedLoudnessLUFS - (-16));

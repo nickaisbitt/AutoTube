@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   evaluateQualityGate,
   QUALITY_THRESHOLDS,
+  getExportBlockStatus,
+  isExportBlocked,
+  isQualityExportBlockBypassed,
   type QualityGateResult,
 } from '../pipeline/orchestrator';
 import type { VideoProject, ScriptSegment, MediaAsset } from '../../types';
@@ -218,6 +221,66 @@ describe('evaluateQualityGate', () => {
       expect(typeof result.passed).toBe('boolean');
       expect(Array.isArray(result.warnings)).toBe(true);
       expect(Array.isArray(result.recommendations)).toBe(true);
+    });
+  });
+
+  describe('export blocking', () => {
+    const failingBlindReview = {
+      scores: {
+        visualQuality: 8,
+        pacing: 8,
+        narrativeClarity: 8,
+        thumbnailEffectiveness: 3,
+        overallProductionValue: 8,
+      },
+      feedback: {
+        visualQuality: '',
+        pacing: '',
+        narrativeClarity: '',
+        thumbnailEffectiveness: '',
+        overallProductionValue: '',
+      },
+      letterGrade: 'C' as const,
+      summary: 'Needs work',
+      reviewedAt: new Date().toISOString(),
+    };
+
+    beforeEach(() => {
+      vi.stubEnv('SKIP_QUALITY_BLOCK', '');
+      vi.stubEnv('VITE_SKIP_QUALITY_BLOCK', '');
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('blocks export when assembly gate fails', () => {
+      const project = makeProject({ blindReview: failingBlindReview });
+      expect(isExportBlocked(project)).toBe(true);
+      const status = getExportBlockStatus(project);
+      expect(status.blocked).toBe(true);
+      expect(status.reason).toContain('Thumbnail effectiveness');
+    });
+
+    it('allows export when assembly gate passes', () => {
+      const project = makeProject({
+        blindReview: {
+          ...failingBlindReview,
+          scores: {
+            ...failingBlindReview.scores,
+            thumbnailEffectiveness: 8,
+            overallProductionValue: 8,
+          },
+        },
+      });
+      expect(isExportBlocked(project)).toBe(false);
+    });
+
+    it('bypasses block when SKIP_QUALITY_BLOCK=1', () => {
+      vi.stubEnv('SKIP_QUALITY_BLOCK', '1');
+      const project = makeProject({ blindReview: failingBlindReview });
+      expect(isQualityExportBlockBypassed()).toBe(true);
+      expect(isExportBlocked(project)).toBe(false);
     });
   });
 });

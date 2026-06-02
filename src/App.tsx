@@ -5,6 +5,8 @@ import PipelineStepRouter from './components/PipelineStepRouter';
 import RenderProgressDashboard from './components/RenderProgressDashboard';
 import ToastContainer from './components/Toast';
 import { StoreProvider, useVideoProject } from './store/StoreContext';
+import { getExportBlockStatus } from './store/pipeline/orchestrator';
+import { toast } from './hooks/useToast';
 
 function AppContent() {
   const { appConfig, loadProject, project, assembleVideo } = useVideoProject();
@@ -27,6 +29,12 @@ function AppContent() {
 
   const handleExport = useCallback(async (quality: 'draft' | 'standard' | 'high', format: 'webm' | 'mp4', resolution?: '720p' | '1080p' | '4K') => {
     if (!project) return;
+
+    const block = getExportBlockStatus(project);
+    if (block.blocked) {
+      toast(block.reason ?? 'Export blocked by quality gate', 'error');
+      return;
+    }
     
     const clonedProject = structuredClone(project);
     clonedProject.exportSettings = {

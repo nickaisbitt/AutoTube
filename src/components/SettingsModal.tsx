@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, ExternalLink, Settings, AlertTriangle, CheckCircle, AlertCircle, Mic2, Check, XCircle } from 'lucide-react';
-import { useVideoProject } from '../store';
+import { useVideoProject } from '../store/StoreContext';
 import { logger } from '../services/logger';
 import AssetTester from './AssetTester';
 

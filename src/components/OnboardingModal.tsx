@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Key, Zap, Film, Mic, ChevronRight, Check, ExternalLink } from 'lucide-react';
-import { useVideoProject } from '../store';
+import { useVideoProject } from '../store/StoreContext';
 
 interface OnboardingModalProps {
   isOpen: boolean;

@@ -32,7 +32,9 @@ export function extractHostname(url: string): string {
   try {
     return new URL(url).hostname;
   } catch (err) {
-    console.warn('Domain filter URL parse failed:', err);
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('Domain filter URL parse failed:', err);
+    }
     return '';
   }
 }

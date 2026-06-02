@@ -1,7 +1,7 @@
 import React, { ReactNode } from 'react';
 import PipelineSidebar from './PipelineSidebar';
 import DebugOverlay from './DebugOverlay';
-import { useVideoProject } from '../store';
+import { useVideoProject } from '../store/StoreContext';
 import type { PipelineStep } from '../types';
 
 interface AppShellProps {

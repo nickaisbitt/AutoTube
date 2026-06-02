@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { useVideoProject } from '../store';
+import { useVideoProject } from '../store/StoreContext';
 import { TopicConfig } from '../types';
 
 import TopicStep from './TopicStep';

@@ -56,7 +56,9 @@ export class DeepHarvestProvider implements SourceProvider {
         sourceUrl: img.sourceUrl,
       }));
     } catch (err) {
-      console.warn(`[DeepHarvest] Error for "${query}":`, err);
+      if (process.env.NODE_ENV !== 'test') {
+        console.warn(`[DeepHarvest] Error for "${query}":`, err);
+      }
       return [];
     }
   }

@@ -3053,6 +3053,10 @@ async function concatenateAudio(audioFiles, outputFile) {
 
 // ── Main render ────────────────────────────────────────────────────────────
 async function render() {
+  let ffmpeg;
+  let ffmpegExited = false;
+  let lastFfmpegError = null;
+
   // Task 121: Memory check before render
   const preRenderMem = logMemoryUsage('pre-render');
   // Task 118: Recommend --max-old-space-size flag

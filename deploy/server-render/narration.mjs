@@ -738,13 +738,17 @@ export async function generateNarration(segments, outputDir, options = {}) {
     // Tier 3: edge-tts (local fallback, extremely fast and reliable)
     if (!success) {
       const voice = edgeVoice || 'en-US-GuyNeural';
-      const result = spawnSync('edge-tts', [
+      const edgeArgs = [
         '--voice', voice,
         '--rate', '+10%',
         '--text', seg.narration,
         '--write-media', audioFile,
         '--write-subtitles', subtitleFile,
-      ], { encoding: 'utf8', timeout: 30000 });
+      ];
+      let result = spawnSync('edge-tts', edgeArgs, { encoding: 'utf8', timeout: 30000 });
+      if (result.status !== 0) {
+        result = spawnSync('python3', ['-m', 'edge_tts', ...edgeArgs], { encoding: 'utf8', timeout: 30000 });
+      }
       success = result.status === 0 && existsSync(audioFile);
       if (!success) {
         console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}, trying silence`);

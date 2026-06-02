@@ -78,6 +78,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = join(__dirname, 'test-recordings');
 const OUTPUT_FILE = process.argv[2] || join(OUTPUT_DIR, `server-render-${Date.now()}.mp4`);
 
+/** Active ffmpeg child (module scope for cleanup on crash). */
+let activeFfmpeg = null;
+let activeFfmpegExited = false;
+
 // Dev server base URL — must be provided via environment variable
 const DEV_SERVER = process.env.DEV_SERVER_URL || (() => {
   console.warn('WARNING: DEV_SERVER_URL environment variable not set, falling back to http://localhost:5173. Set DEV_SERVER_URL for production use.');
@@ -3053,6 +3057,12 @@ async function concatenateAudio(audioFiles, outputFile) {
 
 // ── Main render ────────────────────────────────────────────────────────────
 async function render() {
+  let ffmpeg;
+  let ffmpegExited = false;
+  let lastFfmpegError = null;
+  activeFfmpeg = null;
+  activeFfmpegExited = false;
+
   // Task 121: Memory check before render
   const preRenderMem = logMemoryUsage('pre-render');
   // Task 118: Recommend --max-old-space-size flag
@@ -3540,7 +3550,8 @@ async function render() {
 
     // Set up ffmpeg pipe — use GPU acceleration by default when available
     const hwEncoder = detectHardwareEncoder();
-    const useGpu = hwEncoder !== null && !DRAFT_MODE;
+    const forceCpu = process.env.AUTOTUBE_FORCE_CPU === '1' || process.env.AUTOTUBE_FORCE_CPU === 'true';
+    const useGpu = !forceCpu && hwEncoder !== null && !DRAFT_MODE;
     if (useGpu) {
       log('info', `  🖥️  GPU acceleration enabled: ${hwEncoder}`);
     } else {
@@ -3608,13 +3619,16 @@ async function render() {
   ffmpegArgs.push('-pix_fmt', 'yuv420p', '-movflags', '+faststart', OUTPUT_FILE);
 
   ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'inherit', 'pipe'] });
+  activeFfmpeg = ffmpeg;
 
   // Safety: Detect if ffmpeg process dies unexpectedly
   ffmpegExited = false;
+  activeFfmpegExited = false;
   lastFfmpegError = null;
   ffmpeg.setMaxListeners(0); // Allow many drain/close listeners at high frame rates
   ffmpeg.on('close', code => {
     ffmpegExited = true;
+    activeFfmpegExited = true;
     if (code !== 0 && code !== null) {
       console.error(`\n❌ Ffmpeg exited prematurely with code ${code}`);
       const parsed = parseFfmpegError(lastFfmpegError || `exit code ${code}`);
@@ -3626,6 +3640,7 @@ async function render() {
 
   ffmpeg.on('error', err => {
     ffmpegExited = true;
+    activeFfmpegExited = true;
     console.error(`\n❌ Ffmpeg error: ${err.message}`);
     lastFfmpegError = err.message;
   });
@@ -5119,10 +5134,10 @@ if (isMainModule) {
     console.error(err.stack);
     
     // Cleanup: Kill ffmpeg if still running
-    if (ffmpeg && !ffmpegExited) {
+    if (activeFfmpeg && !activeFfmpegExited) {
       log('info', '   Killing ffmpeg process...');
       try {
-        ffmpeg.kill('SIGKILL');
+        activeFfmpeg.kill('SIGKILL');
       } catch (err) {
         console.warn('Cleanup: failed to kill ffmpeg:', err.message);
       }

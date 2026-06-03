@@ -1127,7 +1127,13 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
 
     if (result.status !== 0 || !result.stdout || result.stdout.length === 0) {
       console.warn(`  ⚠ ffmpeg frame extraction failed for clip at t=${timestamp}`);
-      return null;
+      let fallbackImg = null;
+      if (thumbnailUrl) {
+        fallbackImg = await fetchImage(thumbnailUrl);
+      }
+      failedClipFallbackCache.set(clipUrl, fallbackImg);
+      videoFrameCache.set(cacheKey, fallbackImg);
+      return fallbackImg;
     }
 
     const img = await loadImage(result.stdout);
@@ -1138,8 +1144,13 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
     return img;
   } catch (err) {
     console.warn(`  ⚠ Video frame extraction error: ${err.message}`);
-    failedClipFallbackCache.set(clipUrl, null);
-    return null;
+    let fallbackImg = null;
+    if (thumbnailUrl) {
+      fallbackImg = await fetchImage(thumbnailUrl).catch(() => null);
+    }
+    failedClipFallbackCache.set(clipUrl, fallbackImg);
+    videoFrameCache.set(cacheKey, fallbackImg);
+    return fallbackImg;
   }
 }
 

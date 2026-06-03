@@ -22,6 +22,7 @@ function parseArgs(argv) {
   const cfg = {
     max: 0,
     untilPass: false,
+    untilScore: 9.3,
     delaySec: 5,
     reviewOnly: false,
     skipVision: false,
@@ -32,6 +33,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--max' && argv[i + 1]) cfg.max = parseInt(argv[++i], 10);
     else if (a === '--until-pass') cfg.untilPass = true;
+    else if (a === '--until-score' && argv[i + 1]) cfg.untilScore = parseFloat(argv[++i]);
     else if (a === '--delay' && argv[i + 1]) cfg.delaySec = parseInt(argv[++i], 10);
     else if (a === '--review-only') cfg.reviewOnly = true;
     else if (a === '--skip-vision') cfg.skipVision = true;
@@ -85,8 +87,11 @@ async function main() {
   let currentTopic = fixState.pendingTopic || null;
   let iteration = fixState.iteration || 0;
 
+  const TARGET_FILE = join(LOOP_DIR, 'TARGET_SCORE_REACHED.json');
+
   console.log('\n🔁 Video improvement loop (fix-gated)');
   console.log(`   Max iterations: ${cfg.max > 0 ? cfg.max : '∞'}`);
+  console.log(`   Target score: ${cfg.untilScore}/10 (stops when reached)`);
   console.log(`   Fix before next topic: YES`);
   console.log(`   Journal: ${JOURNAL_JSONL}\n`);
 
@@ -204,9 +209,32 @@ async function main() {
       });
     }
 
+    const brutalScore = watch.brutal?.overall ?? 0;
     const uploadReady = watch.uploadReady === true;
+    const scoreTargetMet = Number.isFinite(brutalScore) && brutalScore >= cfg.untilScore;
     let nextStep = 'new random topic';
     let fixesApplied = [];
+
+    if (scoreTargetMet) {
+      writeFileSync(
+        TARGET_FILE,
+        JSON.stringify(
+          {
+            reachedAt: new Date().toISOString(),
+            score: brutalScore,
+            target: cfg.untilScore,
+            topic: currentTopic,
+            videoPath,
+            reportPath: watch.reportPath,
+            runDir,
+          },
+          null,
+          2,
+        ),
+      );
+      console.log(`\n🎯 TARGET SCORE ${brutalScore}/10 ≥ ${cfg.untilScore} — STOPPING LOOP`);
+      console.log(`   Flag file: ${TARGET_FILE}`);
+    }
 
     if (!uploadReady) {
       const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState);
@@ -249,13 +277,18 @@ async function main() {
       generateError,
       videoPath,
       uploadReady,
-      brutalScore: watch.brutal?.overall,
+      brutalScore,
+      scoreTargetMet,
       hookPass: watch.hookVision?.hookPass,
       fixesApplied,
       nextStep,
       reportPath: watch.reportPath,
       runDir,
     });
+
+    if (scoreTargetMet) {
+      break;
+    }
 
     if (cfg.untilPass && uploadReady) {
       console.log('\n🎉 Upload-ready — stopping loop.');

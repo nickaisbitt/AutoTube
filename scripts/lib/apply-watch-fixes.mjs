@@ -27,11 +27,20 @@ export function applyFixesFromWatch(watch, fixState) {
     applied.push(`1. Hook FAIL → shock opener: "${s.hookLine.slice(0, 70)}…"`);
   }
 
-  if (pacing <= 6 || longestHold >= 6) {
+  if (pacing <= 8 || longestHold >= 4) {
     s.useFastPacing = true;
     const prev = s.cutIntervalSec ?? 1.25;
-    s.cutIntervalSec = Math.max(0.85, prev - 0.15);
+    s.cutIntervalSec = Math.max(0.75, prev - 0.2);
     applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s, fast pacing ON`);
+  }
+
+  if ((watch.brutal?.overall ?? 10) < 9.3) {
+    s.showKineticText = true;
+    s.useFastPacing = true;
+    s.cutIntervalSec = Math.max(0.75, (s.cutIntervalSec ?? 1.25) - 0.1);
+    s.shockHook = true;
+    s.forceRealStock = true;
+    applied.push(`2b. Score below 9.3 → escalate all render fixes (cuts=${s.cutIntervalSec}s)`);
   }
 
   if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6) {

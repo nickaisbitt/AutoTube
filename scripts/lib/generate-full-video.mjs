@@ -203,7 +203,7 @@ export async function generateFullVideo(options) {
     route.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' }),
   );
 
-  const scriptTimeoutMs = realHarvest ? 900_000 : 180_000;
+  const scriptTimeoutMs = realHarvest ? 240_000 : 180_000;
   const mediaTimeoutMs = realHarvest ? 1_200_000 : 300_000;
   const narrationTimeoutMs = realHarvest ? 900_000 : 600_000;
 

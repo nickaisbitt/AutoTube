@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   evaluateQualityGate,
   QUALITY_THRESHOLDS,
+  getExportBlockStatus,
+  isExportBlocked,
+  isQualityExportBlockBypassed,
   type QualityGateResult,
 } from '../pipeline/orchestrator';
 import type { VideoProject, ScriptSegment, MediaAsset } from '../../types';
@@ -164,6 +167,21 @@ describe('evaluateQualityGate', () => {
       expect(result.warnings.some((w) => w.dimension === 'story_arc')).toBe(true);
     });
 
+    it('fails when blind review production value is below viral threshold', () => {
+      const project = makeProject({
+        blindReview: {
+          scores: { visualQuality: 8, pacing: 8, narrativeClarity: 8, thumbnailEffectiveness: 8, overallProductionValue: 5 },
+          feedback: { visualQuality: '', pacing: '', narrativeClarity: '', thumbnailEffectiveness: '', overallProductionValue: '' },
+          letterGrade: 'C',
+          summary: 'Mediocre',
+          reviewedAt: new Date().toISOString(),
+        },
+      });
+      const result = evaluateQualityGate(project, 'assembly');
+      expect(result.passed).toBe(false);
+      expect(result.warnings.some((w) => w.dimension === 'production_value')).toBe(true);
+    });
+
     it('passes when blind review scores are all above threshold', () => {
       const project = makeProject({
         blindReview: {
@@ -181,8 +199,10 @@ describe('evaluateQualityGate', () => {
 
   describe('QUALITY_THRESHOLDS', () => {
     it('exports configurable thresholds', () => {
-      expect(QUALITY_THRESHOLDS.thumbnailMinScore).toBe(5);
-      expect(QUALITY_THRESHOLDS.hookMinScore).toBe(5);
+      expect(QUALITY_THRESHOLDS.thumbnailMinScore).toBe(6);
+      expect(QUALITY_THRESHOLDS.hookMinScore).toBe(6);
+      expect(QUALITY_THRESHOLDS.visualQualityMinScore).toBe(6);
+      expect(QUALITY_THRESHOLDS.overallProductionMinScore).toBe(7);
       expect(QUALITY_THRESHOLDS.minArcPhases).toBe(2);
       expect(QUALITY_THRESHOLDS.clarityMinScore).toBe(4);
       expect(QUALITY_THRESHOLDS.credibilityMinScore).toBe(4);
@@ -201,6 +221,66 @@ describe('evaluateQualityGate', () => {
       expect(typeof result.passed).toBe('boolean');
       expect(Array.isArray(result.warnings)).toBe(true);
       expect(Array.isArray(result.recommendations)).toBe(true);
+    });
+  });
+
+  describe('export blocking', () => {
+    const failingBlindReview = {
+      scores: {
+        visualQuality: 8,
+        pacing: 8,
+        narrativeClarity: 8,
+        thumbnailEffectiveness: 3,
+        overallProductionValue: 8,
+      },
+      feedback: {
+        visualQuality: '',
+        pacing: '',
+        narrativeClarity: '',
+        thumbnailEffectiveness: '',
+        overallProductionValue: '',
+      },
+      letterGrade: 'C' as const,
+      summary: 'Needs work',
+      reviewedAt: new Date().toISOString(),
+    };
+
+    beforeEach(() => {
+      vi.stubEnv('SKIP_QUALITY_BLOCK', '');
+      vi.stubEnv('VITE_SKIP_QUALITY_BLOCK', '');
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('blocks export when assembly gate fails', () => {
+      const project = makeProject({ blindReview: failingBlindReview });
+      expect(isExportBlocked(project)).toBe(true);
+      const status = getExportBlockStatus(project);
+      expect(status.blocked).toBe(true);
+      expect(status.reason).toContain('Thumbnail effectiveness');
+    });
+
+    it('allows export when assembly gate passes', () => {
+      const project = makeProject({
+        blindReview: {
+          ...failingBlindReview,
+          scores: {
+            ...failingBlindReview.scores,
+            thumbnailEffectiveness: 8,
+            overallProductionValue: 8,
+          },
+        },
+      });
+      expect(isExportBlocked(project)).toBe(false);
+    });
+
+    it('bypasses block when SKIP_QUALITY_BLOCK=1', () => {
+      vi.stubEnv('SKIP_QUALITY_BLOCK', '1');
+      const project = makeProject({ blindReview: failingBlindReview });
+      expect(isQualityExportBlockBypassed()).toBe(true);
+      expect(isExportBlocked(project)).toBe(false);
     });
   });
 });

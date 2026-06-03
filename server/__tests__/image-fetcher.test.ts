@@ -12,9 +12,37 @@ vi.mock('canvas', () => ({
 
 describe('fetchImage', () => {
   let fetchImage: (url: string) => Promise<unknown>;
+  let buildImageFetchSources: (url: string) => { fetchUrl: string; label: string; retries?: number }[];
   let imageCache: Map<string, unknown>;
   let cacheSet: (key: string, value: unknown) => void;
   let MAX_CACHE_SIZE: number;
+
+  const jpegHeader = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]);
+  const mockJpegBuf = Buffer.concat([jpegHeader, Buffer.alloc(51200 - jpegHeader.length)]);
+
+  function successFetchResponse() {
+    return {
+      ok: true,
+      headers: {
+        get: vi.fn().mockImplementation((h: string) => {
+          const key = h.toLowerCase();
+          if (key === 'content-type') return 'image/jpeg';
+          if (key === 'content-length') return '51200';
+          return null;
+        }),
+      },
+      arrayBuffer: vi.fn().mockResolvedValue(mockJpegBuf.buffer),
+    };
+  }
+
+  function failureFetchResponse() {
+    return {
+      ok: false,
+      status: 503,
+      headers: { get: vi.fn().mockReturnValue(null) },
+      arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+    };
+  }
 
   beforeEach(async () => {
     vi.resetModules();
@@ -54,6 +82,7 @@ describe('fetchImage', () => {
     // @ts-expect-error .mjs module has no declaration file
     const mod = await import('../../server-render.mjs');
     fetchImage = mod.fetchImage;
+    buildImageFetchSources = mod.buildImageFetchSources;
     imageCache = mod.imageCache;
     cacheSet = mod.cacheSet;
     MAX_CACHE_SIZE = mod.MAX_CACHE_SIZE;
@@ -67,15 +96,7 @@ describe('fetchImage', () => {
   });
 
   it('returns cached image on subsequent calls', async () => {
-    const jpegHeader = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]);
-    const mockBuf = Buffer.concat([jpegHeader, Buffer.alloc(51200 - jpegHeader.length)]);
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      headers: {
-        get: vi.fn().mockImplementation((h: string) => h.toLowerCase() === 'content-type' ? 'image/jpeg' : '51200'),
-      },
-      arrayBuffer: vi.fn().mockResolvedValue(mockBuf.buffer),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(successFetchResponse());
     vi.stubGlobal('fetch', fetchMock);
 
     const img1 = await fetchImage('https://example.com/img.jpg');
@@ -85,16 +106,18 @@ describe('fetchImage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('buildImageFetchSources includes proxy, weserv, corsproxy, and direct', () => {
+    const url = 'https://example.com/photo.jpg';
+    const sources = buildImageFetchSources(url);
+    expect(sources.map(s => s.label)).toEqual(['proxy', 'weserv', 'corsproxy', 'direct']);
+    expect(sources[0].fetchUrl).toContain('/api/proxy-image?url=');
+    expect(sources[1].fetchUrl).toContain('images.weserv.nl');
+    expect(sources[2].fetchUrl).toContain('corsproxy.io');
+    expect(sources[3].fetchUrl).toBe(url);
+  });
+
   it('constructs proxy URL with encoded image URL', async () => {
-    const jpegHeader = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]);
-    const mockBuf = Buffer.concat([jpegHeader, Buffer.alloc(51200 - jpegHeader.length)]);
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      headers: {
-        get: vi.fn().mockImplementation((h: string) => h.toLowerCase() === 'content-type' ? 'image/jpeg' : '51200'),
-      },
-      arrayBuffer: vi.fn().mockResolvedValue(mockBuf.buffer),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(successFetchResponse());
     vi.stubGlobal('fetch', fetchMock);
 
     const url = 'https://example.com/image with spaces.jpg';
@@ -105,64 +128,56 @@ describe('fetchImage', () => {
     expect(calledUrl).toContain(encodeURIComponent(url));
   });
 
-  it('retries up to 3 times on proxy failure before returning null', async () => {
+  it('retries proxy then alternate sources before returning null', async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 503,
-      headers: {
-        get: vi.fn().mockReturnValue(null),
-      },
-      arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(failureFetchResponse());
     vi.stubGlobal('fetch', fetchMock);
 
     const resultPromise = fetchImage('https://example.com/fail.jpg');
-    // Advance timers to trigger retry delays
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(15000);
     const result = await resultPromise;
 
     vi.useRealTimers();
 
     expect(result).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    // proxy×3 + weserv×2 + corsproxy×1 + direct×1
+    expect(fetchMock).toHaveBeenCalledTimes(7);
   });
 
-  it('falls back to direct HTTPS fetch when proxy fails', async () => {
-    let callCount = 0;
-    const jpegHeader = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]);
-    const mockBuf = Buffer.concat([jpegHeader, Buffer.alloc(51200 - jpegHeader.length)]);
-    const fetchMock = vi.fn().mockImplementation(() => {
-      callCount++;
-      if (callCount <= 3) {
-        // Proxy failures — throw non-ok response
-        return Promise.resolve({
-          ok: false,
-          status: 503,
-          headers: {
-            get: vi.fn().mockReturnValue(null),
-          },
-          arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
-        });
+  it('falls back to direct HTTPS fetch when proxy and proxies fail', async () => {
+    const directUrl = 'https://example.com/direct.jpg';
+    const fetchMock = vi.fn().mockImplementation((fetchUrl: string) => {
+      if (fetchUrl === directUrl) {
+        return Promise.resolve(successFetchResponse());
       }
-      // Direct HTTPS fetch succeeds
-      return Promise.resolve({
-        ok: true,
-        headers: {
-          get: vi.fn().mockImplementation((h: string) => h.toLowerCase() === 'content-type' ? 'image/jpeg' : '51200'),
-        },
-        arrayBuffer: vi.fn().mockResolvedValue(mockBuf.buffer),
-      });
+      return Promise.resolve(failureFetchResponse());
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await fetchImage('https://example.com/direct.jpg');
+    const result = await fetchImage(directUrl);
 
     expect(result).not.toBeNull();
     const calls = fetchMock.mock.calls.map(c => c[0] as string);
     expect(calls.some(url => url.includes('proxy-image'))).toBe(true);
-    expect(calls.some(url => url === 'https://example.com/direct.jpg')).toBe(true);
-  }, 15000); // 15s timeout for retry delays
+    expect(calls.some(url => url.includes('weserv.nl'))).toBe(true);
+    expect(calls.some(url => url === directUrl)).toBe(true);
+  }, 15000);
+
+  it('falls back to weserv when proxy fails', async () => {
+    const originalUrl = 'https://example.com/weserv.jpg';
+    const fetchMock = vi.fn().mockImplementation((fetchUrl: string) => {
+      if (fetchUrl.includes('weserv.nl')) {
+        return Promise.resolve(successFetchResponse());
+      }
+      return Promise.resolve(failureFetchResponse());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchImage(originalUrl);
+
+    expect(result).not.toBeNull();
+    expect(fetchMock.mock.calls.some(c => String(c[0]).includes('weserv.nl'))).toBe(true);
+  }, 15000);
 
   it('evicts oldest cache entries when size exceeds MAX_CACHE_SIZE', () => {
     for (let i = 0; i <= MAX_CACHE_SIZE; i++) {

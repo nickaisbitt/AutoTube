@@ -21,9 +21,11 @@ Thumbs.db
 
 narration-audio-*/
 *.mp4
+!docs/artifacts/*.mp4
 *.mp3
 !public/audio/**
 *.aac
+!public/audio/*.aac
 output/
 tmp/
 dev.pid
@@ -40,3 +42,4 @@ server-render/
 !deploy/server-render/
 
 reviews/
+test-audio-dir/

@@ -94,8 +94,14 @@ export default function QualityCheck({ videoUrl, existingReport }: QualityCheckP
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Request failed' }));
-        setStatusMsg(`Error: ${err.error}`);
+        const text = await res.text().catch(() => '');
+        let err: { error?: string };
+        try {
+          err = JSON.parse(text);
+        } catch {
+          err = { error: `Request failed (${res.status}): ${text.slice(0, 300)}` };
+        }
+        setStatusMsg(`Error: ${err.error || 'Request failed'}`);
         setIsRunning(false);
         return;
       }

@@ -2,10 +2,12 @@
  * Narration Generation Module
  *
  * Generates narration audio using a fallback chain:
- *   1. Kokoro-82M (local, free, 82M params) — GPU accelerated, RTF ~0.25
- *   2. Silence (last resort)
+ *   1. Kokoro-82M (local / KOKORO_SERVER_URL)
+ *   2. MeloTTS (Cloudflare, optional)
+ *   3. edge-tts (CLI or python3 -m edge_tts)
  *
- * Subtitles are generated from Kokoro's audio duration (word-level VTT) after audio success.
+ * Fails fast when no TTS engine is available — narration segments are never replaced with silence.
+ * Setup: scripts/squad/A3-tts-setup.md
  */
 
 import { spawn, spawnSync } from 'child_process';
@@ -16,17 +18,35 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const KOKORO_SCRIPT = join(__dirname, 'kokoro_generate.py');
 
+/** Keep in sync with COLD_OPEN_SECONDS in server-render.mjs (3.5s cold open) */
+const INTRO_SILENCE_SECONDS = 3.5;
+
+const TTS_SETUP_DOC = 'scripts/squad/A3-tts-setup.md';
+
 function resolveKokoroPython() {
+  const envPython = process.env.KOKORO_PYTHON?.trim();
+  if (envPython) {
+    if (envPython.includes('/') && !existsSync(envPython)) {
+      throw new Error(
+        `KOKORO_PYTHON is set to "${envPython}" but the executable was not found. See ${TTS_SETUP_DOC}.`
+      );
+    }
+    return envPython;
+  }
   const candidates = [
-    '/tmp/tts-env/bin/python',
     '/tmp/tts-env/bin/python3',
+    '/tmp/tts-env/bin/python',
   ];
   for (const p of candidates) {
     if (existsSync(p)) return p;
   }
   return 'python3';
 }
-const KOKORO_PYTHON = resolveKokoroPython();
+
+function getKokoroPython() {
+  return resolveKokoroPython();
+}
+
 const DEFAULT_VOICE = 'af_heart';
 
 // ── Task 17: Voice consistency guard — fallback chain within same engine ──
@@ -188,6 +208,98 @@ const PRONUNCIATION = {
 const EMOTION_SPEED = {};
 for (const [emo, params] of Object.entries(EMOTION_PARAMS)) {
   EMOTION_SPEED[emo] = params.speed;
+}
+
+/**
+ * Resolve how to invoke edge-tts: native CLI or `python -m edge_tts`.
+ * @returns {{ available: boolean, command: string, prefixArgs: string[], detail?: string }}
+ */
+function resolveEdgeTtsRunner(python = getKokoroPython()) {
+  const cliCheck = spawnSync('which', ['edge-tts'], { encoding: 'utf8', timeout: 5000 });
+  if (cliCheck.status === 0) {
+    return { available: true, command: 'edge-tts', prefixArgs: [] };
+  }
+
+  const moduleCheck = spawnSync(python, ['-m', 'edge_tts', '--help'], {
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  if (moduleCheck.status === 0) {
+    return { available: true, command: python, prefixArgs: ['-m', 'edge_tts'] };
+  }
+
+  const fallbackCheck = spawnSync('python3', ['-m', 'edge_tts', '--help'], {
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  if (fallbackCheck.status === 0) {
+    return { available: true, command: 'python3', prefixArgs: ['-m', 'edge_tts'] };
+  }
+
+  const detail = (moduleCheck.stderr || moduleCheck.stdout || fallbackCheck.stderr || '').trim();
+  return {
+    available: false,
+    command: python,
+    prefixArgs: ['-m', 'edge_tts'],
+    detail: detail || 'edge-tts module not importable',
+  };
+}
+
+/**
+ * Detect which TTS providers are available on this host.
+ * @param {object} [options]
+ * @returns {{ kokoro: boolean, melo: boolean, edgeTts: boolean, python: string, edgeRunner: ReturnType<typeof resolveEdgeTtsRunner> }}
+ */
+export function detectTtsProviders(options = {}) {
+  const python = getKokoroPython();
+  const cfAccountId = options.cfAccountId || process.env.CF_ACCOUNT_ID || '';
+  const cfApiToken = options.cfApiToken || process.env.CF_API_TOKEN || '';
+  const melo = !!cfAccountId && !!cfApiToken;
+
+  let kokoro = false;
+  if (process.env.KOKORO_SERVER_URL) {
+    kokoro = true;
+  } else if (existsSync(KOKORO_SCRIPT)) {
+    const importCheck = spawnSync(
+      python,
+      ['-c', 'from kokoro import KPipeline'],
+      { encoding: 'utf8', timeout: 30000 },
+    );
+    kokoro = importCheck.status === 0;
+  }
+
+  const edgeRunner = resolveEdgeTtsRunner(python);
+  return {
+    kokoro,
+    melo,
+    edgeTts: edgeRunner.available,
+    python,
+    edgeRunner,
+  };
+}
+
+/**
+ * Fail fast when no narration engine can run.
+ * @param {object} [options]
+ * @returns {ReturnType<typeof detectTtsProviders>}
+ */
+export function assertTtsAvailable(options = {}) {
+  const providers = detectTtsProviders(options);
+  if (!providers.kokoro && !providers.melo && !providers.edgeTts) {
+    const lines = [
+      'No TTS engine available for server render.',
+      'Install at least one provider (edge-tts is the quickest):',
+      '  pip install --break-system-packages edge-tts',
+      'Optional Kokoro: pip install kokoro torch (set KOKORO_PYTHON if using a venv)',
+      'Optional MeloTTS: set CF_ACCOUNT_ID and CF_API_TOKEN',
+      `See ${TTS_SETUP_DOC} for full setup.`,
+    ];
+    if (providers.edgeRunner.detail) {
+      lines.splice(1, 0, `edge-tts probe: ${providers.edgeRunner.detail}`);
+    }
+    throw new Error(lines.join('\n'));
+  }
+  return providers;
 }
 
 /**
@@ -512,8 +624,9 @@ export async function generateKokoroSegment(text, outputPath, options = {}) {
 
       // Generate audio via Kokoro Python wrapper (async to avoid blocking event loop)
       const env = { ...process.env, PYTORCH_ENABLE_MPS_FALLBACK: '1' };
+      const kokoroPython = getKokoroPython();
       const kokoroPromise = new Promise((resolve) => {
-        const child = spawn(KOKORO_PYTHON, [KOKORO_SCRIPT, batchInput], {
+        const child = spawn(kokoroPython, [KOKORO_SCRIPT, batchInput], {
           encoding: 'utf8',
           timeout: 300000,
           env,
@@ -651,13 +764,47 @@ async function generateMeloSegment(text, outputPath, accountId, apiToken) {
 }
 
 /**
+ * Generate narration via edge-tts (CLI or python3 -m edge_tts).
+ * @param {string} text
+ * @param {string} audioFile
+ * @param {string} subtitleFile
+ * @param {string} voice
+ * @param {ReturnType<typeof resolveEdgeTtsRunner>} [edgeRunner]
+ * @returns {boolean}
+ */
+function generateEdgeTtsSegment(text, audioFile, subtitleFile, voice, edgeRunner) {
+  const runner = edgeRunner || resolveEdgeTtsRunner();
+  if (!runner.available) {
+    console.warn(`  ⚠ edge-tts unavailable: ${runner.detail || 'not installed'}`);
+    return false;
+  }
+
+  const edgeArgs = [
+    ...runner.prefixArgs,
+    '--voice', voice,
+    '--rate', '+0%',
+    '--text', text,
+    '--write-media', audioFile,
+    '--write-subtitles', subtitleFile,
+  ];
+
+  const result = spawnSync(runner.command, edgeArgs, { encoding: 'utf8', timeout: 60000 });
+  if (result.status !== 0) {
+    const errMsg = (result.stderr || result.stdout || '').trim();
+    console.warn(`  ⚠ edge-tts failed (${runner.command}): ${errMsg.substring(0, 200)}`);
+    return false;
+  }
+  return existsSync(audioFile) && statSync(audioFile).size > 0;
+}
+
+/**
  * Generate narration audio for all segments using a fallback chain:
- *   1. Kokoro-82M (local, free, GPU accelerated)
- *   2. MeloTTS (Cloudflare cheap fallback)
- *   3. edge-tts (local reliable fallback)
- *   4. Silence (last resort)
+ *   1. Kokoro-82M (local / KOKORO_SERVER_URL)
+ *   2. MeloTTS (Cloudflare, optional)
+ *   3. edge-tts (CLI or python3 -m edge_tts)
  *
- * Includes silence gaps for cold open (5s) and segment title cards (1.5s each).
+ * Throws if no TTS engine is available or all engines fail for a segment.
+ * Intentional timeline silences (cold open, title cards, end screen) are still generated.
  * Task 18: Inserts breathing sounds between segments.
  * Task 21: Inserts silence pauses at paragraph breaks.
  * Task 24: Uses 48kHz sample rate for all silence generation.
@@ -669,19 +816,20 @@ async function generateMeloSegment(text, outputPath, accountId, apiToken) {
  */
 export async function generateNarration(segments, outputDir, options = {}) {
   const { cfAccountId, cfApiToken, edgeVoice } = options;
-  const useMelo = !!cfAccountId && !!cfApiToken;
+  const providers = assertTtsAvailable({ cfAccountId, cfApiToken });
+  const useMelo = providers.melo;
   const audioFiles = [];
 
-  const engines = ['Kokoro-82M'];
+  const engines = [];
+  if (providers.kokoro) engines.push('Kokoro-82M');
   if (useMelo) engines.push('MeloTTS');
-  engines.push('edge-tts');
-  engines.push('silence');
+  if (providers.edgeTts) engines.push('edge-tts');
   console.log(`Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
 
-  // Generate initial silence for cold open (2s) + title card (3s) = 5s
+  // Intro silence — matches cold open duration in server-render.mjs (title card currently skipped)
   const introSilenceFile = join(outputDir, 'silence-intro.wav');
-  if (generateSilence(introSilenceFile, 5)) {
-    audioFiles.push({ file: introSilenceFile, duration: 5 });
+  if (generateSilence(introSilenceFile, INTRO_SILENCE_SECONDS)) {
+    audioFiles.push({ file: introSilenceFile, duration: INTRO_SILENCE_SECONDS });
   }
 
   for (let i = 0; i < segments.length; i++) {
@@ -690,10 +838,13 @@ export async function generateNarration(segments, outputDir, options = {}) {
     // Validate seg.duration to prevent ffmpeg crashes from NaN/undefined
     const segDuration = (typeof seg.duration === 'number' && !isNaN(seg.duration) && seg.duration > 0) ? seg.duration : 10;
 
-    // Generate 1.5s silence for the segment title card
-    const silenceFile = join(outputDir, `silence-${i}.wav`);
-    if (generateSilence(silenceFile, 1.5)) {
-      audioFiles.push({ file: silenceFile, duration: 1.5 });
+    // Brief pause between segments (video has no segment title cards — keep A/V in sync)
+    const segmentGapSec = parseFloat(process.env.AUTOTUBE_SEGMENT_GAP_SEC || '0.25');
+    if (segmentGapSec > 0) {
+      const silenceFile = join(outputDir, `silence-${i}.wav`);
+      if (generateSilence(silenceFile, segmentGapSec)) {
+        audioFiles.push({ file: silenceFile, duration: segmentGapSec });
+      }
     }
 
     const audioFile = join(outputDir, `narration-${i}.wav`);
@@ -714,7 +865,7 @@ export async function generateNarration(segments, outputDir, options = {}) {
     }
 
     // Tier 1: Kokoro-82M (local, free, GPU accelerated) with voice fallback chain
-    if (!success) {
+    if (!success && providers.kokoro) {
       const narrationText = seg.narration || '';
       success = await generateKokoroSegment(narrationText, audioFile, {
         emotion: seg.emotion || null,
@@ -736,18 +887,17 @@ export async function generateNarration(segments, outputDir, options = {}) {
     }
 
     // Tier 3: edge-tts (local fallback, extremely fast and reliable)
-    if (!success) {
+    if (!success && providers.edgeTts) {
       const voice = edgeVoice || 'en-US-GuyNeural';
-      const result = spawnSync('edge-tts', [
-        '--voice', voice,
-        '--rate', '+10%',
-        '--text', seg.narration,
-        '--write-media', audioFile,
-        '--write-subtitles', subtitleFile,
-      ], { encoding: 'utf8', timeout: 30000 });
-      success = result.status === 0 && existsSync(audioFile);
+      success = generateEdgeTtsSegment(
+        seg.narration,
+        audioFile,
+        subtitleFile,
+        voice,
+        providers.edgeRunner,
+      );
       if (!success) {
-        console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}, trying silence`);
+        console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}`);
       }
     }
 
@@ -790,12 +940,10 @@ export async function generateNarration(segments, outputDir, options = {}) {
         });
       }
     } else {
-      // Tier 4: Silence (last resort)
-      console.warn(`\n  ⚠ All TTS engines failed for segment ${i + 1}, using silence`);
-      if (generateSilence(audioFile, segDuration)) {
-        writeFileSync(subtitleFile, 'WEBVTT\n\n');
-        audioFiles.push({ file: audioFile, duration: segDuration, subtitleFile });
-      }
+      throw new Error(
+        `TTS failed for segment ${i + 1} "${segTitle}": exhausted ${engines.join(' → ')}. ` +
+        `See ${TTS_SETUP_DOC}.`
+      );
     }
   }
 

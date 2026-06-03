@@ -41,7 +41,8 @@ import { trackVideoGeneration } from '../../services/analytics';
 import { reorderForHook } from '../../services/segmentReorderer';
 import { CHART_KEYWORDS } from '../../services/captionUtils';
 import { runAIEditPass } from '../../services/aiEditor';
-import { extractHookLine } from '../../services/seoTitles';
+import { resolveProjectHookLine, syncIntroNarrationToHook } from '../../services/seoTitles';
+import { prepareThumbnailConcepts } from '../../services/thumbnail';
 import { logger } from '../../services/logger';
 import { runBlindReview } from '../../services/blindReview';
 import { generateGrokTts, generateMeloTts } from '../../services/tts';
@@ -50,6 +51,10 @@ import { CURRENT_PROJECT_VERSION } from '../../services/projectMigrations';
 // LR-1 fix: use crypto.randomUUID() for guaranteed uniqueness
 function generateId(): string {
   return crypto.randomUUID();
+}
+
+function isLoopFastMode(): boolean {
+  return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
 }
 
 export interface ProgressCallbacks {
@@ -134,52 +139,72 @@ export async function executeGenerateScript(
     logger.info('Store', `Retention beat: segment=${beat.segmentIndex} offset=${beat.timeOffsetSec.toFixed(1)}s type=${beat.type}`);
   }
 
+  const loopFastMode = isLoopFastMode();
+
+  const hookLine = resolveProjectHookLine(segments, config.topic);
+  const introIdx = segments.findIndex(s => s.type === 'intro');
+  if (introIdx >= 0) {
+    segments[introIdx] = {
+      ...segments[introIdx],
+      narration: syncIntroNarrationToHook(segments[introIdx].narration, hookLine),
+    };
+  }
+
   // Generate title variants (Task 97): direct, curiosity gap, emotional/urgent
   setProcessingProgress(80);
   setProcessingMessage('Generating title variants...');
-  const hookLine = extractHookLine(segments);
-  let videoTitle: string;
+  let videoTitle: string = config.topic;
   let titleVariants: { direct: string; curiosityGap: string; emotionalUrgent: string } | undefined;
-  try {
-    titleVariants = await generateTitleVariants(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
-    videoTitle = titleVariants.curiosityGap; // Default to curiosity gap variant
-  } catch (err) {
-    if ((err as Error).name === 'AbortError') {
-      logger.info('Store', 'Title generation cancelled by user');
-      return null;
-    }
+  if (!loopFastMode) {
     try {
-      videoTitle = await generateVideoTitle(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
-    } catch {
-      videoTitle = config.topic;
+      titleVariants = await generateTitleVariants(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
+      videoTitle = titleVariants.curiosityGap; // Default to curiosity gap variant
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        logger.info('Store', 'Title generation cancelled by user');
+        return null;
+      }
+      try {
+        videoTitle = await generateVideoTitle(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
+      } catch {
+        videoTitle = config.topic;
+      }
     }
+  } else {
+    logger.info('Store', 'Loop fast mode: skipping title variants');
   }
 
   // Generate series metadata (Task 102)
   let seriesMetadata: { seriesName: string; episodeNumber: number; playlistDescription: string; episodeTitle: string } | undefined;
-  try {
-    seriesMetadata = await generateSeriesMetadata(segments, config.topic, appConfig.openRouterKey, signal);
-  } catch {
-    logger.warn('Store', 'Series metadata generation failed');
+  if (!loopFastMode) {
+    try {
+      seriesMetadata = await generateSeriesMetadata(segments, config.topic, appConfig.openRouterKey, signal);
+    } catch {
+      logger.warn('Store', 'Series metadata generation failed');
+    }
   }
 
   // Generate pinned comments (Task 91)
   let pinnedComments: Array<{ text: string; type: 'question_prompt' | 'controversial_take' | 'what_did_i_miss' }> | undefined;
-  try {
-    pinnedComments = await generatePinnedComments(segments, config.topic, appConfig.openRouterKey, signal);
-  } catch {
-    logger.warn('Store', 'Pinned comment generation failed');
+  if (!loopFastMode) {
+    try {
+      pinnedComments = await generatePinnedComments(segments, config.topic, appConfig.openRouterKey, signal);
+    } catch {
+      logger.warn('Store', 'Pinned comment generation failed');
+    }
   }
 
   // Generate hashtags (Task 96)
   let hashtags: string[] | undefined;
-  try {
-    hashtags = await generateHashtags(config.topic, config.style, '', appConfig.openRouterKey, signal);
-  } catch {
-    logger.warn('Store', 'Hashtag generation failed');
+  if (!loopFastMode) {
+    try {
+      hashtags = await generateHashtags(config.topic, config.style, '', appConfig.openRouterKey, signal);
+    } catch {
+      logger.warn('Store', 'Hashtag generation failed');
+    }
   }
 
-  const newProject: VideoProject = {
+  let newProject: VideoProject = {
     version: CURRENT_PROJECT_VERSION,
     id: generateId(),
     title: videoTitle,
@@ -201,7 +226,20 @@ export async function executeGenerateScript(
       score: arcValidation.score,
       issues: arcValidation.issues,
     },
+    hookLine,
   };
+
+  if (!loopFastMode) {
+    newProject = await refineUntilQualityGatePasses(
+      newProject,
+      'script',
+      appConfig,
+      signal,
+      callbacks,
+    );
+  } else {
+    logger.info('Store', 'Loop fast mode: skipping script quality-gate refinements');
+  }
 
   return newProject;
 }
@@ -307,12 +345,20 @@ export async function executeSourceMedia(
     }
   }
 
-  const updatedProject: VideoProject = {
+  let updatedProject: VideoProject = {
     ...activeProject,
     media,
     topicContext,
     visualPlans,
   };
+
+  updatedProject = await refineUntilQualityGatePasses(
+    updatedProject,
+    'media',
+    appConfig,
+    signal,
+    callbacks,
+  );
 
   // Save project for server-side renderer — AWAITED so the file is on disk
   // before this function returns. The server render reads the project from
@@ -615,6 +661,14 @@ export async function executeAssembleVideo(
 ): Promise<VideoProject | null> {
   const { setProcessingProgress, setProcessingMessage } = callbacks;
 
+  const isReExport = activeProject.status === 'complete' && !!activeProject.thumbnail;
+  if (isReExport) {
+    const block = getExportBlockStatus(activeProject);
+    if (block.blocked) {
+      throw new Error(block.reason ?? 'Export blocked by quality gate');
+    }
+  }
+
   // Deep-clone the project so the render operates on an immutable snapshot
   const renderSnapshot = structuredClone(activeProject);
 
@@ -631,100 +685,135 @@ export async function executeAssembleVideo(
         (a.alt ?? '').toLowerCase().includes(kw.toLowerCase())
     )
   );
-  const projectToRender = hasChartAsset ? reorderForHook(renderSnapshot) : renderSnapshot;
+  let projectToRender = hasChartAsset ? reorderForHook(renderSnapshot) : renderSnapshot;
 
-  const renderResult = await renderVideoToBlob(projectToRender, {
-    quality,
-    format,
-    width: preset.width,
-    height: preset.height,
-    onProgress: (pct, message) => {
-      setProcessingProgress(pct);
-      setProcessingMessage(message);
-    },
-    signal,
-  });
+  // Select best thumbnail concept (fear / curiosity / authority) before export
+  const { concepts: thumbnailConcepts, selected: selectedThumbnailConcept } = prepareThumbnailConcepts(
+    projectToRender.topic,
+    projectToRender.style,
+  );
+  projectToRender = { ...projectToRender, thumbnailConcepts, selectedThumbnailConcept };
 
-  // Revoke old thumbnail blob URL to prevent memory leak
-  if (renderSnapshot.thumbnail?.startsWith('blob:')) URL.revokeObjectURL(renderSnapshot.thumbnail);
+  let updatedProject: VideoProject | null = null;
 
-  // Determine video source: streaming URL for server renders, blob URL for browser renders
-  let url: string;
-  let mimeType: string;
-  let resolvedFormat: 'webm' | 'mp4';
-  let isServerRender = false;
-  let fileSize = 0;
+  for (let assemblyIter = 0; assemblyIter < MAX_QUALITY_ITERATIONS; assemblyIter++) {
+    if (signal.aborted) return null;
 
-  if (renderResult && 'url' in renderResult && 'isServerRender' in renderResult) {
-    // Server-side render result — use streaming URL directly
-    const rr = renderResult as RenderResult;
-    url = rr.url;
-    isServerRender = rr.isServerRender;
-    // Infer format from URL
-    resolvedFormat = url.includes('.mp4') ? 'mp4' : 'webm';
-    mimeType = resolvedFormat === 'mp4' ? 'video/mp4' : 'video/webm';
-    // File size unknown for streaming; estimate from total frames * quality
-    fileSize = projectToRender.script.reduce((s, seg) => s + seg.duration, 0) * 1024 * 1024;
-  } else {
-    // Browser-side render result — create blob URL
-    const blob = renderResult as Blob;
-    url = URL.createObjectURL(blob);
-    mimeType = blob.type || 'video/webm';
-    resolvedFormat = mimeType.includes('mp4') ? 'mp4' : 'webm';
-    fileSize = blob.size;
-  }
-
-  const fileName = `${projectToRender.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${resolvedFormat}`;
-
-  const updatedProject: VideoProject = {
-    ...projectToRender,
-    status: 'complete',
-    thumbnail: url,
-    exportSettings: {
+    const renderResult = await renderVideoToBlob(projectToRender, {
       quality,
-      format: resolvedFormat,
+      format,
       width: preset.width,
       height: preset.height,
-      mimeType,
-      fileName,
-      backgroundMusic: projectToRender.exportSettings?.backgroundMusic,
-      isStreaming: isServerRender,
-    },
-  };
-
-  trackVideoGeneration({
-    videoId: renderSnapshot.id,
-    title: renderSnapshot.title,
-    topic: renderSnapshot.topic,
-    createdAt: new Date().toISOString(),
-    renderTime: Math.max(0, (performance.now() - renderStartedAt) / 1000),
-    fileSize,
-    duration: renderSnapshot.script.reduce((sum, seg) => sum + seg.duration, 0),
-    segments: renderSnapshot.script.length,
-    mediaCount: renderSnapshot.media.length,
-    narrationClips: renderSnapshot.narration.length,
-    quality,
-    exportFormat: resolvedFormat,
-  });
-
-  // Blind Review Step
-  setProcessingProgress(96);
-  setProcessingMessage('Running blind quality review...');
-  try {
-    const report = await runBlindReview(updatedProject, appConfig.openRouterKey, {
-      signal,
-      onProgress: (pct, msg) => {
-        const overallPct = 96 + Math.round(pct * 0.03);
-        setProcessingProgress(overallPct);
-        setProcessingMessage(msg);
+      onProgress: (pct, message) => {
+        setProcessingProgress(pct);
+        setProcessingMessage(message);
       },
+      signal,
     });
-    if (report) {
-      updatedProject.blindReview = report;
+
+    // Revoke old thumbnail blob URL to prevent memory leak
+    if (projectToRender.thumbnail?.startsWith('blob:')) URL.revokeObjectURL(projectToRender.thumbnail);
+
+    // Determine video source: streaming URL for server renders, blob URL for browser renders
+    let url: string;
+    let mimeType: string;
+    let resolvedFormat: 'webm' | 'mp4';
+    let isServerRender = false;
+    let fileSize = 0;
+
+    if (renderResult && 'url' in renderResult && 'isServerRender' in renderResult) {
+      const rr = renderResult as RenderResult;
+      url = rr.url;
+      isServerRender = rr.isServerRender;
+      resolvedFormat = url.includes('.mp4') ? 'mp4' : 'webm';
+      mimeType = resolvedFormat === 'mp4' ? 'video/mp4' : 'video/webm';
+      fileSize = projectToRender.script.reduce((s, seg) => s + seg.duration, 0) * 1024 * 1024;
+    } else {
+      const blob = renderResult as Blob;
+      url = URL.createObjectURL(blob);
+      mimeType = blob.type || 'video/webm';
+      resolvedFormat = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      fileSize = blob.size;
     }
-  } catch (err) {
-    if ((err as Error).name === 'AbortError') throw err;
-    logger.warn('Store', 'Blind review failed, continuing to preview', err);
+
+    const fileName = `${projectToRender.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.${resolvedFormat}`;
+
+    updatedProject = {
+      ...projectToRender,
+      status: 'complete',
+      thumbnail: url,
+      exportSettings: {
+        quality,
+        format: resolvedFormat,
+        width: preset.width,
+        height: preset.height,
+        mimeType,
+        fileName,
+        backgroundMusic: projectToRender.exportSettings?.backgroundMusic,
+        isStreaming: isServerRender,
+        serverVideoUrl: isServerRender ? url : projectToRender.exportSettings?.serverVideoUrl,
+        hookLine: projectToRender.hookLine ?? projectToRender.exportSettings?.hookLine,
+        youtubeMode: projectToRender.exportSettings?.youtubeMode,
+      },
+    };
+
+    trackVideoGeneration({
+      videoId: renderSnapshot.id,
+      title: renderSnapshot.title,
+      topic: renderSnapshot.topic,
+      createdAt: new Date().toISOString(),
+      renderTime: Math.max(0, (performance.now() - renderStartedAt) / 1000),
+      fileSize,
+      duration: renderSnapshot.script.reduce((sum, seg) => sum + seg.duration, 0),
+      segments: renderSnapshot.script.length,
+      mediaCount: renderSnapshot.media.length,
+      narrationClips: renderSnapshot.narration.length,
+      quality,
+      exportFormat: resolvedFormat,
+    });
+
+    // Blind review → quality gate → optional re-render
+    setProcessingProgress(96);
+    setProcessingMessage('Running blind quality review...');
+    try {
+      const report = await runBlindReview(updatedProject, appConfig.openRouterKey, {
+        signal,
+        onProgress: (pct, msg) => {
+          const overallPct = 96 + Math.round(pct * 0.03);
+          setProcessingProgress(overallPct);
+          setProcessingMessage(msg);
+        },
+      });
+      if (report) {
+        updatedProject.blindReview = report;
+      }
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err;
+      logger.warn('Store', 'Blind review failed, continuing to preview', err);
+    }
+
+    const assemblyGate = evaluateQualityGate(updatedProject, 'assembly');
+    if (assemblyGate.passed) {
+      if (assemblyIter > 0) {
+        logger.success('QualityGate', `Assembly passed after ${assemblyIter + 1} render attempt(s)`);
+      }
+      break;
+    }
+
+    if (assemblyIter >= MAX_QUALITY_ITERATIONS - 1 || assemblyGate.recommendations.length === 0) {
+      logger.warn('QualityGate', `Assembly quality gate still failing after ${assemblyIter + 1} attempt(s) — delivering best result`);
+      break;
+    }
+
+    setProcessingMessage(`Quality below threshold — refining and re-rendering (${assemblyIter + 2}/${MAX_QUALITY_ITERATIONS})...`);
+    const refined = await applyQualityRecommendations(
+      updatedProject,
+      assemblyGate.recommendations,
+      appConfig,
+      signal,
+      callbacks,
+    );
+    projectToRender = structuredClone(refined);
   }
 
   return updatedProject;
@@ -732,15 +821,163 @@ export async function executeAssembleVideo(
 
 // ─── Quality Gates ───────────────────────────────────────────────────────────
 
+/** Max render → quality-check → refine iterations per pipeline phase. */
+export const MAX_QUALITY_ITERATIONS = 3;
+
+/**
+ * Iteratively applies quality-gate recommendations until thresholds pass
+ * or max iterations is reached.
+ */
+export async function refineUntilQualityGatePasses(
+  project: VideoProject,
+  phase: QualityGatePhase,
+  appConfig: AppConfig,
+  signal: AbortSignal,
+  callbacks: ProgressCallbacks,
+): Promise<VideoProject> {
+  let current = project;
+
+  for (let iter = 0; iter < MAX_QUALITY_ITERATIONS; iter++) {
+    const gate = evaluateQualityGate(current, phase);
+    if (gate.passed) {
+      if (iter > 0) {
+        logger.success('QualityGate', `${phase} phase passed after ${iter} refinement(s)`);
+      }
+      return current;
+    }
+
+    if (gate.recommendations.length === 0) {
+      logger.warn('QualityGate', `${phase} phase has warnings but no actionable recommendations`);
+      return current;
+    }
+
+    if (iter >= MAX_QUALITY_ITERATIONS - 1) {
+      logger.warn('QualityGate', `${phase} phase still below threshold after ${MAX_QUALITY_ITERATIONS} iterations — proceeding`);
+      return current;
+    }
+
+    callbacks.setProcessingMessage(
+      `Quality gate (${phase}): auto-refining (${iter + 2}/${MAX_QUALITY_ITERATIONS})...`,
+    );
+    logger.info('QualityGate', `${phase} iteration ${iter + 1}: ${gate.recommendations.map((r) => r.action).join(', ')}`);
+
+    current = await applyQualityRecommendations(
+      current,
+      gate.recommendations,
+      appConfig,
+      signal,
+      callbacks,
+    );
+  }
+
+  return current;
+}
+
+/**
+ * Applies actionable recommendations from a failed quality gate.
+ */
+export async function applyQualityRecommendations(
+  project: VideoProject,
+  recommendations: QualityGateRecommendation[],
+  appConfig: AppConfig,
+  signal: AbortSignal,
+  callbacks: ProgressCallbacks,
+): Promise<VideoProject> {
+  let updated = project;
+  const uniqueActions = [...new Set(recommendations.map((r) => r.action))];
+
+  for (const action of uniqueActions) {
+    if (signal.aborted) break;
+
+    switch (action) {
+      case 'rewrite_hook':
+      case 'simplify_language':
+      case 'add_arc_bridge': {
+        callbacks.setProcessingMessage(`Refining script: ${action.replace(/_/g, ' ')}...`);
+        try {
+          const refined = await refineScriptMultiPass(
+            updated.script,
+            updated.topic,
+            appConfig.openRouterKey,
+            signal,
+          );
+          updated = { ...updated, script: refined };
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') throw err;
+          logger.warn('QualityGate', `Script refinement for ${action} failed`, err);
+        }
+        break;
+      }
+
+      case 'regenerate_thumbnail':
+      case 'diversify_visuals': {
+        const assetIds = findAssetsNeedingReplacement(updated, action);
+        for (const assetId of assetIds.slice(0, 3)) {
+          if (signal.aborted) break;
+          callbacks.setProcessingMessage(`Replacing weak visual asset...`);
+          const replaced = await executeReplaceMediaAsset(updated, assetId, appConfig);
+          if (replaced) updated = replaced;
+        }
+        break;
+      }
+
+      case 'add_sources':
+        // Requires dedicated fact-check pass — logged for manual review
+        logger.info('QualityGate', 'add_sources recommendation noted — requires OpenRouter fact-check pass');
+        break;
+    }
+  }
+
+  return updated;
+}
+
+/** Picks media assets to replace based on quality-gate recommendations. */
+function findAssetsNeedingReplacement(
+  project: VideoProject,
+  action: QualityGateRecommendation['action'],
+): string[] {
+  const ids: string[] = [];
+
+  if (action === 'regenerate_thumbnail' && project.script.length > 0) {
+    const firstSegId = project.script[0].id;
+    const firstAssets = project.media.filter((a) => a.segmentId === firstSegId);
+    const weakest = firstAssets
+      .filter((a) => !a.isFallback)
+      .sort((a, b) => (a.qualityFactors?.relevance ?? a.score ?? 0) - (b.qualityFactors?.relevance ?? b.score ?? 0))[0];
+    if (weakest) ids.push(weakest.id);
+  }
+
+  if (action === 'diversify_visuals') {
+    const conceptCounts = new Map<string, string[]>();
+    for (const asset of project.media) {
+      const concept = asset.concept || asset.query || 'unknown';
+      const list = conceptCounts.get(concept) || [];
+      list.push(asset.id);
+      conceptCounts.set(concept, list);
+    }
+    for (const [, assetList] of conceptCounts) {
+      if (assetList.length > 2) {
+        ids.push(...assetList.slice(1));
+      }
+    }
+  }
+
+  return ids;
+}
+
 /**
  * Configurable thresholds for quality gate evaluation.
  * Scores are on a 0-10 scale unless otherwise noted.
  */
 export const QUALITY_THRESHOLDS = {
   /** Minimum thumbnail composite score (0-10) before auto-regeneration is recommended. */
-  thumbnailMinScore: 5,
+  thumbnailMinScore: 6,
   /** Minimum hook clarity/intensity score (0-10) before rewrite is flagged. */
-  hookMinScore: 5,
+  hookMinScore: 6,
+  /** Minimum blind-review visual quality (0-10) before re-render is triggered. */
+  visualQualityMinScore: 6,
+  /** Minimum blind-review overall production value (0-10) before re-render is triggered. */
+  overallProductionMinScore: 7,
   /** Minimum number of distinct story arc phases required (personal, institutional, geopolitical). */
   minArcPhases: 2,
   /** Minimum clarity score (0-10) for script content. */
@@ -789,13 +1026,12 @@ export interface QualityGateResult {
 /**
  * Evaluate quality gate for a project after a given pipeline phase.
  *
- * This is an opt-in utility that CAN be called by the orchestrator but does NOT
- * modify the existing orchestration flow. It inspects the project state and returns
- * a pass/fail result with specific warnings and recommendations.
+ * Called automatically by the orchestrator after script, media, and assembly
+ * (with up to MAX_QUALITY_ITERATIONS refine/re-render loops).
  *
  * - After 'script' phase: validates hook quality, story arc, clarity, credibility
  * - After 'media' phase: validates thumbnail quality, visual diversity
- * - After 'assembly' phase: validates overall production, problem-to-solution arc
+ * - After 'assembly' phase: blind-review scores, problem-to-solution arc
  */
 export function evaluateQualityGate(
   project: VideoProject,
@@ -818,6 +1054,52 @@ export function evaluateQualityGate(
     warnings,
     recommendations,
   };
+}
+
+/** Whether quality-gate export blocking is disabled (CI / E2E via SKIP_QUALITY_BLOCK). */
+export function isQualityExportBlockBypassed(): boolean {
+  const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
+  const skip =
+    env?.SKIP_QUALITY_BLOCK ??
+    env?.VITE_SKIP_QUALITY_BLOCK ??
+    (typeof process !== 'undefined' ? process.env.SKIP_QUALITY_BLOCK : undefined);
+  return skip === '1' || skip === 'true';
+}
+
+export interface ExportBlockStatus {
+  blocked: boolean;
+  reason?: string;
+}
+
+/**
+ * Returns whether export/download should be blocked due to failed assembly quality gates.
+ * Bypass when SKIP_QUALITY_BLOCK=1 (CI/E2E).
+ */
+export function getExportBlockStatus(project: VideoProject): ExportBlockStatus {
+  if (isQualityExportBlockBypassed()) {
+    return { blocked: false };
+  }
+
+  const gate = evaluateQualityGate(project, 'assembly');
+  if (gate.passed) {
+    return { blocked: false };
+  }
+
+  const criticalMessages = gate.warnings
+    .filter((w) => w.severity === 'critical')
+    .map((w) => w.message);
+
+  const reason =
+    criticalMessages.length > 0
+      ? criticalMessages.join('; ')
+      : 'Quality gate failed — blind review or assembly scores below threshold';
+
+  return { blocked: true, reason };
+}
+
+/** Convenience wrapper for UI export buttons. */
+export function isExportBlocked(project: VideoProject): boolean {
+  return getExportBlockStatus(project).blocked;
 }
 
 // ─── Phase-specific evaluators (internal helpers) ────────────────────────────
@@ -855,11 +1137,16 @@ function evaluateScriptPhase(
     // Check for concrete risk indicators in hook
     const riskIndicators = ['money', 'files', 'identity', 'account', 'password', 'bank', 'stolen', 'hacked', 'lost', 'locked'];
     const hasConcreteRisk = riskIndicators.some((r) => narration.includes(r));
-    if (!hasConcreteRisk && !isGenericHook) {
+    if (!hasConcreteRisk) {
       warnings.push({
         dimension: 'hook',
-        message: 'Hook lacks concrete personal risk — consider adding specific threat language',
-        severity: 'warning',
+        message: 'Hook lacks concrete personal risk — add money, identity, or account stakes in the first 15 seconds',
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'rewrite_hook',
+        reason: 'Viral hooks need immediate personal stakes — replace abstract setup with concrete threat language',
+        affectedSegments: [intro.id],
       });
     }
   }
@@ -964,11 +1251,39 @@ function evaluateAssemblyPhase(
       });
     }
 
+    if (scores.visualQuality < QUALITY_THRESHOLDS.visualQualityMinScore) {
+      warnings.push({
+        dimension: 'visual_quality',
+        message: `Visual quality score (${scores.visualQuality}) below threshold (${QUALITY_THRESHOLDS.visualQualityMinScore})`,
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'diversify_visuals',
+        reason: 'Blind review rated visuals below threshold — swap weak assets and re-render',
+      });
+    }
+
+    if (scores.overallProductionValue < QUALITY_THRESHOLDS.overallProductionMinScore) {
+      warnings.push({
+        dimension: 'production_value',
+        message: `Overall production score (${scores.overallProductionValue}) below viral threshold (${QUALITY_THRESHOLDS.overallProductionMinScore})`,
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'rewrite_hook',
+        reason: 'Production value too low for YouTube retention — refine script and visuals then re-render',
+      });
+    }
+
     if (scores.pacing < QUALITY_THRESHOLDS.hookMinScore) {
       warnings.push({
         dimension: 'pacing',
         message: `Pacing score (${scores.pacing}) below threshold — retention risk`,
-        severity: 'warning',
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'simplify_language',
+        reason: 'Pacing too slow for short-form retention — tighten script and re-render',
       });
     }
 

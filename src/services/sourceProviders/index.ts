@@ -20,6 +20,7 @@ import { PexelsVideoProvider } from './pexelsVideo';
 import { PixabayVideoProvider } from './pixabayVideo';
 import { DeepHarvestProvider } from './deepHarvest';
 import { filterWatermarked } from './watermarkFilter';
+import { isProviderDisabled } from './disabledProviders';
 import { searchDDGLocal, searchDDGVideos, searchWikimedia, searchBingImages, searchGoogleImages, searchYandexImages, searchDuckDuckGoImages, searchStaticMap, searchBingVideos, searchGoogleVideos } from '../media';
 import { logger } from '../logger';
 
@@ -244,11 +245,12 @@ const allProviders: SourceProvider[] = [
 ];
 
 export function getAllProviders(): SourceProvider[] {
-  return [...allProviders];
+  return allProviders.filter((p) => !isProviderDisabled(p.name));
 }
 
 export function getAvailableProviders(config: AppConfig): SourceProvider[] {
   return allProviders.filter((provider) => {
+    if (isProviderDisabled(provider.name)) return false;
     const providerConfig = mapAppConfigToProviderConfig(provider, config);
     return provider.isAvailable(providerConfig);
   });

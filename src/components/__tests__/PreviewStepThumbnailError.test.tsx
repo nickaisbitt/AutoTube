@@ -19,6 +19,7 @@ vi.mock('../../services/thumbnail', () => ({
   generateThumbnail: vi.fn(() =>
     Promise.reject(new Error('Fallback thumbnail failed')),
   ),
+  getBestThumbnailOverlay: vi.fn((_project: unknown, hookLine?: string) => hookLine ?? 'Test overlay'),
   downloadThumbnail: vi.fn(),
 }));
 

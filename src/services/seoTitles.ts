@@ -497,6 +497,62 @@ export function extractHookLine(segments: ScriptSegment[]): string {
   return intro.narration.slice(0, 100).trim();
 }
 
+/** Score sentences for cold-open / hook line (mirrors deploy/server-render/youtubeProfile.mjs). */
+function scoreHookSentence(s: string): number {
+  let n = 0;
+  if (/\d/.test(s)) n += 4;
+  if (/\b(billion|million|thousand|%\d|\d+%)\b/i.test(s)) n += 3;
+  if (/\b(hack|stolen|ransom|breach|exposed|died|lawsuit|fine)\b/i.test(s)) n += 2;
+  if (/^in\s+\d{4}/i.test(s)) n -= 3;
+  if (/^in this video/i.test(s)) n -= 4;
+  return n;
+}
+
+export function buildRetentionHookLine(narration: string): string {
+  if (!narration?.trim()) return '';
+  const sentences = narration
+    .split(/(?<=[.!?])\s+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 12);
+  if (!sentences.length) return narration.slice(0, 72).trim();
+  const ranked = [...sentences].sort((a, b) => scoreHookSentence(b) - scoreHookSentence(a));
+  const pick = ranked[0] || sentences[0];
+  return pick.length > 72 ? `${pick.slice(0, 69)}…` : pick;
+}
+
+/** Topic-aware hook for project + TTS — bans weak year openers. */
+export function resolveProjectHookLine(segments: ScriptSegment[], topic: string): string {
+  const intro = segments.find(s => s.type === 'intro');
+  const narration = intro?.narration || '';
+  const firstSentence = extractHookLine(segments);
+  if (firstSentence && !/^in\s+20\d{2}\b/i.test(firstSentence.trim())) {
+    const retention = buildRetentionHookLine(narration);
+    if (retention && scoreHookSentence(retention) >= scoreHookSentence(firstSentence)) {
+      return retention;
+    }
+    return firstSentence;
+  }
+  const t = (topic || 'this story').replace(/\.$/, '');
+  const templates = [
+    `${t} — and almost nobody saw it coming.`,
+    `This could affect you by tomorrow: ${t}.`,
+    `Billions lost overnight: ${t}.`,
+    `They tried to hide this — ${t}.`,
+  ];
+  return templates[Math.floor(Math.random() * templates.length)];
+}
+
+/** Replace intro opener so spoken hook matches on-screen hookLine. */
+export function syncIntroNarrationToHook(narration: string, hookLine: string): string {
+  const hook = hookLine.trim();
+  if (!hook || !narration?.trim()) return narration;
+  const rest = narration.replace(/^[^.!?]+[.!?]\s*/, '').trim();
+  if (!rest) return hook.endsWith('.') || hook.endsWith('!') || hook.endsWith('?') ? hook : `${hook}.`;
+  if (rest.toLowerCase().startsWith(hook.toLowerCase().slice(0, 20))) return narration;
+  const punct = hook.match(/[.!?]$/) ? '' : '.';
+  return `${hook}${punct} ${rest}`;
+}
+
 /**
  * Sanitizes a single tag: trims, removes invalid chars (only alphanumeric,
  * spaces, and hyphens allowed), enforces 2-30 char length.

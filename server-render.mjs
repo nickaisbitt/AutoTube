@@ -28,20 +28,28 @@ process.on('uncaughtException', (err, origin) => {
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir, homedir } from 'os';
-import { generateNarration } from './server-render/narration.mjs';
+import { generateNarration, assertTtsAvailable, detectTtsProviders } from './server-render/narration.mjs';
 import { parseVttWordTimestamps, findCurrentWord } from './server-render/subtitleParser.mjs';
 import { createStyleParticles, updateStyleParticles, drawStyleParticles, drawDynamicVignette, drawChromaticAberration, drawFlashFrame, computeTensionZoom, drawKineticOverlay } from './server-render/visualFx.mjs';
 import { generateFFmpegChapterMetadata, chaptersFromSegments, embedChaptersCommand, selectCommentBait, computeMidpointTime, generateEasterEggs, drawEasterEgg, computeSpeedRamp, generateABThumbnailVariants, detectEmotionalTone } from './server-render/growthFeatures.mjs';
 import { drawLowerThird, drawNameCard, drawSourceCitation, drawProgressTimeline, drawTransition, drawChartReveal, extractNamesFromText, extractCitationsFromSegments, selectTransitionForSegment, drawAnimatedBarChart, drawBounceText, drawElasticText, drawSlideInText, drawParallaxBackground, logBRollCoverage, snapTransitionToBeat, easeInOut, easeOut, easeInBounce, applyBreathingRoom, drawZoomTransition, getAvailableTransitions } from './server-render/advancedRender.mjs';
 import {
   renderQueue, progressBroadcaster, checkAvailableMemory, logMemoryUsage,
-  EtaEstimator, validateOutput, stepMetrics, saveCheckpoint, loadCheckpoint,
+  EtaEstimator, validateOutput, assertRenderOutput, stepMetrics, saveCheckpoint, loadCheckpoint,
   clearCheckpoint, parseFfmpegError, getRecoveryAction, QUALITY_DEGRADATION_CHAIN,
   retryWithFallback, recommendNodeFlags, yieldToEventLoop, RenderStateManager,
   measureAudioLoudness,
 } from './server-render/pipelineReliability.mjs';
 
 import { estimateRenderCost } from './src/services/costTracker.mjs';
+import {
+  isYouTubeExportMode,
+  captionMetrics,
+  hookFontPx,
+  buildRetentionHook,
+  tokenizeCaptionWords,
+  assetCutIntervalSec,
+} from './server-render/youtubeProfile.mjs';
 
 // ── Word timestamp cache for karaoke subtitle sync ─────────────────────────
 // Populated from edge-tts VTT files before rendering begins.
@@ -69,7 +77,10 @@ const CONFIG = {
   CONCURRENCY_LIMIT: 15,
   SEGMENT_TITLE_DURATION: 0,
   WATERMARK_OPACITY: 0.6,
+  MIN_MEDIA_LOAD_RATE: 0.9,
 };
+
+const STRICT_MEDIA = process.env.STRICT_MEDIA === '1';
 
 const RENDER_DEBUG_OVERLAYS = false;
 
@@ -77,6 +88,10 @@ const RENDER_DEBUG_OVERLAYS = false;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = join(__dirname, 'test-recordings');
 const OUTPUT_FILE = process.argv[2] || join(OUTPUT_DIR, `server-render-${Date.now()}.mp4`);
+
+/** Active ffmpeg child (module scope for cleanup on crash). */
+let activeFfmpeg = null;
+let activeFfmpegExited = false;
 
 // Dev server base URL — must be provided via environment variable
 const DEV_SERVER = process.env.DEV_SERVER_URL || (() => {
@@ -135,6 +150,7 @@ function hexToRgba(hex, alpha) {
 }
 
 let DRAFT_MODE = false;
+let YOUTUBE_MODE = false;
 
 // ── Caches to avoid per-frame allocations ──────────────────────────────────
 const MAX_ASSET_SEED_CACHE_SIZE = 500;
@@ -190,30 +206,82 @@ function measureWordCached(ctx, font, word) {
   return w;
 }
 
+/** Encoders that failed probe or runtime encode — skipped for the rest of this process. */
+const disabledHardwareEncoders = new Set();
+
+function getForceCpuEncoding() {
+  return process.env.AUTOTUBE_FORCE_CPU === '1' || process.env.AUTOTUBE_FORCE_CPU === 'true';
+}
+
+function listHardwareEncoderCandidates(encoders) {
+  const candidates = [];
+  if (process.platform === 'darwin' && encoders.includes('h264_videotoolbox')) {
+    candidates.push('h264_videotoolbox');
+  }
+  if (encoders.includes('h264_nvenc')) {
+    candidates.push('h264_nvenc');
+  }
+  if (encoders.includes('h264_vaapi')) {
+    candidates.push('h264_vaapi');
+  }
+  if (encoders.includes('h264_v4l2m2m')) {
+    candidates.push('h264_v4l2m2m');
+  }
+  return candidates;
+}
+
+function buildHardwareEncoderProbeArgs(encoder) {
+  const nullSink = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  const base = ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=0.04', '-frames:v', '1'];
+  switch (encoder) {
+    case 'h264_videotoolbox':
+      return [...base, '-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-f', 'null', nullSink];
+    case 'h264_nvenc':
+      return [...base, '-c:v', 'h264_nvenc', '-preset', 'p4', '-f', 'null', nullSink];
+    case 'h264_vaapi':
+      return ['-hide_banner', '-loglevel', 'error', '-vaapi_device', '/dev/dri/renderD128', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=0.04', '-frames:v', '1', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi', '-f', 'null', nullSink];
+    case 'h264_v4l2m2m':
+      return [...base, '-c:v', 'h264_v4l2m2m', '-f', 'null', nullSink];
+    default:
+      return null;
+  }
+}
+
+function probeHardwareEncoder(encoder) {
+  if (!encoder || disabledHardwareEncoders.has(encoder)) return false;
+  const args = buildHardwareEncoderProbeArgs(encoder);
+  if (!args) return false;
+  try {
+    const result = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 15000 });
+    if (result.status === 0) return true;
+    const detail = (result.stderr || result.stdout || '').trim();
+    if (detail) {
+      log('warn', `  ⚠ Hardware encoder probe failed for ${encoder}: ${detail.slice(0, 200)}`);
+    }
+    disabledHardwareEncoders.add(encoder);
+    return false;
+  } catch (err) {
+    log('warn', `  ⚠ Hardware encoder probe error for ${encoder}: ${err.message}`);
+    disabledHardwareEncoders.add(encoder);
+    return false;
+  }
+}
+
+function isHardwareEncoderError(stderr) {
+  if (!stderr) return false;
+  const lower = stderr.toLowerCase();
+  return /nvenc|vaapi|videotoolbox|v4l2|cannot load libcuda|no device|encoder.*not found|unknown encoder|error while opening encoder|could not open encoder|device creation failed|cuda|hwupload/i.test(lower);
+}
+
 function detectHardwareEncoder() {
   try {
     const result = spawnSync('ffmpeg', ['-encoders'], { encoding: 'utf8', timeout: 5000 });
     if (result.status !== 0) return null;
     const encoders = result.stdout;
 
-    // macOS: VideoToolbox
-    if (process.platform === 'darwin' && encoders.includes('h264_videotoolbox')) {
-      return 'h264_videotoolbox';
-    }
-
-    // NVIDIA GPU: NVENC
-    if (encoders.includes('h264_nvenc')) {
-      return 'h264_nvenc';
-    }
-
-    // AMD/Intel: VA-API (Linux)
-    if (encoders.includes('h264_vaapi')) {
-      return 'h264_vaapi';
-    }
-
-    // Video4Linux2
-    if (encoders.includes('h264_v4l2m2m')) {
-      return 'h264_v4l2m2m';
+    for (const candidate of listHardwareEncoderCandidates(encoders)) {
+      if (disabledHardwareEncoders.has(candidate)) continue;
+      if (probeHardwareEncoder(candidate)) return candidate;
     }
   } catch {}
   return null;
@@ -490,13 +558,13 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narration
   if (topicText) {
     const textY = narrationText ? h * 0.42 : h / 2;
     // Highlight numbers and proper nouns on the card title in neon green/accent blue
-    drawTextWithHighlights(ctx, topicText.substring(0, 70), textY, w, 'bold 44px sans-serif', '#ffffff', p.accent);
+    const titlePx = Math.round(h * (YOUTUBE_MODE ? 0.065 : 0.041));
+    const bodyPx = Math.round(h * (YOUTUBE_MODE ? 0.032 : 0.02));
+    drawTextWithHighlights(ctx, topicText.substring(0, 70), textY, w, `bold ${titlePx}px Impact, sans-serif`, '#ffffff', p.accent);
 
-    // Narration Sub-text (if provided)
     if (narrationText) {
       const excerpt = narrationText.substring(0, 110) + (narrationText.length > 110 ? '...' : '');
-      // Highlight statistics/numbers in glowing electric orange
-      drawTextWithHighlights(ctx, excerpt, h * 0.58, w, '300 22px sans-serif', 'rgba(255, 255, 255, 0.75)', '#ff8c00');
+      drawTextWithHighlights(ctx, excerpt, h * 0.58, w, `600 ${bodyPx}px sans-serif`, 'rgba(255, 255, 255, 0.9)', '#ff8c00');
     }
   }
 }
@@ -789,6 +857,14 @@ function drawTechnicalLabel(ctx, asset, barH, seg, projectTopic) {
 // The legacy /tmp/autotube-project.json path is intentionally skipped here
 // because it is never updated when the client uses ?id= (UUID-keyed) saves.
 async function fetchProject() {
+  const explicitPath = process.env.AUTOTUBE_PROJECT_PATH?.trim();
+  if (explicitPath && existsSync(explicitPath)) {
+    log('info', `Loading project from AUTOTUBE_PROJECT_PATH: ${explicitPath}`);
+    const project = JSON.parse(readFileSync(explicitPath, 'utf8'));
+    log('info', `Project topic: "${project.topic || project.title || 'unknown'}"`);
+    return project;
+  }
+
   // Find the most recently modified autotube project file in /tmp
   let bestPath = null;
   let bestMtime = 0;
@@ -843,133 +919,126 @@ function cacheSet(key, value) {
 
 // Task 128: Dependency fallback chain documented:
 //   TTS: Kokoro → MeloTTS → edge-tts → silence (handled in generateNarration)
-//   Image proxy: proxy fetch → direct HTTPS → null (procedural fallback)
+//   Image proxy: proxy → weserv → corsproxy → direct HTTPS → null (procedural fallback)
 //   ffmpeg: full effects → draft mode (skip particles/effects) → lower resolution
+
+/** Build ordered fetch sources for an asset URL (mirrors browser buildImageSources). */
+export function buildImageFetchSources(originalUrl) {
+  if (!/^https?:\/\//i.test(originalUrl)) {
+    const fetchUrl = originalUrl.startsWith('http')
+      ? originalUrl
+      : `${DEV_SERVER}${originalUrl.startsWith('/') ? '' : '/'}${originalUrl}`;
+    return [{ fetchUrl, label: 'local', retries: 1 }];
+  }
+
+  return [
+    {
+      fetchUrl: `${DEV_SERVER}/api/proxy-image?url=${encodeURIComponent(originalUrl)}`,
+      label: 'proxy',
+      retries: CONFIG.FETCH_MAX_RETRIES,
+    },
+    {
+      fetchUrl: `https://images.weserv.nl/?url=${encodeURIComponent(originalUrl)}&w=1920&output=jpg`,
+      label: 'weserv',
+      retries: 2,
+    },
+    {
+      fetchUrl: `https://corsproxy.io/?${encodeURIComponent(originalUrl)}`,
+      label: 'corsproxy',
+      retries: 1,
+    },
+    {
+      fetchUrl: originalUrl,
+      label: 'direct',
+      retries: 1,
+    },
+  ];
+}
+
+async function fetchImageResponse(fetchUrl, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(fetchUrl, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const contentType = res.headers.get('content-type');
+    const buf = Buffer.from(await res.arrayBuffer());
+    const contentLength = parseInt(res.headers.get('content-length') || String(buf.length), 10);
+    return { buf, contentType, contentLength };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function decodeFetchedImage(buf, contentType, contentLength, originalUrl) {
+  const contentTypeValidation = validateContentType(contentType, buf);
+  if (!contentTypeValidation.valid) {
+    throw new Error(contentTypeValidation.error);
+  }
+
+  const detectedFormat = detectImageFormat(buf);
+  if (detectedFormat === 'unknown') {
+    throw new Error('Corrupted or unsupported image format');
+  }
+
+  if (!isCanvasSupportedFormat(detectedFormat)) {
+    console.warn(`  ⚠ [fetchImage] Format '${detectedFormat}' has limited canvas support, attempting load...`);
+  }
+
+  let img;
+  try {
+    img = await loadImage(buf);
+  } catch (loadErr) {
+    throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}`);
+  }
+
+  const validation = validateImage(img, originalUrl, contentLength, buf);
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
+  return img;
+}
+
 async function fetchImage(url) {
   if (imageCache.has(url)) return imageCache.get(url);
 
-  const MAX_RETRIES = CONFIG.FETCH_MAX_RETRIES;
   const TIMEOUT_MS = CONFIG.FETCH_TIMEOUT_MS;
 
   // SECURITY: Validate URL safety before fetching (SSRF protection)
-  const urlSafety = validateUrlSafety(url);
-  if (!urlSafety.valid) {
-    console.warn(`  ⚠ [fetchImage] URL blocked for security: ${urlSafety.error}`);
-    return null;
-  }
-
-  // Attempt proxy fetch with retries and exponential backoff
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const proxyUrl = `${DEV_SERVER}/api/proxy-image?url=${encodeURIComponent(url)}`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-      const res = await fetch(proxyUrl, { signal: controller.signal });
-      if (!res.ok) {
-        clearTimeout(timer);
-        throw new Error(`Proxy returned ${res.status}`);
-      }
-      
-      // Get content-type header for validation
-      const contentType = res.headers.get('content-type');
-      const buf = Buffer.from(await res.arrayBuffer());
-      clearTimeout(timer);
-
-      // Validate Content-Type matches expected image format
-      const contentTypeValidation = validateContentType(contentType, buf);
-      if (!contentTypeValidation.valid) {
-        console.warn(`  ⚠ [fetchImage] Content-Type validation failed: ${contentTypeValidation.error}`);
-        throw new Error(contentTypeValidation.error);
-      }
-
-      // Detect image format from magic bytes
-      const detectedFormat = detectImageFormat(buf);
-      if (detectedFormat === 'unknown') {
-        console.warn(`  ⚠ [fetchImage] Unknown/corrupted image format detected`);
-        throw new Error(`Corrupted or unsupported image format`);
-      }
-
-      // Warn if format may not be fully supported by canvas
-      if (!isCanvasSupportedFormat(detectedFormat)) {
-        console.warn(`  ⚠ [fetchImage] Format '${detectedFormat}' has limited canvas support, attempting load...`);
-      }
-
-      let img;
-      try {
-        img = await loadImage(buf);
-      } catch (loadErr) {
-        console.warn(`  ⚠ [fetchImage] loadImage failed: ${loadErr.message}`);
-        throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}. File may be corrupted.`);
-      }
-      
-      // Comprehensive validation after loading
-      const contentLength = parseInt(res.headers.get('content-length') || '0', 10);
-      const validation = validateImage(img, url, contentLength, buf);
-      if (!validation.valid) {
-        console.warn(`  ⚠ [fetchImage] Image validation failed: ${validation.error}`);
-        throw new Error(validation.error);
-      }
-      
-      cacheSet(url, img);
-      return img;
-    } catch (err) {
-      if (attempt < MAX_RETRIES) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
-        await new Promise(r => setTimeout(r, delay));
-      }
+  if (/^https?:\/\//i.test(url)) {
+    const urlSafety = validateUrlSafety(url);
+    if (!urlSafety.valid) {
+      console.warn(`  ⚠ [fetchImage] URL blocked for security: ${urlSafety.error}`);
+      return null;
     }
   }
 
-  // Secondary fallback: direct HTTPS fetch (bypasses proxy)
-  if (url.startsWith('https://')) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-      const res = await fetch(url, { signal: controller.signal });
-      if (!res.ok) {
-        clearTimeout(timer);
-        throw new Error(`Direct fetch returned ${res.status}`);
-      }
-      
-      const contentType = res.headers.get('content-type');
-      const buf = Buffer.from(await res.arrayBuffer());
-      const contentLength = parseInt(res.headers.get('content-length') || '0', 10);
-      clearTimeout(timer);
+  const sources = buildImageFetchSources(url);
 
-      // Validate Content-Type
-      const contentTypeValidation = validateContentType(contentType, buf);
-      if (!contentTypeValidation.valid) {
-        console.warn(`  ⚠ [fetchImage] Direct fetch Content-Type validation failed: ${contentTypeValidation.error}`);
-        throw new Error(contentTypeValidation.error);
-      }
-
-      // Detect format and validate
-      const detectedFormat = detectImageFormat(buf);
-      if (detectedFormat === 'unknown') {
-        console.warn(`  ⚠ [fetchImage] Direct fetch: unknown/corrupted format`);
-        throw new Error(`Corrupted or unsupported image format`);
-      }
-
-      let img;
+  for (const source of sources) {
+    const maxAttempts = source.retries ?? 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        img = await loadImage(buf);
-      } catch (loadErr) {
-        console.warn(`  ⚠ [fetchImage] Direct fetch loadImage failed: ${loadErr.message}`);
-        throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}`);
+        const { buf, contentType, contentLength } = await fetchImageResponse(source.fetchUrl, TIMEOUT_MS);
+        const img = await decodeFetchedImage(buf, contentType, contentLength, url);
+        cacheSet(url, img);
+        if (source.label !== 'proxy') {
+          log('info', `  ↳ [fetchImage] Loaded via ${source.label} fallback: ${url.substring(0, 60)}`);
+        }
+        return img;
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        if (attempt < maxAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+          console.warn(`  ⚠ [fetchImage] ${source.label} attempt ${attempt}/${maxAttempts} failed: ${detail}`);
+          await new Promise(r => setTimeout(r, delay));
+        } else {
+          console.warn(`  ⚠ [fetchImage] ${source.label} failed after ${maxAttempts} attempt(s): ${detail}`);
+        }
       }
-
-      // Comprehensive validation
-      const validation = validateImage(img, url, contentLength, buf);
-      if (!validation.valid) {
-        console.warn(`  ⚠ [fetchImage] Direct fetch validation failed: ${validation.error}`);
-        throw new Error(validation.error);
-      }
-      
-      cacheSet(url, img);
-      return img;
-    } catch (err) {
-      console.warn(`  ⚠ [fetchImage] Direct HTTPS fetch failed: ${err.message}`);
-      // Direct fetch also failed — fall through to null
     }
   }
 
@@ -983,6 +1052,7 @@ const videoFrameCache = new Map();
 const MAX_CLIP_FILE_CACHE_SIZE = 500;
 const clipFileCache = new Map(); // Maps clip URLs → cached file paths on disk
 const videoFramesDirectories = new Map(); // Maps clip URLs → directories of extracted JPEGs
+const failedClipFallbackCache = new Map(); // Maps clip URLs → thumbnail Image|null after a failed download
 
 /**
  * Downloads a video clip via the proxy and extracts a single frame at the
@@ -1000,6 +1070,11 @@ const videoFramesDirectories = new Map(); // Maps clip URLs → directories of e
 async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
   const cacheKey = `${clipUrl}@${timestamp.toFixed(2)}`;
   if (videoFrameCache.has(cacheKey)) return videoFrameCache.get(cacheKey);
+  if (failedClipFallbackCache.has(clipUrl)) {
+    const fallback = failedClipFallbackCache.get(clipUrl);
+    videoFrameCache.set(cacheKey, fallback);
+    return fallback;
+  }
 
   try {
     // Reuse cached clip file on disk, or download once and persist
@@ -1009,22 +1084,25 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
       const fullUrl = clipUrl.startsWith('http')
         ? clipUrl
         : `${DEV_SERVER}${clipUrl}`;
-      const clipRes = await fetch(fullUrl);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT_MS);
+      const clipRes = await fetch(fullUrl, { signal: controller.signal }).finally(() => clearTimeout(timer));
       if (!clipRes.ok) {
         console.warn(`  ⚠ Failed to download clip: ${clipUrl.substring(0, 60)} — ${clipRes.status}`);
         // Try thumbnail as fallback image when clip download fails (e.g. 403, geo-blocked)
+        let fallbackImg = null;
         if (thumbnailUrl) {
           log('info', `    ↳ Trying thumbnail fallback: ${thumbnailUrl.substring(0, 60)}`);
-          const fallbackImg = await fetchImage(thumbnailUrl);
+          fallbackImg = await fetchImage(thumbnailUrl);
           if (fallbackImg) {
             if (videoFrameCache.size >= MAX_VIDEO_FRAME_CACHE_SIZE) {
               videoFrameCache.delete(videoFrameCache.keys().next().value);
             }
             videoFrameCache.set(cacheKey, fallbackImg);
-            return fallbackImg;
           }
         }
-        return null;
+        failedClipFallbackCache.set(clipUrl, fallbackImg);
+        return fallbackImg;
       }
       const clipBuffer = Buffer.from(await clipRes.arrayBuffer());
 
@@ -1049,7 +1127,13 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
 
     if (result.status !== 0 || !result.stdout || result.stdout.length === 0) {
       console.warn(`  ⚠ ffmpeg frame extraction failed for clip at t=${timestamp}`);
-      return null;
+      let fallbackImg = null;
+      if (thumbnailUrl) {
+        fallbackImg = await fetchImage(thumbnailUrl);
+      }
+      failedClipFallbackCache.set(clipUrl, fallbackImg);
+      videoFrameCache.set(cacheKey, fallbackImg);
+      return fallbackImg;
     }
 
     const img = await loadImage(result.stdout);
@@ -1060,7 +1144,13 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
     return img;
   } catch (err) {
     console.warn(`  ⚠ Video frame extraction error: ${err.message}`);
-    return null;
+    let fallbackImg = null;
+    if (thumbnailUrl) {
+      fallbackImg = await fetchImage(thumbnailUrl).catch(() => null);
+    }
+    failedClipFallbackCache.set(clipUrl, fallbackImg);
+    videoFrameCache.set(cacheKey, fallbackImg);
+    return fallbackImg;
   }
 }
 
@@ -1339,7 +1429,8 @@ function drawEndScreenFrame(ctx, title, progress) {
   ctx.font = '800 52px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Thanks for watching', WIDTH / 2, HEIGHT * 0.30);
+  const thanksLine = YOUTUBE_MODE ? 'Before you go…' : 'Thanks for watching';
+  ctx.fillText(thanksLine, WIDTH / 2, HEIGHT * 0.30);
   ctx.restore();
 
   // Accent line
@@ -1368,7 +1459,7 @@ function drawEndScreenFrame(ctx, title, progress) {
   // "Subscribe" pill button — modern with glow
   ctx.save();
   ctx.globalAlpha = fadeAlpha;
-  const btnText = 'Subscribe';
+  const btnText = YOUTUBE_MODE ? 'SUBSCRIBE' : 'Subscribe';
   ctx.font = '700 26px system-ui, -apple-system, sans-serif';
   const btnTextW = ctx.measureText(btnText).width;
   const btnW = btnTextW + 60;
@@ -1412,7 +1503,7 @@ function drawEndScreenFrame(ctx, title, progress) {
   ctx.font = '600 22px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Watch Next', WIDTH / 2, HEIGHT * 0.64);
+  ctx.fillText(YOUTUBE_MODE ? 'WATCH NEXT →' : 'Watch Next', WIDTH / 2, HEIGHT * 0.64);
   ctx.restore();
 
   // Task 131: Channel name
@@ -2413,10 +2504,8 @@ function drawTextWithHighlights(ctx, text, startY, w, font, baseColor, highlight
 
 // ── Draw a single frame ────────────────────────────────────────────────────
 async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress, segmentIndex, suppressSubtitles = false) {
-  const isFallbackAsset = asset && (
-    asset.isFallback === true ||
-    (asset.url && (asset.url.includes('picsum.photos') || asset.url.includes('placeholder')))
-  );
+  // Only skip assets explicitly marked fallback — picsum/placeholders are valid when they load.
+  const isFallbackAsset = asset?.isFallback === true;
   const activeImg = isFallbackAsset ? null : img;
 
   // ── Determine if a scene layout should handle background + text rendering ──
@@ -2424,13 +2513,15 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   const layoutFn = sceneLayout ? (SCENE_LAYOUT_DISPATCH[sceneLayout] || null) : null;
 
   // Draw bright background when image is available, or procedural bg when not
-  if (activeImg) {
-    // Bright warm background behind image for contrast
+  if (activeImg && !YOUTUBE_MODE) {
     const bgGrad = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
     bgGrad.addColorStop(0, '#3a5a8e');
     bgGrad.addColorStop(0.5, '#4a7ab8');
     bgGrad.addColorStop(1, '#2a4a7e');
     ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  } else if (activeImg && YOUTUBE_MODE) {
+    ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
   } else if (!DRAFT_MODE) {
     drawProceduralBackground(ctx, seg, progress, false, segmentIndex);
@@ -2514,7 +2605,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
             const score = saturationCache.get(asset.url);
             filterString = computeAdaptiveFilter(score, globalBrightnessBoost * 1.22);
           } else {
-            filterString = `saturate(1.1) contrast(1.05) brightness(${finalBrightness})`;
+            filterString = `saturate(1.18) contrast(1.12) brightness(${finalBrightness})`;
           }
 
           const isChart = isChartAsset(asset);
@@ -2555,8 +2646,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 }
 
-  // Letterbox bars — black bars with subtle accent inner edge glow
-  const barH = Math.round(HEIGHT * 0.04);
+  const barH = YOUTUBE_MODE ? 0 : Math.round(HEIGHT * 0.012);
   const accentHex = ACCENT_COLORS[seg.type] || '#ffffff';
   // Black bars
   ctx.fillStyle = 'rgba(0, 0, 0, 0.92)';
@@ -2737,8 +2827,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     }
   }
 
-  // Title overlay — only rendered when no scene layout is active (layouts handle their own titles)
-  if (!layoutFn) {
+  // Title overlay — hidden in YouTube mode (captions carry the story; less clutter)
+  if (!layoutFn && !YOUTUBE_MODE) {
   const titleAccent = '#60a5fa';
   const titleSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
   // Position title overlay above the subtitle bar to avoid overlap
@@ -2763,7 +2853,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     ctx.shadowBlur = 16;
   }
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
+  const segmentTitlePx = Math.round(HEIGHT * 0.042);
+  ctx.font = `bold ${segmentTitlePx}px system-ui, Montserrat, Impact, sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText(seg.title.substring(0, 50), titleSafeZone.left + 12, ltY + 10);
@@ -2898,62 +2989,81 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
     const visibleCount = currentWordIdx - windowStart + 1;
 
     if (visibleCount > 0) {
-      // Modern glass-morphism caption background — centered for mobile readability
       const capSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
-      const capBgW = Math.min(1200, WIDTH * 0.65);
-      const capBgH = 64;
-      // Position above the title overlay area to avoid overlap
-      const capY = Math.min(HEIGHT - barH - 100, HEIGHT - capSafeZone.bottom - capBgH - 12);
+      const yt = YOUTUBE_MODE ? captionMetrics(HEIGHT, WIDTH) : null;
+      const capBgW = YOUTUBE_MODE ? yt.barWidth : Math.min(1400, WIDTH * 0.88);
+      const capBgH = YOUTUBE_MODE ? Math.round(HEIGHT * 0.14) : Math.round(HEIGHT * 0.11);
+      const capFontPx = YOUTUBE_MODE ? yt.basePx : Math.round(HEIGHT * 0.052);
+      const capFontCurrentPx = YOUTUBE_MODE ? yt.currentPx : Math.round(HEIGHT * 0.062);
+      const capStrokePx = YOUTUBE_MODE ? yt.strokePx : Math.max(6, Math.round(HEIGHT * 0.007));
+      const capY = YOUTUBE_MODE
+        ? HEIGHT - yt.bottomPad - capBgH
+        : Math.min(HEIGHT - barH - capBgH - 28, HEIGHT - capSafeZone.bottom - capBgH - 20);
 
-      // Glass background with rounded corners
-      ctx.save();
-      ctx.fillStyle = 'rgba(10, 10, 26, 0.80)';
-      if (!DRAFT_MODE) {
-        ctx.shadowColor = 'rgba(96, 165, 250, 0.15)';
-        ctx.shadowBlur = 20;
+      if (YOUTUBE_MODE) {
+        const grad = ctx.createLinearGradient(0, capY - 20, 0, HEIGHT);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(0.35, 'rgba(0,0,0,0.55)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.75)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, capY - 24, WIDTH, HEIGHT - capY + 24);
+      } else {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
+        if (!DRAFT_MODE) {
+          ctx.shadowColor = 'rgba(96, 165, 250, 0.15)';
+          ctx.shadowBlur = 20;
+        }
+        ctx.beginPath();
+        ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(96, 165, 250, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
+        ctx.stroke();
+        ctx.restore();
       }
-      ctx.beginPath();
-      ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
-      ctx.fill();
 
-      // Subtle accent border
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(96, 165, 250, 0.15)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect((WIDTH - capBgW) / 2, capY - 8, capBgW, capBgH, 8);
-      ctx.stroke();
-      ctx.restore();
-      // Measure total width to center the word group
-      const normalFont = '900 30px system-ui, Montserrat, Impact, sans-serif';
-      const boldFont = '900 34px system-ui, Montserrat, Impact, sans-serif';
+      let drawStart = windowStart;
+      let drawCount = visibleCount;
+      if (YOUTUBE_MODE) {
+        const maxW = yt.maxWords;
+        const half = Math.floor(maxW / 2);
+        const cur = currentWordIdx;
+        drawStart = Math.max(0, Math.min(cur - half, words.length - maxW));
+        drawCount = Math.min(maxW, words.length - drawStart);
+      }
+
+      const normalFont = `900 ${capFontPx}px Impact, "Arial Black", system-ui, sans-serif`;
+      const boldFont = `900 ${capFontCurrentPx}px Impact, "Arial Black", system-ui, sans-serif`;
       const spaceWidth = measureWordCached(ctx, normalFont, ' ');
 
       // Pre-measure all words (cached)
       let totalWidth = 0;
-      const wordWidths = new Array(visibleCount);
-      for (let wi = 0; wi < visibleCount; wi++) {
-        const isCurrentWord = (windowStart + wi) === currentWordIdx;
-        const rawWord = words[windowStart + wi] || '';
-        const word = rawWord.toUpperCase();
+      const wordWidths = new Array(drawCount);
+      for (let wi = 0; wi < drawCount; wi++) {
+        const isCurrentWord = (drawStart + wi) === currentWordIdx;
+        const rawWord = words[drawStart + wi] || '';
+        const word = /^[a-zA-Z]/.test(rawWord) ? rawWord.toUpperCase() : rawWord;
         const font = isCurrentWord ? boldFont : normalFont;
         const ww = measureWordCached(ctx, font, word);
         wordWidths[wi] = ww;
         totalWidth += ww;
-        if (wi < visibleCount - 1) {
+        if (wi < drawCount - 1) {
           totalWidth += spaceWidth;
         }
       }
 
-      // Draw each word
-      const centerY = capY + 24;
+      const centerY = capY + Math.round(capBgH * 0.48);
       let curX = WIDTH / 2 - totalWidth / 2;
 
-      for (let wi = 0; wi < visibleCount; wi++) {
-        const globalWordIdx = windowStart + wi;
+      for (let wi = 0; wi < drawCount; wi++) {
+        const globalWordIdx = drawStart + wi;
         const isCurrentWord = globalWordIdx === currentWordIdx;
         const rawWord = words[globalWordIdx] || '';
-        const displayWord = rawWord.toUpperCase();
+        const displayWord = /^[a-zA-Z]/.test(rawWord) ? rawWord.toUpperCase() : rawWord;
 
         const wordKey = `${seg.id}:${globalWordIdx}`;
         if (!wordFirstAppearFrame.has(wordKey)) {
@@ -2976,10 +3086,10 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
 
         if (isCurrentWord) {
           ctx.font = boldFont;
-          ctx.fillStyle = '#ff5500'; // High-retention orange brand highlight
+          ctx.fillStyle = YOUTUBE_MODE ? '#FFE135' : '#ff5500';
         } else {
           ctx.font = normalFont;
-          ctx.fillStyle = '#ffffff'; // Clean high-readability white
+          ctx.fillStyle = '#ffffff';
         }
 
         ctx.textAlign = 'left';
@@ -2995,7 +3105,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
         // Draw thick solid black stroke behind every word for absolute legibility
         if (typeof ctx.strokeText === 'function') {
           ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 5;
+          ctx.lineWidth = capStrokePx;
           ctx.strokeText(displayWord, curX, centerY);
         }
 
@@ -3003,7 +3113,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
         ctx.restore();
 
         curX += wordWidths[wi];
-        if (wi < visibleCount - 1) {
+        if (wi < drawCount - 1 && /^[a-zA-Z0-9]/.test(words[drawStart + wi + 1] || '')) {
           curX += spaceWidth;
         }
       }
@@ -3011,8 +3121,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
   } // end !suppressSubtitles
 
-  // ── Step 11: Enhanced Progress Timeline (Task 81) ──
-  if (typeof globalProgress === 'number' && project && project.script) {
+  if (typeof globalProgress === 'number' && project && project.script && !YOUTUBE_MODE) {
     const accentColor = ACCENT_COLORS[seg.type] || '#60a5fa';
     drawProgressTimeline(ctx, project.script, globalProgress, WIDTH, HEIGHT, accentColor);
   }
@@ -3027,16 +3136,18 @@ function validateTTSConfiguration() {
     console.warn('WARNING: Using VITE_ prefixed Cloudflare variables which are exposed to clients. Set CF_ACCOUNT_ID and CF_API_TOKEN instead.');
   }
 
-  const meloAvailable = !!cfAccountId && !!cfApiToken;
-  const edgeTtsAvailable = spawnSync('which', ['edge-tts'], { encoding: 'utf-8' }).status === 0;
+  const providers = assertTtsAvailable({ cfAccountId, cfApiToken });
+  log('info', `TTS providers: Kokoro-82M=${providers.kokoro ? 'YES' : 'NO'}, MeloTTS=${providers.melo ? 'YES' : 'NO'}, edge-tts=${providers.edgeTts ? 'YES' : 'NO'}`);
 
-  log('info', `TTS providers: MeloTTS=${meloAvailable ? 'YES' : 'NO'}, Kokoro-82M=YES (primary), edge-tts subtitles=${edgeTtsAvailable ? 'YES' : 'NO'}`);
-
-  if (!meloAvailable) {
+  if (!providers.melo) {
     console.warn('⚠ MeloTTS not configured (optional). Set CF_ACCOUNT_ID and CF_API_TOKEN for MeloTTS fallback.');
   }
 
-  return { meloAvailable, edgeTtsAvailable };
+  return {
+    meloAvailable: providers.melo,
+    edgeTtsAvailable: providers.edgeTts,
+    kokoroAvailable: providers.kokoro,
+  };
 }
 
 // ── Concatenate audio files ────────────────────────────────────────────────
@@ -3053,6 +3164,12 @@ async function concatenateAudio(audioFiles, outputFile) {
 
 // ── Main render ────────────────────────────────────────────────────────────
 async function render() {
+  let ffmpeg;
+  let ffmpegExited = false;
+  let lastFfmpegError = null;
+  activeFfmpeg = null;
+  activeFfmpegExited = false;
+
   // Task 121: Memory check before render
   const preRenderMem = logMemoryUsage('pre-render');
   // Task 118: Recommend --max-old-space-size flag
@@ -3141,7 +3258,16 @@ async function render() {
   }
 
   // Draft quality: halve render resolution and let ffmpeg upscale (4x fewer pixel ops)
-  const quality = project.exportSettings?.quality || 'medium';
+  YOUTUBE_MODE = isYouTubeExportMode(project);
+  if (YOUTUBE_MODE) {
+    process.env.AUTOTUBE_YOUTUBE_MODE = '1';
+    log('info', '  YouTube export profile: full-bleed visuals, large captions, voice-first mix');
+    if (!project.exportSettings) project.exportSettings = {};
+    project.exportSettings.quality = 'highest';
+    project.exportSettings.youtubeMode = true;
+  }
+
+  const quality = project.exportSettings?.quality || (YOUTUBE_MODE ? 'highest' : 'medium');
   DRAFT_MODE = quality === 'draft';
   const outputWidth = WIDTH;
   const outputHeight = HEIGHT;
@@ -3156,9 +3282,9 @@ async function render() {
 
   // Initialize rendering flags (can be modified by AI post-review enrichment pass)
   const renderFlags = {
-    showDataOverlay: false,
-    showKineticText: false,
-    useFastPacing: false,
+    showDataOverlay: process.env.AUTOTUBE_DATA_OVERLAY === '1',
+    showKineticText: process.env.AUTOTUBE_KINETIC_TEXT === '1',
+    useFastPacing: process.env.AUTOTUBE_FAST_PACING === '1',
   };
 
   // Initialize global state for advanced rendering features (Tasks 58, 79, 80)
@@ -3252,7 +3378,17 @@ async function render() {
 
   await preloadWithConcurrency(uniqueUrls, CONCURRENCY_LIMIT);
 
-  log('info', `\n  ✓ Image preloading complete: ${loadedCount} loaded, ${failedCount} failed out of ${uniqueUrls.length} unique URLs`);
+  const totalUnique = uniqueUrls.length;
+  const loadRate = totalUnique > 0 ? loadedCount / totalUnique : 1;
+  const loadRatePct = (loadRate * 100).toFixed(1);
+  log('info', `\n  ✓ Image preloading complete: ${loadedCount} loaded, ${failedCount} failed out of ${totalUnique} unique URLs`);
+  log('info', `  [MediaPreload] load rate: ${loadRatePct}% (${loadedCount}/${totalUnique} succeeded, ${failedCount} → gradient fallback)`);
+
+  if (STRICT_MEDIA && loadRate < CONFIG.MIN_MEDIA_LOAD_RATE) {
+    const msg = `STRICT_MEDIA: image preload load rate ${loadRatePct}% is below ${(CONFIG.MIN_MEDIA_LOAD_RATE * 100).toFixed(0)}% threshold (${loadedCount}/${totalUnique} loaded)`;
+    console.error(`  ❌ ${msg}`);
+    throw new Error(msg);
+  }
   const videoAssetCount = project.media.filter(a => a.type === 'video').length;
   if (videoAssetCount > 0) {
     log('info', `  ${videoAssetCount} video clip(s) will be frame-extracted during render`);
@@ -3322,12 +3458,15 @@ async function render() {
     let videoFramesFailed = 0;
 
     for (const asset of videoAssets) {
+      if (failedClipFallbackCache.has(asset.url)) continue;
       const clipDuration = asset.duration || 10;
       // Download clip once
       const fullUrl = asset.url.startsWith('http') ? asset.url : `${DEV_SERVER}${asset.url}`;
       let clipTmp = null;
       try {
-        const clipRes = await fetch(fullUrl);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT_MS);
+        const clipRes = await fetch(fullUrl, { signal: controller.signal }).finally(() => clearTimeout(timer));
         if (clipRes.ok) {
           const clipBuffer = Buffer.from(await clipRes.arrayBuffer());
           clipTmp = join(tmpdir(), `autotube-clip-${Date.now()}.mp4`);
@@ -3343,8 +3482,9 @@ async function render() {
 
       if (!clipTmp) {
         // Use thumbnail fallback
+        let fallbackImg = null;
         if (asset.thumbnailUrl) {
-          const fallbackImg = await fetchImage(asset.thumbnailUrl);
+          fallbackImg = await fetchImage(asset.thumbnailUrl);
           if (fallbackImg) {
             for (const pct of TIMESTAMPS) {
               if (videoFrameCache.size >= MAX_VIDEO_FRAME_CACHE_SIZE) {
@@ -3355,6 +3495,7 @@ async function render() {
             videoFramesExtracted += TIMESTAMPS.length;
           }
         }
+        failedClipFallbackCache.set(asset.url, fallbackImg);
         continue;
       }
 
@@ -3395,6 +3536,17 @@ async function render() {
         log('info', `      ✓ Extracted smooth frames to disk`);
       } else {
         log('warn', `      ⚠ Ffmpeg extract smooth frames failed: ${extractAllResult.stderr || 'unknown error'}`);
+        let fallbackImg = null;
+        if (asset.thumbnailUrl) {
+          fallbackImg = await fetchImage(asset.thumbnailUrl);
+        }
+        failedClipFallbackCache.set(asset.url, fallbackImg);
+        if (fallbackImg) {
+          for (const pct of TIMESTAMPS) {
+            videoFrameCache.set(`${asset.url}@${(pct * clipDuration).toFixed(2)}`, fallbackImg);
+          }
+        }
+        continue;
       }
 
       // Extract frames at key timestamps for backwards compatibility & fallback
@@ -3526,6 +3678,14 @@ async function render() {
   let renderPassed = false;
   let finalMp4File = null;
   let totalFrames = 0;
+  let forceCpuThisPass = false;
+  const twoPassState = {
+    tempFile: null,
+    tempArgs: null,
+    finalCodec: null,
+    finalCrf: null,
+    finalExtraArgs: null,
+  };
 
   while (attempt < MAX_ATTEMPTS && !renderPassed) {
     attempt++;
@@ -3564,7 +3724,7 @@ async function render() {
     ffmpegArgs.push('-vaapi_device', '/dev/dri/renderD128', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi');
   } else {
     const codec = project?.exportSettings?.codec === 'av1' ? 'libsvtav1' : project?.exportSettings?.codec === 'hevc' ? 'libx265' : 'libx264';
-    const crfValue = project?.exportSettings?.codec === 'av1' ? 30 : project?.exportSettings?.codec === 'hevc' ? 20 : 16;
+    const crfValue = project?.exportSettings?.codec === 'av1' ? 30 : project?.exportSettings?.codec === 'hevc' ? 20 : (YOUTUBE_MODE ? 14 : 16);
     const extraCodecArgs = project?.exportSettings?.codec === 'hevc' ? ['-tag:v', 'hvc1'] : [];
 
     if (quality === 'highest' && !DRAFT_MODE) {
@@ -3608,13 +3768,16 @@ async function render() {
   ffmpegArgs.push('-pix_fmt', 'yuv420p', '-movflags', '+faststart', OUTPUT_FILE);
 
   ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'inherit', 'pipe'] });
+  activeFfmpeg = ffmpeg;
 
   // Safety: Detect if ffmpeg process dies unexpectedly
   ffmpegExited = false;
+  activeFfmpegExited = false;
   lastFfmpegError = null;
   ffmpeg.setMaxListeners(0); // Allow many drain/close listeners at high frame rates
   ffmpeg.on('close', code => {
     ffmpegExited = true;
+    activeFfmpegExited = true;
     if (code !== 0 && code !== null) {
       console.error(`\n❌ Ffmpeg exited prematurely with code ${code}`);
       const parsed = parseFfmpegError(lastFfmpegError || `exit code ${code}`);
@@ -3626,6 +3789,7 @@ async function render() {
 
   ffmpeg.on('error', err => {
     ffmpegExited = true;
+    activeFfmpegExited = true;
     console.error(`\n❌ Ffmpeg error: ${err.message}`);
     lastFfmpegError = err.message;
   });
@@ -3706,7 +3870,7 @@ async function render() {
   globalSafeZone = computeSafeZone(WIDTH, HEIGHT);
   segWordsCache = new Map();
   for (const seg of project.script) {
-    segWordsCache.set(seg.id, seg.narration ? seg.narration.split(' ') : []);
+    segWordsCache.set(seg.id, seg.narration ? tokenizeCaptionWords(seg.narration) : []);
   }
 
   totalFrames = 0;
@@ -3714,22 +3878,28 @@ async function render() {
   const END_SCREEN_SECONDS = isShortsMode ? 2 : 4;
   const effectiveTitleDur = 0; // Skips full-screen blank chapter transition cards
   const SEGMENT_TITLE_FRAMES = 0;
-  const COLD_OPEN_FRAMES = 0; // Start visual segments immediately
-  const COLD_OPEN_FADE_FRAMES = 0;
+  // Hook packaging: cover the watcher's full 0–3s hook audit window.
+  const COLD_OPEN_SECONDS = isShortsMode ? 0 : 3.5;
+  const COLD_OPEN_FRAMES = Math.round(COLD_OPEN_SECONDS * FPS);
+  const COLD_OPEN_FADE_FRAMES = isShortsMode ? 0 : Math.max(1, Math.round(0.25 * FPS));
   const SEGMENT_FADE_FRAMES = Math.round((renderFlags.useFastPacing ? 0.05 : 0.12) * FPS);
   const SEGMENT_TITLE_FADE_FRAMES = 0;
   const titleCardFrames = 0;
   const endScreenFrames = Math.round(END_SCREEN_SECONDS * FPS);
 
 
-  // Apply dynamic pacing: adjust segment durations based on content type
-  // ONLY if the project does not have pre-generated narration matching the script.
-  const hasNarration = project.narration && project.narration.length > 0;
-  if (!hasNarration) {
-    log('info', '  No narration found. Applying dynamic pacing ranges to segment durations...');
+  // Apply dynamic pacing only when segment durations were not measured from narration audio.
+  // generateNarration() runs before this block and sets seg.duration from ffprobe on each WAV.
+  const hasPrebuiltNarration = project.narration && project.narration.length > 0;
+  const hasTtsNarration = audioFiles.some((af) => af.file && /narration-\d+\.wav$/i.test(af.file));
+  if (!hasPrebuiltNarration && !hasTtsNarration) {
+    log('info', '  No narration audio. Applying dynamic pacing ranges to segment durations...');
     for (const seg of project.script) {
       seg.duration = computeDynamicSegmentDuration(seg);
     }
+  } else if (hasTtsNarration) {
+    const measuredSec = project.script.reduce((s, seg) => s + seg.duration, 0);
+    log('info', `  TTS narration measured (${measuredSec.toFixed(1)}s content). Using audio durations for frame timing.`);
   } else {
     log('info', '  Narration voiceover detected. Keeping original script durations for audio synchronization.');
   }
@@ -3812,43 +3982,36 @@ async function render() {
     lastProgressLog = now;
   }
 
-  // ── Step 13: Cold open — dynamic frames from the most dramatic segment ───────
+  // ── Step 13: Cold open — intro segment hook with fast visual beats ───────────
   // Task 130: Skip cold open for Shorts mode
   let coldOpenSeg = null;
   if (!isShortsMode) {
-    // Score each section segment by dramatic/surprising language heuristics
-    let maxScore = -1;
-    for (const seg of project.script) {
-      if (seg.type === 'section' && seg.narration) {
-        const wordCount = seg.narration.split(/\s+/).length;
-        let score = wordCount;
-        if (/\d+/.test(seg.narration)) score += 50;
-        if (/[A-Z][a-z]+ [A-Z][a-z]+/.test(seg.narration)) score += 30;
-        if (seg.narration.includes('?')) score += 20;
-        if (score > maxScore) {
-          maxScore = score;
-          coldOpenSeg = seg;
-        }
-      }
-    }
-    if (!coldOpenSeg) coldOpenSeg = project.script[0];
+    // First-second impact: always use intro segment (script[0]) for hook packaging
+    coldOpenSeg = project.script[0] ?? null;
   }
 
   const coldOpenSegIndex = coldOpenSeg ? project.script.indexOf(coldOpenSeg) : -1;
-  const coldOpenMedia = coldOpenSeg ? project.media.filter(a => a.segmentId === coldOpenSeg.id) : [];
+  const coldOpenMediaRaw = coldOpenSeg ? project.media.filter(a => a.segmentId === coldOpenSeg.id) : [];
+  const coldOpenMedia = [...coldOpenMediaRaw].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   if (!isShortsMode) log('info', `  Cold open: ${COLD_OPEN_FRAMES} frames (${coldOpenSec}s) from "${coldOpenSeg?.title}"`);
   if (isShortsMode) log('info', '  Shorts mode: skipping cold open');
 
-  // Opening hook frames — bold text on dark background (req c)
-  const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round(0.3 * FPS));
-  const hookText = coldOpenSeg?.narration
-    ? (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60)
-    : 'Watch this!';
+  // Opening hook frames — keep the explicit hook visible through the watcher's
+  // 0–3s audit window instead of letting weak segment titles take over.
+  const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round((YOUTUBE_MODE ? 3.2 : 0.3) * FPS));
+  const COLD_OPEN_BEAT_FRAMES = Math.max(1, Math.round(0.5 * FPS)); // ~5 beats in 2.5s
+  const explicitHook = project.hookLine || project.exportSettings?.hookLine;
+  const hookText = explicitHook
+    || (coldOpenSeg?.narration
+      ? (YOUTUBE_MODE ? buildRetentionHook(coldOpenSeg.narration) : (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60))
+      : 'Watch this!');
 
   if (!isShortsMode) for (let f = 0; f < COLD_OPEN_FRAMES; f++) {
-    // Render at 30-50% progress (the middle of the segment)
-    const coldProgress = 0.3 + (f / COLD_OPEN_FRAMES) * 0.2; // 0.3 → 0.5
-    const coldMi = Math.min(Math.floor(coldProgress * Math.max(1, coldOpenMedia.length)), Math.max(0, coldOpenMedia.length - 1));
+    // Fast visual beats: highest-scored assets first, ~0.5s per beat (checklist: 3–5 beats pre-narration)
+    const beatIndex = Math.floor(f / COLD_OPEN_BEAT_FRAMES);
+    const coldMi = coldOpenMedia.length > 0 ? Math.min(beatIndex, coldOpenMedia.length - 1) : 0;
+    const beatPhase = (f % COLD_OPEN_BEAT_FRAMES) / COLD_OPEN_BEAT_FRAMES;
+    const coldProgress = 0.05 + beatPhase * 0.25; // early impactful frames, not mid-clip
     const coldAsset = coldOpenMedia[coldMi] || null;
     let coldImg = null;
 
@@ -3883,6 +4046,10 @@ async function render() {
     if (f < 3 && !DRAFT_MODE) {
       drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.6);
     }
+    // Beat-cut flash when cycling to next asset (~0.5s intervals)
+    if (f > 0 && f % COLD_OPEN_BEAT_FRAMES === 0 && !DRAFT_MODE) {
+      drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.35);
+    }
     // Cold open flash at end before fade-to-black (Task 48)
     if (f === COLD_OPEN_FRAMES - 2 && !DRAFT_MODE) {
       drawFlashFrame(ctx, WIDTH, HEIGHT, 'color', 0.5);
@@ -3907,18 +4074,22 @@ async function render() {
       // Dark overlay
       ctx.fillStyle = `rgba(0, 0, 0, ${0.85 * (1 - hookProgress * 0.7)})`;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      // Hook text with fast fade-in (0.3s)
+      // Hook text must be readable on frame 0; the watcher samples immediately.
       ctx.save();
-      ctx.globalAlpha = Math.min(1, hookProgress * 3);
+      ctx.globalAlpha = 1;
       ctx.fillStyle = '#ffffff';
-      ctx.font = `bold ${Math.round(HEIGHT * 0.05)}px system-ui, -apple-system, sans-serif`;
+      ctx.font = `bold ${hookFontPx(HEIGHT)}px Impact, "Arial Black", system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
       ctx.shadowBlur = 24;
       ctx.shadowOffsetX = 2;
       ctx.shadowOffsetY = 2;
-      ctx.fillText(hookText, WIDTH / 2, HEIGHT / 2);
+      const { lines, fontSize } = wrapTitleText(ctx, hookText, WIDTH, Math.round(hookFontPx(HEIGHT) * 0.72), WIDTH * 0.9, 'bold');
+      ctx.font = `bold ${fontSize}px Impact, "Arial Black", system-ui, sans-serif`;
+      const lineHeight = fontSize * 1.08;
+      const startY = HEIGHT / 2 - ((lines.length - 1) * lineHeight) / 2;
+      lines.forEach((line, li) => ctx.fillText(line, WIDTH / 2, startY + li * lineHeight));
       ctx.restore();
     }
 
@@ -3926,7 +4097,8 @@ async function render() {
     const comingUpSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
     ctx.save();
     ctx.globalAlpha = 0.8;
-    ctx.font = '600 14px system-ui, -apple-system, sans-serif';
+    const comingUpPx = Math.round(HEIGHT * 0.022);
+    ctx.font = `700 ${comingUpPx}px system-ui, Montserrat, sans-serif`;
     ctx.letterSpacing = '2px';
     const comingUpW = ctx.measureText('COMING UP...').width;
     const comingUpPadX = 10;
@@ -4130,10 +4302,14 @@ async function render() {
     let prevMi = -1; // Track previous media index for zoom/pan transitions (Step 10)
     let zoomTransitionCounter = -1; // Counts down from 3 when mi changes
 
-    // Pacing-based asset alternation interval (Requirements 13.3, 13.4)
-    // Capped to a strict 3-second ceiling for premium documentary engagement
+    // Pacing-based asset alternation — faster cuts in intro segment (checklist: opener pacing)
     const pacingScore = seg.pacingScore || 3;
-    const assetAlternationInterval = Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
+    const ytCut = assetCutIntervalSec(project);
+    const assetAlternationInterval = ytCut != null
+      ? ytCut
+      : si === 0
+        ? Math.min(1.5, pacingScore >= 4 ? 1.0 : 1.5)
+        : Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
 
 
     for (let f = 0; f < numFrames; f++) {
@@ -4225,7 +4401,7 @@ async function render() {
         zoomTransitionCounter--;
       }
 
-      if (si > 0 && f < FADE_FRAMES) {
+      if ((si > 0 || COLD_OPEN_FRAMES > 0) && f < FADE_FRAMES) {
         // Crossfade transition: blend outgoing black with incoming frame using
         // computeCrossfadeAlpha for consistent blending (Requirements 4.3, 4.6, 10.2)
         ctx.fillStyle = '#000000';
@@ -4373,37 +4549,57 @@ async function render() {
   const ENCODING_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max for encoding
   log('info', `\n⏳ Encoding video (timeout: ${ENCODING_TIMEOUT_MS / 1000}s)...`);
 
-  await new Promise((resolve, reject) => {
-    let settled = false;
-    const timeoutId = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        console.error(`\n❌ Ffmpeg encoding timed out after ${ENCODING_TIMEOUT_MS / 1000}s`);
-        ffmpeg.kill('SIGKILL');
-        reject(new Error(`Ffmpeg encoding timed out after ${ENCODING_TIMEOUT_MS / 1000}s`));
-      }
-    }, ENCODING_TIMEOUT_MS);
-
-    ffmpeg.on('close', code => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutId);
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`ffmpeg exited with code ${code}`));
+  let encodeFailed = false;
+  try {
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const timeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          console.error(`\n❌ Ffmpeg encoding timed out after ${ENCODING_TIMEOUT_MS / 1000}s`);
+          ffmpeg.kill('SIGKILL');
+          reject(new Error(`Ffmpeg encoding timed out after ${ENCODING_TIMEOUT_MS / 1000}s`));
         }
-      }
-    });
+      }, ENCODING_TIMEOUT_MS);
 
-    ffmpeg.on('error', err => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeoutId);
-        reject(err);
-      }
+      ffmpeg.on('close', code => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`ffmpeg exited with code ${code}`));
+          }
+        }
+      });
+
+      ffmpeg.on('error', err => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(err);
+        }
+      });
     });
-  });
+  } catch (err) {
+    if (useGpu && isHardwareEncoderError(lastFfmpegError || err.message)) {
+      disabledHardwareEncoders.add(hwEncoder);
+      log('warn', `  ⚠ GPU encoder ${hwEncoder} failed during render — falling back to libx264`);
+      encodeFailed = true;
+    } else {
+      throw err;
+    }
+  }
+
+  if (encodeFailed) {
+    attempt--;
+    forceCpuThisPass = true;
+    totalFrames = 0;
+    globalFrameCounter = 0;
+    try { if (ffmpeg && !ffmpeg.killed) ffmpeg.kill('SIGKILL'); } catch {}
+    continue;
+  }
 
   renderPassed = true;
   finalMp4File = OUTPUT_FILE;
@@ -4521,10 +4717,10 @@ async function render() {
           style: videoStyle,
           musicPreset,
           backgroundMusic: bgMusicEnabled,
-          enableAmbient: true,
+          enableAmbient: false,
           enableAudioFx: true,
-          enableSubBass: true,
-          enableDucking: true,
+          enableSubBass: false,
+          enableDucking: false,
           statTimestamps: project.script ? project.script.map((s, i) => {
             const match = s.narration ? s.narration.match(/\d+%/) : null;
             return match ? i * 8 : null;
@@ -4727,6 +4923,12 @@ async function render() {
     console.warn(`   Failed to clean up video clips: ${cleanupErr.message}`);
   }
 
+  if (!renderPassed || !finalMp4File) {
+    throw new Error('Render failed: pipeline did not produce output');
+  }
+  const finalOutputGate = assertRenderOutput(finalMp4File, 'Final render output');
+  log('info', `  ✅ Final output validated (${(finalOutputGate.size / 1024 / 1024).toFixed(1)}MB)`);
+
   if (renderPassed && finalMp4File) {
     // Copy to Downloads with a topic-based filename
     const safeTitle = (project.title || project.topic || 'autotube-video')
@@ -4737,9 +4939,7 @@ async function render() {
     const downloadName = `autotube-${safeTitle}.mp4`;
     const homeDir = homedir() || tmpdir();
     try {
-    // Ensure Downloads directory exists
-    mkdirSync(join(homeDir, 'Downloads'), { recursive: true });
-    copyFileSync(finalMp4File, `${homeDir}/Downloads/${downloadName}`);
+      copyFileSync(finalMp4File, `${homeDir}/Downloads/${downloadName}`);
       log('info', `📁 Copied to ~/Downloads/${downloadName}`);
     } catch (copyErr) {
       console.warn(`  ⚠ Could not copy video to downloads folder: ${copyErr.message}`);
@@ -5119,10 +5319,10 @@ if (isMainModule) {
     console.error(err.stack);
     
     // Cleanup: Kill ffmpeg if still running
-    if (ffmpeg && !ffmpegExited) {
+    if (activeFfmpeg && !activeFfmpegExited) {
       log('info', '   Killing ffmpeg process...');
       try {
-        ffmpeg.kill('SIGKILL');
+        activeFfmpeg.kill('SIGKILL');
       } catch (err) {
         console.warn('Cleanup: failed to kill ffmpeg:', err.message);
       }

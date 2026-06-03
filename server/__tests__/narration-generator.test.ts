@@ -4,13 +4,27 @@ let mockExistsSync: ReturnType<typeof vi.fn>;
 let mockSpawnSync: ReturnType<typeof vi.fn>;
 let mockSpawn: ReturnType<typeof vi.fn>;
 let mockWriteFileSync: ReturnType<typeof vi.fn>;
+let mockStatSync: ReturnType<typeof vi.fn>;
 let generateNarration: (segments: Array<{ title: string; narration: string; duration: number }>, outputDir: string, options?: Record<string, unknown>) => Promise<Array<{ file: string; duration: number }>>;
 let generateSilence: (outputPath: string, durationSec: number) => boolean;
 
 describe('narration.mjs', () => {
   beforeEach(async () => {
     vi.resetModules();
-    mockExistsSync = vi.fn().mockReturnValue(true);
+    const narrationStatCalls = new Map<string, number>();
+    mockExistsSync = vi.fn((path: string) => {
+      if (typeof path === 'string' && path.includes('_kokoro/current.wav')) return true;
+      if (typeof path === 'string' && path.endsWith('kokoro_generate.py')) return true;
+      return true;
+    });
+    mockStatSync = vi.fn((path: string) => {
+      if (typeof path === 'string' && /narration-\d+\.wav/.test(path)) {
+        const n = (narrationStatCalls.get(path) || 0) + 1;
+        narrationStatCalls.set(path, n);
+        return { size: n === 1 ? 0 : 1024 };
+      }
+      return { size: 1024 };
+    });
     mockSpawnSync = vi.fn().mockReturnValue({ status: 0 });
     mockSpawn = vi.fn().mockImplementation(() => ({
       stdout: { on: vi.fn() },
@@ -30,7 +44,7 @@ describe('narration.mjs', () => {
       readFileSync: vi.fn(),
       mkdirSync: vi.fn(),
       rmSync: vi.fn(),
-      statSync: vi.fn(),
+      statSync: mockStatSync,
       readdirSync: vi.fn(),
       default: {
         existsSync: mockExistsSync,
@@ -39,7 +53,7 @@ describe('narration.mjs', () => {
         readFileSync: vi.fn(),
         mkdirSync: vi.fn(),
         rmSync: vi.fn(),
-        statSync: vi.fn(),
+        statSync: mockStatSync,
         readdirSync: vi.fn(),
       },
     }));
@@ -111,8 +125,8 @@ describe('narration.mjs', () => {
       expect(kokoroCalls.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('falls back to silence when Kokoro fails and no API providers available', async () => {
-      // Make Kokoro fail (spawn returns non-zero)
+    it('falls back to edge-tts when Kokoro fails and no API providers available', async () => {
+      // Make Kokoro python generation fail (spawn returns non-zero)
       mockSpawn.mockImplementation(() => ({
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn() },
@@ -122,11 +136,9 @@ describe('narration.mjs', () => {
           }
         }),
       }));
-      // Make existsSync return true for the silence file
-      mockExistsSync.mockReturnValue(true);
-
       const result = await generateNarration(segments, '/tmp/audio', {});
       expect(result.length).toBeGreaterThan(0);
+      expect(result.some(r => r.file.includes('narration-0'))).toBe(true);
     });
 
     it('includes intro silence and per-segment silence gaps', async () => {

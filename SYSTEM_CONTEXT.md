@@ -53,36 +53,36 @@ The system incorporates four massive technical upgrades implemented to ensure ab
 
 ## 3. Recent Critical Hotfixes
 
-### 1. PostCSS / Vite Unclosed Comment Build Crash (Fixed)
+### A. PostCSS / Vite Unclosed Comment Build Crash (Fixed)
 * **Incident:** Deployments on Railway failed during the `npm run build` phase with the PostCSS compiler error:
   `[vite:css] [postcss] /app/src/index.css:128:1: Unclosed comment`
 * **Resolution:** Removed the trailing unclosed comment bracket (`/* ════════...` without a matching `*/`) at the bottom of `/app/src/index.css`. The project now builds successfully with zero compilation warnings.
 
-### 2. FFMPEG Subprocess Death Detection (Fixed)
+### B. FFMPEG Subprocess Death Detection (Fixed)
 * **Incident:** High-resolution renders would occasionally freeze indefinitely if an underlying `ffmpeg` process encountered a bad codec packet.
 * **Resolution:** Integrated aggressive fail-safe timeout watchers that track active write actions; if a subprocess stops writing data for 30 seconds, the engine auto-terminates the pid and restarts the pipeline step. Added error classification (OOM, disk-full, transient), retry logic with exponential backoff, and checkpoint/resume for segment-level recovery.
 
-### 3. Image Validation Gate (Fixed)
+### C. Image Validation Gate (Fixed)
 * **Incident:** Corrupted image URLs downloaded during the media harvest phase would occasionally cause the Canvas 2D engine to draw blank black screens or throw unhandled draw errors.
 * **Resolution:** Implemented pre-flight buffer scanning with magic-byte format detection, Content-Type validation, dimension bounds checking (100px–8192px), aspect ratio limits (10:1 max), file size bounds (1KB–50MB), and SSRF URL safety validation blocking private IPs and metadata endpoints.
 
-### 4. Nixpacks Package Syntax Error (Fixed)
+### D. Nixpacks Package Syntax Error (Fixed)
 * **Incident:** Railway deployments failed during Nixpacks setup with a package-not-found error due to an invalid placeholder `"..."` inside the `nixPkgs` array of `nixpacks.toml`.
 * **Resolution:** Removed the `"..."` placeholder, specifying only valid native packages (`ffmpeg`, `chromium`, `cairo`, `pango`, `libjpeg`, `giflib`, `librsvg`, `pkg-config`, `pixman`), allowing Nixpacks to provision the build container successfully.
 
-### 5. Deployment Configuration Sync (Fixed)
+### E. Deployment Configuration Sync (Fixed)
 * **Incident:** Deploying from the `deploy/` directory caused Railway to ignore configuration properties inside root `railway.toml` and `nixpacks.toml`, resulting in missing dependencies and incorrect start commands.
 * **Resolution:** Patched the master deployment script `scripts/deploy.sh` to explicitly sync `railway.toml` and `nixpacks.toml` into the `deploy/` folder before invoking `railway up`, guaranteeing correct cloud orchestration.
 
-### 6. Background Music Pipeline Overhaul (Fixed — C4)
+### F. Background Music Pipeline Overhaul (Fixed — C4)
 * **Incident:** Background music files were silent placeholders (2.4KB each). Music never played in rendered videos despite UI toggle being enabled.
 * **Resolution:** Generated three proper mood-specific 60-second loop tracks (neutral, tense, uplifting) at 48kHz stereo / 192kbps AAC / -16 LUFS. Added EBU R128 two-pass normalization, exponential crossfade anti-banding, and dynamic ducking with dB-based gain staging.
 
-### 7. MeloTTS Removal (Complete)
+### G. MeloTTS Removal (Complete)
 * **Incident:** MeloTTS (Cloudflare Workers) was listed in engine fallback chains but had been removed from `TTS_ENGINES`, causing inconsistent state.
 * **Resolution:** Removed MeloTTS from `ENGINE_PRIORITY`, deleted `meloEngine.ts`, cleaned all credential references (`CF_ACCOUNT_ID`, `CF_API_TOKEN`), and updated tests. TTS fallback is now Kokoro-82M → Browser SpeechSynthesis.
 
-### 8. StoreContext Architectural Fix (Fixed — PR #14)
+### H. StoreContext Architectural Fix (Fixed — PR #14)
 * **Incident:** The composed `useVideoProject()` hook assembles 5 slice hooks (project, pipeline, config, narration, ui) that each internally call `useState`. Without a React Context provider, every component that called `useVideoProject()` (`App`, `AppShell`, `PipelineStepRouter`, `AppModals`, `OnboardingModal`, `SettingsModal`) was getting its **own independent `useState` instance**. `generateScript` in `PipelineStepRouter` updated `stepStatuses.script = 'complete'` in its own copy, but the `PipelineSidebar` rendered by `AppShell` still saw `'idle'` — the button stayed `[disabled]` even after the script generated. The script data also lived in `PipelineStepRouter`'s isolated instance.
 * **Resolution:** Added `src/store/StoreContext.tsx` with `StoreProvider` (creates the store once at the top of the tree) and a `useVideoProject()` wrapper that reads from Context when a provider exists, otherwise falls back to a local instance. `App` is now wrapped in `StoreProvider`. All 6 component consumers migrated to the new wrapper. Test files (`src/services/__tests__/`) still import the original hook from `src/store/index.ts` and rely on the fallback-to-local behavior — `renderHook(useVideoProject)` continues working without a provider.
 * **Files changed:** `src/store/StoreContext.tsx` (new, 53 lines), `src/App.tsx` (12 lines), 5 component import lines.
@@ -245,9 +245,9 @@ The following root-level markdown files have been reviewed and reconciled into t
 | `FINAL_VERIFICATION_REPORT.md` | [SUPERSEDED — superseded by current test counts in Section 8] | `reviews/_archive/FINAL_VERIFICATION_REPORT.md` |
 | `PHASE_1_COMPLETION_SUMMARY.md` | [SUPERSEDED — error handling, checkpointing, stall detection in Section 2/3] | `reviews/_archive/PHASE_1_COMPLETION_SUMMARY.md` |
 | `PHASE_3_COMPLETION_SUMMARY.md` | [SUPERSEDED — logging and progress dashboard in Section 8 Domain 6] | `reviews/_archive/PHASE_3_COMPLETION_SUMMARY.md` |
-| `C4_BACKGROUND_MUSIC_FIX_SUMMARY.md` | [SUPERSEDED — bg music overhaul in Sections 2C, 3.6, 5C] | `reviews/_archive/C4_BACKGROUND_MUSIC_FIX_SUMMARY.md` |
-| `C5_IMAGE_VALIDATION_FIX_SUMMARY.md` | [SUPERSEDED — image validation in Section 3.3] | `reviews/_archive/C5_IMAGE_VALIDATION_FIX_SUMMARY.md` |
-| `C7_FFMPEG_DEATH_DETECTION_IMPLEMENTATION.md` | [SUPERSEDED — ffmpeg death detection in Section 3.2] | `reviews/_archive/C7_FFMPEG_DEATH_DETECTION_IMPLEMENTATION.md` |
+| `C4_BACKGROUND_MUSIC_FIX_SUMMARY.md` | [SUPERSEDED — bg music overhaul in Sections 2C, 3F, 5C] | `reviews/_archive/C4_BACKGROUND_MUSIC_FIX_SUMMARY.md` |
+| `C5_IMAGE_VALIDATION_FIX_SUMMARY.md` | [SUPERSEDED — image validation in Section 3C] | `reviews/_archive/C5_IMAGE_VALIDATION_FIX_SUMMARY.md` |
+| `C7_FFMPEG_DEATH_DETECTION_IMPLEMENTATION.md` | [SUPERSEDED — ffmpeg death detection in Section 3B] | `reviews/_archive/C7_FFMPEG_DEATH_DETECTION_IMPLEMENTATION.md` |
 | `audit-changelist.md` | [STILL RELEVANT — 84-item change inventory; archived 2026-06-02 to reduce root noise] | `reviews/_archive/audit-changelist.md` |
 | `viral_growth_strategies.md` | [STILL RELEVANT — 90-task strategy blueprint; archived 2026-06-02 to reduce root noise] | `reviews/_archive/viral_growth_strategies.md` |
 

@@ -595,13 +595,13 @@ Optional tasks are marked with a trailing `*`.
 
 ---
 
-- [ ] 14.* *(Optional)* Dependency pruning
-  - Applies ONLY if Phase 3 (Task 4.3) flagged one or more dependencies as unused AND the user opts in per-dependency
+  - [ ] 14.* *(Optional)* Dependency pruning
+  - Applies ONLY if Task 4.3 (design Phase 3 — dependency cross-reference audit) flagged one or more dependencies as unused AND the user opts in per-dependency
   - _Design: "Fix Implementation → Dependency pruning"; "Out-of-scope explicitly" (dependency removal is proposed, not automatic)_
   - _Requirements: 2.18, 2.27_
 
   - [ ] 14.1* Confirm each flagged dependency with the user and remove approved entries from `package.json`
-    - For each `used = false` entry in Task 4.3 findings, confirm with the user (per-dependency yes/no)
+    - For each `used = false` entry in Task 4.3 (Phase 3 refactor audit) findings, confirm with the user (per-dependency yes/no)
     - Remove approved entries from `dependencies` or `devDependencies` in `package.json`
     - Do NOT touch entries the user did not explicitly approve
     - _Requirements: 2.18, 2.27_

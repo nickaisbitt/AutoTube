@@ -60,6 +60,8 @@ export interface VideoProject {
   media: MediaAsset[];
   narration: NarrationClip[];
   thumbnail?: string;
+  /** Cold-open + caption hook (spoken + on-screen); set at script time. */
+  hookLine?: string;
   status: 'draft' | 'processing' | 'complete';
   createdAt: Date;
   exportSettings?: {
@@ -73,6 +75,10 @@ export interface VideoProject {
     backgroundMusic?: boolean;
     musicPreset?: string;
     isStreaming?: boolean;
+    /** Server-render MP4 URL for quality-check (not a blob: URL). */
+    serverVideoUrl?: string;
+    youtubeMode?: boolean;
+    hookLine?: string;
   };
   topicContext?: TopicContext;
   visualPlans?: Record<string, SegmentVisualPlan>;
@@ -94,5 +100,25 @@ export interface VideoProject {
     passed: boolean;
     score: number;
     issues: string[];
+  };
+  /** Thumbnail concept variants (fear / curiosity / authority) generated pre-export */
+  thumbnailConcepts?: Array<{
+    variant: 'fear' | 'curiosity' | 'authority';
+    signifier: string;
+    emotionalAngle: string;
+    textOverlay: string;
+    colorAccent: string;
+    dominantSubject: string;
+    searchQueries: string[];
+  }>;
+  /** Best-scoring thumbnail concept selected before export */
+  selectedThumbnailConcept?: {
+    variant: 'fear' | 'curiosity' | 'authority';
+    signifier: string;
+    emotionalAngle: string;
+    textOverlay: string;
+    colorAccent: string;
+    dominantSubject: string;
+    searchQueries: string[];
   };
 }

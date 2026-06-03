@@ -36,7 +36,57 @@ npm install
 npm run dev
 ```
 
-### Configuration
+### Generate a full test video (topic → MP4)
+
+End-to-end pipeline without real API keys: Playwright drives the UI with mocked OpenRouter/media, then `server-render.mjs` produces the final MP4 with narration and background music.
+
+**Terminal 1 — dev server:**
+
+```bash
+npm run dev -- --port 5173 --host 0.0.0.0
+```
+
+**Terminal 2 — full pipeline:**
+
+```bash
+npm run generate:video
+# or with a custom topic:
+npm run generate:video -- "Why quantum computing matters in 2026"
+```
+
+**Requirements:** Node 18+, Playwright Chromium (`npx playwright install chromium`), `ffmpeg` on PATH. Optional: `edge-tts` for faster narration synthesis on the server.
+
+**Output:**
+
+| Path | Description |
+|------|-------------|
+| `test-recordings/full-<timestamp>/final-video-final.mp4` | Run-specific final video with muxed audio |
+| `test-recordings/FINAL-OUTPUT.mp4` | Copy of the latest successful render |
+
+Screenshots for each pipeline step are saved alongside the MP4 in the same `full-<timestamp>/` folder.
+
+**Fixture-only render** (no browser, no LLM):
+
+```bash
+npm run render:fixture
+```
+
+### Real Pass verification (R7 merge gate)
+
+Seven-point checklist enforced by `scripts/verify-real-pass.mjs`:
+
+```bash
+npm run verify:real-pass
+```
+
+**Fixture / short CI run** (30s minimum instead of 180s):
+
+```bash
+REAL_PASS_FIXTURE=1 MIN_DURATION_SEC=30 npm run verify:real-pass
+```
+
+Key env vars: `MIN_DURATION_SEC`, `MIN_SIZE_BYTES`, `FORCE_CPU` / `AUTOTUBE_FORCE_CPU`, `SKIP_GATE_TEST`, `RENDER_LOG`. Full checklist and example output: [`scripts/squad/R7-real-pass.md`](scripts/squad/R7-real-pass.md).
+
 
 1. Open the app in your browser
 2. Click the ⚙️ Settings button

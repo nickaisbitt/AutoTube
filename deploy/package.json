@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "npx tsx server.mjs"
+    "start": "npx tsx server.mjs",
+    "build": "echo 'pre-built dist/ from root; skipping' && exit 0"
   },
   "dependencies": {
     "clsx": "2.1.1",

@@ -48,7 +48,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
   const StepIcon = STEPS[currentStep].icon;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" data-testid="onboarding-modal">
       <div className="absolute inset-0 bg-black/90" />
       <div className="relative w-full max-w-lg border-2 border-surface-700 bg-surface-900 p-8 shadow-hard">
         {/* Progress squares */}
@@ -102,6 +102,8 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
         {/* Navigation */}
         <div className="flex items-center justify-between">
           <button
+            type="button"
+            data-testid={currentStep === 0 ? 'onboarding-skip' : 'onboarding-back'}
             onClick={() => currentStep === 0 ? handleSave() : setCurrentStep(Math.max(0, currentStep - 1))}
             className="border-2 border-surface-700 px-4 py-2 text-sm font-mono font-medium text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
           >

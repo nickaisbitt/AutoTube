@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 vi.mock('canvas', () => ({
   createCanvas: vi.fn((w: number, h: number) => ({
@@ -218,5 +220,31 @@ existsSync: mockExistsSync,
       const result = mixNarrationWithBgMusic('/tmp/narration.aac', '/tmp/music.aac', '/tmp/out.aac', 0.15);
       expect(result).toBe(false);
     });
+  });
+
+  describe('render failure ffmpeg cleanup (module scope)', () => {
+    const renderPaths = [
+      join(process.cwd(), 'server-render.mjs'),
+      join(process.cwd(), 'deploy/server-render.mjs'),
+    ];
+
+    for (const renderPath of renderPaths) {
+      it(`${renderPath} uses module-scope activeFfmpeg for crash cleanup`, () => {
+        const source = readFileSync(renderPath, 'utf8');
+
+        expect(source).toMatch(/let activeFfmpeg = null;/);
+        expect(source).toMatch(/let activeFfmpegExited = false;/);
+        expect(source).toMatch(/activeFfmpeg = ffmpeg;/);
+        expect(source).toMatch(/activeFfmpegExited = true;/);
+
+        const failureHandler = source.match(
+          /render\(\)\.catch\(err => \{[\s\S]*?\n  \}\);/
+        )?.[0];
+        expect(failureHandler).toBeDefined();
+        expect(failureHandler).toMatch(/if \(activeFfmpeg && !activeFfmpegExited\)/);
+        expect(failureHandler).toMatch(/activeFfmpeg\.kill\('SIGKILL'\)/);
+        expect(failureHandler).not.toMatch(/if \(ffmpeg && !ffmpegExited\)/);
+      });
+    }
   });
 });

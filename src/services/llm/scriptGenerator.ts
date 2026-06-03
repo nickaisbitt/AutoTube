@@ -198,7 +198,7 @@ On-screen text in the intro MUST reinforce the spoken hook so the video works wi
 
 HOOK-FIRST INTRO (CRITICAL):
 The first segment (type "intro") MUST open with a specific, attention-grabbing claim, statistic, or question derived from the TOPIC CONTEXT DATA provided below — NOT a generic introduction like "Welcome to", "In this video", "Today we're looking at", or "Let's talk about". Pull a real number, date, event, or consequence from the provided context data and lead with it. If no context data is available, use the topic name itself with style-appropriate dramatic framing — but NEVER fabricate a specific statistic.
-The very first sentence of the entire script is your HOOK — it must grab attention immediately. A good hook is a specific, surprising, or counter-intuitive statement that makes the viewer think "I need to hear the rest of this." Bad hooks: generic welcomes, questions the viewer can answer with "no", or vague teases. Good hooks: "In 2024, Nvidia made more profit than the entire US postal service." or "By the time you finish this sentence, hackers will have attempted 300 new attacks."
+The very first sentence of the entire script is your HOOK — it must grab attention immediately. A good hook is a specific, surprising, or counter-intuitive statement that makes the viewer think "I need to hear the rest of this." Bad hooks: generic welcomes, opening with a calendar year ("In 2024…", "In 2023…"), questions the viewer can answer with "no", or vague teases. Good hooks: "Hospitals paid billions after this one mistake — and your records were in the blast radius." or "By the time you finish this sentence, hackers will have attempted 300 new attacks."
 
 FIRST 15 SECONDS RULE (Task 135):
 Deliver substantive value within the first 15 seconds. Open with the most compelling fact, number, or consequence — not context or backstory. The viewer must feel they've already learned something valuable by the 15-second mark.
@@ -235,7 +235,7 @@ Each segment MUST include an "audioDirection" object that guides sound design:
 - "intensity": Number 0-10 representing audio energy level. CRITICAL: Vary intensity across segments to prevent "wall of tension" fatigue. Never have 3+ consecutive segments above 7. Pattern should wave: high → medium → low → high. Intro=6, threats=7-8, explanations=4-5, advice=2-3, outro=4.
 
 OUTPUT FORMAT:
-Return ONLY a valid JSON array of segments. No markdown, no preamble.
+Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }. No markdown, no preamble.
 Each segment:
 {
   "type": "intro" | "section" | "transition" | "outro",
@@ -353,7 +353,9 @@ After writing each segment, mentally review every sentence. Remove any sentence 
 
 SEO KEYWORD INJECTION (Task 144): The TOPIC CONTEXT DATA above contains keywords extracted from top YouTube search results for this topic. Weave these keywords naturally into the narration text throughout the script — at least 3 distinct keywords from the list must appear across different segments. Use them as you would naturally discuss the topic; do not force or repeat them awkwardly. These keywords improve discoverability by aligning with what viewers actually search for.
 
-Total segments: ${totalSegments}`;
+Total segments: ${totalSegments}
+
+Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
 
   // Bug 9 fix: bail before initiating a network request if already cancelled
   if (signal?.aborted) {
@@ -670,6 +672,9 @@ export function validateScriptSpecificity(segments: ScriptSegment[]): Specificit
   const firstNarration = (segments[0]?.narration || '').toLowerCase();
   const genericOpeners = ['welcome to', 'in this video', 'today we', "let's talk about", "let us talk about", 'we\'re looking at', 'we are looking at'];
   if (genericOpeners.some(o => firstNarration.startsWith(o))) {
+    issues.push({ segmentIndex: 0, issue: 'generic_hook' });
+  }
+  if (/^in\s+20\d{2}\b/.test(firstNarration.trim())) {
     issues.push({ segmentIndex: 0, issue: 'generic_hook' });
   }
 

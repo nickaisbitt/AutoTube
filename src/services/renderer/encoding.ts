@@ -68,28 +68,38 @@ export async function tryServerRender(
   project: VideoProject,
   onProgress?: (pct: number, message: string) => void,
   signal?: AbortSignal,
-): Promise<Blob | null> {
+): Promise<Blob | RenderResult | null> {
   let serverTimeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     // Ensure the project is saved for the server-side renderer to read (10s timeout)
     const saveTimeout = new AbortController();
     const saveTimer = setTimeout(() => saveTimeout.abort(), 10_000);
     const saveSignal = signal ? AbortSignal.any([signal, saveTimeout.signal]) : saveTimeout.signal;
-    const saveRes = await fetch('/api/save-project', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(project),
-      signal: saveSignal,
-    });
+    const saveRes = await fetch(
+      `/api/save-project?id=${encodeURIComponent(project.id)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(project),
+        signal: saveSignal,
+      },
+    );
     clearTimeout(saveTimer);
     if (!saveRes.ok) {
       logger.error('Renderer', `Failed to save project for server render: ${saveRes.status}`);
       return null;
     }
 
-    // Timeout server-render after 3 min so we fall back to browser render
+    const saveData = (await saveRes.json()) as { path?: string };
+    const projectPath = saveData.path;
+    if (!projectPath) {
+      logger.error('Renderer', 'Save-project response missing path');
+      return null;
+    }
+
+    // Timeout server-render after 10 min (high-quality 8-min videos need headroom)
     const serverTimeout = new AbortController();
-    serverTimeoutId = setTimeout(() => serverTimeout.abort(), 180_000);
+    serverTimeoutId = setTimeout(() => serverTimeout.abort(), 600_000);
     if (signal) {
       signal.addEventListener('abort', () => serverTimeout.abort(), { once: true });
     }
@@ -99,7 +109,7 @@ export async function tryServerRender(
     const res = await fetch('/api/server-render', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: project.id || '' }),
+      body: JSON.stringify({ projectPath }),
       signal: combinedSignal,
     });
     if (!res.ok || !res.body) {
@@ -148,36 +158,15 @@ export async function tryServerRender(
       return null;
     }
 
-    // Fetch the rendered video file
-    logger.info('Renderer', `Fetching server-rendered file from: ${filePath}`);
-    // Convert absolute filesystem path to relative URL path (#55)
-    const urlPath = filePath.startsWith('/') && !filePath.startsWith('http')
-      ? `/api/render-output?file=${encodeURIComponent(filePath)}`
-      : filePath;
-    const videoRes = await fetch(urlPath, { signal });
-    if (!videoRes.ok) {
-      logger.warn('Renderer', `Could not fetch rendered video from ${filePath}: status=${videoRes.status} statusText=${videoRes.statusText}`);
-      logger.warn('Renderer', `Response headers: content-type=${videoRes.headers.get('content-type')}, content-length=${videoRes.headers.get('content-length')}`);
-      return null;
-    }
+    const streamUrl =
+      filePath.startsWith('http') || filePath.startsWith('/api/')
+        ? filePath
+        : filePath.startsWith('/')
+          ? filePath
+          : `/api/render-output/mp4/${filePath.replace(/^\/+/, '')}`;
 
-    const blob = await videoRes.blob();
-    logger.info('Renderer', `Fetched blob: size=${blob.size} bytes (${(blob.size / 1024 / 1024).toFixed(2)}MB), type=${blob.type || '(empty)'}`);
-
-    // Ensure the blob has the correct MIME type. Some browsers may return an
-    // empty blob.type even when the server sent a valid Content-Type header.
-    // Fall back to the Content-Type header or infer from the file path.
-    let resolvedBlob = blob;
-    if (!blob.type) {
-      const serverContentType = videoRes.headers.get('content-type');
-      const inferredType = serverContentType
-        || (filePath.includes('/mp4/') || filePath.endsWith('.mp4') ? 'video/mp4' : 'video/webm');
-      logger.info('Renderer', `Blob type empty, re-wrapping with inferred type: ${inferredType}`);
-      resolvedBlob = new Blob([blob], { type: inferredType });
-    }
-
-    logger.success('Renderer', `Server render complete: ${(resolvedBlob.size / 1024 / 1024).toFixed(2)}MB (type: ${resolvedBlob.type})`);
-    return resolvedBlob;
+    logger.success('Renderer', `Server render complete — stream URL: ${streamUrl}`);
+    return { url: streamUrl, isServerRender: true };
   } catch (err) {
     if ((err as Error).message === 'Cancelled' || ((err as Error).name === 'AbortError' && signal?.aborted)) {
       throw err; // Re-throw only user cancellation

@@ -21,7 +21,7 @@ import { fileURLToPath } from 'url';
 import { computeReverbFilter, computeStereoPanFilter, generateAmbientBed, computeSubBassRumble, buildFilterChain } from './audioFx.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = join(__dirname, '..');
+const PROJECT_ROOT = join(__dirname, '..', '..');
 
 /** Style-to-filename mapping for background music tracks. */
 const BG_MUSIC_MAP = {
@@ -31,24 +31,43 @@ const BG_MUSIC_MAP = {
   explainer: 'bg-uplifting.aac',
 };
 
+/** User-selected music preset → filename (matches src/services/audioMixer.ts). */
+const MUSIC_PRESET_MAP = {
+  tense: 'bg-tense.aac',
+  uplifting: 'bg-uplifting.aac',
+  neutral: 'bg-neutral.aac',
+  ambient: 'bg-neutral.aac',
+};
+
 /**
- * Resolves the background music file path for a given video style.
- * Returns the absolute path if the style-specific file exists.
- * Falls back to the generic neutral track if the style-specific file is missing.
- * Returns null only if neither file exists on disk.
+ * Resolves the background music file path for a given video style and/or preset.
+ * musicPreset takes priority over style when provided.
+ * Falls back to the generic neutral track if the preferred file is missing.
+ * Returns null only if no bg music file exists on disk.
  *
- * @param {string} style  The video style (e.g. 'business_insider').
+ * @param {string|null} style  The video style (e.g. 'business_insider').
+ * @param {string|null} [musicPreset]  Explicit preset id (e.g. 'tense', 'neutral').
  * @returns {string|null}
  */
-export function resolveBackgroundMusicPath(style) {
-  const filename = BG_MUSIC_MAP[style];
-  if (filename) {
-    const stylePath = join(PROJECT_ROOT, 'public', 'audio', filename);
-    if (existsSync(stylePath)) return stylePath;
+export function resolveBackgroundMusicPath(style, musicPreset = null) {
+  const candidates = [];
+
+  if (musicPreset && MUSIC_PRESET_MAP[musicPreset]) {
+    candidates.push(MUSIC_PRESET_MAP[musicPreset]);
   }
-  // Fallback to generic neutral track
-  const fallbackPath = join(PROJECT_ROOT, 'public', 'audio', 'bg-neutral.aac');
-  return existsSync(fallbackPath) ? fallbackPath : null;
+
+  if (style && BG_MUSIC_MAP[style]) {
+    candidates.push(BG_MUSIC_MAP[style]);
+  }
+
+  candidates.push('bg-neutral.aac');
+
+  for (const filename of candidates) {
+    const filePath = join(PROJECT_ROOT, 'public', 'audio', filename);
+    if (existsSync(filePath)) return filePath;
+  }
+
+  return null;
 }
 
 /**
@@ -193,7 +212,8 @@ export function computeBgMusicVolume(hasNarration, options = {}) {
  * @returns {boolean} True if ducking succeeded.
  */
 export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, totalDuration, options = {}) {
-  const { duckingLevel = -24, peakLevel = -14, fadeDuration = 0.3, lookAhead = 0.1 } = options;
+  const yt = process.env.AUTOTUBE_YOUTUBE_MODE === '1';
+  const { duckingLevel = yt ? -36 : -32, peakLevel = yt ? -22 : -18, fadeDuration = 0.35, lookAhead = 0.1 } = options;
 
   console.log(`  🎚️ Applying dynamic ducking envelope (${narrationTimings.length} narration segments)...`);
 
@@ -499,10 +519,11 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
   // Build filter chain with audio FX
   const narrationFilter = [
     '[0:a]aresample=48000:async=1:min_hard_comp=0.100000',
-    'highpass=f=80',
-    'compand=attacks=0.1:decays=0.1:points=-20/-20|-10/-5|0/0',
-    'equalizer=f=3000:t=q:w=1:g=2',
-    'adelay=1500|1500',
+    'highpass=f=100',
+    'lowpass=f=12000',
+    'compand=attacks=0.05:decays=0.2:points=-25/-25|-12/-8|0/-2|20/-5',
+    'equalizer=f=2500:t=q:w=1.2:g=4',
+    'equalizer=f=180:t=q:w=0.8:g=-2',
   ].join(',');
   const filterParts = [
     `${narrationFilter}[narration]`,
@@ -519,7 +540,8 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
     '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
     roomToneFile,
   ], { encoding: 'utf8', timeout: 30000 });
-  const hasRoomTone = rtResult.status === 0 && existsSync(roomToneFile);
+  const enableRoomTone = process.env.AUTOTUBE_ROOM_TONE === '1';
+  const hasRoomTone = enableRoomTone && rtResult.status === 0 && existsSync(roomToneFile);
 
   // Build input list for ffmpeg
   const inputFiles = [narrationFile, bgMusicPath];
@@ -565,14 +587,13 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
   const mixInputs = mixLabels.map(l => `[${l}]`).join('');
   const inputCount = mixLabels.length;
 
-  // Account for 1.5s adelay in total duration
-  const actualDuration = totalDur + 1.5;
+  const actualDuration = totalDur;
   const fadeDuration = 2;
   const fadeStart = Math.max(0, actualDuration - fadeDuration);
 
   if (enableAudioFx) {
-    const reverbFilter = computeReverbFilter('subtle');
-    filterParts.push(`[narration]${reverbFilter}[narration_fx]`);
+    // Dry voice-first mix — reverb was muddying narration on laptop speakers
+    filterParts.push('[narration]aresample=48000:async=1[narration_fx]');
     
     const panDirection = style === 'warfront' ? 'left-to-right' : style === 'cyber' ? 'right-to-left' : 'center';
     if (panDirection !== 'center') {
@@ -582,10 +603,11 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
       filterParts.push('[bg]aresample=48000:async=1[bg_fx]');
     }
     
-    const weights = ['1', '0.5', ...extraInputs.map(() => '0.1'), ...noiseLabels.map(() => '0.08')].join(' ');
+    const bgWeight = process.env.AUTOTUBE_YOUTUBE_MODE === '1' ? '0.12' : '0.22';
+    const weights = ['1.8', bgWeight, ...extraInputs.map(() => '0.06'), ...noiseLabels.map(() => '0.04')].join(' ');
     filterParts.push(`${mixInputs}amix=inputs=${inputCount}:duration=first:dropout_transition=3:weights="${weights}",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);
   } else {
-    filterParts.push(`[narration][bg]amix=inputs=2:duration=first:dropout_transition=3:weights="1 0.5",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);
+    filterParts.push(`[narration][bg]amix=inputs=2:duration=first:dropout_transition=3:weights="1.6 0.22",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);
   }
 
   const filterChain = filterParts.join(';');
@@ -737,6 +759,7 @@ export function createBgMusicOnlyTrack(bgMusicPath, outputFile, duration, bgVolu
  * @param {number} videoDuration   Total video duration in seconds.
  * @param {object} [options]       Additional options.
  * @param {string} [options.style] Video style for bg music selection.
+ * @param {string} [options.musicPreset] Explicit music preset (overrides style mapping).
  * @param {boolean} [options.backgroundMusic=true] Whether to include background music.
  * @param {Array<{start: number, end: number}>} [options.narrationTimings] Narration segments for dynamic ducking.
  * @returns {boolean} True if muxing succeeded.
@@ -744,18 +767,20 @@ export function createBgMusicOnlyTrack(bgMusicPath, outputFile, duration, bgVolu
 export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDuration, options = {}) {
   const { 
     style = null, 
+    musicPreset = null,
     backgroundMusic = true,
     narrationTimings = [] 
   } = options;
   
   const hasNarration = narrationFile && existsSync(narrationFile);
 
-  // Resolve background music path based on style
+  // Resolve background music path (preset overrides style when set)
   let bgMusicPath = null;
-  if (backgroundMusic && style) {
-    bgMusicPath = resolveBackgroundMusicPath(style);
+  if (backgroundMusic) {
+    bgMusicPath = resolveBackgroundMusicPath(style, musicPreset);
     if (bgMusicPath) {
-      console.log(`  🎼 Background music resolved: ${bgMusicPath}`);
+      const source = musicPreset ? `preset=${musicPreset}` : (style ? `style=${style}` : 'default');
+      console.log(`  🎼 Background music resolved (${source}): ${bgMusicPath}`);
     }
   }
 

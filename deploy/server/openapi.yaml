@@ -95,10 +95,26 @@ paths:
       description: >
         Spawns a full server-side render using node-canvas, edge-tts, and ffmpeg.
         Requires the project to be saved first via /api/save-project.
+        Pass the `path` returned by save-project in the request body.
         Returns SSE progress events.
       operationId: postServerRender
       tags:
         - Render
+      requestBody:
+        description: Saved project file location from /api/save-project
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectPath:
+                  type: string
+                  description: Absolute path returned by /api/save-project
+                  example: /tmp/autotube-project-abc123.json
+                projectId:
+                  type: string
+                  description: Fallback project ID when projectPath is omitted
       responses:
         "200":
           description: SSE stream with render progress

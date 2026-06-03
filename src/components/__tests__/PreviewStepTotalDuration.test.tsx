@@ -17,6 +17,7 @@ vi.mock('../../services/thumbnail', () => ({
   generateThumbnail: vi.fn(() =>
     Promise.resolve(new Blob(['thumb-fallback'], { type: 'image/png' })),
   ),
+  getBestThumbnailOverlay: vi.fn((_project: unknown, hookLine?: string) => hookLine ?? 'Test overlay'),
   downloadThumbnail: vi.fn(),
 }));
 

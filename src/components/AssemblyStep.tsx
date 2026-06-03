@@ -26,7 +26,7 @@ export default function AssemblyStep({ project, status, progress, message, onAss
   const [startTime, setStartTime] = useState<number | null>(null);
   const [backgroundMusic, setBackgroundMusic] = useState(true);
   const [musicPreset, setMusicPreset] = useState('neutral');
-  const [quality, setQuality] = useState<'draft' | 'standard' | 'high'>('standard');
+  const [quality, setQuality] = useState<'draft' | 'standard' | 'high'>('high');
 
   useEffect(() => {
     if (status === 'processing' && startTime === null) {

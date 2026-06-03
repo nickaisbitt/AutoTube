@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { X, Download, Film, Settings, Check, Monitor, Loader2 } from 'lucide-react';
+import { X, Download, Film, Settings, Check, Monitor, Loader2, AlertTriangle } from 'lucide-react';
 import type { VideoProject } from '../types';
 import { QUALITY_PRESETS } from '../services/renderer';
 import { RESOLUTION_PRESETS, type ResolutionKey } from '../services/renderingShared';
+import { getExportBlockStatus } from '../store/pipeline/orchestrator';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -18,7 +19,7 @@ const RESOLUTION_LABELS: Record<ResolutionKey, string> = {
 };
 
 export default function ExportModal({ isOpen, onClose, project, onExport }: ExportModalProps) {
-  const [quality, setQuality] = useState<keyof typeof QUALITY_PRESETS>('standard');
+  const [quality, setQuality] = useState<keyof typeof QUALITY_PRESETS>('high');
   const [format, setFormat] = useState<'webm' | 'mp4'>('mp4');
   const [resolution, setResolution] = useState<ResolutionKey>(
     (project?.exportSettings?.resolution as ResolutionKey) || '1080p'
@@ -29,8 +30,10 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
 
   const resPreset = RESOLUTION_PRESETS[resolution];
   const estimatedSize = Math.round(project.script.reduce((s, seg) => s + seg.duration, 0) * resPreset.videoBitsPerSecond / 8 / 1024 / 1024);
+  const exportBlock = getExportBlockStatus(project);
 
   const handleExport = async () => {
+    if (exportBlock.blocked) return;
     setIsExporting(true);
     try {
       await onExport(quality, format, resolution);
@@ -175,12 +178,25 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
           </div>
         </div>
 
+        {exportBlock.blocked && (
+          <div
+            className="mb-6 flex gap-3 border-2 border-red-500/60 bg-red-950/40 p-4 text-xs font-mono text-red-300"
+            data-testid="export-quality-block"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+            <div>
+              <p className="font-semibold uppercase tracking-wider text-red-200">Export blocked</p>
+              <p className="mt-1 text-red-300/90">{exportBlock.reason}</p>
+            </div>
+          </div>
+        )}
+
         {/* Export Button */}
         <button
           onClick={handleExport}
-          disabled={isExporting}
+          disabled={isExporting || exportBlock.blocked}
           className={`flex w-full items-center justify-center gap-2 px-6 py-3 text-sm font-bold uppercase text-black shadow-hard ${
-            isExporting ? 'cursor-not-allowed bg-surface-600' : 'bg-brand-500'
+            isExporting || exportBlock.blocked ? 'cursor-not-allowed bg-surface-600' : 'bg-brand-500'
           }`}
           data-testid="export-submit-button"
         >

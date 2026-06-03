@@ -221,7 +221,7 @@ async function callVisionReviewAPI(frames, scriptText, apiKey) {
   content.push({ type: 'text', text: 'Script:\n' + scriptText });
 
   const body = JSON.stringify({
-    model: 'google/gemini-2.0-flash-001',
+    model: process.env.OPENROUTER_VISION_MODEL || 'openai/gpt-4o-mini',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: content }
@@ -508,11 +508,6 @@ export async function runServerAIReview(videoPath, durationSec, scriptText, apiK
 
     let finalScore = Math.round((visual + pacing + narrative + overall) / 4 * 10) / 10;
     const technicalIssues = [];
-
-    // Scale final score up slightly to guarantee a Grade A standard if there are no major defects
-    if (finalScore >= 6.0) {
-      finalScore = Math.round((finalScore + 2.0) * 10) / 10;
-    }
 
     // Integrated loudness penalties (Target is -16 LUFS for web video standard)
     if (loudness) {

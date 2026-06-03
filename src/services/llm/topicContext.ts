@@ -56,7 +56,11 @@ export async function fetchWikiContext(topic: string): Promise<{ extract: string
  */
 export async function fetchTopicContext(topic: string): Promise<string> {
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(topic + ' news 2026')}`);
+    const res = await fetchWithTimeout(
+      `/api/search?q=${encodeURIComponent(topic + ' news 2026')}`,
+      {},
+      { timeoutMs: 8_000, maxRetries: 1 },
+    );
     if (!res.ok) return '';
     const data = await res.json();
     const results = (data as Record<string, unknown>)?.results;

@@ -74,7 +74,7 @@ if d.get('errors'):
 print('SUCCESS: serviceConnect', d['data']['serviceConnect']['id'])
 "
 
-DEPLOY_JSON="$(gql "{\"query\":\"mutation(\$serviceId: String!, \$environmentId: String!) { serviceInstanceDeployV2(serviceId: \$serviceId, environmentId: \$environmentId) { id } }\",\"variables\":{\"serviceId\":\"$SERVICE_ID\",\"environmentId\":\"$ENV_ID\"}}" || true)"
+DEPLOY_JSON="$(gql "{\"query\":\"mutation(\$serviceId: String!, \$environmentId: String!) { serviceInstanceDeployV2(serviceId: \$serviceId, environmentId: \$environmentId) }\",\"variables\":{\"serviceId\":\"$SERVICE_ID\",\"environmentId\":\"$ENV_ID\"}}" || true)"
 
 if printf '%s' "$DEPLOY_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); exit(0 if d.get('data',{}).get('serviceInstanceDeployV2') else 1)" 2>/dev/null; then
   printf '%s' "$DEPLOY_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print('SUCCESS: deploy', d['data']['serviceInstanceDeployV2']['id'])"

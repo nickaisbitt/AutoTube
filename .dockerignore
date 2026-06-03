@@ -23,7 +23,23 @@ narration-audio-*
 server-render
 powers
 scratch
-scripts
+# Keep scripts/ — postinstall runs scripts/ensure-server-render.mjs
+scripts/squad
+scripts/video-improvement-loop.mjs
+scripts/generate-full-video.mjs
+scripts/render-*.mjs
+scripts/watch-video.mjs
+scripts/youtube-*.mjs
+scripts/ship-*.mjs
+scripts/verify-*.mjs
+scripts/debug-*.mjs
+scripts/finalize-*.mjs
+scripts/export-*.mjs
+scripts/railway-*.mjs
+scripts/railway-*.sh
+scripts/deploy.sh
+scripts/lib/random-topics.mjs
+scripts/lib/stock-media-urls.mjs
 
 # Logs and temp files
 *.log
@@ -53,7 +69,6 @@ docker-compose.yml
 .env*.local
 *.tsbuildinfo
 .eslintcache
+# Keep vite/tsconfig for npm run build (Railpack)
 playwright.config.ts
 vitest.config.ts
-tsconfig.json
-vite.config.ts

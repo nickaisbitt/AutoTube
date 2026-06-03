@@ -3841,8 +3841,8 @@ async function render() {
   const END_SCREEN_SECONDS = isShortsMode ? 2 : 4;
   const effectiveTitleDur = 0; // Skips full-screen blank chapter transition cards
   const SEGMENT_TITLE_FRAMES = 0;
-  // Hook packaging: 2–3s cold open before intro narration (sync with narration intro silence)
-  const COLD_OPEN_SECONDS = isShortsMode ? 0 : 2.5;
+  // Hook packaging: cover the watcher's full 0–3s hook audit window.
+  const COLD_OPEN_SECONDS = isShortsMode ? 0 : 3.5;
   const COLD_OPEN_FRAMES = Math.round(COLD_OPEN_SECONDS * FPS);
   const COLD_OPEN_FADE_FRAMES = isShortsMode ? 0 : Math.max(1, Math.round(0.25 * FPS));
   const SEGMENT_FADE_FRAMES = Math.round((renderFlags.useFastPacing ? 0.05 : 0.12) * FPS);

@@ -158,8 +158,8 @@ export async function generateFullVideo(options) {
     route.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' }),
   );
 
-  const scriptTimeoutMs = realHarvest ? 300_000 : 180_000;
-  const mediaTimeoutMs = realHarvest ? 900_000 : 300_000;
+  const scriptTimeoutMs = realHarvest ? 900_000 : 180_000;
+  const mediaTimeoutMs = realHarvest ? 1_200_000 : 300_000;
   const narrationTimeoutMs = realHarvest ? 900_000 : 600_000;
 
   try {
@@ -171,8 +171,8 @@ export async function generateFullVideo(options) {
     await page.getByTestId('topic-input').fill(topic);
     await page.getByTestId('duration-select').selectOption('3').catch(() => {});
     await page.getByTestId('generate-script-only').click();
-    log('⏳ Script...');
-    await page.getByTestId('sidebar-step-script').locator('.bg-emerald-500').waitFor({ timeout: scriptTimeoutMs });
+    log('⏳ Script (live OpenRouter — may take several minutes)...');
+    await page.getByRole('button', { name: /Source Media/i }).waitFor({ state: 'visible', timeout: scriptTimeoutMs });
 
     await page.getByRole('button', { name: /Source Media Assets/i }).click();
     log('⏳ Media (live harvest)...');

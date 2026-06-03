@@ -28,6 +28,8 @@
     "youtube:review": "node scripts/youtube-minute-review.mjs",
     "watch:video": "node scripts/watch-video.mjs",
     "watch:video:full": "node scripts/watch-video.mjs --full",
+    "loop:video": "node scripts/video-improvement-loop.mjs",
+    "loop:video:once": "node scripts/video-improvement-loop.mjs --max 1",
     "test:unit": "vitest run --passWithNoTests",
     "test:unit:watch": "vitest",
     "test:unit:coverage": "vitest run --coverage",

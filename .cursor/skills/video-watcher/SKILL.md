@@ -20,6 +20,16 @@ Use when the user says a rendered video looks bad, wants review, retention audit
 
 Set `OPENROUTER_API_KEY` in Cursor → Settings → MCP → video-watcher → env for automated vision scores.
 
+## Improvement loop (generate + review + repeat)
+
+```bash
+npm run loop:video              # random topic each iteration, forever
+npm run loop:video:once         # single cycle
+npm run loop:video -- --max 5 --delay 60
+```
+
+See `docs/VIDEO_IMPROVEMENT_LOOP.md`.
+
 ## CLI fallback
 
 ```bash

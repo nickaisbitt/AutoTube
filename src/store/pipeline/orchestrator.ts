@@ -41,7 +41,7 @@ import { trackVideoGeneration } from '../../services/analytics';
 import { reorderForHook } from '../../services/segmentReorderer';
 import { CHART_KEYWORDS } from '../../services/captionUtils';
 import { runAIEditPass } from '../../services/aiEditor';
-import { extractHookLine } from '../../services/seoTitles';
+import { resolveProjectHookLine, syncIntroNarrationToHook } from '../../services/seoTitles';
 import { prepareThumbnailConcepts } from '../../services/thumbnail';
 import { logger } from '../../services/logger';
 import { runBlindReview } from '../../services/blindReview';
@@ -141,10 +141,18 @@ export async function executeGenerateScript(
 
   const loopFastMode = isLoopFastMode();
 
+  const hookLine = resolveProjectHookLine(segments, config.topic);
+  const introIdx = segments.findIndex(s => s.type === 'intro');
+  if (introIdx >= 0) {
+    segments[introIdx] = {
+      ...segments[introIdx],
+      narration: syncIntroNarrationToHook(segments[introIdx].narration, hookLine),
+    };
+  }
+
   // Generate title variants (Task 97): direct, curiosity gap, emotional/urgent
   setProcessingProgress(80);
   setProcessingMessage('Generating title variants...');
-  const hookLine = extractHookLine(segments);
   let videoTitle: string = config.topic;
   let titleVariants: { direct: string; curiosityGap: string; emotionalUrgent: string } | undefined;
   if (!loopFastMode) {
@@ -218,6 +226,7 @@ export async function executeGenerateScript(
       score: arcValidation.score,
       issues: arcValidation.issues,
     },
+    hookLine,
   };
 
   if (!loopFastMode) {
@@ -742,6 +751,9 @@ export async function executeAssembleVideo(
         fileName,
         backgroundMusic: projectToRender.exportSettings?.backgroundMusic,
         isStreaming: isServerRender,
+        serverVideoUrl: isServerRender ? url : projectToRender.exportSettings?.serverVideoUrl,
+        hookLine: projectToRender.hookLine ?? projectToRender.exportSettings?.hookLine,
+        youtubeMode: projectToRender.exportSettings?.youtubeMode,
       },
     };
 

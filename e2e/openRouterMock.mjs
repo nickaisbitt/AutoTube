@@ -21,7 +21,7 @@
  */
 
 const LONG_NARRATION_BLOCK =
-  'In 2024, hospitals paid billions in ransomware settlements while AI systems scanned millions of patient records every hour. Your medical identity, credit lines, and family safety depend on understanding how clinics adopt automation, where data leaks happen, and which guardrails regulators enforce across Epic, UnitedHealth, Mayo Clinic, and regional providers nationwide.';
+  'Hospitals paid billions after hackers exploited one weakness — and your medical records were already in the blast radius. Your identity, credit lines, and family safety depend on understanding how clinics adopt automation, where data leaks happen, and which guardrails regulators enforce across Epic, UnitedHealth, Mayo Clinic, and regional providers nationwide.';
 
 /** Shock hook — no year opener (YouTube retention). */
 export function buildShockHookLine(topic, override) {
@@ -128,7 +128,7 @@ export const MOCK_SCRIPT_SEGMENTS = [
     type: 'intro',
     title: 'Introduction',
     narration:
-      'In 2024, hospitals paid $2.3 billion in ransomware settlements. Your bank account could be drained in seconds by a single phishing click. In this video we break down how AI is changing healthcare — and what it means for your money, your records, and your family.',
+      'Your hospital records could be sold on the dark web tonight — and one phishing click is all it takes. Hackers drained $2.3 billion from healthcare systems last year alone. In this video we break down how AI is changing healthcare — and what it means for your money, your records, and your family.',
     visualNote: 'Worried person at laptop, hospital corridor',
     duration: 22,
   },

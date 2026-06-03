@@ -66,9 +66,9 @@ export async function renderVideoToBlob(
   let serverRenderFailed = false;
   try {
     const serverResult = await tryServerRender(project, onProgress, signal);
-    if (serverResult && (serverResult as any).size) {
+    if (serverResult && 'isServerRender' in serverResult && serverResult.isServerRender) {
       logger.success('Renderer', 'Server-side render succeeded, skipping browser render');
-      return serverResult as unknown as Blob;
+      return serverResult;
     }
     serverRenderFailed = true;
   } catch (err) {

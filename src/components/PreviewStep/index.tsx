@@ -239,7 +239,12 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
       />
 
       {/* Video Quality Check */}
-      <QualityCheck videoUrl={project.thumbnail ?? null} />
+      <QualityCheck
+        videoUrl={
+          project.exportSettings?.serverVideoUrl
+          ?? (project.thumbnail?.startsWith('blob:') ? null : project.thumbnail ?? null)
+        }
+      />
 
       {/* Blind Review Card */}
       <BlindReviewCard report={project.blindReview ?? null} />

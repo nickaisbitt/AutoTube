@@ -98,7 +98,12 @@ node -e '
   console.log("Patched deploy/package.json build to dummy for Railway");
 ' || echo "WARN: could not patch dummy build script"
 
-npx @railway/cli up || echo "railway up failed (likely missing RAILWAY_TOKEN or login — run 'npx @railway/cli login' and 'npx @railway/cli link' first, or export RAILWAY_TOKEN)"
+if [ -z "${RAILWAY_TOKEN:-}" ]; then
+  echo "ERROR: RAILWAY_TOKEN is not set. Add it in GitHub Secrets or export RAILWAY_TOKEN before running deploy."
+  exit 1
+fi
+export RAILWAY_TOKEN
+npx @railway/cli up
 echo ""
-echo "Deployed (or attempted)! Check: https://autotube-production.up.railway.app/api/health"
+echo "Deployed! Check: https://autotube-production.up.railway.app/api/health"
 

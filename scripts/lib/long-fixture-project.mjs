@@ -20,6 +20,9 @@ export function buildLongFixtureProject(options = {}) {
     duration: seg.duration ?? 32,
   }));
 
+  const hookLine = (script[0]?.narration || '').split(/(?<=[.!?])\s+/)[0]?.trim().slice(0, 72)
+    || 'Hospitals paid billions after this one mistake.';
+
   const media = [];
   script.forEach((seg, i) => {
     for (let v = 0; v < 3; v++) {
@@ -51,6 +54,7 @@ export function buildLongFixtureProject(options = {}) {
     script,
     media,
     narration: [],
+    hookLine,
     exportSettings: {
       quality: 'high',
       youtubeMode: true,

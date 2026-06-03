@@ -18,8 +18,8 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const KOKORO_SCRIPT = join(__dirname, 'kokoro_generate.py');
 
-/** Keep in sync with COLD_OPEN_SECONDS + TITLE_CARD_SECONDS in server-render.mjs */
-const INTRO_SILENCE_SECONDS = 2.5;
+/** Keep in sync with COLD_OPEN_SECONDS in server-render.mjs (3.5s cold open) */
+const INTRO_SILENCE_SECONDS = 3.5;
 
 const TTS_SETUP_DOC = 'scripts/squad/A3-tts-setup.md';
 

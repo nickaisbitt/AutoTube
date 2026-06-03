@@ -53,6 +53,10 @@ function generateId(): string {
   return crypto.randomUUID();
 }
 
+function isLoopFastMode(): boolean {
+  return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
+}
+
 export interface ProgressCallbacks {
   setProcessingProgress: (progress: number) => void;
   setProcessingMessage: (message: string) => void;
@@ -135,49 +139,61 @@ export async function executeGenerateScript(
     logger.info('Store', `Retention beat: segment=${beat.segmentIndex} offset=${beat.timeOffsetSec.toFixed(1)}s type=${beat.type}`);
   }
 
+  const loopFastMode = isLoopFastMode();
+
   // Generate title variants (Task 97): direct, curiosity gap, emotional/urgent
   setProcessingProgress(80);
   setProcessingMessage('Generating title variants...');
   const hookLine = extractHookLine(segments);
-  let videoTitle: string;
+  let videoTitle: string = config.topic;
   let titleVariants: { direct: string; curiosityGap: string; emotionalUrgent: string } | undefined;
-  try {
-    titleVariants = await generateTitleVariants(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
-    videoTitle = titleVariants.curiosityGap; // Default to curiosity gap variant
-  } catch (err) {
-    if ((err as Error).name === 'AbortError') {
-      logger.info('Store', 'Title generation cancelled by user');
-      return null;
-    }
+  if (!loopFastMode) {
     try {
-      videoTitle = await generateVideoTitle(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
-    } catch {
-      videoTitle = config.topic;
+      titleVariants = await generateTitleVariants(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
+      videoTitle = titleVariants.curiosityGap; // Default to curiosity gap variant
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        logger.info('Store', 'Title generation cancelled by user');
+        return null;
+      }
+      try {
+        videoTitle = await generateVideoTitle(segments, config.topic, appConfig.openRouterKey, hookLine, signal);
+      } catch {
+        videoTitle = config.topic;
+      }
     }
+  } else {
+    logger.info('Store', 'Loop fast mode: skipping title variants');
   }
 
   // Generate series metadata (Task 102)
   let seriesMetadata: { seriesName: string; episodeNumber: number; playlistDescription: string; episodeTitle: string } | undefined;
-  try {
-    seriesMetadata = await generateSeriesMetadata(segments, config.topic, appConfig.openRouterKey, signal);
-  } catch {
-    logger.warn('Store', 'Series metadata generation failed');
+  if (!loopFastMode) {
+    try {
+      seriesMetadata = await generateSeriesMetadata(segments, config.topic, appConfig.openRouterKey, signal);
+    } catch {
+      logger.warn('Store', 'Series metadata generation failed');
+    }
   }
 
   // Generate pinned comments (Task 91)
   let pinnedComments: Array<{ text: string; type: 'question_prompt' | 'controversial_take' | 'what_did_i_miss' }> | undefined;
-  try {
-    pinnedComments = await generatePinnedComments(segments, config.topic, appConfig.openRouterKey, signal);
-  } catch {
-    logger.warn('Store', 'Pinned comment generation failed');
+  if (!loopFastMode) {
+    try {
+      pinnedComments = await generatePinnedComments(segments, config.topic, appConfig.openRouterKey, signal);
+    } catch {
+      logger.warn('Store', 'Pinned comment generation failed');
+    }
   }
 
   // Generate hashtags (Task 96)
   let hashtags: string[] | undefined;
-  try {
-    hashtags = await generateHashtags(config.topic, config.style, '', appConfig.openRouterKey, signal);
-  } catch {
-    logger.warn('Store', 'Hashtag generation failed');
+  if (!loopFastMode) {
+    try {
+      hashtags = await generateHashtags(config.topic, config.style, '', appConfig.openRouterKey, signal);
+    } catch {
+      logger.warn('Store', 'Hashtag generation failed');
+    }
   }
 
   let newProject: VideoProject = {
@@ -204,13 +220,17 @@ export async function executeGenerateScript(
     },
   };
 
-  newProject = await refineUntilQualityGatePasses(
-    newProject,
-    'script',
-    appConfig,
-    signal,
-    callbacks,
-  );
+  if (!loopFastMode) {
+    newProject = await refineUntilQualityGatePasses(
+      newProject,
+      'script',
+      appConfig,
+      signal,
+      callbacks,
+    );
+  } else {
+    logger.info('Store', 'Loop fast mode: skipping script quality-gate refinements');
+  }
 
   return newProject;
 }

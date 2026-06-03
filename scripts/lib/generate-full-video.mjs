@@ -92,9 +92,19 @@ export async function generateFullVideo(options) {
           ttsVoice: 'Leo',
         }),
       );
+      sessionStorage.setItem('autotube_loop_fast_mode', 'true');
     },
     { key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline', harvest: realHarvest },
   );
+
+  const browserEvents = [];
+  const recordBrowserEvent = (type, detail) => {
+    browserEvents.push({ at: new Date().toISOString(), type, detail: String(detail).slice(0, 1000) });
+    if (browserEvents.length > 200) browserEvents.shift();
+  };
+  page.on('console', (msg) => recordBrowserEvent(`console.${msg.type()}`, msg.text()));
+  page.on('pageerror', (err) => recordBrowserEvent('pageerror', err.message));
+  page.on('requestfailed', (request) => recordBrowserEvent('requestfailed', `${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`));
 
   if (!realHarvest) {
     await page.route('**/openrouter.ai/**', async (route) => {
@@ -171,8 +181,21 @@ export async function generateFullVideo(options) {
     await page.getByTestId('topic-input').fill(topic);
     await page.getByTestId('duration-select').selectOption('3').catch(() => {});
     await page.getByTestId('generate-script-only').click();
-    log('⏳ Script (live OpenRouter — may take several minutes)...');
-    await page.getByRole('button', { name: /Source Media/i }).waitFor({ state: 'visible', timeout: scriptTimeoutMs });
+    log('⏳ Script (live OpenRouter — fast loop mode)...');
+    try {
+      await page.getByRole('button', { name: /Source Media/i }).waitFor({ state: 'visible', timeout: scriptTimeoutMs });
+    } catch (err) {
+      writeFileSync(join(outDir, 'browser-events.json'), JSON.stringify(browserEvents, null, 2));
+      const uiState = await page.evaluate(() => ({
+        bodyText: document.body?.innerText?.slice(0, 4000) || '',
+        projectRawLength: localStorage.getItem('autotube_project')?.length || 0,
+        configRawLength: sessionStorage.getItem('autotube_config_session')?.length || 0,
+        fastMode: sessionStorage.getItem('autotube_loop_fast_mode'),
+      })).catch((e) => ({ error: e.message }));
+      writeFileSync(join(outDir, 'ui-state-on-script-timeout.json'), JSON.stringify(uiState, null, 2));
+      await page.screenshot({ path: join(outDir, 'script-timeout.png'), fullPage: true }).catch(() => {});
+      throw err;
+    }
 
     await page.getByRole('button', { name: /Source Media Assets/i }).click();
     log('⏳ Media (live harvest)...');

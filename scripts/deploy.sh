@@ -64,18 +64,6 @@ cp "$ROOT/server.mjs" "$DEPLOY_DIR/"
 cp "$ROOT/package.json" "$DEPLOY_DIR/"
 cp "$ROOT/package-lock.json" "$DEPLOY_DIR/" 2>/dev/null || true
 
-# Ensure dummy build script so Nixpacks does not attempt a full vite build
-# (we pre-populate dist/ from the local build; root package.json has real "vite build")
-node -e '
-  const fs = require("fs");
-  const pjPath = "package.json";
-  const pj = JSON.parse(fs.readFileSync(pjPath, "utf8"));
-  pj.scripts = pj.scripts || {};
-  pj.scripts.build = "echo '\''pre-built dist/ from root; skipping'\'' && exit 0";
-  fs.writeFileSync(pjPath, JSON.stringify(pj, null, 2) + "\n");
-  console.log("Patched deploy/package.json build to dummy for Railway");
-' || echo "WARN: could not patch dummy build script"
-
 # Sync public/ (audio, static assets)
 if [ -d "$ROOT/public" ]; then
   echo "Syncing public/..."
@@ -96,6 +84,20 @@ cp "$ROOT/nixpacks.toml" "$DEPLOY_DIR/"
 # Deploy
 echo "Deploying to Railway..."
 cd "$DEPLOY_DIR"
+
+# Ensure dummy build script so Nixpacks does not attempt a full vite build
+# (we pre-populate dist/ from the local build; root package.json has real "vite build")
+# Run AFTER cd so relative package.json is the one in the Railway build context.
+node -e '
+  const fs = require("fs");
+  const pjPath = "package.json";
+  const pj = JSON.parse(fs.readFileSync(pjPath, "utf8"));
+  pj.scripts = pj.scripts || {};
+  pj.scripts.build = "echo '\''pre-built dist/ from root; skipping'\'' && exit 0";
+  fs.writeFileSync(pjPath, JSON.stringify(pj, null, 2) + "\n");
+  console.log("Patched deploy/package.json build to dummy for Railway");
+' || echo "WARN: could not patch dummy build script"
+
 npx @railway/cli up || echo "railway up failed (likely missing RAILWAY_TOKEN or login — run 'npx @railway/cli login' and 'npx @railway/cli link' first, or export RAILWAY_TOKEN)"
 echo ""
 echo "Deployed (or attempted)! Check: https://autotube-production.up.railway.app/api/health"

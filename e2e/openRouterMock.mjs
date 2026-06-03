@@ -23,6 +23,51 @@
 const LONG_NARRATION_BLOCK =
   'In 2024, hospitals paid billions in ransomware settlements while AI systems scanned millions of patient records every hour. Your medical identity, credit lines, and family safety depend on understanding how clinics adopt automation, where data leaks happen, and which guardrails regulators enforce across Epic, UnitedHealth, Mayo Clinic, and regional providers nationwide.';
 
+/** Shock hook — no year opener (YouTube retention). */
+export function buildShockHookLine(topic, override) {
+  if (override?.trim()) return override.trim();
+  const t = (topic || 'this story').replace(/\.$/, '');
+  const templates = [
+    `${t} — and almost nobody saw it coming.`,
+    `This ${t.toLowerCase()} could affect you by tomorrow.`,
+    `Billions lost overnight: ${t}.`,
+    `They tried to hide ${t.toLowerCase()} — here's the proof.`,
+  ];
+  return templates[Math.floor(Math.random() * templates.length)];
+}
+
+function buildTopicBody(topic, hookLine) {
+  const t = topic || 'the story';
+  return `${hookLine} Experts warn the fallout is spreading fast. Regulators are scrambling. Millions of ordinary people are already paying the price. In the next few minutes you'll see exactly what happened, who profited, and what you should do right now to protect yourself. This is ${t} explained without the corporate spin.`;
+}
+
+/**
+ * Topic-aware mock script with shock hook (for improvement loop + generate path).
+ * @param {string} topic
+ * @param {{ hookLine?: string }} [options]
+ */
+export function buildMockScriptForTopic(topic, options = {}) {
+  const hookLine = buildShockHookLine(topic, options.hookLine);
+  const bodyBlock = buildTopicBody(topic, hookLine);
+  const introNarration = `${hookLine} Stay with me — the next two minutes change how you see this forever. ${bodyBlock.split('. ').slice(0, 2).join('. ')}.`;
+
+  const segmentTemplates = [
+    { type: 'intro', title: 'The Hook', visualNote: 'Shock headline, human face, stakes', narration: introNarration },
+    { type: 'section', title: 'What Happened', visualNote: 'News footage, data dashboard, crowd', narration: bodyBlock },
+    { type: 'section', title: 'Who Pays', visualNote: 'Families, hospital, courtroom', narration: bodyBlock },
+    { type: 'section', title: 'The Hidden Cause', visualNote: 'Server room, hacker silhouette, charts', narration: bodyBlock },
+    { type: 'section', title: 'What Changes Next', visualNote: 'Regulators, protests, tech demo', narration: bodyBlock },
+    { type: 'outro', title: 'Your Move', visualNote: 'Subscribe CTA, checklist, direct camera', narration: `${bodyBlock} Subscribe for part two — we break down the next scandal before mainstream news catches up.` },
+  ];
+
+  return segmentTemplates.map((seg, i) => ({
+    ...seg,
+    id: `seg-${i}`,
+    narration: repeatToWordCount(seg.narration, 85),
+    duration: 32,
+  }));
+}
+
 function repeatToWordCount(block, targetWords) {
   const words = [];
   while (words.length < targetWords) {

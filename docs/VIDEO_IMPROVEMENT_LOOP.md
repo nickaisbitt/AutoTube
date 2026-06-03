@@ -8,6 +8,14 @@ Endless (or capped) **generate → watch → repeat** with a **new random topic 
 2. Optional: `OPENROUTER_API_KEY` for brutal/hook vision in reviews
 3. Long runs: use **tmux** (each full cycle is often 30–60+ minutes)
 
+## Fix gate (important)
+
+If Video Watcher says **upload-ready: NO**, the loop:
+
+1. Applies fixes (hook rewrite, faster cuts, real stock, kinetic text, etc.)
+2. Saves state to `test-recordings/improvement-loop/FIX_STATE.json`
+3. **Re-runs the SAME topic** with fixes — does NOT pick a new topic until pass or `--max` retries (default 4)
+
 ## Commands
 
 ```bash

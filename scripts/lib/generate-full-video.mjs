@@ -7,7 +7,9 @@ import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlink
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
-import { MOCK_LONG_SCRIPT_SEGMENTS, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
+import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
+import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
+import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 
 export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || 'http://localhost:5173') {
   try {
@@ -25,10 +27,14 @@ export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || '
  * @param {number} [options.runId]
  * @param {boolean} [options.youtubeMode]
  * @param {boolean} [options.quiet]
+ * @param {object} [options.fixState] — loop fix state from apply-watch-fixes
  */
 export async function generateFullVideo(options) {
   const topic = options.topic;
   if (!topic?.trim()) throw new Error('topic is required');
+
+  const fixState = options.fixState || {};
+  const mockSegments = buildMockScriptForTopic(topic, { hookLine: fixState.hookLine });
 
   const devServer = options.devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173';
   const runId = options.runId ?? Date.now();
@@ -69,9 +75,11 @@ export async function generateFullVideo(options) {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: mockOpenRouterHttpBody(post, MOCK_LONG_SCRIPT_SEGMENTS),
+      body: mockOpenRouterHttpBody(post, mockSegments),
     });
   });
+
+  const stockResults = stockSearchResults(topic, STOCK_HEALTHCARE_IMAGES.length);
 
   await page.route(
     /\/api\/(?:search|search-bing-images|search-google-images|search-bing-videos|search-google-videos|search-videos|static-map|press-release|search-bing-news|proxy-page).*/,
@@ -82,8 +90,8 @@ export async function generateFullVideo(options) {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
-            url: 'https://picsum.photos/id/20/1920/1080',
-            thumbnailUrl: 'https://picsum.photos/id/20/200/150',
+            url: STOCK_HEALTHCARE_IMAGES[0].url,
+            thumbnailUrl: STOCK_HEALTHCARE_IMAGES[0].url.replace('w=1920', 'w=400'),
           }),
         });
         return;
@@ -95,32 +103,7 @@ export async function generateFullVideo(options) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          results: [
-            {
-              url: 'https://picsum.photos/id/10/1920/1080',
-              image: 'https://picsum.photos/id/10/1920/1080',
-              thumbnailUrl: 'https://picsum.photos/id/10/200/150',
-              source: 'Mock',
-              title: topic.slice(0, 80),
-              alt: topic.slice(0, 80),
-              width: 1920,
-              height: 1080,
-              type: 'image',
-            },
-            {
-              url: 'https://picsum.photos/id/11/1920/1080',
-              image: 'https://picsum.photos/id/11/1920/1080',
-              thumbnailUrl: 'https://picsum.photos/id/11/200/150',
-              source: 'Mock',
-              title: 'B-roll',
-              alt: 'B-roll',
-              width: 1920,
-              height: 1080,
-              type: 'image',
-            },
-          ],
-        }),
+        body: JSON.stringify({ results: stockResults }),
       });
     },
   );
@@ -178,16 +161,7 @@ export async function generateFullVideo(options) {
       return { ok: false, error: 'No project with media after pipeline', topic, outDir };
     }
 
-    project.topic = topic;
-    project.title = topic;
-    project.exportSettings = {
-      ...(typeof project.exportSettings === 'object' && project.exportSettings ? project.exportSettings : {}),
-      quality: 'high',
-      backgroundMusic: true,
-      musicPreset: 'neutral',
-      resolution: '1080p',
-      youtubeMode: options.youtubeMode !== false,
-    };
+    patchProjectForLoop(project, topic, fixState);
 
     try {
       for (const f of readdirSync('/tmp')) {
@@ -217,6 +191,11 @@ export async function generateFullVideo(options) {
     if (options.youtubeMode !== false) {
       renderEnv.AUTOTUBE_YOUTUBE_MODE = '1';
     }
+    if (fixState.cutIntervalSec) {
+      renderEnv.AUTOTUBE_CUT_INTERVAL_SEC = String(fixState.cutIntervalSec);
+    }
+    if (fixState.showKineticText) renderEnv.AUTOTUBE_KINETIC_TEXT = '1';
+    if (fixState.useFastPacing) renderEnv.AUTOTUBE_FAST_PACING = '1';
 
     const render = spawnSync('node', ['server-render.mjs', mp4Out], {
       cwd: root,

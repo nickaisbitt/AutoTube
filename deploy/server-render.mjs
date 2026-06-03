@@ -3261,9 +3261,9 @@ async function render() {
 
   // Initialize rendering flags (can be modified by AI post-review enrichment pass)
   const renderFlags = {
-    showDataOverlay: false,
-    showKineticText: false,
-    useFastPacing: false,
+    showDataOverlay: process.env.AUTOTUBE_DATA_OVERLAY === '1',
+    showKineticText: process.env.AUTOTUBE_KINETIC_TEXT === '1',
+    useFastPacing: process.env.AUTOTUBE_FAST_PACING === '1',
   };
 
   // Initialize global state for advanced rendering features (Tasks 58, 79, 80)

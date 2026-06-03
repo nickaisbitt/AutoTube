@@ -1,16 +1,8 @@
 #!/usr/bin/env node
 /**
- * Generate → Video Watcher review → repeat with a random topic each iteration.
+ * Generate → watch → FIX → retry (same topic) → only then next random topic.
  *
- * Prerequisites:
- *   npm run dev -- --port 5173 --host 0.0.0.0
- *   OPENROUTER_API_KEY (optional but recommended for vision review)
- *
- * Usage:
- *   npm run loop:video
- *   npm run loop:video -- --max 3
- *   npm run loop:video -- --until-pass --delay 60
- *   npm run loop:video -- --review-only   # skip generate, only review latest MP4
+ * Gate: if review fails, apply fixes to pipeline state and re-run BEFORE picking a new topic.
  */
 import { mkdirSync, writeFileSync, appendFileSync, existsSync, copyFileSync, readFileSync } from 'fs';
 import { join } from 'path';
@@ -18,6 +10,8 @@ import { spawnSync } from 'child_process';
 import { generateFullVideo, checkDevServer } from './lib/generate-full-video.mjs';
 import { pickRandomTopic } from './lib/random-topics.mjs';
 import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
+import { loadFixState, saveFixState } from './lib/loop-state.mjs';
+import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
 
 const ROOT = process.cwd();
 const LOOP_DIR = join(ROOT, 'test-recordings', 'improvement-loop');
@@ -28,7 +22,7 @@ function parseArgs(argv) {
   const cfg = {
     max: 0,
     untilPass: false,
-    delaySec: 10,
+    delaySec: 5,
     reviewOnly: false,
     skipVision: false,
     watchMode: 'quick',
@@ -54,7 +48,7 @@ function sleep(ms) {
 function appendJournal(entry) {
   appendFileSync(JOURNAL_JSONL, `${JSON.stringify(entry)}\n`);
   const lines = [
-    `### Loop ${entry.iteration} — ${entry.topic}`,
+    `### Loop ${entry.iteration}${entry.retry ? ` (retry ${entry.retry})` : ''} — ${entry.topic}`,
     ``,
     `1. **Time:** ${entry.at}`,
     `2. **Generate:** ${entry.generateOk ? 'OK' : 'FAIL'}${entry.generateError ? ` — ${entry.generateError}` : ''}`,
@@ -62,8 +56,10 @@ function appendJournal(entry) {
     `4. **Upload-ready:** ${entry.uploadReady ? 'YES' : 'NO'}`,
     `5. **Brutal score:** ${entry.brutalScore ?? '—'}/10`,
     `6. **Hook pass:** ${entry.hookPass === true ? 'YES' : entry.hookPass === false ? 'NO' : '—'}`,
-    `7. **Watch report:** \`${entry.reportPath || '—'}\``,
-    `8. **Run folder:** \`${entry.runDir || '—'}\``,
+    `7. **Fixes applied:** ${entry.fixesApplied?.length ? entry.fixesApplied.join('; ') : 'none'}`,
+    `8. **Next step:** ${entry.nextStep || '—'}`,
+    `9. **Watch report:** \`${entry.reportPath || '—'}\``,
+    `10. **Run folder:** \`${entry.runDir || '—'}\``,
     ``,
   ];
   appendFileSync(JOURNAL_MD, `${lines.join('\n')}\n`);
@@ -73,42 +69,52 @@ async function main() {
   const cfg = parseArgs(process.argv.slice(2));
   mkdirSync(LOOP_DIR, { recursive: true });
 
-  if (!cfg.reviewOnly) {
-    const devServer = process.env.DEV_SERVER_URL || 'http://localhost:5173';
-    if (!(await checkDevServer(devServer))) {
-      console.error(`❌ Dev server not reachable at ${devServer}`);
-      console.error('   Start: npm run dev -- --port 5173 --host 0.0.0.0');
-      process.exit(1);
-    }
+  if (!cfg.reviewOnly && !(await checkDevServer())) {
+    console.error('❌ Dev server not reachable. Start: npm run dev -- --port 5173');
+    process.exit(1);
   }
 
   if (!existsSync(JOURNAL_MD)) {
     writeFileSync(
       JOURNAL_MD,
-      '# Video improvement loop journal\n\nRandom topic each iteration → generate → watch → repeat.\n\n',
+      '# Video improvement loop journal\n\nGenerate → watch → **fix** → retry same topic → new topic only after pass or max retries.\n\n',
     );
   }
 
-  console.log('\n🔁 Video improvement loop');
-  console.log(`   Max iterations: ${cfg.max > 0 ? cfg.max : '∞ (Ctrl+C to stop)'}`);
-  console.log(`   Until pass: ${cfg.untilPass}`);
-  console.log(`   Journal: ${JOURNAL_JSONL}\n`);
+  let fixState = loadFixState(LOOP_DIR);
+  let currentTopic = fixState.pendingTopic || null;
+  let iteration = fixState.iteration || 0;
 
-  let iteration = 0;
+  console.log('\n🔁 Video improvement loop (fix-gated)');
+  console.log(`   Max iterations: ${cfg.max > 0 ? cfg.max : '∞'}`);
+  console.log(`   Fix before next topic: YES`);
+  console.log(`   Journal: ${JOURNAL_JSONL}\n`);
 
   while (true) {
     iteration += 1;
+    fixState.iteration = iteration;
     if (cfg.max > 0 && iteration > cfg.max) {
       console.log(`\n✅ Reached --max ${cfg.max}`);
       break;
     }
 
-    const topic = cfg.reviewOnly ? '(review-only)' : pickRandomTopic();
+    const isRetry = Boolean(currentTopic);
+    if (!currentTopic && !cfg.reviewOnly) {
+      currentTopic = pickRandomTopic();
+      fixState.topicRetryCount = 0;
+    }
+
+    const topic = cfg.reviewOnly ? '(review-only)' : currentTopic;
     const runDir = join(LOOP_DIR, `run-${String(iteration).padStart(4, '0')}-${Date.now()}`);
     mkdirSync(runDir, { recursive: true });
 
     console.log(`\n${'═'.repeat(64)}`);
-    console.log(` LOOP ${iteration}${cfg.reviewOnly ? '' : ` — ${topic}`}`);
+    console.log(
+      ` LOOP ${iteration}${isRetry ? ` RETRY ${fixState.topicRetryCount + 1}/${fixState.maxRetriesPerTopic}` : ''} — ${topic}`,
+    );
+    if (isRetry) {
+      console.log(` 🔧 Applying saved fixes: cut=${fixState.cutIntervalSec}s kinetic=${fixState.showKineticText} fast=${fixState.useFastPacing}`);
+    }
     console.log(`${'═'.repeat(64)}\n`);
 
     let generateOk = false;
@@ -118,14 +124,21 @@ async function main() {
 
     if (!cfg.reviewOnly) {
       writeFileSync(join(runDir, 'topic.txt'), topic);
-      const gen = await generateFullVideo({ topic, youtubeMode: true, runId: Date.now() });
+      saveFixState(LOOP_DIR, { ...fixState, pendingTopic: currentTopic });
+
+      const gen = await generateFullVideo({
+        topic: currentTopic,
+        youtubeMode: true,
+        runId: Date.now(),
+        fixState,
+      });
       generateOk = gen.ok;
       generateError = gen.error ?? null;
       videoPath = gen.canonicalPath || gen.videoPath;
       scriptText = gen.scriptText || '';
 
-      if (gen.ok && existsSync(gen.canonicalPath)) {
-        copyFileSync(gen.canonicalPath, join(runDir, 'FINAL-VIDEO-final.mp4'));
+      if (gen.ok && videoPath && existsSync(videoPath)) {
+        copyFileSync(videoPath, join(runDir, 'FINAL-VIDEO-final.mp4'));
         if (gen.projectPath && existsSync(gen.projectPath)) {
           copyFileSync(gen.projectPath, join(runDir, 'project.json'));
         }
@@ -133,24 +146,25 @@ async function main() {
         console.error(`\n❌ Generate failed: ${generateError}`);
         appendJournal({
           iteration,
+          retry: isRetry,
           topic,
           at: new Date().toISOString(),
           generateOk: false,
           generateError,
           runDir,
+          nextStep: 'retry with same topic after generate fix',
         });
-        if (cfg.delaySec > 0) await sleep(cfg.delaySec * 1000);
+        fixState.topicRetryCount += 1;
+        saveFixState(LOOP_DIR, fixState);
         continue;
       }
     } else {
-      try {
-        videoPath = resolveVideoPath();
-        generateOk = true;
-        const proj = join(ROOT, 'test-recordings', 'last-project.json');
-        if (existsSync(proj)) scriptText = JSON.parse(readFileSync(proj, 'utf8')).script?.map((s) => s.narration).join('\n\n') || '';
-      } catch (e) {
-        console.error(`❌ ${e.message}`);
-        process.exit(1);
+      videoPath = resolveVideoPath();
+      generateOk = true;
+      const proj = join(ROOT, 'test-recordings', 'last-project.json');
+      if (existsSync(proj)) {
+        scriptText =
+          JSON.parse(readFileSync(proj, 'utf8')).script?.map((s) => s.narration).join('\n\n') || '';
       }
     }
 
@@ -167,67 +181,96 @@ async function main() {
       console.error(`❌ Watch failed: ${e.message}`);
       appendJournal({
         iteration,
+        retry: isRetry,
         topic,
         at: new Date().toISOString(),
         generateOk,
         generateError: e.message,
         videoPath,
         runDir,
+        nextStep: 'retry watch',
       });
-      if (cfg.delaySec > 0) await sleep(cfg.delaySec * 1000);
       continue;
     }
 
-    if (existsSync(watch.reportPath)) {
-      copyFileSync(watch.reportPath, join(runDir, 'WATCH_REPORT.md'));
-    }
+    if (existsSync(watch.reportPath)) copyFileSync(watch.reportPath, join(runDir, 'WATCH_REPORT.md'));
     if (watch.contactSheet && existsSync(watch.contactSheet)) {
       copyFileSync(watch.contactSheet, join(runDir, 'contact-sheet.jpg'));
     }
-
-    if (cfg.exportReview && videoPath && existsSync(videoPath)) {
-      const reviewOut = join(runDir, 'review-export-90s.mp4');
-      spawnSync(
-        'node',
-        ['scripts/export-youtube-review.mjs', videoPath, reviewOut, '90'],
-        { cwd: ROOT, stdio: 'pipe' },
-      );
+    if (cfg.exportReview && videoPath) {
+      spawnSync('node', ['scripts/export-youtube-review.mjs', videoPath, join(runDir, 'review-export-90s.mp4'), '90'], {
+        cwd: ROOT,
+        stdio: 'pipe',
+      });
     }
 
     const uploadReady = watch.uploadReady === true;
-    const brutalScore = watch.brutal?.overall;
-    const hookPass = watch.hookVision?.hookPass;
+    let nextStep = 'new random topic';
+    let fixesApplied = [];
+
+    if (!uploadReady) {
+      const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState);
+      fixState = nextFix;
+      fixesApplied = applied;
+      const fixReport = formatFixReport(applied, fixState);
+      writeFileSync(join(runDir, 'FIXES_APPLIED.md'), fixReport);
+      console.log(`\n🔧 FIX GATE — must apply fixes before next topic:\n`);
+      console.log(fixReport);
+
+      if (blockNextTopic && fixState.topicRetryCount < fixState.maxRetriesPerTopic) {
+        fixState.topicRetryCount += 1;
+        fixState.pendingTopic = currentTopic;
+        nextStep = `RETRY same topic with fixes (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`;
+        console.log(`\n⛔ Not advancing topic — ${nextStep}`);
+      } else if (fixState.topicRetryCount >= fixState.maxRetriesPerTopic) {
+        console.log(`\n⚠ Max retries on topic — advancing with accumulated fixes`);
+        currentTopic = null;
+        fixState.pendingTopic = null;
+        fixState.topicRetryCount = 0;
+        nextStep = 'new topic (max retries hit, fixes retained)';
+      }
+    } else {
+      console.log('\n✅ Upload-ready — advancing to new random topic');
+      currentTopic = null;
+      fixState.pendingTopic = null;
+      fixState.topicRetryCount = 0;
+    }
+
+    saveFixState(LOOP_DIR, fixState);
 
     console.log(watch.reportText);
-    console.log(`\n📄 Report: ${watch.reportPath}`);
-    console.log(`📁 Run: ${runDir}`);
 
     appendJournal({
       iteration,
+      retry: isRetry,
       topic,
       at: new Date().toISOString(),
       generateOk,
       generateError,
       videoPath,
       uploadReady,
-      brutalScore,
-      hookPass,
+      brutalScore: watch.brutal?.overall,
+      hookPass: watch.hookVision?.hookPass,
+      fixesApplied,
+      nextStep,
       reportPath: watch.reportPath,
       runDir,
-      verdict: watch.brutal?.report?.verdict,
     });
 
     if (cfg.untilPass && uploadReady) {
-      console.log('\n🎉 Upload-ready bar met — stopping loop.');
+      console.log('\n🎉 Upload-ready — stopping loop.');
       break;
     }
 
-    if (cfg.delaySec > 0) {
-      console.log(`\n⏳ Next random topic in ${cfg.delaySec}s...`);
+    if (cfg.delaySec > 0 && !uploadReady) {
+      console.log(`\n⏳ ${cfg.delaySec}s before fix retry...`);
+      await sleep(cfg.delaySec * 1000);
+    } else if (cfg.delaySec > 0 && uploadReady) {
       await sleep(cfg.delaySec * 1000);
     }
   }
 
+  saveFixState(LOOP_DIR, fixState);
   console.log(`\n📋 Journal: ${JOURNAL_MD}\n`);
 }
 

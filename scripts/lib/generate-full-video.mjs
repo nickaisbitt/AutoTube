@@ -106,7 +106,42 @@ export async function generateFullVideo(options) {
   page.on('pageerror', (err) => recordBrowserEvent('pageerror', err.message));
   page.on('requestfailed', (request) => recordBrowserEvent('requestfailed', `${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`));
 
-  if (!realHarvest) {
+  if (realHarvest) {
+    await page.route('**/openrouter.ai/**', async (route) => {
+      const request = route.request();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000);
+      try {
+        const upstream = await fetch(request.url(), {
+          method: request.method(),
+          headers: {
+            'Authorization': `Bearer ${openRouterKey}`,
+            'Content-Type': request.headers()['content-type'] || 'application/json',
+            'HTTP-Referer': 'https://autotube.video',
+            'X-Title': 'AutoTube AI Generator',
+          },
+          body: request.postData() || undefined,
+          signal: controller.signal,
+        });
+        const body = await upstream.text();
+        recordBrowserEvent('openrouter.proxy', `${upstream.status} ${request.postDataJSON()?.model || 'unknown-model'}`);
+        await route.fulfill({
+          status: upstream.status,
+          contentType: upstream.headers.get('content-type') || 'application/json',
+          body,
+        });
+      } catch (err) {
+        recordBrowserEvent('openrouter.proxy.error', err instanceof Error ? err.message : String(err));
+        await route.fulfill({
+          status: 504,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } }),
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+    });
+  } else {
     await page.route('**/openrouter.ai/**', async (route) => {
       const post = route.request().postDataJSON();
       await route.fulfill({

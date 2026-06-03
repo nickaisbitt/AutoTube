@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "video-watcher": {
+      "command": "node",
+      "args": ["powers/video-watcher/src/server.mjs"]
+    },
+    "autotube-tester": {
+      "command": "node",
+      "args": ["powers/autotube-tester/src/server.mjs"]
+    }
+  }
+}

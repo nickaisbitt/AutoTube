@@ -221,7 +221,7 @@ async function callVisionReviewAPI(frames, scriptText, apiKey) {
   content.push({ type: 'text', text: 'Script:\n' + scriptText });
 
   const body = JSON.stringify({
-    model: 'google/gemini-2.0-flash-001',
+    model: process.env.OPENROUTER_VISION_MODEL || 'openai/gpt-4o-mini',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: content }

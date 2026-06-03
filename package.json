@@ -26,6 +26,7 @@
     "export:review": "node scripts/export-youtube-review.mjs",
     "youtube:execute": "node scripts/youtube-execute-all.mjs",
     "youtube:review": "node scripts/youtube-minute-review.mjs",
+    "watch:video": "node scripts/watch-video.mjs",
     "test:unit": "vitest run --passWithNoTests",
     "test:unit:watch": "vitest",
     "test:unit:coverage": "vitest run --coverage",

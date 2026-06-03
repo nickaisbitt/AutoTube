@@ -1,26 +1,22 @@
 /**
- * Video Watcher — extract frames, technical QA, optional vision critique.
+ * Video Watcher — extract frames, technical QA, brutal vision critique.
  */
 import { spawnSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runServerAIReview } from '../../../deploy/server-render/aiReviewer.mjs';
+import { detectVisualRepetition } from './frame-dedup.mjs';
 import {
-  extractFrames,
-  runServerAIReview,
-} from '../../../deploy/server-render/aiReviewer.mjs';
+  auditHookFromScript,
+  runBrutalVisionReview,
+  runHookVisionReview,
+} from './vision-brutal.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = resolve(__dirname, '../../..');
 
-const DEFAULT_CANDIDATES = [
+export const DEFAULT_CANDIDATES = [
   'docs/artifacts/FINAL-VIDEO-youtube-full.mp4',
   'docs/artifacts/FINAL-VIDEO-youtube-review.mp4',
   'test-recordings/FINAL-VIDEO-final.mp4',
@@ -92,9 +88,7 @@ function formatTs(sec) {
 export function extractFramesToDir(videoPath, outDir, { intervalSec = 5, maxDurationSec } = {}) {
   mkdirSync(outDir, { recursive: true });
   const { durationSec: fullDur } = probeVideo(videoPath);
-  const durationSec = maxDurationSec
-    ? Math.min(fullDur, maxDurationSec)
-    : fullDur;
+  const durationSec = maxDurationSec ? Math.min(fullDur, maxDurationSec) : fullDur;
 
   const timestamps = new Set([0, 1, 2, 3]);
   for (let t = 0; t < durationSec; t += intervalSec) timestamps.add(Math.round(t * 10) / 10);
@@ -111,13 +105,12 @@ export function extractFramesToDir(videoPath, outDir, { intervalSec = 5, maxDura
     );
     if (r.status !== 0 || !existsSync(outPath)) continue;
     const sizeBytes = statSync(outPath).size;
-    const isLikelyDead = sizeBytes < 6000;
     frames.push({
       path: outPath,
       timestamp: formatTs(ts),
       timestampSec: ts,
       sizeBytes,
-      isLikelyDead,
+      isLikelyDead: sizeBytes < 6000,
     });
   }
 
@@ -165,127 +158,239 @@ function loadOptionalScript() {
   return '';
 }
 
-function buildNumberedReport({ videoPath, meta, framesMeta, vision, apiKeyUsed }) {
+function selectKeyFrames(frames) {
+  const hook = frames.filter((f) => f.timestampSec <= 3);
+  const checkpoints = frames.filter((f) => f.timestampSec > 3 && f.timestampSec % 15 < 1.5);
+  const dead = frames.filter((f) => f.isLikelyDead);
+  const seen = new Set();
+  return [...hook, ...checkpoints, ...dead].filter((f) => {
+    if (seen.has(f.path)) return false;
+    seen.add(f.path);
+    return true;
+  });
+}
+
+function buildTopFixes({ hookScript, hookVision, repetition, brutal, legacyVision }) {
+  const fixes = [];
+  let p = 1;
+
+  if (hookScript && !hookScript.pass) {
+    fixes.push({ n: p++, text: hookScript.issue + ` — rewrite: "${hookVision?.fix || 'Hospitals paid billions after this hack…'}"` });
+  }
+  if (hookVision?.hookPass === false || hookVision?.scrollPastIn3s === true) {
+    fixes.push({
+      n: p++,
+      text: `Hook frames FAIL (on-screen: "${(hookVision?.onScreenText || '').slice(0, 60)}") — ${hookVision?.fix || 'shock line in first 1s'}`,
+    });
+  }
+  if (repetition?.longestRun) {
+    fixes.push({
+      n: p++,
+      text: `Same visual ~${Math.round(repetition.longestRun.approxHoldSec)}s (${repetition.longestRun.start}–${repetition.longestRun.end}) — cut every 1–2s`,
+    });
+  }
+  if (repetition?.duplicateRunCount >= 3) {
+    fixes.push({
+      n: p++,
+      text: `${repetition.duplicateRunCount} repeated-clip runs detected (${repetition.repeatPct}% adjacent duplicates) — add B-roll variety`,
+    });
+  }
+  const brutalIssues = brutal?.report?.topIssues || [];
+  for (const issue of brutalIssues.slice(0, 3)) {
+    fixes.push({ n: p++, text: issue });
+  }
+  if (legacyVision?.technical?.issues?.length) {
+    fixes.push({ n: p++, text: legacyVision.technical.issues[0] });
+  }
+  const pacing = brutal?.report?.scores?.pacing ?? legacyVision?.report?.scores?.pacing;
+  if (typeof pacing === 'number' && pacing <= 5) {
+    fixes.push({ n: p++, text: 'Pacing ≤5/10 — add pattern interrupts every 5–8s in first minute' });
+  }
+
+  return fixes.slice(0, 8);
+}
+
+function buildNumberedReport(ctx) {
+  const {
+    videoPath,
+    meta,
+    framesMeta,
+    repetition,
+    hookScript,
+    hookVision,
+    brutal,
+    legacyVision,
+    apiKeyUsed,
+    mode,
+  } = ctx;
+
+  const analyzedSec = framesMeta.durationSec ?? meta.durationSec;
+  const brutalOverall = brutal?.overall;
+  const uploadReady =
+    brutal?.uploadReady === true &&
+    hookVision?.hookPass !== false &&
+    hookScript?.pass !== false &&
+    (brutalOverall ?? 0) >= 7;
+
   const lines = [];
+  let n = 1;
+
   lines.push('# Video Watcher report');
   lines.push('');
-  lines.push(`1. **File:** \`${videoPath}\``);
-  const analyzedSec = framesMeta.durationSec ?? meta.durationSec;
+  lines.push(`${n}. **Verdict:** ${brutal?.report?.verdict || legacyVision?.report?.summary || 'See scores below'}`);
+  n += 1;
+  lines.push(`${n}. **Upload-ready?** ${uploadReady ? 'YES (automated bar)' : 'NO — fix top issues first'}`);
+  n += 1;
   lines.push(
-    `2. **Technical:** ${analyzedSec.toFixed(1)}s analyzed (${meta.durationSec.toFixed(1)}s file) | ${meta.width}x${meta.height} | ${meta.codec} | ${meta.fps}fps | ${meta.sizeMb} MB`,
+    `${n}. **File:** \`${videoPath}\` | ${analyzedSec.toFixed(0)}s analyzed | ${meta.width}x${meta.height} | mode: ${mode}`,
   );
-  lines.push(
-    `3. **Frames extracted:** ${framesMeta.frames.length} (interval ~${framesMeta.intervalSec}s) | dead/static heuristic: ${framesMeta.deadCount}`,
-  );
+  n += 1;
+
+  if (typeof brutalOverall === 'number') {
+    lines.push(`${n}. **Brutal overall:** ${brutalOverall}/10 (raw average, not inflated)`);
+    n += 1;
+    for (const [key, val] of Object.entries(brutal?.report?.scores || {})) {
+      lines.push(`${n}. **${key}:** ${val}/10 — ${brutal.report.feedback?.[key] || '—'}`);
+      n += 1;
+    }
+  }
+
+  lines.push(`${n}. **Hook (script):** ${hookScript?.pass ? 'PASS' : 'FAIL'} — "${(hookScript?.firstSentence || '').slice(0, 80)}…"`);
+  n += 1;
+  if (hookVision) {
+    lines.push(
+      `${n}. **Hook (frames 0–3s):** ${hookVision.hookPass ? 'PASS' : 'FAIL'} | on-screen: "${(hookVision.onScreenText || '').slice(0, 70)}" | scroll-past: ${hookVision.scrollPastIn3s ? 'yes' : 'no'}`,
+    );
+    n += 1;
+    if (hookVision.fix) {
+      lines.push(`${n}. **Hook fix:** ${hookVision.fix}`);
+      n += 1;
+    }
+  }
+
+  if (repetition) {
+    lines.push(
+      `${n}. **Visual repetition:** ${repetition.duplicateRunCount} duplicate runs | ~${repetition.repeatPct}% adjacent same-frame | longest hold ~${repetition.longestRun ? Math.round(repetition.longestRun.approxHoldSec) : 0}s`,
+    );
+    n += 1;
+    repetition.runs.slice(0, 5).forEach((run, i) => {
+      lines.push(`${n}. **Repeat ${i + 1}:** ${run.start}–${run.end} (~${Math.round(run.approxHoldSec)}s) — \`${run.samplePath}\``);
+      n += 1;
+    });
+  }
+
+  const fixes = buildTopFixes({ hookScript, hookVision, repetition, brutal, legacyVision });
+  lines.push('');
+  lines.push('## Top fixes (do these first)');
+  fixes.forEach((f) => {
+    lines.push(`${f.n}. ${f.text}`);
+  });
+  n = fixes.length > 0 ? Math.max(n, fixes[fixes.length - 1].n + 1) : n;
+
   if (framesMeta.contactSheet) {
-    lines.push(`4. **Contact sheet (open in IDE):** \`${framesMeta.contactSheet}\``);
+    lines.push('');
+    lines.push(`${n}. **Contact sheet:** \`${framesMeta.contactSheet}\` (open in IDE)`);
+    n += 1;
   }
-  lines.push(`5. **Frames directory:** \`${framesMeta.outDir}\``);
-  lines.push('');
+  lines.push(`${n}. **Frames directory:** \`${framesMeta.outDir}\``);
+  n += 1;
 
-  lines.push('## Frame index (reference by timestamp)');
-  framesMeta.frames.forEach((f, i) => {
-    const n = i + 6;
-    const flag = f.isLikelyDead ? ' ⚠ likely dead/blank' : '';
-    lines.push(`${n}. **${f.timestamp}** — \`${f.path}\`${flag}`);
+  const keyFrames = selectKeyFrames(framesMeta.frames);
+  lines.push('');
+  lines.push('## Key frames to inspect');
+  keyFrames.forEach((f) => {
+    const flags = [f.isLikelyDead && 'DEAD', f.timestampSec <= 3 && 'HOOK'].filter(Boolean).join(' ');
+    lines.push(`${n}. **${f.timestamp}** ${flags ? `[${flags}]` : ''} — \`${f.path}\``);
+    n += 1;
   });
 
-  let n = 6 + framesMeta.frames.length;
-  lines.push('');
-  lines.push('## Vision + retention scores');
-
-  if (!vision?.success) {
-    lines.push(`${n}. **Vision audit:** skipped or failed${vision?.error ? ` — ${vision.error}` : ''}.`);
-    n += 1;
-    if (!apiKeyUsed) {
-      lines.push(
-        `${n}. **To enable AI watch:** set \`OPENROUTER_API_KEY\` in Cursor MCP env, or open the contact sheet / frames above and inspect visually in the agent.`,
-      );
-    }
-  } else {
-    const { report, score, passed, technical } = vision;
-    lines.push(`${n}. **Overall score:** ${score}/10 (${passed ? 'PASS' : 'FAIL'} vs threshold 6)`);
-    n += 1;
-    const dims = report?.scores || {};
-    for (const [key, val] of Object.entries(dims)) {
-      lines.push(`${n}. **${key}:** ${val}/10 — ${report?.feedback?.[key] || '—'}`);
-      n += 1;
-    }
-    if (report?.summary) {
-      lines.push(`${n}. **Summary:** ${report.summary}`);
-      n += 1;
-    }
-    if (technical?.issues?.length) {
-      lines.push(`${n}. **Technical issues:** ${technical.issues.join('; ')}`);
-      n += 1;
-    }
+  if (!apiKeyUsed) {
+    lines.push('');
+    lines.push(`${n}. Set \`OPENROUTER_API_KEY\` for brutal + hook vision, or read JPGs manually.`);
   }
 
-  lines.push('');
-  lines.push('## YouTube brutality checklist (fix in order)');
-  const checklist = [
-    'Hook 0–3s: shock line visible + audible — no "In 2024…" opener',
-    'Cuts: new visual every 1–2s in first 30s',
-    'Captions: ≤4 words, huge, high contrast',
-    'Audio: voice clearly above music; no muddy mix',
-    'B-roll: human stakes (faces, ER, patients) not only tech stock',
-    'End screen: Subscribe + Watch Next',
-    'Packaging: custom thumbnail + curiosity title (not descriptive)',
-  ];
-  checklist.forEach((item, i) => {
-    lines.push(`${i + 1}. ${item}`);
-  });
+  const fullIndex = framesMeta.frames
+    .map((f, i) => `${i + 1}. ${f.timestamp} ${f.path}${f.isLikelyDead ? ' DEAD' : ''}`)
+    .join('\n');
+  writeFileSync(join(framesMeta.outDir, 'FRAMES_INDEX.md'), `# Full frame index\n\n${fullIndex}\n`);
 
   return lines.join('\n');
 }
 
 /**
- * Full watch pipeline.
  * @param {object} options
- * @param {string} [options.video_path]
- * @param {number} [options.interval_sec]
- * @param {number} [options.max_duration_sec] — analyze first N seconds only
- * @param {number} [options.vision_frames]
- * @param {boolean} [options.skip_vision]
+ * @param {'quick'|'full'} [options.mode] — quick = 90s, 5s interval, brutal+hook vision
  */
 export async function watchVideo(options = {}) {
+  const mode = options.mode === 'quick' ? 'quick' : options.mode === 'full' ? 'full' : options.mode || 'quick';
   const videoPath = resolveVideoPath(options.video_path);
   const meta = probeVideo(videoPath);
-  const intervalSec = options.interval_sec ?? 5;
-  const maxDurationSec = options.max_duration_sec;
+
+  const intervalSec =
+    options.interval_sec ?? (mode === 'quick' ? 5 : 3);
+  const maxDurationSec =
+    options.max_duration_sec ?? (mode === 'quick' ? 90 : undefined);
+
   const runId = Date.now();
   const outDir = join(PROJECT_ROOT, 'test-recordings', `video-watch-${runId}`);
   const framesMeta = extractFramesToDir(videoPath, outDir, { intervalSec, maxDurationSec });
   framesMeta.outDir = outDir;
   framesMeta.intervalSec = intervalSec;
 
+  let repetition = detectVisualRepetition(framesMeta.frames, outDir);
+  // Finer scan for hold detection (first 45s, every 2s)
+  const fineDir = join(outDir, 'fine-scan');
+  const fineMeta = extractFramesToDir(videoPath, fineDir, {
+    intervalSec: 2,
+    maxDurationSec: Math.min(45, framesMeta.durationSec),
+  });
+  const fineRep = detectVisualRepetition(fineMeta.frames, fineDir);
+  if ((fineRep.longestRun?.approxHoldSec ?? 0) > (repetition.longestRun?.approxHoldSec ?? 0)) {
+    repetition = fineRep;
+  }
   const scriptText = options.script_text || loadOptionalScript();
+  const hookScript = auditHookFromScript(scriptText);
   const apiKey = options.api_key || process.env.OPENROUTER_API_KEY || '';
   const skipVision = options.skip_vision === true;
 
-  let vision = null;
+  let brutal = null;
+  let hookVision = null;
+  let legacyVision = null;
+
   if (!skipVision && apiKey) {
     const dur = framesMeta.durationSec;
-    vision = await runServerAIReview(videoPath, dur, scriptText, apiKey, 6);
-  } else if (!skipVision && !apiKey) {
-    vision = { success: false, error: 'OPENROUTER_API_KEY not set' };
+    try {
+      hookVision = await runHookVisionReview(videoPath, apiKey);
+    } catch (e) {
+      hookVision = { hookPass: false, error: e.message };
+    }
+    try {
+      brutal = await runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 10 : 14);
+    } catch (e) {
+      brutal = { success: false, error: e.message };
+    }
+    if (options.legacy_vision === true) {
+      legacyVision = await runServerAIReview(videoPath, dur, scriptText, apiKey, 6);
+    }
+  } else if (!skipVision) {
+    brutal = { success: false, error: 'OPENROUTER_API_KEY not set' };
   }
 
   const reportText = buildNumberedReport({
     videoPath,
     meta,
     framesMeta,
-    vision,
+    repetition,
+    hookScript,
+    hookVision,
+    brutal,
+    legacyVision,
     apiKeyUsed: Boolean(apiKey) && !skipVision,
+    mode,
   });
 
   const reportPath = join(outDir, 'WATCH_REPORT.md');
   writeFileSync(reportPath, reportText);
-
-  // Vision API uses separate frame extraction; save count for agent
-  const visionFrameCount = apiKey && !skipVision
-    ? extractFrames(videoPath, framesMeta.durationSec, options.vision_frames ?? 12).length
-    : 0;
 
   return {
     videoPath,
@@ -295,7 +400,11 @@ export async function watchVideo(options = {}) {
     contactSheet: framesMeta.contactSheet,
     frames: framesMeta.frames,
     meta,
-    vision,
-    visionFrameCount,
+    repetition,
+    hookScript,
+    hookVision,
+    brutal,
+    legacyVision,
+    uploadReady: reportText.includes('**Upload-ready?** YES'),
   };
 }

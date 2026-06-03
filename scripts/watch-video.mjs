@@ -11,25 +11,24 @@ import { watchVideo } from '../powers/video-watcher/src/analyze.mjs';
 
 const argv = process.argv.slice(2);
 let videoPath;
-let intervalSec = 5;
+let mode = 'quick';
+let intervalSec;
 let maxDurationSec;
 let skipVision = false;
 
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
-  if (a === '--interval' && argv[i + 1]) {
-    intervalSec = parseFloat(argv[++i]);
-  } else if (a === '--max' && argv[i + 1]) {
-    maxDurationSec = parseFloat(argv[++i]);
-  } else if (a === '--skip-vision') {
-    skipVision = true;
-  } else if (!a.startsWith('-')) {
-    videoPath = a;
-  }
+  if (a === '--full') mode = 'full';
+  else if (a === '--quick') mode = 'quick';
+  else if (a === '--interval' && argv[i + 1]) intervalSec = parseFloat(argv[++i]);
+  else if (a === '--max' && argv[i + 1]) maxDurationSec = parseFloat(argv[++i]);
+  else if (a === '--skip-vision') skipVision = true;
+  else if (!a.startsWith('-')) videoPath = a;
 }
 
 const result = await watchVideo({
   video_path: videoPath,
+  mode,
   interval_sec: intervalSec,
   max_duration_sec: maxDurationSec,
   skip_vision: skipVision,

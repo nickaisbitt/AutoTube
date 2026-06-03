@@ -27,6 +27,7 @@
     "youtube:execute": "node scripts/youtube-execute-all.mjs",
     "youtube:review": "node scripts/youtube-minute-review.mjs",
     "watch:video": "node scripts/watch-video.mjs",
+    "watch:video:full": "node scripts/watch-video.mjs --full",
     "test:unit": "vitest run --passWithNoTests",
     "test:unit:watch": "vitest",
     "test:unit:coverage": "vitest run --coverage",

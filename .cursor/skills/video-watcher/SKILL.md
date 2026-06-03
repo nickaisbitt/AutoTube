@@ -4,17 +4,17 @@ Use when the user says a rendered video looks bad, wants review, retention audit
 
 ## MCP tools (preferred)
 
-1. Call **`watch_video`** on the `video-watcher` MCP server.
+1. Call **`watch_video`** on the `video-watcher` MCP server (`mode: "quick"` default).
 2. If no path given, it uses the latest `docs/artifacts/FINAL-VIDEO-youtube-full.mp4` or review export.
-3. Read **`CONTACT_SHEET`** and hook frames (`frame-0000s.jpg` … `frame-0003s.jpg`) with the Read tool when vision API is unavailable.
-4. Reply using **numbered lists only** (user preference) — reference report item numbers.
+3. Read **`WATCH_REPORT.md`** top fixes (numbered) and **`contact-sheet.jpg`** for visual proof.
+4. Reply using **numbered lists only** — reference report item numbers.
 
 ### Parameters
 
 | Param | Use |
 |-------|-----|
-| `interval_sec: 2` | Stricter cut/pacing audit |
-| `max_duration_sec: 90` | Hook + first-minute only |
+| `mode: "quick"` | First 90s + brutal + hook vision (default) |
+| `mode: "full"` | Entire video + repetition scan |
 | `skip_vision: true` | Frames only; you analyze JPGs manually |
 | `video_path` | Explicit MP4 |
 

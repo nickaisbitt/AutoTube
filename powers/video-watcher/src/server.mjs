@@ -20,10 +20,11 @@ const toolResult = (text) => ({
 async function toolWatchVideo(args = {}) {
   const result = await watchVideo({
     video_path: args.video_path,
-    interval_sec: args.interval_sec ?? 5,
+    mode: args.mode ?? 'quick',
+    interval_sec: args.interval_sec,
     max_duration_sec: args.max_duration_sec,
-    vision_frames: args.vision_frames ?? 12,
     skip_vision: args.skip_vision === true,
+    legacy_vision: args.legacy_vision === true,
     script_text: args.script_text,
     api_key: args.api_key,
   });
@@ -76,19 +77,24 @@ const TOOLS = [
           type: 'string',
           description: 'Absolute or repo-relative path to MP4. Omit to use latest canonical artifact.',
         },
+        mode: {
+          type: 'string',
+          enum: ['quick', 'full'],
+          description: 'quick = first 90s + brutal/hook vision (default). full = entire timeline.',
+          default: 'quick',
+        },
         interval_sec: {
           type: 'number',
-          description: 'Extract one frame every N seconds (default 5). Use 2–3 for stricter pacing audit.',
-          default: 5,
+          description: 'Frame every N seconds (default 5 quick, 3 full).',
         },
         max_duration_sec: {
           type: 'number',
-          description: 'Only analyze first N seconds (e.g. 90 for hook/pacing focus).',
+          description: 'Override analyzed duration cap.',
         },
-        vision_frames: {
-          type: 'number',
-          description: 'Frames sent to vision model (default 12).',
-          default: 12,
+        legacy_vision: {
+          type: 'boolean',
+          description: 'Also run legacy aiReviewer (inflated scores). Default false.',
+          default: false,
         },
         skip_vision: {
           type: 'boolean',

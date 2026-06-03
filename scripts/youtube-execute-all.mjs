@@ -57,6 +57,7 @@ run(
 // Phase B verification
 run('npm', ['run', 'squad:gate']);
 run('npm', ['run', 'test:e2e:smoke']);
+run('npm', ['run', 'test:unit'], {}, true);
 
 // Minute-by-minute review (use review file if smaller)
 const reviewInput = existsSync(review90) ? review90 : join(ROOT, 'test-recordings', 'FINAL-VIDEO-final.mp4');

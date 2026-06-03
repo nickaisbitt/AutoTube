@@ -190,7 +190,7 @@ export function convertAudioFormat(inputFile, outputFile, options = {}) {
  * @returns {number} Linear volume multiplier (0.0–1.0).
  */
 export function computeBgMusicVolume(hasNarration, options = {}) {
-  const { duckingLevel = -28, peakLevel = -14 } = options;
+  const { duckingLevel = -18.4, peakLevel = -8 } = options;
 
   // Convert dB to linear scale: linear = 10^(dB/20)
   const dbValue = hasNarration ? duckingLevel : peakLevel;

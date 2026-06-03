@@ -11,7 +11,7 @@ export const STOCK_HEALTHCARE_IMAGES = [
     alt: 'Cybersecurity and technology',
   },
   {
-    url: 'https://images.unsplash.com/photo-1584036561566-baf8f317f137?auto=format&w=1920&q=85',
+    url: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&w=1920&q=85',
     alt: 'Medical research laboratory',
   },
   {
@@ -27,11 +27,11 @@ export const STOCK_HEALTHCARE_IMAGES = [
     alt: 'Hospital corridor',
   },
   {
-    url: 'https://images.unsplash.com/photo-1516574184861-15d469b4528f?auto=format&w=1920&q=85',
+    url: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&w=1920&q=85',
     alt: 'Medical team',
   },
   {
-    url: 'https://images.unsplash.com/photo-1526256262350-7fb1174e5b69?auto=format&w=1920&q=85',
+    url: 'https://images.unsplash.com/photo-1555949963-aa79dcee981c?auto=format&w=1920&q=85',
     alt: 'Health technology',
   },
 ];

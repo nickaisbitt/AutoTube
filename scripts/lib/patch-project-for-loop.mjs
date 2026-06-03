@@ -18,12 +18,11 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
 
   if (fixState.shockHook !== false && project.script?.length) {
     const hook = buildShockHookLine(topic, fixState.hookLine);
-    const first = project.script[0];
-    const rest = first.narration?.split(/(?<=[.!?])\s+/).slice(1).join(' ') || '';
-    first.narration = `${hook} ${rest}`.trim();
-    if (project.script.length > 1) {
-      project.script[0].narration = `${hook} Stay with me — this gets worse. ${project.script[0].narration.split(' ').slice(0, 40).join(' ')}…`;
-    }
+    project.hookLine = hook;
+    project.exportSettings = {
+      ...(project.exportSettings || {}),
+      hookLine: hook,
+    };
   }
 
   if (!options.skipMediaPatch && fixState.forceRealStock !== false && project.media?.length) {

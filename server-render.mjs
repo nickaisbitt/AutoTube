@@ -3959,12 +3959,15 @@ async function render() {
   if (!isShortsMode) log('info', `  Cold open: ${COLD_OPEN_FRAMES} frames (${coldOpenSec}s) from "${coldOpenSeg?.title}"`);
   if (isShortsMode) log('info', '  Shorts mode: skipping cold open');
 
-  // Opening hook frames — bold text on dark background (req c)
-  const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round((YOUTUBE_MODE ? 1.2 : 0.3) * FPS));
+  // Opening hook frames — keep the explicit hook visible through the watcher's
+  // 0–3s audit window instead of letting weak segment titles take over.
+  const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round((YOUTUBE_MODE ? 3.2 : 0.3) * FPS));
   const COLD_OPEN_BEAT_FRAMES = Math.max(1, Math.round(0.5 * FPS)); // ~5 beats in 2.5s
-  const hookText = coldOpenSeg?.narration
-    ? (YOUTUBE_MODE ? buildRetentionHook(coldOpenSeg.narration) : (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60))
-    : 'Watch this!';
+  const explicitHook = project.hookLine || project.exportSettings?.hookLine;
+  const hookText = explicitHook
+    || (coldOpenSeg?.narration
+      ? (YOUTUBE_MODE ? buildRetentionHook(coldOpenSeg.narration) : (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60))
+      : 'Watch this!');
 
   if (!isShortsMode) for (let f = 0; f < COLD_OPEN_FRAMES; f++) {
     // Fast visual beats: highest-scored assets first, ~0.5s per beat (checklist: 3–5 beats pre-narration)
@@ -4045,7 +4048,11 @@ async function render() {
       ctx.shadowBlur = 24;
       ctx.shadowOffsetX = 2;
       ctx.shadowOffsetY = 2;
-      ctx.fillText(hookText, WIDTH / 2, HEIGHT / 2);
+      const { lines, fontSize } = wrapTitleText(ctx, hookText, WIDTH, hookFontPx(HEIGHT), WIDTH * 0.86, 'bold');
+      ctx.font = `bold ${fontSize}px Impact, "Arial Black", system-ui, sans-serif`;
+      const lineHeight = fontSize * 1.08;
+      const startY = HEIGHT / 2 - ((lines.length - 1) * lineHeight) / 2;
+      lines.forEach((line, li) => ctx.fillText(line, WIDTH / 2, startY + li * lineHeight));
       ctx.restore();
     }
 

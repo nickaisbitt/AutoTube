@@ -2006,7 +2006,7 @@ export async function sourceSegmentMedia(
     const shotsToHarvest = plan.shots && plan.shots.length > 0
       ? plan.shots
       : [{ concept: plan.visualAction, queries: plan.queries, vibe: plan.visualConcept }];
-    const targetAssetsPerSegment = 2;
+    const targetAssetsPerSegment = config.sourceType === 'raw' ? 4 : 2;
     const shotCount = Math.max(targetAssetsPerSegment, shotsToHarvest.length);
     const rawPrimaryQuery = shotsToHarvest[0]?.queries[0] || segment.title;
     const primaryQuery = buildSpecificQuery(rawPrimaryQuery, topicContext);
@@ -2158,10 +2158,12 @@ export async function sourceSegmentMedia(
       }
     }
 
-    // If we only got 1 asset from the shot loop but have more candidates, try to pick a second
-    if (finalAssets.length < targetAssetsPerSegment && uniqueCandidates.length > 1) {
+    // Raw harvest needs enough unique B-roll for sub-second cuts. Keep adding
+    // distinct candidates so renderer pacing changes actual visuals, not just effects.
+    while (finalAssets.length < targetAssetsPerSegment && uniqueCandidates.length > finalAssets.length) {
       const fallbackShot = shotsToHarvest[1] || shotsToHarvest[0];
       const extra = selectShotCandidate(uniqueCandidates, fallbackShot, segmentIndex, excludedUrls, undefined, deduplicationRegistry.usedUrls);
+      if (!extra) break;
       if (extra) {
         usedUrlsMap.set(extra.url, segmentIndex);
         registerAsset(deduplicationRegistry, { url: extra.url, alt: extra.alt, sourceUrl: extra.sourceUrl });
@@ -2182,6 +2184,13 @@ export async function sourceSegmentMedia(
           score: extra.finalScore,
           trace: [...trace, `[S${segmentIndex + 1}] bonus B-roll selected for visual variety`],
         });
+      }
+    }
+
+    if (finalAssets.length > 0) {
+      const durationPerAsset = segment.duration / finalAssets.length;
+      for (const asset of finalAssets) {
+        asset.duration = durationPerAsset;
       }
     }
 

@@ -39,15 +39,17 @@ export function applyFixesFromWatch(watch, fixState) {
     s.useFastPacing = true;
     s.cutIntervalSec = Math.max(0.75, (s.cutIntervalSec ?? 1.25) - 0.1);
     s.shockHook = true;
-    s.forceRealStock = true;
+    s.reHarvestMedia = true;
+    s.minAssetsPerSegment = Math.max(4, s.minAssetsPerSegment || 0);
     applied.push(`2b. Score below 9.3 → escalate all render fixes (cuts=${s.cutIntervalSec}s)`);
   }
 
   if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6) {
-    s.forceRealStock = true;
+    s.reHarvestMedia = true;
+    s.minAssetsPerSegment = Math.max(4, s.minAssetsPerSegment || 0);
     s.showKineticText = true;
     s.mediaOffset = (s.mediaOffset || 0) + 4;
-    applied.push(`3. Repetition/visual FAIL (${repeatPct}% dup, ${dupRuns} runs) → real Unsplash stock + kinetic text + media rotate`);
+    applied.push(`3. Repetition/visual FAIL (${repeatPct}% dup, ${dupRuns} runs) → live harvest ≥${s.minAssetsPerSegment} assets/segment + kinetic text`);
   }
 
   if ((watch.brutal?.overall ?? 10) <= 5) {
@@ -87,8 +89,10 @@ export function formatFixReport(applied, fixState) {
   lines.push(`3. useFastPacing: ${fixState.useFastPacing}`);
   lines.push(`4. shockHook: ${fixState.shockHook}`);
   lines.push(`5. hookLine: ${fixState.hookLine || '(auto)'}`);
-  lines.push(`6. forceRealStock: ${fixState.forceRealStock}`);
-  lines.push(`7. mediaOffset: ${fixState.mediaOffset}`);
-  lines.push(`8. topicRetryCount: ${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic}`);
+  lines.push(`6. reHarvestMedia: ${fixState.reHarvestMedia}`);
+  lines.push(`7. minAssetsPerSegment: ${fixState.minAssetsPerSegment || 4}`);
+  lines.push(`8. mediaOffset: ${fixState.mediaOffset}`);
+  lines.push(`9. topicRetryCount: ${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic}`);
+  lines.push(`10. generateFailureCount: ${fixState.generateFailureCount || 0}/${fixState.maxGenerateFailuresPerTopic || 2}`);
   return lines.join('\n');
 }

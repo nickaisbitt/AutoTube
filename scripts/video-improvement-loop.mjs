@@ -150,12 +150,25 @@ async function main() {
       scriptText = gen.scriptText || '';
 
       if (gen.ok && videoPath && existsSync(videoPath)) {
+        fixState.generateFailureCount = 0;
         copyFileSync(videoPath, join(runDir, 'FINAL-VIDEO-final.mp4'));
         if (gen.projectPath && existsSync(gen.projectPath)) {
           copyFileSync(gen.projectPath, join(runDir, 'project.json'));
         }
       } else {
         console.error(`\n❌ Generate failed: ${generateError}`);
+        const generateFailureCount = (fixState.generateFailureCount || 0) + 1;
+        fixState.generateFailureCount = generateFailureCount;
+        const maxGenerateFailuresPerTopic = fixState.maxGenerateFailuresPerTopic || 2;
+        const shouldAdvanceTopic = generateFailureCount >= maxGenerateFailuresPerTopic;
+        if (shouldAdvanceTopic) {
+          currentTopic = null;
+          fixState.pendingTopic = null;
+          fixState.generateFailureCount = 0;
+          fixState.topicRetryCount = 0;
+        } else {
+          fixState.pendingTopic = currentTopic;
+        }
         appendJournal({
           iteration,
           retry: isRetry,
@@ -164,9 +177,10 @@ async function main() {
           generateOk: false,
           generateError,
           runDir,
-          nextStep: 'retry with same topic after generate fix',
+          nextStep: shouldAdvanceTopic
+            ? `new topic after ${generateFailureCount}/${maxGenerateFailuresPerTopic} generate failures`
+            : `retry same topic after generate failure (${generateFailureCount}/${maxGenerateFailuresPerTopic})`,
         });
-        fixState.topicRetryCount += 1;
         saveFixState(LOOP_DIR, fixState);
         continue;
       }
@@ -262,6 +276,7 @@ async function main() {
         currentTopic = null;
         fixState.pendingTopic = null;
         fixState.topicRetryCount = 0;
+        fixState.generateFailureCount = 0;
         nextStep = 'new topic (max retries hit, fixes retained)';
       }
     } else {
@@ -269,6 +284,7 @@ async function main() {
       currentTopic = null;
       fixState.pendingTopic = null;
       fixState.topicRetryCount = 0;
+      fixState.generateFailureCount = 0;
     }
 
     saveFixState(LOOP_DIR, fixState);

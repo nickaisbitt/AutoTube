@@ -11,7 +11,6 @@ echo "Syncing server code..."
 # Sync server code into deploy/ (no --delete to avoid wiping other dirs)
 rsync -av \
   --exclude='__tests__/' \
-  --exclude='quality-check/' \
   --exclude='node_modules/' \
   "$ROOT/server/" "$DEPLOY_DIR/server/"
 
@@ -39,11 +38,22 @@ cp "$ROOT/src/services/monitoring.ts" "$DEPLOY_DIR/src/services/"
 # Sync dist/ (carefully - only update, don't delete)
 if [ -d "$ROOT/dist" ]; then
   echo "Syncing dist..."
-  rsync -av "$ROOT/dist/" "$DEPLOY_DIR/"
+  mkdir -p "$DEPLOY_DIR/dist"
+  rsync -av "$ROOT/dist/" "$DEPLOY_DIR/dist/"
 fi
 
 # Sync server.mjs
 cp "$ROOT/server.mjs" "$DEPLOY_DIR/"
+
+# Sync root package files so Railway build context has deps + scripts
+cp "$ROOT/package.json" "$DEPLOY_DIR/"
+cp "$ROOT/package-lock.json" "$DEPLOY_DIR/" 2>/dev/null || true
+
+# Sync public/ (audio, static assets)
+if [ -d "$ROOT/public" ]; then
+  echo "Syncing public/..."
+  rsync -av --exclude='node_modules/' "$ROOT/public/" "$DEPLOY_DIR/public/"
+fi
 
 # Sync config files for Railway
 cp "$ROOT/railway.toml" "$DEPLOY_DIR/"
@@ -52,7 +62,7 @@ cp "$ROOT/nixpacks.toml" "$DEPLOY_DIR/"
 # Deploy
 echo "Deploying to Railway..."
 cd "$DEPLOY_DIR"
-railway up
+npx @railway/cli up || echo "railway up failed (likely missing RAILWAY_TOKEN or login — run 'npx @railway/cli login' and 'npx @railway/cli link' first, or export RAILWAY_TOKEN)"
 echo ""
-echo "Deployed! Check: https://autotube-production.up.railway.app/api/health"
+echo "Deployed (or attempted)! Check: https://autotube-production.up.railway.app/api/health"
 

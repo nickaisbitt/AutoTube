@@ -30,7 +30,7 @@ export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || '
 }
 
 function isLikelyVideoHost(url = '') {
-  return /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com)/i.test(url);
+  return /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|player\.vimeo|archive\.org|giphy)/i.test(url);
 }
 
 function isImageLikeUrl(url = '') {
@@ -38,7 +38,7 @@ function isImageLikeUrl(url = '') {
     || /(?:th\.bing\.com|tse\d*\.mm\.bing\.net|i\.vimeocdn\.com|images\.|img\.|cdn\.)/i.test(url);
 }
 
-async function canFetch(url, { timeoutMs = 6000, minBytes = 256 } = {}) {
+async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = false } = {}) {
   if (!url || !/^https?:\/\//i.test(url)) return false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -46,12 +46,23 @@ async function canFetch(url, { timeoutMs = 6000, minBytes = 256 } = {}) {
     const res = await fetch(url, {
       signal: controller.signal,
       headers: {
-        range: 'bytes=0-4095',
+        range: expectVideo ? undefined : 'bytes=0-4095',
         'user-agent': 'Mozilla/5.0 AutoTube media validator',
       },
     });
     if (!res.ok) return false;
+    const contentType = res.headers.get('content-type') || '';
+    if (expectVideo && !/video|octet-stream|application\/octet/.test(contentType) && !contentType.includes('video')) {
+      // still allow if body looks binary; fall through to size check
+    }
     const buf = Buffer.from(await res.arrayBuffer());
+    if (expectVideo && buf.length > 4) {
+      // crude MP4/webm check
+      const sig = buf.slice(0, 4).toString('hex');
+      if (!sig.includes('66747970') && !contentType.includes('video')) {
+        return false; // not video-like
+      }
+    }
     return buf.length >= minBytes;
   } catch {
     return false;
@@ -68,26 +79,42 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir) {
     dropped: [],
     keptVideo: [],
   };
-  if (!project.media?.length) return report;
+  if (!project.media?.length) {
+    writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
+    return report;
+  }
 
   const sanitized = [];
+  const fallbackImage = project.topicContext?.thumbnailUrl || null;
+
   for (const asset of project.media) {
     if (asset.type !== 'video') {
       sanitized.push(asset);
       continue;
     }
 
+    // Prefer sourceUrl (page) for proxying unreliable video hosts; fall back to url
+    const pageUrl = asset.sourceUrl || asset.url;
     const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '');
-    const downloadUrl = asset.url?.startsWith('/api/download-clip')
-      ? `${devServer}${asset.url}`
-      : isLikelyVideoHost(asset.url)
-        ? `${devServer}/api/download-clip?url=${encodeURIComponent(asset.url)}`
-        : asset.url;
 
-    const thumbnailOk = thumbnailUrl ? await canFetch(thumbnailUrl, { timeoutMs: 5000 }) : false;
-    const clipOk = downloadUrl ? await canFetch(downloadUrl, { timeoutMs: 8000, minBytes: 1024 }) : false;
+    // Always route video-host or non-direct through the server proxy for fetchability + caching
+    let downloadUrl: string;
+    if (asset.url?.startsWith('/api/download-clip')) {
+      downloadUrl = `${devServer}${asset.url}`;
+    } else if (isLikelyVideoHost(pageUrl) || isLikelyVideoHost(asset.url) || !/\.(mp4|webm|mov)/i.test(asset.url || '')) {
+      const target = isLikelyVideoHost(pageUrl) ? pageUrl : asset.url;
+      downloadUrl = `${devServer}/api/download-clip?url=${encodeURIComponent(target)}`;
+    } else {
+      downloadUrl = asset.url;
+    }
 
-    if (clipOk) {
+    // For known flaky video hosts, be willing to accept a good thumbnail even if clip probe is slow/partial
+    const preferThumbnailForHost = isLikelyVideoHost(pageUrl) || isLikelyVideoHost(asset.url);
+
+    const thumbnailOk = thumbnailUrl ? await canFetch(thumbnailUrl, { timeoutMs: 8000 }) : false;
+    const clipOk = downloadUrl ? await canFetch(downloadUrl, { timeoutMs: 30000, minBytes: 2048, expectVideo: true }) : false;
+
+    if (clipOk && !preferThumbnailForHost) {
       sanitized.push(asset);
       report.keptVideo.push({ url: asset.url, thumbnailUrl, reason: 'clip fetchable' });
       continue;
@@ -100,9 +127,23 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir) {
         url: thumbnailUrl,
         source: `${asset.source || 'Video'} thumbnail`,
         isFallback: false,
-        reasoning: `${asset.reasoning || ''} Converted video to fetchable thumbnail before render.`.trim(),
+        reasoning: `${asset.reasoning || ''} Converted video to fetchable thumbnail before render (clip probe ${clipOk ? 'passed but host prefers stable thumb' : 'failed or slow'}).`.trim(),
       });
-      report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl, reason: 'clip unavailable; thumbnail fetchable' });
+      report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl, reason: 'clip unavailable/slow or host prefers thumbnail' });
+      continue;
+    }
+
+    if (fallbackImage && !isImageLikeUrl(fallbackImage)) {
+      // last resort stable fallback to keep segment populated
+      sanitized.push({
+        ...asset,
+        type: 'image',
+        url: fallbackImage,
+        source: 'topic-fallback',
+        isFallback: true,
+        reasoning: 'Video unavailable; fell back to topic thumbnail to avoid empty segment.',
+      });
+      report.dropped.push({ url: asset.url, thumbnailUrl, reason: 'clip+thumb failed; replaced with topic fallback' });
       continue;
     }
 

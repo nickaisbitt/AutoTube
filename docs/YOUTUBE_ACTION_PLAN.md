@@ -49,15 +49,15 @@ This merges reviewer feedback (content, retention, file/export) into one ordered
 
 ## Phase E — AutoTube pipeline (what we automate vs you)
 
-| # | Item | AutoTube status |
-|---|------|-----------------|
-| 6 | Shock hook line | `buildRetentionHook()` in YouTube mode |
-| 7 | 1–2s visual cuts | YouTube mode forces ~1.0s asset alternation |
-| 8 | Large captions | YouTube profile (~8% frame height) |
-| 11 | Short on-screen text | 4-word caption window |
-| 12 | Human B-roll | **You** — real media search / Visual Director (not 6 stock stills) |
-| 9–10 | Title / thumbnail | **You** — `thumbnail.ts` + title variants in app |
-| 1–5 | Compatible export | `npm run export:review` |
+| Action ID | Item | AutoTube status |
+|-----------|------|-----------------|
+| B6 | Shock hook line | `buildRetentionHook()` in YouTube mode |
+| B7 | 1–2s visual cuts | YouTube mode forces ~1.0s asset alternation |
+| B8 | Large captions | YouTube profile (~8% frame height) |
+| C11 | Short on-screen text | 4-word caption window |
+| C12 | Human B-roll | **You** — real media search / Visual Director (not 6 stock stills) |
+| B9–B10 | Title / thumbnail | **You** — `thumbnail.ts` + title variants in app |
+| A1–A5 | Compatible export | `npm run export:review` |
 
 ---
 

@@ -7,16 +7,19 @@ set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEPLOY_DIR="$ROOT/deploy"
 
-# Portable sync helper (rsync if present, else cp -r). Keeps deploy/ robust in all envs (incl. minimal cloud agents without rsync).
+# Portable sync helper (rsync if present, else cp -r + cleanup). Keeps deploy/ robust in all envs (incl. minimal cloud agents without rsync).
 sync_dir() {
-  local src="$1" dst="$2" extra_excludes="${3:-}"
+  local src="$1" dst="$2"
   mkdir -p "$dst"
   if command -v rsync >/dev/null 2>&1; then
-    rsync -av --exclude='__tests__/' --exclude='node_modules/' --exclude='__pycache__/' $extra_excludes "$src" "$dst"
+    rsync -av --exclude='__tests__/' --exclude='node_modules/' --exclude='__pycache__/' "$src" "$dst"
   else
     echo "rsync not found; using cp -r fallback for $src -> $dst"
     # copy contents into dst (not the dir itself)
-    (cd "$src" && tar cf - . --exclude='__tests__' --exclude='node_modules' --exclude='__pycache__' $extra_excludes | (cd "$dst" && tar xf -))
+    cp -r "$src." "$dst" 2>/dev/null || cp -r "$src"* "$dst" 2>/dev/null || cp -a "$src"/* "$dst"/ 2>/dev/null || true
+    # cleanup excludes in dest
+    rm -rf "$dst/__tests__" "$dst/node_modules" "$dst/__pycache__" 2>/dev/null || true
+    find "$dst" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
   fi
 }
 
@@ -50,7 +53,7 @@ if [ -d "$ROOT/dist" ]; then
     rsync -av "$ROOT/dist/" "$DEPLOY_DIR/dist/"
   else
     echo "rsync not found; using cp -r fallback for dist/"
-    cp -r "$ROOT/dist/." "$DEPLOY_DIR/dist/" 2>/dev/null || true
+    cp -r "$ROOT/dist/." "$DEPLOY_DIR/dist/" 2>/dev/null || cp -a "$ROOT/dist"/* "$DEPLOY_DIR/dist"/ 2>/dev/null || true
   fi
 fi
 
@@ -81,7 +84,8 @@ if [ -d "$ROOT/public" ]; then
     rsync -av --exclude='node_modules/' "$ROOT/public/" "$DEPLOY_DIR/public/"
   else
     echo "rsync not found; using cp -r fallback for public/"
-    (cd "$ROOT/public" && tar cf - . --exclude='node_modules' | (cd "$DEPLOY_DIR/public" && tar xf -))
+    cp -r "$ROOT/public/." "$DEPLOY_DIR/public/" 2>/dev/null || cp -a "$ROOT/public"/* "$DEPLOY_DIR/public"/ 2>/dev/null || true
+    rm -rf "$DEPLOY_DIR/public/node_modules" 2>/dev/null || true
   fi
 fi
 

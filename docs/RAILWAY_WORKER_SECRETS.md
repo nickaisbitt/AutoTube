@@ -1,56 +1,45 @@
-# Railway token + Cursor Cloud Agent (why secrets sometimes “don’t work”)
+# Railway token in Cursor Cloud Agents
 
-## What’s going on
+## Secret names (important)
 
-AutoTube agents often run on a **self-hosted Cursor worker** on Railway:
+Cursor Dashboard secrets map to **environment variable names**. AutoTube accepts the same names as Podomator:
 
-- Service: `cursor-worker`
-- Project: `cursor-self-hosted-worker`
-- Worker id: `railway-AutoTube` (see `.cursor/agent-cli-state.json` on the worker)
+| Cursor secret name | Works? |
+|--------------------|--------|
+| **`Railway`** | Yes (common Cursor label) |
+| **`RAILWAY_API_TOKEN`** | Yes (recommended) |
+| **`RAILWAY_TOKEN`** | Yes |
 
-**Cursor Dashboard → Secrets** inject into **Cursor-hosted** cloud agent VMs.
+If your other projects work but AutoTube did not, the script may have been checking only `RAILWAY_TOKEN`. Use **`npm run env:debug-railway`** — it checks all names above.
 
-**Self-hosted Railway workers** only get:
-
-1. Variables you set on the **Railway `cursor-worker` service** (Railway dashboard → Variables), and  
-2. Railway runtime metadata (`RAILWAY_PROJECT_ID`, `RAILWAY_SERVICE_NAME`, …) for **that worker**, not AutoTube-Deploy.
-
-So `RAILWAY_TOKEN` can be “definitely in Cursor secrets” but still **length 0** inside the agent shell.
-
-## Fix (pick one)
-
-### Option A — Recommended for `railway-AutoTube` worker
-
-1. Open Railway → project **cursor-self-hosted-worker** → service **cursor-worker** → **Variables**.
-2. Add **`RAILWAY_TOKEN`** = your deploy token from [railway.com/account/tokens](https://railway.com/account/tokens) (project token for **AutoTube-Deploy** is best).
-3. **Redeploy / restart** the `cursor-worker` service so the new variable is in the process env.
-4. Start a **new** Cursor agent on AutoTube → run `npm run railway:connect`.
-
-### Option B — Cursor environment-scoped secret
-
-1. Cursor → **Cloud Agents** → environment **railway-AutoTube** (or your AutoTube environment name).
-2. Add secret **`RAILWAY_TOKEN`** on **that environment**, not only global secrets.
-3. **New agent session** (restart agent).
-
-### Option C — Dashboard (no token in agent)
-
-1. Railway → **AutoTube-Deploy** → **autotube** → **Connect Repo** (one-time).
-2. Then only `git push origin master` for deploys.
-
-## Verify in the agent
+## Verify THIS agent session
 
 ```bash
-echo "RAILWAY_TOKEN len=${#RAILWAY_TOKEN}"
+npm run env:debug-railway
+```
+
+If this prints **unset** for every key, **this VM has no token** — including Podomator in the same shell:
+
+```bash
+cd ../podomator && npm run env:debug-railway
+```
+
+If both are unset, the token is not injected into **this** cloud agent run (not an AutoTube-only bug).
+
+## If secret is in Cursor but debug shows unset
+
+1. Secret name is **`Railway`** or **`RAILWAY_API_TOKEN`** (value from [railway.com/account/tokens](https://railway.com/account/tokens) — not SSH key, not `ghp_`, not `crsr_`).
+2. **Start a new agent run** after saving the secret (injection happens at VM boot).
+3. If you use a **saved environment / snapshot**, refresh it so new secrets are included.
+
+## Connect GitHub (when token is present)
+
+```bash
 npm run railway:connect
 ```
 
-`len` should be **36** (or similar), not **0**.
+Or push `master` after connecting repo once in Railway UI.
 
-## AutoTube deploy vs worker project
+## Worker vs AutoTube project
 
-| Project | Purpose |
-|---------|---------|
-| `cursor-self-hosted-worker` | Runs the Cursor agent VM |
-| `AutoTube-Deploy` | Production AutoTube app (`autotube-production.up.railway.app`) |
-
-`RAILWAY_TOKEN` must be a token that can manage **AutoTube-Deploy**, even when set on the worker service.
+`cursor-worker` injects `RAILWAY_PROJECT_ID` for **cursor-self-hosted-worker**. Deploy scripts target **AutoTube-Deploy** by name via CLI — that is correct and unrelated to the worker’s project id.

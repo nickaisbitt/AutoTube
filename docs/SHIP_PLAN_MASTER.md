@@ -19,7 +19,7 @@ Last updated: 2026-06-03. Deploy model: **git push `master` → Railway autodepl
 
 ### A1b. Connect repo via CLI (backend — no dashboard)
 
-Requires `RAILWAY_TOKEN` in **Cursor Cloud Agents → Secrets** (exact name). **Restart the agent** after adding the secret so it appears in the shell.
+Requires `RAILWAY_TOKEN` in the agent shell. **Self-hosted Railway workers** (`railway-AutoTube`): add it on Railway → **cursor-self-hosted-worker** → **cursor-worker** → **Variables**, redeploy worker, new agent session. Cursor Dashboard secrets alone are often **not** injected — see **`docs/RAILWAY_WORKER_SECRETS.md`**.
 
 ```bash
 npm run railway:connect

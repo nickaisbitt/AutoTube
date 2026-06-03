@@ -1,4 +1,4 @@
 {
-  "install": "echo ready",
+  "install": "bash .cursor/check-agent-secrets.sh || true",
   "start": "echo ready"
 }

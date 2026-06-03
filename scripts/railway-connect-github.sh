@@ -12,6 +12,7 @@ resolve_token() {
   if [ -n "${RAILWAY_TOKEN:-}" ]; then echo "$RAILWAY_TOKEN"; return; fi
   if [ -n "${RAILWAY_API_TOKEN:-}" ]; then echo "$RAILWAY_API_TOKEN"; return; fi
   if [ -n "${Railway:-}" ]; then echo "$Railway"; return; fi
+  if [ -n "${AUTOTUBE_RAILWAY_TOKEN:-}" ]; then echo "$AUTOTUBE_RAILWAY_TOKEN"; return; fi
   if [ -f "${HOME}/.railway/config.json" ] && command -v jq >/dev/null 2>&1; then
     jq -r '.user.token // empty' "${HOME}/.railway/config.json"
     return
@@ -19,10 +20,21 @@ resolve_token() {
   echo ""
 }
 
+echo "Secret check (lengths only):"
+for v in RAILWAY_TOKEN RAILWAY_API_TOKEN Railway AUTOTUBE_RAILWAY_TOKEN; do
+  eval "len=\${#${v}}"
+  echo "  $v=$len"
+done
+echo "  (worker: ${RAILWAY_SERVICE_NAME:-unknown} @ ${RAILWAY_PROJECT_NAME:-unknown})"
+
 TOKEN="$(resolve_token)"
 if [ -z "$TOKEN" ]; then
-  echo "ERROR: RAILWAY_TOKEN is not set."
-  echo "  Add it in cursor.com → Cloud Agents → Secrets (name: RAILWAY_TOKEN), then restart the agent."
+  echo ""
+  echo "ERROR: RAILWAY_TOKEN is not in this shell."
+  echo "  Cursor Dashboard secrets often do NOT inject into self-hosted Railway workers."
+  echo "  Fix: Railway → cursor-self-hosted-worker → cursor-worker → Variables → RAILWAY_TOKEN"
+  echo "       Then restart cursor-worker and start a NEW agent session."
+  echo "  See: docs/RAILWAY_WORKER_SECRETS.md"
   exit 1
 fi
 export RAILWAY_TOKEN="$TOKEN"

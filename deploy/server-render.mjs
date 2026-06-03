@@ -1052,6 +1052,7 @@ const videoFrameCache = new Map();
 const MAX_CLIP_FILE_CACHE_SIZE = 500;
 const clipFileCache = new Map(); // Maps clip URLs → cached file paths on disk
 const videoFramesDirectories = new Map(); // Maps clip URLs → directories of extracted JPEGs
+const failedClipFallbackCache = new Map(); // Maps clip URLs → thumbnail Image|null after a failed download
 
 /**
  * Downloads a video clip via the proxy and extracts a single frame at the
@@ -1069,6 +1070,11 @@ const videoFramesDirectories = new Map(); // Maps clip URLs → directories of e
 async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
   const cacheKey = `${clipUrl}@${timestamp.toFixed(2)}`;
   if (videoFrameCache.has(cacheKey)) return videoFrameCache.get(cacheKey);
+  if (failedClipFallbackCache.has(clipUrl)) {
+    const fallback = failedClipFallbackCache.get(clipUrl);
+    videoFrameCache.set(cacheKey, fallback);
+    return fallback;
+  }
 
   try {
     // Reuse cached clip file on disk, or download once and persist
@@ -1078,22 +1084,25 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
       const fullUrl = clipUrl.startsWith('http')
         ? clipUrl
         : `${DEV_SERVER}${clipUrl}`;
-      const clipRes = await fetch(fullUrl);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT_MS);
+      const clipRes = await fetch(fullUrl, { signal: controller.signal }).finally(() => clearTimeout(timer));
       if (!clipRes.ok) {
         console.warn(`  ⚠ Failed to download clip: ${clipUrl.substring(0, 60)} — ${clipRes.status}`);
         // Try thumbnail as fallback image when clip download fails (e.g. 403, geo-blocked)
+        let fallbackImg = null;
         if (thumbnailUrl) {
           log('info', `    ↳ Trying thumbnail fallback: ${thumbnailUrl.substring(0, 60)}`);
-          const fallbackImg = await fetchImage(thumbnailUrl);
+          fallbackImg = await fetchImage(thumbnailUrl);
           if (fallbackImg) {
             if (videoFrameCache.size >= MAX_VIDEO_FRAME_CACHE_SIZE) {
               videoFrameCache.delete(videoFrameCache.keys().next().value);
             }
             videoFrameCache.set(cacheKey, fallbackImg);
-            return fallbackImg;
           }
         }
-        return null;
+        failedClipFallbackCache.set(clipUrl, fallbackImg);
+        return fallbackImg;
       }
       const clipBuffer = Buffer.from(await clipRes.arrayBuffer());
 
@@ -1129,6 +1138,7 @@ async function fetchVideoFrame(clipUrl, timestamp, thumbnailUrl) {
     return img;
   } catch (err) {
     console.warn(`  ⚠ Video frame extraction error: ${err.message}`);
+    failedClipFallbackCache.set(clipUrl, null);
     return null;
   }
 }

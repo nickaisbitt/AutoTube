@@ -1,0 +1,4 @@
+{
+  "install": "echo ready",
+  "start": "echo ready"
+}

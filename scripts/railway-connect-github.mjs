@@ -4,6 +4,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { loadRailwayToken, ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
+import { getAutotubeRailwayTarget } from './lib/railway-autotube-target.mjs';
 
 ensureRailwayApiTokenEnv();
 const token = loadRailwayToken();
@@ -13,9 +14,10 @@ if (!token) {
 }
 process.env.RAILWAY_TOKEN = token;
 
-const PROJECT = process.env.RAILWAY_PROJECT || 'AutoTube-Deploy';
-const ENVIRONMENT = process.env.RAILWAY_ENVIRONMENT || 'production';
-const SERVICE = process.env.RAILWAY_SERVICE || 'autotube';
+const target = getAutotubeRailwayTarget();
+const PROJECT = process.env.RAILWAY_PROJECT || target.projectId;
+const ENVIRONMENT = process.env.RAILWAY_ENVIRONMENT || target.environment;
+const SERVICE = process.env.RAILWAY_SERVICE || target.service;
 const REPO = process.env.RAILWAY_REPO || 'nickaisbitt/AutoTube';
 const BRANCH = process.env.RAILWAY_BRANCH || 'master';
 

@@ -6,19 +6,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadRailwayToken, getRailwayTokenSource, ensureRailwayApiTokenEnv, TOKEN_ENV_CANDIDATES } from './lib/railway-token.mjs';
+import { getAutotubeRailwayTarget } from './lib/railway-autotube-target.mjs';
 
 console.log('\n=== AutoTube Railway credentials debug ===\n');
 console.log(`Worker: ${process.env.RAILWAY_SERVICE_NAME ?? '(not on Railway worker)'}`);
 console.log(`Worker project: ${process.env.RAILWAY_PROJECT_NAME ?? '—'} (${process.env.RAILWAY_PROJECT_ID ?? '—'})`);
-console.log(`AutoTube deploy target: AutoTube-Deploy / autotube (via CLI when token present)\n`);
+const target = getAutotubeRailwayTarget();
+console.log(`AutoTube deploy target: project ${target.projectId} / ${target.environment} / ${target.service}`);
+console.log(`Ignore worker Railway env: ${target.ignoreWorkerRailwayEnv}\n`);
 
 console.log('Process env (presence only):');
 for (const { env } of TOKEN_ENV_CANDIDATES) {
   const set = Boolean(process.env[env]?.trim());
   console.log(`  ${env}: ${set ? 'SET' : 'unset'}`);
 }
-import fs from 'node:fs';
-import path from 'node:path';
 const envLocal = path.join(process.cwd(), '.env.local');
 console.log(`  .env.local: ${fs.existsSync(envLocal) ? 'file exists' : 'missing'}`);
 console.log(`  ~/.config/railway/token: ${fs.existsSync(path.join(process.env.HOME || '', '.config', 'railway', 'token')) ? 'exists' : 'missing'}`);

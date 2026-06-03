@@ -70,7 +70,12 @@ export function getRailwayTokenSource() {
 }
 
 export function ensureRailwayApiTokenEnv() {
-  if (process.env.RAILWAY_API_TOKEN?.trim()) return;
-  const token = loadRailwayToken();
-  if (token) process.env.RAILWAY_API_TOKEN = token;
+  const token =
+    process.env.RAILWAY_API_TOKEN?.trim() ||
+    loadRailwayToken();
+  if (!token) return;
+  process.env.RAILWAY_API_TOKEN = token;
+  if (!process.env.RAILWAY_TOKEN?.trim()) {
+    process.env.RAILWAY_TOKEN = token;
+  }
 }

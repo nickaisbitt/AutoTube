@@ -12,7 +12,9 @@ console.log('\n=== AutoTube Railway credentials debug ===\n');
 console.log(`Worker: ${process.env.RAILWAY_SERVICE_NAME ?? '(not on Railway worker)'}`);
 console.log(`Worker project: ${process.env.RAILWAY_PROJECT_NAME ?? '—'} (${process.env.RAILWAY_PROJECT_ID ?? '—'})`);
 const target = getAutotubeRailwayTarget();
-console.log(`AutoTube deploy target: project ${target.projectId} / ${target.environment} / ${target.service}`);
+console.log(
+  `AutoTube deploy target: ${target.projectId ?? target.projectName} / ${target.environment} / ${target.service}`,
+);
 console.log(`Ignore worker Railway env: ${target.ignoreWorkerRailwayEnv}\n`);
 
 console.log('Process env (presence only):');

@@ -15,7 +15,8 @@ if (!token) {
 process.env.RAILWAY_TOKEN = token;
 
 const target = getAutotubeRailwayTarget();
-const PROJECT = process.env.RAILWAY_PROJECT || target.projectId;
+const PROJECT =
+  process.env.RAILWAY_PROJECT?.trim() || target.projectId || target.projectName;
 const ENVIRONMENT = process.env.RAILWAY_ENVIRONMENT || target.environment;
 const SERVICE = process.env.RAILWAY_SERVICE || target.service;
 const REPO = process.env.RAILWAY_REPO || 'nickaisbitt/AutoTube';

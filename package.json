@@ -37,7 +37,8 @@
     "typecheck": "tsc --noEmit",
     "start": "npx tsx server.mjs",
     "railway:connect": "node scripts/railway-connect-github.mjs",
-    "env:debug-railway": "node scripts/debug-railway-credentials.mjs"
+    "env:debug-railway": "node scripts/debug-railway-credentials.mjs",
+    "deploy:status": "node scripts/deploy-status.mjs"
   },
   "dependencies": {
     "canvas": "^3.2.3",

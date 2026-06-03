@@ -12,6 +12,7 @@ export const TOKEN_ENV_CANDIDATES = [
   { env: 'RAILWAY_TOKEN', label: 'RAILWAY_TOKEN' },
   { env: 'Railway', label: 'Railway (Cursor secret)' },
   { env: 'RAILWAY', label: 'RAILWAY' },
+  { env: 'AUTOTUBE_RAILWAY_TOKEN', label: 'AUTOTUBE_RAILWAY_TOKEN' },
 ];
 
 export function loadRailwayToken() {

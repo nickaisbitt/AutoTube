@@ -24,7 +24,7 @@ if (!token) {
   console.log('\n❌ No Railway API token in THIS agent process.');
   console.log('If other repos work for you, compare:');
   console.log('  1. Same agent session? (secrets inject at VM boot — restart agent after adding secret)');
-  console.log('  2. Secret name in Cursor → Railway or RAILWAY_API_TOKEN (not only RAILWAY_TOKEN)');
+  console.log('  2. Secret name in Cursor → Railway or RAILWAY_API_TOKEN or AUTOTUBE_RAILWAY_TOKEN');
   console.log('  3. Run `npm run env:debug-railway` in podomator in the SAME session — if also unset, token is not in this VM');
   console.log('\nSee docs/RAILWAY_WORKER_SECRETS.md\n');
   process.exit(1);

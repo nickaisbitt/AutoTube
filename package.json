@@ -35,7 +35,8 @@
     "test:unit:coverage": "vitest run --coverage",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "start": "npx tsx server.mjs"
+    "start": "npx tsx server.mjs",
+    "railway:connect": "bash scripts/railway-connect-github.sh"
   },
   "dependencies": {
     "canvas": "^3.2.3",

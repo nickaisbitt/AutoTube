@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "railway": {
+      "command": "npx",
+      "args": ["-y", "@railway/mcp-server"]
+    },
     "video-watcher": {
       "command": "node",
       "args": ["powers/video-watcher/src/server.mjs"]

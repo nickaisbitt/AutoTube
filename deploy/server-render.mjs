@@ -4037,9 +4037,9 @@ async function render() {
       // Dark overlay
       ctx.fillStyle = `rgba(0, 0, 0, ${0.85 * (1 - hookProgress * 0.7)})`;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      // Hook text with fast fade-in (0.3s)
+      // Hook text must be readable on frame 0; the watcher samples immediately.
       ctx.save();
-      ctx.globalAlpha = Math.min(1, hookProgress * 3);
+      ctx.globalAlpha = 1;
       ctx.fillStyle = '#ffffff';
       ctx.font = `bold ${hookFontPx(HEIGHT)}px Impact, "Arial Black", system-ui, sans-serif`;
       ctx.textAlign = 'center';
@@ -4048,7 +4048,7 @@ async function render() {
       ctx.shadowBlur = 24;
       ctx.shadowOffsetX = 2;
       ctx.shadowOffsetY = 2;
-      const { lines, fontSize } = wrapTitleText(ctx, hookText, WIDTH, hookFontPx(HEIGHT), WIDTH * 0.86, 'bold');
+      const { lines, fontSize } = wrapTitleText(ctx, hookText, WIDTH, Math.round(hookFontPx(HEIGHT) * 0.72), WIDTH * 0.9, 'bold');
       ctx.font = `bold ${fontSize}px Impact, "Arial Black", system-ui, sans-serif`;
       const lineHeight = fontSize * 1.08;
       const startY = HEIGHT / 2 - ((lines.length - 1) * lineHeight) / 2;

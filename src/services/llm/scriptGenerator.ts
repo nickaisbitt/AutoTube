@@ -235,7 +235,7 @@ Each segment MUST include an "audioDirection" object that guides sound design:
 - "intensity": Number 0-10 representing audio energy level. CRITICAL: Vary intensity across segments to prevent "wall of tension" fatigue. Never have 3+ consecutive segments above 7. Pattern should wave: high → medium → low → high. Intro=6, threats=7-8, explanations=4-5, advice=2-3, outro=4.
 
 OUTPUT FORMAT:
-Return ONLY a valid JSON array of segments. No markdown, no preamble.
+Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }. No markdown, no preamble.
 Each segment:
 {
   "type": "intro" | "section" | "transition" | "outro",
@@ -353,7 +353,9 @@ After writing each segment, mentally review every sentence. Remove any sentence 
 
 SEO KEYWORD INJECTION (Task 144): The TOPIC CONTEXT DATA above contains keywords extracted from top YouTube search results for this topic. Weave these keywords naturally into the narration text throughout the script — at least 3 distinct keywords from the list must appear across different segments. Use them as you would naturally discuss the topic; do not force or repeat them awkwardly. These keywords improve discoverability by aligning with what viewers actually search for.
 
-Total segments: ${totalSegments}`;
+Total segments: ${totalSegments}
+
+Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
 
   // Bug 9 fix: bail before initiating a network request if already cancelled
   if (signal?.aborted) {

@@ -37,6 +37,38 @@ export function stripPartLabels(narration: string): string {
 
 const VALID_SEGMENT_TYPES = new Set(['intro', 'section', 'transition', 'outro']);
 
+function looksLikeSegmentArray(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.some((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const record = item as Record<string, unknown>;
+    return typeof record.narration === 'string' || typeof record.title === 'string';
+  });
+}
+
+function extractSegmentArray(parsed: unknown): unknown[] {
+  if (looksLikeSegmentArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== 'object') return [];
+
+  const record = parsed as Record<string, unknown>;
+  const directKeys = ['segments', 'script', 'chapters', 'scenes', 'items'];
+  for (const key of directKeys) {
+    if (looksLikeSegmentArray(record[key])) return record[key] as unknown[];
+  }
+
+  const numericValues = Object.keys(record)
+    .filter((key) => /^\d+$/.test(key))
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key) => record[key]);
+  if (looksLikeSegmentArray(numericValues)) return numericValues;
+
+  for (const value of Object.values(record)) {
+    const nested = extractSegmentArray(value);
+    if (nested.length > 0) return nested;
+  }
+
+  return [];
+}
+
 /**
  * Safety net: if the LLM produced >4 segments but forgot to include a
  * transition segment, inject one at the midpoint. The prompt already asks
@@ -155,12 +187,9 @@ export function parseSegmentsFromContent(content: string): ScriptSegment[] {
     }
   }
 
-  // Handle { "segments": [...] } wrapper or bare array
-  const rawArray: unknown[] = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray((parsed as Record<string, unknown>).segments)
-      ? ((parsed as Record<string, unknown>).segments as unknown[])
-      : [];
+  // Handle bare arrays plus common JSON-object wrappers. OpenRouter JSON-object
+  // mode may wrap arrays as {segments:[...]}, {script:[...]}, or numeric keys.
+  const rawArray = extractSegmentArray(parsed);
 
   if (rawArray.length === 0) throw new Error('AI returned an empty segments array');
 

@@ -3458,12 +3458,15 @@ async function render() {
     let videoFramesFailed = 0;
 
     for (const asset of videoAssets) {
+      if (failedClipFallbackCache.has(asset.url)) continue;
       const clipDuration = asset.duration || 10;
       // Download clip once
       const fullUrl = asset.url.startsWith('http') ? asset.url : `${DEV_SERVER}${asset.url}`;
       let clipTmp = null;
       try {
-        const clipRes = await fetch(fullUrl);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT_MS);
+        const clipRes = await fetch(fullUrl, { signal: controller.signal }).finally(() => clearTimeout(timer));
         if (clipRes.ok) {
           const clipBuffer = Buffer.from(await clipRes.arrayBuffer());
           clipTmp = join(tmpdir(), `autotube-clip-${Date.now()}.mp4`);
@@ -3479,8 +3482,9 @@ async function render() {
 
       if (!clipTmp) {
         // Use thumbnail fallback
+        let fallbackImg = null;
         if (asset.thumbnailUrl) {
-          const fallbackImg = await fetchImage(asset.thumbnailUrl);
+          fallbackImg = await fetchImage(asset.thumbnailUrl);
           if (fallbackImg) {
             for (const pct of TIMESTAMPS) {
               if (videoFrameCache.size >= MAX_VIDEO_FRAME_CACHE_SIZE) {
@@ -3491,6 +3495,7 @@ async function render() {
             videoFramesExtracted += TIMESTAMPS.length;
           }
         }
+        failedClipFallbackCache.set(asset.url, fallbackImg);
         continue;
       }
 
@@ -3531,6 +3536,17 @@ async function render() {
         log('info', `      ✓ Extracted smooth frames to disk`);
       } else {
         log('warn', `      ⚠ Ffmpeg extract smooth frames failed: ${extractAllResult.stderr || 'unknown error'}`);
+        let fallbackImg = null;
+        if (asset.thumbnailUrl) {
+          fallbackImg = await fetchImage(asset.thumbnailUrl);
+        }
+        failedClipFallbackCache.set(asset.url, fallbackImg);
+        if (fallbackImg) {
+          for (const pct of TIMESTAMPS) {
+            videoFrameCache.set(`${asset.url}@${(pct * clipDuration).toFixed(2)}`, fallbackImg);
+          }
+        }
+        continue;
       }
 
       // Extract frames at key timestamps for backwards compatibility & fallback

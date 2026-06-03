@@ -13,7 +13,7 @@ if (!(await checkDevServer(devServer))) {
   process.exit(1);
 }
 
-const result = await generateFullVideo({ topic, youtubeMode: true });
+const result = await generateFullVideo({ topic, youtubeMode: true, realHarvest: true });
 if (!result.ok) {
   console.error(`\n❌ ${result.error}`);
   process.exit(1);

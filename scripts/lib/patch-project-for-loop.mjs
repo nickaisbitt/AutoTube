@@ -9,7 +9,7 @@ import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
  * @param {string} topic
  * @param {object} fixState
  */
-export function patchProjectForLoop(project, topic, fixState = {}) {
+export function patchProjectForLoop(project, topic, fixState = {}, options = {}) {
   if (!project) return project;
 
   project.topic = topic;
@@ -26,7 +26,7 @@ export function patchProjectForLoop(project, topic, fixState = {}) {
     }
   }
 
-  if (fixState.forceRealStock !== false && project.media?.length) {
+  if (!options.skipMediaPatch && fixState.forceRealStock !== false && project.media?.length) {
     const offset = fixState.mediaOffset || 0;
     project.media = project.media.map((m, i) => {
       const stock = STOCK_HEALTHCARE_IMAGES[(i + offset) % STOCK_HEALTHCARE_IMAGES.length];

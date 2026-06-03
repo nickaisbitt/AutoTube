@@ -7,7 +7,7 @@
 import { mkdirSync, writeFileSync, appendFileSync, existsSync, copyFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
-import { generateFullVideo, checkDevServer } from './lib/generate-full-video.mjs';
+import { generateFullVideo, checkDevServer, resolveOpenRouterKey } from './lib/generate-full-video.mjs';
 import { pickRandomTopic } from './lib/random-topics.mjs';
 import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
@@ -76,6 +76,11 @@ async function main() {
     process.exit(1);
   }
 
+  if (!cfg.reviewOnly && !resolveOpenRouterKey()) {
+    console.error('❌ OPENROUTER_API_KEY required for real harvest loop');
+    process.exit(1);
+  }
+
   if (!existsSync(JOURNAL_MD)) {
     writeFileSync(
       JOURNAL_MD,
@@ -93,6 +98,7 @@ async function main() {
   console.log(`   Max iterations: ${cfg.max > 0 ? cfg.max : '∞'}`);
   console.log(`   Target score: ${cfg.untilScore}/10 (stops when reached)`);
   console.log(`   Fix before next topic: YES`);
+  console.log(`   Harvest: real (OpenRouter + live search; Pexels/Picsum disabled)`);
   console.log(`   Journal: ${JOURNAL_JSONL}\n`);
 
   while (true) {
@@ -136,6 +142,7 @@ async function main() {
         youtubeMode: true,
         runId: Date.now(),
         fixState,
+        realHarvest: true,
       });
       generateOk = gen.ok;
       generateError = gen.error ?? null;

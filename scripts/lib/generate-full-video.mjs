@@ -3,13 +3,22 @@
  * Used by generate-full-video.mjs CLI and video-improvement-loop.mjs.
  */
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
 import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
 import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
+
+export function resolveOpenRouterKey() {
+  return (
+    process.env.OPENROUTER_API_KEY ||
+    process.env.VITE_OPENROUTER_KEY ||
+    process.env.OPENROUTER_KEY ||
+    ''
+  ).trim();
+}
 
 export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || 'http://localhost:5173') {
   try {
@@ -27,6 +36,7 @@ export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || '
  * @param {number} [options.runId]
  * @param {boolean} [options.youtubeMode]
  * @param {boolean} [options.quiet]
+ * @param {boolean} [options.realHarvest] — use live OpenRouter + dev-server search APIs (no mocks)
  * @param {object} [options.fixState] — loop fix state from apply-watch-fixes
  */
 export async function generateFullVideo(options) {
@@ -34,6 +44,18 @@ export async function generateFullVideo(options) {
   if (!topic?.trim()) throw new Error('topic is required');
 
   const fixState = options.fixState || {};
+  const openRouterKey = resolveOpenRouterKey();
+  const realHarvest = options.realHarvest === true || (options.realHarvest !== false && Boolean(openRouterKey));
+
+  if (realHarvest && !openRouterKey) {
+    return {
+      ok: false,
+      error: 'realHarvest requires OPENROUTER_API_KEY (or VITE_OPENROUTER_KEY) in environment',
+      topic,
+      outDir: null,
+    };
+  }
+
   const mockSegments = buildMockScriptForTopic(topic, { hookLine: fixState.hookLine });
 
   const devServer = options.devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173';
@@ -51,83 +73,94 @@ export async function generateFullVideo(options) {
   }
 
   log(`\n🎬 Generate: ${topic}`);
+  log(`   Mode: ${realHarvest ? 'real harvest (OpenRouter + live search)' : 'mock (CI/e2e)'}`);
   log(`   Out: ${outDir}\n`);
 
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 
-  await page.addInitScript(() => {
-    localStorage.setItem('autotube_onboarding_seen', 'true');
-    localStorage.removeItem('autotube_project');
-    sessionStorage.setItem(
-      'autotube_config_session',
-      JSON.stringify({
-        openRouterKey: 'sk-or-v1-e2e-full-pipeline',
-        sourceType: 'stock',
-        flickrKey: '',
-        ttsVoice: 'Leo',
-      }),
-    );
-  });
+  await page.addInitScript(
+    ({ key, harvest }) => {
+      localStorage.setItem('autotube_onboarding_seen', 'true');
+      localStorage.removeItem('autotube_project');
+      sessionStorage.setItem(
+        'autotube_config_session',
+        JSON.stringify({
+          openRouterKey: key,
+          sourceType: harvest ? 'raw' : 'stock',
+          flickrKey: '',
+          ttsVoice: 'Leo',
+        }),
+      );
+    },
+    { key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline', harvest: realHarvest },
+  );
 
-  await page.route('**/openrouter.ai/**', async (route) => {
-    const post = route.request().postDataJSON();
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: mockOpenRouterHttpBody(post, mockSegments),
-    });
-  });
-
-  const stockResults = stockSearchResults(topic, STOCK_HEALTHCARE_IMAGES.length);
-
-  await page.route(
-    /\/api\/(?:search|search-bing-images|search-google-images|search-bing-videos|search-google-videos|search-videos|static-map|press-release|search-bing-news|proxy-page).*/,
-    async (route) => {
-      const url = route.request().url();
-      if (url.includes('static-map')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            url: STOCK_HEALTHCARE_IMAGES[0].url,
-            thumbnailUrl: STOCK_HEALTHCARE_IMAGES[0].url.replace('w=1920', 'w=400'),
-          }),
-        });
-        return;
-      }
-      if (url.includes('press-release') || url.includes('search-bing-news') || url.includes('proxy-page')) {
-        await route.fulfill({ status: 200, contentType: 'text/html', body: '' });
-        return;
-      }
+  if (!realHarvest) {
+    await page.route('**/openrouter.ai/**', async (route) => {
+      const post = route.request().postDataJSON();
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ results: stockResults }),
+        body: mockOpenRouterHttpBody(post, mockSegments),
       });
-    },
-  );
+    });
 
+    const stockResults = stockSearchResults(topic, STOCK_HEALTHCARE_IMAGES.length);
+
+    await page.route(
+      /\/api\/(?:search|search-bing-images|search-google-images|search-bing-videos|search-google-videos|search-videos|static-map|press-release|search-bing-news|proxy-page).*/,
+      async (route) => {
+        const url = route.request().url();
+        if (url.includes('static-map')) {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              url: STOCK_HEALTHCARE_IMAGES[0].url,
+              thumbnailUrl: STOCK_HEALTHCARE_IMAGES[0].url.replace('w=1920', 'w=400'),
+            }),
+          });
+          return;
+        }
+        if (url.includes('press-release') || url.includes('search-bing-news') || url.includes('proxy-page')) {
+          await route.fulfill({ status: 200, contentType: 'text/html', body: '' });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ results: stockResults }),
+        });
+      },
+    );
+
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    await page.route(/.*picsum\.photos.*/, (r) => r.fulfill({ status: 200, contentType: 'image/png', body: png }));
+    await page.route(/.*wikipedia\.org.*|.*wikimedia\.org.*/, (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          extract: topic,
+          description: topic,
+          query: { pages: { '1': { title: 'Topic', extract: topic } } },
+        }),
+      }),
+    );
+  }
+
+  // Block YouTube embed fetches in headless (not needed for harvest)
   await page.route(/https:\/\/www\.youtube\.com\/.*/, (route) =>
     route.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' }),
   );
 
-  const png = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-    'base64',
-  );
-  await page.route(/.*picsum\.photos.*/, (r) => r.fulfill({ status: 200, contentType: 'image/png', body: png }));
-  await page.route(/.*wikipedia\.org.*|.*wikimedia\.org.*/, (r) =>
-    r.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        extract: topic,
-        description: topic,
-        query: { pages: { '1': { title: 'Topic', extract: topic } } },
-      }),
-    }),
-  );
+  const scriptTimeoutMs = realHarvest ? 300_000 : 180_000;
+  const mediaTimeoutMs = realHarvest ? 900_000 : 300_000;
+  const narrationTimeoutMs = realHarvest ? 900_000 : 600_000;
 
   try {
     await page.goto(devServer, { waitUntil: 'networkidle', timeout: 60000 });
@@ -139,15 +172,15 @@ export async function generateFullVideo(options) {
     await page.getByTestId('duration-select').selectOption('3').catch(() => {});
     await page.getByTestId('generate-script-only').click();
     log('⏳ Script...');
-    await page.getByTestId('sidebar-step-script').locator('.bg-emerald-500').waitFor({ timeout: 180000 });
+    await page.getByTestId('sidebar-step-script').locator('.bg-emerald-500').waitFor({ timeout: scriptTimeoutMs });
 
     await page.getByRole('button', { name: /Source Media Assets/i }).click();
-    log('⏳ Media...');
-    await page.getByRole('button', { name: /Prepare Narration/i }).waitFor({ timeout: 300000 });
+    log('⏳ Media (live harvest)...');
+    await page.getByRole('button', { name: /Prepare Narration/i }).waitFor({ timeout: mediaTimeoutMs });
 
     await page.getByRole('button', { name: /Prepare Narration/i }).click();
     log('⏳ Narration...');
-    await page.getByTestId('skip-ai-edit-button').waitFor({ timeout: 600000 });
+    await page.getByTestId('skip-ai-edit-button').waitFor({ timeout: narrationTimeoutMs });
     await page.getByTestId('skip-ai-edit-button').click();
     await page.waitForTimeout(500);
 
@@ -161,7 +194,7 @@ export async function generateFullVideo(options) {
       return { ok: false, error: 'No project with media after pipeline', topic, outDir };
     }
 
-    patchProjectForLoop(project, topic, fixState);
+    patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
 
     try {
       for (const f of readdirSync('/tmp')) {
@@ -254,6 +287,7 @@ export async function generateFullVideo(options) {
       scriptText,
       durationSec,
       sizeMb: (gate.size / 1024 / 1024).toFixed(2),
+      realHarvest,
     };
   } catch (err) {
     return { ok: false, error: err.message, topic, outDir };

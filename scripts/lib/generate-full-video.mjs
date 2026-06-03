@@ -29,6 +29,92 @@ export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || '
   }
 }
 
+function isLikelyVideoHost(url = '') {
+  return /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com)/i.test(url);
+}
+
+function isImageLikeUrl(url = '') {
+  return /\.(?:jpg|jpeg|png|webp|gif)(?:[?#].*)?$/i.test(url)
+    || /(?:th\.bing\.com|tse\d*\.mm\.bing\.net|i\.vimeocdn\.com|images\.|img\.|cdn\.)/i.test(url);
+}
+
+async function canFetch(url, { timeoutMs = 6000, minBytes = 256 } = {}) {
+  if (!url || !/^https?:\/\//i.test(url)) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        range: 'bytes=0-4095',
+        'user-agent': 'Mozilla/5.0 AutoTube media validator',
+      },
+    });
+    if (!res.ok) return false;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.length >= minBytes;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function sanitizeRealHarvestMedia(project, devServer, outDir) {
+  const report = {
+    before: project.media?.length || 0,
+    after: 0,
+    convertedVideoToImage: [],
+    dropped: [],
+    keptVideo: [],
+  };
+  if (!project.media?.length) return report;
+
+  const sanitized = [];
+  for (const asset of project.media) {
+    if (asset.type !== 'video') {
+      sanitized.push(asset);
+      continue;
+    }
+
+    const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '');
+    const downloadUrl = asset.url?.startsWith('/api/download-clip')
+      ? `${devServer}${asset.url}`
+      : isLikelyVideoHost(asset.url)
+        ? `${devServer}/api/download-clip?url=${encodeURIComponent(asset.url)}`
+        : asset.url;
+
+    const thumbnailOk = thumbnailUrl ? await canFetch(thumbnailUrl, { timeoutMs: 5000 }) : false;
+    const clipOk = downloadUrl ? await canFetch(downloadUrl, { timeoutMs: 8000, minBytes: 1024 }) : false;
+
+    if (clipOk) {
+      sanitized.push(asset);
+      report.keptVideo.push({ url: asset.url, thumbnailUrl, reason: 'clip fetchable' });
+      continue;
+    }
+
+    if (thumbnailOk) {
+      sanitized.push({
+        ...asset,
+        type: 'image',
+        url: thumbnailUrl,
+        source: `${asset.source || 'Video'} thumbnail`,
+        isFallback: false,
+        reasoning: `${asset.reasoning || ''} Converted video to fetchable thumbnail before render.`.trim(),
+      });
+      report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl, reason: 'clip unavailable; thumbnail fetchable' });
+      continue;
+    }
+
+    report.dropped.push({ url: asset.url, thumbnailUrl, reason: 'clip and thumbnail unavailable' });
+  }
+
+  project.media = sanitized;
+  report.after = sanitized.length;
+  writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
+  return report;
+}
+
 /**
  * @param {object} options
  * @param {string} options.topic
@@ -253,6 +339,10 @@ export async function generateFullVideo(options) {
     }
 
     patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
+    if (realHarvest) {
+      const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir);
+      log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
+    }
 
     try {
       for (const f of readdirSync('/tmp')) {

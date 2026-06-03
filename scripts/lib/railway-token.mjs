@@ -15,25 +15,58 @@ export const TOKEN_ENV_CANDIDATES = [
   { env: 'AUTOTUBE_RAILWAY_TOKEN', label: 'AUTOTUBE_RAILWAY_TOKEN' },
 ];
 
-export function loadRailwayToken() {
-  for (const { env } of TOKEN_ENV_CANDIDATES) {
-    const value = process.env[env]?.trim();
+/** @type {string | null} */
+let lastTokenSource = null;
+
+function readEnvLocalToken(cwd = process.cwd()) {
+  const file = path.join(cwd, '.env.local');
+  if (!fs.existsSync(file)) return null;
+  const text = fs.readFileSync(file, 'utf8');
+  const keys = new Set(TOKEN_ENV_CANDIDATES.map((c) => c.env));
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq < 1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    if (!keys.has(key)) continue;
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
     if (value) return value;
-  }
-  const tokenPath = path.join(os.homedir(), '.config', 'railway', 'token');
-  if (fs.existsSync(tokenPath)) {
-    return fs.readFileSync(tokenPath, 'utf8').trim();
   }
   return null;
 }
 
-export function getRailwayTokenSource() {
+export function loadRailwayToken() {
   for (const { env, label } of TOKEN_ENV_CANDIDATES) {
-    if (process.env[env]?.trim()) return label;
+    const value = process.env[env]?.trim();
+    if (value) {
+      lastTokenSource = label;
+      return value;
+    }
+  }
+  const fromLocal = readEnvLocalToken();
+  if (fromLocal) {
+    lastTokenSource = '.env.local';
+    return fromLocal;
   }
   const tokenPath = path.join(os.homedir(), '.config', 'railway', 'token');
-  if (fs.existsSync(tokenPath)) return '~/.config/railway/token';
+  if (fs.existsSync(tokenPath)) {
+    lastTokenSource = '~/.config/railway/token';
+    return fs.readFileSync(tokenPath, 'utf8').trim();
+  }
+  lastTokenSource = null;
   return null;
+}
+
+export function getRailwayTokenSource() {
+  loadRailwayToken();
+  return lastTokenSource;
 }
 
 export function ensureRailwayApiTokenEnv() {

@@ -8,14 +8,26 @@ Last updated: 2026-06-03. Deploy model: **git push `master` → Railway autodepl
 
 | # | Step | Who |
 |---|------|-----|
-| A1 | Connect **GitHub repo** to Railway project **AutoTube-Deploy** (dashboard → service → Settings → Source) | You (one-time) |
-| A2 | Set **branch** = `master`, **root directory** = `.` (repo root, not `deploy/`) | You (one-time) |
+| A1 | **Connect GitHub to Railway** (one-time) — see **A1b** (CLI) or dashboard **Connect Repo** | You / agent |
+| A2 | **branch** = `master`, **root directory** = empty / `.` (repo root, not `deploy/`) | Set in A1b |
 | A3 | Railway reads **`railway.toml`** + **`nixpacks.toml`** at repo root | Automatic |
 | A4 | **`git push origin master`** | You / agent |
 | A5 | Railway builds (`npm run build`, edge-tts, native deps) and starts `npx tsx server.mjs` | Automatic |
 | A6 | Verify | `curl https://autotube-production.up.railway.app/api/health` |
 
-**No GitHub Actions** are required for deploy. Workflows are **manual-only** (optional local CI).
+**No GitHub Actions** for deploy. Workflows are **manual-only** (optional CI).
+
+### A1b. Connect repo via CLI (backend — no dashboard)
+
+Requires `RAILWAY_TOKEN` in **Cursor Cloud Agents → Secrets** (exact name). **Restart the agent** after adding the secret so it appears in the shell.
+
+```bash
+npm run railway:connect
+```
+
+This runs `scripts/railway-connect-github.sh`: links **AutoTube-Deploy** / **autotube**, sets `nickaisbitt/AutoTube` @ `master`, root `.`, redeploys from GitHub.
+
+**One-time:** Railway’s GitHub App must be installed on your GitHub account (Railway may open OAuth the first time you connect a repo).
 
 ---
 

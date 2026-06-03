@@ -8,7 +8,7 @@ Use this after the long PR/video-quality thread. **Master** is source of truth; 
 
 1. **Code** — Video-watcher, hook sync, QualityCheck server URLs, real-harvest loop, deploy scripts: **on `master`**.
 2. **Prod app** — https://autotube-production.up.railway.app/api/health returns OK but **uptime ~3+ days** = **old container**, not your latest commits.
-3. **GitHub ↔ Railway** — **Not connected** on service `autotube` (dashboard still shows “Connect Repo”).
+3. **GitHub ↔ Railway** — **Connected** via GraphQL `serviceConnect` (nickaisbitt/AutoTube @ master). Confirm in Railway → autotube → Source shows the repo.
 4. **This agent** — `npm run env:debug-railway` → **all token env vars unset** (cannot run `npm run railway:connect` here).
 5. **Video quality** — Still **not 9.3/10**; fixture/mock path was the main “meh” source; real harvest + loop fixes are on master but need prod keys + iteration.
 
@@ -30,8 +30,9 @@ Run anytime: `npm run deploy:status`
    3. Redeploy **cursor-worker**, start a **new** agent on AutoTube
 
 3. **Connect GitHub (pick one)**
-   1. **Dashboard (fastest):** AutoTube-Deploy → **autotube** → **Connect Repo** → `nickaisbitt/AutoTube`, branch **master**, root **empty / `.`**
-   2. **CLI:** `npm run railway:connect` (only when step 1 shows SET)
+   1. **curl (works when Node/npm abort on worker):** `npm run railway:graphql:connect:curl` or `bash scripts/railway-graphql-curl-connect.sh`
+   2. **Node:** `npm run railway:graphql:connect` (when `fetch` works)
+   3. **Dashboard:** Connect Repo → `nickaisbitt/AutoTube`, branch **master**, root **`.`**
 
 4. **Ship code**
    ```bash

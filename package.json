@@ -37,6 +37,8 @@
     "typecheck": "tsc --noEmit",
     "start": "npx tsx server.mjs",
     "railway:connect": "node scripts/railway-connect-github.mjs",
+    "railway:graphql:connect": "node scripts/railway-graphql-connect-deploy.mjs",
+    "railway:graphql:connect:curl": "bash scripts/railway-graphql-curl-connect.sh",
     "env:debug-railway": "node scripts/debug-railway-credentials.mjs",
     "deploy:status": "node scripts/deploy-status.mjs"
   },

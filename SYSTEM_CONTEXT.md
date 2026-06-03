@@ -165,19 +165,10 @@ node server-render.mjs
 ```
 
 ### Production Deployment (Railway)
-```bash
-# 1. Log in to Railway
-railway login
 
-# 2. Link your workspace to the active project
-railway link -p AutoTube-Deploy
+**Default:** connect GitHub in Railway → push `master` → autodeploy from repo root (`railway.toml` + `nixpacks.toml`). See `docs/SHIP_PLAN_MASTER.md`.
 
-# 3. Link to the autotube service
-railway service link autotube
-
-# 4. Deploy your latest committed changes instantly
-railway up
-```
+**Emergency CLI only:** `RAILWAY_TOKEN=... ./scripts/deploy.sh` (legacy `deploy/` sync + `railway up`).
 
 ---
 

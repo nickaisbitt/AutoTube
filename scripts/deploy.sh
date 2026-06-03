@@ -1,6 +1,7 @@
 #!/bin/bash
-# Deploy AutoTube to Railway
-# Usage: ./scripts/deploy.sh
+# OPTIONAL manual Railway deploy (sync deploy/ + railway up).
+# Normal production path: git push master → Railway GitHub autodeploy from repo root.
+# Usage: RAILWAY_TOKEN=... ./scripts/deploy.sh
 
 set -e
 

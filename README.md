@@ -135,17 +135,15 @@ The Vite dev server (`npm run dev`) runs a local proxy at `/api/search` and `/ap
 
 ## 🚀 Deployment to Railway
 
-This project is optimized out-of-the-box for seamless cloud hosting on **Railway** using standard nixpacks builders:
+Production deploy is **push to `master` → Railway GitHub autodeploy** (no GitHub Actions).
 
-1. **System Provisioning (`nixpacks.toml`):** Configures the container with all native canvas-compiling libraries (`cairo`, `pango`, `giflib`, `libjpeg`, `librsvg`, `pixman`, `pkg-config`), `ffmpeg` for professional media rendering, and system-level `chromium` with Playwright browser bindings.
-2. **Dynamic Bindings (`server.mjs`):** Automatically reads Railway's dynamic port mapping (`process.env.PORT`) to handle incoming production requests.
-3. **Continuous Deployment (`railway.toml`):** Provisions automatic start triggers using `npx tsx server.mjs`, active failover restarts, and system health audits (`/api/health`).
+1. **One-time:** Railway dashboard → connect this repo → branch **`master`**, root directory **`.`** (repo root).
+2. **Every release:** `git push origin master` — Railway runs `nixpacks.toml` (`npm run build`, native deps) and starts via `railway.toml` (`npx tsx server.mjs`).
+3. **Health:** `https://autotube-production.up.railway.app/api/health`
 
-To deploy your workspace changes instantly:
-```bash
-# Push master branch commits and trigger automatic Railway cloud build
-railway up
-```
+Set service variables in Railway: `OPENROUTER_API_KEY`, `VITE_OPENROUTER_KEY`, `TRUST_PROXY`, `ALLOWED_ORIGINS`.
+
+Optional emergency CLI (not the normal path): `./scripts/deploy.sh` with `RAILWAY_TOKEN` set. Full checklist: [`docs/SHIP_PLAN_MASTER.md`](docs/SHIP_PLAN_MASTER.md).
 
 ## Security
 

@@ -1,9 +1,9 @@
-name: CI
+# Manual-only CI — does NOT run on push (saves GitHub Actions minutes).
+# Production deploy: push to master → Railway GitHub autodeploy (see docs/SHIP_PLAN_MASTER.md).
+name: CI (manual)
+
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+  workflow_dispatch:
 
 jobs:
   lint-and-test:

@@ -98,8 +98,15 @@ node -e '
   console.log("Patched deploy/package.json build to dummy for Railway");
 ' || echo "WARN: could not patch dummy build script"
 
-if [ -z "${RAILWAY_TOKEN:-}" ]; then
-  echo "ERROR: RAILWAY_TOKEN is not set. Add it in GitHub Secrets or export RAILWAY_TOKEN before running deploy."
+if [ -n "${RAILWAY_TOKEN:-}" ]; then
+  :
+elif [ -n "${RAILWAY_API_TOKEN:-}" ]; then
+  export RAILWAY_TOKEN="$RAILWAY_API_TOKEN"
+elif [ -n "${Railway:-}" ]; then
+  export RAILWAY_TOKEN="$Railway"
+else
+  echo "ERROR: RAILWAY_TOKEN is not set (also checked RAILWAY_API_TOKEN, Railway)."
+  echo "Add in Cursor Cloud Agent secrets or GitHub Actions secrets, then export before deploy."
   exit 1
 fi
 export RAILWAY_TOKEN

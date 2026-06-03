@@ -7,12 +7,22 @@ set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEPLOY_DIR="$ROOT/deploy"
 
+# Portable sync helper (rsync if present, else cp -r). Keeps deploy/ robust in all envs (incl. minimal cloud agents without rsync).
+sync_dir() {
+  local src="$1" dst="$2" extra_excludes="${3:-}"
+  mkdir -p "$dst"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -av --exclude='__tests__/' --exclude='node_modules/' --exclude='__pycache__/' $extra_excludes "$src" "$dst"
+  else
+    echo "rsync not found; using cp -r fallback for $src -> $dst"
+    # copy contents into dst (not the dir itself)
+    (cd "$src" && tar cf - . --exclude='__tests__' --exclude='node_modules' --exclude='__pycache__' $extra_excludes | (cd "$dst" && tar xf -))
+  fi
+}
+
 echo "Syncing server code..."
 # Sync server code into deploy/ (no --delete to avoid wiping other dirs)
-rsync -av \
-  --exclude='__tests__/' \
-  --exclude='node_modules/' \
-  "$ROOT/server/" "$DEPLOY_DIR/server/"
+sync_dir "$ROOT/server/" "$DEPLOY_DIR/server/"
 
 echo "Syncing server-render..."
 # Canonical modules may live only under deploy/ — ensure root path exists for local dev
@@ -20,10 +30,7 @@ if [ ! -d "$ROOT/server-render" ] && [ -d "$ROOT/deploy/server-render" ]; then
   ln -sf deploy/server-render "$ROOT/server-render"
 fi
 if [ -d "$ROOT/server-render" ]; then
-  rsync -av \
-    --exclude='__pycache__/' \
-    --exclude='node_modules/' \
-    "$ROOT/server-render/" "$DEPLOY_DIR/server-render/"
+  sync_dir "$ROOT/server-render/" "$DEPLOY_DIR/server-render/"
 else
   echo "WARN: server-render/ not found at repo root or deploy/"
 fi
@@ -39,7 +46,12 @@ cp "$ROOT/src/services/monitoring.ts" "$DEPLOY_DIR/src/services/"
 if [ -d "$ROOT/dist" ]; then
   echo "Syncing dist..."
   mkdir -p "$DEPLOY_DIR/dist"
-  rsync -av "$ROOT/dist/" "$DEPLOY_DIR/dist/"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -av "$ROOT/dist/" "$DEPLOY_DIR/dist/"
+  else
+    echo "rsync not found; using cp -r fallback for dist/"
+    cp -r "$ROOT/dist/." "$DEPLOY_DIR/dist/" 2>/dev/null || true
+  fi
 fi
 
 # Sync server.mjs
@@ -64,7 +76,13 @@ node -e '
 # Sync public/ (audio, static assets)
 if [ -d "$ROOT/public" ]; then
   echo "Syncing public/..."
-  rsync -av --exclude='node_modules/' "$ROOT/public/" "$DEPLOY_DIR/public/"
+  mkdir -p "$DEPLOY_DIR/public"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -av --exclude='node_modules/' "$ROOT/public/" "$DEPLOY_DIR/public/"
+  else
+    echo "rsync not found; using cp -r fallback for public/"
+    (cd "$ROOT/public" && tar cf - . --exclude='node_modules' | (cd "$DEPLOY_DIR/public" && tar xf -))
+  fi
 fi
 
 # Sync config files for Railway

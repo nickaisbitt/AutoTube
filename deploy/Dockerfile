@@ -26,7 +26,7 @@ COPY public ./public
 COPY server ./server
 COPY server.mjs ./
 
-RUN npm run build:railway
+RUN npm run build && rm -rf node_modules && npm ci --omit=dev && node deploy/bootstrap-server-render.mjs
 
 ENV NODE_ENV=production
 

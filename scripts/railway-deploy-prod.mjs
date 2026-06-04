@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 /**
- * One-shot production deploy: V2 builder, single deploy, wait for live health.
+ * One-shot production deploy: single config patch, one trigger, wait for live health.
  * Usage: npm run deploy:railway
- *   RAILWAY_USE_DOCKERFILE=1  — switch to deploy/Dockerfile builder before deploy
+ *   RAILWAY_SYNC_ENV=1     — also upsert vars from .env.local (each may queue a deploy; use sparingly)
+ *   RAILWAY_USE_DOCKERFILE=1 — use deploy/Dockerfile (usually worse snapshot timeouts)
  */
 import { spawnSync } from 'node:child_process';
 import { loadRailwayToken, ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
-import { AUTOTUBE_PROJECT_ID } from './lib/railway-autotube-target.mjs';
 import {
   AUTOTUBE_SERVICE_ID,
   AUTOTUBE_ENVIRONMENT_ID,
 } from './lib/railway-autotube-ids.mjs';
 import { railwayGql } from './lib/railway-gql.mjs';
+import {
+  applyProdBuildConfig,
+  readProdBuildConfig,
+} from './lib/railway-prod-build-config.mjs';
 
 ensureRailwayApiTokenEnv();
 
@@ -25,36 +29,39 @@ function runNpm(script) {
   if (r.status !== 0) process.exit(r.status ?? 1);
 }
 
-async function patchDockerfileBuilder(token) {
-  const env = await railwayGql(
-    token,
-    `query($id: String!) { environment(id: $id) { config } }`,
-    { id: AUTOTUBE_ENVIRONMENT_ID },
-  );
-  const svc = env.environment?.config?.services?.[AUTOTUBE_SERVICE_ID];
-  if (!svc) throw new Error('autotube service not in environment config');
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
-  const next = structuredClone(svc);
-  next.build = {
-    ...next.build,
-    builder: 'DOCKERFILE',
-    dockerfilePath: 'deploy/Dockerfile',
-    buildEnvironment: 'V2',
-    buildCommand: null,
-  };
-
-  await railwayGql(
+async function cancelAllActive(token) {
+  const data = await railwayGql(
     token,
-    `mutation($environmentId: String!, $patch: EnvironmentConfig, $commitMessage: String) {
-      environmentPatchCommit(environmentId: $environmentId, patch: $patch, commitMessage: $commitMessage)
+    `query($input: DeploymentListInput!, $first: Int) {
+      deployments(input: $input, first: $first) {
+        edges { node { id status createdAt } }
+      }
     }`,
     {
-      environmentId: AUTOTUBE_ENVIRONMENT_ID,
-      patch: { services: { [AUTOTUBE_SERVICE_ID]: next } },
-      commitMessage: 'Use deploy/Dockerfile (V2) for autotube',
+      input: {
+        projectId: process.env.AUTOTUBE_RAILWAY_PROJECT_ID || '283b075f-eb25-4a60-8468-a45d77e068bc',
+        environmentId: AUTOTUBE_ENVIRONMENT_ID,
+        serviceId: AUTOTUBE_SERVICE_ID,
+      },
+      first: 20,
     },
   );
-  console.log('Builder set to DOCKERFILE deploy/Dockerfile (V2)');
+  const active = (data.deployments?.edges ?? [])
+    .map((e) => e.node)
+    .filter((n) => ['BUILDING', 'QUEUED', 'INITIALIZING', 'DEPLOYING'].includes(n.status));
+  for (const d of active) {
+    const ok = await railwayGql(
+      token,
+      `mutation($id: String!) { deploymentCancel(id: $id) }`,
+      { id: d.id },
+    );
+    console.log(`Canceled ${d.status} ${d.id.slice(0, 8)} → ${ok.deploymentCancel}`);
+    await sleep(400);
+  }
 }
 
 async function triggerDeploy(token) {
@@ -77,24 +84,40 @@ async function main() {
     process.exit(1);
   }
 
-  if (process.env.RAILWAY_USE_DOCKERFILE === '1') {
-    await patchDockerfileBuilder(token);
+  const useDocker = process.env.RAILWAY_USE_DOCKERFILE === '1';
+  const current = await readProdBuildConfig(token);
+  const wantRailpack = !useDocker;
+  const needsPatch =
+    current?.buildEnvironment !== 'V2' ||
+    (wantRailpack &&
+      (current?.builder !== 'RAILPACK' || current?.buildCommand !== 'npm run build:railway')) ||
+    (!wantRailpack && current?.builder !== 'DOCKERFILE');
+
+  if (needsPatch) {
+    const build = await applyProdBuildConfig(token, { useDockerfile: useDocker });
+    console.log('Build config:', build);
+    console.log('Waiting 8s for Railway to register patch-triggered deploys…');
+    await sleep(8000);
+    await cancelAllActive(token);
+    await sleep(2000);
   } else {
-    runNpm('railway:disable-metal');
+    console.log('Build config already V2 Railpack — skipping patch');
+    await cancelAllActive(token);
   }
 
-  runNpm('railway:sync-env');
-
-  // Wait for Railway to register any auto-triggered deployments from config patches
-  await new Promise((r) => setTimeout(r, 5000));
-
-  // Cancel all stale builds (including those auto-triggered by config patches)
-  runNpm('railway:cancel-stale-builds');
+  if (process.env.RAILWAY_SYNC_ENV === '1') {
+    runNpm('railway:sync-env');
+    console.log('Waiting 8s after env sync…');
+    await sleep(8000);
+    await cancelAllActive(token);
+    await sleep(2000);
+  }
 
   await triggerDeploy(token);
 
   runNpm('railway:deploy:wait');
   runNpm('deploy:status');
+  runNpm('railway:smoke');
 }
 
 main().catch((e) => {

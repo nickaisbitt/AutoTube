@@ -100,7 +100,7 @@ async function main() {
       process.exit(2);
     }
 
-    if (d?.id && ['BUILDING', 'DEPLOYING', 'QUEUED'].includes(d.status)) {
+    if (d?.id && ['BUILDING', 'DEPLOYING', 'INITIALIZING'].includes(d.status)) {
       const logs = await fetchBuildLogTail(token, d.id, 15);
       const tail = logs.slice(-3).join(' | ');
       const logKey = logs.at(-1) ?? '';

@@ -1,28 +1,17 @@
 #!/usr/bin/env node
 /**
- * Cancel BUILDING deployments except the newest (frees Railway build queue).
+ * Cancel duplicate BUILDING/QUEUED deployments (keep newest active).
  * Usage: npm run railway:cancel-stale-builds
  */
 import { loadRailwayToken } from './lib/railway-token.mjs';
 import { AUTOTUBE_PROJECT_ID } from './lib/railway-autotube-target.mjs';
+import { AUTOTUBE_SERVICE_ID, AUTOTUBE_ENVIRONMENT_ID } from './lib/railway-autotube-ids.mjs';
+import { railwayGql } from './lib/railway-gql.mjs';
 
-const SERVICE_ID = '5cf09f78-9182-4e95-8659-a999dc97e246';
-const ENV_ID = 'decad258-accb-49f1-a0e0-679568c883f6';
+const ACTIVE = new Set(['BUILDING', 'QUEUED', 'INITIALIZING', 'DEPLOYING']);
 
-async function gql(token, query, variables = {}) {
-  const res = await fetch('https://backboard.railway.app/graphql/v2', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const json = await res.json();
-  if (!res.ok || json.errors?.length) {
-    throw new Error(json.errors?.map((e) => e.message).join('; ') || res.statusText);
-  }
-  return json.data;
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function main() {
@@ -32,7 +21,7 @@ async function main() {
     process.exit(1);
   }
 
-  const data = await gql(
+  const data = await railwayGql(
     token,
     `query($input: DeploymentListInput!, $first: Int) {
       deployments(input: $input, first: $first) {
@@ -42,30 +31,31 @@ async function main() {
     {
       input: {
         projectId: AUTOTUBE_PROJECT_ID,
-        environmentId: ENV_ID,
-        serviceId: SERVICE_ID,
+        environmentId: AUTOTUBE_ENVIRONMENT_ID,
+        serviceId: AUTOTUBE_SERVICE_ID,
       },
-      first: 15,
+      first: 20,
     },
   );
 
   const nodes = (data.deployments?.edges ?? []).map((e) => e.node);
-  const building = nodes.filter((n) => n.status === 'BUILDING');
-  if (building.length <= 1) {
-    console.log(`Nothing to cancel (${building.length} BUILDING)`);
+  const active = nodes.filter((n) => ACTIVE.has(n.status));
+  if (active.length <= 1) {
+    console.log(`Nothing to cancel (${active.length} active)`);
     return;
   }
 
-  const [keep, ...stale] = building;
-  console.log(`Keeping ${keep.id.slice(0, 8)} (${keep.createdAt})`);
+  const [keep, ...stale] = active;
+  console.log(`Keeping ${keep.id.slice(0, 8)} ${keep.status} (${keep.createdAt})`);
 
   for (const d of stale) {
-    const ok = await gql(
+    const ok = await railwayGql(
       token,
       `mutation($id: String!) { deploymentCancel(id: $id) }`,
       { id: d.id },
     );
-    console.log(`Cancel ${d.id.slice(0, 8)} → ${ok.deploymentCancel}`);
+    console.log(`Cancel ${d.status} ${d.id.slice(0, 8)} → ${ok.deploymentCancel}`);
+    await sleep(400);
   }
 }
 

@@ -4,11 +4,7 @@
  * Usage: npm run railway:disable-metal
  */
 import { loadRailwayToken, ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
-import {
-  AUTOTUBE_SERVICE_ID,
-  AUTOTUBE_ENVIRONMENT_ID,
-} from './lib/railway-autotube-ids.mjs';
-import { railwayGql } from './lib/railway-gql.mjs';
+import { applyProdBuildConfig, readProdBuildConfig } from './lib/railway-prod-build-config.mjs';
 
 ensureRailwayApiTokenEnv();
 const token = loadRailwayToken();
@@ -17,54 +13,13 @@ if (!token) {
   process.exit(1);
 }
 
-const SERVICE_ID = process.env.RAILWAY_SERVICE_ID || AUTOTUBE_SERVICE_ID;
-const ENVIRONMENT_ID = process.env.RAILWAY_ENVIRONMENT_ID || AUTOTUBE_ENVIRONMENT_ID;
-
-const env = await railwayGql(
-  token,
-  `query($id: String!) { environment(id: $id) { config } }`,
-  { id: ENVIRONMENT_ID },
-);
-const cfg = env.environment?.config;
-const svc = cfg?.services?.[SERVICE_ID];
-if (!svc) throw new Error(`Service ${SERVICE_ID} not in environment config`);
-
-const build = svc.build ?? {};
-const next = structuredClone(svc);
-next.build = {
-  ...build,
-  builder: build.builder === 'DOCKERFILE' ? 'DOCKERFILE' : build.builder || 'RAILPACK',
-  buildEnvironment: 'V2',
-  buildCommand:
-    build.builder === 'DOCKERFILE' ? null : build.buildCommand || 'npm run build:railway',
-};
-
-if (
-  build.buildEnvironment === 'V2' &&
-  (build.builder === 'DOCKERFILE' || build.buildCommand === 'npm run build:railway')
-) {
-  console.log('Metal already off (buildEnvironment=V2)', next.build);
+const build = await readProdBuildConfig(token);
+if (build?.buildEnvironment === 'V2' && build?.buildCommand === 'npm run build:railway') {
+  console.log('Metal already off (V2 + build:railway)', build);
   process.exit(0);
 }
 
-await railwayGql(
-  token,
-  `mutation($environmentId: String!, $patch: EnvironmentConfig, $commitMessage: String) {
-    environmentPatchCommit(environmentId: $environmentId, patch: $patch, commitMessage: $commitMessage)
-  }`,
-  {
-    environmentId: ENVIRONMENT_ID,
-    patch: { services: { [SERVICE_ID]: next } },
-    commitMessage: 'Disable Metal build environment (V3→V2) for autotube',
-  },
-);
-
-const verify = await railwayGql(
-  token,
-  `query($id: String!) { environment(id: $id) { config } }`,
-  { id: ENVIRONMENT_ID },
-);
-const after = verify.environment.config.services[SERVICE_ID].build;
+const after = await applyProdBuildConfig(token, { useDockerfile: false });
 console.log('Updated build config:', after);
 if (after.buildEnvironment !== 'V2') {
   console.error('Patch did not stick — check Railway dashboard');

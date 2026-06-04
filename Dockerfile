@@ -26,7 +26,7 @@ COPY public ./public
 COPY server ./server
 COPY server.mjs deploy/server-render.mjs ./
 
-RUN npm run build && npm prune --omit=dev
+RUN npm run build
 
 ENV NODE_ENV=production
 

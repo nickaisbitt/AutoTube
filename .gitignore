@@ -21,7 +21,7 @@ Thumbs.db
 
 narration-audio-*/
 *.mp4
-!docs/artifacts/*.mp4
+docs/artifacts/
 *.mp3
 !public/audio/**
 *.aac

@@ -11,20 +11,27 @@ coverage
 # Build output (rebuilt during deploy)
 dist
 
-# Tool configs
+# Tool configs / agent specs (not needed in prod image)
 .opencode
 .kiro
 .lingma
 .vscode
 .github
+.cursor
+
+# Demo artifacts (~200MB MP4s in git) — not needed in Railway image
+docs/artifacts
+docs/
 
 # Generated files
 narration-audio-*
 server-render
 powers
 scratch
-# Keep scripts/ — postinstall runs scripts/ensure-server-render.mjs
-scripts/squad
+remotion
+
+# Dev/loop scripts — postinstall uses deploy/bootstrap-server-render.mjs
+scripts/squad/
 scripts/video-improvement-loop.mjs
 scripts/generate-full-video.mjs
 scripts/render-*.mjs
@@ -53,6 +60,7 @@ dev.log
 *.webm
 *.mp3
 *.aac
+*.gif
 test-output*
 test-final*
 
@@ -69,6 +77,5 @@ docker-compose.yml
 .env*.local
 *.tsbuildinfo
 .eslintcache
-# Keep vite/tsconfig for npm run build (Railpack)
 playwright.config.ts
 vitest.config.ts

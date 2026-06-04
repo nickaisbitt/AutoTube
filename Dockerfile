@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV NODE_OPTIONS=--max-old-space-size=3072
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV CHROME_BIN=/usr/bin/chromium
-ENV NODE_ENV=production
 
 COPY package.json package-lock.json ./
 COPY deploy/bootstrap-server-render.mjs deploy/bootstrap-server-render.mjs
@@ -28,6 +27,8 @@ COPY server ./server
 COPY server.mjs deploy/server-render.mjs ./
 
 RUN npm run build && npm prune --omit=dev
+
+ENV NODE_ENV=production
 
 EXPOSE 5173
 CMD ["npx", "tsx", "server.mjs"]

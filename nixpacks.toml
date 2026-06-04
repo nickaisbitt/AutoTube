@@ -17,6 +17,7 @@ nixPkgs = [
 # Symlink before npm ci — survives if scripts/ is omitted from the image
 cmds = [
   "if [ -d deploy/server-render ] && [ ! -e server-render ]; then ln -sfn deploy/server-render server-render; fi",
+  "pip install --break-system-packages edge-tts==7.0.2",
   "npm ci"
 ]
 cacheDirectories = [
@@ -26,9 +27,7 @@ cacheDirectories = [
 
 [phases.build]
 cmds = [
-  "pip install --break-system-packages edge-tts==7.0.2",
-  "NODE_OPTIONS=--max-old-space-size=3072 npm run build",
-  "npm prune --omit=dev"
+  "NODE_OPTIONS=--max-old-space-size=3072 npm run build"
 ]
 
 [variables]

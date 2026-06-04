@@ -1,0 +1,12 @@
+---
+description: Default new Cloud/Glass agents to Railway My Machines (not Cursor cloud VMs)
+alwaysApply: true
+---
+
+# Default agent runtime: Railway
+
+For work in this repo, use **My Machines → railway-AutoTube** (self-hosted on Railway), not Cursor cloud.
+
+Website: [cursor.com/agents](https://cursor.com/agents) with machine **railway-AutoTube**.
+
+After Railway redeploy: `node ~/Projects/cursor-railway-worker/scripts/pin-default-workers.mjs` (Cursor quit first).

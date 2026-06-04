@@ -16,12 +16,17 @@ while true; do
 import { loadRailwayToken } from './scripts/lib/railway-token.mjs';
 const token = loadRailwayToken();
 if (!token) { console.log('NO_TOKEN none'); process.exit(0); }
-const q = `query { deployments(input: { projectId: "283b075f-eb25-4a60-8468-a45d77e068bc", environmentId: "decad258-accb-49f1-a0e0-679568c883f6", serviceId: "5cf09f78-9182-4e95-8659-a999dc97e246" }, first: 1) { edges { node { id status createdAt } } } }`;
-const n = (await (await fetch('https://backboard.railway.app/graphql/v2', {
+const q = `query { deployments(input: { projectId: "283b075f-eb25-4a60-8468-a45d77e068bc", environmentId: "decad258-accb-49f1-a0e0-679568c883f6", serviceId: "5cf09f78-9182-4e95-8659-a999dc97e246" }, first: 5) { edges { node { id status createdAt } } } }`;
+const edges = (await (await fetch('https://backboard.railway.app/graphql/v2', {
   method: 'POST',
   headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
   body: JSON.stringify({ query: q }),
-})).json()).data?.deployments?.edges?.[0]?.node;
+})).json()).data?.deployments?.edges ?? [];
+const nodes = edges.map((e) => e.node);
+const n =
+  nodes.find((d) => d.status === 'BUILDING') ??
+  nodes.find((d) => d.status === 'SUCCESS') ??
+  nodes[0];
 console.log((n?.status ?? 'UNKNOWN'), (n?.id ?? 'none'));
 NODE
 )"

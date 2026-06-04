@@ -47,10 +47,9 @@ function buildRailwayVars(local) {
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
     CHROME_BIN: '/usr/bin/chromium',
     NODE_OPTIONS: '--max-old-space-size=3072',
-    RAILPACK_DEPLOY_APT_PACKAGES:
-      'ffmpeg chromium python3 python3-pip pkg-config libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev',
-    RAILPACK_BUILD_APT_PACKAGES:
-      'pkg-config libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev python3-pip',
+    // Keep small — large apt sets (chromium + dev headers) blow snapshot upload past heartbeat timeout
+    RAILPACK_DEPLOY_APT_PACKAGES: 'ffmpeg python3 python3-pip',
+    RAILPACK_BUILD_APT_PACKAGES: 'pkg-config libcairo2-dev libjpeg-dev python3-pip',
   };
   if (openRouter) {
     vars.OPENROUTER_API_KEY = openRouter;

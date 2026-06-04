@@ -20,10 +20,8 @@ cmds = [
   "pip install --break-system-packages edge-tts==7.0.2",
   "npm ci"
 ]
-cacheDirectories = [
-  "node_modules",
-  "~/.npm"
-]
+# Don't cache node_modules — avoids huge stale layers on snapshot upload
+cacheDirectories = ["~/.npm"]
 
 [phases.build]
 # Reinstall prod-only deps after vite — smaller snapshot than npm prune (which hung on Railway)

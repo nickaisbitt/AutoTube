@@ -83,8 +83,13 @@ async function main() {
     runNpm('railway:disable-metal');
   }
 
-  runNpm('railway:cancel-stale-builds');
   runNpm('railway:sync-env');
+
+  // Wait for Railway to register any auto-triggered deployments from config patches
+  await new Promise((r) => setTimeout(r, 5000));
+
+  // Cancel all stale builds (including those auto-triggered by config patches)
+  runNpm('railway:cancel-stale-builds');
 
   await triggerDeploy(token);
 

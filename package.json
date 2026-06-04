@@ -44,7 +44,10 @@
     "deploy:status": "node scripts/deploy-status.mjs",
     "railway:sync-env": "node scripts/railway-sync-env.mjs",
     "railway:deploy:wait": "node scripts/railway-wait-deploy.mjs",
-    "railway:cancel-stale-builds": "node scripts/railway-cancel-stale-builds.mjs"
+    "railway:cancel-stale-builds": "node scripts/railway-cancel-stale-builds.mjs",
+    "railway:disable-metal": "node scripts/railway-disable-metal-build.mjs",
+    "deploy:railway": "node scripts/railway-deploy-prod.mjs",
+    "railway:smoke": "node scripts/railway-smoke-prod.mjs"
   },
   "dependencies": {
     "canvas": "^3.2.3",

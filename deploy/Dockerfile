@@ -1,4 +1,4 @@
-# Single-stage image: one apt layer + vite build (avoids 50min double-install timeouts on Railway).
+# Production image (V2 builder path). No Dockerfile at repo root — Railway uses deploy/Dockerfile via config.
 FROM node:22-bookworm
 WORKDIR /app
 
@@ -24,7 +24,7 @@ COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src
 COPY public ./public
 COPY server ./server
-COPY server.mjs deploy/server-render.mjs ./
+COPY server.mjs ./
 
 RUN npm run build:railway
 

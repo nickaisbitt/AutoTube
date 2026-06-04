@@ -78,7 +78,6 @@ test-final*
 # Misc
 .DS_Store
 Thumbs.db
-Dockerfile
 docker-compose.yml
 .env
 .env.local

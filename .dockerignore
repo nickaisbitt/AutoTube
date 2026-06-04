@@ -23,6 +23,14 @@ dist
 docs/artifacts
 docs/
 
+# Large optional trees (not used at runtime on Railway)
+remotion
+deploy/node_modules
+deploy/audio
+deploy/index.html
+deploy/reviewer.html
+deploy/images
+
 # Generated files
 narration-audio-*
 server-render

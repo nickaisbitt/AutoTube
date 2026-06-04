@@ -42,7 +42,8 @@
     "env:debug-railway": "node scripts/debug-railway-credentials.mjs",
     "deploy:status": "node scripts/deploy-status.mjs",
     "railway:sync-env": "node scripts/railway-sync-env.mjs",
-    "railway:deploy:wait": "node scripts/railway-wait-deploy.mjs"
+    "railway:deploy:wait": "node scripts/railway-wait-deploy.mjs",
+    "railway:cancel-stale-builds": "node scripts/railway-cancel-stale-builds.mjs"
   },
   "dependencies": {
     "canvas": "^3.2.3",

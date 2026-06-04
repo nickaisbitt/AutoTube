@@ -36,7 +36,7 @@ async function main() {
     token,
     `query($input: DeploymentListInput!, $first: Int) {
       deployments(input: $input, first: $first) {
-        edges { node { id status createdAt meta { commitHash } } }
+        edges { node { id status createdAt } }
       }
     }`,
     {
@@ -57,7 +57,7 @@ async function main() {
   }
 
   const [keep, ...stale] = building;
-  console.log(`Keeping ${keep.id.slice(0, 8)} (${keep.meta?.commitHash?.slice(0, 7)})`);
+  console.log(`Keeping ${keep.id.slice(0, 8)} (${keep.createdAt})`);
 
   for (const d of stale) {
     const ok = await gql(
@@ -65,9 +65,7 @@ async function main() {
       `mutation($id: String!) { deploymentCancel(id: $id) }`,
       { id: d.id },
     );
-    console.log(
-      `Cancel ${d.id.slice(0, 8)} ${d.meta?.commitHash?.slice(0, 7)} → ${ok.deploymentCancel}`,
-    );
+    console.log(`Cancel ${d.id.slice(0, 8)} → ${ok.deploymentCancel}`);
   }
 }
 

@@ -26,8 +26,12 @@ cacheDirectories = [
 ]
 
 [phases.build]
+# Reinstall prod-only deps after vite — smaller snapshot than npm prune (which hung on Railway)
 cmds = [
-  "NODE_OPTIONS=--max-old-space-size=3072 npm run build"
+  "NODE_OPTIONS=--max-old-space-size=3072 npm run build",
+  "rm -rf node_modules",
+  "npm ci --omit=dev",
+  "node deploy/bootstrap-server-render.mjs"
 ]
 
 [variables]

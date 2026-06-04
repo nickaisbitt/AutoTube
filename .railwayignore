@@ -1,44 +1,29 @@
-# Dependencies (Railpack installs its own)
+# Same exclusions as .dockerignore — keeps Railpack snapshot upload small
 node_modules
-
-# Test data (448MB!)
 test-recordings
 test-results
 e2e
 tests
 coverage
-
-# Build output (rebuilt during deploy)
 dist
-
-# Tool configs / agent specs (not needed in prod image)
 .opencode
 .kiro
 .lingma
 .vscode
 .github
 .cursor
-
-# Demo artifacts (~200MB MP4s in git) — not needed in Railway image
 docs/artifacts
 docs/
-
-# Large optional trees (not used at runtime on Railway)
 remotion
 deploy/node_modules
 deploy/audio
 deploy/index.html
 deploy/reviewer.html
 deploy/images
-
-# Generated files
 narration-audio-*
 server-render
 powers
 scratch
-remotion
-
-# Dev/loop scripts — postinstall uses deploy/bootstrap-server-render.mjs
 scripts/squad/
 scripts/video-improvement-loop.mjs
 scripts/generate-full-video.mjs
@@ -53,17 +38,8 @@ scripts/export-*.mjs
 scripts/railway-*.mjs
 scripts/railway-*.sh
 scripts/deploy.sh
-scripts/lib/random-topics.mjs
-scripts/lib/stock-media-urls.mjs
-
-# Logs and temp files
 *.log
 *.pid
-*.txt
-journey*.log
-dev.log
-
-# Media files
 *.mp4
 *.webm
 *.mp3
@@ -71,21 +47,11 @@ dev.log
 *.gif
 test-output*
 test-final*
-
-# Markdown docs
 *.md
-
-# Git metadata (not needed in image)
-.git
-
-# Misc
 .DS_Store
-Thumbs.db
-docker-compose.yml
 .env
 .env.local
 .env*.local
-*.tsbuildinfo
-.eslintcache
 playwright.config.ts
 vitest.config.ts
+.git

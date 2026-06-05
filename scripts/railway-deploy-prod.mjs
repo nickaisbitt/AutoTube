@@ -2,8 +2,8 @@
 /**
  * One-shot production deploy: single config patch, one trigger, wait for live health.
  * Usage: npm run deploy:railway
- *   RAILWAY_SYNC_ENV=1     — also upsert vars from .env.local (each may queue a deploy; use sparingly)
- *   RAILWAY_USE_DOCKERFILE=1 — use deploy/Dockerfile (usually worse snapshot timeouts)
+ *   RAILWAY_SYNC_ENV=1     — batch env vars into one environmentPatchCommit
+ *   RAILWAY_USE_DOCKERFILE=1 — use deploy/Dockerfile (emergency only; same snapshot path)
  */
 import { spawnSync } from 'node:child_process';
 import { loadRailwayToken, ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
@@ -92,16 +92,18 @@ async function main() {
   }
 
   const useDocker = process.env.RAILWAY_USE_DOCKERFILE === '1';
+  const syncEnv = process.env.RAILWAY_SYNC_ENV === '1';
   const current = await readProdBuildConfig(token);
   const wantRailpack = !useDocker;
   const needsPatch =
     current?.buildEnvironment !== 'V2' ||
     (wantRailpack &&
       (current?.builder !== 'RAILPACK' || current?.buildCommand !== 'npm run build:railway')) ||
-    (!wantRailpack && current?.builder !== 'DOCKERFILE');
+    (!wantRailpack && current?.builder !== 'DOCKERFILE') ||
+    syncEnv;
 
   if (needsPatch) {
-    const build = await applyProdBuildConfig(token, { useDockerfile: useDocker });
+    const build = await applyProdBuildConfig(token, { useDockerfile: useDocker, syncEnv });
     console.log('Build config:', build);
     console.log('Waiting 8s for Railway to register patch-triggered deploys…');
     await sleep(8000);
@@ -112,20 +114,19 @@ async function main() {
     await cancelAllActive(token);
   }
 
-  if (process.env.RAILWAY_SYNC_ENV === '1') {
-    if (runNpm('railway:sync-env', { optional: true })) {
-      console.log('Waiting 8s after env sync…');
-      await sleep(8000);
-      await cancelAllActive(token);
-      await sleep(2000);
-    }
+  const deploymentId = await triggerDeploy(token);
+
+  const waitOk = runNpm('railway:deploy:wait');
+  runNpm('deploy:status');
+  runNpm('railway:smoke', { optional: true });
+
+  if (!waitOk) {
+    console.log('\nDeploy did not succeed — generating support bundle…');
+    runNpm('railway:support-bundle', { optional: true });
+    process.exit(1);
   }
 
-  await triggerDeploy(token);
-
-  runNpm('railway:deploy:wait');
-  runNpm('deploy:status');
-  runNpm('railway:smoke');
+  console.log(`\nDeploy ${deploymentId} finished. Verify deploy.gitCommit in health.`);
 }
 
 main().catch((e) => {

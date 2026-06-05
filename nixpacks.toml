@@ -1,3 +1,6 @@
+# DEPRECATED: Railpack reads railway.toml, not nixpacks.toml.
+# Kept for reference / emergency Nixpacks only. See railway.toml + build:railway.
+
 [phases.setup]
 nixPkgs = [
   "ffmpeg",

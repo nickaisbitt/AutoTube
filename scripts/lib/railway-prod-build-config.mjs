@@ -3,9 +3,13 @@ import {
   AUTOTUBE_ENVIRONMENT_ID,
 } from './railway-autotube-ids.mjs';
 import { railwayGql } from './railway-gql.mjs';
+import {
+  buildProdRailwayVars,
+  readEnvLocal,
+  varsForEnvironmentPatch,
+} from './railway-prod-env.mjs';
 
-/** One patch: V2 + Railpack + build:railway (avoids per-step auto-deploy storms). */
-export async function applyProdBuildConfig(token, { useDockerfile = false } = {}) {
+async function readServiceBlock(token) {
   const env = await railwayGql(
     token,
     `query($id: String!) { environment(id: $id) { config } }`,
@@ -13,7 +17,10 @@ export async function applyProdBuildConfig(token, { useDockerfile = false } = {}
   );
   const svc = env.environment?.config?.services?.[AUTOTUBE_SERVICE_ID];
   if (!svc) throw new Error('autotube missing from environment config');
+  return structuredClone(svc);
+}
 
+function buildBlock(svc, { useDockerfile = false, syncEnv = false } = {}) {
   const next = structuredClone(svc);
   if (useDockerfile) {
     next.build = {
@@ -32,6 +39,20 @@ export async function applyProdBuildConfig(token, { useDockerfile = false } = {}
       buildCommand: 'npm run build:railway',
     };
   }
+  if (syncEnv) {
+    const vars = buildProdRailwayVars(readEnvLocal());
+    next.variables = varsForEnvironmentPatch(vars);
+  }
+  return next;
+}
+
+/** One patch: V2 + Railpack + optional env vars (avoids per-step auto-deploy storms). */
+export async function applyProdBuildConfig(
+  token,
+  { useDockerfile = false, syncEnv = false } = {},
+) {
+  const svc = await readServiceBlock(token);
+  const next = buildBlock(svc, { useDockerfile, syncEnv });
 
   await railwayGql(
     token,
@@ -43,7 +64,9 @@ export async function applyProdBuildConfig(token, { useDockerfile = false } = {}
       patch: { services: { [AUTOTUBE_SERVICE_ID]: next } },
       commitMessage: useDockerfile
         ? 'autotube: DOCKERFILE V2'
-        : 'autotube: RAILPACK V2 + build:railway',
+        : syncEnv
+          ? 'autotube: RAILPACK V2 + env vars'
+          : 'autotube: RAILPACK V2 + build:railway',
     },
   );
 
@@ -57,4 +80,8 @@ export async function readProdBuildConfig(token) {
     { id: AUTOTUBE_ENVIRONMENT_ID },
   );
   return env.environment?.config?.services?.[AUTOTUBE_SERVICE_ID]?.build ?? null;
+}
+
+export async function readProdServiceConfig(token) {
+  return readServiceBlock(token);
 }

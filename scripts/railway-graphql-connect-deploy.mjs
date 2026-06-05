@@ -1,8 +1,24 @@
 #!/usr/bin/env node
 /**
- * Connect autotube → GitHub and trigger deploy (no Railway CLI).
- * Usage: RAILWAY_API_TOKEN=... npm run railway:graphql:connect
+ * DEPRECATED — causes deploy storms (8+ parallel builds per push).
+ * Use: npm run deploy:railway
+ *
+ * To force this script: RAILWAY_ALLOW_GRAPHQL_CONNECT=1 npm run railway:graphql:connect
  */
+if (process.env.RAILWAY_ALLOW_GRAPHQL_CONNECT !== '1') {
+  console.error(`
+⚠️  railway:graphql:connect is deprecated — it queues multiple deploys.
+
+Use the canonical path instead:
+  set -a && . ./.env.local && set +a
+  npm run railway:audit
+  npm run deploy:railway
+
+To run this script anyway:
+  RAILWAY_ALLOW_GRAPHQL_CONNECT=1 npm run railway:graphql:connect
+`);
+  process.exit(1);
+}
 import { loadRailwayToken, ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
 import {
   AUTOTUBE_PROJECT_ID,

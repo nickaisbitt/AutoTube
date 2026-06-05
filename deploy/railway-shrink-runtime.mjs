@@ -28,9 +28,12 @@ const REMOVE = [
   'playwright.config.ts',
   'vitest.config.ts',
   'nixpacks.toml',
+  'deploy/Dockerfile',
   'deploy/Dockerfile.example',
   'deploy/index.html',
   'deploy/reviewer.html',
+  'deploy/node_modules',
+  'deploy/audio',
 ];
 
 for (const rel of REMOVE) {

@@ -34,9 +34,7 @@ if (ghToken.status !== 0 || !ghToken.stdout.trim()) {
   process.exit(1);
 }
 
-run('docker', ['login', 'ghcr.io', '-u', 'nickaisbitt', '--password-stdin'], {
-  input: ghToken.stdout.trim(),
-});
+run('sh', ['-c', 'gh auth token | docker login ghcr.io -u nickaisbitt --password-stdin']);
 
 run('docker', [
   'build',

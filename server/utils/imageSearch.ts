@@ -430,7 +430,7 @@ export async function fetchGoogleImages(query: string): Promise<WebImageResult[]
   // HEADLESS BROWSER FALLBACK — Puppeteer renders the JS-heavy Google Images
   // page and extracts actual image URLs from the DOM.
   // ---------------------------------------------------------------------------
-  if (results.length === 0) {
+  if (results.length === 0 && process.env.AUTOTUBE_DISABLE_BROWSER_SEARCH !== '1') {
     try {
       const headlessResults = await fetchGoogleImagesHeadless(query);
       for (const r of headlessResults) addResult(r);
@@ -481,12 +481,16 @@ export async function fetchGoogleImages(query: string): Promise<WebImageResult[]
  * Renders the full JS page and extracts image URLs from the DOM.
  */
 async function fetchGoogleImagesHeadless(query: string): Promise<WebImageResult[]> {
+  if (process.env.AUTOTUBE_DISABLE_BROWSER_SEARCH === '1') return [];
+  const puppeteer = await getPuppeteer();
+  if (!puppeteer) return [];
+
   const CHROME_PATH = process.env.PUPPETEER_EXECUTABLE_PATH
     || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     || "/usr/bin/google-chrome"
     || "/usr/bin/chromium";
 
-  const browser = await (await getPuppeteer()).launch({
+  const browser = await puppeteer.launch({
     headless: true,
     executablePath: CHROME_PATH,
     args: [

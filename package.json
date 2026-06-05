@@ -42,6 +42,7 @@
     "railway:audit": "node scripts/railway-audit.mjs",
     "railway:support-bundle": "node scripts/railway-support-bundle.mjs",
     "railway:up": "node scripts/railway-up-escape.mjs",
+    "railway:escalate": "node scripts/railway-escalate-station.mjs",
     "railway:graphql:connect:curl": "bash scripts/railway-graphql-curl-connect.sh",
     "env:debug-railway": "node scripts/debug-railway-credentials.mjs",
     "deploy:status": "node scripts/deploy-status.mjs",
@@ -50,6 +51,7 @@
     "railway:cancel-stale-builds": "node scripts/railway-cancel-stale-builds.mjs",
     "railway:disable-metal": "node scripts/railway-disable-metal-build.mjs",
     "deploy:railway": "node scripts/railway-deploy-prod.mjs",
+    "deploy:railway:registry": "node scripts/railway-deploy-registry.mjs",
     "railway:smoke": "node scripts/railway-smoke-prod.mjs"
   },
   "dependencies": {

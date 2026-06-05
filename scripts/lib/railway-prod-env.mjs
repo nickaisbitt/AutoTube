@@ -36,10 +36,10 @@ export function buildProdRailwayVars(local = readEnvLocal()) {
     AUTOTUBE_FORCE_CPU: '1',
     NODE_ENV: 'production',
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
-    CHROME_BIN: '/usr/bin/chromium',
+    AUTOTUBE_DISABLE_BROWSER_SEARCH: '1',
     NODE_OPTIONS: '--max-old-space-size=3072',
     RAILPACK_BUILD_APT_PACKAGES: 'pkg-config libcairo2-dev libjpeg-dev python3-pip',
-    RAILPACK_DEPLOY_APT_PACKAGES: 'ffmpeg python3 python3-pip chromium',
+    RAILPACK_DEPLOY_APT_PACKAGES: 'ffmpeg python3 python3-pip',
   };
   if (openRouter) {
     vars.OPENROUTER_API_KEY = openRouter;

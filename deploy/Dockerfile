@@ -24,14 +24,14 @@ FROM node:22-bookworm AS runtime
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg chromium python3 python3-pip \
+    ffmpeg python3 python3-pip \
     && pip3 install --break-system-packages edge-tts==7.0.2 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size=3072
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-ENV CHROME_BIN=/usr/bin/chromium
+ENV AUTOTUBE_DISABLE_BROWSER_SEARCH=1
 
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules

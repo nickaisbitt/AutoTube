@@ -19,14 +19,21 @@ import {
 
 ensureRailwayApiTokenEnv();
 
-function runNpm(script) {
+function runNpm(script, { optional = false } = {}) {
   console.log(`\n> npm run ${script}\n`);
   const r = spawnSync('npm', ['run', script], {
     stdio: 'inherit',
     env: process.env,
     cwd: process.cwd(),
   });
-  if (r.status !== 0) process.exit(r.status ?? 1);
+  if (r.status !== 0) {
+    if (optional) {
+      console.warn(`Warning: ${script} exited ${r.status ?? 1} (continuing)`);
+      return false;
+    }
+    process.exit(r.status ?? 1);
+  }
+  return true;
 }
 
 function sleep(ms) {
@@ -106,11 +113,12 @@ async function main() {
   }
 
   if (process.env.RAILWAY_SYNC_ENV === '1') {
-    runNpm('railway:sync-env');
-    console.log('Waiting 8s after env sync…');
-    await sleep(8000);
-    await cancelAllActive(token);
-    await sleep(2000);
+    if (runNpm('railway:sync-env', { optional: true })) {
+      console.log('Waiting 8s after env sync…');
+      await sleep(8000);
+      await cancelAllActive(token);
+      await sleep(2000);
+    }
   }
 
   await triggerDeploy(token);

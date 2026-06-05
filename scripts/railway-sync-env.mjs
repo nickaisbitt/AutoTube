@@ -6,13 +6,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadRailwayToken } from './lib/railway-token.mjs';
-import {
-  AUTOTUBE_PROJECT_ID,
-} from './lib/railway-autotube-target.mjs';
+import { AUTOTUBE_PROJECT_ID } from './lib/railway-autotube-target.mjs';
+import { railwayGql } from './lib/railway-gql.mjs';
 
 const SERVICE_ID = process.env.RAILWAY_SERVICE_ID || '5cf09f78-9182-4e95-8659-a999dc97e246';
 const ENV_ID = process.env.RAILWAY_ENVIRONMENT_ID || 'decad258-accb-49f1-a0e0-679568c883f6';
-const GRAPHQL = 'https://backboard.railway.app/graphql/v2';
 const PROD_URL = 'https://autotube-production.up.railway.app';
 
 function readEnvLocal(cwd = process.cwd()) {
@@ -60,29 +58,13 @@ function buildRailwayVars(local) {
   return vars;
 }
 
-async function gql(token, query, variables = {}) {
-  const res = await fetch(GRAPHQL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const json = await res.json();
-  if (!res.ok || json.errors?.length) {
-    throw new Error(json.errors?.map((e) => e.message).join('; ') || res.statusText);
-  }
-  return json.data;
-}
-
 async function upsertVar(token, projectId, environmentId, serviceId, name, value) {
   const mutation = `
     mutation($input: VariableUpsertInput!) {
       variableUpsert(input: $input)
     }
   `;
-  await gql(token, mutation, {
+  await railwayGql(token, mutation, {
     input: {
       projectId,
       environmentId,
@@ -105,6 +87,7 @@ async function main() {
   console.log(`Syncing ${Object.keys(vars).length} vars to AutoTube-Deploy / autotube…`);
   for (const [name, value] of Object.entries(vars)) {
     await upsertVar(token, AUTOTUBE_PROJECT_ID, ENV_ID, SERVICE_ID, name, value);
+    await new Promise((r) => setTimeout(r, 250));
   }
   console.log('Done. Redeploy may be required for some vars to apply.');
 }

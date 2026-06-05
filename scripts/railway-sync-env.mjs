@@ -48,8 +48,8 @@ function buildRailwayVars(local) {
     CHROME_BIN: '/usr/bin/chromium',
     NODE_OPTIONS: '--max-old-space-size=3072',
     // Keep small — large apt sets (chromium + dev headers) blow snapshot upload past heartbeat timeout
-    RAILPACK_DEPLOY_APT_PACKAGES: 'ffmpeg python3 python3-pip',
-    RAILPACK_BUILD_APT_PACKAGES: 'pkg-config libcairo2-dev libjpeg-dev python3-pip',
+    RAILPACK_DEPLOY_APT_PACKAGES: 'ffmpeg chromium python3 python3-pip',
+    RAILPACK_BUILD_APT_PACKAGES: 'pkg-config libcairo2-dev libjpeg-dev libpango1.0-dev python3-pip',
   };
   if (openRouter) {
     vars.OPENROUTER_API_KEY = openRouter;

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
  * Remove dev-only trees from /app before Railway snapshots the image.
- * Safe on Railway build only — do not run locally unless you know why.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,9 +34,8 @@ const REMOVE = [
 ];
 
 for (const rel of REMOVE) {
-  const abs = path.join(ROOT, rel);
   try {
-    fs.rmSync(abs, { recursive: true, force: true });
+    fs.rmSync(path.join(ROOT, rel), { recursive: true, force: true });
   } catch {
     /* ignore */
   }

@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-COPY deploy/bootstrap-server-render.mjs deploy/bootstrap-server-render.mjs
+COPY deploy/bootstrap-server-render.mjs deploy/railway-shrink-runtime.mjs deploy/
 COPY deploy/server-render deploy/server-render
 RUN npm ci && node deploy/bootstrap-server-render.mjs
 
@@ -15,7 +15,7 @@ COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src
 COPY public ./public
 COPY server ./server
-COPY server.mjs scripts/railway-shrink-runtime.mjs ./
+COPY server.mjs ./
 
 ENV NODE_OPTIONS=--max-old-space-size=3072
 RUN npm run build:railway

@@ -21,8 +21,9 @@ export function resolveOpenRouterKey() {
 }
 
 export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || 'http://localhost:5173') {
+  const timeoutMs = Number(process.env.DEV_SERVER_CHECK_TIMEOUT_MS) || 30_000;
   try {
-    const r = await fetch(devServer, { signal: AbortSignal.timeout(5000) });
+    const r = await fetch(devServer, { signal: AbortSignal.timeout(timeoutMs) });
     return r.ok;
   } catch {
     return false;

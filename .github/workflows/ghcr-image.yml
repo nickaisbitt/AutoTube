@@ -28,13 +28,17 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libcairo2-dev libjpeg-dev libpango1.0-dev libgif-dev
 
-      - name: Build production tree
-        timeout-minutes: 25
-        run: |
-          npm ci --ignore-scripts --prefer-offline
-          npm rebuild canvas
-          node deploy/bootstrap-server-render.mjs
-          npm run build
+      - name: npm ci
+        run: npm ci --ignore-scripts --prefer-offline
+
+      - name: Rebuild canvas
+        run: npm rebuild canvas
+
+      - name: Bootstrap server-render
+        run: node deploy/bootstrap-server-render.mjs
+
+      - name: Vite build
+        run: npm run build
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

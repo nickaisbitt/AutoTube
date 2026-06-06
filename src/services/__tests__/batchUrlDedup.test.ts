@@ -169,11 +169,9 @@ describe('Bug 15: batch job URL dedup map reset', () => {
       await result.current.batchGenerate(jobs);
     });
 
-    // resetUsedUrlsMap should be called at least once per job (at start)
-    // plus once per job in the finally block = at least 4 calls for 2 jobs
+    // Once at batch start + once per job in finally (sequential jobs — no mid-job reset)
     expect(resetUsedUrlsMap).toHaveBeenCalled();
-    // At minimum: 2 calls at start of each job + 2 calls in finally blocks = 4
-    expect(resetUsedUrlsMap.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(resetUsedUrlsMap.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
   /**
@@ -226,12 +224,8 @@ describe('Bug 15: batch job URL dedup map reset', () => {
       await result.current.batchGenerate(jobs);
     });
 
-    // Even though job 1 failed, resetUsedUrlsMap should have been called:
-    // - Once at start of job 1
-    // - Once in finally of job 1 (the fix)
-    // - Once at start of job 2
-    // - Once in finally of job 2
-    expect(resetUsedUrlsMap.mock.calls.length).toBeGreaterThanOrEqual(4);
+    // Batch start reset + finally after each job (job 1 error still runs finally)
+    expect(resetUsedUrlsMap.mock.calls.length).toBeGreaterThanOrEqual(3);
 
     // Verify the batch completed (both jobs processed)
     expect(result.current.batchJobs).toHaveLength(2);
@@ -285,7 +279,7 @@ describe('Bug 15: batch job URL dedup map reset', () => {
     });
 
     // For each job, resetUsedUrlsMap should appear before generateAIScript
-    // Pattern: reset, generate, ..., reset(finally), reset, generate, ..., reset(finally)
+    // Pattern: reset(batch), generate, reset(finally), generate, reset(finally)
     const resetIndices = callOrder
       .map((call, idx) => (call === 'resetUsedUrlsMap' ? idx : -1))
       .filter((idx) => idx >= 0);

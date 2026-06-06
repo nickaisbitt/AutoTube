@@ -146,8 +146,8 @@ if (!liveOnLocal && !health.error) {
 } else if (!health.error) {
   console.log('✓ prod live on local HEAD (git or GHCR image tag)');
 }
-console.log('\nCanonical deploy (Railpack): npm run deploy:railway');
-console.log('GHCR escape (snapshot hangs): gh workflow run ghcr-image.yml && npm run deploy:railway:registry:pull');
+console.log('\nCanonical deploy (GHCR): gh workflow run ghcr-image.yml && npm run deploy:railway:registry:pull');
+console.log('Railpack fallback (snapshot often hangs): npm run deploy:railway');
 console.log('Avoid: npm run railway:graphql:connect (causes deploy storms)');
 console.log('Tip: disable GitHub auto-deploy in Railway during fix passes\n');
 

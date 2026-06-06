@@ -25,4 +25,4 @@ if (after.buildEnvironment !== 'V2') {
   console.error('Patch did not stick — check Railway dashboard');
   process.exit(1);
 }
-console.log('Done. Redeploy: npm run deploy:railway');
+console.log('Done. Redeploy: npm run deploy:railway:registry:pull');

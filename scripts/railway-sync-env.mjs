@@ -17,7 +17,7 @@ async function main() {
   console.log(`Patching ${Object.keys(vars).length} vars in one environmentPatchCommit…`);
   const build = await applyProdBuildConfig(token, { useDockerfile: false, syncEnv: true });
   console.log('Build config:', build);
-  console.log('Done. Redeploy: npm run deploy:railway');
+  console.log('Done. Redeploy: npm run deploy:railway:registry:pull');
 }
 
 main().catch((e) => {

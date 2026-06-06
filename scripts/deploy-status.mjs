@@ -134,7 +134,7 @@ if (health.error) {
 console.log('\n--- Numbered next steps ---\n');
 let n = 1;
 if (!token) {
-  console.log(`${n}. Add RAILWAY_API_TOKEN to .env.local, then: npm run deploy:railway`);
+  console.log(`${n}. Add RAILWAY_API_TOKEN to .env.local, then: npm run deploy:railway:registry:pull`);
   n++;
 }
 if (buildCfg?.buildEnvironment === 'V3') {

@@ -620,10 +620,10 @@ export function useVideoProject() {
     }));
     setBatchJobs(initialJobs);
     setIsBatchProcessing(true);
+    resetUsedUrlsMap();
 
     for (let i = 0; i < initialJobs.length; i++) {
       const job = initialJobs[i];
-      resetUsedUrlsMap();
 
       initialJobs[i] = { ...job, status: 'running', startedAt: new Date() };
       setBatchJobs([...initialJobs]);

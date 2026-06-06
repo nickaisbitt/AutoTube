@@ -1,130 +1,9 @@
+import '../../store/__tests__/storeHookMocks';
+import { makeHookSafeSegments } from '../../store/__tests__/storeHookTestHelpers';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useVideoProject } from '../../store';
-import type { TopicConfig, ScriptSegment } from '../../types';
-
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
-
-// Mock service modules so we can control their behavior and inspect abort signals
-vi.mock('../../services/llm', () => ({
-  generateAIScript: vi.fn(),
-  reviewAndImproveScript: vi.fn((segs: unknown) => Promise.resolve(segs)),
-  refineScriptMultiPass: vi.fn((segs: unknown) => Promise.resolve(segs)),
-  generateVideoTitle: vi.fn(() => Promise.resolve('Test Title')),
-  generateSeriesMetadata: vi.fn(),
-  generatePinnedComments: vi.fn(),
-  generateHashtags: vi.fn(),
-  mapEmotionalArc: vi.fn(() => [{ emotion: 'curiosity', segmentIndex: 0, intensity: 0.5 }]),
-  validateStoryArc: vi.fn(() => ({ passed: true, score: 100, issues: [] })),
-}));
-
-vi.mock('../../services/llm/titleGenerator', () => ({
-  generateTitleVariants: vi.fn(() => Promise.resolve({
-    direct: 'Direct Title',
-    curiosityGap: 'Curiosity Gap Title',
-    emotionalUrgent: 'Emotional Urgent Title',
-  })),
-}));
-
-vi.mock('../../services/renderingShared', () => ({
-  assignSceneLayouts: vi.fn((segs: unknown[]) => (segs as unknown[]).map(() => 'centered-text')),
-  scheduleRetentionBeats: vi.fn(() => []),
-}));
-
-vi.mock('../../services/tts', () => ({
-}));
-
-vi.mock('../../services/media', () => ({
-  sourceSegmentMedia: vi.fn(),
-  replaceMediaAsset: vi.fn(),
-  resetUsedUrlsMap: vi.fn(),
-}));
-
-vi.mock('../../services/visualPlanner', () => ({
-  resolveTopicContext: vi.fn(),
-  planSegmentVisuals: vi.fn(),
-}));
-
-vi.mock('../../services/renderer', () => ({
-  QUALITY_PRESETS: {
-    draft: { width: 854, height: 480, fps: 24 },
-    standard: { width: 1280, height: 720, fps: 30 },
-    high: { width: 1920, height: 1080, fps: 30 },
-  },
-  renderVideoToBlob: vi.fn(),
-}));
-
-vi.mock('../../services/analytics', () => ({
-  trackVideoGeneration: vi.fn(),
-}));
-
-vi.mock('../../services/segmentReorderer', () => ({
-  reorderForHook: vi.fn((p: unknown) => p),
-}));
-
-vi.mock('../../services/captionUtils', () => ({
-  CHART_KEYWORDS: [],
-}));
-
-vi.mock('../../services/logger', () => ({
-  subscribeToLogs: vi.fn(() => () => {}),
-  logger: {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    success: vi.fn(),
-  },
-}));
-
-vi.mock('../../utils/speech', () => ({
-  hasSpeechSupport: vi.fn(() => false),
-  loadSpeechVoices: vi.fn(async () => []),
-  pickPreferredVoice: vi.fn(() => null),
-  stopSpeaking: vi.fn(),
-}));
-
-vi.mock('../../services/aiEditor', () => ({
-  runAIEditPass: vi.fn(),
-}));
-
-vi.mock('../../services/projectMigrations', () => ({
-  CURRENT_PROJECT_VERSION: 1,
-  migrateProject: vi.fn((p: unknown) => p),
-}));
-
-vi.mock('../../services/tts/grokEngine', () => ({
-  generateGrokTts: vi.fn(),
-}));
-
-vi.mock('../../services/tts', () => ({
-  generateGrokTts: vi.fn(),
-  generateMeloTts: vi.fn(),
-}));
-
-vi.mock('../../services/blindReview', () => ({
-  runBlindReview: vi.fn(),
-}));
-
-vi.mock('../../services/seoTitles', () => ({
-  extractHookLine: vi.fn(),
-}));
-
-vi.mock('../../utils/secureStorage', () => ({
-  hasEncryptedConfig: vi.fn(() => false),
-  loadEncryptedBlob: vi.fn(() => null),
-  loadConfigFromSession: vi.fn(() => null),
-  saveConfigToSession: vi.fn(),
-  clearEncryptedConfig: vi.fn(),
-  clearSessionConfig: vi.fn(),
-  persistEncryptedConfig: vi.fn(),
-  decryptConfig: vi.fn(),
-}));
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+import type { TopicConfig } from '../../types';
 
 const TOPIC_CONFIG: TopicConfig = {
   topic: 'Test Topic',
@@ -133,17 +12,6 @@ const TOPIC_CONFIG: TopicConfig = {
   tone: 'informative',
   audience: 'General audience',
 };
-
-function makeSegments(count = 2): ScriptSegment[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `seg-${i}`,
-    type: 'section' as const,
-    title: `Segment ${i}`,
-    narration: `Narration text for segment ${i}`,
-    visualNote: 'Some visual note',
-    duration: 10,
-  }));
-}
 
 // ---------------------------------------------------------------------------
 // Task 10.7: Abort signal propagation through the store
@@ -238,7 +106,7 @@ describe('Abort signal propagation through the store', () => {
   // ── Requirement 2.2: Cancelling during media sourcing stops new requests ──
 
   it('cancelling during media sourcing aborts via AbortSignal', async () => {
-    const segments = makeSegments(3);
+    const segments = makeHookSafeSegments(3);
 
     // Set up resolveTopicContext to return a basic context
     resolveTopicContext.mockResolvedValue({
@@ -329,7 +197,7 @@ describe('Abort signal propagation through the store', () => {
   // ── Requirement 2.3: Cancelling during narration stops processing ──
 
   it('cancelling during narration generation resets step status', async () => {
-    const segments = makeSegments(3);
+    const segments = makeHookSafeSegments(3);
 
     // Override the speech mocks for this test so loadSpeechVoices hangs,
     // keeping generateNarration paused at the voice-loading step.

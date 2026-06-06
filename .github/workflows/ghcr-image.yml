@@ -38,6 +38,7 @@ jobs:
         run: node deploy/bootstrap-server-render.mjs
 
       - name: Vite build
+        timeout-minutes: 10
         run: npm run build
 
       - name: Log in to GHCR

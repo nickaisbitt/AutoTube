@@ -10,6 +10,11 @@ import {
   AUTOTUBE_ENVIRONMENT_ID,
 } from './lib/railway-autotube-ids.mjs';
 import { AUTOTUBE_PROJECT_ID } from './lib/railway-autotube-target.mjs';
+import {
+  deployMatchesLocal,
+  imageTagFromDeploy,
+  prodLooksLive,
+} from './lib/railway-deploy-evidence.mjs';
 
 const HEALTH_URL =
   process.env.AUTOTUBE_HEALTH_URL ||
@@ -109,12 +114,20 @@ if (health.error) {
   console.log(`Prod git branch: ${deploy.gitBranch ?? '—'}`);
   console.log(`GitHub source connected: ${deploy.sourceConnected ? 'yes' : 'no / unknown'}`);
 
-  if (localSha && deploy.gitCommit) {
+  const imgTag = imageTagFromDeploy(latestDeploy);
+  if (imgTag) console.log(`Latest deploy image tag: ${imgTag.slice(0, 12)}`);
+  const live = prodLooksLive({ health, latestDeploy, localSha });
+  if (localSha && (deploy.gitCommit || imgTag)) {
     const match =
-      deploy.gitCommit.startsWith(localSha) || localSha.startsWith(deploy.gitCommit);
-    console.log(`Local matches prod: ${match ? 'YES' : 'NO — push master then wait for Railway deploy'}`);
-  } else if (health.uptime > 86_400) {
-    console.log('Prod container is old (>24h uptime) — likely not redeployed after recent pushes.');
+      (deploy.gitCommit &&
+        (deploy.gitCommit.startsWith(localSha) || localSha.startsWith(deploy.gitCommit))) ||
+      deployMatchesLocal(latestDeploy, localSha);
+    console.log(`Local matches prod: ${match ? 'YES' : 'NO'}`);
+  }
+  if (!live && health.uptime > 3600) {
+    console.log('Prod may be stale — redeploy if local has newer commits.');
+  } else if (live) {
+    console.log('Prod confirmed live on local HEAD.');
   }
 }
 
@@ -128,18 +141,12 @@ if (buildCfg?.buildEnvironment === 'V3') {
   console.log(`${n}. Disable Metal: npm run railway:disable-metal`);
   n++;
 }
-if (health.uptime > 3600 && !health.deploy?.gitCommit) {
-  console.log(`${n}. Deploy: npm run deploy:railway`);
+const live = prodLooksLive({ health, latestDeploy, localSha });
+if (!live) {
+  console.log(`${n}. Deploy: gh workflow run ghcr-image.yml (wait green) then npm run deploy:railway:registry:pull`);
   n++;
-} else if (localSha && health.deploy?.gitCommit) {
-  const match =
-    health.deploy.gitCommit.startsWith(localSha) || localSha.startsWith(health.deploy.gitCommit);
-  if (!match) {
-    console.log(`${n}. Deploy latest: npm run deploy:railway`);
-    n++;
-  }
 }
-console.log(`${n}. Verify: curl ${HEALTH_URL} — uptime <15m and deploy.gitCommit matches local`);
+console.log(`${n}. Verify: npm run railway:completion-check`);
 n++;
 console.log(`${n}. Smoke: npm run railway:smoke`);
 n++;

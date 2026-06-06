@@ -27,8 +27,12 @@ if (!healthRes.ok) {
 const health = await healthRes.json();
 console.log('Health:', JSON.stringify({ status: health.status, uptime: Math.round(health.uptime), deploy: health.deploy }));
 
-if (health.uptime > 900 && !health.deploy?.gitCommit) {
-  console.warn('Warning: uptime >15m and no gitCommit — may still be old container');
+if (
+  health.uptime > 86_400 &&
+  !health.deploy?.gitCommit &&
+  !health.deploy?.deployImage
+) {
+  console.warn('Warning: uptime >24h with no deploy revision — likely stale container');
 }
 
 let ok = true;

@@ -25,6 +25,7 @@ export async function handleHealth(
         "",
       )
     : null;
+  const deployImage = process.env.DEPLOY_IMAGE?.trim() || null;
 
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(
@@ -35,6 +36,7 @@ export async function handleHealth(
         gitCommit,
         gitBranch,
         gitRepo,
+        deployImage,
         sourceConnected: Boolean(gitRepo && gitCommit),
       },
       memoryUsage: {

@@ -7,6 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pip3 install --break-system-packages edge-tts==7.0.2 \
     && rm -rf /var/lib/apt/lists/*
 
+ARG GIT_COMMIT=
+ARG DEPLOY_IMAGE=
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV DEPLOY_IMAGE=${DEPLOY_IMAGE}
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size=3072
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1

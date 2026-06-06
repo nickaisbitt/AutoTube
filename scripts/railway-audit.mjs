@@ -12,6 +12,11 @@ import {
 } from './lib/railway-autotube-ids.mjs';
 import { AUTOTUBE_PROJECT_ID, AUTOTUBE_PROJECT_NAME } from './lib/railway-autotube-target.mjs';
 import { readProdBuildConfig } from './lib/railway-prod-build-config.mjs';
+import {
+  deployMatchesLocal,
+  imageTagFromDeploy,
+  prodLooksLive,
+} from './lib/railway-deploy-evidence.mjs';
 
 const HEALTH_URL =
   process.env.AUTOTUBE_HEALTH_URL ||
@@ -101,10 +106,15 @@ if (health.error) {
   const deploy = health.deploy ?? {};
   console.log(`status: ${health.status}`);
   console.log(`uptime: ${h}h (${Math.round(health.uptime)}s)`);
-  console.log(`gitCommit: ${deploy.gitCommit ?? '(missing — old deploy)'}`);
-  if (localSha && deploy.gitCommit) {
+  console.log(`gitCommit: ${deploy.gitCommit ?? '(not in container — GHCR deploys use image tag)'}`);
+  const latestOk = deps.find((d) => d.status === 'SUCCESS');
+  const imgTag = imageTagFromDeploy(latestOk);
+  if (imgTag) console.log(`latest image tag: ${imgTag.slice(0, 12)}`);
+  if (localSha && (deploy.gitCommit || imgTag)) {
     const match =
-      deploy.gitCommit.startsWith(localSha) || localSha.startsWith(deploy.gitCommit);
+      (deploy.gitCommit &&
+        (deploy.gitCommit.startsWith(localSha) || localSha.startsWith(deploy.gitCommit))) ||
+      deployMatchesLocal(latestOk, localSha);
     console.log(`matches local: ${match ? 'YES' : 'NO'}`);
   }
 }
@@ -128,11 +138,16 @@ if (active.length > 1) {
 } else {
   console.log('✓ no active deploys');
 }
-if (health.uptime > 86_400 && !health.deploy?.gitCommit) {
-  console.log('✗ prod container is stale (>24h, no gitCommit)');
+const latestOk = deps.find((d) => d.status === 'SUCCESS');
+const liveOnLocal = prodLooksLive({ health, latestDeploy: latestOk, localSha });
+if (!liveOnLocal && !health.error) {
+  console.log('✗ prod not confirmed on local HEAD (stale uptime or image/commit mismatch)');
   ok = false;
+} else if (!health.error) {
+  console.log('✓ prod live on local HEAD (git or GHCR image tag)');
 }
-console.log('\nCanonical deploy: npm run deploy:railway');
+console.log('\nCanonical deploy (Railpack): npm run deploy:railway');
+console.log('GHCR escape (snapshot hangs): gh workflow run ghcr-image.yml && npm run deploy:railway:registry:pull');
 console.log('Avoid: npm run railway:graphql:connect (causes deploy storms)');
 console.log('Tip: disable GitHub auto-deploy in Railway during fix passes\n');
 

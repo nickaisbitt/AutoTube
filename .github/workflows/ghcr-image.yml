@@ -71,6 +71,9 @@ jobs:
           context: .
           file: deploy/Dockerfile.runtime
           push: true
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            DEPLOY_IMAGE=ghcr.io/nickaisbitt/autotube:${{ github.sha }}
           tags: |
             ghcr.io/nickaisbitt/autotube:${{ github.sha }}
             ghcr.io/nickaisbitt/autotube:latest

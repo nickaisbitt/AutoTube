@@ -53,7 +53,8 @@
     "deploy:railway": "node scripts/railway-deploy-prod.mjs",
     "deploy:railway:registry": "node scripts/railway-deploy-registry.mjs",
     "deploy:railway:registry:pull": "RAILWAY_SKIP_BUILD=1 RAILWAY_IMAGE_USE_SHA=1 node scripts/railway-deploy-registry.mjs",
-    "railway:smoke": "node scripts/railway-smoke-prod.mjs"
+    "railway:smoke": "node scripts/railway-smoke-prod.mjs",
+    "railway:completion-check": "node scripts/railway-completion-check.mjs"
   },
   "dependencies": {
     "canvas": "^3.2.3",

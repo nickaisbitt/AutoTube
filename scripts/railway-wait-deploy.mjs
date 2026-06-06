@@ -11,6 +11,12 @@ import {
   AUTOTUBE_ENVIRONMENT_ID,
 } from './lib/railway-autotube-ids.mjs';
 import { railwayGql, fetchBuildLogTail } from './lib/railway-gql.mjs';
+import {
+  deployMatchesLocal,
+  imageTagFromDeploy,
+  isFreshUptime,
+  gitHead,
+} from './lib/railway-deploy-evidence.mjs';
 
 const HEALTH_URL =
   process.env.AUTOTUBE_HEALTH_URL ||
@@ -66,7 +72,7 @@ async function main() {
 
   const startHealth = await (await fetch(HEALTH_URL)).json();
   const startUptime = startHealth.uptime ?? 0;
-  const localCommit = process.env.RAILWAY_EXPECT_COMMIT?.trim();
+  const localCommit = process.env.RAILWAY_EXPECT_COMMIT?.trim() || gitHead();
   console.log(
     `Waiting for deploy (max ${MAX_MIN} min, snapshot stall ${SNAPSHOT_STALL_MIN} min). Old uptime=${Math.round(startUptime)}s`,
   );
@@ -133,15 +139,17 @@ async function main() {
       const h = await (await fetch(HEALTH_URL)).json();
       const commit = h.deploy?.gitCommit ?? '';
       const uptime = h.uptime ?? 0;
-      const freshUptime = uptime < Math.min(startUptime * 0.5, 900);
+      const freshUptime = isFreshUptime(uptime, startUptime);
+      const imageTag = imageTagFromDeploy(d);
+      const ghcrOk = Boolean(d.meta?.image) && deployMatchesLocal(d, localCommit);
       const commitOk =
-        !localCommit ||
-        commit.startsWith(localCommit) ||
-        localCommit.startsWith(commit.slice(0, 12));
+        commit &&
+        localCommit &&
+        (commit.startsWith(localCommit) || localCommit.startsWith(commit.slice(0, 12)));
       console.log(
-        `Health uptime=${Math.round(uptime)}s commit=${commit.slice(0, 12) || '—'}`,
+        `Health uptime=${Math.round(uptime)}s commit=${commit.slice(0, 12) || '—'} image=${imageTag.slice(0, 12) || '—'}`,
       );
-      if (freshUptime && (commit || uptime < 300)) {
+      if (freshUptime && (commitOk || ghcrOk || uptime < 900)) {
         console.log('SUCCESS: new deployment is live');
         process.exit(0);
       }

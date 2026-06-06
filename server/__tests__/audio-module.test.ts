@@ -15,6 +15,20 @@ import { spawnSync } from 'child_process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
 
+function hasFfmpegTooling(): boolean {
+  const ffmpeg = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' });
+  const ffprobe = spawnSync('ffprobe', ['-version'], { encoding: 'utf8' });
+  const lavfi = spawnSync(
+    'ffmpeg',
+    ['-hide_banner', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.1', '-f', 'null', '-'],
+    { encoding: 'utf8', timeout: 8000 },
+  );
+  return ffmpeg.status === 0 && ffprobe.status === 0 && lavfi.status === 0;
+}
+
+const ffmpegAvailable = hasFfmpegTooling();
+const describeAudio = ffmpegAvailable ? describe : describe.skip;
+
 // Import audio module functions
 let audioModule: any;
 
@@ -25,7 +39,7 @@ async function loadAudioModule() {
   return audioModule;
 }
 
-describe('Audio Module - Background Music Integration (C4)', () => {
+describeAudio('Audio Module - Background Music Integration (C4)', () => {
   const testDir = join(tmpdir(), `autotube-audio-test-${Date.now()}`);
   
   beforeEach(() => {

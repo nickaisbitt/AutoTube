@@ -242,7 +242,10 @@ it('calls onReplace with the correct asset ID when the Replace button is clicked
   });
 
   it('shows loading state with spinner and disables button for the specific card being replaced', async () => {
-    const onReplace = vi.fn().mockImplementation(() => new Promise<void>((r) => { setTimeout(r, 10); }));
+    let resolveReplace: (() => void) | undefined;
+    const onReplace = vi.fn().mockImplementation(
+      () => new Promise<void>((resolve) => { resolveReplace = resolve; }),
+    );
     render(
       <MediaStep
         {...defaultProps}
@@ -252,15 +255,20 @@ it('calls onReplace with the correct asset ID when the Replace button is clicked
       />,
     );
 
-    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
-    fireEvent.click(replaceButtons[0]);
+    const introReplaceButtons = screen.getAllByRole('button', {
+      name: /replace visual for introduction/i,
+    });
+    fireEvent.click(introReplaceButtons[0]);
 
     await waitFor(() => {
       expect(screen.getByText('Re-harvesting…')).toBeDefined();
+      expect(introReplaceButtons.every((btn) => (btn as HTMLButtonElement).disabled)).toBe(true);
     });
-    
-    const activeButtons = screen.getAllByRole('button', { name: /replace visual for/i });
-    expect(activeButtons[0].hasAttribute('disabled')).toBe(true);
+
+    resolveReplace?.();
+    await waitFor(() => {
+      expect(introReplaceButtons.every((btn) => !(btn as HTMLButtonElement).disabled)).toBe(true);
+    });
   });
 
   it('displays inline error message on the affected card when replace fails', async () => {

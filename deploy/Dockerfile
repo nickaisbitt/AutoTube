@@ -18,8 +18,8 @@ COPY server ./server
 COPY server.mjs ./
 
 ENV NODE_OPTIONS=--max-old-space-size=3072
-# prune is faster than rm node_modules + npm ci --omit=dev (avoids canvas recompile in CI)
-RUN npm run build && npm prune --omit=dev && node deploy/bootstrap-server-render.mjs && node deploy/railway-shrink-runtime.mjs
+# Skip prune/reinstall — registry deploy pulls the image; dev deps in node_modules are acceptable
+RUN npm run build && node deploy/bootstrap-server-render.mjs
 
 FROM node:22-bookworm AS runtime
 WORKDIR /app

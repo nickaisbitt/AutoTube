@@ -46,6 +46,8 @@
     "railway:graphql:connect:curl": "bash scripts/railway-graphql-curl-connect.sh",
     "env:debug-railway": "node scripts/debug-railway-credentials.mjs",
     "env:fetch-railway": "node scripts/fetch-railway-production-env.mjs",
+    "env:scan-credentials": "node scripts/scan-agent-credentials.mjs",
+    "deploy:bootstrap": "node scripts/trigger-podomator-deploy.mjs",
     "deploy:status": "node scripts/deploy-status.mjs",
     "railway:sync-env": "node scripts/railway-sync-env.mjs",
     "railway:deploy:wait": "node scripts/railway-wait-deploy.mjs",

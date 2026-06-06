@@ -1,7 +1,10 @@
 # Build on ubuntu-amd64 host, package via Dockerfile.runtime, push to GHCR.
-name: GHCR image (manual)
+# Triggers on push to master (canonical deploy path) or manual dispatch.
+name: GHCR image
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
 
 permissions:

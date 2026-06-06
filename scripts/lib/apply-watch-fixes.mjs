@@ -34,14 +34,14 @@ export function applyFixesFromWatch(watch, fixState) {
     applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s, fast pacing ON`);
   }
 
-  if ((watch.brutal?.overall ?? 10) < 9.3) {
+  if ((watch.brutal?.overall ?? 10) < 9.1) {
     s.showKineticText = true;
     s.useFastPacing = true;
     s.cutIntervalSec = Math.max(0.75, (s.cutIntervalSec ?? 1.25) - 0.1);
     s.shockHook = true;
     s.reHarvestMedia = true;
     s.minAssetsPerSegment = Math.max(4, s.minAssetsPerSegment || 0);
-    applied.push(`2b. Score below 9.3 → escalate all render fixes (cuts=${s.cutIntervalSec}s)`);
+    applied.push(`2b. Score below 9.1 → escalate all render fixes (cuts=${s.cutIntervalSec}s)`);
   }
 
   if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6) {

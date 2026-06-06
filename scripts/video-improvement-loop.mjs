@@ -10,6 +10,7 @@ import { spawnSync } from 'child_process';
 import { generateFullVideo, checkDevServer, resolveOpenRouterKey } from './lib/generate-full-video.mjs';
 import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
 import { ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
+import { runLoopPreflight } from './loop-preflight.mjs';
 import { pickRandomTopic } from './lib/random-topics.mjs';
 import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
@@ -24,7 +25,7 @@ function parseArgs(argv) {
   const cfg = {
     max: 0,
     untilPass: false,
-    untilScore: 9.3,
+    untilScore: 9.1,
     delaySec: 5,
     reviewOnly: false,
     skipVision: false,
@@ -76,13 +77,7 @@ async function main() {
   const cfg = parseArgs(process.argv.slice(2));
   mkdirSync(LOOP_DIR, { recursive: true });
 
-  if (!cfg.reviewOnly && !(await checkDevServer())) {
-    console.error('❌ Dev server not reachable. Start: npm run dev -- --port 5173');
-    process.exit(1);
-  }
-
-  if (!cfg.reviewOnly && !resolveOpenRouterKey()) {
-    console.error('❌ OPENROUTER_API_KEY required for real harvest loop');
+  if (!cfg.reviewOnly && !(await runLoopPreflight())) {
     process.exit(1);
   }
 

@@ -38,8 +38,21 @@ jobs:
         run: node deploy/bootstrap-server-render.mjs
 
       - name: Vite build
-        timeout-minutes: 10
-        run: npm run build
+        timeout-minutes: 5
+        run: |
+          # vite-singlefile can leave the Node process hanging on GHA after "built in Xs"
+          npm run build &
+          pid=$!
+          for _ in $(seq 1 120); do
+            if [ -f dist/index.html ]; then
+              kill "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+              exit 0
+            fi
+            sleep 1
+          done
+          kill "$pid" 2>/dev/null || true
+          exit 1
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

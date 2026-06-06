@@ -1,13 +1,30 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const PROD_URL =
   process.env.AUTOTUBE_HEALTH_URL?.replace(/\/api\/health$/, '') ||
   'https://autotube-production.up.railway.app';
 
+const EXTRA_ENV_LOCAL_PATHS = [
+  '/home/node/autotube.env.local',
+  path.join(os.homedir(), 'autotube.env.local'),
+];
+
 export function readEnvLocal(cwd = process.cwd()) {
-  const file = path.join(cwd, '.env.local');
-  if (!fs.existsSync(file)) return {};
+  const merged = {};
+  const candidates = [
+    path.join(cwd, '.env.local'),
+    ...EXTRA_ENV_LOCAL_PATHS,
+  ];
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue;
+    Object.assign(merged, parseEnvLocalFile(file));
+  }
+  return merged;
+}
+
+function parseEnvLocalFile(file) {
   const out = {};
   for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
     const t = line.trim();

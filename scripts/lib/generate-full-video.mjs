@@ -203,7 +203,10 @@ export async function generateFullVideo(options) {
   log(`   Mode: ${realHarvest ? 'real harvest (OpenRouter + live search)' : 'mock (CI/e2e)'}`);
   log(`   Out: ${outDir}\n`);
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--disable-dev-shm-usage', '--no-sandbox', '--disable-setuid-sandbox'],
+  });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 
   await page.addInitScript(
@@ -481,6 +484,6 @@ export async function generateFullVideo(options) {
   } catch (err) {
     return { ok: false, error: err.message, topic, outDir };
   } finally {
-    await browser.close();
+    await browser.close().catch(() => {});
   }
 }

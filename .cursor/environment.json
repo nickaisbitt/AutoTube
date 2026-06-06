@@ -1,4 +1,4 @@
 {
-  "install": "bash .cursor/check-agent-secrets.sh && node -e \"import('./scripts/lib/railway-token.mjs').then(m=>m.ensureRailwayApiTokenEnv())\"",
+  "install": "bash .cursor/check-agent-secrets.sh && node -e \"import('./scripts/lib/railway-token.mjs').then(m=>m.ensureRailwayApiTokenEnv())\" && npm run env:sync-worker --if-present 2>/dev/null || true",
   "start": "bash .cursor/check-agent-secrets.sh"
 }

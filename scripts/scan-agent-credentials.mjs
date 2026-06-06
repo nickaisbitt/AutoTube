@@ -43,6 +43,10 @@ console.log(`  CURSOR_API_KEY: ${len('CURSOR_API_KEY')}`);
 
 const paths = [
   scanFile('.env.local (cwd)', path.join(process.cwd(), '.env.local')),
+  scanFile('/home/node/autotube.env.local', '/home/node/autotube.env.local'),
+  scanFile('podomator/.env.local', path.join(process.cwd(), '../podomator/.env.local')),
+  scanFile('audra-voice-api/.env.local', path.join(process.cwd(), '../audra-voice-api/.env.local')),
+  scanFile('polymarketapp/.env.local', path.join(process.cwd(), '../polymarketapp/.env.local')),
   scanFile('~/.config/railway/token', path.join(os.homedir(), '.config', 'railway', 'token')),
   scanFile('~/.config/cursor/auth.json', path.join(os.homedir(), '.config', 'cursor/auth.json')),
 ];

@@ -2,7 +2,8 @@
 /**
  * Exit 0 when prod is live on current code (GHCR or Railpack). Used by /loop until done.
  */
-import { loadRailwayToken } from './lib/railway-token.mjs';
+import { loadRailwayToken, ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
+import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
 import { railwayGql } from './lib/railway-gql.mjs';
 import {
   AUTOTUBE_SERVICE_ID,
@@ -19,6 +20,9 @@ import {
 const HEALTH_URL =
   process.env.AUTOTUBE_HEALTH_URL ||
   'https://autotube-production.up.railway.app/api/health';
+
+applyEnvLocalToProcess();
+ensureRailwayApiTokenEnv();
 
 const localSha = gitHead();
 let health = { error: 'no fetch' };

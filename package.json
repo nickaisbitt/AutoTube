@@ -47,6 +47,7 @@
     "env:debug-railway": "node scripts/debug-railway-credentials.mjs",
     "env:fetch-railway": "node scripts/fetch-railway-production-env.mjs",
     "env:scan-credentials": "node scripts/scan-agent-credentials.mjs",
+    "env:sync-worker": "node scripts/sync-worker-env.mjs",
     "deploy:bootstrap": "node scripts/trigger-podomator-deploy.mjs",
     "deploy:status": "node scripts/deploy-status.mjs",
     "railway:sync-env": "node scripts/railway-sync-env.mjs",

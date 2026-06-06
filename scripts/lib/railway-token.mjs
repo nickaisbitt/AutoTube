@@ -8,9 +8,9 @@ import path from 'node:path';
 
 /** @type {readonly { env: string; label: string }[]} */
 export const TOKEN_ENV_CANDIDATES = [
+  { env: 'Railway', label: 'Railway (Cursor secret)' },
   { env: 'RAILWAY_API_TOKEN', label: 'RAILWAY_API_TOKEN' },
   { env: 'RAILWAY_TOKEN', label: 'RAILWAY_TOKEN' },
-  { env: 'Railway', label: 'Railway (Cursor secret)' },
   { env: 'RAILWAY', label: 'RAILWAY' },
   { env: 'AUTOTUBE_RAILWAY_TOKEN', label: 'AUTOTUBE_RAILWAY_TOKEN' },
 ];
@@ -70,10 +70,16 @@ export function getRailwayTokenSource() {
 }
 
 export function ensureRailwayApiTokenEnv() {
-  const token =
-    process.env.RAILWAY_API_TOKEN?.trim() ||
-    loadRailwayToken();
+  // Cursor secret is often named "Railway" — mirror into RAILWAY_API_TOKEN for older scripts.
+  const railwaySecret = process.env.Railway?.trim();
+  if (railwaySecret && !process.env.RAILWAY_API_TOKEN?.trim()) {
+    process.env.RAILWAY_API_TOKEN = railwaySecret;
+    lastTokenSource = 'Railway (Cursor secret)';
+  }
+
+  const token = process.env.RAILWAY_API_TOKEN?.trim() || loadRailwayToken();
   if (!token) return;
+
   process.env.RAILWAY_API_TOKEN = token;
   if (!process.env.RAILWAY_TOKEN?.trim()) {
     process.env.RAILWAY_TOKEN = token;

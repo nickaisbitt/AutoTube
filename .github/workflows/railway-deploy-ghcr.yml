@@ -1,0 +1,52 @@
+# Point AutoTube production at the GHCR image built by "GHCR image" workflow.
+name: Railway deploy GHCR
+
+on:
+  workflow_run:
+    workflows: ['GHCR image']
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: 'Full git SHA for ghcr.io/nickaisbitt/autotube tag (default: HEAD)'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve image tag
+        id: image
+        run: |
+          if [ -n "${{ github.event.inputs.image_sha }}" ]; then
+            SHA="${{ github.event.inputs.image_sha }}"
+          elif [ -n "${{ github.event.workflow_run.head_sha }}" ]; then
+            SHA="${{ github.event.workflow_run.head_sha }}"
+          else
+            SHA="${{ github.sha }}"
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Deploying ghcr.io/nickaisbitt/autotube:$SHA"
+
+      - name: Deploy to Railway (registry pull)
+        env:
+          Railway: ${{ secrets.Railway }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SKIP_BUILD: '1'
+          RAILWAY_IMAGE_USE_SHA: '1'
+          RAILWAY_IMAGE: ghcr.io/nickaisbitt/autotube:${{ steps.image.outputs.sha }}
+        run: node scripts/railway-deploy-registry.mjs

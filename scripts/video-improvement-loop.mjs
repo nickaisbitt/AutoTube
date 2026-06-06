@@ -8,6 +8,8 @@ import { mkdirSync, writeFileSync, appendFileSync, existsSync, copyFileSync, rea
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { generateFullVideo, checkDevServer, resolveOpenRouterKey } from './lib/generate-full-video.mjs';
+import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
+import { ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
 import { pickRandomTopic } from './lib/random-topics.mjs';
 import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
@@ -68,6 +70,9 @@ function appendJournal(entry) {
 }
 
 async function main() {
+  applyEnvLocalToProcess();
+  ensureRailwayApiTokenEnv();
+
   const cfg = parseArgs(process.argv.slice(2));
   mkdirSync(LOOP_DIR, { recursive: true });
 

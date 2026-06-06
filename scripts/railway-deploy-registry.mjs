@@ -63,7 +63,7 @@ if (!skipBuild) {
 
 const token = loadRailwayToken();
 if (!token) {
-  console.error('Set RAILWAY_API_TOKEN');
+  console.error('Set Railway (Cursor secret) or RAILWAY_API_TOKEN — npm run env:debug-railway');
   process.exit(1);
 }
 

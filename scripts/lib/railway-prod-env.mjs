@@ -24,6 +24,15 @@ export function readEnvLocal(cwd = process.cwd()) {
   return out;
 }
 
+/** Load gitignored .env.local into process.env (does not override existing vars). */
+export function applyEnvLocalToProcess(cwd = process.cwd()) {
+  for (const [key, value] of Object.entries(readEnvLocal(cwd))) {
+    if (value && !process.env[key]?.trim()) {
+      process.env[key] = value;
+    }
+  }
+}
+
 /** Production service variables for Railway environment patch (single commit, no per-var storms). */
 export function buildProdRailwayVars(local = readEnvLocal()) {
   const openRouter =

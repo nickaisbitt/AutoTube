@@ -1,5 +1,4 @@
-# Build + push production image to GHCR (native amd64). Railway pulls via deploy:railway:registry.
-# Does NOT deploy — run: npm run deploy:railway:registry -- --skip-build after push completes.
+# Build on ubuntu-amd64 host, package via Dockerfile.runtime, push to GHCR.
 name: GHCR image (manual)
 
 on:
@@ -15,6 +14,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install build deps for canvas
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libcairo2-dev libjpeg-dev libpango1.0-dev libgif-dev
+
+      - name: Build production tree
+        run: |
+          npm ci
+          node deploy/bootstrap-server-render.mjs
+          npm run build
+          npm prune --omit=dev
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -22,11 +39,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Package and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: deploy/Dockerfile
+          file: deploy/Dockerfile.runtime
           push: true
           tags: |
             ghcr.io/nickaisbitt/autotube:${{ github.sha }}

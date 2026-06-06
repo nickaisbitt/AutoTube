@@ -477,6 +477,9 @@ export async function generateFullVideo(options) {
     }
     if (fixState.showKineticText) renderEnv.AUTOTUBE_KINETIC_TEXT = '1';
     if (fixState.useFastPacing) renderEnv.AUTOTUBE_FAST_PACING = '1';
+    // Loop renders: draft quality + longer encode timeout (worker CPU is slow)
+    renderEnv.AUTOTUBE_RENDER_QUALITY = process.env.AUTOTUBE_RENDER_QUALITY || 'draft';
+    renderEnv.AUTOTUBE_ENCODING_TIMEOUT_MS = process.env.AUTOTUBE_ENCODING_TIMEOUT_MS || '1800000';
 
     const render = spawnSync('node', ['server-render.mjs', mp4Out], {
       cwd: root,

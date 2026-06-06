@@ -3267,7 +3267,9 @@ async function render() {
     project.exportSettings.youtubeMode = true;
   }
 
-  const quality = project.exportSettings?.quality || (YOUTUBE_MODE ? 'highest' : 'medium');
+  const quality = process.env.AUTOTUBE_RENDER_QUALITY?.trim()
+    || project.exportSettings?.quality
+    || (YOUTUBE_MODE ? 'highest' : 'medium');
   DRAFT_MODE = quality === 'draft';
   const outputWidth = WIDTH;
   const outputHeight = HEIGHT;
@@ -4546,7 +4548,8 @@ async function render() {
   ffmpeg.stdin.end();
 
   // Safety: Add timeout to prevent infinite hangs during encoding
-  const ENCODING_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max for encoding
+  const ENCODING_TIMEOUT_MS = Number(process.env.AUTOTUBE_ENCODING_TIMEOUT_MS)
+    || Math.max(5 * 60 * 1000, Math.ceil(totalSec * 3) * 1000);
   log('info', `\n⏳ Encoding video (timeout: ${ENCODING_TIMEOUT_MS / 1000}s)...`);
 
   let encodeFailed = false;

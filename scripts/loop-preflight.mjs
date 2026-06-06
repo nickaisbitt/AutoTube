@@ -3,6 +3,7 @@
  * Preflight before video improvement loop (never prints secrets).
  */
 import { spawnSync } from 'node:child_process';
+import { statSync, unlinkSync } from 'node:fs';
 import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
 import { ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
 import { checkDevServer, resolveOpenRouterKey } from './lib/generate-full-video.mjs';
@@ -10,6 +11,27 @@ import { assertTtsAvailable } from '../deploy/server-render/narration.mjs';
 
 function have(cmd) {
   return spawnSync('which', [cmd], { encoding: 'utf8' }).status === 0;
+}
+
+function probeEdgeTts() {
+  const out = '/tmp/autotube-preflight-tts.mp3';
+  try {
+    unlinkSync(out);
+  } catch {
+    /* ignore */
+  }
+  const r = spawnSync('edge-tts', ['--text', 'preflight', '--write-media', out], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  try {
+    const st = statSync(out);
+    if (st.size > 500) return true;
+  } catch {
+    /* fall through */
+  }
+  const detail = (r.stderr || r.stdout || '').split('\n').find((l) => l.trim()) || 'no output file';
+  throw new Error(`edge-tts synthesis failed — upgrade: pip install --break-system-packages 'edge-tts>=7.2.7' (${detail.slice(0, 120)})`);
 }
 
 export async function runLoopPreflight({ devServer, requireOpenRouter = true } = {}) {
@@ -34,7 +56,8 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
   try {
     const providers = assertTtsAvailable();
     if (providers.edgeTts) {
-      console.log('[preflight] TTS: edge-tts OK');
+      probeEdgeTts();
+      console.log('[preflight] TTS: edge-tts OK (synthesis probe passed)');
     } else if (providers.kokoro) {
       console.log('[preflight] TTS: kokoro OK');
     } else if (providers.melo) {

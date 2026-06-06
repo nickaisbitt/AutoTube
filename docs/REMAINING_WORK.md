@@ -41,7 +41,7 @@ Last updated: 2026-06-06. Use item numbers in chat ("fix 3", "do 7").
 
 ## F — Definition of done (103%)
 
-18. `npm run railway:completion-check` exit 0 (prod image tag = local `git rev-parse HEAD`). **Current:** FAIL — prod on `6c11d39`, local `98b671d`.
+18. `npm run railway:completion-check` exit 0 (prod image tag = local `git rev-parse HEAD`). **Current:** FAIL — prod on `6c11d39`; GHCR image **built** for `14aad39` (auto workflow); needs `npm run deploy:railway:registry:pull` from Mac.
 19. `npm run railway:smoke` pass.
 20. `npm run test:unit` — **DONE** (1720 passed, 21 skipped without ffmpeg).
 21. `npm run test:e2e:smoke` — 3/3 (Mac or CI with Playwright deps).

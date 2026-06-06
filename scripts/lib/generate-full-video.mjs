@@ -204,9 +204,15 @@ export async function generateFullVideo(options) {
   log(`   Mode: ${realHarvest ? 'real harvest (OpenRouter + live search)' : 'mock (CI/e2e)'}`);
   log(`   Out: ${outDir}\n`);
 
-  const browser = await chromium.launch({
+  let browser = await chromium.launch({
     headless: true,
-    args: ['--disable-dev-shm-usage', '--no-sandbox', '--disable-setuid-sandbox'],
+    args: [
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+    ],
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 
@@ -408,6 +414,10 @@ export async function generateFullVideo(options) {
     const mp4Out = join(outDir, 'final-video.mp4');
     log(`🎥 Render → ${mp4Out}`);
 
+    // Free Playwright/Chromium memory before server-render (4GB cgroup on worker).
+    await browser.close().catch(() => {});
+    browser = null;
+
     const renderEnv = {
       ...process.env,
       DEV_SERVER_URL: devServer,
@@ -485,6 +495,6 @@ export async function generateFullVideo(options) {
   } catch (err) {
     return { ok: false, error: err.message, topic, outDir };
   } finally {
-    await browser.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
   }
 }

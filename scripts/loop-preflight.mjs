@@ -20,7 +20,7 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
   const url = devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173';
 
   if (!(await checkDevServer(url))) {
-    errors.push(`Dev server not reachable at ${url} — run: npm run dev -- --port 5173 --host 0.0.0.0`);
+    errors.push(`Dev server not reachable at ${url} — run: npm run dev -- --port 5173 --host 0.0.0.0 (vite preview lacks /api routes)`);
   }
 
   if (requireOpenRouter && !resolveOpenRouterKey()) {

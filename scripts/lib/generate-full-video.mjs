@@ -224,7 +224,8 @@ export async function generateFullVideo(options) {
         'autotube_config_session',
         JSON.stringify({
           openRouterKey: key,
-          sourceType: harvest ? 'raw' : 'stock',
+          // Loop fast mode: stock (2 assets/segment) — raw (4/segment) exceeds 20min on worker
+          sourceType: 'stock',
           flickrKey: '',
           ttsVoice: 'Leo',
         }),
@@ -370,8 +371,52 @@ export async function generateFullVideo(options) {
     }
 
     await page.getByRole('button', { name: /Source Media Assets/i }).click();
-    log('⏳ Media (live harvest)...');
-    await page.getByRole('button', { name: /Prepare Narration/i }).waitFor({ timeout: mediaTimeoutMs });
+    log(`⏳ Media (${realHarvest ? 'live harvest' : 'mock harvest'})...`);
+
+    const mediaDeadline = Date.now() + mediaTimeoutMs;
+    const mediaStart = Date.now();
+    let mediaReady = false;
+    let lastLogMin = -1;
+    while (Date.now() < mediaDeadline) {
+      mediaReady = await page.getByRole('button', { name: /Prepare Narration/i }).isVisible().catch(() => false);
+      if (mediaReady) break;
+      const elapsedMin = Math.floor((Date.now() - mediaStart) / 60000);
+      if (elapsedMin >= 1 && elapsedMin !== lastLogMin && elapsedMin % 2 === 0) {
+        lastLogMin = elapsedMin;
+        const msg = await page.locator('[data-testid="dynamic-message"]').textContent().catch(() => '');
+        const progress = await page.evaluate(() => {
+          const raw = localStorage.getItem('autotube_project');
+          if (!raw) return { media: 0, segments: 0 };
+          try {
+            const p = JSON.parse(raw).project;
+            return { media: p?.media?.length ?? 0, segments: p?.script?.length ?? 0 };
+          } catch {
+            return { media: 0, segments: 0 };
+          }
+        }).catch(() => ({ media: 0, segments: 0 }));
+        log(`   … ${elapsedMin}min media harvest (${progress.media} assets / ${progress.segments} segments) ${msg ? `— ${msg.slice(0, 60)}` : ''}`);
+      }
+      await page.waitForTimeout(5000);
+    }
+
+    if (!mediaReady) {
+      writeFileSync(join(outDir, 'browser-events.json'), JSON.stringify(browserEvents, null, 2));
+      const uiState = await page.evaluate(() => ({
+        bodyText: document.body?.innerText?.slice(0, 4000) || '',
+        projectRawLength: localStorage.getItem('autotube_project')?.length || 0,
+        mediaCount: (() => {
+          try {
+            return JSON.parse(localStorage.getItem('autotube_project') || '{}').project?.media?.length ?? 0;
+          } catch {
+            return 0;
+          }
+        })(),
+        stepText: document.body?.innerText?.match(/Step \d+ — \w+/)?.[0] || '',
+      })).catch((e) => ({ error: e.message }));
+      writeFileSync(join(outDir, 'ui-state-on-media-timeout.json'), JSON.stringify(uiState, null, 2));
+      await page.screenshot({ path: join(outDir, 'media-timeout.png'), fullPage: true }).catch(() => {});
+      throw new Error(`Media harvest timed out after ${Math.round(mediaTimeoutMs / 60000)}min waiting for Prepare Narration`);
+    }
 
     await page.getByRole('button', { name: /Prepare Narration/i }).click();
     log('⏳ Narration...');

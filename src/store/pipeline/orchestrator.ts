@@ -352,13 +352,18 @@ export async function executeSourceMedia(
     visualPlans,
   };
 
-  updatedProject = await refineUntilQualityGatePasses(
-    updatedProject,
-    'media',
-    appConfig,
-    signal,
-    callbacks,
-  );
+  const loopFastMode = isLoopFastMode();
+  if (!loopFastMode) {
+    updatedProject = await refineUntilQualityGatePasses(
+      updatedProject,
+      'media',
+      appConfig,
+      signal,
+      callbacks,
+    );
+  } else {
+    logger.info('Store', 'Loop fast mode: skipping media quality-gate refinements');
+  }
 
   // Save project for server-side renderer — AWAITED so the file is on disk
   // before this function returns. The server render reads the project from

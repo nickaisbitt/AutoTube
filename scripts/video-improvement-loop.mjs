@@ -31,6 +31,7 @@ function parseArgs(argv) {
     skipVision: false,
     watchMode: 'quick',
     exportReview: true,
+    mockHarvest: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -42,6 +43,7 @@ function parseArgs(argv) {
     else if (a === '--skip-vision') cfg.skipVision = true;
     else if (a === '--watch-full') cfg.watchMode = 'full';
     else if (a === '--no-export') cfg.exportReview = false;
+    else if (a === '--mock-harvest') cfg.mockHarvest = true;
   }
   return cfg;
 }
@@ -99,7 +101,7 @@ async function main() {
   console.log(`   Max iterations: ${cfg.max > 0 ? cfg.max : '∞'} (this session)`);
   console.log(`   Target score: ${cfg.untilScore}/10 (stops when reached)`);
   console.log(`   Fix before next topic: YES`);
-  console.log(`   Harvest: real (OpenRouter + live search; Pexels/Picsum disabled)`);
+  console.log(`   Harvest: ${cfg.mockHarvest ? 'mock (fast CI path)' : 'real (OpenRouter + live search; stock 2 assets/segment)'}`);
   console.log(`   Journal: ${JOURNAL_JSONL}\n`);
 
   while (true) {
@@ -145,7 +147,7 @@ async function main() {
         youtubeMode: true,
         runId: Date.now(),
         fixState,
-        realHarvest: true,
+        realHarvest: !cfg.mockHarvest,
       });
       generateOk = gen.ok;
       generateError = gen.error ?? null;

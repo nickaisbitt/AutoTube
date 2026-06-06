@@ -24,30 +24,42 @@ function gitShort() {
   return r.status === 0 ? r.stdout.trim() : 'latest';
 }
 
-const tag = process.env.RAILWAY_IMAGE_TAG || gitShort();
-const image = process.env.RAILWAY_IMAGE || `ghcr.io/nickaisbitt/autotube:${tag}`;
-const platform = process.env.DOCKER_PLATFORM || 'linux/amd64';
-
-const ghToken = spawnSync('gh', ['auth', 'token'], { encoding: 'utf8' });
-if (ghToken.status !== 0 || !ghToken.stdout.trim()) {
-  console.error('gh auth token failed — run: gh auth login');
-  process.exit(1);
+function gitFull() {
+  const r = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : 'latest';
 }
 
-run('sh', ['-c', 'gh auth token | docker login ghcr.io -u nickaisbitt --password-stdin']);
+const tag = process.env.RAILWAY_IMAGE_TAG || gitShort();
+const image =
+  process.env.RAILWAY_IMAGE ||
+  `ghcr.io/nickaisbitt/autotube:${process.env.RAILWAY_IMAGE_USE_SHA === '1' ? gitFull() : tag}`;
+const platform = process.env.DOCKER_PLATFORM || 'linux/amd64';
+const skipBuild = process.env.RAILWAY_SKIP_BUILD === '1';
 
-run('docker', [
-  'build',
-  '--platform',
-  platform,
-  '-f',
-  'deploy/Dockerfile',
-  '-t',
-  image,
-  '.',
-]);
+if (!skipBuild) {
+  const ghToken = spawnSync('gh', ['auth', 'token'], { encoding: 'utf8' });
+  if (ghToken.status !== 0 || !ghToken.stdout.trim()) {
+    console.error('gh auth token failed — run: gh auth login');
+    process.exit(1);
+  }
 
-run('docker', ['push', image]);
+  run('sh', ['-c', 'gh auth token | docker login ghcr.io -u nickaisbitt --password-stdin']);
+
+  run('docker', [
+    'build',
+    '--platform',
+    platform,
+    '-f',
+    'deploy/Dockerfile',
+    '-t',
+    image,
+    '.',
+  ]);
+
+  run('docker', ['push', image]);
+} else {
+  console.log(`Skipping local build — using existing image ${image}`);
+}
 
 const token = loadRailwayToken();
 if (!token) {

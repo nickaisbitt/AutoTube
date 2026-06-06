@@ -1,0 +1,33 @@
+# Build + push production image to GHCR (native amd64). Railway pulls via deploy:railway:registry.
+# Does NOT deploy — run: npm run deploy:railway:registry -- --skip-build after push completes.
+name: GHCR image (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/nickaisbitt/autotube:${{ github.sha }}
+            ghcr.io/nickaisbitt/autotube:latest

@@ -3,6 +3,26 @@ import type { VideoProject } from '../../types';
 import { hasSpeechSupport, speakText, stopSpeaking } from '../../utils/speech';
 import type { PreviewMode } from './VideoPlayer';
 
+/** Effective segment duration (editPlan adjustedDuration wins over script.duration). */
+export function segmentDurationForProject(project: VideoProject, segmentIndex: number): number {
+  const segment = project.script[segmentIndex];
+  if (!segment) return 0;
+  const editEntry = project.editPlan?.segments?.find((e) => e.segmentId === segment.id);
+  if (editEntry?.adjustedDuration != null) return editEntry.adjustedDuration;
+  return segment.duration;
+}
+
+/** Map timeline position to script segment index using editPlan-aware durations. */
+export function segmentIndexAtTime(project: VideoProject, currentTime: number): number {
+  let accumulated = 0;
+  for (let i = 0; i < project.script.length; i += 1) {
+    const dur = segmentDurationForProject(project, i);
+    if (currentTime < accumulated + dur) return i;
+    accumulated += dur;
+  }
+  return Math.max(0, project.script.length - 1);
+}
+
 export interface PlaybackState {
   isPlaying: boolean;
   currentTime: number;
@@ -82,16 +102,10 @@ export function usePlayback(
 
   const totalDuration = useMemo(() => {
     if (!project) return 0;
-    const editSegments = project.editPlan?.segments;
-    return project.script.reduce((sum, segment) => {
-      if (editSegments) {
-        const editEntry = editSegments.find((e) => e.segmentId === segment.id);
-        if (editEntry?.adjustedDuration != null) {
-          return sum + editEntry.adjustedDuration;
-        }
-      }
-      return sum + segment.duration;
-    }, 0);
+    return project.script.reduce(
+      (sum, _segment, i) => sum + segmentDurationForProject(project, i),
+      0,
+    );
   }, [project, project?.editPlan]);
 
   useEffect(() => {
@@ -130,16 +144,7 @@ export function usePlayback(
   useEffect(() => {
     if (!project) return;
 
-    let accumulated = 0;
-    let foundIndex = 0;
-    for (let i = 0; i < project.script.length; i += 1) {
-      const segDuration = project.script[i].duration;
-      if (currentTime < accumulated + segDuration) {
-        foundIndex = i;
-        break;
-      }
-      accumulated += segDuration;
-    }
+    const foundIndex = segmentIndexAtTime(project, currentTime);
 
     if (foundIndex !== currentSegmentIndex) {
       setCurrentSegmentIndex(foundIndex);

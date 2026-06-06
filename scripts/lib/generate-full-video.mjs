@@ -98,7 +98,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir) {
     const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '');
 
     // Always route video-host or non-direct through the server proxy for fetchability + caching
-    let downloadUrl: string;
+    let downloadUrl;
     if (asset.url?.startsWith('/api/download-clip')) {
       downloadUrl = `${devServer}${asset.url}`;
     } else if (isLikelyVideoHost(pageUrl) || isLikelyVideoHost(asset.url) || !/\.(mp4|webm|mov)/i.test(asset.url || '')) {

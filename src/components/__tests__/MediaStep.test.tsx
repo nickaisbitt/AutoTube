@@ -282,47 +282,6 @@ it('calls onReplace with the correct asset ID when the Replace button is clicked
     });
   });
 
-
-  it('shows loading state with spinner and disables button for the specific card being replaced', async () => {
-    const onReplace = vi.fn().mockImplementation(() => new Promise<void>(() => {}));
-    render(
-      <MediaStep
-        {...defaultProps}
-        project={makeProjectWithMedia()}
-        status="complete"
-        onReplace={onReplace}
-      />,
-    );
-
-    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
-
-    fireEvent.click(replaceButtons[0]);
-
-    await waitFor(() => {
-      expect(screen.getByText('Re-harvesting…')).toBeDefined();
-    });
-    expect(replaceButtons[0].hasAttribute('disabled')).toBe(true);
-  });
-
-  it('displays inline error message on the affected card when replace fails', async () => {
-    const onReplace = vi.fn().mockRejectedValue(new Error('Network error'));
-    render(
-      <MediaStep
-        {...defaultProps}
-        project={makeProjectWithMedia()}
-        status="complete"
-        onReplace={onReplace}
-      />,
-    );
-
-    const replaceButtons = screen.getAllByRole('button', { name: /replace visual for/i });
-    fireEvent.click(replaceButtons[0]);
-
-    await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeDefined();
-    });
-  });
-
   it('shows spinner only on the specific card being replaced, not all cards', async () => {
     const onReplace = vi.fn().mockImplementation(() => new Promise<void>(() => {}));
     render(

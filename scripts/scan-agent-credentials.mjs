@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { TOKEN_ENV_CANDIDATES, loadRailwayToken, ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
-import { readEnvLocal } from './lib/railway-prod-env.mjs';
+import { readEnvLocal, applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
 
 const OPENROUTER_KEYS = ['OPENROUTER_API_KEY', 'VITE_OPENROUTER_KEY', 'OPENROUTER_KEY'];
 
@@ -68,6 +68,7 @@ if (Object.keys(local).length) {
   console.log(`  OpenRouter present: ${localOpenRouter ? 'yes' : 'no'}`);
 }
 
+applyEnvLocalToProcess();
 ensureRailwayApiTokenEnv();
 const railway = loadRailwayToken();
 const openRouter = OPENROUTER_KEYS.map((k) => process.env[k]?.trim()).find(Boolean);

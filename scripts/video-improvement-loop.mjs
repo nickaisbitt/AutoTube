@@ -91,23 +91,26 @@ async function main() {
   let fixState = loadFixState(LOOP_DIR);
   let currentTopic = fixState.pendingTopic || null;
   let iteration = fixState.iteration || 0;
+  let sessionCount = 0;
 
   const TARGET_FILE = join(LOOP_DIR, 'TARGET_SCORE_REACHED.json');
 
   console.log('\n🔁 Video improvement loop (fix-gated)');
-  console.log(`   Max iterations: ${cfg.max > 0 ? cfg.max : '∞'}`);
+  console.log(`   Max iterations: ${cfg.max > 0 ? cfg.max : '∞'} (this session)`);
   console.log(`   Target score: ${cfg.untilScore}/10 (stops when reached)`);
   console.log(`   Fix before next topic: YES`);
   console.log(`   Harvest: real (OpenRouter + live search; Pexels/Picsum disabled)`);
   console.log(`   Journal: ${JOURNAL_JSONL}\n`);
 
   while (true) {
-    iteration += 1;
-    fixState.iteration = iteration;
-    if (cfg.max > 0 && iteration > cfg.max) {
+    sessionCount += 1;
+    if (cfg.max > 0 && sessionCount > cfg.max) {
       console.log(`\n✅ Reached --max ${cfg.max}`);
       break;
     }
+
+    iteration += 1;
+    fixState.iteration = iteration;
 
     const isRetry = Boolean(currentTopic);
     if (!currentTopic && !cfg.reviewOnly) {

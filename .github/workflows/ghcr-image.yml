@@ -56,7 +56,7 @@ jobs:
 
       - name: Un-ignore CI build artifacts for runtime image
         run: |
-          printf '\n# ghcr-image workflow only\n!node_modules\n!dist\n' >> .dockerignore
+          printf '\n# ghcr-image workflow only\n!node_modules\n!dist\n!src\n' >> .dockerignore
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

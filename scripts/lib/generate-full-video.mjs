@@ -375,7 +375,8 @@ export async function generateFullVideo(options) {
   const narrationTimeoutMs = realHarvest ? 900_000 : 600_000;
 
   try {
-    await page.goto(devServer, { waitUntil: 'networkidle', timeout: 60000 });
+  // networkidle hangs when dev server is serving long harvest API streams
+    await page.goto(devServer, { waitUntil: 'domcontentloaded', timeout: 90_000 });
     if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 3000 }).catch(() => false)) {
       await page.getByTestId('onboarding-skip').click();
     }

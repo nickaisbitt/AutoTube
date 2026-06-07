@@ -2,7 +2,8 @@
  * Assert loop render output is complete before scoring.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const MIN_DURATION_SEC = 55;
 const MIN_BYTES = 5 * 1024 * 1024;
@@ -32,6 +33,28 @@ export function validateLoopVideo(videoPath) {
       valid: false,
       error: `duration ${durationSec || 0}s < ${MIN_DURATION_SEC}s (truncated/corrupt render?)`,
     };
+  }
+
+  const manifestPath = join(dirname(videoPath), 'ffmpeg-assembly', 'render-manifest.json');
+  if (existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      if ((manifest.tpadSec ?? 0) > 2) {
+        return {
+          valid: false,
+          error: `render used ${manifest.tpadSec}s video freeze-pad (A/V sync bug)`,
+        };
+      }
+      const avDelta = Math.abs((manifest.videoSec ?? durationSec) - (manifest.muxDurationSec ?? durationSec));
+      if (avDelta > 1) {
+        return {
+          valid: false,
+          error: `A/V duration mismatch: video ${manifest.videoSec}s vs mux ${manifest.muxDurationSec}s`,
+        };
+      }
+    } catch {
+      /* manifest optional */
+    }
   }
 
   return {

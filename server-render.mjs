@@ -51,6 +51,7 @@ import {
   assetCutIntervalSec,
 } from './server-render/youtubeProfile.mjs';
 import { renderViaFfmpegAssembly } from './server-render/ffmpegAssembly.mjs';
+import { buildEditTimeline } from './scripts/lib/build-edit-timeline.mjs';
 
 let sharpModule = null;
 async function getSharp() {
@@ -3681,6 +3682,17 @@ async function render() {
 
   if (process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg') {
     log('info', '\n🎬 FFmpeg assembly mode — skipping canvas frame loop');
+    const cutInterval = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.25');
+    const measuredSec = project.script.reduce((s, seg) => s + (seg.duration || 0), 0);
+    project.editTimeline = buildEditTimeline(project, {
+      cutIntervalSec: cutInterval,
+      reason: 'post-tts sync',
+    });
+    log(
+      'info',
+      `  📐 Rebuilt editTimeline: ${project.editTimeline.length} clips across ${project.script.length} segments (${measuredSec.toFixed(1)}s measured narration)`,
+    );
+
     const mixedAudio = join(audioDir, 'narration-mix.wav');
     try {
       await concatenateAudio(audioFiles, mixedAudio);
@@ -3695,7 +3707,7 @@ async function render() {
     if (!ffResult.ok) {
       throw new Error(ffResult.error || 'ffmpeg assembly render failed');
     }
-    log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments)`);
+    log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments, ${ffResult.manifest?.clipCount ?? '?'} clips, tpad ${ffResult.manifest?.tpadSec ?? 0}s)`);
     if (process.env.AUTOTUBE_REMOTION_CAPTIONS === '1') {
       try {
         const { overlayRemotionCaptions } = await import('./server-render/remotionCaptions.mjs');

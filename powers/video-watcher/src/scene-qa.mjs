@@ -89,8 +89,8 @@ print(json.dumps({"scenes": out}))
     ? durations.reduce((a, b) => a + b, 0) / durations.length
     : 0;
 
-  const hookPass = longestHookSec <= MAX_HOOK_SCENE_SEC;
-  const bodyPass = longestSceneSec <= MAX_BODY_SCENE_SEC;
+  const hookPass = scenes.length > 0 && longestHookSec <= MAX_HOOK_SCENE_SEC;
+  const bodyPass = scenes.length > 0 && longestSceneSec <= MAX_BODY_SCENE_SEC;
   const pass = hookPass && bodyPass;
 
   return {

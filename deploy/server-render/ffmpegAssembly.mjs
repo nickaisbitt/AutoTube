@@ -22,35 +22,13 @@ function probeMediaDuration(path) {
   return Number.isFinite(d) ? d : 0;
 }
 
-function padVideoToDuration(inputPath, outputPath, targetSec, preset) {
-  const current = probeMediaDuration(inputPath);
-  if (current >= targetSec - 0.1) {
-    if (inputPath !== outputPath) {
-      spawnSync('ffmpeg', ['-y', '-i', inputPath, '-c', 'copy', outputPath], { encoding: 'utf8' });
-    }
-    return current;
-  }
-  const padSec = Math.max(0.1, targetSec - current);
+function trimAudioToDuration(inputPath, outputPath, targetSec) {
   const r = spawnSync(
     'ffmpeg',
-    [
-      '-y',
-      '-i',
-      inputPath,
-      '-vf',
-      `tpad=stop_mode=clone:stop_duration=${padSec.toFixed(3)}`,
-      '-c:v',
-      'libx264',
-      '-preset',
-      preset,
-      '-pix_fmt',
-      'yuv420p',
-      '-an',
-      outputPath,
-    ],
-    { encoding: 'utf8', timeout: 300_000 },
+    ['-y', '-i', inputPath, '-t', String(targetSec), '-c:a', 'pcm_s16le', outputPath],
+    { encoding: 'utf8', timeout: 120_000 },
   );
-  return r.status === 0 && existsSync(outputPath) ? targetSec : current;
+  return r.status === 0 && existsSync(outputPath);
 }
 
 function outputDimensions() {
@@ -68,12 +46,21 @@ function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
   return Math.floor(timeInSegment / intervalSec) % assetCount;
 }
 
+function resolveTimelineAsset(entry, segMedia) {
+  const byId = segMedia.find((m) => m.id === entry.assetId);
+  if (byId) return byId;
+  const idx = Math.floor((entry.startSec || 0) / Math.max(entry.endSec - entry.startSec, 0.5)) % segMedia.length;
+  return segMedia[idx] || segMedia[0];
+}
+
 function buildClipSchedule(segment, segMedia, intervalSec, project) {
+  const targetDuration = segment.duration || 20;
   const timeline = (project?.editTimeline || []).filter((e) => e.segmentId === segment.id);
+  const clips = [];
+
   if (timeline.length) {
-    const clips = [];
     for (const entry of timeline) {
-      const asset = segMedia.find((m) => m.id === entry.assetId) || segMedia[0];
+      const asset = resolveTimelineAsset(entry, segMedia);
       if (!asset) continue;
       const durationSec = (entry.endSec ?? 0) - (entry.startSec ?? 0);
       if (durationSec <= 0.05) continue;
@@ -84,18 +71,22 @@ function buildClipSchedule(segment, segMedia, intervalSec, project) {
         durationSec,
       });
     }
-    if (clips.length) return clips;
   }
 
-  const duration = segment.duration || 20;
-  const clips = [];
-  let t = 0;
-  while (t < duration - 0.05) {
+  const covered = clips.reduce((sum, c) => sum + c.durationSec, 0);
+  let t = clips.length ? clips[clips.length - 1].endSec : 0;
+  while (t < targetDuration - 0.05) {
     const idx = computeActiveAssetIndex(t, segMedia.length, intervalSec);
-    const clipEnd = Math.min(duration, t + intervalSec);
-    clips.push({ asset: segMedia[idx], startSec: t, endSec: clipEnd, durationSec: clipEnd - t });
+    const clipEnd = Math.min(targetDuration, t + intervalSec);
+    clips.push({
+      asset: segMedia[idx],
+      startSec: t,
+      endSec: clipEnd,
+      durationSec: clipEnd - t,
+    });
     t = clipEnd;
   }
+
   return clips;
 }
 
@@ -181,7 +172,14 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec } = schedule[i];
     const clipOut = join(tmpDir, `clip-${String(i).padStart(3, '0')}.mp4`);
-    const localSrc = await ensureLocalAsset(asset, devServer, cacheDir);
+    let localSrc = await ensureLocalAsset(asset, devServer, cacheDir);
+    if (!localSrc) {
+      for (const alt of segMedia) {
+        if (alt.id === asset.id) continue;
+        localSrc = await ensureLocalAsset(alt, devServer, cacheDir);
+        if (localSrc) break;
+      }
+    }
     if (!localSrc) {
       console.log(`  [ffmpeg] clip ${i + 1}/${schedule.length}: skip — asset fetch failed`);
       continue;
@@ -276,7 +274,16 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   if (r.status !== 0 || !existsSync(outputPath)) {
     return { ok: false, error: r.stderr?.slice(-300) || 'segment concat failed' };
   }
-  return { ok: true, clipCount: clipPaths.length, intervalSec: interval };
+
+  const videoSec = probeMediaDuration(outputPath);
+  return {
+    ok: true,
+    clipCount: clipPaths.length,
+    scheduleCount: schedule.length,
+    intervalSec: interval,
+    targetSec: segment.duration || 20,
+    videoSec,
+  };
 }
 
 /**
@@ -288,6 +295,8 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const workDir = join(dirname(outputPath), 'ffmpeg-assembly');
   mkdirSync(workDir, { recursive: true });
   const segmentOutputs = [];
+  const perSegment = [];
+  let totalClipCount = 0;
   const preset = ffmpegPreset();
 
   const mediaPool = project.media || [];
@@ -300,13 +309,22 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     }
     if (!segMedia.length) continue;
 
-    console.log(`  [ffmpeg] segment ${si + 1}/${project.script.length}: ${seg.title}`);
+    console.log(`  [ffmpeg] segment ${si + 1}/${project.script.length}: ${seg.title} (${(seg.duration || 0).toFixed(1)}s)`);
     const segOut = join(workDir, `segment-${si}.mp4`);
     const result = await renderSegmentClips(seg, segMedia, project, segOut, options);
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };
     }
     segmentOutputs.push(segOut);
+    totalClipCount += result.clipCount;
+    perSegment.push({
+      segmentId: seg.id,
+      title: seg.title,
+      clipCount: result.clipCount,
+      scheduleCount: result.scheduleCount,
+      targetSec: result.targetSec,
+      videoSec: result.videoSec,
+    });
   }
 
   if (segmentOutputs.length === 0) {
@@ -341,29 +359,52 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     return { ok: false, error: 'segment merge failed' };
   }
 
+  const videoDurationSec = probeMediaDuration(mergedVideo) || 60;
   const audioFile = options.mixedAudioPath;
-  let videoDurationSec = probeMediaDuration(mergedVideo) || 60;
   const audioDurationSec = audioFile && existsSync(audioFile) ? probeMediaDuration(audioFile) : 0;
-  const targetDurationSec = Math.max(videoDurationSec, audioDurationSec || 0);
 
-  let videoForMux = mergedVideo;
-  if (targetDurationSec > videoDurationSec + 0.15) {
-    const paddedVideo = join(workDir, 'merged-video-padded.mp4');
-    const padded = padVideoToDuration(mergedVideo, paddedVideo, targetDurationSec, preset);
-    if (padded >= targetDurationSec - 0.1) {
-      videoForMux = paddedVideo;
-      videoDurationSec = padded;
+  let audioForMux = audioFile;
+  let audioTrimmedSec = 0;
+  const muxDurationSec = videoDurationSec;
+
+  if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
+    const trimmedAudio = join(workDir, 'narration-trimmed.wav');
+    if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
+      audioForMux = trimmedAudio;
+      audioTrimmedSec = audioDurationSec - videoDurationSec;
+      console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (no video freeze-pad)`);
     }
   }
 
-  if (audioFile && existsSync(audioFile)) {
-    muxVideoWithAudio(videoForMux, audioFile, outputPath, targetDurationSec, {
+  if (audioForMux && existsSync(audioForMux)) {
+    muxVideoWithAudio(mergedVideo, audioForMux, outputPath, muxDurationSec, {
       backgroundMusic: project.exportSettings?.backgroundMusic !== false,
       musicPreset: project.exportSettings?.musicPreset,
     });
   } else {
-    spawnSync('ffmpeg', ['-y', '-i', videoForMux, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    spawnSync('ffmpeg', ['-y', '-i', mergedVideo, '-c', 'copy', outputPath], { encoding: 'utf8' });
   }
 
-  return { ok: existsSync(outputPath), outputPath, mode: 'ffmpeg-assembly', segmentCount: segmentOutputs.length };
+  const manifest = {
+    clipCount: totalClipCount,
+    videoSec: videoDurationSec,
+    audioSec: audioDurationSec,
+    audioTrimmedSec: Math.round(audioTrimmedSec * 100) / 100,
+    tpadSec: 0,
+    muxDurationSec,
+    perSegment,
+    cutIntervalSec: options.cutIntervalSec ?? assetCutIntervalSec(project),
+  };
+  const manifestPath = join(workDir, 'render-manifest.json');
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`  [ffmpeg] manifest: ${totalClipCount} clips, video ${videoDurationSec.toFixed(1)}s, tpad 0s`);
+
+  return {
+    ok: existsSync(outputPath),
+    outputPath,
+    mode: 'ffmpeg-assembly',
+    segmentCount: segmentOutputs.length,
+    manifest,
+    manifestPath,
+  };
 }

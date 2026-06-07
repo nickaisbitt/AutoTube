@@ -3,6 +3,7 @@
  */
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
+import { buildEditTimeline } from './build-edit-timeline.mjs';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'they', 'this', 'that', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
@@ -209,29 +210,10 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4));
 
   if (fixState.brollPlacement !== false && project.script?.length && project.media?.length) {
-    const cut = fixState.cutIntervalSec ?? 1.25;
-    const entries = [];
-    for (const seg of project.script) {
-      const assets = project.media.filter((m) => m.segmentId === seg.id);
-      if (!assets.length) continue;
-      const duration = seg.duration || 20;
-      const interval = seg.type === 'intro' ? Math.min(cut, 3) : cut;
-      let t = 0;
-      let ai = 0;
-      while (t < duration - 0.05) {
-        const end = Math.min(duration, t + interval);
-        entries.push({
-          segmentId: seg.id,
-          startSec: t,
-          endSec: end,
-          assetId: assets[ai % assets.length].id,
-          reason: 'loop heuristic placement',
-        });
-        t = end;
-        ai += 1;
-      }
-    }
-    project.editTimeline = entries;
+    project.editTimeline = buildEditTimeline(project, {
+      cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+      reason: 'loop heuristic placement',
+    });
   }
 
   if (fixState.shockHook !== false && project.script?.length) {

@@ -794,8 +794,10 @@ export async function planSegmentVisuals(
 ): Promise<SegmentVisualPlan> {
   const beat = detectBeat(segment.narration);
   const entities = extractCapitalizedEntities(segment.narration);
+  const loopFastMode =
+    typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
 
-  if (openRouterKey) {
+  if (openRouterKey && !loopFastMode) {
     const aiPlan = await generateAIPlan(segment.narration, topicContext, openRouterKey, undefined, signal, segment.title);
     // If AI returned a useful plan with shots, use it
     if (aiPlan.shots && aiPlan.shots.length > 0) {

@@ -381,7 +381,13 @@ export async function generateFullVideo(options) {
     let mediaReady = false;
     let lastLogMin = -1;
     while (Date.now() < mediaDeadline) {
-      mediaReady = await page.getByRole('button', { name: /Prepare Narration/i }).isVisible().catch(() => false);
+      try {
+        mediaReady = await page
+          .getByRole('button', { name: /Prepare Narration/i })
+          .isVisible({ timeout: 10_000 });
+      } catch {
+        mediaReady = false;
+      }
       if (mediaReady) break;
       const elapsedMin = Math.floor((Date.now() - mediaStart) / 60000);
       if (elapsedMin >= 1 && elapsedMin !== lastLogMin && elapsedMin % 2 === 0) {

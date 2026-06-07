@@ -23,7 +23,11 @@ export async function generateAIScript(
   model = DEFAULT_SCRIPT_MODEL,
   signal?: AbortSignal,
 ): Promise<ScriptSegment[]> {
-  const totalSegments = Math.max(12, Math.min(15, Math.round(config.targetDuration * 2.5)));
+  const loopFastMode =
+    typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
+  const totalSegments = loopFastMode
+    ? Math.max(3, Math.min(4, Math.round(config.targetDuration)))
+    : Math.max(12, Math.min(15, Math.round(config.targetDuration * 2.5)));
   const needsTransition = totalSegments > 4;
   const tone = config.tone || 'informative';
 

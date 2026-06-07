@@ -23,6 +23,10 @@ import { isWatermarked } from './sourceProviders/watermarkFilter';
 import { determineLicense, isLicenseCompatible } from './licenseTracker';
 import { computePaletteBonus } from './qualityValidation/colorPalette';
 
+function isLoopFastMode(): boolean {
+  return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
+}
+
 // ---------------------------------------------------------------------------
 // Watermark Detection Constants
 // ---------------------------------------------------------------------------
@@ -1584,7 +1588,7 @@ async function harvestMediaWithSafetyNet(
 
   // Vision check — run on top 3 candidates if OpenRouter API key is available
   let visionRejectedAll = false;
-  if (config.openRouterKey && scored.length > 0) {
+  if (config.openRouterKey && scored.length > 0 && !isLoopFastMode()) {
     try {
       const top3Vision = scored.slice(0, 3);
       const visionResults = await batchVisionCheck(top3Vision, config.openRouterKey, { signal });
@@ -1690,10 +1694,10 @@ async function harvestMediaWithSafetyNet(
     scored.sort((a, b) => b.finalScore - a.finalScore);
   }
 
-  // Resolution stage — resolve full-resolution URLs for ALL candidates (with 15s timeout)
+  // Resolution stage — resolve full-resolution URLs (with 15s timeout)
   if (scored.length > 0) {
     try {
-      const allResolve = scored;
+      const allResolve = isLoopFastMode() ? scored.slice(0, 8) : scored;
       progressCallback?.(`Resolving full-resolution for ${allResolve.length} candidates...`, 35);
       const cache = new MediaCache();
       const resolveSignal = signal
@@ -1725,7 +1729,7 @@ async function harvestMediaWithSafetyNet(
   }
 
   // Quality scoring stage — score top 3 candidates after resolution (with 15s timeout)
-  if (config.openRouterKey && scored.length > 0) {
+  if (config.openRouterKey && scored.length > 0 && !isLoopFastMode()) {
     try {
       const top3Quality = scored.slice(0, 3);
       progressCallback?.(`Vision-checking top ${top3Quality.length}...`, 55);
@@ -2020,7 +2024,7 @@ export async function sourceSegmentMedia(
       ? buildSpecificQuery(rawVariationQuery, topicContext)
       : rawVariationQuery;
     let secondaryCandidates: MediaCandidate[] = [];
-    if (variationQuery && variationQuery !== primaryQuery && !signal?.aborted) {
+    if (variationQuery && variationQuery !== primaryQuery && !signal?.aborted && !isLoopFastMode()) {
       try {
         const secondary = await harvestMediaWithSafetyNet(variationQuery, topicContext, config, shotsToHarvest[1]?.vibe || shotsToHarvest[0]?.vibe, 1, [...trace], signal, undefined, segment.narration, segment.title);
         secondaryCandidates = secondary.candidates;
@@ -2064,7 +2068,7 @@ export async function sourceSegmentMedia(
 
       if (best) {
         // Final vision gate: scan the selected image before committing it
-        if (config.openRouterKey && !signal?.aborted && best.type === 'image') {
+        if (config.openRouterKey && !signal?.aborted && best.type === 'image' && !isLoopFastMode()) {
           try {
             const visionResult = await checkCandidateVision(best.resolvedUrl || best.url, config.openRouterKey, { signal });
             if (visionResult && !visionResult.pass) {
@@ -2090,7 +2094,7 @@ export async function sourceSegmentMedia(
         let cropMetadata: { x: number; y: number; width: number; height: number } | undefined;
         const assetWidth = best.resolvedWidth || best.width;
         const assetHeight = best.resolvedHeight || best.height;
-        if (assetWidth && assetHeight && needsCropping(assetWidth, assetHeight) && config.openRouterKey && !signal?.aborted) {
+        if (assetWidth && assetHeight && needsCropping(assetWidth, assetHeight) && config.openRouterKey && !signal?.aborted && !isLoopFastMode()) {
           try {
             const cropResult = await focalCrop(best.resolvedUrl || best.url, assetWidth, assetHeight, config.openRouterKey, { signal });
             cropMetadata = cropResult.crop;

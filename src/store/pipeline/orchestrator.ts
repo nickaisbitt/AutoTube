@@ -92,22 +92,28 @@ export async function executeGenerateScript(
     throw err;
   }
 
+  const loopFastMode = isLoopFastMode();
+
   // Multi-pass script refinement: review → polish → trim (Task 84, 100)
-  setProcessingProgress(40);
-  setProcessingMessage('Refining script (review pass)...');
-  try {
-    segments = await refineScriptMultiPass(segments, config.topic, appConfig.openRouterKey, signal);
-  } catch (err) {
-    if ((err as Error).name === 'AbortError') {
-      logger.info('Store', 'Script refinement cancelled by user');
-      return null;
-    }
-    logger.warn('Store', 'Script refinement encountered an error, falling back to single review pass');
+  if (!loopFastMode) {
+    setProcessingProgress(40);
+    setProcessingMessage('Refining script (review pass)...');
     try {
-      segments = await reviewAndImproveScript(segments, config.topic, appConfig.openRouterKey, signal);
-    } catch {
-      logger.warn('Store', 'Script review also failed, using original script');
+      segments = await refineScriptMultiPass(segments, config.topic, appConfig.openRouterKey, signal);
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        logger.info('Store', 'Script refinement cancelled by user');
+        return null;
+      }
+      logger.warn('Store', 'Script refinement encountered an error, falling back to single review pass');
+      try {
+        segments = await reviewAndImproveScript(segments, config.topic, appConfig.openRouterKey, signal);
+      } catch {
+        logger.warn('Store', 'Script review also failed, using original script');
+      }
     }
+  } else {
+    logger.info('Store', 'Loop fast mode: skipping script multi-pass refinement');
   }
 
   // Validate story arc (Task 86)
@@ -138,8 +144,6 @@ export async function executeGenerateScript(
   for (const beat of retentionBeats) {
     logger.info('Store', `Retention beat: segment=${beat.segmentIndex} offset=${beat.timeOffsetSec.toFixed(1)}s type=${beat.type}`);
   }
-
-  const loopFastMode = isLoopFastMode();
 
   const hookLine = resolveProjectHookLine(segments, config.topic);
   const introIdx = segments.findIndex(s => s.type === 'intro');

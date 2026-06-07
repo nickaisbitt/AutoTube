@@ -79,6 +79,13 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
     console.log('[preflight] scenedetect OK');
   }
 
+  const whisper = spawnSync('python3', ['-c', 'import faster_whisper'], { encoding: 'utf8' });
+  if (whisper.status !== 0) {
+    console.log('[preflight] faster-whisper not installed — run: pip install faster-whisper');
+  } else {
+    console.log('[preflight] faster-whisper OK');
+  }
+
   try {
     const providers = assertTtsAvailable();
     if (providers.edgeTts) {

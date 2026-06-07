@@ -52,7 +52,11 @@ export function runObjectiveQa(videoPath, options = {}) {
 
   let report;
   try {
-    report = JSON.parse(r.stdout);
+    const sanitized = (r.stdout || '')
+      .replace(/\b-Infinity\b/g, 'null')
+      .replace(/\bInfinity\b/g, 'null')
+      .replace(/\bNaN\b/g, 'null');
+    report = JSON.parse(sanitized);
   } catch {
     return { pass: false, error: 'check_quality JSON parse failed' };
   }

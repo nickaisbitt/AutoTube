@@ -15,11 +15,32 @@ Exit codes:
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+
+def _safe_float(value, default=0.0):
+    try:
+        parsed = float(value)
+        if math.isfinite(parsed):
+            return parsed
+    except (TypeError, ValueError):
+        pass
+    return default
+
+
+def _json_safe(value):
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
 
 def run_ffprobe(video_path):
     """Extract video metadata using ffprobe."""
@@ -52,12 +73,13 @@ def run_loudness_analysis(video_path):
         json_end = stderr.rfind('}') + 1
         if json_start >= 0 and json_end > json_start:
             loudness = json.loads(stderr[json_start:json_end])
+            lufs = _safe_float(loudness.get('input_i'), -70.0)
             return {
-                'integrated_loudness_lufs': float(loudness.get('input_i', 0)),
-                'true_peak_dbtp': float(loudness.get('input_tp', 0)),
-                'loudness_range_lu': float(loudness.get('input_lra', 0)),
+                'integrated_loudness_lufs': lufs,
+                'true_peak_dbtp': _safe_float(loudness.get('input_tp'), 0.0),
+                'loudness_range_lu': _safe_float(loudness.get('input_lra'), 0.0),
                 'target_lufs': -14.0,
-                'needs_normalization': abs(float(loudness.get('input_i', 0)) - (-14.0)) > 2.0,
+                'needs_normalization': abs(lufs - (-14.0)) > 2.0,
             }
     except Exception as e:
         print(f"Warning: loudness analysis failed: {e}", file=sys.stderr)
@@ -336,7 +358,7 @@ def main():
                     report['metadata']['audio_bitrate_kbps'] = round(int(br) / 1000)
 
     if args.json:
-        print(json.dumps(report, indent=2))
+        print(json.dumps(_json_safe(report), indent=2))
     else:
         # Pretty print
         print(f"\n{'='*60}")

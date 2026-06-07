@@ -20,6 +20,7 @@ export const DEFAULT_FIX_STATE = {
   minAssetsPerSegment: 4,
   maxGenerateFailuresPerTopic: 2,
   reHarvestMedia: false,
+  patternInterrupts: false,
 };
 
 /**
@@ -29,7 +30,10 @@ export function loadFixState(loopDir) {
   const path = join(loopDir, 'FIX_STATE.json');
   if (!existsSync(path)) return { ...DEFAULT_FIX_STATE };
   try {
-    return { ...DEFAULT_FIX_STATE, ...JSON.parse(readFileSync(path, 'utf8')) };
+    const loaded = { ...DEFAULT_FIX_STATE, ...JSON.parse(readFileSync(path, 'utf8')) };
+    // Persisted state once enabled stock overwrite — always prefer harvested media in loop.
+    loaded.forceRealStock = false;
+    return loaded;
   } catch {
     return { ...DEFAULT_FIX_STATE };
   }

@@ -466,7 +466,7 @@ function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec = 4) {
  *
  * Requirement 4.7
  */
-function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narrationText, projectTopic) {
+function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narrationText, projectTopic, assetIndex = 0) {
   const palettes = {
     intro:      { bg: ['#0a0a1a', '#1a0a2e', '#0a1a2e'], accent: '#e74c3c', glow: '#ff6b6b' },
     section:    { bg: ['#0a0a1a', '#0a1a2e', '#0a2a3e'], accent: '#3498db', glow: '#5dade2' },
@@ -495,12 +495,14 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narration
   }
 
   const p = palettes[segType] || palettes.section;
+  const accentPalette = ['#e74c3c', '#3498db', '#f39c12', '#2ecc71', '#9b59b6', '#1abc9c', '#e67e22'];
+  p.accent = accentPalette[assetIndex % accentPalette.length];
 
   // Richer multi-stop gradient background
   const grad = ctx.createLinearGradient(0, 0, w, h);
-  grad.addColorStop(0, p.bg[0]);
-  grad.addColorStop(0.5, p.bg[1]);
-  grad.addColorStop(1, p.bg[2]);
+  grad.addColorStop(0, p.bg[assetIndex % p.bg.length]);
+  grad.addColorStop(0.5, p.bg[(assetIndex + 1) % p.bg.length]);
+  grad.addColorStop(1, p.bg[(assetIndex + 2) % p.bg.length]);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
 
@@ -1186,9 +1188,11 @@ function drawProceduralBackground(ctx, seg, progress, skipParticles = false, seg
   const segmentColors = ['#3a4a7e', '#3a5a8e', '#2a5a7e', '#3a6a8f', '#4a3b89'];
   const bgColor = segmentColors[segmentIndex % segmentColors.length];
 
-  // Draft mode: solid colour fill — skip gradient and particle overhead
+  // Draft mode: solid colour fill — vary by segment + progress so holds don't hash identical
   if (DRAFT_MODE) {
-    ctx.fillStyle = p.bg[1];
+    const draftColors = ['#1a2a4e', '#2a1a3e', '#1a3a2e', '#3a2a1e', '#2a3a4e', '#1e3a4a', '#3a1e2a'];
+    const idx = (segmentIndex * 3 + Math.floor(progress * 8)) % draftColors.length;
+    ctx.fillStyle = draftColors[idx];
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     return;
   }
@@ -2525,7 +2529,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   } else if (activeImg && YOUTUBE_MODE) {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  } else if (!DRAFT_MODE) {
+  } else if (!DRAFT_MODE || loopMode) {
     drawProceduralBackground(ctx, seg, progress, false, segmentIndex);
   }
 
@@ -3289,6 +3293,7 @@ async function render() {
     showDataOverlay: process.env.AUTOTUBE_DATA_OVERLAY === '1',
     showKineticText: process.env.AUTOTUBE_KINETIC_TEXT === '1',
     useFastPacing: process.env.AUTOTUBE_FAST_PACING === '1',
+    patternInterrupts: process.env.AUTOTUBE_PATTERN_INTERRUPTS === '1' || process.env.AUTOTUBE_LOOP_MODE === '1',
   };
 
   // Initialize global state for advanced rendering features (Tasks 58, 79, 80)
@@ -4324,6 +4329,9 @@ async function render() {
         ? Math.min(1.5, pacingScore >= 4 ? 1.0 : 1.5)
         : Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
 
+    if (ytCut != null) {
+      log('info', `  B-roll cut interval: ${assetAlternationInterval}s (${segMedia.length} assets)`);
+    }
 
     for (let f = 0; f < numFrames; f++) {
       // Use computeActiveAssetIndex for multi-asset alternation (Requirement 4.4)
@@ -4383,7 +4391,7 @@ async function render() {
         }
         // Requirement 4.7: procedural background fallback when asset fails to load
         if (!img && asset) {
-          drawProceduralFallbackWithText(ctx, WIDTH, HEIGHT, seg.title, seg.type);
+          drawProceduralFallbackWithText(ctx, WIDTH, HEIGHT, seg.title, seg.type, seg.narration, project.topic || project.title, mi);
         }
       }
 
@@ -4392,6 +4400,9 @@ async function render() {
       // Step 10: Detect media asset change within segment and trigger zoom-out transition
       if (mi !== prevMi && prevMi >= 0) {
         zoomTransitionCounter = 3; // Start 3-frame zoom-out transition
+        if (renderFlags.patternInterrupts && process.env.AUTOTUBE_LOOP_MODE === '1') {
+          drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.35);
+        }
       }
       prevMi = mi;
 

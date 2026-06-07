@@ -219,8 +219,49 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     report.dropped.push({ url: asset.url, thumbnailUrl, reason: 'clip and thumbnail unavailable' });
   }
 
-  project.media = sanitized;
-  report.after = sanitized.length;
+  const validated = [];
+  const urlOk = new Map();
+  const reserve = [];
+
+  for (const asset of sanitized) {
+    if (asset.type !== 'image' || !asset.url) {
+      validated.push(asset);
+      continue;
+    }
+    const key = asset.url.split('?')[0];
+    if (validated.some((a) => a.url?.split('?')[0] === key)) continue;
+
+    let ok = urlOk.get(asset.url);
+    if (ok === undefined) {
+      ok = await canFetch(asset.url, { timeoutMs: 8000, minBytes: 512 });
+      urlOk.set(asset.url, ok);
+    }
+    if (ok) {
+      validated.push(asset);
+      reserve.push(asset);
+    } else {
+      report.dropped.push({ url: asset.url, reason: 'image fetch failed pre-render' });
+    }
+  }
+
+  const bySegment = {};
+  for (const asset of validated) {
+    bySegment[asset.segmentId] = (bySegment[asset.segmentId] || 0) + 1;
+  }
+  const minPerSeg = 3;
+  for (const segId of [...new Set(validated.map((a) => a.segmentId))]) {
+    while ((bySegment[segId] || 0) < minPerSeg) {
+      const replacement = reserve.find(
+        (r) => !validated.some((v) => v.segmentId === segId && v.url === r.url),
+      );
+      if (!replacement) break;
+      validated.push({ ...replacement, segmentId: segId });
+      bySegment[segId] = (bySegment[segId] || 0) + 1;
+    }
+  }
+
+  project.media = validated;
+  report.after = validated.length;
   writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
   return report;
 }
@@ -570,6 +611,7 @@ export async function generateFullVideo(options) {
       renderEnv.AUTOTUBE_CUT_INTERVAL_SEC = String(fixState.cutIntervalSec);
     }
     if (fixState.showKineticText) renderEnv.AUTOTUBE_KINETIC_TEXT = '1';
+    if (fixState.patternInterrupts) renderEnv.AUTOTUBE_PATTERN_INTERRUPTS = '1';
     if (fixState.useFastPacing) renderEnv.AUTOTUBE_FAST_PACING = '1';
     renderEnv.AUTOTUBE_LOOP_MODE = '1';
     // Loop renders: draft quality + longer encode timeout (worker CPU is slow)

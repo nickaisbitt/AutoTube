@@ -114,6 +114,43 @@ export function stripSceneLayoutsForLoop(project) {
   return project;
 }
 
+/** Ensure every segment has B-roll; dedupe URLs; steal from over-filled segments. */
+export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
+  if (!project?.script?.length || !project?.media?.length) return project;
+
+  const segIds = project.script.map((s) => s.id);
+  const buckets = Object.fromEntries(segIds.map((id) => [id, []]));
+  const seenUrls = new Set();
+
+  for (const asset of project.media) {
+    const key = (asset.url || '').split('?')[0];
+    if (key && seenUrls.has(key)) continue;
+    if (key) seenUrls.add(key);
+    const sid = segIds.includes(asset.segmentId) ? asset.segmentId : segIds[0];
+    buckets[sid].push({ ...asset, segmentId: sid });
+  }
+
+  const needy = segIds.filter((id) => buckets[id].length < minPerSegment);
+  if (needy.length === 0) {
+    project.media = segIds.flatMap((id) => buckets[id]);
+    return project;
+  }
+
+  const donors = [...segIds].sort((a, b) => buckets[b].length - buckets[a].length);
+  for (const needId of needy) {
+    while (buckets[needId].length < minPerSegment) {
+      const donorId = donors.find((id) => id !== needId && buckets[id].length > minPerSegment);
+      if (!donorId) break;
+      const moved = buckets[donorId].pop();
+      if (!moved) break;
+      buckets[needId].push({ ...moved, segmentId: needId });
+    }
+  }
+
+  project.media = segIds.flatMap((id) => buckets[id]);
+  return project;
+}
+
 /** Cap loop iteration runtime so cuts can outpace duplication on limited assets. */
 export function trimProjectForLoop(project, maxTotalSec = 75) {
   if (!project?.script?.length) return project;
@@ -153,6 +190,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   trimProjectForLoop(project, options.maxTotalSec ?? 75);
 
   stripSceneLayoutsForLoop(project);
+  balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4));
 
   if (fixState.shockHook !== false && project.script?.length) {
     const hook = buildShockHookLine(topic, fixState.hookLine);

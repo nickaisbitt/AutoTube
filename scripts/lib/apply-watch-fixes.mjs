@@ -52,16 +52,27 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
 
   if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6) {
     s.reHarvestMedia = true;
+    s.forceRealStock = false;
     s.minAssetsPerSegment = Math.min(8, Math.max(6, (s.minAssetsPerSegment || 4) + (repeatPct >= 40 ? 2 : 0)));
-    s.showKineticText = true;
     s.mediaOffset = (s.mediaOffset || 0) + 4;
-    applied.push(`3. Repetition/visual FAIL (${repeatPct}% dup, ${dupRuns} runs) → live harvest ≥${s.minAssetsPerSegment} assets/segment + kinetic text`);
+    const cutsAtFloor = (s.cutIntervalSec ?? 1.25) <= 0.5;
+    if (cutsAtFloor && repeatPct >= 35) {
+      // Cuts already maxed — kinetic text + captions read as duplicate frames to the watcher.
+      s.showKineticText = false;
+      s.patternInterrupts = true;
+      applied.push(`3. Repetition FAIL (${repeatPct}% dup, ${dupRuns} runs) → kinetic OFF, flash cuts ON, re-harvest ≥${s.minAssetsPerSegment}/seg`);
+    } else {
+      s.showKineticText = true;
+      applied.push(`3. Repetition/visual FAIL (${repeatPct}% dup, ${dupRuns} runs) → live harvest ≥${s.minAssetsPerSegment} assets/segment + kinetic text`);
+    }
   }
 
   if ((watch.brutal?.overall ?? 10) <= 5) {
-    s.showKineticText = true;
     s.useFastPacing = true;
-    applied.push('4. Overall ≤5/10 → enable kinetic text + fast pacing');
+    if (!s.patternInterrupts) s.showKineticText = (watch.brutal?.report?.scores?.visualVariety ?? 10) <= 5;
+    applied.push(s.showKineticText
+      ? '4. Overall ≤5/10 → enable kinetic text + fast pacing'
+      : '4. Overall ≤5/10 → fast pacing ON (kinetic OFF — text-heavy frames)');
   }
 
   if (watch.legacyVision?.technical?.issues?.some((i) => /loudness/i.test(i))) {
@@ -101,5 +112,7 @@ export function formatFixReport(applied, fixState) {
   lines.push(`9. mediaOffset: ${fixState.mediaOffset}`);
   lines.push(`10. topicRetryCount: ${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic}`);
   lines.push(`11. generateFailureCount: ${fixState.generateFailureCount || 0}/${fixState.maxGenerateFailuresPerTopic || 2}`);
+  lines.push(`12. patternInterrupts: ${fixState.patternInterrupts === true}`);
+  lines.push(`13. forceRealStock: ${fixState.forceRealStock === true}`);
   return lines.join('\n');
 }

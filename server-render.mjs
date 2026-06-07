@@ -3795,10 +3795,16 @@ async function render() {
     '-i', 'pipe:0',
   ];
 
+  const baseBitrate = Math.max(6_000_000, Number(project?.exportSettings?.videoBitsPerSecond || resPreset?.videoBitsPerSecond || 12_000_000));
+  const qualityMultiplier = quality === 'highest' ? 1.6 : quality === 'high' ? 1.35 : 1;
+  const targetVideoBitrate = String(Math.round(baseBitrate * qualityMultiplier));
+  const targetMaxRate = String(Math.round(Number(targetVideoBitrate) * 1.35));
+  const targetBufferSize = String(Math.round(Number(targetVideoBitrate) * 2));
+
   if (useGpu && hwEncoder === 'h264_videotoolbox') {
-    ffmpegArgs.push('-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-b:v', '12M');
+    ffmpegArgs.push('-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize);
   } else if (useGpu && hwEncoder === 'h264_nvenc') {
-    ffmpegArgs.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-rc', 'vbr', '-cq', '18', '-b:v', '12M');
+    ffmpegArgs.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-rc', 'vbr', '-cq', '18', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize);
   } else if (useGpu && hwEncoder === 'h264_vaapi') {
     ffmpegArgs.push('-vaapi_device', '/dev/dri/renderD128', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi');
   } else {
@@ -3809,7 +3815,7 @@ async function render() {
       ? (process.env.AUTOTUBE_FFMPEG_PRESET || 'ultrafast')
       : 'slow';
 
-    if (quality === 'highest' && !DRAFT_MODE) {
+    if ((quality === 'high' || quality === 'highest') && !DRAFT_MODE) {
       // Two-pass encoding: render to temp file, then two-pass encode
       const tempRenderFile = join(tmpdir(), `autotube-temp-render-${Date.now()}.mp4`);
       const tempRenderArgs = [
@@ -4718,8 +4724,8 @@ async function render() {
   // Task 129: Clear checkpoint on successful completion
   renderStateManager.markComplete();
 
-  // Two-pass encoding post-processing: re-encode temp render with two-pass for highest quality
-  if (quality === 'highest' && !DRAFT_MODE && twoPassState.tempFile && existsSync(twoPassState.tempFile)) {
+  // Two-pass encoding post-processing: re-encode temp render with two-pass for high/highest quality
+  if ((quality === 'high' || quality === 'highest') && !DRAFT_MODE && twoPassState.tempFile && existsSync(twoPassState.tempFile)) {
     log('info', `\n🎬 Two-pass encoding for highest quality...`);
     const tempFile = twoPassState.tempFile;
     const passLog = join(tmpdir(), `autotube-twopass-${Date.now()}.log`);
@@ -4730,7 +4736,7 @@ async function render() {
     // Pass 1: analyze
     const pass1Args = [
       '-y', '-i', tempFile,
-      '-c:v', codec, '-preset', 'slow', '-b:v', '12M', '-pass', '1',
+      '-c:v', codec, '-preset', 'slow', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize, '-pass', '1',
       '-passlogfile', passLog,
       ...extraArgs,
       '-an', '-f', 'null', process.platform === 'win32' ? 'NUL' : '/dev/null',
@@ -4742,7 +4748,7 @@ async function render() {
       // Pass 2: encode with analysis data
       const pass2Args = [
         '-y', '-i', tempFile,
-        '-c:v', codec, '-preset', 'slow', '-b:v', '12M', '-pass', '2',
+        '-c:v', codec, '-preset', 'slow', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize, '-pass', '2',
         '-passlogfile', passLog,
         ...extraArgs,
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
@@ -5034,8 +5040,11 @@ async function render() {
     const downloadName = `autotube-${safeTitle}.mp4`;
     const homeDir = homedir() || tmpdir();
     try {
-      copyFileSync(finalMp4File, `${homeDir}/Downloads/${downloadName}`);
-      log('info', `📁 Copied to ~/Downloads/${downloadName}`);
+      const downloadsDir = join(homeDir, 'Downloads');
+      if (!existsSync(downloadsDir)) mkdirSync(downloadsDir, { recursive: true });
+      const destination = join(downloadsDir, downloadName);
+      copyFileSync(finalMp4File, destination);
+      log('info', `📁 Copied to ${destination}`);
     } catch (copyErr) {
       console.warn(`  ⚠ Could not copy video to downloads folder: ${copyErr.message}`);
     }

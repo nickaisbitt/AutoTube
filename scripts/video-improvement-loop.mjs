@@ -163,7 +163,8 @@ async function main() {
       });
       generateOk = gen.ok;
       generateError = gen.error ?? null;
-      videoPath = gen.canonicalPath || gen.videoPath;
+      // Score the file we just rendered — canonical may be overwritten by finalize picking stale giants
+      videoPath = gen.videoPath || gen.canonicalPath;
       scriptText = gen.scriptText || '';
 
       if (gen.ok && videoPath && existsSync(videoPath)) {

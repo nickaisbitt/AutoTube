@@ -44,14 +44,31 @@ function score(path) {
 }
 
 mkdirSync(RECORDINGS, { recursive: true });
-const candidates = findCandidates();
-if (candidates.length === 0) {
-  console.error('❌ No -final.mp4 artifacts in test-recordings/');
-  process.exit(1);
-}
 
-candidates.sort((a, b) => score(b) - score(a));
-const best = candidates[0];
+/** Loop passes the just-rendered file — never pick a stale giant from test-recordings/. */
+const explicitSource = process.env.AUTOTUBE_FINALIZE_SOURCE?.trim();
+let best = null;
+let candidates = [];
+if (explicitSource && existsSync(explicitSource)) {
+  best = explicitSource;
+  candidates = [explicitSource];
+  console.log(`[finalize] Using explicit source: ${best}`);
+} else {
+  candidates = findCandidates();
+  if (candidates.length === 0) {
+    console.error('❌ No -final.mp4 artifacts in test-recordings/');
+    process.exit(1);
+  }
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
+  candidates.sort((a, b) => {
+    if (loopMode) {
+      // Newest wins in loop — do NOT prefer file size (stale HQ renders are huge)
+      return statSync(b).mtimeMs - statSync(a).mtimeMs;
+    }
+    return score(b) - score(a);
+  });
+  best = candidates[0];
+}
 const durationSec = probeDuration(best);
 const sizeBytes = statSync(best).size;
 

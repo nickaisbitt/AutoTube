@@ -110,8 +110,9 @@ function isJunkHarvestUrl(url) {
   const u = (url || '').toLowerCase();
   return (
     u.includes('gravatar.com/avatar') ||
-    /tse\d\.mm\.bing\.net\/th\/id\/ovp/i.test(u) ||
-    u.includes('/th/id/ovp.')
+    /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
+    u.includes('/th/id/ovp.') ||
+    u.includes('th?id=ovp.')
   );
 }
 
@@ -619,6 +620,7 @@ export async function generateFullVideo(options) {
       env: {
         ...process.env,
         AUTOTUBE_LOOP_MODE: '1',
+        AUTOTUBE_FINALIZE_SOURCE: produced,
         MIN_DURATION_SEC: process.env.MIN_DURATION_SEC || '30',
         REAL_PASS_FIXTURE: '1',
       },

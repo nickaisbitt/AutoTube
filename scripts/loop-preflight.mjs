@@ -58,7 +58,10 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
   const url = devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173';
 
   if (!(await checkDevServer(url))) {
-    errors.push(`Dev server not reachable at ${url} — run: npm run dev -- --port 5173 --host 0.0.0.0 (vite preview lacks /api routes)`);
+    console.log(`[preflight] Dev server down — waiting up to 90s (restart: npm run loop:serve)`);
+    if (!(await waitForDevServer(url, { maxWaitMs: 90_000, pollMs: 5000 }))) {
+      errors.push(`Dev server not reachable at ${url} — run: npm run loop:serve (vite preview lacks /api routes)`);
+    }
   }
 
   if (requireOpenRouter && !resolveOpenRouterKey()) {

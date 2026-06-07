@@ -4,37 +4,61 @@
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 
-/** 3–5 word punchy on-screen hook for watcher 0–3s frame audit. */
-export function buildShortHookOverlay(topic, hookLine) {
-  const stop = new Set([
-    'the', 'a', 'an', 'they', 'this', 'that', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
-    'it', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'try', 'tried', 'hide', 'hiding',
-    'reveal', 'shocking', 'truth', 'about', 'why', 'how', 'what', 'when', 'where', 'who',
-    'start', 'your', 'here', 'proof', 'right', 'now',
-  ]);
-  const raw = (topic || hookLine || 'Watch this').replace(/^The /i, '').trim();
-  const topicWords = raw
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'they', 'this', 'that', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+  'it', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'try', 'tried', 'hide', 'hiding',
+  'reveal', 'shocking', 'truth', 'about', 'why', 'how', 'what', 'when', 'where', 'who',
+  'start', 'your', 'here', 'proof', 'right', 'now', 'found', 'that', 'entire', 'into',
+]);
+
+function topicKeywords(topic) {
+  return (topic || '')
+    .replace(/^The /i, '')
     .split(/\s+/)
     .map((w) => w.replace(/[^a-zA-Z0-9]/g, ''))
-    .filter((w) => w.length > 2 && !stop.has(w.toLowerCase()))
-    .slice(0, 5);
-  if (topicWords.length >= 2) {
-    return topicWords.join(' ').toUpperCase();
-  }
-  const hlWords = (hookLine || '').split(/\s+/).filter(Boolean);
-  const significant = hlWords
-    .map((w) => w.replace(/[^a-zA-Z0-9]/g, ''))
-    .filter((w) => w.length > 2 && !stop.has(w.toLowerCase()))
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase()))
     .slice(0, 4);
-  return (significant.join(' ') || 'WATCH THIS').toUpperCase();
+}
+
+/** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
+export function buildShortHookOverlay(topic, hookLine, options = {}) {
+  if (options.preferredOverlay?.trim()) {
+    return options.preferredOverlay.trim().toUpperCase();
+  }
+
+  const visionFix = options.visionFix?.trim();
+  if (visionFix) {
+    const clean = visionFix
+      .replace(/['"]/g, '')
+      .replace(/^Start with[^:]*:\s*/i, '')
+      .replace(/^Reveal[^:]*:\s*/i, '')
+      .trim();
+    const words = clean.split(/\s+/).filter(Boolean).slice(0, 7);
+    if (words.length >= 3) return words.join(' ').toUpperCase();
+  }
+
+  const keywords = topicKeywords(topic);
+  const core = keywords.join(' ').toUpperCase() || 'CRISIS EXPOSED';
+  const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
+
+  if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
+    return `EXPOSED: ${core}`;
+  }
+  if (/nuclear|radiation|meltdown|plant/i.test(t)) {
+    return `EMERGENCY: ${core}`;
+  }
+  if (/fire|attack|blackout|disaster|death|kill|crash|bomb|hack/i.test(t)) {
+    return `BREAKING: ${core}`;
+  }
+  return `BREAKING: ${core}`;
 }
 
 /** Cap loop iteration runtime so cuts can outpace duplication on limited assets. */
-export function trimProjectForLoop(project, maxTotalSec = 90) {
+export function trimProjectForLoop(project, maxTotalSec = 75) {
   if (!project?.script?.length) return project;
   const segCount = project.script.length;
-  const perSegSec = Math.max(18, Math.floor(maxTotalSec / segCount));
-  const wordsPerSeg = Math.max(35, Math.floor((perSegSec / 60) * 140));
+  const perSegSec = Math.max(15, Math.floor(maxTotalSec / segCount));
+  const wordsPerSeg = Math.max(28, Math.floor((perSegSec / 60) * 130));
 
   project.script = project.script.map((seg) => {
     const words = (seg.narration || '').split(/\s+/).filter(Boolean);
@@ -44,10 +68,9 @@ export function trimProjectForLoop(project, maxTotalSec = 90) {
 
   project.targetDuration = maxTotalSec / 60;
   if (project.narration?.length) {
-    const perClip = perSegSec;
     project.narration = project.narration.map((clip, i) => ({
       ...clip,
-      duration: perClip,
+      duration: perSegSec,
       segmentId: project.script[i]?.id ?? clip.segmentId,
     }));
   }
@@ -66,11 +89,14 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   project.title = topic;
   project.style = 'youtube_viral';
 
-  trimProjectForLoop(project, options.maxTotalSec ?? 90);
+  trimProjectForLoop(project, options.maxTotalSec ?? 75);
 
   if (fixState.shockHook !== false && project.script?.length) {
     const hook = buildShockHookLine(topic, fixState.hookLine);
-    const hookOverlay = buildShortHookOverlay(topic, hook);
+    const hookOverlay = buildShortHookOverlay(topic, hook, {
+      preferredOverlay: fixState.hookOverlay,
+      visionFix: fixState.hookOverlay,
+    });
     project.hookLine = hook;
     project.exportSettings = {
       ...(project.exportSettings || {}),

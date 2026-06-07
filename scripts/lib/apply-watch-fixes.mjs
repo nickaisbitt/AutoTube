@@ -2,6 +2,7 @@
  * Map Video Watcher results → pipeline fixes (applied before next loop iteration).
  */
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
+import { buildShortHookOverlay } from './patch-project-for-loop.mjs';
 
 /**
  * @param {object} watch — watchVideo() result
@@ -22,35 +23,35 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
 
   if (hookFail) {
     s.shockHook = true;
-    // Always rebuild from current topic — stale hookLine from prior topics breaks hook frames.
     const visionFix = watch.hookVision?.fix?.trim();
     const topicHint = (topic || '').toLowerCase().slice(0, 24);
     const fixMatchesTopic =
       topicHint.length > 0 && visionFix && visionFix.toLowerCase().includes(topicHint.split(/\s+/)[0]);
     s.hookLine = buildShockHookLine(topic, fixMatchesTopic ? visionFix : undefined);
-    applied.push(`1. Hook FAIL → shock opener: "${s.hookLine.slice(0, 70)}…"`);
+    s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, { visionFix });
+    applied.push(`1. Hook FAIL → overlay: "${s.hookOverlay}"`);
   }
 
   if (pacing <= 8 || longestHold >= 4) {
     s.useFastPacing = true;
     const prev = s.cutIntervalSec ?? 1.25;
-    s.cutIntervalSec = Math.max(0.75, prev - 0.2);
+    s.cutIntervalSec = Math.max(0.5, prev - 0.15);
     applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s, fast pacing ON`);
   }
 
   if ((watch.brutal?.overall ?? 10) < 9.1) {
     s.showKineticText = true;
     s.useFastPacing = true;
-    s.cutIntervalSec = Math.max(0.75, (s.cutIntervalSec ?? 1.25) - 0.1);
+    s.cutIntervalSec = Math.max(0.5, (s.cutIntervalSec ?? 1.25) - 0.1);
     s.shockHook = true;
     s.reHarvestMedia = true;
-    s.minAssetsPerSegment = Math.max(4, s.minAssetsPerSegment || 0);
-    applied.push(`2b. Score below 9.1 → escalate all render fixes (cuts=${s.cutIntervalSec}s)`);
+    s.minAssetsPerSegment = Math.min(8, Math.max(6, s.minAssetsPerSegment || 4));
+    applied.push(`2b. Score below 9.1 → escalate (cuts=${s.cutIntervalSec}s, assets≥${s.minAssetsPerSegment}/seg)`);
   }
 
   if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6) {
     s.reHarvestMedia = true;
-    s.minAssetsPerSegment = Math.max(4, s.minAssetsPerSegment || 0);
+    s.minAssetsPerSegment = Math.min(8, Math.max(6, (s.minAssetsPerSegment || 4) + (repeatPct >= 40 ? 2 : 0)));
     s.showKineticText = true;
     s.mediaOffset = (s.mediaOffset || 0) + 4;
     applied.push(`3. Repetition/visual FAIL (${repeatPct}% dup, ${dupRuns} runs) → live harvest ≥${s.minAssetsPerSegment} assets/segment + kinetic text`);
@@ -93,10 +94,11 @@ export function formatFixReport(applied, fixState) {
   lines.push(`3. useFastPacing: ${fixState.useFastPacing}`);
   lines.push(`4. shockHook: ${fixState.shockHook}`);
   lines.push(`5. hookLine: ${fixState.hookLine || '(auto)'}`);
-  lines.push(`6. reHarvestMedia: ${fixState.reHarvestMedia}`);
-  lines.push(`7. minAssetsPerSegment: ${fixState.minAssetsPerSegment || 4}`);
-  lines.push(`8. mediaOffset: ${fixState.mediaOffset}`);
-  lines.push(`9. topicRetryCount: ${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic}`);
-  lines.push(`10. generateFailureCount: ${fixState.generateFailureCount || 0}/${fixState.maxGenerateFailuresPerTopic || 2}`);
+  lines.push(`6. hookOverlay: ${fixState.hookOverlay || '(auto)'}`);
+  lines.push(`7. reHarvestMedia: ${fixState.reHarvestMedia}`);
+  lines.push(`8. minAssetsPerSegment: ${fixState.minAssetsPerSegment || 4}`);
+  lines.push(`9. mediaOffset: ${fixState.mediaOffset}`);
+  lines.push(`10. topicRetryCount: ${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic}`);
+  lines.push(`11. generateFailureCount: ${fixState.generateFailureCount || 0}/${fixState.maxGenerateFailuresPerTopic || 2}`);
   return lines.join('\n');
 }

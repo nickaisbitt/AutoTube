@@ -224,7 +224,7 @@ export async function generateFullVideo(options) {
   const log = (msg) => {
     if (!options.quiet) console.log(msg);
   };
-  const loopMinAssets = Math.max(2, Math.min(4, fixState.minAssetsPerSegment || 4));
+  const loopMinAssets = Math.max(2, Math.min(8, fixState.minAssetsPerSegment || 6));
 
   if (!(await checkDevServer(devServer))) {
     return { ok: false, error: `Dev server not reachable at ${devServer}`, topic, outDir };
@@ -232,7 +232,7 @@ export async function generateFullVideo(options) {
 
   log(`\n🎬 Generate: ${topic}`);
   log(`   Mode: ${realHarvest ? 'real harvest (OpenRouter + live search)' : 'mock (CI/e2e)'}`);
-  if (realHarvest) log(`   Loop: ${loopMinAssets} assets/segment, ≤90s target`);
+  if (realHarvest) log(`   Loop: ${loopMinAssets} assets/segment, ≤75s target`);
   log(`   Out: ${outDir}\n`);
 
   let browser = await chromium.launch({

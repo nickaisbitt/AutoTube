@@ -119,6 +119,7 @@ async function main() {
       currentTopic = pickRandomTopic();
       fixState.topicRetryCount = 0;
       delete fixState.hookLine;
+      delete fixState.hookOverlay;
     }
 
     const topic = cfg.reviewOnly ? '(review-only)' : currentTopic;

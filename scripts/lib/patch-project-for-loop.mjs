@@ -61,8 +61,17 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
   if (fromVision) return fromVision;
 
-  const keywords = topicKeywords(topic);
-  const core = keywords.join(' ').toUpperCase() || 'CRISIS EXPOSED';
+  const headline = (topic || '')
+    .replace(/^How\s+/i, '')
+    .replace(/^The\s+/i, '')
+    .replace(/\?$/,'')
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 1)
+    .slice(0, 8)
+    .join(' ')
+    .toUpperCase() || topicKeywords(topic).join(' ').toUpperCase() || 'CRISIS EXPOSED';
+  const core = headline;
   const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
 
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {

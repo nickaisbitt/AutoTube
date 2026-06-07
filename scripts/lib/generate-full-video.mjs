@@ -224,6 +224,7 @@ export async function generateFullVideo(options) {
   const log = (msg) => {
     if (!options.quiet) console.log(msg);
   };
+  const loopMinAssets = Math.max(2, Math.min(4, fixState.minAssetsPerSegment || 4));
 
   if (!(await checkDevServer(devServer))) {
     return { ok: false, error: `Dev server not reachable at ${devServer}`, topic, outDir };
@@ -245,8 +246,6 @@ export async function generateFullVideo(options) {
     ],
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-
-  const loopMinAssets = Math.max(2, Math.min(4, fixState.minAssetsPerSegment || 4));
 
   await page.addInitScript(
     ({ key, minAssets }) => {

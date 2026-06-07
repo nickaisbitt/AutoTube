@@ -608,7 +608,9 @@ export function scoreCandidate(
   if (
     urlLower.includes('gravatar.com/avatar') ||
     /tse\d\.mm\.bing\.net\/th\/id\/ovp/i.test(urlLower) ||
-    urlLower.includes('/th/id/ovp.')
+    urlLower.includes('/th/id/ovp.') ||
+    /\.webp(?:[?#]|$)/.test(urlLower) ||
+    /\.avif(?:[?#]|$)/.test(urlLower)
   ) {
     score -= 450;
   }

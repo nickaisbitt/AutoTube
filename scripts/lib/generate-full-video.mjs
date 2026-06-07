@@ -20,6 +20,32 @@ export function resolveOpenRouterKey() {
   ).trim();
 }
 
+async function clickPipelineButton(page, locator, { settleMs = 2000, timeout = 120_000 } = {}) {
+  await locator.waitFor({ state: 'visible', timeout });
+  if (settleMs > 0) await page.waitForTimeout(settleMs);
+  try {
+    await locator.click({ timeout: 20_000 });
+    return;
+  } catch {
+    /* fall through */
+  }
+  try {
+    await locator.click({ force: true, timeout });
+    return;
+  } catch {
+    /* fall through */
+  }
+  const clicked = await page.evaluate(() => {
+    const btn =
+      document.querySelector('[data-testid="media-step-next"]') ||
+      [...document.querySelectorAll('button')].find((b) => /Prepare Narration/i.test(b.textContent || ''));
+    if (!btn) return false;
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    return true;
+  });
+  if (!clicked) throw new Error('Pipeline button click failed (Prepare Narration)');
+}
+
 export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || 'http://localhost:5173') {
   const timeoutMs = Number(process.env.DEV_SERVER_CHECK_TIMEOUT_MS) || 30_000;
   try {
@@ -427,7 +453,10 @@ export async function generateFullVideo(options) {
       throw new Error(`Media harvest timed out after ${Math.round(mediaTimeoutMs / 60000)}min waiting for Prepare Narration`);
     }
 
-    await page.getByRole('button', { name: /Prepare Narration/i }).click();
+    await clickPipelineButton(
+      page,
+      page.getByTestId('media-step-next').or(page.locator('button:has-text("Prepare Narration")').first()),
+    );
     log('⏳ Narration...');
     await page.getByTestId('skip-ai-edit-button').waitFor({ timeout: narrationTimeoutMs });
     await page.getByTestId('skip-ai-edit-button').click();

@@ -160,6 +160,8 @@ export default function MediaStep({
 
       {status === 'complete' && (
         <button
+          type="button"
+          data-testid="media-step-next"
           onClick={onNext}
           className="group flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase tracking-wider text-black shadow-hard hover:bg-brand-400"
         >

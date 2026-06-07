@@ -4,7 +4,9 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
-export const FIX_STATE_VERSION = 2;
+export const FIX_STATE_VERSION = 3;
+
+/** @typedef {'interval' | 'hard_cuts' | 'reharvest' | 'new_topic'} FixStrategy */
 
 export const DEFAULT_FIX_STATE = {
   version: FIX_STATE_VERSION,
@@ -15,6 +17,10 @@ export const DEFAULT_FIX_STATE = {
   hookLine: null,
   forceRealStock: false,
   mediaOffset: 0,
+  harvestNonce: 0,
+  excludedUrls: [],
+  fixStrategy: 'interval',
+  ffmpegHardCuts: false,
   topicRetryCount: 0,
   maxRetriesPerTopic: 4,
   pendingTopic: null,
@@ -46,6 +52,10 @@ export function loadFixState(loopDir) {
     if (raw.harvestVideoFirst === undefined) loaded.harvestVideoFirst = true;
     if (raw.brollPlacement === undefined) loaded.brollPlacement = true;
     if (raw.renderTier === undefined) loaded.renderTier = 'draft';
+    if (raw.fixStrategy === undefined) loaded.fixStrategy = 'interval';
+    if (raw.ffmpegHardCuts === undefined) loaded.ffmpegHardCuts = false;
+    if (raw.harvestNonce === undefined) loaded.harvestNonce = 0;
+    if (!Array.isArray(raw.excludedUrls)) loaded.excludedUrls = [];
     return loaded;
   } catch {
     return { ...DEFAULT_FIX_STATE };

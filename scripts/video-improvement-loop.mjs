@@ -68,11 +68,12 @@ function appendJournal(entry) {
     `6. **Objective gate:** ${entry.objectivePass === true ? 'PASS' : entry.objectivePass === false ? 'FAIL' : '—'} (score ${entry.objectiveScore ?? '—'})`,
     `7. **Scene QA:** ${entry.scenePass === true ? 'PASS' : entry.scenePass === false ? 'FAIL' : '—'} (longest ${entry.longestSceneSec ?? '—'}s)`,
     `8. **Render tier:** ${entry.renderTier || '—'}`,
-    `9. **Hook pass:** ${entry.hookPass === true ? 'YES' : entry.hookPass === false ? 'NO' : '—'}`,
-    `10. **Fixes applied:** ${entry.fixesApplied?.length ? entry.fixesApplied.join('; ') : 'none'}`,
-    `11. **Next step:** ${entry.nextStep || '—'}`,
-    `12. **Watch report:** \`${entry.reportPath || '—'}\``,
-    `13. **Run folder:** \`${entry.runDir || '—'}\``,
+    `9. **Fix strategy:** ${entry.fixStrategy || '—'} | nonce ${entry.harvestNonce ?? '—'} | hardCuts ${entry.ffmpegHardCuts === true ? 'yes' : entry.ffmpegHardCuts === false ? 'no' : '—'}`,
+    `10. **Hook pass:** ${entry.hookPass === true ? 'YES' : entry.hookPass === false ? 'NO' : '—'}`,
+    `11. **Fixes applied:** ${entry.fixesApplied?.length ? entry.fixesApplied.join('; ') : 'none'}`,
+    `12. **Next step:** ${entry.nextStep || '—'}`,
+    `13. **Watch report:** \`${entry.reportPath || '—'}\``,
+    `14. **Run folder:** \`${entry.runDir || '—'}\``,
     ``,
   ];
   appendFileSync(JOURNAL_MD, `${lines.join('\n')}\n`);
@@ -124,6 +125,8 @@ async function main() {
     if (!currentTopic && !cfg.reviewOnly) {
       currentTopic = pickRandomTopic();
       fixState.topicRetryCount = 0;
+      fixState.fixStrategy = 'interval';
+      fixState.ffmpegHardCuts = false;
       delete fixState.hookLine;
       delete fixState.hookOverlay;
     }
@@ -137,7 +140,9 @@ async function main() {
       ` LOOP ${iteration}${isRetry ? ` RETRY ${fixState.topicRetryCount + 1}/${fixState.maxRetriesPerTopic}` : ''} — ${topic}`,
     );
     if (isRetry) {
-      console.log(` 🔧 Applying saved fixes: cut=${fixState.cutIntervalSec}s tier=${fixState.renderTier || 'draft'} ffmpeg=${fixState.useFfmpegAssembly !== false} videoFirst=${fixState.harvestVideoFirst !== false}`);
+      console.log(
+        ` 🔧 Applying saved fixes: strategy=${fixState.fixStrategy || 'interval'} cut=${fixState.cutIntervalSec}s tier=${fixState.renderTier || 'draft'} hardCuts=${fixState.ffmpegHardCuts === true} reHarvest=${fixState.reHarvestMedia === true} nonce=${fixState.harvestNonce || 0}`,
+      );
     }
     console.log(`${'═'.repeat(64)}\n`);
 
@@ -145,6 +150,7 @@ async function main() {
     let generateError = null;
     let videoPath = null;
     let scriptText = '';
+    let renderEnv = null;
 
     if (!cfg.reviewOnly) {
       if (!(await waitForDevServer())) {
@@ -169,9 +175,13 @@ async function main() {
       });
       generateOk = gen.ok;
       generateError = gen.error ?? null;
+      if (gen.fixState) {
+        fixState = { ...fixState, ...gen.fixState };
+      }
       // Score the file we just rendered — canonical may be overwritten by finalize picking stale giants
       videoPath = gen.videoPath || gen.canonicalPath;
       scriptText = gen.scriptText || '';
+      renderEnv = gen.renderEnv || null;
 
       if (gen.ok && videoPath && existsSync(videoPath)) {
         const videoCheck = validateLoopVideo(videoPath);
@@ -299,6 +309,10 @@ async function main() {
         scenePass,
         longestSceneSec: watch.sceneQa?.longestSceneSec,
         renderTier: 'draft',
+        fixStrategy: fixState.fixStrategy,
+        harvestNonce: fixState.harvestNonce,
+        ffmpegHardCuts: fixState.ffmpegHardCuts,
+        renderEnv,
         hookPass: watch.hookVision?.hookPass,
         fixesApplied: ['promote to full-quality render'],
         nextStep: 'RETRY same topic at full tier',
@@ -352,6 +366,8 @@ async function main() {
         fixState.generateFailureCount = 0;
         fixState.mediaOffset = 0;
         fixState.renderTier = 'draft';
+        fixState.fixStrategy = 'interval';
+        fixState.ffmpegHardCuts = false;
         nextStep = 'new topic (max retries hit, fixes retained)';
       }
     } else {
@@ -383,6 +399,10 @@ async function main() {
       scenePass,
       longestSceneSec: watch.sceneQa?.longestSceneSec,
       renderTier,
+      fixStrategy: fixState.fixStrategy,
+      harvestNonce: fixState.harvestNonce,
+      ffmpegHardCuts: fixState.ffmpegHardCuts,
+      renderEnv: renderEnv || fixState.renderEnv,
       hookPass: watch.hookVision?.hookPass,
       fixesApplied,
       nextStep,

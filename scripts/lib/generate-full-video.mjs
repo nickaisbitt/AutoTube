@@ -10,6 +10,13 @@ import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pip
 import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
 import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
+import {
+  accumulateExcludedUrls,
+  harvestContextFromFixState,
+  harvestSessionStoragePayload,
+  loadLastProjectUrls,
+} from './harvest-loop-context.mjs';
+import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-env-from-fix-state.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -294,7 +301,19 @@ export async function generateFullVideo(options) {
   const topic = options.topic;
   if (!topic?.trim()) throw new Error('topic is required');
 
-  const fixState = options.fixState || {};
+  const fixState = { ...(options.fixState || {}) };
+  if (fixState.reHarvestMedia) {
+    fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
+    fixState.reHarvestMedia = false;
+    if (!options.quiet) {
+      console.log(`   🔄 Re-harvest requested — nonce ${fixState.harvestNonce}, offset ${fixState.mediaOffset || 0}`);
+    }
+  }
+  const priorUrls = loadLastProjectUrls(process.cwd());
+  if (priorUrls.length && (!fixState.excludedUrls || fixState.excludedUrls.length === 0)) {
+    fixState.excludedUrls = priorUrls.map((u) => (u || '').split('?')[0]).slice(-200);
+  }
+  const harvestCtx = harvestContextFromFixState(fixState);
   const openRouterKey = resolveOpenRouterKey();
   const realHarvest = options.realHarvest === true || (options.realHarvest !== false && Boolean(openRouterKey));
 
@@ -347,8 +366,9 @@ export async function generateFullVideo(options) {
   const pexelsKey = resolvePexelsKey();
   const pixabayKey = resolvePixabayKey();
 
+  const harvestStorage = harvestSessionStoragePayload(harvestCtx);
   await page.addInitScript(
-    ({ key, minAssets, pexels, pixabay, rawFirst }) => {
+    ({ key, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
       localStorage.setItem('autotube_onboarding_seen', 'true');
       localStorage.removeItem('autotube_project');
       sessionStorage.setItem(
@@ -366,6 +386,9 @@ export async function generateFullVideo(options) {
       sessionStorage.setItem('autotube_loop_min_assets', String(minAssets));
       sessionStorage.setItem('autotube_loop_broll_placement', 'true');
       if (rawFirst) sessionStorage.setItem('autotube_loop_video_first', 'true');
+      for (const [k, v] of Object.entries(hs || {})) {
+        sessionStorage.setItem(k, v);
+      }
     },
     {
       key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline',
@@ -373,6 +396,7 @@ export async function generateFullVideo(options) {
       pexels: pexelsKey,
       pixabay: pixabayKey,
       rawFirst: realHarvest,
+      harvestStorage,
     },
   );
 
@@ -590,6 +614,7 @@ export async function generateFullVideo(options) {
       const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, { loopMode: true });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
     }
+    accumulateExcludedUrls(fixState, project);
 
     try {
       for (const f of readdirSync('/tmp')) {
@@ -614,45 +639,9 @@ export async function generateFullVideo(options) {
     await browser.close().catch(() => {});
     browser = null;
 
-    const renderEnv = {
-      ...process.env,
-      DEV_SERVER_URL: devServer,
-      AUTOTUBE_FORCE_CPU: process.env.AUTOTUBE_FORCE_CPU || '1',
-      AUTOTUBE_PROJECT_PATH: projectPath,
-    };
-    if (options.youtubeMode !== false) {
-      renderEnv.AUTOTUBE_YOUTUBE_MODE = '1';
-    }
-    if (fixState.cutIntervalSec) {
-      renderEnv.AUTOTUBE_CUT_INTERVAL_SEC = String(fixState.cutIntervalSec);
-    }
-    if (fixState.showKineticText) renderEnv.AUTOTUBE_KINETIC_TEXT = '1';
-    if (fixState.patternInterrupts) renderEnv.AUTOTUBE_PATTERN_INTERRUPTS = '1';
-    if (fixState.useFastPacing) renderEnv.AUTOTUBE_FAST_PACING = '1';
-    renderEnv.AUTOTUBE_LOOP_MODE = '1';
-    const renderTier = fixState.renderTier === 'full' ? 'full' : 'draft';
-    if (fixState.useFfmpegAssembly !== false) {
-      renderEnv.AUTOTUBE_RENDER_MODE = 'ffmpeg';
-    }
-    if (fixState.harvestVideoFirst !== false) {
-      renderEnv.AUTOTUBE_HARVEST_VIDEO_FIRST = '1';
-    }
-    if (fixState.whisperAlign || renderTier === 'full') {
-      renderEnv.AUTOTUBE_WHISPER_ALIGN = '1';
-    }
-    if (fixState.brollPlacement !== false) {
-      renderEnv.AUTOTUBE_BROLL_PLACEMENT = '1';
-    }
-    if (renderTier === 'full') {
-      renderEnv.AUTOTUBE_RENDER_QUALITY = 'high';
-      renderEnv.AUTOTUBE_FFMPEG_PRESET = process.env.AUTOTUBE_FFMPEG_PRESET || 'fast';
-      delete renderEnv.AUTOTUBE_DRAFT_NO_UPSCALE;
-    } else {
-      renderEnv.AUTOTUBE_RENDER_QUALITY = process.env.AUTOTUBE_RENDER_QUALITY || 'draft';
-      renderEnv.AUTOTUBE_FFMPEG_PRESET = process.env.AUTOTUBE_FFMPEG_PRESET || 'ultrafast';
-      renderEnv.AUTOTUBE_DRAFT_NO_UPSCALE = process.env.AUTOTUBE_DRAFT_NO_UPSCALE || '1';
-    }
-    renderEnv.AUTOTUBE_ENCODING_TIMEOUT_MS = process.env.AUTOTUBE_ENCODING_TIMEOUT_MS || '1800000';
+    const renderEnv = buildRenderEnvFromFixState(fixState, { devServer, projectPath });
+    const renderSnapshot = renderEnvJournalSnapshot(fixState);
+    writeFileSync(join(outDir, 'render-env.json'), JSON.stringify(renderSnapshot, null, 2));
 
     const render = spawnSync('node', ['server-render.mjs', mp4Out], {
       cwd: root,
@@ -719,6 +708,9 @@ export async function generateFullVideo(options) {
       durationSec,
       sizeMb: (gate.size / 1024 / 1024).toFixed(2),
       realHarvest,
+      fixState,
+      renderEnv: renderSnapshot,
+      harvestNonce: fixState.harvestNonce || 0,
     };
   } catch (err) {
     return { ok: false, error: err.message, topic, outDir };

@@ -47,6 +47,35 @@ function isLoopVideoFirst(): boolean {
   );
 }
 
+function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<string> } {
+  if (!isLoopFastMode() || typeof sessionStorage === 'undefined') {
+    return { offset: 0, nonce: 0, exclude: new Set() };
+  }
+  const offset = parseInt(sessionStorage.getItem('autotube_loop_media_offset') || '0', 10) || 0;
+  const nonce = parseInt(sessionStorage.getItem('autotube_loop_harvest_nonce') || '0', 10) || 0;
+  const exclude = new Set<string>();
+  try {
+    const raw = sessionStorage.getItem('autotube_loop_exclude_urls');
+    if (raw) {
+      for (const u of JSON.parse(raw) as string[]) {
+        if (u) exclude.add(u.split('?')[0].toLowerCase());
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return { offset, nonce, exclude };
+}
+
+const LOOP_DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investigation', 'report', 'leaked', 'official'];
+
+function diversifyLoopQuery(query: string, ctx: { offset: number; nonce: number }): string {
+  if (ctx.offset === 0 && ctx.nonce === 0) return query;
+  const token = LOOP_DIVERSITY_TOKENS[ctx.offset % LOOP_DIVERSITY_TOKENS.length];
+  const variant = ctx.nonce > 0 ? ` take ${ctx.nonce}` : '';
+  return `${query} ${token}${variant}`.trim();
+}
+
 // ---------------------------------------------------------------------------
 // Watermark Detection Constants
 // ---------------------------------------------------------------------------
@@ -1598,8 +1627,10 @@ async function harvestMediaWithSafetyNet(
     return true;
   }).join(' ');
   const cleanQuery = deduped || query;
+  const loopCtx = isLoopFastMode() ? loopHarvestContext() : { offset: 0, nonce: 0, exclude: new Set<string>() };
+  const searchQuery = isLoopFastMode() ? diversifyLoopQuery(cleanQuery, loopCtx) : cleanQuery;
 
-  trace.push(`[S${depth+1}] Query: "${cleanQuery}"`);
+  trace.push(`[S${depth+1}] Query: "${searchQuery}"`);
 
   // Check signal before starting provider calls
   if (signal?.aborted) {
@@ -1607,9 +1638,16 @@ async function harvestMediaWithSafetyNet(
   }
 
   // Task 13.1: Use queryAllProviders from the provider registry instead of inline calls
-  progressCallback?.(`Searching sources for '${cleanQuery}'...`, 5);
-  let candidates = await queryAllProviders(cleanQuery, config, signal);
+  progressCallback?.(`Searching sources for '${searchQuery}'...`, 5);
+  let candidates = await queryAllProviders(searchQuery, config, signal);
   candidates = candidates.filter(meetsMinimumSize);
+  if (loopCtx.exclude.size > 0) {
+    const before = candidates.length;
+    candidates = candidates.filter((c) => !loopCtx.exclude.has((c.url || '').split('?')[0].toLowerCase()));
+    if (before !== candidates.length) {
+      trace.push(`[S${depth+1}] Excluded ${before - candidates.length} prior-loop URLs`);
+    }
+  }
 
   // Check signal before triggering fallbacks
   if (signal?.aborted) {

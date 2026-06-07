@@ -40,6 +40,10 @@ function ffmpegPreset() {
   return process.env.AUTOTUBE_FFMPEG_PRESET || (process.env.AUTOTUBE_RENDER_QUALITY === 'draft' ? 'ultrafast' : 'fast');
 }
 
+function hardCutsEnabled() {
+  return process.env.AUTOTUBE_FFMPEG_HARD_CUTS === '1' || process.env.AUTOTUBE_FFMPEG_HARD_CUTS === 'true';
+}
+
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
   if (assetCount <= 1) return 0;
   if (intervalSec <= 0) return 0;
@@ -186,8 +190,12 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     }
 
     const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
+    const hardCuts = hardCutsEnabled();
     let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
-    if (!isVideo && !draft) {
+    if (!isVideo && hardCuts) {
+      const fadeOut = Math.max(0.04, durationSec - 0.04);
+      vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
+    } else if (!isVideo && !draft) {
       const frames = Math.max(1, Math.round(durationSec * FPS));
       vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
     }
@@ -394,6 +402,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     muxDurationSec,
     perSegment,
     cutIntervalSec: options.cutIntervalSec ?? assetCutIntervalSec(project),
+    hardCuts: hardCutsEnabled(),
   };
   const manifestPath = join(workDir, 'render-manifest.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

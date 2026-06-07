@@ -483,6 +483,8 @@ export async function generateFullVideo(options) {
     // Loop renders: draft quality + longer encode timeout (worker CPU is slow)
     renderEnv.AUTOTUBE_RENDER_QUALITY = process.env.AUTOTUBE_RENDER_QUALITY || 'draft';
     renderEnv.AUTOTUBE_ENCODING_TIMEOUT_MS = process.env.AUTOTUBE_ENCODING_TIMEOUT_MS || '1800000';
+    renderEnv.AUTOTUBE_FFMPEG_PRESET = process.env.AUTOTUBE_FFMPEG_PRESET || 'ultrafast';
+    renderEnv.AUTOTUBE_DRAFT_NO_UPSCALE = process.env.AUTOTUBE_DRAFT_NO_UPSCALE || '1';
 
     const render = spawnSync('node', ['server-render.mjs', mp4Out], {
       cwd: root,

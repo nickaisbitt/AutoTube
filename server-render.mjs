@@ -3728,6 +3728,9 @@ async function render() {
     const codec = project?.exportSettings?.codec === 'av1' ? 'libsvtav1' : project?.exportSettings?.codec === 'hevc' ? 'libx265' : 'libx264';
     const crfValue = project?.exportSettings?.codec === 'av1' ? 30 : project?.exportSettings?.codec === 'hevc' ? 20 : (YOUTUBE_MODE ? 14 : 16);
     const extraCodecArgs = project?.exportSettings?.codec === 'hevc' ? ['-tag:v', 'hvc1'] : [];
+    const x264Preset = DRAFT_MODE
+      ? (process.env.AUTOTUBE_FFMPEG_PRESET || 'ultrafast')
+      : 'slow';
 
     if (quality === 'highest' && !DRAFT_MODE) {
       // Two-pass encoding: render to temp file, then two-pass encode
@@ -3755,7 +3758,7 @@ async function render() {
       ffmpegArgs.length = 0;
       ffmpegArgs.push(...tempRenderArgs);
     } else {
-      ffmpegArgs.push('-c:v', codec, '-preset', 'slow', '-crf', String(crfValue), '-bf', '3', '-tune', 'film', ...extraCodecArgs);
+      ffmpegArgs.push('-c:v', codec, '-preset', x264Preset, '-crf', String(crfValue), '-bf', '3', '-tune', 'film', ...extraCodecArgs);
     }
   }
 
@@ -3763,7 +3766,7 @@ async function render() {
   const hdrArgs = project?.exportSettings?.hdr ? ['-color_primaries', 'bt2020', '-color_trc', 'smpte2084', '-colorspace', 'bt2020nc'] : [];
   ffmpegArgs.push(...hdrArgs);
 
-  if (DRAFT_MODE) {
+  if (DRAFT_MODE && process.env.AUTOTUBE_DRAFT_NO_UPSCALE !== '1') {
     ffmpegArgs.push('-vf', `scale=${outputWidth}:${outputHeight}:flags=lanczos`);
   }
 
@@ -3813,6 +3816,10 @@ async function render() {
     try {
       return ffmpeg.stdin.write(buffer);
     } catch (err) {
+      if (err && (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED')) {
+        ffmpegExited = true;
+        return 'dead';
+      }
       return 'dead';
     }
   }

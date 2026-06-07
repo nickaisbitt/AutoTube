@@ -128,10 +128,17 @@ export async function executeGenerateScript(
   const emotionalArc = mapEmotionalArc(segments);
   logger.info('Store', `Emotional arc: ${emotionalArc.map((p) => p.emotion).join(' → ')}`);
 
-  // Assign scene layouts based on purpose tags
-  const layouts = assignSceneLayouts(segments);
-  for (let i = 0; i < segments.length; i++) {
-    segments[i].sceneLayout = layouts[i];
+  // Scene layouts render static slides — skip in loop fast mode so B-roll cuts apply
+  if (!loopFastMode) {
+    const layouts = assignSceneLayouts(segments);
+    for (let i = 0; i < segments.length; i++) {
+      segments[i].sceneLayout = layouts[i];
+    }
+  } else {
+    logger.info('Store', 'Loop fast mode: skipping scene layouts (full-bleed B-roll)');
+    for (const seg of segments) {
+      delete seg.sceneLayout;
+    }
   }
 
   // Schedule retention beats

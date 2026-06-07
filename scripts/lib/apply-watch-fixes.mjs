@@ -2,7 +2,7 @@
  * Map Video Watcher results → pipeline fixes (applied before next loop iteration).
  */
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
-import { buildShortHookOverlay } from './patch-project-for-loop.mjs';
+import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
 
 /**
  * @param {object} watch — watchVideo() result
@@ -24,10 +24,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   if (hookFail) {
     s.shockHook = true;
     const visionFix = watch.hookVision?.fix?.trim();
+    const extracted = extractOverlayFromVisionFix(visionFix);
     const topicHint = (topic || '').toLowerCase().slice(0, 24);
     const fixMatchesTopic =
       topicHint.length > 0 && visionFix && visionFix.toLowerCase().includes(topicHint.split(/\s+/)[0]);
-    s.hookLine = buildShockHookLine(topic, fixMatchesTopic ? visionFix : undefined);
+    s.hookLine = buildShockHookLine(topic, fixMatchesTopic ? extracted || visionFix : undefined);
     s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, { visionFix });
     applied.push(`1. Hook FAIL → overlay: "${s.hookOverlay}"`);
   }

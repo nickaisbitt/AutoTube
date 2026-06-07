@@ -20,22 +20,46 @@ function topicKeywords(topic) {
     .slice(0, 4);
 }
 
-/** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
-export function buildShortHookOverlay(topic, hookLine, options = {}) {
-  if (options.preferredOverlay?.trim()) {
-    return options.preferredOverlay.trim().toUpperCase();
+function isInstructionOverlay(text) {
+  return /^(replace|start with|use|change|fix|try)\b/i.test((text || '').trim());
+}
+
+/** Pull the suggested hook text from watcher "Replace X with Y" fixes. */
+export function extractOverlayFromVisionFix(visionFix) {
+  if (!visionFix?.trim()) return null;
+  let text = visionFix.trim();
+
+  const quoted = text.match(/\bwith\s+['"]([^'"]+)['"]/i);
+  if (quoted) text = quoted[1].trim();
+  else {
+    const bare = text.match(/\bwith\s+(.+)$/i);
+    if (bare) text = bare[1].trim();
+    else {
+      text = text
+        .replace(/^Replace\s+.+?\s+with\s+/i, '')
+        .replace(/^Start with[^:]*:\s*/i, '')
+        .replace(/^Reveal[^:]*:\s*/i, '')
+        .replace(/['"]/g, '')
+        .trim();
+    }
   }
 
-  const visionFix = options.visionFix?.trim();
-  if (visionFix) {
-    const clean = visionFix
-      .replace(/['"]/g, '')
-      .replace(/^Start with[^:]*:\s*/i, '')
-      .replace(/^Reveal[^:]*:\s*/i, '')
-      .trim();
-    const words = clean.split(/\s+/).filter(Boolean).slice(0, 7);
-    if (words.length >= 3) return words.join(' ').toUpperCase();
+  text = text.split(/[—–]/)[0].split(/[.!?]/)[0].trim();
+  if (text.length < 5 || isInstructionOverlay(text)) return null;
+
+  const words = text.split(/\s+/).filter(Boolean);
+  return words.slice(0, 8).join(' ').toUpperCase();
+}
+
+/** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
+export function buildShortHookOverlay(topic, hookLine, options = {}) {
+  const preferred = options.preferredOverlay?.trim();
+  if (preferred && !isInstructionOverlay(preferred)) {
+    return preferred.toUpperCase();
   }
+
+  const fromVision = extractOverlayFromVisionFix(options.visionFix);
+  if (fromVision) return fromVision;
 
   const keywords = topicKeywords(topic);
   const core = keywords.join(' ').toUpperCase() || 'CRISIS EXPOSED';
@@ -47,10 +71,37 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return `EMERGENCY: ${core}`;
   }
-  if (/fire|attack|blackout|disaster|death|kill|crash|bomb|hack/i.test(t)) {
+  if (/evict|tenant|landlord|lawsuit|fine|hack|stolen|breach/i.test(t)) {
+    return `URGENT: ${core}`;
+  }
+  if (/fire|attack|blackout|disaster|death|kill|crash|bomb/i.test(t)) {
     return `BREAKING: ${core}`;
   }
-  return `BREAKING: ${core}`;
+  return `URGENT: ${core}`;
+}
+
+const DATE_OPENER_RE = /^(On\s+\w+\s+\d{1,2},?\s+\d{4}|In\s+\d{4}|As\s+of\s+\w+\s+\d{4})/i;
+
+/** Replace weak date/year openers with the shock hook line. */
+export function rewriteIntroOpener(project, hookLine) {
+  if (!project?.script?.length || !hookLine?.trim()) return project;
+  const intro = project.script[0];
+  const narration = intro.narration || '';
+  const rest = narration.replace(/^[^.!?]+[.!?]\s*/, '');
+  if (DATE_OPENER_RE.test(narration.trim()) || /^in \d{4}/i.test(narration.trim())) {
+    intro.narration = `${hookLine.trim()} ${rest}`.trim();
+  }
+  return project;
+}
+
+/** Scene layouts render static slides — bypass in loop so cut intervals apply. */
+export function stripSceneLayoutsForLoop(project) {
+  if (!project?.script?.length) return project;
+  project.script = project.script.map((seg) => {
+    const { sceneLayout, ...rest } = seg;
+    return rest;
+  });
+  return project;
 }
 
 /** Cap loop iteration runtime so cuts can outpace duplication on limited assets. */
@@ -91,6 +142,8 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
 
   trimProjectForLoop(project, options.maxTotalSec ?? 75);
 
+  stripSceneLayoutsForLoop(project);
+
   if (fixState.shockHook !== false && project.script?.length) {
     const hook = buildShockHookLine(topic, fixState.hookLine);
     const hookOverlay = buildShortHookOverlay(topic, hook, {
@@ -98,6 +151,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
       visionFix: fixState.hookOverlay,
     });
     project.hookLine = hook;
+    rewriteIntroOpener(project, hook);
     project.exportSettings = {
       ...(project.exportSettings || {}),
       hookLine: hook,

@@ -2509,7 +2509,9 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   const activeImg = isFallbackAsset ? null : img;
 
   // ── Determine if a scene layout should handle background + text rendering ──
-  const sceneLayout = seg.sceneLayout || null;
+  // Loop mode forces full-bleed Ken Burns so asset cut intervals actually apply.
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
+  const sceneLayout = loopMode ? null : (seg.sceneLayout || null);
   const layoutFn = sceneLayout ? (SCENE_LAYOUT_DISPATCH[sceneLayout] || null) : null;
 
   // Draw bright background when image is available, or procedural bg when not

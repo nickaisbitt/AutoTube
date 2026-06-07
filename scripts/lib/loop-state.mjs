@@ -17,6 +17,9 @@ export const DEFAULT_FIX_STATE = {
   pendingTopic: null,
   iteration: 0,
   appliedFixes: [],
+  minAssetsPerSegment: 4,
+  maxGenerateFailuresPerTopic: 2,
+  reHarvestMedia: false,
 };
 
 /**

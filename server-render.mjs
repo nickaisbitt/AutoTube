@@ -4010,7 +4010,9 @@ async function render() {
   const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round((YOUTUBE_MODE ? 3.2 : 0.3) * FPS));
   const COLD_OPEN_BEAT_FRAMES = Math.max(1, Math.round(0.5 * FPS)); // ~5 beats in 2.5s
   const explicitHook = project.hookLine || project.exportSettings?.hookLine;
-  const hookText = explicitHook
+  const hookOverlay = project.exportSettings?.hookOverlay;
+  const hookText = hookOverlay
+    || explicitHook
     || (coldOpenSeg?.narration
       ? (YOUTUBE_MODE ? buildRetentionHook(coldOpenSeg.narration) : (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60))
       : 'Watch this!');

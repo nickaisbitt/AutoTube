@@ -231,6 +231,7 @@ export async function generateFullVideo(options) {
 
   log(`\n🎬 Generate: ${topic}`);
   log(`   Mode: ${realHarvest ? 'real harvest (OpenRouter + live search)' : 'mock (CI/e2e)'}`);
+  if (realHarvest) log(`   Loop: ${loopMinAssets} assets/segment, ≤90s target`);
   log(`   Out: ${outDir}\n`);
 
   let browser = await chromium.launch({
@@ -245,23 +246,25 @@ export async function generateFullVideo(options) {
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 
+  const loopMinAssets = Math.max(2, Math.min(4, fixState.minAssetsPerSegment || 4));
+
   await page.addInitScript(
-    ({ key, harvest }) => {
+    ({ key, minAssets }) => {
       localStorage.setItem('autotube_onboarding_seen', 'true');
       localStorage.removeItem('autotube_project');
       sessionStorage.setItem(
         'autotube_config_session',
         JSON.stringify({
           openRouterKey: key,
-          // Loop fast mode: stock (2 assets/segment) — raw (4/segment) exceeds 20min on worker
           sourceType: 'stock',
           flickrKey: '',
           ttsVoice: 'Leo',
         }),
       );
       sessionStorage.setItem('autotube_loop_fast_mode', 'true');
+      sessionStorage.setItem('autotube_loop_min_assets', String(minAssets));
     },
-    { key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline', harvest: realHarvest },
+    { key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline', minAssets: loopMinAssets },
   );
 
   const browserEvents = [];

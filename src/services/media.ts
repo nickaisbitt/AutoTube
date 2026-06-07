@@ -27,6 +27,13 @@ function isLoopFastMode(): boolean {
   return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
 }
 
+function loopMinAssetsPerSegment(): number {
+  if (!isLoopFastMode() || typeof sessionStorage === 'undefined') return 0;
+  const raw = sessionStorage.getItem('autotube_loop_min_assets');
+  const parsed = raw ? parseInt(raw, 10) : 0;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 // ---------------------------------------------------------------------------
 // Watermark Detection Constants
 // ---------------------------------------------------------------------------
@@ -2010,7 +2017,9 @@ export async function sourceSegmentMedia(
     const shotsToHarvest = plan.shots && plan.shots.length > 0
       ? plan.shots
       : [{ concept: plan.visualAction, queries: plan.queries, vibe: plan.visualConcept }];
-    const targetAssetsPerSegment = config.sourceType === 'raw' ? 4 : 2;
+    const loopMin = loopMinAssetsPerSegment();
+    const stockDefault = loopMin > 0 ? loopMin : 2;
+    const targetAssetsPerSegment = config.sourceType === 'raw' ? 4 : stockDefault;
     const shotCount = Math.max(targetAssetsPerSegment, shotsToHarvest.length);
     const rawPrimaryQuery = shotsToHarvest[0]?.queries[0] || segment.title;
     const primaryQuery = buildSpecificQuery(rawPrimaryQuery, topicContext);
@@ -2024,7 +2033,8 @@ export async function sourceSegmentMedia(
       ? buildSpecificQuery(rawVariationQuery, topicContext)
       : rawVariationQuery;
     let secondaryCandidates: MediaCandidate[] = [];
-    if (variationQuery && variationQuery !== primaryQuery && !signal?.aborted && !isLoopFastMode()) {
+    const skipVariationHarvest = isLoopFastMode() && loopMinAssetsPerSegment() <= 2;
+    if (variationQuery && variationQuery !== primaryQuery && !signal?.aborted && !skipVariationHarvest) {
       try {
         const secondary = await harvestMediaWithSafetyNet(variationQuery, topicContext, config, shotsToHarvest[1]?.vibe || shotsToHarvest[0]?.vibe, 1, [...trace], signal, undefined, segment.narration, segment.title);
         secondaryCandidates = secondary.candidates;

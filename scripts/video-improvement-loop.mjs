@@ -118,6 +118,7 @@ async function main() {
     if (!currentTopic && !cfg.reviewOnly) {
       currentTopic = pickRandomTopic();
       fixState.topicRetryCount = 0;
+      delete fixState.hookLine;
     }
 
     const topic = cfg.reviewOnly ? '(review-only)' : currentTopic;
@@ -273,7 +274,7 @@ async function main() {
     }
 
     if (!uploadReady) {
-      const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState);
+      const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState, currentTopic || topic);
       fixState = nextFix;
       fixesApplied = applied;
       const fixReport = formatFixReport(applied, fixState);

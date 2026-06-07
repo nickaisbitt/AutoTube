@@ -1,13 +1,15 @@
 /**
  * Map Video Watcher results → pipeline fixes (applied before next loop iteration).
  */
+import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 
 /**
  * @param {object} watch — watchVideo() result
  * @param {object} fixState — mutable loop fix state
+ * @param {string} [topic] — current video topic (for topic-aware hook lines)
  * @returns {{ applied: string[], fixState: object, blockNextTopic: boolean }}
  */
-export function applyFixesFromWatch(watch, fixState) {
+export function applyFixesFromWatch(watch, fixState, topic = '') {
   const applied = [];
   const s = { ...fixState };
 
@@ -20,10 +22,12 @@ export function applyFixesFromWatch(watch, fixState) {
 
   if (hookFail) {
     s.shockHook = true;
-    if (watch.hookVision?.fix) s.hookLine = watch.hookVision.fix;
-    else if (!s.hookLine) {
-      s.hookLine = 'Billions lost overnight — and your data could be next.';
-    }
+    // Always rebuild from current topic — stale hookLine from prior topics breaks hook frames.
+    const visionFix = watch.hookVision?.fix?.trim();
+    const topicHint = (topic || '').toLowerCase().slice(0, 24);
+    const fixMatchesTopic =
+      topicHint.length > 0 && visionFix && visionFix.toLowerCase().includes(topicHint.split(/\s+/)[0]);
+    s.hookLine = buildShockHookLine(topic, fixMatchesTopic ? visionFix : undefined);
     applied.push(`1. Hook FAIL → shock opener: "${s.hookLine.slice(0, 70)}…"`);
   }
 

@@ -34,6 +34,22 @@ function probeEdgeTts() {
   throw new Error(`edge-tts synthesis failed — upgrade: pip install --break-system-packages 'edge-tts>=7.2.7' (${detail.slice(0, 120)})`);
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Wait for dev server between loop iterations (worker may OOM-kill Vite). */
+export async function waitForDevServer(devServer, { maxWaitMs = 120_000, pollMs = 5000 } = {}) {
+  const url = devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173';
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    if (await checkDevServer(url)) return true;
+    console.log(`[preflight] Waiting for dev server at ${url}...`);
+    await sleep(pollMs);
+  }
+  return false;
+}
+
 export async function runLoopPreflight({ devServer, requireOpenRouter = true } = {}) {
   applyEnvLocalToProcess();
   ensureRailwayApiTokenEnv();

@@ -10,7 +10,7 @@ import { spawnSync } from 'child_process';
 import { generateFullVideo, checkDevServer, resolveOpenRouterKey } from './lib/generate-full-video.mjs';
 import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
 import { ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
-import { runLoopPreflight } from './loop-preflight.mjs';
+import { runLoopPreflight, waitForDevServer } from './loop-preflight.mjs';
 import { pickRandomTopic } from './lib/random-topics.mjs';
 import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
@@ -139,6 +139,15 @@ async function main() {
     let scriptText = '';
 
     if (!cfg.reviewOnly) {
+      if (!(await waitForDevServer())) {
+        console.error('\n❌ Dev server not reachable — restart: npm run dev -- --port 5173 --host 0.0.0.0');
+        sessionCount -= 1;
+        iteration -= 1;
+        fixState.iteration = iteration;
+        await sleep(Math.min(cfg.delaySec, 30) * 1000);
+        continue;
+      }
+
       writeFileSync(join(runDir, 'topic.txt'), topic);
       saveFixState(LOOP_DIR, { ...fixState, pendingTopic: currentTopic });
 

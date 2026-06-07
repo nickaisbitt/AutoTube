@@ -152,8 +152,48 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
   return null;
 }
 
+async function resolveLocalAsset(asset, segMedia, devServer, cacheDir) {
+  let localSrc = await ensureLocalAsset(asset, devServer, cacheDir);
+  if (localSrc) return { localSrc, asset };
+  for (const alt of segMedia) {
+    if (alt.id === asset.id) continue;
+    localSrc = await ensureLocalAsset(alt, devServer, cacheDir);
+    if (localSrc) return { localSrc, asset: alt };
+  }
+  return { localSrc: null, asset };
+}
+
+function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft }) {
+  const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
+  const hardCuts = hardCutsEnabled();
+  let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
+  if (!isVideo && hardCuts) {
+    const fadeOut = Math.max(0.04, durationSec - 0.04);
+    vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
+  } else if (!isVideo && !draft) {
+    const frames = Math.max(1, Math.round(durationSec * FPS));
+    vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
+  }
+
+  const args = isVideo
+    ? [
+        '-y', '-ss', '0', '-i', localSrc, '-t', String(durationSec),
+        '-vf', vf, '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
+        '-r', String(FPS), '-an', clipOut,
+      ]
+    : [
+        '-y', '-loop', '1', '-i', localSrc, '-t', String(durationSec),
+        '-vf', vf, '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
+        '-r', String(FPS), '-an', clipOut,
+      ];
+
+  const r = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 180_000 });
+  return r.status === 0 && existsSync(clipOut);
+}
+
 async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
   const interval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
+  const targetDuration = segment.duration || 20;
   const schedule = buildClipSchedule(segment, segMedia, interval, project);
   const { w, h } = outputDimensions();
   const preset = ffmpegPreset();
@@ -172,84 +212,44 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   const clipPaths = [];
   const devServer = options.devServer || 'http://localhost:5173';
+  let renderedDuration = 0;
+  let clipIndex = 0;
+
+  async function pushClip(asset, durationSec, label) {
+    const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
+    clipIndex += 1;
+    const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
+    if (!localSrc) {
+      console.log(`  [ffmpeg] ${label}: skip — asset fetch failed`);
+      return false;
+    }
+    const ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, { w, h, preset, draft });
+    if (!ok) {
+      console.log(`  [ffmpeg] ${label}: encode failed`);
+      return false;
+    }
+    clipPaths.push(clipOut);
+    renderedDuration += durationSec;
+    return true;
+  }
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec } = schedule[i];
-    const clipOut = join(tmpDir, `clip-${String(i).padStart(3, '0')}.mp4`);
-    let localSrc = await ensureLocalAsset(asset, devServer, cacheDir);
-    if (!localSrc) {
-      for (const alt of segMedia) {
-        if (alt.id === asset.id) continue;
-        localSrc = await ensureLocalAsset(alt, devServer, cacheDir);
-        if (localSrc) break;
-      }
-    }
-    if (!localSrc) {
-      console.log(`  [ffmpeg] clip ${i + 1}/${schedule.length}: skip — asset fetch failed`);
-      continue;
-    }
+    await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`);
+  }
 
-    const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
-    const hardCuts = hardCutsEnabled();
-    let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
-    if (!isVideo && hardCuts) {
-      const fadeOut = Math.max(0.04, durationSec - 0.04);
-      vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
-    } else if (!isVideo && !draft) {
-      const frames = Math.max(1, Math.round(durationSec * FPS));
-      vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
-    }
+  let fillerRound = 0;
+  while (renderedDuration < targetDuration - 0.05 && segMedia.length && fillerRound < segMedia.length * 4) {
+    const asset = segMedia[fillerRound % segMedia.length];
+    const needSec = Math.min(interval, targetDuration - renderedDuration);
+    if (needSec <= 0.05) break;
+    const added = await pushClip(asset, needSec, `filler ${fillerRound + 1} (+${needSec.toFixed(2)}s)`);
+    fillerRound += 1;
+    if (!added && fillerRound >= segMedia.length * 2) break;
+  }
 
-    const args = isVideo
-      ? [
-          '-y',
-          '-ss',
-          '0',
-          '-i',
-          localSrc,
-          '-t',
-          String(durationSec),
-          '-vf',
-          vf,
-          '-c:v',
-          'libx264',
-          '-preset',
-          preset,
-          '-pix_fmt',
-          'yuv420p',
-          '-r',
-          String(FPS),
-          '-an',
-          clipOut,
-        ]
-      : [
-          '-y',
-          '-loop',
-          '1',
-          '-i',
-          localSrc,
-          '-t',
-          String(durationSec),
-          '-vf',
-          vf,
-          '-c:v',
-          'libx264',
-          '-preset',
-          preset,
-          '-pix_fmt',
-          'yuv420p',
-          '-r',
-          String(FPS),
-          '-an',
-          clipOut,
-        ];
-
-    const r = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 180_000 });
-    if (r.status === 0 && existsSync(clipOut)) {
-      clipPaths.push(clipOut);
-    } else if (i % 10 === 0 || i === schedule.length - 1) {
-      console.log(`  [ffmpeg] clip ${i + 1}/${schedule.length}: ${r.status === 0 ? 'ok' : 'fail'}`);
-    }
+  if (renderedDuration < targetDuration - 0.5) {
+    console.log(`  [ffmpeg] segment short: ${renderedDuration.toFixed(1)}s / ${targetDuration.toFixed(1)}s target`);
   }
 
   if (clipPaths.length === 0) {

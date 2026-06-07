@@ -603,6 +603,16 @@ export function scoreCandidate(
     score -= 200;
   }
 
+  // 9a. Junk harvest URLs — video play-button thumbs, avatars, not real B-roll
+  const urlLower = (c.url || '').toLowerCase();
+  if (
+    urlLower.includes('gravatar.com/avatar') ||
+    /tse\d\.mm\.bing\.net\/th\/id\/ovp/i.test(urlLower) ||
+    urlLower.includes('/th/id/ovp.')
+  ) {
+    score -= 450;
+  }
+
   // 9b. Curated stock API penalty — Pexels/Pixabay/Unsplash are secondary B-roll, not primary sourcing
   if (isSecondaryStockSource(c.source) && !c.source.includes('Picsum')) {
     score -= 90;
@@ -2046,7 +2056,9 @@ export async function sourceSegmentMedia(
       : [{ concept: plan.visualAction, queries: plan.queries, vibe: plan.visualConcept }];
     const loopMin = loopMinAssetsPerSegment();
     const stockDefault = loopMin > 0 ? loopMin : 2;
-    const targetAssetsPerSegment = config.sourceType === 'raw' ? 4 : stockDefault;
+    // Loop min must apply in raw mode too — raw≠4-cap when loop asks for 6–8 cuts/seg
+    const rawFloor = config.sourceType === 'raw' ? 4 : 2;
+    const targetAssetsPerSegment = Math.max(rawFloor, stockDefault);
     const shotCount = Math.max(targetAssetsPerSegment, shotsToHarvest.length);
     const rawPrimaryQuery = shotsToHarvest[0]?.queries[0] || segment.title;
     const primaryQuery = buildSpecificQuery(rawPrimaryQuery, topicContext);

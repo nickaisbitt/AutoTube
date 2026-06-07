@@ -89,7 +89,8 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   return `URGENT: ${core}`;
 }
 
-const DATE_OPENER_RE = /^(On\s+\w+\s+\d{1,2},?\s+\d{4}|In\s+\d{4}|As\s+of\s+\w+\s+\d{4})/i;
+const DATE_OPENER_RE =
+  /^(On\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|On\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|In\s+\d{4}|As\s+of\s+\w+\s+\d{4})/i;
 
 /** Replace weak date/year openers with the shock hook line. */
 export function rewriteIntroOpener(project, hookLine) {

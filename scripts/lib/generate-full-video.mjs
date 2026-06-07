@@ -106,7 +106,17 @@ async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = f
   }
 }
 
-async function sanitizeRealHarvestMedia(project, devServer, outDir) {
+function isJunkHarvestUrl(url) {
+  const u = (url || '').toLowerCase();
+  return (
+    u.includes('gravatar.com/avatar') ||
+    /tse\d\.mm\.bing\.net\/th\/id\/ovp/i.test(u) ||
+    u.includes('/th/id/ovp.')
+  );
+}
+
+async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}) {
+  const loopMode = options.loopMode === true;
   const report = {
     before: project.media?.length || 0,
     after: 0,
@@ -123,8 +133,31 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir) {
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
 
   for (const asset of project.media) {
+    if (isJunkHarvestUrl(asset.url) || isJunkHarvestUrl(asset.thumbnailUrl)) {
+      report.dropped.push({ url: asset.url, reason: 'junk URL (avatar/video-thumb placeholder)' });
+      continue;
+    }
+
     if (asset.type !== 'video') {
       sanitized.push(asset);
+      continue;
+    }
+
+    // Loop/draft render often cannot extract video frames — use still thumbnails only
+    if (loopMode) {
+      const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '');
+      if (thumbnailUrl && !isJunkHarvestUrl(thumbnailUrl) && await canFetch(thumbnailUrl, { timeoutMs: 8000 })) {
+        sanitized.push({
+          ...asset,
+          type: 'image',
+          url: thumbnailUrl,
+          source: `${asset.source || 'Video'} still`,
+          isFallback: false,
+        });
+        report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl, reason: 'loop mode: video→still' });
+        continue;
+      }
+      report.dropped.push({ url: asset.url, reason: 'loop mode: video without usable still' });
       continue;
     }
 
@@ -496,7 +529,7 @@ export async function generateFullVideo(options) {
 
     patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
     if (realHarvest) {
-      const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir);
+      const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, { loopMode: true });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
     }
 

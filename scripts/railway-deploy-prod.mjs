@@ -107,15 +107,20 @@ async function main() {
     console.log('Build config:', build);
     console.log('Waiting 8s for Railway to register patch-triggered deploys…');
     await sleep(8000);
-    await cancelAllActive(token);
-    await sleep(2000);
   } else {
     console.log('Build config already V2 Railpack — skipping patch');
-    await cancelAllActive(token);
   }
 
-  const deploymentId = await triggerDeploy(token);
+  runNpm('railway:sync-env', { optional: true });
 
+  // Wait for Railway to register any auto-triggered deployments from config patches
+  await sleep(5000);
+
+  // Cancel stale builds after patches have settled (not before)
+  runNpm('railway:cancel-stale-builds');
+  await cancelAllActive(token);
+
+  const deploymentId = await triggerDeploy(token);
   const waitOk = runNpm('railway:deploy:wait');
   runNpm('deploy:status');
   runNpm('railway:smoke', { optional: true });

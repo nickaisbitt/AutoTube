@@ -73,6 +73,16 @@ export function buildProdRailwayVars(local = readEnvLocal()) {
   }
   if (local.VITE_SERPER_KEY?.trim()) vars.VITE_SERPER_KEY = local.VITE_SERPER_KEY.trim();
   if (local.KOKORO_SERVER_URL?.trim()) vars.KOKORO_SERVER_URL = local.KOKORO_SERVER_URL.trim();
+  const pexels = local.PEXELS_API_KEY?.trim() || local.VITE_PEXELS_KEY?.trim();
+  const pixabay = local.PIXABAY_API_KEY?.trim() || local.VITE_PIXABAY_KEY?.trim();
+  if (pexels) {
+    vars.PEXELS_API_KEY = pexels;
+    vars.VITE_PEXELS_KEY = pexels;
+  }
+  if (pixabay) {
+    vars.PIXABAY_API_KEY = pixabay;
+    vars.VITE_PIXABAY_KEY = pixabay;
+  }
   return vars;
 }
 

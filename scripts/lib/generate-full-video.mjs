@@ -20,6 +20,14 @@ export function resolveOpenRouterKey() {
   ).trim();
 }
 
+export function resolvePexelsKey() {
+  return (process.env.PEXELS_API_KEY || process.env.VITE_PEXELS_KEY || '').trim();
+}
+
+export function resolvePixabayKey() {
+  return (process.env.PIXABAY_API_KEY || process.env.VITE_PIXABAY_KEY || '').trim();
+}
+
 async function clickPipelineButton(page, locator, { settleMs = 2000, timeout = 120_000 } = {}) {
   await locator.waitFor({ state: 'visible', timeout });
   if (settleMs > 0) await page.waitForTimeout(settleMs);
@@ -247,15 +255,20 @@ export async function generateFullVideo(options) {
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 
+  const pexelsKey = resolvePexelsKey();
+  const pixabayKey = resolvePixabayKey();
+
   await page.addInitScript(
-    ({ key, minAssets }) => {
+    ({ key, minAssets, pexels, pixabay, rawFirst }) => {
       localStorage.setItem('autotube_onboarding_seen', 'true');
       localStorage.removeItem('autotube_project');
       sessionStorage.setItem(
         'autotube_config_session',
         JSON.stringify({
           openRouterKey: key,
-          sourceType: 'stock',
+          sourceType: rawFirst ? 'raw' : 'stock',
+          pexelsKey: pexels,
+          pixabayKey: pixabay,
           flickrKey: '',
           ttsVoice: 'Leo',
         }),
@@ -263,7 +276,13 @@ export async function generateFullVideo(options) {
       sessionStorage.setItem('autotube_loop_fast_mode', 'true');
       sessionStorage.setItem('autotube_loop_min_assets', String(minAssets));
     },
-    { key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline', minAssets: loopMinAssets },
+    {
+      key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline',
+      minAssets: loopMinAssets,
+      pexels: pexelsKey,
+      pixabay: pixabayKey,
+      rawFirst: realHarvest,
+    },
   );
 
   const browserEvents = [];

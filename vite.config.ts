@@ -56,5 +56,11 @@ export default defineConfig({
     "import.meta.env.VITE_OPENROUTER_KEY": JSON.stringify(
       process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_KEY || '',
     ),
+    "import.meta.env.VITE_PEXELS_KEY": JSON.stringify(
+      process.env.PEXELS_API_KEY || process.env.VITE_PEXELS_KEY || '',
+    ),
+    "import.meta.env.VITE_PIXABAY_KEY": JSON.stringify(
+      process.env.PIXABAY_API_KEY || process.env.VITE_PIXABAY_KEY || '',
+    ),
   },
 });

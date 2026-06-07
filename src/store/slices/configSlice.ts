@@ -16,6 +16,8 @@ import { logger } from '../../services/logger';
 export const DEFAULT_APP_CONFIG: AppConfig = {
   openRouterKey: import.meta.env.VITE_OPENROUTER_KEY || '',
   sourceType: 'stock',
+  pexelsKey: import.meta.env.VITE_PEXELS_KEY || '',
+  pixabayKey: import.meta.env.VITE_PIXABAY_KEY || '',
   flickrKey: '',
   ttsVoice: 'Leo',
 };

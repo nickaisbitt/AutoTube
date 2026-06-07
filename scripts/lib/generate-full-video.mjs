@@ -9,6 +9,8 @@ import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
 import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
 import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
+import { validateEditTimeline } from './build-edit-timeline.mjs';
+import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 import {
   accumulateExcludedUrls,
@@ -133,6 +135,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     convertedVideoToImage: [],
     dropped: [],
     keptVideo: [],
+    phashDropped: [],
   };
   if (!project.media?.length) {
     writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
@@ -281,8 +284,32 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
 
-  project.media = validated;
-  report.after = validated.length;
+  const deduped = dedupeMediaByPHash(validated, {
+    devServer,
+    onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
+  });
+  project.media = deduped.media;
+  report.phashHashCount = deduped.hashCount;
+  report.after = deduped.media.length;
+
+  const bySegmentAfter = {};
+  for (const asset of project.media) {
+    bySegmentAfter[asset.segmentId] = (bySegmentAfter[asset.segmentId] || 0) + 1;
+  }
+  for (const segId of [...new Set(project.media.map((a) => a.segmentId))]) {
+    while ((bySegmentAfter[segId] || 0) < minPerSeg) {
+      const replacement = deduped.media.find(
+        (r) => !project.media.some((v) => v.segmentId === segId && v.url === r.url),
+      ) || reserve.find(
+        (r) => !project.media.some((v) => v.segmentId === segId && v.url === r.url),
+      );
+      if (!replacement) break;
+      project.media.push({ ...replacement, segmentId: segId, id: `${replacement.id}-ph-${segId.slice(0, 6)}` });
+      bySegmentAfter[segId] = (bySegmentAfter[segId] || 0) + 1;
+    }
+  }
+  report.after = project.media.length;
+
   writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
   return report;
 }
@@ -613,6 +640,13 @@ export async function generateFullVideo(options) {
     if (realHarvest) {
       const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, { loopMode: true });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
+      if (mediaReport.phashDropped?.length) {
+        log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
+      }
+    }
+    const timelineReport = validateEditTimeline(project, { cutIntervalSec: fixState.cutIntervalSec ?? 1.25 });
+    if (timelineReport.rebuilt) {
+      log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }
     accumulateExcludedUrls(fixState, project);
 

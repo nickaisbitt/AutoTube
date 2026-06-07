@@ -4,6 +4,7 @@
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
+import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'they', 'this', 'that', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
@@ -122,10 +123,19 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
   const segIds = project.script.map((s) => s.id);
   const buckets = Object.fromEntries(segIds.map((id) => [id, []]));
   const seenUrls = new Set();
+  const visualRegistry = [];
 
   for (const asset of project.media) {
     const key = (asset.url || '').split('?')[0];
     if (key && seenUrls.has(key)) continue;
+
+    const thumb = asset.thumbnailUrl || (asset.type === 'image' ? asset.url : null);
+    if (thumb) {
+      const hash = aHashFromImage(thumb);
+      if (hash && isSimilarToRegistry(hash, visualRegistry)) continue;
+      if (hash) visualRegistry.push(hash);
+    }
+
     if (key) seenUrls.add(key);
     const sid = segIds.includes(asset.segmentId) ? asset.segmentId : segIds[0];
     buckets[sid].push({ ...asset, segmentId: sid });

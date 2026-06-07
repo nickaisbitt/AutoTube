@@ -58,3 +58,26 @@ export function mediaForSegment(project, segmentId) {
   }
   return segMedia;
 }
+
+/**
+ * Rebuild editTimeline when sanitize/balance invalidated asset IDs.
+ * @param {object} project
+ * @param {{ cutIntervalSec?: number }} [options]
+ */
+export function validateEditTimeline(project, options = {}) {
+  const mediaIds = new Set((project.media || []).map((m) => m.id));
+  const timeline = project.editTimeline || [];
+  let stale = 0;
+  for (const entry of timeline) {
+    if (!mediaIds.has(entry.assetId)) stale += 1;
+  }
+  const staleRatio = timeline.length ? stale / timeline.length : 1;
+  const rebuilt = staleRatio > 0.1 || timeline.length === 0;
+  if (rebuilt) {
+    project.editTimeline = buildEditTimeline(project, {
+      cutIntervalSec: options.cutIntervalSec ?? 1.25,
+      reason: 'post-sanitize rebuild',
+    });
+  }
+  return { rebuilt, staleCount: stale, staleRatio, clipCount: project.editTimeline.length };
+}

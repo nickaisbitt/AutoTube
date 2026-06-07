@@ -27,6 +27,7 @@ import { focalCrop, needsCropping } from './focalCropper';
 import { isWatermarked } from './sourceProviders/watermarkFilter';
 import { determineLicense, isLicenseCompatible } from './licenseTracker';
 import { computePaletteBonus } from './qualityValidation/colorPalette';
+import { computeImageAHash, isSimilarToAny } from './perceptualHash';
 
 function isLoopFastMode(): boolean {
   return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
@@ -1595,9 +1596,36 @@ export function getDeduplicationRegistry(): DeduplicationRegistry {
 // but we keep the segment-index tracking for selectShotCandidate's proximity check
 const usedUrlsMap = new Map<string, number>();
 
+let acceptedVisualHashes: string[] = [];
+
+export function resetVisualHashRegistry(): void {
+  acceptedVisualHashes = [];
+}
+
 export function resetUsedUrlsMap() {
   usedUrlsMap.clear();
   deduplicationRegistry = createDeduplicationRegistry();
+  resetVisualHashRegistry();
+}
+
+function thumbnailUrlForHash(candidate: MediaCandidate): string | null {
+  if (candidate.thumbnailUrl) return candidate.thumbnailUrl;
+  if (candidate.type === 'image') return candidate.url;
+  return null;
+}
+
+function registerVisualHash(_candidate: MediaCandidate, hash: string | null): void {
+  if (!hash || !isLoopFastMode()) return;
+  acceptedVisualHashes.push(hash);
+}
+
+async function hashCandidateThumb(
+  candidate: MediaCandidate,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const thumb = thumbnailUrlForHash(candidate);
+  if (!thumb) return null;
+  return computeImageAHash(thumb, signal);
 }
 
 // ---------------------------------------------------------------------------
@@ -2021,18 +2049,18 @@ async function harvestMediaWithSafetyNet(
   return { candidates: filteredScored, trace };
 }
 
-function selectShotCandidate(
+function rankShotCandidates(
   candidates: MediaCandidate[],
   shot: { concept: string; queries: string[]; vibe: string },
   segmentIndex: number,
   excludedUrls: Set<string>,
   preferredType?: MediaCandidate['type'],
   blockedUrls?: Set<string>,
-): MediaCandidate | undefined {
+): MediaCandidate[] {
   const shotMeta = `${shot.concept} ${shot.vibe} ${shot.queries.join(' ')}`.toLowerCase();
   const shotTerms = shotMeta.split(/\s+/).filter((word) => word.length > 2);
 
-  const ranked = candidates
+  return candidates
     .map((candidate) => {
       if (excludedUrls.has(candidate.url)) return null;
       if (blockedUrls?.has(candidate.url)) return null;
@@ -2060,13 +2088,35 @@ function selectShotCandidate(
     .filter((x): x is { candidate: MediaCandidate; score: number } => x != null)
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
-      // Tiebreak: higher resolution wins
       const aPixels = (a.candidate.width ?? 0) * (a.candidate.height ?? 0);
       const bPixels = (b.candidate.width ?? 0) * (b.candidate.height ?? 0);
       return bPixels - aPixels;
-    });
+    })
+    .map((x) => x.candidate);
+}
 
-  return ranked[0]?.candidate;
+async function pickDistinctShotCandidate(
+  candidates: MediaCandidate[],
+  shot: { concept: string; queries: string[]; vibe: string },
+  segmentIndex: number,
+  excludedUrls: Set<string>,
+  preferredType?: MediaCandidate['type'],
+  blockedUrls?: Set<string>,
+  signal?: AbortSignal,
+): Promise<MediaCandidate | undefined> {
+  const ranked = rankShotCandidates(candidates, shot, segmentIndex, excludedUrls, preferredType, blockedUrls);
+  for (const candidate of ranked) {
+    if (signal?.aborted) return undefined;
+    if (!isLoopFastMode()) return candidate;
+    const hash = await hashCandidateThumb(candidate, signal);
+    if (hash && isSimilarToAny(hash, acceptedVisualHashes)) {
+      excludedUrls.add(candidate.url);
+      continue;
+    }
+    registerVisualHash(candidate, hash);
+    return candidate;
+  }
+  return undefined;
 }
 
 function buildSpecificQuery(baseQuery: string, topicContext: TopicContext): string {
@@ -2141,13 +2191,68 @@ export async function sourceSegmentMedia(
     const uniqueCandidates = allCandidates.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index);
     const excludedUrls = new Set<string>();
 
+    const pushSelectedCandidate = (
+      best: MediaCandidate,
+      shot: { concept: string; queries: string[]; vibe: string },
+      shotType: 'primary' | 'secondary',
+      cropMetadata?: { x: number; y: number; width: number; height: number },
+    ) => {
+      finalAssets.push({
+        type: best.type,
+        url: best.url,
+        thumbnailUrl: best.thumbnailUrl,
+        alt: best.alt,
+        source: best.source,
+        duration: segment.duration / shotCount,
+        query: best.query,
+        sourceUrl: best.sourceUrl,
+        isFallback: best.source.includes('Picsum') || best.source.includes('Fallback'),
+        shotType,
+        concept: shot.concept,
+        reasoning: `Zero-Cost Harvester: ${shotType} shot matched at ${best.source}`,
+        score: best.finalScore,
+        trace: [...trace, `[S${segmentIndex + 1}] ${shotType} shot selected: ${shot.concept}`],
+        cropMetadata,
+        qualityFactors: best.qualityFactors,
+        resolvedWidth: best.resolvedWidth,
+        resolvedHeight: best.resolvedHeight,
+        resolvedUrl: best.resolvedUrl,
+        license: (() => {
+          const lic = determineLicense(best.source, best.sourceUrl);
+          return {
+            source: lic.source,
+            licenseType: lic.licenseType,
+            attributionRequired: lic.attributionRequired,
+            attributionText: lic.attributionText,
+            commercialUse: lic.commercialUse,
+          };
+        })(),
+      });
+    };
+
     for (let i = 0; i < shotsToHarvest.length; i++) {
       const shot = shotsToHarvest[i];
       const shotType = i === 0 ? 'primary' : 'secondary';
-      let best = selectShotCandidate(uniqueCandidates, shot, segmentIndex, excludedUrls, i > 0 ? finalAssets[i - 1]?.type : undefined, deduplicationRegistry.usedUrls);
+      let best = await pickDistinctShotCandidate(
+        uniqueCandidates,
+        shot,
+        segmentIndex,
+        excludedUrls,
+        i > 0 ? finalAssets[i - 1]?.type : undefined,
+        deduplicationRegistry.usedUrls,
+        signal,
+      );
 
       if (!best) {
-        best = selectShotCandidate(uniqueCandidates, shot, segmentIndex, excludedUrls, undefined, deduplicationRegistry.usedUrls);
+        best = await pickDistinctShotCandidate(
+          uniqueCandidates,
+          shot,
+          segmentIndex,
+          excludedUrls,
+          undefined,
+          deduplicationRegistry.usedUrls,
+          signal,
+        );
       }
 
       // Deduplication fallback: if all candidates were rejected (likely due to dedup penalties),
@@ -2178,7 +2283,15 @@ export async function sourceSegmentMedia(
               logger.warn('VisionGate', `Final check REJECTED ${best.url} — issues: ${visionResult.issues.join(', ')}`);
               excludedUrls.add(best.url);
               // Try next best candidate
-              const fallback = selectShotCandidate(uniqueCandidates, shot, segmentIndex, excludedUrls, undefined, deduplicationRegistry.usedUrls);
+              const fallback = await pickDistinctShotCandidate(
+                uniqueCandidates,
+                shot,
+                segmentIndex,
+                excludedUrls,
+                undefined,
+                deduplicationRegistry.usedUrls,
+                signal,
+              );
               if (fallback) {
                 best = fallback;
               }
@@ -2206,39 +2319,7 @@ export async function sourceSegmentMedia(
           }
         }
 
-        finalAssets.push({
-          type: best.type,
-          url: best.url,
-          thumbnailUrl: best.thumbnailUrl,
-          alt: best.alt,
-          source: best.source,
-          duration: segment.duration / shotCount,
-          query: best.query,
-          sourceUrl: best.sourceUrl,
-          isFallback: best.source.includes('Picsum') || best.source.includes('Fallback'),
-          shotType,
-          concept: shot.concept,
-          reasoning: `Zero-Cost Harvester: ${shotType} shot matched at ${best.source}`,
-          score: best.finalScore,
-          trace: [...trace, `[S${segmentIndex + 1}] ${shotType} shot selected: ${shot.concept}`],
-          // Task 13.4: Transfer quality/resolution metadata to MediaAsset
-          cropMetadata,
-          qualityFactors: best.qualityFactors,
-          resolvedWidth: best.resolvedWidth,
-          resolvedHeight: best.resolvedHeight,
-          resolvedUrl: best.resolvedUrl,
-          // Task 156: License tracking
-          license: (() => {
-            const lic = determineLicense(best.source, best.sourceUrl);
-            return {
-              source: lic.source,
-              licenseType: lic.licenseType,
-              attributionRequired: lic.attributionRequired,
-              attributionText: lic.attributionText,
-              commercialUse: lic.commercialUse,
-            };
-          })(),
-        });
+        pushSelectedCandidate(best, shot, shotType, cropMetadata);
       } else if (topicContext.thumbnailUrl && !deduplicationRegistry.usedUrls.has(topicContext.thumbnailUrl)) {
         finalAssets.push({
           type: 'image',
@@ -2269,28 +2350,50 @@ export async function sourceSegmentMedia(
     // distinct candidates so renderer pacing changes actual visuals, not just effects.
     while (finalAssets.length < targetAssetsPerSegment && uniqueCandidates.length > finalAssets.length) {
       const fallbackShot = shotsToHarvest[1] || shotsToHarvest[0];
-      const extra = selectShotCandidate(uniqueCandidates, fallbackShot, segmentIndex, excludedUrls, undefined, deduplicationRegistry.usedUrls);
+      const extra = await pickDistinctShotCandidate(
+        uniqueCandidates,
+        fallbackShot,
+        segmentIndex,
+        excludedUrls,
+        undefined,
+        deduplicationRegistry.usedUrls,
+        signal,
+      );
       if (!extra) break;
-      if (extra) {
-        usedUrlsMap.set(extra.url, segmentIndex);
-        registerAsset(deduplicationRegistry, { url: extra.url, alt: extra.alt, sourceUrl: extra.sourceUrl });
-        excludedUrls.add(extra.url);
-        finalAssets.push({
-          type: extra.type,
-          url: extra.url,
-          thumbnailUrl: extra.thumbnailUrl,
-          alt: extra.alt,
-          source: extra.source,
-          duration: segment.duration / shotCount,
-          query: extra.query,
-          sourceUrl: extra.sourceUrl,
-          isFallback: extra.source.includes('Picsum') || extra.source.includes('Fallback'),
-          shotType: 'secondary',
-          concept: fallbackShot.concept,
-          reasoning: `Zero-Cost Harvester: bonus B-roll from ${extra.source}`,
-          score: extra.finalScore,
-          trace: [...trace, `[S${segmentIndex + 1}] bonus B-roll selected for visual variety`],
-        });
+      usedUrlsMap.set(extra.url, segmentIndex);
+      registerAsset(deduplicationRegistry, { url: extra.url, alt: extra.alt, sourceUrl: extra.sourceUrl });
+      excludedUrls.add(extra.url);
+      pushSelectedCandidate(extra, fallbackShot, 'secondary');
+      finalAssets[finalAssets.length - 1]!.reasoning = `Zero-Cost Harvester: bonus B-roll from ${extra.source}`;
+      finalAssets[finalAssets.length - 1]!.trace = [
+        ...trace,
+        `[S${segmentIndex + 1}] bonus B-roll selected for visual variety`,
+      ];
+    }
+
+    if (isLoopVideoFirst()) {
+      const loopMinVideos = 2;
+      let videoCount = finalAssets.filter((asset) => asset.type === 'video').length;
+      const videoShot = shotsToHarvest[0];
+      while (videoCount < loopMinVideos && !signal?.aborted) {
+        const videoPick = await pickDistinctShotCandidate(
+          uniqueCandidates,
+          videoShot,
+          segmentIndex,
+          excludedUrls,
+          'video',
+          deduplicationRegistry.usedUrls,
+          signal,
+        );
+        if (!videoPick || videoPick.type !== 'video') break;
+        usedUrlsMap.set(videoPick.url, segmentIndex);
+        registerAsset(deduplicationRegistry, { url: videoPick.url, alt: videoPick.alt, sourceUrl: videoPick.sourceUrl });
+        excludedUrls.add(videoPick.url);
+        pushSelectedCandidate(videoPick, videoShot, 'secondary');
+        const last = finalAssets[finalAssets.length - 1]!;
+        last.reasoning = `Loop video-first: extra motion clip from ${videoPick.source}`;
+        last.trace = [...trace, `[S${segmentIndex + 1}] video-first min clip ${videoCount + 1}/${loopMinVideos}`];
+        videoCount += 1;
       }
     }
 
@@ -2316,11 +2419,21 @@ export async function sourceSegmentMedia(
       for (let ai = 0; ai < finalAssets.length; ai++) {
         const asset = finalAssets[ai];
         const prevSegUsed = usedUrlsMap.get(asset.url);
-        // Check if URL was used in any of the last DIVERSITY_WINDOW segments
         if (prevSegUsed !== undefined && prevSegUsed >= segmentIndex - DIVERSITY_WINDOW && prevSegUsed < segmentIndex) {
-          // This URL was used recently — try to swap it
-          const replacement = uniqueCandidates.find(
-            c => !excludedUrls.has(c.url) && !deduplicationRegistry.usedUrls.has(c.url) && (usedUrlsMap.get(c.url) === undefined || usedUrlsMap.get(c.url)! < segmentIndex - DIVERSITY_WINDOW)
+          const diversityShot = shotsToHarvest[ai] || shotsToHarvest[0];
+          const replacement = await pickDistinctShotCandidate(
+            uniqueCandidates.filter(
+              (c) =>
+                !excludedUrls.has(c.url) &&
+                !deduplicationRegistry.usedUrls.has(c.url) &&
+                (usedUrlsMap.get(c.url) === undefined || usedUrlsMap.get(c.url)! < segmentIndex - DIVERSITY_WINDOW),
+            ),
+            diversityShot,
+            segmentIndex,
+            excludedUrls,
+            undefined,
+            deduplicationRegistry.usedUrls,
+            signal,
           );
           if (replacement) {
             usedUrlsMap.set(replacement.url, segmentIndex);

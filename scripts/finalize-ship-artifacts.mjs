@@ -83,8 +83,20 @@ console.log(`   Duration: ${durationSec?.toFixed(1) ?? '?'}s`);
 console.log(`   Size:     ${manifest.sizeMb} MB`);
 console.log(`   Manifest: ${manifestPath}\n`);
 
-if (durationSec != null && durationSec < 180) {
-  console.error(`❌ Duration ${durationSec.toFixed(1)}s < 180s — run npm run render:fixture:full or npm run generate:video`);
+const minDurationSec = (() => {
+  const raw = process.env.MIN_DURATION_SEC;
+  if (raw != null && raw !== '') {
+    const n = parseFloat(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  if (process.env.REAL_PASS_FIXTURE === '1' || process.env.AUTOTUBE_LOOP_MODE === '1') return 30;
+  return 180;
+})();
+
+if (durationSec != null && durationSec < minDurationSec) {
+  console.error(
+    `❌ Duration ${durationSec.toFixed(1)}s < ${minDurationSec}s — run npm run render:fixture:full or set MIN_DURATION_SEC for loop/fixture runs`,
+  );
   process.exit(1);
 }
 

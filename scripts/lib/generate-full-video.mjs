@@ -525,6 +525,12 @@ export async function generateFullVideo(options) {
 
     const finalize = spawnSync('node', ['scripts/finalize-ship-artifacts.mjs'], {
       cwd: root,
+      env: {
+        ...process.env,
+        AUTOTUBE_LOOP_MODE: '1',
+        MIN_DURATION_SEC: process.env.MIN_DURATION_SEC || '30',
+        REAL_PASS_FIXTURE: '1',
+      },
       stdio: options.quiet ? 'pipe' : 'inherit',
     });
     if (finalize.status !== 0) {

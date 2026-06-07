@@ -112,7 +112,9 @@ function isJunkHarvestUrl(url) {
     u.includes('gravatar.com/avatar') ||
     /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
     u.includes('/th/id/ovp.') ||
-    u.includes('th?id=ovp.')
+    u.includes('th?id=ovp.') ||
+    /\.webp(?:[?#]|$)/i.test(u) ||
+    /\.avif(?:[?#]|$)/i.test(u)
   );
 }
 

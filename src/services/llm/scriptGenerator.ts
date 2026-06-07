@@ -408,9 +408,10 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
     // Safety net: inject a transition segment if the LLM forgot one (Requirement 1.2)
     segments = injectTransitionIfMissing(segments);
 
-    // Post-generation specificity validation — retry if too generic
+    // Post-generation specificity validation — retry if too generic (skip in loop fast mode)
+    const loopFastMode = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
     const specificityIssues = validateScriptSpecificity(segments);
-    if (specificityIssues.length > 0 && !signal?.aborted) {
+    if (specificityIssues.length > 0 && !signal?.aborted && !loopFastMode) {
       logger.warn('OpenRouter', `Specificity check: ${specificityIssues.length} issue(s) found. Retrying with specificity instructions.`);
       const fixPrompt = buildSpecificityFixPrompt(segments, safeTopic, specificityIssues);
       try {
@@ -430,7 +431,7 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
             ],
             response_format: { type: 'json_object' },
           }),
-        }, { timeoutMs: 30_000, maxRetries: 1, signal });
+        }, { timeoutMs: 90_000, maxRetries: 1, signal });
         if (retryResponse.ok) {
           const retryData = await retryResponse.json();
           const retryContent: unknown = retryData?.choices?.[0]?.message?.content;
@@ -440,10 +441,11 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
             logger.success('OpenRouter', 'Specificity retry produced improved segments');
           }
         }
-      } catch (err) {
-        if ((err as Error).name === 'AbortError') throw err;
+      } catch {
         logger.warn('OpenRouter', 'Specificity retry failed, keeping original segments');
       }
+    } else if (specificityIssues.length > 0 && loopFastMode) {
+      logger.info('OpenRouter', `Loop fast mode: skipping specificity retry (${specificityIssues.length} issue(s))`);
     }
 
     // Enforce duration cap — LLM sometimes ignores the 25s constraint

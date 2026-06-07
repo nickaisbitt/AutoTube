@@ -82,7 +82,7 @@ export class PexelsProvider implements SourceProvider {
         sourceUrl: photo.url,
         width: photo.width,
         height: photo.height,
-        baseScore: 170,
+        baseScore: 95,
         query,
         finalScore: 0,
         type: 'image' as const,

@@ -36,7 +36,7 @@ export class UnsplashProvider implements SourceProvider {
           thumbnailUrl: item.thumbnailUrl,
           alt: item.title || query,
           source: 'unsplash',
-          baseScore: 175,
+          baseScore: 95,
           query,
           finalScore: 0,
           type: 'image' as const,

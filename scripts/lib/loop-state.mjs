@@ -10,7 +10,7 @@ export const DEFAULT_FIX_STATE = {
   useFastPacing: false,
   shockHook: true,
   hookLine: null,
-  forceRealStock: true,
+  forceRealStock: false,
   mediaOffset: 0,
   topicRetryCount: 0,
   maxRetriesPerTopic: 4,

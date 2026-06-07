@@ -48,7 +48,10 @@ export default defineConfig({
       process.env.VITE_SKIP_QUALITY_BLOCK || process.env.SKIP_QUALITY_BLOCK || '',
     ),
     "import.meta.env.VITE_DISABLED_PROVIDERS": JSON.stringify(
-      process.env.AUTOTUBE_DISABLED_PROVIDERS || 'Pexels,Pexels Videos,Picsum',
+      process.env.AUTOTUBE_DISABLED_PROVIDERS || 'Picsum',
+    ),
+    "import.meta.env.VITE_STOCK_AS_SECONDARY": JSON.stringify(
+      process.env.AUTOTUBE_STOCK_AS_SECONDARY ?? '1',
     ),
     "import.meta.env.VITE_OPENROUTER_KEY": JSON.stringify(
       process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_KEY || '',

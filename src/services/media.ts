@@ -15,6 +15,11 @@ import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { filterCandidates, getDomainTrustTier } from './domainFilter';
 import { batchVisionCheck, checkCandidateVision } from './visionCheck';
 import { queryAllProviders } from './sourceProviders';
+import {
+  applySecondaryStockPolicy,
+  isPrimaryWebSource,
+  isSecondaryStockSource,
+} from './sourceProviders/providerTiers';
 import { batchResolve } from './fullResResolver';
 import { MediaCache } from './mediaCache';
 import { batchScoreQuality } from './qualityScorer';
@@ -596,6 +601,26 @@ export function scoreCandidate(
   // 9. Picsum Penalty — generic random photos should NEVER outrank real DDG/Wikimedia results
   if (c.source.includes('Picsum')) {
     score -= 200;
+  }
+
+  // 9b. Curated stock API penalty — Pexels/Pixabay/Unsplash are secondary B-roll, not primary sourcing
+  if (isSecondaryStockSource(c.source) && !c.source.includes('Picsum')) {
+    score -= 90;
+    // Extra hit when metadata doesn't match query terms (common with generic stock alts)
+    const altHasQueryWord = qWords.some((w) => meta.includes(w));
+    if (qWords.length >= 2 && !altHasQueryWord) {
+      score -= 80;
+    }
+  }
+
+  // 9c. Deep Harvest boost — images extracted from topic-specific article pages
+  if (c.source.includes('Deep Harvest')) {
+    score += 45;
+  }
+
+  // 9d. Primary web source boost when metadata matches the segment topic
+  if (isPrimaryWebSource(c.source) && hasTopicOverlap) {
+    score += 35;
   }
 
   // 10. Small image penalty — likely icons or thumbnails (#12)
@@ -1588,10 +1613,12 @@ async function harvestMediaWithSafetyNet(
     logger.warn('DomainFilter', `Rejected: ${rejCandidate.url} [${category}] matched pattern "${pattern}"`);
   }
 
-  const scored = accepted.map(c => ({
+  let scored = accepted.map(c => ({
     ...c,
     finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle)
   })).sort((a, b) => b.finalScore - a.finalScore);
+
+  scored = applySecondaryStockPolicy(scored);
 
   // Vision check — run on top 3 candidates if OpenRouter API key is available
   let visionRejectedAll = false;

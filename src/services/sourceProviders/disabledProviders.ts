@@ -1,9 +1,11 @@
 /**
- * Providers excluded from harvest (e.g. Pexels — low quality / user preference).
- * Set VITE_DISABLED_PROVIDERS="Pexels,Pexels Videos,Picsum" or AUTOTUBE_DISABLED_PROVIDERS at build time.
+ * Providers excluded from harvest.
+ * Picsum is disabled by default (random, irrelevant). Pexels/Pixabay are enabled when API keys
+ * exist but rank as secondary behind web harvest (see providerTiers.ts).
+ * Override: VITE_DISABLED_PROVIDERS or AUTOTUBE_DISABLED_PROVIDERS at build time.
  */
 
-const DEFAULT_DISABLED = ['Pexels', 'Pexels Videos', 'Picsum'];
+const DEFAULT_DISABLED = ['Picsum'];
 
 function parseList(raw: string | undefined): string[] {
   if (!raw?.trim()) return [];

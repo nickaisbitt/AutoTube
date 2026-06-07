@@ -79,7 +79,7 @@ export class PexelsVideoProvider implements SourceProvider {
           sourceUrl: video.url,
           width: hdFile.width,
           height: hdFile.height,
-          baseScore: 175,
+          baseScore: 90,
           query,
           finalScore: 0,
           type: 'video' as const,

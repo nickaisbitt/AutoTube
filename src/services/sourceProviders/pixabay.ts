@@ -73,7 +73,7 @@ export class PixabayProvider implements SourceProvider {
         sourceUrl: hit.pageURL,
         width: hit.imageWidth,
         height: hit.imageHeight,
-        baseScore: 160,
+        baseScore: 95,
         query,
         finalScore: 0,
         type: 'image' as const,

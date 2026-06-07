@@ -130,20 +130,36 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
     buckets[sid].push({ ...asset, segmentId: sid });
   }
 
-  const needy = segIds.filter((id) => buckets[id].length < minPerSegment);
-  if (needy.length === 0) {
-    project.media = segIds.flatMap((id) => buckets[id]);
-    return project;
+  const effectiveMin = Math.min(
+    minPerSegment,
+    Math.max(1, Math.ceil(project.media.length / segIds.length)),
+  );
+  const donors = [...segIds].sort((a, b) => buckets[b].length - buckets[a].length);
+
+  for (const needId of segIds.filter((id) => buckets[id].length === 0)) {
+    const donorId = donors.find((id) => id !== needId && buckets[id].length > 0);
+    if (!donorId) break;
+    const moved = buckets[donorId].pop();
+    if (!moved) break;
+    buckets[needId].push({
+      ...moved,
+      id: `${moved.id}-bal-${needId.slice(0, 6)}`,
+      segmentId: needId,
+    });
   }
 
-  const donors = [...segIds].sort((a, b) => buckets[b].length - buckets[a].length);
+  const needy = segIds.filter((id) => buckets[id].length < effectiveMin);
   for (const needId of needy) {
-    while (buckets[needId].length < minPerSegment) {
-      const donorId = donors.find((id) => id !== needId && buckets[id].length > minPerSegment);
+    while (buckets[needId].length < effectiveMin) {
+      const donorId = donors.find((id) => id !== needId && buckets[id].length > 1);
       if (!donorId) break;
       const moved = buckets[donorId].pop();
       if (!moved) break;
-      buckets[needId].push({ ...moved, segmentId: needId });
+      buckets[needId].push({
+        ...moved,
+        id: `${moved.id}-bal-${needId.slice(0, 6)}-${buckets[needId].length}`,
+        segmentId: needId,
+      });
     }
   }
 

@@ -12,6 +12,47 @@ import { muxVideoWithAudio } from './audio.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FPS = 24;
 
+function probeMediaDuration(path) {
+  const probe = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', path],
+    { encoding: 'utf8' },
+  );
+  const d = parseFloat((probe.stdout || '').trim());
+  return Number.isFinite(d) ? d : 0;
+}
+
+function padVideoToDuration(inputPath, outputPath, targetSec, preset) {
+  const current = probeMediaDuration(inputPath);
+  if (current >= targetSec - 0.1) {
+    if (inputPath !== outputPath) {
+      spawnSync('ffmpeg', ['-y', '-i', inputPath, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    }
+    return current;
+  }
+  const padSec = Math.max(0.1, targetSec - current);
+  const r = spawnSync(
+    'ffmpeg',
+    [
+      '-y',
+      '-i',
+      inputPath,
+      '-vf',
+      `tpad=stop_mode=clone:stop_duration=${padSec.toFixed(3)}`,
+      '-c:v',
+      'libx264',
+      '-preset',
+      preset,
+      '-pix_fmt',
+      'yuv420p',
+      '-an',
+      outputPath,
+    ],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  return r.status === 0 && existsSync(outputPath) ? targetSec : current;
+}
+
 function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
   return draft ? { w: 960, h: 540 } : { w: 1920, h: 1080 };
@@ -249,9 +290,14 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const segmentOutputs = [];
   const preset = ffmpegPreset();
 
+  const mediaPool = project.media || [];
+
   for (let si = 0; si < (project.script || []).length; si++) {
     const seg = project.script[si];
-    const segMedia = (project.media || []).filter((a) => a.segmentId === seg.id);
+    let segMedia = mediaPool.filter((a) => a.segmentId === seg.id);
+    if (!segMedia.length && mediaPool.length) {
+      segMedia = mediaPool.map((a) => ({ ...a, segmentId: seg.id }));
+    }
     if (!segMedia.length) continue;
 
     console.log(`  [ffmpeg] segment ${si + 1}/${project.script.length}: ${seg.title}`);
@@ -296,24 +342,27 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   }
 
   const audioFile = options.mixedAudioPath;
-  let durationSec = 60;
-  const probe = spawnSync(
-    'ffprobe',
-    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', mergedVideo],
-    { encoding: 'utf8' },
-  );
-  if (probe.stdout) {
-    const d = parseFloat(probe.stdout.trim());
-    if (Number.isFinite(d)) durationSec = d;
+  let videoDurationSec = probeMediaDuration(mergedVideo) || 60;
+  const audioDurationSec = audioFile && existsSync(audioFile) ? probeMediaDuration(audioFile) : 0;
+  const targetDurationSec = Math.max(videoDurationSec, audioDurationSec || 0);
+
+  let videoForMux = mergedVideo;
+  if (targetDurationSec > videoDurationSec + 0.15) {
+    const paddedVideo = join(workDir, 'merged-video-padded.mp4');
+    const padded = padVideoToDuration(mergedVideo, paddedVideo, targetDurationSec, preset);
+    if (padded >= targetDurationSec - 0.1) {
+      videoForMux = paddedVideo;
+      videoDurationSec = padded;
+    }
   }
 
   if (audioFile && existsSync(audioFile)) {
-    muxVideoWithAudio(mergedVideo, audioFile, outputPath, durationSec, {
+    muxVideoWithAudio(videoForMux, audioFile, outputPath, targetDurationSec, {
       backgroundMusic: project.exportSettings?.backgroundMusic !== false,
       musicPreset: project.exportSettings?.musicPreset,
     });
   } else {
-    spawnSync('ffmpeg', ['-y', '-i', mergedVideo, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    spawnSync('ffmpeg', ['-y', '-i', videoForMux, '-c', 'copy', outputPath], { encoding: 'utf8' });
   }
 
   return { ok: existsSync(outputPath), outputPath, mode: 'ffmpeg-assembly', segmentCount: segmentOutputs.length };

@@ -144,10 +144,11 @@ async function main() {
 
       const gen = await generateFullVideo({
         topic: currentTopic,
-        youtubeMode: true,
+        youtubeMode: !cfg.mockHarvest,
         runId: Date.now(),
         fixState,
         realHarvest: !cfg.mockHarvest,
+        loopShort: true,
       });
       generateOk = gen.ok;
       generateError = gen.error ?? null;

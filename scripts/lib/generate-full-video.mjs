@@ -184,7 +184,10 @@ export async function generateFullVideo(options) {
     };
   }
 
-  const mockSegments = buildMockScriptForTopic(topic, { hookLine: fixState.hookLine });
+  const mockSegments = buildMockScriptForTopic(topic, {
+    hookLine: fixState.hookLine,
+    loopShort: options.loopShort !== false && !realHarvest,
+  });
 
   const devServer = options.devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173';
   const runId = options.runId ?? Date.now();

@@ -51,7 +51,7 @@ export function buildMockScriptForTopic(topic, options = {}) {
   const bodyBlock = buildTopicBody(topic, hookLine);
   const introNarration = `${hookLine} Stay with me — the next two minutes change how you see this forever. ${bodyBlock.split('. ').slice(0, 2).join('. ')}.`;
 
-  const segmentTemplates = [
+  let segmentTemplates = [
     { type: 'intro', title: 'The Hook', visualNote: 'Shock headline, human face, stakes', narration: introNarration },
     { type: 'section', title: 'What Happened', visualNote: 'News footage, data dashboard, crowd', narration: bodyBlock },
     { type: 'section', title: 'Who Pays', visualNote: 'Families, hospital, courtroom', narration: bodyBlock },
@@ -60,11 +60,18 @@ export function buildMockScriptForTopic(topic, options = {}) {
     { type: 'outro', title: 'Your Move', visualNote: 'Subscribe CTA, checklist, direct camera', narration: `${bodyBlock} Subscribe for part two — we break down the next scandal before mainstream news catches up.` },
   ];
 
+  if (options.loopShort) {
+    segmentTemplates = segmentTemplates.slice(0, 3);
+  }
+
+  const duration = options.loopShort ? 12 : 32;
+  const wordTarget = options.loopShort ? 40 : 85;
+
   return segmentTemplates.map((seg, i) => ({
     ...seg,
     id: `seg-${i}`,
-    narration: repeatToWordCount(seg.narration, 85),
-    duration: 32,
+    narration: repeatToWordCount(seg.narration, wordTarget),
+    duration,
   }));
 }
 

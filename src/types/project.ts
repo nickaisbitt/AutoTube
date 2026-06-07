@@ -83,6 +83,14 @@ export interface VideoProject {
   topicContext?: TopicContext;
   visualPlans?: Record<string, SegmentVisualPlan>;
   editPlan?: EditPlan;
+  /** Loop/ffmpeg assembly B-roll placement timeline */
+  editTimeline?: Array<{
+    segmentId: string;
+    startSec: number;
+    endSec: number;
+    assetId: string;
+    reason?: string;
+  }>;
   logs?: SystemLog[];
   blindReview?: QualityReport;
   /** Task 97: Title A/B/C variants */

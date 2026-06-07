@@ -39,6 +39,14 @@ function loopMinAssetsPerSegment(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+function isLoopVideoFirst(): boolean {
+  return (
+    isLoopFastMode() &&
+    typeof sessionStorage !== 'undefined' &&
+    sessionStorage.getItem('autotube_loop_video_first') === 'true'
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Watermark Detection Constants
 // ---------------------------------------------------------------------------
@@ -609,8 +617,8 @@ export function scoreCandidate(
     urlLower.includes('gravatar.com/avatar') ||
     /tse\d\.mm\.bing\.net\/th\/id\/ovp/i.test(urlLower) ||
     urlLower.includes('/th/id/ovp.') ||
-    /\.webp(?:[?#]|$)/.test(urlLower) ||
-    /\.avif(?:[?#]|$)/.test(urlLower)
+    (!isLoopVideoFirst() && /\.webp(?:[?#]|$)/.test(urlLower)) ||
+    (!isLoopVideoFirst() && /\.avif(?:[?#]|$)/.test(urlLower))
   ) {
     score -= 450;
   }
@@ -647,6 +655,12 @@ export function scoreCandidate(
 
   // 12. Video clip enhancement scoring (HD Media Acquisition)
   if (c.type === 'video') {
+    if (isLoopVideoFirst()) {
+      score += 120;
+      if (isPrimaryWebSource(c.source) || /archive\.org|pexels|pixabay/i.test(c.source)) {
+        score += 80;
+      }
+    }
     // +50 bonus for video clips with duration metadata (implies motion content)
     if (c.duration && c.duration > 0) {
       score += 50;

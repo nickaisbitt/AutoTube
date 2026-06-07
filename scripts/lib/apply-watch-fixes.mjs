@@ -19,7 +19,31 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   const visualVariety = watch.brutal?.report?.scores?.visualVariety ?? 10;
   const repeatPct = watch.repetition?.repeatPct ?? 0;
   const dupRuns = watch.repetition?.duplicateRunCount ?? 0;
-  const longestHold = watch.repetition?.longestRun?.approxHoldSec ?? 0;
+  const longestHold = watch.sceneQa?.longestSceneSec ?? watch.repetition?.longestRun?.approxHoldSec ?? 0;
+  const sceneFail = watch.sceneQa?.available && watch.sceneQa.pass === false;
+  const objectiveFail = watch.objectiveGate?.available && watch.objectiveGate.pass === false;
+
+  if (sceneFail) {
+    s.useFastPacing = true;
+    s.patternInterrupts = true;
+    s.useFfmpegAssembly = true;
+    s.harvestVideoFirst = true;
+    const prev = s.cutIntervalSec ?? 1.25;
+    s.cutIntervalSec = Math.max(0.5, prev - 0.25);
+    applied.push(`0. Scene hold FAIL (longest ${longestHold.toFixed(1)}s) → cuts ${prev}s→${s.cutIntervalSec}s, ffmpeg assembly ON`);
+  }
+
+  if (objectiveFail) {
+    const failed = (watch.objectiveGate?.checks || []).filter((c) => !c.pass).map((c) => c.name);
+    s.reHarvestMedia = true;
+    s.harvestVideoFirst = true;
+    applied.push(`0b. Objective gate FAIL (${failed.join(', ')}) → video-first re-harvest`);
+  }
+
+  if (watch.objectiveQa && !watch.objectiveQa.silencePass) {
+    s.useFastPacing = true;
+    applied.push(`0c. Silence gaps ${watch.objectiveQa.silenceFirst60Sec}s in first 60s → tighten pacing`);
+  }
 
   if (hookFail) {
     s.shockHook = true;
@@ -40,39 +64,38 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s, fast pacing ON`);
   }
 
-  if ((watch.brutal?.overall ?? 10) < 9.1) {
-    s.showKineticText = true;
+  const renderTier = s.renderTier || 'draft';
+  if (renderTier === 'full' && (watch.brutal?.overall ?? 10) < 9.1) {
     s.useFastPacing = true;
     s.cutIntervalSec = Math.max(0.5, (s.cutIntervalSec ?? 1.25) - 0.1);
     s.shockHook = true;
     s.reHarvestMedia = true;
+    s.brollPlacement = true;
     s.minAssetsPerSegment = Math.min(8, Math.max(6, s.minAssetsPerSegment || 4));
-    applied.push(`2b. Score below 9.1 → escalate (cuts=${s.cutIntervalSec}s, assets≥${s.minAssetsPerSegment}/seg)`);
+    applied.push(`2b. Full-tier score below 9.1 → escalate (cuts=${s.cutIntervalSec}s, assets≥${s.minAssetsPerSegment}/seg)`);
   }
 
-  if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6) {
+  if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6 || sceneFail) {
     s.reHarvestMedia = true;
     s.forceRealStock = false;
+    s.harvestVideoFirst = true;
     s.minAssetsPerSegment = Math.min(8, Math.max(6, (s.minAssetsPerSegment || 4) + (repeatPct >= 40 ? 2 : 0)));
     s.mediaOffset = (s.mediaOffset || 0) + 4;
     const cutsAtFloor = (s.cutIntervalSec ?? 1.25) <= 0.5;
-    if (cutsAtFloor && repeatPct >= 35) {
-      // Cuts already maxed — kinetic text + captions read as duplicate frames to the watcher.
+    if (cutsAtFloor && (repeatPct >= 35 || sceneFail)) {
       s.showKineticText = false;
       s.patternInterrupts = true;
       applied.push(`3. Repetition FAIL (${repeatPct}% dup, ${dupRuns} runs) → kinetic OFF, flash cuts ON, re-harvest ≥${s.minAssetsPerSegment}/seg`);
     } else {
-      s.showKineticText = true;
-      applied.push(`3. Repetition/visual FAIL (${repeatPct}% dup, ${dupRuns} runs) → live harvest ≥${s.minAssetsPerSegment} assets/segment + kinetic text`);
+      s.showKineticText = false;
+      applied.push(`3. Repetition/visual FAIL (${repeatPct}% dup, ${dupRuns} runs) → live harvest ≥${s.minAssetsPerSegment} assets/segment`);
     }
   }
 
-  if ((watch.brutal?.overall ?? 10) <= 5) {
+  if (renderTier === 'full' && (watch.brutal?.overall ?? 10) <= 5) {
     s.useFastPacing = true;
-    if (!s.patternInterrupts) s.showKineticText = (watch.brutal?.report?.scores?.visualVariety ?? 10) <= 5;
-    applied.push(s.showKineticText
-      ? '4. Overall ≤5/10 → enable kinetic text + fast pacing'
-      : '4. Overall ≤5/10 → fast pacing ON (kinetic OFF — text-heavy frames)');
+    s.showKineticText = false;
+    applied.push('4. Overall ≤5/10 on full tier → fast pacing ON, kinetic OFF');
   }
 
   if (watch.legacyVision?.technical?.issues?.some((i) => /loudness/i.test(i))) {
@@ -81,10 +104,13 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
 
   s.appliedFixes = [...(s.appliedFixes || []), ...applied.map((a) => `[${new Date().toISOString()}] ${a}`)];
 
+  const objectivePass = watch.objectiveGate?.pass === true;
+  const uploadReady = watch.uploadReady === true;
+
   return {
     applied,
     fixState: s,
-    blockNextTopic: applied.length > 0 && !watch.uploadReady,
+    blockNextTopic: applied.length > 0 && !(uploadReady || (objectivePass && renderTier === 'draft')),
   };
 }
 
@@ -114,5 +140,10 @@ export function formatFixReport(applied, fixState) {
   lines.push(`11. generateFailureCount: ${fixState.generateFailureCount || 0}/${fixState.maxGenerateFailuresPerTopic || 2}`);
   lines.push(`12. patternInterrupts: ${fixState.patternInterrupts === true}`);
   lines.push(`13. forceRealStock: ${fixState.forceRealStock === true}`);
+  lines.push(`14. renderTier: ${fixState.renderTier || 'draft'}`);
+  lines.push(`15. useFfmpegAssembly: ${fixState.useFfmpegAssembly !== false}`);
+  lines.push(`16. harvestVideoFirst: ${fixState.harvestVideoFirst !== false}`);
+  lines.push(`17. whisperAlign: ${fixState.whisperAlign === true}`);
+  lines.push(`18. brollPlacement: ${fixState.brollPlacement !== false}`);
   return lines.join('\n');
 }

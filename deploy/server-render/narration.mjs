@@ -906,8 +906,22 @@ export async function generateNarration(segments, outputDir, options = {}) {
       const actualDuration = getAudioDuration(audioFile) || segDuration;
       seg.duration = actualDuration;
 
-      // Task 25: Generate WebVTT captions from narration text if not already created by the engine
-      if (!existsSync(subtitleFile) && seg.narration) {
+      if (process.env.AUTOTUBE_WHISPER_ALIGN === '1' && existsSync(audioFile)) {
+        const alignScript = join(dirname(fileURLToPath(import.meta.url)), '../../server/tts/align-whisper.py');
+        const whisperModel = process.env.AUTOTUBE_WHISPER_MODEL || 'base';
+        const sidecar = subtitleFile.replace(/\.vtt$/, '.words.json');
+        const align = spawnSync(
+          'python3',
+          [alignScript, audioFile, subtitleFile, '--model', whisperModel, '--json-sidecar', sidecar],
+          { encoding: 'utf8', timeout: 300_000 },
+        );
+        if (align.status !== 0) {
+          console.warn(`  ⚠ whisper align failed for segment ${i + 1}, using estimated VTT`);
+          if (!existsSync(subtitleFile) && seg.narration) {
+            generateWebVTT(seg.narration, actualDuration, subtitleFile);
+          }
+        }
+      } else if (!existsSync(subtitleFile) && seg.narration) {
         generateWebVTT(seg.narration, actualDuration, subtitleFile);
       }
 

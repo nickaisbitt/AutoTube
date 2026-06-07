@@ -146,8 +146,20 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       continue;
     }
 
-    // Loop/draft render often cannot extract video frames — use still thumbnails only
-    if (loopMode) {
+    if (loopMode && asset.type === 'video') {
+      const pageUrl = asset.sourceUrl || asset.url;
+      let downloadUrl = asset.url;
+      if (asset.url?.startsWith('/api/download-clip')) {
+        downloadUrl = `${devServer}${asset.url}`;
+      } else if (isLikelyVideoHost(pageUrl) || !/\.(mp4|webm|mov)/i.test(asset.url || '')) {
+        downloadUrl = `${devServer}/api/download-clip?url=${encodeURIComponent(isLikelyVideoHost(pageUrl) ? pageUrl : asset.url)}`;
+      }
+      const clipOk = await canFetch(downloadUrl, { timeoutMs: 30000, minBytes: 2048, expectVideo: true });
+      if (clipOk) {
+        sanitized.push({ ...asset, url: downloadUrl.startsWith('http') ? downloadUrl : asset.url });
+        report.keptVideo.push({ url: asset.url, reason: 'loop mode: ffmpeg assembly clip OK' });
+        continue;
+      }
       const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '');
       if (thumbnailUrl && !isJunkHarvestUrl(thumbnailUrl) && await canFetch(thumbnailUrl, { timeoutMs: 8000 })) {
         sanitized.push({
@@ -157,10 +169,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
           source: `${asset.source || 'Video'} still`,
           isFallback: false,
         });
-        report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl, reason: 'loop mode: video→still' });
+        report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl, reason: 'loop mode: video→still (clip failed)' });
         continue;
       }
-      report.dropped.push({ url: asset.url, reason: 'loop mode: video without usable still' });
+      report.dropped.push({ url: asset.url, reason: 'loop mode: video without usable clip or still' });
       continue;
     }
 
@@ -352,6 +364,8 @@ export async function generateFullVideo(options) {
       );
       sessionStorage.setItem('autotube_loop_fast_mode', 'true');
       sessionStorage.setItem('autotube_loop_min_assets', String(minAssets));
+      sessionStorage.setItem('autotube_loop_broll_placement', 'true');
+      if (rawFirst) sessionStorage.setItem('autotube_loop_video_first', 'true');
     },
     {
       key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline',
@@ -616,11 +630,29 @@ export async function generateFullVideo(options) {
     if (fixState.patternInterrupts) renderEnv.AUTOTUBE_PATTERN_INTERRUPTS = '1';
     if (fixState.useFastPacing) renderEnv.AUTOTUBE_FAST_PACING = '1';
     renderEnv.AUTOTUBE_LOOP_MODE = '1';
-    // Loop renders: draft quality + longer encode timeout (worker CPU is slow)
-    renderEnv.AUTOTUBE_RENDER_QUALITY = process.env.AUTOTUBE_RENDER_QUALITY || 'draft';
+    const renderTier = fixState.renderTier === 'full' ? 'full' : 'draft';
+    if (fixState.useFfmpegAssembly !== false) {
+      renderEnv.AUTOTUBE_RENDER_MODE = 'ffmpeg';
+    }
+    if (fixState.harvestVideoFirst !== false) {
+      renderEnv.AUTOTUBE_HARVEST_VIDEO_FIRST = '1';
+    }
+    if (fixState.whisperAlign || renderTier === 'full') {
+      renderEnv.AUTOTUBE_WHISPER_ALIGN = '1';
+    }
+    if (fixState.brollPlacement !== false) {
+      renderEnv.AUTOTUBE_BROLL_PLACEMENT = '1';
+    }
+    if (renderTier === 'full') {
+      renderEnv.AUTOTUBE_RENDER_QUALITY = 'high';
+      renderEnv.AUTOTUBE_FFMPEG_PRESET = process.env.AUTOTUBE_FFMPEG_PRESET || 'fast';
+      delete renderEnv.AUTOTUBE_DRAFT_NO_UPSCALE;
+    } else {
+      renderEnv.AUTOTUBE_RENDER_QUALITY = process.env.AUTOTUBE_RENDER_QUALITY || 'draft';
+      renderEnv.AUTOTUBE_FFMPEG_PRESET = process.env.AUTOTUBE_FFMPEG_PRESET || 'ultrafast';
+      renderEnv.AUTOTUBE_DRAFT_NO_UPSCALE = process.env.AUTOTUBE_DRAFT_NO_UPSCALE || '1';
+    }
     renderEnv.AUTOTUBE_ENCODING_TIMEOUT_MS = process.env.AUTOTUBE_ENCODING_TIMEOUT_MS || '1800000';
-    renderEnv.AUTOTUBE_FFMPEG_PRESET = process.env.AUTOTUBE_FFMPEG_PRESET || 'ultrafast';
-    renderEnv.AUTOTUBE_DRAFT_NO_UPSCALE = process.env.AUTOTUBE_DRAFT_NO_UPSCALE || '1';
 
     const render = spawnSync('node', ['server-render.mjs', mp4Out], {
       cwd: root,

@@ -4,7 +4,10 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
+export const FIX_STATE_VERSION = 2;
+
 export const DEFAULT_FIX_STATE = {
+  version: FIX_STATE_VERSION,
   cutIntervalSec: 1.25,
   showKineticText: false,
   useFastPacing: false,
@@ -21,6 +24,11 @@ export const DEFAULT_FIX_STATE = {
   maxGenerateFailuresPerTopic: 2,
   reHarvestMedia: false,
   patternInterrupts: false,
+  useFfmpegAssembly: true,
+  renderTier: 'draft',
+  harvestVideoFirst: true,
+  whisperAlign: false,
+  brollPlacement: true,
 };
 
 /**
@@ -30,9 +38,14 @@ export function loadFixState(loopDir) {
   const path = join(loopDir, 'FIX_STATE.json');
   if (!existsSync(path)) return { ...DEFAULT_FIX_STATE };
   try {
-    const loaded = { ...DEFAULT_FIX_STATE, ...JSON.parse(readFileSync(path, 'utf8')) };
-    // Persisted state once enabled stock overwrite — always prefer harvested media in loop.
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    const loaded = { ...DEFAULT_FIX_STATE, ...raw };
+    loaded.version = FIX_STATE_VERSION;
     loaded.forceRealStock = false;
+    if (raw.useFfmpegAssembly === undefined) loaded.useFfmpegAssembly = true;
+    if (raw.harvestVideoFirst === undefined) loaded.harvestVideoFirst = true;
+    if (raw.brollPlacement === undefined) loaded.brollPlacement = true;
+    if (raw.renderTier === undefined) loaded.renderTier = 'draft';
     return loaded;
   } catch {
     return { ...DEFAULT_FIX_STATE };

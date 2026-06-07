@@ -15,6 +15,7 @@ import { pickRandomTopic } from './lib/random-topics.mjs';
 import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
+import { validateLoopVideo } from './lib/validate-loop-video.mjs';
 
 const ROOT = process.cwd();
 const LOOP_DIR = join(ROOT, 'test-recordings', 'improvement-loop');
@@ -29,6 +30,7 @@ function parseArgs(argv) {
     delaySec: 5,
     reviewOnly: false,
     skipVision: false,
+    objectiveOnly: false,
     watchMode: 'quick',
     exportReview: true,
     mockHarvest: false,
@@ -41,6 +43,7 @@ function parseArgs(argv) {
     else if (a === '--delay' && argv[i + 1]) cfg.delaySec = parseInt(argv[++i], 10);
     else if (a === '--review-only') cfg.reviewOnly = true;
     else if (a === '--skip-vision') cfg.skipVision = true;
+    else if (a === '--objective-only') cfg.objectiveOnly = true;
     else if (a === '--watch-full') cfg.watchMode = 'full';
     else if (a === '--no-export') cfg.exportReview = false;
     else if (a === '--mock-harvest') cfg.mockHarvest = true;
@@ -62,11 +65,14 @@ function appendJournal(entry) {
     `3. **Video:** \`${entry.videoPath || '—'}\``,
     `4. **Upload-ready:** ${entry.uploadReady ? 'YES' : 'NO'}`,
     `5. **Brutal score:** ${entry.brutalScore ?? '—'}/10`,
-    `6. **Hook pass:** ${entry.hookPass === true ? 'YES' : entry.hookPass === false ? 'NO' : '—'}`,
-    `7. **Fixes applied:** ${entry.fixesApplied?.length ? entry.fixesApplied.join('; ') : 'none'}`,
-    `8. **Next step:** ${entry.nextStep || '—'}`,
-    `9. **Watch report:** \`${entry.reportPath || '—'}\``,
-    `10. **Run folder:** \`${entry.runDir || '—'}\``,
+    `6. **Objective gate:** ${entry.objectivePass === true ? 'PASS' : entry.objectivePass === false ? 'FAIL' : '—'} (score ${entry.objectiveScore ?? '—'})`,
+    `7. **Scene QA:** ${entry.scenePass === true ? 'PASS' : entry.scenePass === false ? 'FAIL' : '—'} (longest ${entry.longestSceneSec ?? '—'}s)`,
+    `8. **Render tier:** ${entry.renderTier || '—'}`,
+    `9. **Hook pass:** ${entry.hookPass === true ? 'YES' : entry.hookPass === false ? 'NO' : '—'}`,
+    `10. **Fixes applied:** ${entry.fixesApplied?.length ? entry.fixesApplied.join('; ') : 'none'}`,
+    `11. **Next step:** ${entry.nextStep || '—'}`,
+    `12. **Watch report:** \`${entry.reportPath || '—'}\``,
+    `13. **Run folder:** \`${entry.runDir || '—'}\``,
     ``,
   ];
   appendFileSync(JOURNAL_MD, `${lines.join('\n')}\n`);
@@ -131,7 +137,7 @@ async function main() {
       ` LOOP ${iteration}${isRetry ? ` RETRY ${fixState.topicRetryCount + 1}/${fixState.maxRetriesPerTopic}` : ''} — ${topic}`,
     );
     if (isRetry) {
-      console.log(` 🔧 Applying saved fixes: cut=${fixState.cutIntervalSec}s kinetic=${fixState.showKineticText} fast=${fixState.useFastPacing}`);
+      console.log(` 🔧 Applying saved fixes: cut=${fixState.cutIntervalSec}s tier=${fixState.renderTier || 'draft'} ffmpeg=${fixState.useFfmpegAssembly !== false} videoFirst=${fixState.harvestVideoFirst !== false}`);
     }
     console.log(`${'═'.repeat(64)}\n`);
 
@@ -168,6 +174,14 @@ async function main() {
       scriptText = gen.scriptText || '';
 
       if (gen.ok && videoPath && existsSync(videoPath)) {
+        const videoCheck = validateLoopVideo(videoPath);
+        if (!videoCheck.valid) {
+          generateOk = false;
+          generateError = videoCheck.error;
+        }
+      }
+
+      if (gen.ok && videoPath && existsSync(videoPath) && generateOk) {
         fixState.generateFailureCount = 0;
         copyFileSync(videoPath, join(runDir, 'FINAL-VIDEO-final.mp4'));
         if (gen.projectPath && existsSync(gen.projectPath)) {
@@ -212,14 +226,18 @@ async function main() {
       }
     }
 
-    console.log('\n👁 Video Watcher review...\n');
+    const renderTier = fixState.renderTier || 'draft';
+    const skipBrutalOnDraft = renderTier === 'draft' && !cfg.objectiveOnly;
+
+    console.log(`\n👁 Video Watcher review (tier=${renderTier})...\n`);
     let watch;
     try {
       watch = await watchVideo({
         video_path: videoPath,
         mode: cfg.watchMode,
-        skip_vision: cfg.skipVision,
+        skip_vision: cfg.skipVision || skipBrutalOnDraft || cfg.objectiveOnly,
         script_text: scriptText,
+        render_tier: renderTier,
       });
     } catch (e) {
       console.error(`❌ Watch failed: ${e.message}`);
@@ -250,9 +268,46 @@ async function main() {
 
     const brutalScore = watch.brutal?.overall ?? 0;
     const uploadReady = watch.uploadReady === true;
-    const scoreTargetMet = Number.isFinite(brutalScore) && brutalScore >= cfg.untilScore;
+    const objectivePass = watch.objectiveGate?.pass === true;
+    const scenePass = watch.sceneQa?.pass === true;
+    const scoreTargetMet =
+      objectivePass &&
+      renderTier === 'full' &&
+      Number.isFinite(brutalScore) &&
+      brutalScore >= cfg.untilScore;
     let nextStep = 'new random topic';
     let fixesApplied = [];
+
+    if (objectivePass && renderTier === 'draft') {
+      console.log('\n✅ Objective gate PASS on draft — promoting to full-quality render');
+      fixState.renderTier = 'full';
+      fixState.whisperAlign = true;
+      fixState.pendingTopic = currentTopic;
+      fixState.topicRetryCount = Math.max(0, (fixState.topicRetryCount || 0));
+      saveFixState(LOOP_DIR, fixState);
+      appendJournal({
+        iteration,
+        retry: isRetry,
+        topic,
+        at: new Date().toISOString(),
+        generateOk,
+        videoPath,
+        uploadReady: false,
+        brutalScore,
+        objectivePass,
+        objectiveScore: watch.objectiveQa?.score,
+        scenePass,
+        longestSceneSec: watch.sceneQa?.longestSceneSec,
+        renderTier: 'draft',
+        hookPass: watch.hookVision?.hookPass,
+        fixesApplied: ['promote to full-quality render'],
+        nextStep: 'RETRY same topic at full tier',
+        reportPath: watch.reportPath,
+        runDir,
+      });
+      if (cfg.delaySec > 0) await sleep(cfg.delaySec * 1000);
+      continue;
+    }
 
     if (scoreTargetMet) {
       writeFileSync(
@@ -295,6 +350,8 @@ async function main() {
         fixState.pendingTopic = null;
         fixState.topicRetryCount = 0;
         fixState.generateFailureCount = 0;
+        fixState.mediaOffset = 0;
+        fixState.renderTier = 'draft';
         nextStep = 'new topic (max retries hit, fixes retained)';
       }
     } else {
@@ -303,6 +360,7 @@ async function main() {
       fixState.pendingTopic = null;
       fixState.topicRetryCount = 0;
       fixState.generateFailureCount = 0;
+      fixState.renderTier = 'draft';
     }
 
     saveFixState(LOOP_DIR, fixState);
@@ -320,6 +378,11 @@ async function main() {
       uploadReady,
       brutalScore,
       scoreTargetMet,
+      objectivePass,
+      objectiveScore: watch.objectiveQa?.score,
+      scenePass,
+      longestSceneSec: watch.sceneQa?.longestSceneSec,
+      renderTier,
       hookPass: watch.hookVision?.hookPass,
       fixesApplied,
       nextStep,

@@ -72,6 +72,13 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
     if (!have(bin)) errors.push(`${bin} not found on PATH`);
   }
 
+  const scenedetect = spawnSync('python3', ['-c', 'import scenedetect'], { encoding: 'utf8' });
+  if (scenedetect.status !== 0) {
+    console.log('[preflight] scenedetect not installed — run: pip install scenedetect');
+  } else {
+    console.log('[preflight] scenedetect OK');
+  }
+
   try {
     const providers = assertTtsAvailable();
     if (providers.edgeTts) {

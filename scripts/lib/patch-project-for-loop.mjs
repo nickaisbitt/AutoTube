@@ -192,6 +192,32 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   stripSceneLayoutsForLoop(project);
   balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4));
 
+  if (fixState.brollPlacement !== false && project.script?.length && project.media?.length) {
+    const cut = fixState.cutIntervalSec ?? 1.25;
+    const entries = [];
+    for (const seg of project.script) {
+      const assets = project.media.filter((m) => m.segmentId === seg.id);
+      if (!assets.length) continue;
+      const duration = seg.duration || 20;
+      const interval = seg.type === 'intro' ? Math.min(cut, 3) : cut;
+      let t = 0;
+      let ai = 0;
+      while (t < duration - 0.05) {
+        const end = Math.min(duration, t + interval);
+        entries.push({
+          segmentId: seg.id,
+          startSec: t,
+          endSec: end,
+          assetId: assets[ai % assets.length].id,
+          reason: 'loop heuristic placement',
+        });
+        t = end;
+        ai += 1;
+      }
+    }
+    project.editTimeline = entries;
+  }
+
   if (fixState.shockHook !== false && project.script?.length) {
     const hook = buildShockHookLine(topic, fixState.hookLine);
     const hookOverlay = buildShortHookOverlay(topic, hook, {

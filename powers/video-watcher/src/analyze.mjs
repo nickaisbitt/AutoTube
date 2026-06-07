@@ -7,6 +7,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runServerAIReview } from '../../../deploy/server-render/aiReviewer.mjs';
 import { detectVisualRepetition } from './frame-dedup.mjs';
+import { analyzeScenes } from './scene-qa.mjs';
+import { runObjectiveQa, evaluateObjectiveGate } from '../../../scripts/lib/run-objective-qa.mjs';
 import {
   auditHookFromScript,
   runBrutalVisionReview,
@@ -85,7 +87,7 @@ function formatTs(sec) {
 /**
  * Extract JPEG frames on a timeline (hook zone gets extra samples).
  */
-export function extractFramesToDir(videoPath, outDir, { intervalSec = 5, maxDurationSec } = {}) {
+export function extractFramesToDir(videoPath, outDir, { intervalSec = 5, maxDurationSec, maskCaptions = false } = {}) {
   mkdirSync(outDir, { recursive: true });
   const { durationSec: fullDur } = probeVideo(videoPath);
   const durationSec = maxDurationSec ? Math.min(fullDur, maxDurationSec) : fullDur;
@@ -98,9 +100,10 @@ export function extractFramesToDir(videoPath, outDir, { intervalSec = 5, maxDura
   for (const ts of sorted) {
     const name = `frame-${String(Math.floor(ts)).padStart(4, '0')}s.jpg`;
     const outPath = join(outDir, name);
+    const vf = maskCaptions ? 'crop=ih*1.78:ih*0.7:0:0,scale=960:-1' : 'scale=960:-1';
     const r = spawnSync(
       'ffmpeg',
-      ['-y', '-ss', String(ts), '-i', videoPath, '-frames:v', '1', '-vf', 'scale=960:-1', '-q:v', '3', outPath],
+      ['-y', '-ss', String(ts), '-i', videoPath, '-frames:v', '1', '-vf', vf, '-q:v', '3', outPath],
       { encoding: 'utf8', timeout: 60_000 },
     );
     if (r.status !== 0 || !existsSync(outPath)) continue;
@@ -170,7 +173,7 @@ function selectKeyFrames(frames) {
   });
 }
 
-function buildTopFixes({ hookScript, hookVision, repetition, brutal, legacyVision }) {
+function buildTopFixes({ hookScript, hookVision, repetition, sceneQa, brutal, legacyVision }) {
   const fixes = [];
   let p = 1;
 
@@ -183,7 +186,12 @@ function buildTopFixes({ hookScript, hookVision, repetition, brutal, legacyVisio
       text: `Hook frames FAIL (on-screen: "${(hookVision?.onScreenText || '').slice(0, 60)}") — ${hookVision?.fix || 'shock line in first 1s'}`,
     });
   }
-  if (repetition?.longestRun) {
+  if (sceneQa?.available && !sceneQa.pass) {
+    fixes.push({
+      n: p++,
+      text: `Scene hold FAIL — longest shot ${sceneQa.longestSceneSec.toFixed(1)}s (hook ${sceneQa.longestHookSec.toFixed(1)}s) — cut every 1–2s`,
+    });
+  } else if (repetition?.longestRun) {
     fixes.push({
       n: p++,
       text: `Same visual ~${Math.round(repetition.longestRun.approxHoldSec)}s (${repetition.longestRun.start}–${repetition.longestRun.end}) — cut every 1–2s`,
@@ -216,12 +224,16 @@ function buildNumberedReport(ctx) {
     meta,
     framesMeta,
     repetition,
+    sceneQa,
+    objectiveQa,
+    objectiveGate,
     hookScript,
     hookVision,
     brutal,
     legacyVision,
     apiKeyUsed,
     mode,
+    renderTier,
   } = ctx;
 
   const analyzedSec = framesMeta.durationSec ?? meta.durationSec;
@@ -268,9 +280,36 @@ function buildNumberedReport(ctx) {
     }
   }
 
-  if (repetition) {
+  if (sceneQa?.available) {
     lines.push(
-      `${n}. **Visual repetition:** ${repetition.duplicateRunCount} duplicate runs | ~${repetition.repeatPct}% adjacent same-frame | longest hold ~${repetition.longestRun ? Math.round(repetition.longestRun.approxHoldSec) : 0}s`,
+      `${n}. **Scene cuts (PySceneDetect):** ${sceneQa.sceneCount} scenes | longest ${sceneQa.longestSceneSec.toFixed(1)}s | hook longest ${sceneQa.longestHookSec.toFixed(1)}s | ${sceneQa.pass ? 'PASS' : 'FAIL'}`,
+    );
+    n += 1;
+  }
+
+  if (objectiveQa) {
+    lines.push(
+      `${n}. **Objective QA:** score ${objectiveQa.score}/100 | silence first 60s ${objectiveQa.silenceFirst60Sec}s | ${objectiveQa.pass ? 'PASS' : 'FAIL'}`,
+    );
+    n += 1;
+  }
+
+  if (objectiveGate?.available) {
+    lines.push(`${n}. **Objective gate:** ${objectiveGate.pass ? 'PASS' : 'FAIL'} (${objectiveGate.checks.map((c) => `${c.name}:${c.pass ? 'ok' : 'fail'}`).join(', ')})`);
+    n += 1;
+  }
+
+  if (renderTier) {
+    lines.push(`${n}. **Render tier:** ${renderTier}`);
+    n += 1;
+  }
+
+  if (repetition) {
+    const primaryHold = sceneQa?.available
+      ? sceneQa.longestSceneSec
+      : (repetition.longestRun ? Math.round(repetition.longestRun.approxHoldSec) : 0);
+    lines.push(
+      `${n}. **Visual repetition (aHash, caption-masked):** ${repetition.duplicateRunCount} duplicate runs | ~${repetition.repeatPct}% adjacent | longest hold ~${primaryHold}s (scene-detect primary)`,
     );
     n += 1;
     repetition.runs.slice(0, 5).forEach((run, i) => {
@@ -279,7 +318,7 @@ function buildNumberedReport(ctx) {
     });
   }
 
-  const fixes = buildTopFixes({ hookScript, hookVision, repetition, brutal, legacyVision });
+  const fixes = buildTopFixes({ hookScript, hookVision, repetition, sceneQa, brutal, legacyVision });
   lines.push('');
   lines.push('## Top fixes (do these first)');
   fixes.forEach((f) => {
@@ -340,14 +379,17 @@ export async function watchVideo(options = {}) {
   let repetition = detectVisualRepetition(framesMeta.frames, outDir);
   // Finer scan for hold detection (first 45s, every 2s)
   const fineDir = join(outDir, 'fine-scan');
-  const fineMeta = extractFramesToDir(videoPath, fineDir, {
-    intervalSec: 2,
-    maxDurationSec: Math.min(45, framesMeta.durationSec),
+  const maskedDir = join(outDir, 'masked-scan');
+  const maskedMeta = extractFramesToDir(videoPath, maskedDir, {
+    intervalSec: intervalSec,
+    maxDurationSec,
+    maskCaptions: true,
   });
-  const fineRep = detectVisualRepetition(fineMeta.frames, fineDir);
-  if ((fineRep.longestRun?.approxHoldSec ?? 0) > (repetition.longestRun?.approxHoldSec ?? 0)) {
-    repetition = fineRep;
-  }
+  repetition = detectVisualRepetition(maskedMeta.frames, maskedDir);
+
+  const sceneQa = analyzeScenes(videoPath);
+  const objectiveQa = runObjectiveQa(videoPath, { skipVision: options.skip_vision === true });
+  const objectiveGate = evaluateObjectiveGate({ sceneQa, objectiveQa, renderTier: options.render_tier });
   const scriptText = options.script_text || loadOptionalScript();
   const hookScript = auditHookFromScript(scriptText);
   const apiKey = options.api_key || process.env.OPENROUTER_API_KEY || '';
@@ -381,12 +423,16 @@ export async function watchVideo(options = {}) {
     meta,
     framesMeta,
     repetition,
+    sceneQa,
+    objectiveQa,
+    objectiveGate,
     hookScript,
     hookVision,
     brutal,
     legacyVision,
     apiKeyUsed: Boolean(apiKey) && !skipVision,
     mode,
+    renderTier: options.render_tier,
   });
 
   const reportPath = join(outDir, 'WATCH_REPORT.md');
@@ -401,6 +447,9 @@ export async function watchVideo(options = {}) {
     frames: framesMeta.frames,
     meta,
     repetition,
+    sceneQa,
+    objectiveQa,
+    objectiveGate,
     hookScript,
     hookVision,
     brutal,

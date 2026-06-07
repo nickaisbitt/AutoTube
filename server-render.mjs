@@ -50,6 +50,19 @@ import {
   tokenizeCaptionWords,
   assetCutIntervalSec,
 } from './server-render/youtubeProfile.mjs';
+import { renderViaFfmpegAssembly } from './server-render/ffmpegAssembly.mjs';
+
+let sharpModule = null;
+async function getSharp() {
+  if (sharpModule !== null) return sharpModule;
+  try {
+    const mod = await import('sharp');
+    sharpModule = mod.default;
+  } catch {
+    sharpModule = false;
+  }
+  return sharpModule;
+}
 
 // ── Word timestamp cache for karaoke subtitle sync ─────────────────────────
 // Populated from edge-tts VTT files before rendering begins.
@@ -985,13 +998,23 @@ async function decodeFetchedImage(buf, contentType, contentLength, originalUrl) 
     throw new Error('Corrupted or unsupported image format');
   }
 
+  let decodeBuf = buf;
   if (!isCanvasSupportedFormat(detectedFormat)) {
-    console.warn(`  ⚠ [fetchImage] Format '${detectedFormat}' has limited canvas support, attempting load...`);
+    const sharp = await getSharp();
+    if (sharp && (detectedFormat === 'webp' || detectedFormat === 'avif' || detectedFormat === 'unknown')) {
+      try {
+        decodeBuf = await sharp(buf).jpeg({ quality: 90 }).toBuffer();
+      } catch {
+        console.warn(`  ⚠ [fetchImage] sharp transcode failed for ${detectedFormat}`);
+      }
+    } else {
+      console.warn(`  ⚠ [fetchImage] Format '${detectedFormat}' has limited canvas support, attempting load...`);
+    }
   }
 
   let img;
   try {
-    img = await loadImage(buf);
+    img = await loadImage(decodeBuf);
   } catch (loadErr) {
     throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}`);
   }
@@ -3655,6 +3678,41 @@ async function render() {
     log('info', `  ⚠ Narration quality gate: some segments may be missing`);
   }
   stepMetrics.endStep('narration', { segmentCount: audioFiles.length, narrationDuration: totalNarrationDuration });
+
+  if (process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg') {
+    log('info', '\n🎬 FFmpeg assembly mode — skipping canvas frame loop');
+    const mixedAudio = join(audioDir, 'narration-mix.wav');
+    try {
+      await concatenateAudio(audioFiles, mixedAudio);
+    } catch (err) {
+      log('warn', `  ⚠ Audio concat for ffmpeg assembly: ${err.message}`);
+    }
+    const ffResult = await renderViaFfmpegAssembly(project, OUTPUT_FILE, {
+      devServer: process.env.DEV_SERVER_URL || 'http://localhost:5173',
+      cutIntervalSec: parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.25'),
+      mixedAudioPath: existsSync(mixedAudio) ? mixedAudio : null,
+    });
+    if (!ffResult.ok) {
+      throw new Error(ffResult.error || 'ffmpeg assembly render failed');
+    }
+    log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments)`);
+    if (process.env.AUTOTUBE_REMOTION_CAPTIONS === '1') {
+      try {
+        const { overlayRemotionCaptions } = await import('./server-render/remotionCaptions.mjs');
+        await overlayRemotionCaptions(OUTPUT_FILE, project, wordTimestampCache);
+      } catch (err) {
+        log('warn', `  ⚠ Remotion caption overlay skipped: ${err.message}`);
+      }
+    }
+    const finalMp4 = OUTPUT_FILE.replace('.mp4', '-final.mp4');
+    if (existsSync(OUTPUT_FILE)) {
+      copyFileSync(OUTPUT_FILE, finalMp4);
+      const videoGate = validateOutput(finalMp4, 'FFmpeg assembly output');
+      if (!videoGate.valid) throw new Error(videoGate.error);
+      log('info', `  ✓ FFmpeg assembly output: ${finalMp4}`);
+    }
+    return;
+  }
 
   // Task 129: Render state manager for checkpoint/resume
   const renderStateManager = new RenderStateManager(project.title);

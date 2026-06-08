@@ -2191,6 +2191,7 @@ export async function sourceSegmentMedia(
     const countDistinct = (list: MediaCandidate[]) =>
       list.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index).length;
 
+    let lastHarvestRound = 2;
     if (loopMin > 0 && !signal?.aborted) {
       const seenQueries = new Set(
         [primaryQuery, variationQuery].filter(Boolean).map((q) => q.toLowerCase()),
@@ -2234,9 +2235,13 @@ export async function sourceSegmentMedia(
         }
         harvestRound += 1;
       }
+      lastHarvestRound = harvestRound;
     }
 
-    const uniqueCandidates = allCandidates.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index);
+    let uniqueCandidates = allCandidates.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index);
+    const rebuildUniqueCandidates = () => {
+      uniqueCandidates = allCandidates.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index);
+    };
     const excludedUrls = new Set<string>();
 
     const pushSelectedCandidate = (
@@ -2396,7 +2401,17 @@ export async function sourceSegmentMedia(
 
     // Raw harvest needs enough unique B-roll for sub-second cuts. Keep adding
     // distinct candidates so renderer pacing changes actual visuals, not just effects.
-    while (finalAssets.length < targetAssetsPerSegment && uniqueCandidates.length > finalAssets.length) {
+    const deficitQueryPool = [
+      `${segment.title} stock photo`,
+      `${topicContext.coreSubject} news photo`,
+      `${segment.title} ${topicContext.coreSubject}`,
+      `${topicContext.coreSubject} documentary`,
+      `${segment.narration?.slice(0, 80) || segment.title} image`,
+      `${segment.title} b-roll footage`,
+    ];
+    let deficitQueryRound = 0;
+    const maxDeficitHarvests = loopMin > 0 ? 10 : 0;
+    while (finalAssets.length < targetAssetsPerSegment && !signal?.aborted) {
       const fallbackShot = shotsToHarvest[1] || shotsToHarvest[0];
       const extra = await pickDistinctShotCandidate(
         uniqueCandidates,
@@ -2407,16 +2422,42 @@ export async function sourceSegmentMedia(
         deduplicationRegistry.usedUrls,
         signal,
       );
-      if (!extra) break;
-      usedUrlsMap.set(extra.url, segmentIndex);
-      registerAsset(deduplicationRegistry, { url: extra.url, alt: extra.alt, sourceUrl: extra.sourceUrl });
-      excludedUrls.add(extra.url);
-      pushSelectedCandidate(extra, fallbackShot, 'secondary');
-      finalAssets[finalAssets.length - 1]!.reasoning = `Zero-Cost Harvester: bonus B-roll from ${extra.source}`;
-      finalAssets[finalAssets.length - 1]!.trace = [
-        ...trace,
-        `[S${segmentIndex + 1}] bonus B-roll selected for visual variety`,
-      ];
+      if (extra) {
+        usedUrlsMap.set(extra.url, segmentIndex);
+        registerAsset(deduplicationRegistry, { url: extra.url, alt: extra.alt, sourceUrl: extra.sourceUrl });
+        excludedUrls.add(extra.url);
+        pushSelectedCandidate(extra, fallbackShot, 'secondary');
+        finalAssets[finalAssets.length - 1]!.reasoning = `Zero-Cost Harvester: bonus B-roll from ${extra.source}`;
+        finalAssets[finalAssets.length - 1]!.trace = [
+          ...trace,
+          `[S${segmentIndex + 1}] bonus B-roll selected for visual variety`,
+        ];
+        continue;
+      }
+      if (deficitQueryRound >= maxDeficitHarvests) break;
+      const rawDeficit = deficitQueryPool[deficitQueryRound % deficitQueryPool.length];
+      deficitQueryRound += 1;
+      const deficitQuery = buildSpecificQuery(`${rawDeficit} ${deficitQueryRound}`, topicContext);
+      try {
+        const harvested = await harvestMediaWithSafetyNet(
+          deficitQuery,
+          topicContext,
+          config,
+          fallbackShot?.vibe,
+          lastHarvestRound + deficitQueryRound,
+          [...trace],
+          signal,
+          progressCallback,
+          segment.narration,
+          segment.title,
+        );
+        if (!harvested.candidates.length) continue;
+        allCandidates = [...allCandidates, ...harvested.candidates];
+        rebuildUniqueCandidates();
+        trace.push(...harvested.trace.filter((t) => !trace.includes(t)));
+      } catch {
+        // Non-critical: try the next deficit query
+      }
     }
 
     if (isLoopVideoFirst()) {

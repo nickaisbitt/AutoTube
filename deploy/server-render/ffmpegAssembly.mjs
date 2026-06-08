@@ -355,12 +355,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       '0',
       '-i',
       listFile,
-      '-c:v',
-      'libx264',
-      '-preset',
-      preset,
-      '-pix_fmt',
-      'yuv420p',
+      '-c',
+      'copy',
       '-an',
       outputPath,
     ],
@@ -439,12 +435,8 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       '0',
       '-i',
       listFile,
-      '-c:v',
-      'libx264',
-      '-preset',
-      preset,
-      '-pix_fmt',
-      'yuv420p',
+      '-c',
+      'copy',
       '-an',
       mergedVideo,
     ],
@@ -495,6 +487,8 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     if (ln.status === 0 && existsSync(normalizedOut)) {
       spawnSync('ffmpeg', ['-y', '-i', normalizedOut, '-c', 'copy', outputPath], { encoding: 'utf8' });
       console.log('  [ffmpeg] applied -14 LUFS loudnorm on final mux');
+    } else {
+      console.log('  [ffmpeg] loudnorm skipped — using muxed audio as-is');
     }
   }
 

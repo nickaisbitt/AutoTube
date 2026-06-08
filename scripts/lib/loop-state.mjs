@@ -53,7 +53,11 @@ export function loadFixState(loopDir) {
     if (raw.brollPlacement === undefined) loaded.brollPlacement = true;
     if (raw.renderTier === undefined) loaded.renderTier = 'draft';
     if (raw.fixStrategy === undefined) loaded.fixStrategy = 'interval';
-    if (raw.ffmpegHardCuts === undefined || (raw.version < FIX_STATE_VERSION && raw.ffmpegHardCuts === false)) {
+    if (
+      raw.ffmpegHardCuts === undefined
+      || (raw.version < FIX_STATE_VERSION && raw.ffmpegHardCuts === false)
+      || (raw.ffmpegHardCuts === false && raw.fixStrategy === 'interval')
+    ) {
       loaded.ffmpegHardCuts = true;
     }
     if (raw.harvestNonce === undefined) loaded.harvestNonce = 0;

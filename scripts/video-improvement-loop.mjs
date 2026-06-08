@@ -126,7 +126,6 @@ async function main() {
       currentTopic = pickRandomTopic();
       fixState.topicRetryCount = 0;
       fixState.fixStrategy = 'interval';
-      fixState.ffmpegHardCuts = false;
       delete fixState.hookLine;
       delete fixState.hookOverlay;
     }
@@ -368,7 +367,6 @@ async function main() {
         fixState.mediaOffset = 0;
         fixState.renderTier = 'draft';
         fixState.fixStrategy = 'interval';
-        fixState.ffmpegHardCuts = false;
         nextStep = 'new topic (max retries hit, fixes retained)';
       }
     } else {

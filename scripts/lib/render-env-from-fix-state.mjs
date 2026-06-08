@@ -44,7 +44,7 @@ export function renderEnvJournalSnapshot(fixState = {}) {
     cutIntervalSec: fixState.cutIntervalSec,
     renderTier: fixState.renderTier || 'draft',
     fixStrategy: fixState.fixStrategy || 'interval',
-    ffmpegHardCuts: fixState.ffmpegHardCuts === true,
+    ffmpegHardCuts: fixState.ffmpegHardCuts !== false,
     reHarvestMedia: fixState.reHarvestMedia === true,
     harvestNonce: fixState.harvestNonce || 0,
     mediaOffset: fixState.mediaOffset || 0,

@@ -3192,6 +3192,108 @@ async function concatenateAudio(audioFiles, outputFile) {
   return concatAudio(audioFiles, outputFile);
 }
 
+/** FFmpeg assembly path: TTS + clip concat (skips canvas preload / frame loop). */
+async function runFfmpegAssemblyRender(project) {
+  log('info', '\n🎬 FFmpeg assembly mode — skipping canvas preload and frame loop');
+
+  const audioDir = join(dirname(OUTPUT_FILE), `narration-audio-${Date.now()}`);
+  mkdirSync(audioDir, { recursive: true, mode: 0o700 });
+  const cfAccountId = process.env.CF_ACCOUNT_ID || '';
+  const cfApiToken = process.env.CF_API_TOKEN || '';
+  const edgeVoice = project.exportSettings?.edgeTtsVoice || 'en-US-GuyNeural';
+
+  stepMetrics.startStep('narration');
+  let audioFiles = [];
+  const TTS_MAX_RETRIES = 3;
+  const TTS_RETRY_DELAY_MS = 2000;
+  for (let ttsAttempt = 1; ttsAttempt <= TTS_MAX_RETRIES; ttsAttempt++) {
+    try {
+      audioFiles = await generateNarration(project.script, audioDir, { cfAccountId, cfApiToken, edgeVoice });
+      if (audioFiles.length > 0) break;
+    } catch (err) {
+      log('info', `  ⚠ Narration attempt ${ttsAttempt}/${TTS_MAX_RETRIES} failed: ${err.message}`);
+      if (ttsAttempt < TTS_MAX_RETRIES) {
+        log('info', `  ⏳ Retrying narration in ${TTS_RETRY_DELAY_MS / 1000}s...`);
+        await new Promise((r) => setTimeout(r, TTS_RETRY_DELAY_MS));
+      }
+    }
+  }
+
+  wordTimestampCache.clear();
+  let narrationSegIdx = 0;
+  for (const af of audioFiles) {
+    if (af.subtitleFile && existsSync(af.subtitleFile)) {
+      const words = parseVttWordTimestamps(af.subtitleFile);
+      if (words.length > 0) {
+        wordTimestampCache.set(narrationSegIdx, words);
+        log('info', `  📝 Loaded ${words.length} word timestamps for segment ${narrationSegIdx + 1}`);
+      }
+      narrationSegIdx++;
+    }
+  }
+
+  let totalNarrationDuration = 0;
+  let narrationValid = true;
+  for (let ni = 0; ni < audioFiles.length; ni++) {
+    const af = audioFiles[ni];
+    const gate = validateOutput(af.file, `Narration segment ${ni}`);
+    if (!gate.valid) {
+      console.warn(`  ⚠ ${gate.error}`);
+      narrationValid = false;
+    } else {
+      totalNarrationDuration += af.duration || 0;
+    }
+  }
+  if (narrationValid) {
+    log('info', `  ✅ Narration quality gate passed (${audioFiles.length} segments, ${totalNarrationDuration.toFixed(1)}s total)`);
+  } else {
+    log('info', '  ⚠ Narration quality gate: some segments may be missing');
+  }
+  stepMetrics.endStep('narration', { segmentCount: audioFiles.length, narrationDuration: totalNarrationDuration });
+
+  const cutInterval = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.25');
+  const measuredSec = project.script.reduce((s, seg) => s + (seg.duration || 0), 0);
+  project.editTimeline = buildEditTimeline(project, {
+    cutIntervalSec: cutInterval,
+    reason: 'post-tts sync',
+  });
+  log(
+    'info',
+    `  📐 Rebuilt editTimeline: ${project.editTimeline.length} clips across ${project.script.length} segments (${measuredSec.toFixed(1)}s measured narration)`,
+  );
+
+  const mixedAudio = join(audioDir, 'narration-mix.wav');
+  try {
+    await concatenateAudio(audioFiles, mixedAudio);
+  } catch (err) {
+    log('warn', `  ⚠ Audio concat for ffmpeg assembly: ${err.message}`);
+  }
+  const ffResult = await renderViaFfmpegAssembly(project, OUTPUT_FILE, {
+    devServer: process.env.DEV_SERVER_URL || 'http://localhost:5173',
+    cutIntervalSec: cutInterval,
+    mixedAudioPath: existsSync(mixedAudio) ? mixedAudio : null,
+  });
+  if (!ffResult.ok) {
+    throw new Error(ffResult.error || 'ffmpeg assembly render failed');
+  }
+  log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments, ${ffResult.manifest?.clipCount ?? '?'} clips, tpad ${ffResult.manifest?.tpadSec ?? 0}s)`);
+  if (process.env.AUTOTUBE_REMOTION_CAPTIONS === '1') {
+    try {
+      const { overlayRemotionCaptions } = await import('./server-render/remotionCaptions.mjs');
+      await overlayRemotionCaptions(OUTPUT_FILE, project, wordTimestampCache);
+    } catch (err) {
+      log('warn', `  ⚠ Remotion caption overlay skipped: ${err.message}`);
+    }
+  }
+  const finalMp4 = OUTPUT_FILE.replace('.mp4', '-final.mp4');
+  if (existsSync(OUTPUT_FILE)) {
+    copyFileSync(OUTPUT_FILE, finalMp4);
+    const videoGate = validateOutput(finalMp4, 'FFmpeg assembly output');
+    if (!videoGate.valid) throw new Error(videoGate.error);
+    log('info', `  ✓ FFmpeg assembly output: ${finalMp4}`);
+  }
+}
+
 // ── Main render ────────────────────────────────────────────────────────────
 async function render() {
   let ffmpeg;
@@ -3375,6 +3477,11 @@ async function render() {
   validateDiskSpace(project, OUTPUT_FILE);
 
   mkdirSync(OUTPUT_DIR, { recursive: true, mode: 0o700 });
+
+  if (process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg') {
+    await runFfmpegAssemblyRender(project);
+    return;
+  }
 
   // Pre-load all images concurrently with concurrency limit (skip video clips — they're fetched per-frame)
   // Requirements 1.3, 1.4: preload all images before any frame rendering begins
@@ -3679,52 +3786,6 @@ async function render() {
     log('info', `  ⚠ Narration quality gate: some segments may be missing`);
   }
   stepMetrics.endStep('narration', { segmentCount: audioFiles.length, narrationDuration: totalNarrationDuration });
-
-  if (process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg') {
-    log('info', '\n🎬 FFmpeg assembly mode — skipping canvas frame loop');
-    const cutInterval = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.25');
-    const measuredSec = project.script.reduce((s, seg) => s + (seg.duration || 0), 0);
-    project.editTimeline = buildEditTimeline(project, {
-      cutIntervalSec: cutInterval,
-      reason: 'post-tts sync',
-    });
-    log(
-      'info',
-      `  📐 Rebuilt editTimeline: ${project.editTimeline.length} clips across ${project.script.length} segments (${measuredSec.toFixed(1)}s measured narration)`,
-    );
-
-    const mixedAudio = join(audioDir, 'narration-mix.wav');
-    try {
-      await concatenateAudio(audioFiles, mixedAudio);
-    } catch (err) {
-      log('warn', `  ⚠ Audio concat for ffmpeg assembly: ${err.message}`);
-    }
-    const ffResult = await renderViaFfmpegAssembly(project, OUTPUT_FILE, {
-      devServer: process.env.DEV_SERVER_URL || 'http://localhost:5173',
-      cutIntervalSec: parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.25'),
-      mixedAudioPath: existsSync(mixedAudio) ? mixedAudio : null,
-    });
-    if (!ffResult.ok) {
-      throw new Error(ffResult.error || 'ffmpeg assembly render failed');
-    }
-    log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments, ${ffResult.manifest?.clipCount ?? '?'} clips, tpad ${ffResult.manifest?.tpadSec ?? 0}s)`);
-    if (process.env.AUTOTUBE_REMOTION_CAPTIONS === '1') {
-      try {
-        const { overlayRemotionCaptions } = await import('./server-render/remotionCaptions.mjs');
-        await overlayRemotionCaptions(OUTPUT_FILE, project, wordTimestampCache);
-      } catch (err) {
-        log('warn', `  ⚠ Remotion caption overlay skipped: ${err.message}`);
-      }
-    }
-    const finalMp4 = OUTPUT_FILE.replace('.mp4', '-final.mp4');
-    if (existsSync(OUTPUT_FILE)) {
-      copyFileSync(OUTPUT_FILE, finalMp4);
-      const videoGate = validateOutput(finalMp4, 'FFmpeg assembly output');
-      if (!videoGate.valid) throw new Error(videoGate.error);
-      log('info', `  ✓ FFmpeg assembly output: ${finalMp4}`);
-    }
-    return;
-  }
 
   // Task 129: Render state manager for checkpoint/resume
   const renderStateManager = new RenderStateManager(project.title);

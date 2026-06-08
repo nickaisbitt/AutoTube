@@ -2466,6 +2466,30 @@ export async function sourceSegmentMedia(
       }
     }
 
+    if (loopMin > 0 && finalAssets.length < targetAssetsPerSegment && !signal?.aborted) {
+      try {
+        const wikiResults = await searchWikimedia(`${segment.title} ${topicContext.coreSubject}`, signal);
+        for (const wiki of wikiResults) {
+          if (finalAssets.length >= targetAssetsPerSegment) break;
+          if (excludedUrls.has(wiki.url) || finalAssets.some((asset) => asset.url === wiki.url)) continue;
+          const fallbackShot = shotsToHarvest[1] || shotsToHarvest[0];
+          usedUrlsMap.set(wiki.url, segmentIndex);
+          registerAsset(deduplicationRegistry, { url: wiki.url, alt: wiki.alt, sourceUrl: wiki.sourceUrl });
+          excludedUrls.add(wiki.url);
+          pushSelectedCandidate(
+            { ...wiki, finalScore: wiki.finalScore || scoreCandidate(wiki, topicContext, fallbackShot?.vibe, config.sourceType, segment.narration, segment.title) },
+            fallbackShot,
+            'secondary',
+          );
+          const last = finalAssets[finalAssets.length - 1]!;
+          last.reasoning = `Loop volume fill: Wikimedia heritage for ${segment.title}`;
+          last.trace = [...trace, `[S${segmentIndex + 1}] Wikimedia volume top-off`];
+        }
+      } catch {
+        // Non-critical: volume top-off is best-effort
+      }
+    }
+
     if (isLoopVideoFirst()) {
       const loopMinVideos = 2;
       let videoCount = finalAssets.filter((asset) => asset.type === 'video').length;

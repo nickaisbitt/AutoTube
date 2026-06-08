@@ -132,6 +132,62 @@ async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = f
   }
 }
 
+async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
+  const segments = project.script || [];
+  const topic = project.topic || project.title || '';
+  const usedGlobal = new Set(
+    (project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean),
+  );
+
+  for (const seg of segments) {
+    const segAssets = (project.media || []).filter((m) => m.segmentId === seg.id);
+    let uniqueCount = new Set(
+      segAssets.map((a) => (a.url || '').split('?')[0]).filter(Boolean),
+    ).size;
+
+    for (let page = 0; page < 8 && uniqueCount < minPerSegment; page += 1) {
+      const q = `${seg.title} ${topic} photo ${page + 1}`;
+      let results = [];
+      try {
+        const res = await fetch(`${devServer}/api/search-bing-images?q=${encodeURIComponent(q)}`);
+        if (res.ok) {
+          const data = await res.json();
+          results = data.results || [];
+        }
+      } catch {
+        break;
+      }
+
+      let added = false;
+      for (const r of results) {
+        const url = r.url || r.thumbnailUrl;
+        if (!url || isJunkHarvestUrl(url)) continue;
+        const key = url.split('?')[0];
+        if (usedGlobal.has(key)) continue;
+        if (!(await canFetch(url, { timeoutMs: 8000, minBytes: 512 }))) continue;
+
+        project.media.push({
+          id: `topup-${seg.id}-${uniqueCount}`,
+          segmentId: seg.id,
+          type: 'image',
+          url,
+          alt: r.alt || r.title || seg.title,
+          source: 'Bing (volume top-up)',
+          duration: 5,
+          isFallback: false,
+        });
+        usedGlobal.add(key);
+        uniqueCount += 1;
+        added = true;
+        report.volumeTopUp = report.volumeTopUp || [];
+        report.volumeTopUp.push({ segmentId: seg.id, url });
+        if (uniqueCount >= minPerSegment) break;
+      }
+      if (!added) break;
+    }
+  }
+}
+
 function isJunkHarvestUrl(url) {
   const u = (url || '').toLowerCase();
   return (
@@ -304,7 +360,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
 
-  const relevance = filterAssetsByRelevance(validated, project, { minScore: 0.12 });
+  const relevance = filterAssetsByRelevance(validated, project);
   report.relevanceDropped = relevance.dropped;
   if (relevance.dropped.length) {
     report.beforeRelevance = validated.length;
@@ -318,7 +374,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   project.media = [...deduped.media];
   report.phashHashCount = deduped.hashCount;
 
-  const minPerSeg = Math.min(4, minPerSegment);
+  const minPerSeg = loopMode ? minPerSegment : Math.min(4, minPerSegment);
   const bySegmentAfter = {};
   for (const asset of project.media) {
     bySegmentAfter[asset.segmentId] = (bySegmentAfter[asset.segmentId] || 0) + 1;
@@ -343,6 +399,17 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
   report.after = project.media.length;
+
+  if (loopMode) {
+    await topUpHarvestVolume(project, devServer, minPerSegment, report);
+    report.afterTopUp = project.media.length;
+    const postTopUp = filterAssetsByRelevance(project.media, project);
+    if (postTopUp.dropped.length) {
+      report.relevanceDropped = [...(report.relevanceDropped || []), ...postTopUp.dropped];
+    }
+    project.media = postTopUp.media;
+    report.afterRelevanceTopUp = project.media.length;
+  }
 
   const volume = evaluateHarvestVolume(project, minPerSegment);
   report.harvestQuality = volume;
@@ -375,7 +442,12 @@ export async function generateFullVideo(options) {
     }
   }
   const priorUrls = loadLastProjectUrls(process.cwd());
-  if (priorUrls.length && (!fixState.excludedUrls || fixState.excludedUrls.length === 0)) {
+  // Never seed excludes from stale last-project during re-harvest (nonce > 0) — that starves harvest.
+  if (
+    priorUrls.length &&
+    (!fixState.excludedUrls || fixState.excludedUrls.length === 0) &&
+    (fixState.harvestNonce || 0) === 0
+  ) {
     fixState.excludedUrls = priorUrls.map((u) => (u || '').split('?')[0]).slice(-200);
   }
   const harvestCtx = harvestContextFromFixState(fixState);

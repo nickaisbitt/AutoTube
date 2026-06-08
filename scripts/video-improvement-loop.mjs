@@ -177,6 +177,9 @@ async function main() {
       if (gen.fixState) {
         fixState = { ...fixState, ...gen.fixState };
       }
+      if (gen.harvestQualityFail) {
+        fixState.reHarvestMedia = true;
+      }
       // Score the file we just rendered — canonical may be overwritten by finalize picking stale giants
       videoPath = gen.videoPath || gen.canonicalPath;
       scriptText = gen.scriptText || '';

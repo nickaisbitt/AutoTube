@@ -19,6 +19,10 @@ import {
   loadLastProjectUrls,
 } from './harvest-loop-context.mjs';
 import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-env-from-fix-state.mjs';
+import {
+  filterAssetsByRelevance,
+  evaluateHarvestVolume,
+} from './harvest-quality.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -129,6 +133,7 @@ function isJunkHarvestUrl(url) {
 
 async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}) {
   const loopMode = options.loopMode === true;
+  const minPerSegment = Math.max(3, options.minAssetsPerSegment || 6);
   const report = {
     before: project.media?.length || 0,
     after: 0,
@@ -136,6 +141,9 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     dropped: [],
     keptVideo: [],
     phashDropped: [],
+    relevanceDropped: [],
+    volumePass: true,
+    harvestQuality: null,
   };
   if (!project.media?.length) {
     writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
@@ -268,14 +276,21 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
 
-  const deduped = dedupeMediaByPHash(validated, {
+  const relevance = filterAssetsByRelevance(validated, project, { minScore: 0.12 });
+  report.relevanceDropped = relevance.dropped;
+  if (relevance.dropped.length) {
+    report.beforeRelevance = validated.length;
+    report.afterRelevance = relevance.media.length;
+  }
+
+  const deduped = dedupeMediaByPHash(relevance.media, {
     devServer,
     onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
   });
   project.media = [...deduped.media];
   report.phashHashCount = deduped.hashCount;
 
-  const minPerSeg = 3;
+  const minPerSeg = Math.min(4, minPerSegment);
   const bySegmentAfter = {};
   for (const asset of project.media) {
     bySegmentAfter[asset.segmentId] = (bySegmentAfter[asset.segmentId] || 0) + 1;
@@ -301,6 +316,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   }
   report.after = project.media.length;
 
+  const volume = evaluateHarvestVolume(project, minPerSegment);
+  report.harvestQuality = volume;
+  report.volumePass = volume.pass;
+  writeFileSync(join(outDir, 'harvest-quality.json'), JSON.stringify(volume, null, 2));
   writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
   return report;
 }
@@ -629,10 +648,31 @@ export async function generateFullVideo(options) {
 
     patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
     if (realHarvest) {
-      const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, { loopMode: true });
+      const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, {
+        loopMode: true,
+        minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
+      });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
+      if (mediaReport.relevanceDropped?.length) {
+        log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
+      }
       if (mediaReport.phashDropped?.length) {
         log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
+      }
+      if (mediaReport.volumePass === false) {
+        const failing = mediaReport.harvestQuality?.failing || [];
+        const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
+        fixState.reHarvestMedia = true;
+        fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
+        fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+        return {
+          ok: false,
+          error: `Harvest volume gate FAIL — ${detail}`,
+          harvestQualityFail: true,
+          topic,
+          outDir,
+          fixState,
+        };
       }
     }
     const timelineReport = validateEditTimeline(project, { cutIntervalSec: fixState.cutIntervalSec ?? 1.25 });

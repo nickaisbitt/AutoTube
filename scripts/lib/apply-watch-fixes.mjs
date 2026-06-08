@@ -84,7 +84,15 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
 
   if (objectiveFail) {
     const failed = (watch.objectiveGate?.checks || []).filter((c) => !c.pass).map((c) => c.name);
-    if (failed.some((n) => n.startsWith('scene_'))) {
+    if (failed.includes('placeholder_pct')) {
+      s.reHarvestMedia = true;
+      s.harvestNonce = (s.harvestNonce || 0) + 1;
+      s.mediaOffset = (s.mediaOffset || 0) + 2;
+      s.harvestVideoFirst = true;
+      s.fixStrategy = 'reharvest';
+      s.minAssetsPerSegment = Math.min(10, Math.max(6, (s.minAssetsPerSegment || 6) + 1));
+      applied.push(`0a. Placeholder gate FAIL → reharvest nonce ${s.harvestNonce}, ≥${s.minAssetsPerSegment}/seg`);
+    } else if (failed.some((n) => n.startsWith('scene_'))) {
       escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`, { sceneFirst: true });
     } else {
       s.reHarvestMedia = true;

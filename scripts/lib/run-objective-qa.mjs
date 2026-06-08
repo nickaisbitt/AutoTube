@@ -13,6 +13,7 @@ const CHECK_SCRIPT = join(ROOT, 'server/quality-check/check_quality.py');
 
 const MIN_OBJECTIVE_SCORE = 75;
 const MAX_SILENCE_FIRST_60S = 1.0;
+const MAX_PLACEHOLDER_PCT = 10;
 
 /**
  * @param {string} videoPath
@@ -113,15 +114,42 @@ export function evaluateClipCountGate(videoPath, durationSec = 0) {
 }
 
 /**
+ * @param {string} videoPath
+ */
+export function evaluatePlaceholderGate(videoPath) {
+  const manifestPath = join(dirname(videoPath), 'ffmpeg-assembly', 'render-manifest.json');
+  if (!existsSync(manifestPath)) {
+    return { available: false };
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const clipCount = manifest.clipCount || 0;
+    const placeholderClipCount = manifest.placeholderClipCount ?? 0;
+    const placeholderPct = manifest.placeholderPct ?? (clipCount > 0 ? (placeholderClipCount / clipCount) * 100 : 0);
+    return {
+      available: true,
+      pass: placeholderPct <= MAX_PLACEHOLDER_PCT,
+      placeholderClipCount,
+      placeholderPct: Math.round(placeholderPct * 10) / 10,
+      clipCount,
+      maxPlaceholderPct: MAX_PLACEHOLDER_PCT,
+    };
+  } catch {
+    return { available: false };
+  }
+}
+
+/**
  * Composite objective gate from scene QA + technical QA.
- * Draft tier: scene + clip-count + silence (tech score deferred to full tier).
+ * Draft tier: scene + clip-count + silence + placeholder (tech score deferred to full tier).
  * Full tier: all checks including tech_score.
- * @param {{ sceneQa?: object, objectiveQa?: object, clipCountGate?: object, renderTier?: string }} parts
+ * @param {{ sceneQa?: object, objectiveQa?: object, clipCountGate?: object, placeholderGate?: object, renderTier?: string }} parts
  */
 export function evaluateObjectiveGate(parts) {
   const scene = parts.sceneQa;
   const tech = parts.objectiveQa;
   const clipGate = parts.clipCountGate;
+  const placeholderGate = parts.placeholderGate;
   const tier = parts.renderTier === 'full' ? 'full' : 'draft';
   const checks = [];
 
@@ -136,6 +164,13 @@ export function evaluateObjectiveGate(parts) {
       detail: `${clipGate.clipCount} clips (min ${clipGate.minClips})`,
     });
   }
+  if (placeholderGate?.available) {
+    checks.push({
+      name: 'placeholder_pct',
+      pass: placeholderGate.pass === true,
+      detail: `${placeholderGate.placeholderPct}% placeholders (max ${placeholderGate.maxPlaceholderPct}%)`,
+    });
+  }
   if (tech) {
     checks.push({ name: 'silence', pass: tech.silencePass === true, detail: `${tech.silenceFirst60Sec}s silence in first 60s` });
     if (tier === 'full') {
@@ -145,7 +180,11 @@ export function evaluateObjectiveGate(parts) {
 
   const available = checks.length > 0;
   const draftChecks = checks.filter(
-    (c) => c.name.startsWith('scene_') || c.name === 'silence' || c.name === 'clip_count',
+    (c) =>
+      c.name.startsWith('scene_')
+      || c.name === 'silence'
+      || c.name === 'clip_count'
+      || c.name === 'placeholder_pct',
   );
   const pass =
     tier === 'draft'

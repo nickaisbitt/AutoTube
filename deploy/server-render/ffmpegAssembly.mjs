@@ -315,6 +315,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const devServer = options.devServer || 'http://localhost:5173';
   let renderedDuration = 0;
   let clipIndex = 0;
+  let placeholderClipCount = 0;
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
@@ -340,6 +341,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (!localSrc) {
       console.log(`  [ffmpeg] ${label}: placeholder — asset fetch failed`);
       ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
+      if (ok) placeholderClipCount += 1;
     } else {
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
       ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
@@ -361,6 +363,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       if (!ok) {
         console.log(`  [ffmpeg] ${label}: encode failed — using placeholder`);
         ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
+        if (ok) placeholderClipCount += 1;
       }
     }
     if (!ok) {
@@ -421,6 +424,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   return {
     ok: true,
     clipCount: clipPaths.length,
+    placeholderClipCount,
     scheduleCount: schedule.length,
     intervalSec: interval,
     targetSec: segment.duration || 20,
@@ -439,6 +443,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const segmentOutputs = [];
   const perSegment = [];
   let totalClipCount = 0;
+  let totalPlaceholderClips = 0;
   const preset = ffmpegPreset();
 
   const mediaPool = project.media || [];
@@ -459,10 +464,12 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     }
     segmentOutputs.push(segOut);
     totalClipCount += result.clipCount;
+    totalPlaceholderClips += result.placeholderClipCount || 0;
     perSegment.push({
       segmentId: seg.id,
       title: seg.title,
       clipCount: result.clipCount,
+      placeholderClipCount: result.placeholderClipCount || 0,
       scheduleCount: result.scheduleCount,
       targetSec: result.targetSec,
       videoSec: result.videoSec,
@@ -543,8 +550,14 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     }
   }
 
+  const placeholderPct = totalClipCount > 0
+    ? Math.round((totalPlaceholderClips / totalClipCount) * 1000) / 10
+    : 0;
+
   const manifest = {
     clipCount: totalClipCount,
+    placeholderClipCount: totalPlaceholderClips,
+    placeholderPct,
     videoSec: videoDurationSec,
     audioSec: audioDurationSec,
     audioTrimmedSec: Math.round(audioTrimmedSec * 100) / 100,
@@ -556,7 +569,9 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   };
   const manifestPath = join(workDir, 'render-manifest.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`  [ffmpeg] manifest: ${totalClipCount} clips, video ${videoDurationSec.toFixed(1)}s, tpad 0s`);
+  console.log(
+    `  [ffmpeg] manifest: ${totalClipCount} clips (${totalPlaceholderClips} placeholders, ${placeholderPct}%), video ${videoDurationSec.toFixed(1)}s, tpad 0s`,
+  );
 
   return {
     ok: existsSync(outputPath),

@@ -346,6 +346,19 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
         w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1,
       });
       if (!ok) {
+        const thumb = resolvedAsset.thumbnailUrl;
+        if (thumb) {
+          const thumbAsset = { ...resolvedAsset, type: 'image', url: thumb };
+          const thumbLocal = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
+          if (thumbLocal) {
+            ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
+              w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1,
+            });
+            if (ok) console.log(`  [ffmpeg] ${label}: video → thumbnail still`);
+          }
+        }
+      }
+      if (!ok) {
         console.log(`  [ffmpeg] ${label}: encode failed — using placeholder`);
         ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
       }

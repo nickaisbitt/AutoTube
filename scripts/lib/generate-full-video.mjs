@@ -81,6 +81,18 @@ function isLikelyVideoHost(url = '') {
   return /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|player\.vimeo|archive\.org|giphy)/i.test(url);
 }
 
+function isGiphyAsset(asset = {}) {
+  const blob = `${asset.url || ''} ${asset.sourceUrl || ''} ${asset.source || ''} ${asset.thumbnailUrl || ''}`;
+  return /giphy/i.test(blob);
+}
+
+function giphyStillUrl(asset = {}) {
+  if (asset.thumbnailUrl && /\.gif(?:[?#]|$)/i.test(asset.thumbnailUrl)) return asset.thumbnailUrl;
+  const mp4 = asset.url || '';
+  if (/giphy\.mp4/i.test(mp4)) return mp4.replace(/giphy\.mp4/i, 'giphy.gif');
+  return asset.thumbnailUrl || '';
+}
+
 function isImageLikeUrl(url = '') {
   return /\.(?:jpg|jpeg|png|webp|gif)(?:[?#].*)?$/i.test(url)
     || /(?:th\.bing\.com|tse\d*\.mm\.bing\.net|i\.vimeocdn\.com|images\.|img\.|cdn\.)/i.test(url);
@@ -105,10 +117,11 @@ async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = f
     }
     const buf = Buffer.from(await res.arrayBuffer());
     if (expectVideo && buf.length > 4) {
-      // crude MP4/webm check
-      const sig = buf.slice(0, 4).toString('hex');
-      if (!sig.includes('66747970') && !contentType.includes('video')) {
-        return false; // not video-like
+      const head = buf.slice(0, Math.min(buf.length, 32));
+      const hasFtyp = head.includes(Buffer.from('ftyp'));
+      const hasWebm = head.slice(0, 4).toString('hex') === '1a45dfa3';
+      if (!hasFtyp && !hasWebm && !contentType.includes('video') && !/giphy\.com/i.test(url)) {
+        return false;
       }
     }
     return buf.length >= minBytes;
@@ -165,6 +178,21 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
 
     if (loopMode && asset.type === 'video') {
+      if (isGiphyAsset(asset)) {
+        const stillUrl = giphyStillUrl(asset);
+        if (stillUrl && !isJunkHarvestUrl(stillUrl) && await canFetch(stillUrl, { timeoutMs: 8000 })) {
+          sanitized.push({
+            ...asset,
+            type: 'image',
+            url: stillUrl,
+            source: `${asset.source || 'Giphy'} still`,
+            isFallback: false,
+          });
+          report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl: stillUrl, reason: 'loop mode: giphy→gif still' });
+          continue;
+        }
+      }
+
       const pageUrl = asset.sourceUrl || asset.url;
       let downloadUrl = asset.url;
       if (asset.url?.startsWith('/api/download-clip')) {
@@ -388,23 +416,27 @@ export async function generateFullVideo(options) {
   if (realHarvest) log(`   Loop: ${loopMinAssets} assets/segment, ≤75s target`);
   log(`   Out: ${outDir}\n`);
 
-  let browser = await chromium.launch({
-    headless: true,
-    args: [
-      '--disable-dev-shm-usage',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-gpu',
-      '--disable-software-rasterizer',
-    ],
-  });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const launchArgs = [
+    '--disable-dev-shm-usage',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-sync',
+    '--mute-audio',
+    '--no-first-run',
+    '--no-zygote',
+  ];
+  let browser = await chromium.launch({ headless: true, args: launchArgs });
+  const browserContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 
   const pexelsKey = resolvePexelsKey();
   const pixabayKey = resolvePixabayKey();
 
   const harvestStorage = harvestSessionStoragePayload(harvestCtx);
-  await page.addInitScript(
+  await browserContext.addInitScript(
     ({ key, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
       localStorage.setItem('autotube_onboarding_seen', 'true');
       localStorage.removeItem('autotube_project');
@@ -442,12 +474,14 @@ export async function generateFullVideo(options) {
     browserEvents.push({ at: new Date().toISOString(), type, detail: String(detail).slice(0, 1000) });
     if (browserEvents.length > 200) browserEvents.shift();
   };
-  page.on('console', (msg) => recordBrowserEvent(`console.${msg.type()}`, msg.text()));
-  page.on('pageerror', (err) => recordBrowserEvent('pageerror', err.message));
-  page.on('requestfailed', (request) => recordBrowserEvent('requestfailed', `${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`));
+
+  const wireBrowserPage = async (targetPage) => {
+    targetPage.on('console', (msg) => recordBrowserEvent(`console.${msg.type()}`, msg.text()));
+    targetPage.on('pageerror', (err) => recordBrowserEvent('pageerror', err.message));
+    targetPage.on('requestfailed', (request) => recordBrowserEvent('requestfailed', `${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`));
 
   if (realHarvest) {
-    await page.route('**/openrouter.ai/**', async (route) => {
+    await targetPage.route('**/openrouter.ai/**', async (route) => {
       const request = route.request();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -482,7 +516,7 @@ export async function generateFullVideo(options) {
       }
     });
   } else {
-    await page.route('**/openrouter.ai/**', async (route) => {
+    await targetPage.route('**/openrouter.ai/**', async (route) => {
       const post = route.request().postDataJSON();
       await route.fulfill({
         status: 200,
@@ -493,7 +527,7 @@ export async function generateFullVideo(options) {
 
     const stockResults = stockSearchResults(topic, STOCK_HEALTHCARE_IMAGES.length);
 
-    await page.route(
+    await targetPage.route(
       /\/api\/(?:search|search-bing-images|search-google-images|search-bing-videos|search-google-videos|search-videos|static-map|press-release|search-bing-news|proxy-page).*/,
       async (route) => {
         const url = route.request().url();
@@ -524,8 +558,8 @@ export async function generateFullVideo(options) {
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
       'base64',
     );
-    await page.route(/.*picsum\.photos.*/, (r) => r.fulfill({ status: 200, contentType: 'image/png', body: png }));
-    await page.route(/.*wikipedia\.org.*|.*wikimedia\.org.*/, (r) =>
+    await targetPage.route(/.*picsum\.photos.*/, (r) => r.fulfill({ status: 200, contentType: 'image/png', body: png }));
+    await targetPage.route(/.*wikipedia\.org.*|.*wikimedia\.org.*/, (r) =>
       r.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -539,9 +573,34 @@ export async function generateFullVideo(options) {
   }
 
   // Block YouTube embed fetches in headless (not needed for harvest)
-  await page.route(/https:\/\/www\.youtube\.com\/.*/, (route) =>
-    route.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' }),
-  );
+    await targetPage.route(/https:\/\/www\.youtube\.com\/.*/, (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<html></html>' }),
+    );
+  };
+
+  let page = await browserContext.newPage();
+  await wireBrowserPage(page);
+
+  const gotoDevServer = async () => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await page.goto(devServer, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+        return;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        recordBrowserEvent('goto.error', `attempt ${attempt}: ${msg}`);
+        const recoverable = /crashed|closed|detached/i.test(msg);
+        if (!recoverable || attempt === 3) throw err;
+        try {
+          await page.close();
+        } catch {
+          /* ignore */
+        }
+        page = await browserContext.newPage();
+        await wireBrowserPage(page);
+      }
+    }
+  };
 
   const scriptTimeoutMs = realHarvest ? 240_000 : 180_000;
   const mediaTimeoutMs = realHarvest ? 1_200_000 : 300_000;
@@ -549,7 +608,7 @@ export async function generateFullVideo(options) {
 
   try {
   // networkidle hangs when dev server is serving long harvest API streams
-    await page.goto(devServer, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+    await gotoDevServer();
     if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 3000 }).catch(() => false)) {
       await page.getByTestId('onboarding-skip').click();
     }
@@ -663,7 +722,6 @@ export async function generateFullVideo(options) {
         const failing = mediaReport.harvestQuality?.failing || [];
         const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
         fixState.reHarvestMedia = true;
-        fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
         fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
         return {
           ok: false,

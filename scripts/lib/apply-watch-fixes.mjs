@@ -48,12 +48,11 @@ function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
 
   s.fixStrategy = 'reharvest';
   s.reHarvestMedia = true;
-  s.harvestNonce = (s.harvestNonce || 0) + 1;
   s.mediaOffset = (s.mediaOffset || 0) + 4;
   s.harvestVideoFirst = true;
   s.minAssetsPerSegment = Math.min(8, Math.max(6, (s.minAssetsPerSegment || 4) + 1));
   applied.push(
-    `${reason} → strategy reharvest (nonce ${s.harvestNonce}, offset ${s.mediaOffset}, ≥${s.minAssetsPerSegment}/seg)`,
+    `${reason} → strategy reharvest (next nonce ${(s.harvestNonce || 0) + 1}, offset ${s.mediaOffset}, ≥${s.minAssetsPerSegment}/seg)`,
   );
 }
 
@@ -86,21 +85,19 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     const failed = (watch.objectiveGate?.checks || []).filter((c) => !c.pass).map((c) => c.name);
     if (failed.includes('placeholder_pct')) {
       s.reHarvestMedia = true;
-      s.harvestNonce = (s.harvestNonce || 0) + 1;
       s.mediaOffset = (s.mediaOffset || 0) + 2;
       s.harvestVideoFirst = true;
       s.fixStrategy = 'reharvest';
       s.minAssetsPerSegment = Math.min(10, Math.max(6, (s.minAssetsPerSegment || 6) + 1));
-      applied.push(`0a. Placeholder gate FAIL → reharvest nonce ${s.harvestNonce}, ≥${s.minAssetsPerSegment}/seg`);
+      applied.push(`0a. Placeholder gate FAIL → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg`);
     } else if (failed.some((n) => n.startsWith('scene_'))) {
       escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`, { sceneFirst: true });
     } else {
       s.reHarvestMedia = true;
-      s.harvestNonce = (s.harvestNonce || 0) + 1;
       s.mediaOffset = (s.mediaOffset || 0) + 2;
       s.harvestVideoFirst = true;
       s.fixStrategy = 'reharvest';
-      applied.push(`0b. Objective gate FAIL (${failed.join(', ')}) → reharvest nonce ${s.harvestNonce}`);
+      applied.push(`0b. Objective gate FAIL (${failed.join(', ')}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}`);
     }
   }
 
@@ -133,7 +130,6 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   const renderTier = s.renderTier || 'draft';
   if (renderTier === 'full' && (watch.brutal?.overall ?? 10) < 9.1) {
     s.reHarvestMedia = true;
-    s.harvestNonce = (s.harvestNonce || 0) + 1;
     s.brollPlacement = true;
     s.minAssetsPerSegment = Math.min(8, Math.max(6, s.minAssetsPerSegment || 4));
     escalateFixStrategy(s, applied, `2b. Full-tier score below 9.1`);
@@ -144,12 +140,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     s.harvestVideoFirst = true;
     s.showKineticText = false;
     s.reHarvestMedia = true;
-    s.harvestNonce = (s.harvestNonce || 0) + 1;
     s.mediaOffset = (s.mediaOffset || 0) + 4;
     s.minAssetsPerSegment = Math.min(8, Math.max(6, (s.minAssetsPerSegment || 4) + (repeatPct >= 40 ? 2 : 0)));
     s.fixStrategy = 'reharvest';
     applied.push(
-      `3. Repetition FAIL (${repeatPct}% dup, ${dupRuns} runs) → reharvest nonce ${s.harvestNonce}, ≥${s.minAssetsPerSegment}/seg`,
+      `3. Repetition FAIL (${repeatPct}% dup, ${dupRuns} runs) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg`,
     );
   }
 

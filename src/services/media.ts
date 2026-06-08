@@ -2187,7 +2187,55 @@ export async function sourceSegmentMedia(
       }
     }
 
-    const allCandidates = [...candidates, ...secondaryCandidates];
+    let allCandidates = [...candidates, ...secondaryCandidates];
+    const countDistinct = (list: MediaCandidate[]) =>
+      list.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index).length;
+
+    if (loopMin > 0 && !signal?.aborted) {
+      const seenQueries = new Set(
+        [primaryQuery, variationQuery].filter(Boolean).map((q) => q.toLowerCase()),
+      );
+      const extraQueryPool = [
+        ...(plan.queries || []),
+        ...shotsToHarvest.flatMap((shot) => shot.queries || []),
+        segment.title,
+        `${segment.title} ${topicContext.coreSubject}`,
+        `${topicContext.coreSubject} news`,
+        `${topicContext.coreSubject} documentary`,
+        `${segment.title} b-roll`,
+      ];
+      let harvestRound = 2;
+      const maxExtraRounds = 5;
+      while (
+        harvestRound < maxExtraRounds + 2 &&
+        countDistinct(allCandidates) < targetAssetsPerSegment
+      ) {
+        const rawExtra = extraQueryPool.find((q) => q && !seenQueries.has(q.toLowerCase()));
+        if (!rawExtra) break;
+        seenQueries.add(rawExtra.toLowerCase());
+        const extraQuery = buildSpecificQuery(rawExtra, topicContext);
+        try {
+          const extra = await harvestMediaWithSafetyNet(
+            extraQuery,
+            topicContext,
+            config,
+            shotsToHarvest[harvestRound % shotsToHarvest.length]?.vibe || shotsToHarvest[0]?.vibe,
+            harvestRound,
+            [...trace],
+            signal,
+            undefined,
+            segment.narration,
+            segment.title,
+          );
+          allCandidates = [...allCandidates, ...extra.candidates];
+          trace.push(...extra.trace.filter((t) => !trace.includes(t)));
+        } catch {
+          // Non-critical: keep prior candidates if an extra harvest round fails
+        }
+        harvestRound += 1;
+      }
+    }
+
     const uniqueCandidates = allCandidates.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index);
     const excludedUrls = new Set<string>();
 

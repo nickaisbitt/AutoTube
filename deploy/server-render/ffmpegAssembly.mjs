@@ -230,6 +230,32 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   return r.status === 0 && existsSync(clipOut);
 }
 
+const PLACEHOLDER_COLORS = ['0x1a1a2e', '0x16213e', '0x0f3460', '0x533483', '0xe94560', '0x2d4059', '0xea5455'];
+
+function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }) {
+  const color = PLACEHOLDER_COLORS[clipIdx % PLACEHOLDER_COLORS.length];
+  const r = spawnSync(
+    'ffmpeg',
+    [
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      `color=c=${color}:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
+      '-c:v',
+      'libx264',
+      '-preset',
+      preset,
+      '-pix_fmt',
+      'yuv420p',
+      '-an',
+      clipOut,
+    ],
+    { encoding: 'utf8', timeout: 60_000 },
+  );
+  return r.status === 0 && existsSync(clipOut);
+}
+
 async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
   const interval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
   const targetDuration = segment.duration || 20;
@@ -274,14 +300,19 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
     clipIndex += 1;
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
+    let ok = false;
     if (!localSrc) {
-      console.log(`  [ffmpeg] ${label}: skip — asset fetch failed`);
-      return false;
+      console.log(`  [ffmpeg] ${label}: placeholder — asset fetch failed`);
+      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
+    } else {
+      const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
+      ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec });
+      if (!ok) {
+        console.log(`  [ffmpeg] ${label}: encode failed — using placeholder`);
+        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
+      }
     }
-    const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
-    const ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec });
     if (!ok) {
-      console.log(`  [ffmpeg] ${label}: encode failed`);
       return false;
     }
     clipPaths.push(clipOut);

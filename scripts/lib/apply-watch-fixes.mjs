@@ -12,24 +12,38 @@ const CUT_FLOOR = 0.5;
  * @param {string[]} applied
  * @param {string} reason
  */
-function escalateFixStrategy(s, applied, reason) {
+function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
   const cuts = s.cutIntervalSec ?? 1.25;
 
-  if (cuts > CUT_FLOOR) {
-    s.fixStrategy = 'interval';
-    s.cutIntervalSec = Math.max(CUT_FLOOR, cuts - 0.25);
-    s.useFfmpegAssembly = true;
-    s.harvestVideoFirst = true;
-    applied.push(`${reason} → strategy interval (cuts ${cuts}s→${s.cutIntervalSec}s)`);
-    return;
-  }
+  const tryHardCuts = () => {
+    if (!s.ffmpegHardCuts) {
+      s.fixStrategy = 'hard_cuts';
+      s.ffmpegHardCuts = true;
+      s.useFfmpegAssembly = true;
+      applied.push(`${reason} → strategy hard_cuts (per-clip fade, no zoompan)`);
+      return true;
+    }
+    return false;
+  };
 
-  if (!s.ffmpegHardCuts) {
-    s.fixStrategy = 'hard_cuts';
-    s.ffmpegHardCuts = true;
-    s.useFfmpegAssembly = true;
-    applied.push(`${reason} → strategy hard_cuts (per-clip fade, no zoompan)`);
-    return;
+  const tryInterval = () => {
+    if (cuts > CUT_FLOOR) {
+      s.fixStrategy = 'interval';
+      s.cutIntervalSec = Math.max(CUT_FLOOR, cuts - 0.25);
+      s.useFfmpegAssembly = true;
+      s.harvestVideoFirst = true;
+      applied.push(`${reason} → strategy interval (cuts ${cuts}s→${s.cutIntervalSec}s)`);
+      return true;
+    }
+    return false;
+  };
+
+  if (sceneFirst) {
+    if (tryHardCuts()) return;
+    if (tryInterval()) return;
+  } else {
+    if (tryInterval()) return;
+    if (tryHardCuts()) return;
   }
 
   s.fixStrategy = 'reharvest';
@@ -65,13 +79,13 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   if (sceneFail) {
     s.useFastPacing = true;
     s.patternInterrupts = true;
-    escalateFixStrategy(s, applied, `0. Scene hold FAIL (longest ${longestHold.toFixed(1)}s)`);
+    escalateFixStrategy(s, applied, `0. Scene hold FAIL (longest ${longestHold.toFixed(1)}s)`, { sceneFirst: true });
   }
 
   if (objectiveFail) {
     const failed = (watch.objectiveGate?.checks || []).filter((c) => !c.pass).map((c) => c.name);
     if (failed.some((n) => n.startsWith('scene_'))) {
-      escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`);
+      escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`, { sceneFirst: true });
     } else {
       s.reHarvestMedia = true;
       s.harvestNonce = (s.harvestNonce || 0) + 1;
@@ -144,13 +158,17 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   s.appliedFixes = [...(s.appliedFixes || []), ...applied.map((a) => `[${new Date().toISOString()}] ${a}`)];
 
   const objectivePass = watch.objectiveGate?.pass === true;
+  const sceneBodyOk = !watch.sceneQa?.available || watch.sceneQa?.bodyPass === true;
   const uploadReady = watch.uploadReady === true;
   const forceNewTopic = s.fixStrategy === 'new_topic';
 
   return {
     applied,
     fixState: s,
-    blockNextTopic: applied.length > 0 && !(uploadReady || (objectivePass && renderTier === 'draft')) && !forceNewTopic,
+    blockNextTopic:
+      applied.length > 0 &&
+      !(uploadReady || (objectivePass && sceneBodyOk && renderTier === 'draft')) &&
+      !forceNewTopic,
   };
 }
 

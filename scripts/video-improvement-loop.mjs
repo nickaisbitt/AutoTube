@@ -288,8 +288,9 @@ async function main() {
     let nextStep = 'new random topic';
     let fixesApplied = [];
 
-    if (objectivePass && renderTier === 'draft') {
-      console.log('\n✅ Objective gate PASS on draft — promoting to full-quality render');
+    const sceneBodyOk = !watch.sceneQa?.available || watch.sceneQa?.bodyPass === true;
+    if (objectivePass && sceneBodyOk && renderTier === 'draft') {
+      console.log('\n✅ Objective gate PASS on draft (scene body OK) — promoting to full-quality render');
       fixState.renderTier = 'full';
       fixState.whisperAlign = true;
       fixState.pendingTopic = currentTopic;

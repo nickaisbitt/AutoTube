@@ -27,9 +27,21 @@ export function buildEditTimeline(project, options = {}) {
     const interval = seg.type === 'intro' ? Math.min(cut, 3) : cut;
     let t = 0;
     let ai = 0;
+    let lastAssetId = null;
+    let lastUrl = null;
     while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
-      const asset = assets[ai % assets.length];
+      let asset = assets[ai % assets.length];
+      let attempts = 0;
+      while (
+        attempts < assets.length &&
+        assets.length > 1 &&
+        (asset.id === lastAssetId || (asset.url && asset.url === lastUrl))
+      ) {
+        ai += 1;
+        asset = assets[ai % assets.length];
+        attempts += 1;
+      }
       entries.push({
         segmentId: seg.id,
         startSec: t,
@@ -37,6 +49,8 @@ export function buildEditTimeline(project, options = {}) {
         assetId: asset.id,
         reason,
       });
+      lastAssetId = asset.id;
+      lastUrl = asset.url || null;
       t = end;
       ai += 1;
     }

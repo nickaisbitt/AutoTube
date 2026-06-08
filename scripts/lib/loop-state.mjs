@@ -20,7 +20,7 @@ export const DEFAULT_FIX_STATE = {
   harvestNonce: 0,
   excludedUrls: [],
   fixStrategy: 'interval',
-  ffmpegHardCuts: false,
+  ffmpegHardCuts: true,
   topicRetryCount: 0,
   maxRetriesPerTopic: 4,
   pendingTopic: null,
@@ -53,7 +53,7 @@ export function loadFixState(loopDir) {
     if (raw.brollPlacement === undefined) loaded.brollPlacement = true;
     if (raw.renderTier === undefined) loaded.renderTier = 'draft';
     if (raw.fixStrategy === undefined) loaded.fixStrategy = 'interval';
-    if (raw.ffmpegHardCuts === undefined) loaded.ffmpegHardCuts = false;
+    if (raw.ffmpegHardCuts === undefined) loaded.ffmpegHardCuts = true;
     if (raw.harvestNonce === undefined) loaded.harvestNonce = 0;
     if (!Array.isArray(raw.excludedUrls)) loaded.excludedUrls = [];
     return loaded;

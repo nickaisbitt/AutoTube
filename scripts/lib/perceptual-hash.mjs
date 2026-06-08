@@ -65,21 +65,16 @@ export function dedupeMediaByPHash(media, options = {}) {
   const devServer = options.devServer || 'http://localhost:5173';
 
   for (const asset of media) {
-    const thumb = asset.thumbnailUrl || asset.url;
-    if (!thumb || asset.type === 'video') {
+    const thumb = asset.thumbnailUrl || (asset.type === 'image' ? asset.url : null);
+    if (!thumb) {
       kept.push(asset);
-      if (asset.type === 'image' && thumb) {
-        const src = thumb.startsWith('http') ? thumb : `${devServer}${thumb.startsWith('/') ? '' : '/'}${thumb}`;
-        const h = aHashFromImage(src);
-        if (h) registry.push(h);
-      }
       continue;
     }
 
     const src = thumb.startsWith('http')
       ? thumb
-      : thumb.startsWith('/api/')
-        ? `${devServer}${thumb}`
+      : thumb.startsWith('/api/') || thumb.startsWith('/')
+        ? `${devServer}${thumb.startsWith('/') ? '' : '/'}${thumb}`
         : thumb;
     const hash = aHashFromImage(src);
     if (hash && isSimilarToRegistry(hash, registry)) {

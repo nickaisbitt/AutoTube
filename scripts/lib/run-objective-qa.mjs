@@ -2,7 +2,7 @@
  * Bridge to server/quality-check/check_quality.py for objective loop gates.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveOpenRouterKey } from './generate-full-video.mjs';
@@ -87,25 +87,70 @@ export function runObjectiveQa(videoPath, options = {}) {
 }
 
 /**
+ * @param {string} videoPath
+ * @param {number} [durationSec]
+ */
+export function evaluateClipCountGate(videoPath, durationSec = 0) {
+  const manifestPath = join(dirname(videoPath), 'ffmpeg-assembly', 'render-manifest.json');
+  if (!existsSync(manifestPath)) {
+    return { available: false };
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const dur = durationSec || manifest.muxDurationSec || manifest.videoSec || 0;
+    const minClips = Math.max(1, Math.floor(dur / 5));
+    const clipCount = manifest.clipCount || 0;
+    return {
+      available: true,
+      pass: clipCount >= minClips,
+      clipCount,
+      minClips,
+      tpadSec: manifest.tpadSec ?? 0,
+    };
+  } catch {
+    return { available: false };
+  }
+}
+
+/**
  * Composite objective gate from scene QA + technical QA.
- * @param {{ sceneQa?: object, objectiveQa?: object, renderTier?: string }} parts
+ * Draft tier: scene + clip-count + silence (tech score deferred to full tier).
+ * Full tier: all checks including tech_score.
+ * @param {{ sceneQa?: object, objectiveQa?: object, clipCountGate?: object, renderTier?: string }} parts
  */
 export function evaluateObjectiveGate(parts) {
   const scene = parts.sceneQa;
   const tech = parts.objectiveQa;
+  const clipGate = parts.clipCountGate;
+  const tier = parts.renderTier === 'full' ? 'full' : 'draft';
   const checks = [];
 
   if (scene?.available) {
     checks.push({ name: 'scene_hook', pass: scene.hookPass === true, detail: `longest hook shot ${scene.longestHookSec?.toFixed(1)}s` });
     checks.push({ name: 'scene_body', pass: scene.bodyPass === true, detail: `longest shot ${scene.longestSceneSec?.toFixed(1)}s` });
   }
+  if (clipGate?.available) {
+    checks.push({
+      name: 'clip_count',
+      pass: clipGate.pass === true,
+      detail: `${clipGate.clipCount} clips (min ${clipGate.minClips})`,
+    });
+  }
   if (tech) {
-    checks.push({ name: 'tech_score', pass: tech.scorePass === true, detail: `score ${tech.score}/100` });
     checks.push({ name: 'silence', pass: tech.silencePass === true, detail: `${tech.silenceFirst60Sec}s silence in first 60s` });
+    if (tier === 'full') {
+      checks.push({ name: 'tech_score', pass: tech.scorePass === true, detail: `score ${tech.score}/100` });
+    }
   }
 
   const available = checks.length > 0;
-  const pass = available && checks.every((c) => c.pass);
+  const draftChecks = checks.filter(
+    (c) => c.name.startsWith('scene_') || c.name === 'silence' || c.name === 'clip_count',
+  );
+  const pass =
+    tier === 'draft'
+      ? draftChecks.length > 0 && draftChecks.every((c) => c.pass)
+      : available && checks.every((c) => c.pass);
 
-  return { pass, checks, available };
+  return { pass, checks, available, tier };
 }

@@ -268,43 +268,34 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
 
-  const bySegment = {};
-  for (const asset of validated) {
-    bySegment[asset.segmentId] = (bySegment[asset.segmentId] || 0) + 1;
-  }
-  const minPerSeg = 3;
-  for (const segId of [...new Set(validated.map((a) => a.segmentId))]) {
-    while ((bySegment[segId] || 0) < minPerSeg) {
-      const replacement = reserve.find(
-        (r) => !validated.some((v) => v.segmentId === segId && v.url === r.url),
-      );
-      if (!replacement) break;
-      validated.push({ ...replacement, segmentId: segId });
-      bySegment[segId] = (bySegment[segId] || 0) + 1;
-    }
-  }
-
   const deduped = dedupeMediaByPHash(validated, {
     devServer,
     onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
   });
-  project.media = deduped.media;
+  project.media = [...deduped.media];
   report.phashHashCount = deduped.hashCount;
-  report.after = deduped.media.length;
 
+  const minPerSeg = 3;
   const bySegmentAfter = {};
   for (const asset of project.media) {
     bySegmentAfter[asset.segmentId] = (bySegmentAfter[asset.segmentId] || 0) + 1;
   }
+  const usedUrls = new Set(project.media.map((a) => (a.url || '').split('?')[0]).filter(Boolean));
   for (const segId of [...new Set(project.media.map((a) => a.segmentId))]) {
     while ((bySegmentAfter[segId] || 0) < minPerSeg) {
-      const replacement = deduped.media.find(
-        (r) => !project.media.some((v) => v.segmentId === segId && v.url === r.url),
-      ) || reserve.find(
-        (r) => !project.media.some((v) => v.segmentId === segId && v.url === r.url),
-      );
+      const replacement = deduped.media.find((r) => {
+        const key = (r.url || '').split('?')[0];
+        if (!key || usedUrls.has(key)) return false;
+        return !project.media.some((v) => v.segmentId === segId && v.url === r.url);
+      });
       if (!replacement) break;
-      project.media.push({ ...replacement, segmentId: segId, id: `${replacement.id}-ph-${segId.slice(0, 6)}` });
+      const key = (replacement.url || '').split('?')[0];
+      if (key) usedUrls.add(key);
+      project.media.push({
+        ...replacement,
+        segmentId: segId,
+        id: `${replacement.id}-ph-${segId.slice(0, 6)}-${bySegmentAfter[segId]}`,
+      });
       bySegmentAfter[segId] = (bySegmentAfter[segId] || 0) + 1;
     }
   }

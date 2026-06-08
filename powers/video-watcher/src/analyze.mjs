@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { runServerAIReview } from '../../../deploy/server-render/aiReviewer.mjs';
 import { detectVisualRepetition } from './frame-dedup.mjs';
 import { analyzeScenes } from './scene-qa.mjs';
-import { runObjectiveQa, evaluateObjectiveGate } from '../../../scripts/lib/run-objective-qa.mjs';
+import { runObjectiveQa, evaluateObjectiveGate, evaluateClipCountGate } from '../../../scripts/lib/run-objective-qa.mjs';
 import {
   auditHookFromScript,
   runBrutalVisionReview,
@@ -389,7 +389,13 @@ export async function watchVideo(options = {}) {
 
   const sceneQa = analyzeScenes(videoPath);
   const objectiveQa = runObjectiveQa(videoPath, { skipVision: options.skip_vision === true });
-  const objectiveGate = evaluateObjectiveGate({ sceneQa, objectiveQa, renderTier: options.render_tier });
+  const clipCountGate = evaluateClipCountGate(videoPath, framesMeta.durationSec);
+  const objectiveGate = evaluateObjectiveGate({
+    sceneQa,
+    objectiveQa,
+    clipCountGate,
+    renderTier: options.render_tier,
+  });
   const scriptText = options.script_text || loadOptionalScript();
   const hookScript = auditHookFromScript(scriptText);
   const apiKey = options.api_key || process.env.OPENROUTER_API_KEY || '';

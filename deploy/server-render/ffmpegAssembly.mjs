@@ -33,6 +33,8 @@ function trimAudioToDuration(inputPath, outputPath, targetSec) {
 
 function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  if (draft && loopMode) return { w: 1280, h: 720 };
   return draft ? { w: 960, h: 540 } : { w: 1920, h: 1080 };
 }
 
@@ -41,7 +43,14 @@ function ffmpegPreset() {
 }
 
 function hardCutsEnabled() {
-  return process.env.AUTOTUBE_FFMPEG_HARD_CUTS === '1' || process.env.AUTOTUBE_FFMPEG_HARD_CUTS === 'true';
+  if (process.env.AUTOTUBE_FFMPEG_HARD_CUTS === '0' || process.env.AUTOTUBE_FFMPEG_HARD_CUTS === 'false') {
+    return false;
+  }
+  if (process.env.AUTOTUBE_FFMPEG_HARD_CUTS === '1' || process.env.AUTOTUBE_FFMPEG_HARD_CUTS === 'true') {
+    return true;
+  }
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  return loopMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
 }
 
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
@@ -91,7 +100,29 @@ function buildClipSchedule(segment, segMedia, intervalSec, project) {
     t = clipEnd;
   }
 
-  return clips;
+  return assignVideoSourceOffsets(clips);
+}
+
+function assetKey(asset) {
+  return asset?.id || asset?.url || '';
+}
+
+/** Advance per-asset seek position so video B-roll does not replay t=0 every cut. */
+function assignVideoSourceOffsets(clips) {
+  const nextOffset = new Map();
+  return clips.map((clip) => {
+    const key = assetKey(clip.asset);
+    const isVideo =
+      clip.asset?.type === 'video' || /\.(mp4|webm|mov)/i.test(clip.asset?.url || '');
+    if (!isVideo) {
+      return { ...clip, sourceStartSec: 0 };
+    }
+    let offset = nextOffset.get(key) || 0;
+    const maxSrc = Math.max(clip.asset?.duration || 0, 30);
+    if (offset + clip.durationSec > maxSrc - 0.15) offset = 0;
+    nextOffset.set(key, offset + clip.durationSec);
+    return { ...clip, sourceStartSec: offset };
+  });
 }
 
 function cachePathForUrl(url, cacheDir, isVideo) {
@@ -155,19 +186,33 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
 async function resolveLocalAsset(asset, segMedia, devServer, cacheDir) {
   let localSrc = await ensureLocalAsset(asset, devServer, cacheDir);
   if (localSrc) return { localSrc, asset };
+
+  const thumb = asset.thumbnailUrl || (asset.type === 'image' ? asset.url : null);
+  if (thumb) {
+    const thumbAsset = { ...asset, type: 'image', url: thumb, thumbnailUrl: thumb };
+    localSrc = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
+    if (localSrc) return { localSrc, asset: thumbAsset };
+  }
+
   for (const alt of segMedia) {
     if (alt.id === asset.id) continue;
     localSrc = await ensureLocalAsset(alt, devServer, cacheDir);
     if (localSrc) return { localSrc, asset: alt };
+    const altThumb = alt.thumbnailUrl || (alt.type === 'image' ? alt.url : null);
+    if (altThumb) {
+      const altStill = { ...alt, type: 'image', url: altThumb, thumbnailUrl: altThumb };
+      localSrc = await ensureLocalAsset(altStill, devServer, cacheDir);
+      if (localSrc) return { localSrc, asset: altStill };
+    }
   }
   return { localSrc: null, asset };
 }
 
-function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft }) {
+function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0 }) {
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
   const hardCuts = hardCutsEnabled();
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
-  if (!isVideo && hardCuts) {
+  if (hardCuts) {
     const fadeOut = Math.max(0.04, durationSec - 0.04);
     vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
   } else if (!isVideo && !draft) {
@@ -175,9 +220,15 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
     vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   }
 
+  let seekSec = isVideo ? Math.max(0, sourceStartSec || 0) : 0;
+  if (isVideo) {
+    const probedDur = probeMediaDuration(localSrc);
+    if (probedDur > 0 && seekSec + durationSec > probedDur - 0.1) seekSec = 0;
+  }
+
   const args = isVideo
     ? [
-        '-y', '-ss', '0', '-i', localSrc, '-t', String(durationSec),
+        '-y', '-ss', String(seekSec), '-i', localSrc, '-t', String(durationSec),
         '-vf', vf, '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
         '-r', String(FPS), '-an', clipOut,
       ]
@@ -214,8 +265,24 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const devServer = options.devServer || 'http://localhost:5173';
   let renderedDuration = 0;
   let clipIndex = 0;
+  const videoOffsets = new Map();
+  const videoDurations = new Map();
 
-  async function pushClip(asset, durationSec, label) {
+  function resolveVideoSeek(asset, localSrc, durationSec, hintOffset = 0) {
+    const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
+    if (!isVideo) return 0;
+    if (!videoDurations.has(localSrc)) {
+      videoDurations.set(localSrc, probeMediaDuration(localSrc) || Math.max(asset.duration || 0, 30));
+    }
+    const total = videoDurations.get(localSrc);
+    const key = assetKey(asset);
+    let offset = videoOffsets.get(key) ?? hintOffset;
+    if (offset + durationSec > total - 0.1) offset = 0;
+    videoOffsets.set(key, offset + durationSec);
+    return offset;
+  }
+
+  async function pushClip(asset, durationSec, label, hintOffset = 0) {
     const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
     clipIndex += 1;
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
@@ -223,7 +290,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       console.log(`  [ffmpeg] ${label}: skip — asset fetch failed`);
       return false;
     }
-    const ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, { w, h, preset, draft });
+    const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
+    const ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec });
     if (!ok) {
       console.log(`  [ffmpeg] ${label}: encode failed`);
       return false;
@@ -234,8 +302,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   }
 
   for (let i = 0; i < schedule.length; i++) {
-    const { asset, durationSec } = schedule[i];
-    await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`);
+    const { asset, durationSec, sourceStartSec } = schedule[i];
+    await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0);
   }
 
   let fillerRound = 0;
@@ -391,6 +459,24 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     });
   } else {
     spawnSync('ffmpeg', ['-y', '-i', mergedVideo, '-c', 'copy', outputPath], { encoding: 'utf8' });
+  }
+
+  if (existsSync(outputPath) && (process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === '1')) {
+    const normalizedOut = join(workDir, 'mux-loudnorm.mp4');
+    const ln = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-i', outputPath,
+        '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11',
+        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k',
+        normalizedOut,
+      ],
+      { encoding: 'utf8', timeout: 300_000 },
+    );
+    if (ln.status === 0 && existsSync(normalizedOut)) {
+      spawnSync('ffmpeg', ['-y', '-i', normalizedOut, '-c', 'copy', outputPath], { encoding: 'utf8' });
+      console.log('  [ffmpeg] applied -14 LUFS loudnorm on final mux');
+    }
   }
 
   const manifest = {

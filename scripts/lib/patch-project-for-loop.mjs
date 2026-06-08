@@ -161,10 +161,17 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
 
   const needy = segIds.filter((id) => buckets[id].length < effectiveMin);
   for (const needId of needy) {
+    const needUrls = () => new Set(buckets[needId].map((a) => (a.url || '').split('?')[0]).filter(Boolean));
     while (buckets[needId].length < effectiveMin) {
+      const used = needUrls();
       const donorId = donors.find((id) => id !== needId && buckets[id].length > 1);
       if (!donorId) break;
-      const moved = buckets[donorId].pop();
+      const donorIdx = buckets[donorId].findIndex((a) => {
+        const key = (a.url || '').split('?')[0];
+        return key && !used.has(key);
+      });
+      if (donorIdx < 0) break;
+      const [moved] = buckets[donorId].splice(donorIdx, 1);
       if (!moved) break;
       buckets[needId].push({
         ...moved,

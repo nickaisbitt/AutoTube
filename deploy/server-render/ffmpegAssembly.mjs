@@ -59,8 +59,10 @@ function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
   return Math.floor(timeInSegment / intervalSec) % assetCount;
 }
 
-function resolveTimelineAsset(entry, segMedia) {
-  const byId = segMedia.find((m) => m.id === entry.assetId);
+function resolveTimelineAsset(entry, segMedia, mediaPool = []) {
+  const byId =
+    segMedia.find((m) => m.id === entry.assetId)
+    || mediaPool.find((m) => m.id === entry.assetId);
   if (byId) return byId;
   const idx = Math.floor((entry.startSec || 0) / Math.max(entry.endSec - entry.startSec, 0.5)) % segMedia.length;
   return segMedia[idx] || segMedia[0];
@@ -73,7 +75,7 @@ function buildClipSchedule(segment, segMedia, intervalSec, project) {
 
   if (timeline.length) {
     for (const entry of timeline) {
-      const asset = resolveTimelineAsset(entry, segMedia);
+      const asset = resolveTimelineAsset(entry, segMedia, project?.media || []);
       if (!asset) continue;
       const durationSec = (entry.endSec ?? 0) - (entry.startSec ?? 0);
       if (durationSec <= 0.05) continue;
@@ -138,11 +140,20 @@ function cachePathForUrl(url, cacheDir, isVideo) {
   return join(cacheDir, `${hash}${ext}`);
 }
 
-async function fetchToCache(fetchUrl, cached) {
-  const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(45_000) });
+async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
+  const res = await fetch(fetchUrl, {
+    signal: AbortSignal.timeout(45_000),
+    headers: { 'user-agent': 'Mozilla/5.0 AutoTube/1.0' },
+  });
   if (!res.ok) return null;
   const buf = Buffer.from(await res.arrayBuffer());
   if (buf.length < 500) return null;
+  const contentType = res.headers.get('content-type') || '';
+  if (expectVideo && !/video|octet-stream/i.test(contentType) && buf.length > 12) {
+    const sig = buf.slice(4, 8).toString('ascii');
+    if (sig !== 'ftyp' && !buf.slice(0, 4).toString('hex').includes('1a45')) return null;
+  }
+  if (!expectVideo && /text\/html/i.test(contentType)) return null;
   writeFileSync(cached, buf);
   return cached;
 }
@@ -162,8 +173,12 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
   } else if (rawUrl.startsWith('http')) {
     if (isVideo) {
       candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);
+      candidates.push(rawUrl);
     }
     candidates.push(`${devServer}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`);
+    if (!isVideo) {
+      candidates.push(`https://images.weserv.nl/?url=${encodeURIComponent(rawUrl)}&w=1280&h=720&fit=cover&output=jpg`);
+    }
     candidates.push(rawUrl);
   }
 
@@ -174,7 +189,7 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
       return cached;
     }
     try {
-      const path = await fetchToCache(fetchUrl, cached);
+      const path = await fetchToCache(fetchUrl, cached, { expectVideo: isVideo });
       if (path) return path;
     } catch {
       /* try next candidate */
@@ -196,15 +211,18 @@ async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
   return { localSrc: null, asset };
 }
 
-function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0 }) {
+function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0 }) {
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
   const hardCuts = hardCutsEnabled();
+  const frames = Math.max(1, Math.round(durationSec * FPS));
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
-  if (hardCuts) {
+  if (!isVideo && hardCuts) {
+    const drift = 0.08 + (clipIndex % 5) * 0.02;
+    vf = `zoompan=z='min(zoom+${drift.toFixed(3)},1.12)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
+  } else if (hardCuts && clipIndex > 0) {
     const fadeOut = Math.max(0.04, durationSec - 0.04);
     vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
   } else if (!isVideo && !draft) {
-    const frames = Math.max(1, Math.round(durationSec * FPS));
     vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   }
 
@@ -226,7 +244,25 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
         '-r', String(FPS), '-an', clipOut,
       ];
 
-  const r = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 180_000 });
+  let r = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 180_000 });
+  if (r.status === 0 && existsSync(clipOut)) return true;
+
+  if (!isVideo && hardCuts) {
+    let simpleVf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
+    if (clipIndex > 0) {
+      const fadeOut = Math.max(0.04, durationSec - 0.04);
+      simpleVf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${simpleVf}`;
+    }
+    r = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-loop', '1', '-i', localSrc, '-t', String(durationSec),
+        '-vf', simpleVf, '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
+        '-r', String(FPS), '-an', clipOut,
+      ],
+      { encoding: 'utf8', timeout: 180_000 },
+    );
+  }
   return r.status === 0 && existsSync(clipOut);
 }
 
@@ -306,7 +342,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
     } else {
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
-      ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec });
+      ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
+        w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1,
+      });
       if (!ok) {
         console.log(`  [ffmpeg] ${label}: encode failed — using placeholder`);
         ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });

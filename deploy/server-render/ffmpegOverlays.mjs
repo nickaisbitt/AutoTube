@@ -1,0 +1,190 @@
+/**
+ * Post-mux overlays for ffmpeg assembly (hook text + karaoke captions).
+ */
+import { spawnSync } from 'node:child_process';
+import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
+
+function escapeDrawtext(text) {
+  return String(text || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "'\\''")
+    .replace(/:/g, '\\:')
+    .replace(/%/g, '\\%');
+}
+
+function escapeAss(text) {
+  return String(text || '').replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}');
+}
+
+function formatAssTime(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const cs = Math.floor((s % 1) * 100);
+  return `${h}:${String(m).padStart(2, '0')}:${String(Math.floor(s)).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+}
+
+/**
+ * Burn hook overlay for first N seconds (watcher 0–3s audit).
+ * @param {string} videoPath
+ * @param {object} project
+ * @param {{ durationSec?: number }} [options]
+ */
+export function overlayHookText(videoPath, project, options = {}) {
+  if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
+
+  const hookText =
+    project.exportSettings?.hookOverlay
+    || project.hookLine
+    || project.exportSettings?.hookLine;
+  if (!hookText?.trim()) return { ok: false, error: 'no hook text' };
+
+  const probe = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=height,width', '-of', 'csv=p=0', videoPath],
+    { encoding: 'utf8' },
+  );
+  const [wStr, hStr] = (probe.stdout || '1280,720').trim().split(',');
+  const h = parseInt(hStr, 10) || 720;
+  const words = hookText.trim().toUpperCase().split(/\s+/).filter(Boolean);
+  const line1 = words.slice(0, 4).join(' ');
+  const line2 = words.slice(4, 8).join(' ');
+  const fontSize = Math.min(hookFontPx(h), Math.round(h * 0.075));
+  const durationSec = options.durationSec ?? 3.2;
+  const border = Math.max(4, Math.round(fontSize * 0.06));
+  const filters = [
+    `drawtext=text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=white:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.28:enable='between(t\\,0\\,${durationSec})'`,
+  ];
+  if (line2) {
+    filters.push(
+      `drawtext=text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=white:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
+    );
+  }
+  const vf = filters.join(',');
+
+  const tmpOut = videoPath.replace(/\.mp4$/, '-hooked.mp4');
+  const r = spawnSync(
+    'ffmpeg',
+    ['-y', '-i', videoPath, '-vf', vf, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  if (r.status !== 0 || !existsSync(tmpOut)) {
+    return { ok: false, error: (r.stderr || '').slice(-300) };
+  }
+  copyFileSync(tmpOut, videoPath);
+  try {
+    unlinkSync(tmpOut);
+  } catch {
+    /* ignore */
+  }
+  return { ok: true, hookText: hookText.trim() };
+}
+
+/**
+ * Burn word-timed captions (YouTube-style, max 4 words per line).
+ * @param {string} videoPath
+ * @param {Map<number, Array<{ word: string, start: number, end: number }>>} wordTimestampCache
+ */
+export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
+  if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
+
+  const probe = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=height,width', '-of', 'csv=p=0', videoPath],
+    { encoding: 'utf8' },
+  );
+  const [wStr, hStr] = (probe.stdout || '1280,720').trim().split(',');
+  const w = parseInt(wStr, 10) || 1280;
+  const h = parseInt(hStr, 10) || 720;
+  const cm = captionMetrics(h, w);
+  const fontSize = cm.currentPx;
+
+  const assPath = join(dirname(videoPath), 'captions-overlay.ass');
+  const header = [
+    '[Script Info]',
+    'Title: AutoTube',
+    'WrapStyle: 0',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Default,Arial Bold,${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,${cm.strokePx},0,2,40,40,${cm.bottomPad},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ];
+
+  const lines = [...header];
+  let idx = 0;
+  let buffer = [];
+  let bufferStart = 0;
+  let bufferEnd = 0;
+
+  const flush = () => {
+    if (!buffer.length) return;
+    const text = escapeAss(buffer.join(' ').toUpperCase());
+    lines.push(`Dialogue: 0,${formatAssTime(bufferStart)},${formatAssTime(bufferEnd)},Default,,0,0,0,,${text}`);
+    idx += 1;
+    buffer = [];
+  };
+
+  const hookEndSec = 3.2;
+  for (const [, words] of wordTimestampCache) {
+    for (const w of words) {
+      if (w.end <= hookEndSec) continue;
+      const start = Math.max(w.start, hookEndSec);
+      if (!buffer.length) bufferStart = start;
+      buffer.push(w.word);
+      bufferEnd = w.end;
+      if (buffer.length >= cm.maxWords) flush();
+    }
+    flush();
+  }
+  flush();
+
+  if (idx === 0) return { ok: false, error: 'no word timestamps' };
+
+  writeFileSync(assPath, lines.join('\n'));
+  const tmpOut = videoPath.replace(/\.mp4$/, '-captioned.mp4');
+  const assEsc = assPath.replace(/'/g, "'\\''");
+  const r = spawnSync(
+    'ffmpeg',
+    ['-y', '-i', videoPath, '-vf', `ass='${assEsc}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
+    { encoding: 'utf8', timeout: 600_000 },
+  );
+  if (r.status !== 0 || !existsSync(tmpOut)) {
+    return { ok: false, error: (r.stderr || '').slice(-300) };
+  }
+  copyFileSync(tmpOut, videoPath);
+  try {
+    unlinkSync(assPath);
+    unlinkSync(tmpOut);
+  } catch {
+    /* ignore */
+  }
+  return { ok: true, captionCount: idx };
+}
+
+/**
+ * Apply YouTube overlays after ffmpeg assembly mux.
+ */
+export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCache) {
+  const results = {};
+  if (!isYouTubeExportMode(project)) return results;
+
+  if (wordTimestampCache?.size) {
+    const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache);
+    results.captions = caps;
+    if (caps.ok) {
+      console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);
+    }
+  }
+
+  const hook = overlayHookText(videoPath, project);
+  results.hook = hook;
+  if (hook.ok) {
+    console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}..."`);
+  }
+  return results;
+}

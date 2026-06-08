@@ -8,20 +8,34 @@
  * @param {{ cutIntervalSec?: number, reason?: string }} [options]
  * @returns {Array<{ segmentId: string, startSec: number, endSec: number, assetId: string, reason: string }>}
  */
+function urlKey(asset) {
+  return (asset?.url || '').split('?')[0] || asset?.id || '';
+}
+
+function uniqueAssetsByUrl(assets) {
+  const seen = new Set();
+  const out = [];
+  for (const asset of assets) {
+    const key = urlKey(asset);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    out.push(asset);
+  }
+  return out;
+}
+
 export function buildEditTimeline(project, options = {}) {
   const cut = options.cutIntervalSec ?? 1.25;
   const reason = options.reason ?? 'heuristic placement';
   const entries = [];
+  const globalPool = uniqueAssetsByUrl(project.media || []);
 
   for (const seg of project.script || []) {
-    const assets = (project.media || []).filter((m) => m.segmentId === seg.id);
+    let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
     if (!assets.length) {
-      const pool = project.media || [];
-      if (!pool.length) continue;
-      for (let i = 0; i < pool.length; i++) {
-        assets.push({ ...pool[i % pool.length], segmentId: seg.id });
-      }
+      assets = globalPool.map((m) => ({ ...m, segmentId: seg.id }));
     }
+    if (!assets.length) continue;
 
     const duration = seg.duration || 20;
     const interval = seg.type === 'intro' ? Math.min(cut, 3) : cut;
@@ -33,14 +47,26 @@ export function buildEditTimeline(project, options = {}) {
       const end = Math.min(duration, t + interval);
       let asset = assets[ai % assets.length];
       let attempts = 0;
+      const pickFrom = (pool) => {
+        for (let j = 0; j < pool.length; j++) {
+          const candidate = pool[(ai + j) % pool.length];
+          const key = urlKey(candidate);
+          if (candidate.id === lastAssetId || (key && key === lastUrl)) continue;
+          return candidate;
+        }
+        return pool[ai % pool.length];
+      };
+
       while (
-        attempts < assets.length &&
-        assets.length > 1 &&
-        (asset.id === lastAssetId || (asset.url && asset.url === lastUrl))
+        attempts < Math.max(assets.length, globalPool.length) &&
+        (asset.id === lastAssetId || (urlKey(asset) && urlKey(asset) === lastUrl))
       ) {
+        asset = pickFrom(assets.length > 1 ? assets : globalPool);
         ai += 1;
-        asset = assets[ai % assets.length];
         attempts += 1;
+      }
+      if (urlKey(asset) === lastUrl && globalPool.length > 1) {
+        asset = pickFrom(globalPool);
       }
       entries.push({
         segmentId: seg.id,
@@ -50,7 +76,7 @@ export function buildEditTimeline(project, options = {}) {
         reason,
       });
       lastAssetId = asset.id;
-      lastUrl = asset.url || null;
+      lastUrl = urlKey(asset) || null;
       t = end;
       ai += 1;
     }

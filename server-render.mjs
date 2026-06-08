@@ -3277,13 +3277,17 @@ async function runFfmpegAssemblyRender(project) {
     throw new Error(ffResult.error || 'ffmpeg assembly render failed');
   }
   log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments, ${ffResult.manifest?.clipCount ?? '?'} clips, tpad ${ffResult.manifest?.tpadSec ?? 0}s)`);
-  if (process.env.AUTOTUBE_REMOTION_CAPTIONS === '1') {
-    try {
-      const { overlayRemotionCaptions } = await import('./server-render/remotionCaptions.mjs');
-      await overlayRemotionCaptions(OUTPUT_FILE, project, wordTimestampCache);
-    } catch (err) {
-      log('warn', `  ⚠ Remotion caption overlay skipped: ${err.message}`);
+  try {
+    const { applyFfmpegYoutubeOverlays } = await import('./server-render/ffmpegOverlays.mjs');
+    const overlayResults = applyFfmpegYoutubeOverlays(OUTPUT_FILE, project, wordTimestampCache);
+    if (overlayResults.hook?.ok === false && overlayResults.hook?.error) {
+      log('warn', `  ⚠ Hook overlay skipped: ${overlayResults.hook.error}`);
     }
+    if (overlayResults.captions?.ok === false && overlayResults.captions?.error) {
+      log('warn', `  ⚠ Caption overlay skipped: ${overlayResults.captions.error}`);
+    }
+  } catch (err) {
+    log('warn', `  ⚠ YouTube overlays skipped: ${err.message}`);
   }
   const finalMp4 = OUTPUT_FILE.replace('.mp4', '-final.mp4');
   if (existsSync(OUTPUT_FILE)) {

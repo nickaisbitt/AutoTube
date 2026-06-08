@@ -2108,6 +2108,7 @@ async function pickDistinctShotCandidate(
   for (const candidate of ranked) {
     if (signal?.aborted) return undefined;
     if (!isLoopFastMode()) return candidate;
+    if (loopMinAssetsPerSegment() > 0) return candidate;
     const hash = await hashCandidateThumb(candidate, signal);
     if (hash && isSimilarToAny(hash, acceptedVisualHashes)) {
       excludedUrls.add(candidate.url);
@@ -2243,6 +2244,11 @@ export async function sourceSegmentMedia(
       uniqueCandidates = allCandidates.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index);
     };
     const excludedUrls = new Set<string>();
+    const blockedUrlsForPick = () => (
+      loopMin > 0
+        ? new Set([...excludedUrls, ...finalAssets.map((asset) => asset.url)])
+        : deduplicationRegistry.usedUrls
+    );
 
     const pushSelectedCandidate = (
       best: MediaCandidate,
@@ -2292,7 +2298,7 @@ export async function sourceSegmentMedia(
         segmentIndex,
         excludedUrls,
         i > 0 ? finalAssets[i - 1]?.type : undefined,
-        deduplicationRegistry.usedUrls,
+        blockedUrlsForPick(),
         signal,
       );
 
@@ -2303,7 +2309,7 @@ export async function sourceSegmentMedia(
           segmentIndex,
           excludedUrls,
           undefined,
-          deduplicationRegistry.usedUrls,
+          blockedUrlsForPick(),
           signal,
         );
       }
@@ -2342,7 +2348,7 @@ export async function sourceSegmentMedia(
                 segmentIndex,
                 excludedUrls,
                 undefined,
-                deduplicationRegistry.usedUrls,
+                blockedUrlsForPick(),
                 signal,
               );
               if (fallback) {
@@ -2419,7 +2425,7 @@ export async function sourceSegmentMedia(
         segmentIndex,
         excludedUrls,
         undefined,
-        deduplicationRegistry.usedUrls,
+        blockedUrlsForPick(),
         signal,
       );
       if (extra) {
@@ -2471,7 +2477,7 @@ export async function sourceSegmentMedia(
           segmentIndex,
           excludedUrls,
           'video',
-          deduplicationRegistry.usedUrls,
+          blockedUrlsForPick(),
           signal,
         );
         if (!videoPick || videoPick.type !== 'video') break;

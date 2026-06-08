@@ -183,27 +183,15 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
   return null;
 }
 
-async function resolveLocalAsset(asset, segMedia, devServer, cacheDir) {
+async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
   let localSrc = await ensureLocalAsset(asset, devServer, cacheDir);
   if (localSrc) return { localSrc, asset };
 
-  const thumb = asset.thumbnailUrl || (asset.type === 'image' ? asset.url : null);
-  if (thumb) {
+  const thumb = asset.thumbnailUrl || (asset.type === 'image' ? null : null);
+  if (thumb && thumb !== asset.url) {
     const thumbAsset = { ...asset, type: 'image', url: thumb, thumbnailUrl: thumb };
     localSrc = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
     if (localSrc) return { localSrc, asset: thumbAsset };
-  }
-
-  for (const alt of segMedia) {
-    if (alt.id === asset.id) continue;
-    localSrc = await ensureLocalAsset(alt, devServer, cacheDir);
-    if (localSrc) return { localSrc, asset: alt };
-    const altThumb = alt.thumbnailUrl || (alt.type === 'image' ? alt.url : null);
-    if (altThumb) {
-      const altStill = { ...alt, type: 'image', url: altThumb, thumbnailUrl: altThumb };
-      localSrc = await ensureLocalAsset(altStill, devServer, cacheDir);
-      if (localSrc) return { localSrc, asset: altStill };
-    }
   }
   return { localSrc: null, asset };
 }

@@ -45,9 +45,9 @@ export function analyzeScenes(videoPath) {
 
   const script = `
 import json, sys
-from scenedetect import detect, ContentDetector
+from scenedetect import detect, AdaptiveDetector
 path = sys.argv[1]
-scenes = detect(path, ContentDetector(threshold=27.0))
+scenes = detect(path, AdaptiveDetector())
 out = []
 for i, (start, end) in enumerate(scenes):
     out.append({

@@ -132,12 +132,38 @@ async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = f
   }
 }
 
+function isDirectImageCandidate(url = '') {
+  const u = (url || '').toLowerCase();
+  return (
+    /\.(jpg|jpeg|png|gif|webp)(?:[?#]|$)/i.test(u)
+    || /(?:th\d*\.bing\.net|upload\.wikimedia|images\.|pexels|pixabay|unsplash|gettyimages|alamy|shutterstock)/i.test(u)
+  );
+}
+
+async function fetchImageSearchResults(devServer, endpoint, query) {
+  try {
+    const res = await fetch(`${devServer}${endpoint}?q=${encodeURIComponent(query)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.results || [];
+  } catch {
+    return [];
+  }
+}
+
 async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
   const usedGlobal = new Set(
     (project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean),
   );
+  const searchEndpoints = [
+    '/api/search-google-images',
+    '/api/search-bing-images',
+    '/api/search-duckduckgo-images',
+    '/api/search-hybrid',
+    '/api/search-unsplash',
+  ];
 
   for (const seg of segments) {
     const segAssets = (project.media || []).filter((m) => m.segmentId === seg.id);
@@ -145,34 +171,27 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
       segAssets.map((a) => (a.url || '').split('?')[0]).filter(Boolean),
     ).size;
 
-    for (let page = 0; page < 8 && uniqueCount < minPerSegment; page += 1) {
-      const q = `${seg.title} ${topic} photo ${page + 1}`;
-      let results = [];
-      try {
-        const res = await fetch(`${devServer}/api/search-bing-images?q=${encodeURIComponent(q)}`);
-        if (res.ok) {
-          const data = await res.json();
-          results = data.results || [];
-        }
-      } catch {
-        break;
-      }
+    for (let round = 0; round < searchEndpoints.length && uniqueCount < minPerSegment; round += 1) {
+      const q = `${seg.title} ${topic} ${round > 0 ? 'news photo' : 'photo'}`;
+      const results = await fetchImageSearchResults(devServer, searchEndpoints[round], q);
+      const candidates = results
+        .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
+        .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
 
       let added = false;
-      for (const r of results) {
-        const url = r.url || r.thumbnailUrl;
-        if (!url || isJunkHarvestUrl(url)) continue;
-        const key = url.split('?')[0];
+      for (const r of candidates) {
+        const key = r.url.split('?')[0];
         if (usedGlobal.has(key)) continue;
-        if (!(await canFetch(url, { timeoutMs: 8000, minBytes: 512 }))) continue;
+        if (!(await canFetch(r.url, { timeoutMs: 8000, minBytes: 512 }))) continue;
 
         project.media.push({
           id: `topup-${seg.id}-${uniqueCount}`,
           segmentId: seg.id,
           type: 'image',
-          url,
-          alt: r.alt || r.title || seg.title,
-          source: 'Bing (volume top-up)',
+          url: r.url,
+          alt: `${seg.title} ${topic}`,
+          query: q,
+          source: `${r.source || 'Search'} (volume top-up)`,
           duration: 5,
           isFallback: false,
         });
@@ -180,10 +199,13 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
         uniqueCount += 1;
         added = true;
         report.volumeTopUp = report.volumeTopUp || [];
-        report.volumeTopUp.push({ segmentId: seg.id, url });
+        report.volumeTopUp.push({ segmentId: seg.id, url: r.url, endpoint: searchEndpoints[round] });
         if (uniqueCount >= minPerSegment) break;
       }
-      if (!added) break;
+      if (!added && round === searchEndpoints.length - 1) {
+        report.volumeTopUpMiss = report.volumeTopUpMiss || [];
+        report.volumeTopUpMiss.push({ segmentId: seg.id, count: uniqueCount, need: minPerSegment });
+      }
     }
   }
 }
@@ -403,12 +425,6 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   if (loopMode) {
     await topUpHarvestVolume(project, devServer, minPerSegment, report);
     report.afterTopUp = project.media.length;
-    const postTopUp = filterAssetsByRelevance(project.media, project);
-    if (postTopUp.dropped.length) {
-      report.relevanceDropped = [...(report.relevanceDropped || []), ...postTopUp.dropped];
-    }
-    project.media = postTopUp.media;
-    report.afterRelevanceTopUp = project.media.length;
   }
 
   const volume = evaluateHarvestVolume(project, minPerSegment);

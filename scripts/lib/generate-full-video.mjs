@@ -358,7 +358,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
 
   for (const asset of project.media) {
-    if (isJunkHarvestUrl(asset.url) || isJunkHarvestUrl(asset.thumbnailUrl)) {
+    // Only reject on primary URL — thumbnailUrl is often a Bing/OIP search preview while url is a full editorial image.
+    if (isJunkHarvestUrl(asset.url)) {
       report.dropped.push({ url: asset.url, reason: 'junk URL (avatar/video-thumb placeholder)' });
       continue;
     }

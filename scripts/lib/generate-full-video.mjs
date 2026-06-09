@@ -303,6 +303,7 @@ function segmentUniqueCount(project, segmentId) {
 }
 
 async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords) {
+  if (isUnreliableVideoHost(`${r.url || ''} ${r.sourceUrl || ''}`)) return false;
   const key = r.url.split('?')[0];
   const alreadyInSeg = (project.media || []).some(
     (m) => m.segmentId === seg.id && (m.url || '').split('?')[0] === key,

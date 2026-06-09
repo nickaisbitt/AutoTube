@@ -23,6 +23,16 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = resolve(__dirname, '../../..');
 
+function resolveOpenRouterApiKey(options = {}) {
+  return (
+    options.api_key
+    || process.env.OPENROUTER_API_KEY
+    || process.env.VITE_OPENROUTER_KEY
+    || process.env.OPENROUTER_KEY
+    || ''
+  ).trim();
+}
+
 export const DEFAULT_CANDIDATES = [
   'docs/artifacts/FINAL-VIDEO-youtube-full.mp4',
   'docs/artifacts/FINAL-VIDEO-youtube-review.mp4',
@@ -432,7 +442,7 @@ export async function watchVideo(options = {}) {
   });
   const scriptText = options.script_text || loadOptionalScript();
   const hookScript = auditHookFromScript(scriptText);
-  const apiKey = options.api_key || process.env.OPENROUTER_API_KEY || '';
+  const apiKey = resolveOpenRouterApiKey(options);
   const skipVision = options.skip_vision === true;
 
   let brutal = null;

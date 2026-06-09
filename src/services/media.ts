@@ -48,6 +48,42 @@ function isLoopVideoFirst(): boolean {
   );
 }
 
+/** Hosts that fail download-clip proxy and become ffmpeg placeholders. */
+function isUnreliableVideoHost(url = ''): boolean {
+  return /(?:tiktok\.com|vm\.tiktok|instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch)/i.test(url);
+}
+
+/** Motion sources that survive proxy + ffmpeg in loop mode. */
+function isTrustedVideoHost(url = ''): boolean {
+  return /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|videos\.pexels\.com)/i.test(url);
+}
+
+function candidateUrlBlob(c: { url?: string; sourceUrl?: string; thumbnailUrl?: string }): string {
+  return `${c.url || ''} ${c.sourceUrl || ''} ${c.thumbnailUrl || ''}`;
+}
+
+function loopMinVideosPerSegment(targetAssetsPerSegment: number): number {
+  if (!isLoopFastMode() || typeof sessionStorage === 'undefined') {
+    return Math.max(2, Math.min(3, targetAssetsPerSegment));
+  }
+  const raw = sessionStorage.getItem('autotube_loop_min_videos');
+  const parsed = raw ? parseInt(raw, 10) : 0;
+  const base = Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
+  // When Giphy is suppressed, keep min at 2 — do not raise to 3 and starve harvest.
+  if (sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true') {
+    return Math.max(2, base);
+  }
+  return Math.max(2, Math.min(3, base));
+}
+
+function isLoopTrustedVideoCandidate(c: MediaCandidate): boolean {
+  const blob = candidateUrlBlob(c);
+  if (isUnreliableVideoHost(blob)) return false;
+  if (c.type !== 'video') return true;
+  if (!isLoopVideoFirst()) return true;
+  return isTrustedVideoHost(blob) || /\.(?:mp4|webm|mov)(?:[?#]|$)/i.test(blob);
+}
+
 /** Max number of Giphy candidates to keep per segment in loop mode (0 = suppressed). */
 function loopMaxGiphyPerSegment(): number {
   if (!isLoopFastMode() || typeof sessionStorage === 'undefined') return Infinity;
@@ -1726,6 +1762,13 @@ async function harvestMediaWithSafetyNet(
       trace.push(`[S${depth+1}] Excluded ${before - candidates.length} prior-loop URLs`);
     }
   }
+  if (isLoopFastMode()) {
+    const before = candidates.length;
+    candidates = candidates.filter(isLoopTrustedVideoCandidate);
+    if (before !== candidates.length) {
+      trace.push(`[S${depth+1}] Dropped ${before - candidates.length} unreliable/non-trusted video URLs`);
+    }
+  }
 
   // Check signal before triggering fallbacks
   if (signal?.aborted) {
@@ -2598,7 +2641,7 @@ export async function sourceSegmentMedia(
     }
 
     if (isLoopVideoFirst()) {
-      const loopMinVideos = Math.max(2, Math.min(3, targetAssetsPerSegment));
+      const loopMinVideos = loopMinVideosPerSegment(targetAssetsPerSegment);
       let videoCount = finalAssets.filter((asset) => asset.type === 'video').length;
       const videoShot = shotsToHarvest[0];
       let videoSearchRound = 0;
@@ -2624,7 +2667,11 @@ export async function sourceSegmentMedia(
               searchDDGVideos(videoQuery, signal),
             ]);
             const fresh = [...bingVideos, ...ddgVideos].filter(
-              (c) => c.type === 'video' && !excludedUrls.has(c.url) && !deduplicationRegistry.usedUrls.has(c.url),
+              (c) =>
+                c.type === 'video'
+                && !excludedUrls.has(c.url)
+                && !deduplicationRegistry.usedUrls.has(c.url)
+                && isLoopTrustedVideoCandidate(c),
             );
             if (fresh.length === 0) break;
             for (const c of fresh) {

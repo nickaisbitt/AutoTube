@@ -17,6 +17,7 @@ export function harvestContextFromFixState(fixState = {}) {
     excludeUrls: Array.isArray(fixState.excludedUrls) ? fixState.excludedUrls : [],
     suppressGiphy: fixState.suppressGiphy === true,
     harvestVideoFirst: fixState.harvestVideoFirst !== false,
+    minVideosPerSegment: Math.max(2, fixState.minVideosPerSegment || 2),
     hookLine: fixState.hookLine?.trim() || null,
     hookOverlay: fixState.hookOverlay?.trim() || null,
   };
@@ -37,6 +38,9 @@ export function harvestSessionStoragePayload(ctx) {
   }
   if (ctx.harvestVideoFirst !== false) {
     payload.autotube_loop_video_first = 'true';
+  }
+  if (ctx.minVideosPerSegment && ctx.minVideosPerSegment > 0) {
+    payload.autotube_loop_min_videos = String(ctx.minVideosPerSegment);
   }
   if (ctx.hookLine) {
     payload.autotube_loop_hook_line = ctx.hookLine;

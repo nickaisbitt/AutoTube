@@ -466,51 +466,70 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     return offset;
   }
 
+  async function tryEncodeAsset(candidate, durationSec, label, hintOffset, interrupt, clipOut) {
+    const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(candidate, segMedia, devServer, cacheDir);
+    if (!localSrc) return { ok: false, resolvedAsset, usedPlaceholder: false };
+
+    const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
+    let ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
+      w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, isInterruptClip: interrupt,
+    });
+    if (!ok) {
+      const thumb = resolvedAsset.thumbnailUrl;
+      if (thumb) {
+        const thumbAsset = { ...resolvedAsset, type: 'image', url: thumb };
+        const thumbLocal = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
+        if (thumbLocal) {
+          ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
+            w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1, isInterruptClip: interrupt,
+          });
+          if (ok) console.log(`  [ffmpeg] ${label}: video → thumbnail still`);
+        }
+      }
+    }
+    return { ok, resolvedAsset, usedPlaceholder: false };
+  }
+
   async function pushClip(asset, durationSec, label, hintOffset = 0) {
     const interrupt = isInterruptClip(durationSec);
     const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
     clipIndex += 1;
-    const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
+
+    const tried = new Set();
+    const alternates = [asset, ...segMedia.filter((a) => assetKey(a) !== assetKey(asset))];
     let ok = false;
     let usedPlaceholder = false;
-    if (!localSrc) {
-      const reason = `fetch failed url=${(asset.url || '').slice(0, 80)} thumb=${(asset.thumbnailUrl || 'none').slice(0, 60)}`;
+    let lastResolved = asset;
+
+    for (const candidate of alternates) {
+      const key = assetKey(candidate);
+      if (key && tried.has(key)) continue;
+      if (key) tried.add(key);
+
+      const result = await tryEncodeAsset(candidate, durationSec, label, hintOffset, interrupt, clipOut);
+      lastResolved = result.resolvedAsset || candidate;
+      if (result.ok) {
+        ok = true;
+        if (candidate !== asset) {
+          console.log(`  [ffmpeg] ${label}: alternate asset succeeded (${(candidate.sourceUrl || candidate.url || '').slice(0, 72)})`);
+        }
+        break;
+      }
+    }
+
+    if (!ok) {
+      const reason = `fetch/encode failed url=${(asset.url || '').slice(0, 80)} tried=${tried.size} alts`;
       console.log(`  [ffmpeg] ${label}: placeholder — ${reason}`);
       ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
       if (ok) {
         placeholderClipCount += 1;
         usedPlaceholder = true;
       }
-    } else {
-      const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
-      ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
-        w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, isInterruptClip: interrupt,
-      });
-      if (!ok) {
-        const thumb = resolvedAsset.thumbnailUrl;
-        if (thumb) {
-          const thumbAsset = { ...resolvedAsset, type: 'image', url: thumb };
-          const thumbLocal = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
-          if (thumbLocal) {
-            ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
-              w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1, isInterruptClip: interrupt,
-            });
-            if (ok) console.log(`  [ffmpeg] ${label}: video → thumbnail still`);
-          }
-        }
-      }
-      if (!ok) {
-        console.log(`  [ffmpeg] ${label}: encode failed — using placeholder`);
-        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
-        if (ok) {
-          placeholderClipCount += 1;
-          usedPlaceholder = true;
-        }
-      }
     }
+
     if (usedPlaceholder) {
-      const key = assetManifestKey(resolvedAsset || asset);
-      if (key) placeholderUrls.push(key);
+      const manifestKey = assetManifestKey(lastResolved || asset);
+      if (manifestKey) placeholderUrls.push(manifestKey);
     }
     if (!ok) {
       return false;

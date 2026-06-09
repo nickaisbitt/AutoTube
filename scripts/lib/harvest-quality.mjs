@@ -169,8 +169,8 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
 
   if (asset?.type === 'video' || /\.(mp4|webm|mov)/i.test(asset?.url || '') || /\/api\/download-clip/i.test(asset?.url || '')) {
     score += 0.05;
-    if (/youtube|vimeo|dailymotion|news|documentary|archive\.org/i.test(haystack)) {
-      score += 0.1;
+    if (/youtube|vimeo|dailymotion|videos\.pexels|news|documentary|archive\.org/i.test(haystack)) {
+      score += 0.12;
     }
   }
   if (asset?.query && segKeywords.some((k) => asset.query.toLowerCase().includes(k))) {

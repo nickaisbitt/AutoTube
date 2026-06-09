@@ -250,6 +250,7 @@ async function main() {
         skip_vision: cfg.skipVision || skipBrutalOnDraft || cfg.objectiveOnly,
         script_text: scriptText,
         render_tier: renderTier,
+        api_key: resolveOpenRouterKey(),
       });
     } catch (e) {
       console.error(`❌ Watch failed: ${e.message}`);

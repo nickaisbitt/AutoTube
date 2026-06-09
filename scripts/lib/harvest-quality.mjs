@@ -30,6 +30,22 @@ const OFF_TOPIC_BLOCKLIST = [
   { pattern: /\bwallpaper\b/i, requires: /\bwallpaper|desktop background\b/i },
   { pattern: /\bfood poisoning\b/i, requires: /\bfood poisoning|salmonella|e\.?\s*coli\b/i },
   { pattern: /\belectric car fire\b/i, requires: /\belectric car|ev fire|tesla fire\b/i },
+
+  // Pinterest pin-board aggregator — almost never quality B-roll; exclude unless topic is about Pinterest
+  { pattern: /pinterest\.com|pinimg\.com/i, requires: /\bpinterest\b/i },
+
+  // Geographic map images (Texas map, state/county maps, OpenStreetMap tiles) — noise for non-geo topics
+  { pattern: /\btexas\s*map|\bstate\s*map|\bcounty\s*map|\bgeographic\s*map/i, requires: /\bmap\b|\bgeograph|\btexas\b/i },
+  { pattern: /openstreetmap\.org|\/api\/static-map/i, requires: /\bmap\b|\bgeograph|\blocation\b|\bstreet\b/i },
+
+  // Hydration / water-bottle lifestyle shots — noise when topic is not health/fitness/drinks
+  { pattern: /\bhydration\b|\bdrinking\s+water\b|\bwater\s+bottle\b/i, requires: /\bhydrat|\bwater\s+drink|\bdrink|\bfitness\b|\bhealth\b|\bwellness\b/i },
+
+  // Royalty-free children stock photos — noise when topic is not about kids/education
+  { pattern: /royalty.{0,5}free\s+(?:kids?|child(?:ren)?)|(?:kids?|children)\s+stock\s+photo/i, requires: /\bkid|\bchild|\byouth\b|\beducation\b/i },
+
+  // Tier-list / ranking graphics — almost never relevant B-roll
+  { pattern: /\btier\s*list\b/i, requires: /\btier\s*list\b/i },
 ];
 
 /**
@@ -109,6 +125,12 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
     score += 0.1;
   }
 
+  // Giphy assets are GIFs/short loops with no editorial context — cap their relevance
+  // score so news/stock/documentary sources always rank above them.
+  if ((asset?.source || '').toLowerCase() === 'giphy') {
+    score = Math.min(score, 0.35);
+  }
+
   return Math.max(0, Math.min(1, score));
 }
 
@@ -154,6 +176,34 @@ export function filterAssetsByRelevance(media, project, options = {}) {
   }
 
   return { media: kept, dropped, minScore };
+}
+
+/**
+ * Detect segments where Giphy dominates (≥50% of assets) or is the only source.
+ * Used by the improvement loop to flag weak-source segments before scoring.
+ *
+ * @param {object} project
+ * @returns {{ giphyOnlySegments: string[], giphyDominantSegments: string[], giphyTotal: number }}
+ */
+export function detectGiphyDominance(project) {
+  const segments = project.script || [];
+  const giphyOnlySegments = [];
+  const giphyDominantSegments = [];
+  let giphyTotal = 0;
+
+  for (const seg of segments) {
+    const assets = (project.media || []).filter((m) => m.segmentId === seg.id);
+    if (assets.length === 0) continue;
+    const giphyCount = assets.filter((m) => (m.source || '').toLowerCase() === 'giphy').length;
+    giphyTotal += giphyCount;
+    if (giphyCount === assets.length) {
+      giphyOnlySegments.push(seg.id);
+    } else if (giphyCount / assets.length >= 0.5) {
+      giphyDominantSegments.push(seg.id);
+    }
+  }
+
+  return { giphyOnlySegments, giphyDominantSegments, giphyTotal };
 }
 
 /**

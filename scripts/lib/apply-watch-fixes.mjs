@@ -108,6 +108,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
 
   if (hookFail) {
     s.shockHook = true;
+    s.patternInterrupts = true;
     const visionFix = watch.hookVision?.fix?.trim();
     const extracted = extractOverlayFromVisionFix(visionFix);
     const topicHint = (topic || '').toLowerCase().slice(0, 24);
@@ -115,7 +116,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
       topicHint.length > 0 && visionFix && visionFix.toLowerCase().includes(topicHint.split(/\s+/)[0]);
     s.hookLine = buildShockHookLine(topic, fixMatchesTopic ? extracted || visionFix : undefined);
     s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, { visionFix });
-    applied.push(`1. Hook FAIL → overlay: "${s.hookOverlay}"`);
+    applied.push(`1. Hook FAIL → patternInterrupts ON, overlay: "${s.hookOverlay}"`);
   }
 
   if ((pacing <= 8 || longestHold >= 4) && !sceneFail) {
@@ -124,6 +125,10 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
       const prev = s.cutIntervalSec ?? 1.25;
       s.cutIntervalSec = Math.max(CUT_FLOOR, prev - 0.15);
       applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s`);
+    }
+    if (pacing <= 6) {
+      s.patternInterrupts = true;
+      applied.push(`2a. Pacing ${pacing}/10 ≤6 → patternInterrupts ON`);
     }
   }
 
@@ -146,6 +151,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push(
       `3. Repetition FAIL (${repeatPct}% dup, ${dupRuns} runs) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg`,
     );
+  }
+
+  if (visualVariety <= 6) {
+    s.suppressGiphy = true;
+    applied.push(`3a. Visual variety ${visualVariety}/10 → suppressGiphy=true for next harvest`);
   }
 
   if (renderTier === 'full' && (watch.brutal?.overall ?? 10) <= 5) {
@@ -205,6 +215,7 @@ export function formatFixReport(applied, fixState) {
   lines.push(`15. generateFailureCount: ${fixState.generateFailureCount || 0}/${fixState.maxGenerateFailuresPerTopic || 2}`);
   lines.push(`16. patternInterrupts: ${fixState.patternInterrupts === true}`);
   lines.push(`17. forceRealStock: ${fixState.forceRealStock === true}`);
+  lines.push(`17a. suppressGiphy: ${fixState.suppressGiphy === true}`);
   lines.push(`18. renderTier: ${fixState.renderTier || 'draft'}`);
   lines.push(`19. useFfmpegAssembly: ${fixState.useFfmpegAssembly !== false}`);
   lines.push(`20. harvestVideoFirst: ${fixState.harvestVideoFirst !== false}`);

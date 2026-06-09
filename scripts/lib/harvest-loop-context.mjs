@@ -15,6 +15,7 @@ export function harvestContextFromFixState(fixState = {}) {
     harvestNonce: fixState.harvestNonce || 0,
     mediaOffset: fixState.mediaOffset || 0,
     excludeUrls: Array.isArray(fixState.excludedUrls) ? fixState.excludedUrls : [],
+    suppressGiphy: fixState.suppressGiphy === true,
   };
 }
 
@@ -23,11 +24,15 @@ export function harvestContextFromFixState(fixState = {}) {
  * @param {object} ctx
  */
 export function harvestSessionStoragePayload(ctx) {
-  return {
+  const payload = {
     autotube_loop_harvest_nonce: String(ctx.harvestNonce || 0),
     autotube_loop_media_offset: String(ctx.mediaOffset || 0),
     autotube_loop_exclude_urls: JSON.stringify((ctx.excludeUrls || []).slice(0, 300)),
   };
+  if (ctx.suppressGiphy) {
+    payload.autotube_loop_suppress_giphy = 'true';
+  }
+  return payload;
 }
 
 /**

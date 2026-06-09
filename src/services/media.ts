@@ -48,6 +48,13 @@ function isLoopVideoFirst(): boolean {
   );
 }
 
+/** Max number of Giphy candidates to keep per segment in loop mode (0 = suppressed). */
+function loopMaxGiphyPerSegment(): number {
+  if (!isLoopFastMode() || typeof sessionStorage === 'undefined') return Infinity;
+  if (sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true') return 0;
+  return 2;
+}
+
 function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<string> } {
   if (!isLoopFastMode() || typeof sessionStorage === 'undefined') {
     return { offset: 0, nonce: 0, exclude: new Set() };
@@ -660,6 +667,46 @@ export function scoreCandidate(
     const altHasQueryWord = qWords.some((w) => meta.includes(w));
     if (qWords.length >= 2 && !altHasQueryWord) {
       score -= 80;
+    }
+  }
+
+  // 9e. Low-signal aggregate source penalties — Pinterest, tier lists, unrelated maps/hydration
+  {
+    const srcLower = (c.sourceUrl || c.url || '').toLowerCase();
+    const topicLower = (_topicContext.resolvedTitle || _topicContext.topic || '').toLowerCase();
+
+    // Pinterest: pin-board aggregator returns low-res reposts with no editorial context
+    if (/pinterest\.com|pinimg\.com/i.test(srcLower) || /pinterest\.com|pinimg\.com/i.test(urlLower)) {
+      score -= 400;
+    }
+
+    // Tier-list ranking graphics — almost never usable B-roll
+    if (/\btier\s*list\b/i.test(meta)) {
+      score -= 300;
+    }
+
+    // Static map screenshots when the topic is not about geography / locations
+    if (
+      /openstreetmap\.org|static.?map/i.test(srcLower) &&
+      !/\bmap\b|\bgeograph|\blocation\b|\bstreet\b/.test(topicLower)
+    ) {
+      score -= 350;
+    }
+
+    // Hydration / water-bottle lifestyle when topic is not health/fitness/drinks
+    if (
+      /\bhydration\b|\bwater\s+bottle\b/i.test(meta) &&
+      !/\bhydrat|\bdrink|\bfitness\b|\bhealth\b|\bwellness\b/.test(topicLower)
+    ) {
+      score -= 250;
+    }
+
+    // Royalty-free children stock photos when topic is not about kids/education
+    if (
+      /royalty.{0,5}free\s+(?:kids?|child(?:ren)?)|(?:kids?|children)\s+stock/i.test(meta) &&
+      !/\bkid|\bchild|\byouth\b|\beducation\b/.test(topicLower)
+    ) {
+      score -= 300;
     }
   }
 
@@ -2243,6 +2290,23 @@ export async function sourceSegmentMedia(
     const rebuildUniqueCandidates = () => {
       uniqueCandidates = allCandidates.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index);
     };
+
+    // Loop mode: cap giphy candidates per segment to prevent visual monotony.
+    // Keep up to loopMaxGiphyPerSegment() highest-scored giphy results; demote the rest.
+    if (loopMin > 0) {
+      const maxGiphy = loopMaxGiphyPerSegment();
+      const giphyOverflow = allCandidates
+        .filter((c) => c.source === 'giphy')
+        .sort((a, b) => b.finalScore - a.finalScore)
+        .slice(maxGiphy)
+        .map((c) => c.url);
+      if (giphyOverflow.length > 0) {
+        const overflow = new Set(giphyOverflow);
+        allCandidates = allCandidates.filter((c) => !overflow.has(c.url));
+        rebuildUniqueCandidates();
+      }
+    }
+
     const excludedUrls = new Set<string>();
     const blockedUrlsForPick = () => (
       loopMin > 0

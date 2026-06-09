@@ -57,6 +57,23 @@ function isLoopFastMode(): boolean {
   return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
 }
 
+function loopMinAssetsPerSegment(): number {
+  if (!isLoopFastMode() || typeof sessionStorage === 'undefined') return 0;
+  const raw = sessionStorage.getItem('autotube_loop_min_assets');
+  const parsed = raw ? parseInt(raw, 10) : 0;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function uniqueAssetCountForSegment(media: MediaAsset[], segmentId: string): number {
+  const urls = new Set<string>();
+  for (const asset of media) {
+    if (asset.segmentId !== segmentId) continue;
+    const key = (asset.url || '').split('?')[0];
+    if (key) urls.add(key);
+  }
+  return urls.size;
+}
+
 export interface ProgressCallbacks {
   setProcessingProgress: (progress: number) => void;
   setProcessingMessage: (message: string) => void;
@@ -314,6 +331,64 @@ export async function executeSourceMedia(
     }
 
     await new Promise((resolve) => window.setTimeout(resolve, 60));
+  }
+
+  const loopMin = loopMinAssetsPerSegment();
+  if (loopMin > 0) {
+    const MAX_TOPOFF_ROUNDS = 4;
+    for (let round = 0; round < MAX_TOPOFF_ROUNDS; round += 1) {
+      const thinSegments = activeProject.script.filter(
+        (seg) => uniqueAssetCountForSegment(media, seg.id) < loopMin,
+      );
+      if (thinSegments.length === 0) break;
+
+      logger.warn(
+        'Store',
+        `Loop harvest below ${loopMin}/seg on ${thinSegments.length} segment(s) — top-off round ${round + 1}/${MAX_TOPOFF_ROUNDS}`,
+      );
+
+      for (const segment of thinSegments) {
+        if (signal.aborted) break;
+        const segIdx = activeProject.script.findIndex((s) => s.id === segment.id);
+        const plan = visualPlans[segment.id];
+        const before = uniqueAssetCountForSegment(media, segment.id);
+        if (before >= loopMin) continue;
+
+        setProcessingProgress(90);
+        setProcessingMessage(`Top-off harvest "${segment.title}" (${before}/${loopMin})…`);
+
+        const sourced = await sourceSegmentMedia(
+          segment,
+          plan,
+          topicContext,
+          usedUrls,
+          segIdx,
+          appConfig,
+          signal,
+        );
+
+        for (const asset of sourced.assets) {
+          if (uniqueAssetCountForSegment(media, segment.id) >= loopMin) break;
+          const key = (asset.url || '').split('?')[0];
+          if (!key) continue;
+          const duplicate = media.some(
+            (m) => m.segmentId === segment.id && (m.url || '').split('?')[0] === key,
+          );
+          if (duplicate) continue;
+          media.push({ id: generateId(), segmentId: segment.id, ...asset });
+        }
+      }
+    }
+
+    for (const segment of activeProject.script) {
+      const count = uniqueAssetCountForSegment(media, segment.id);
+      if (count < 3) {
+        logger.warn(
+          'Store',
+          `Thin browser harvest: segment "${segment.title}" has ${count} assets (< 3/seg) before narration`,
+        );
+      }
+    }
   }
 
   // ── First-Segment Impact (Requirement 7.1) ──────────────────────────────

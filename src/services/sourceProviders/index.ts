@@ -260,6 +260,14 @@ function isLoopFastMode(): boolean {
   return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
 }
 
+function isLoopVideoFirst(): boolean {
+  return (
+    isLoopFastMode() &&
+    typeof sessionStorage !== 'undefined' &&
+    sessionStorage.getItem('autotube_loop_video_first') === 'true'
+  );
+}
+
 const VIDEO_PROVIDER_NAMES = new Set([
   'Bing Videos',
   'Google Videos',
@@ -272,7 +280,10 @@ const VIDEO_PROVIDER_NAMES = new Set([
 
 function providerTimeoutMs(providerName: string): number {
   if (!isLoopFastMode()) return 8_000;
-  return VIDEO_PROVIDER_NAMES.has(providerName) ? 18_000 : 8_000;
+  if (VIDEO_PROVIDER_NAMES.has(providerName)) {
+    return isLoopVideoFirst() ? 22_000 : 18_000;
+  }
+  return 8_000;
 }
 
 export function getAvailableProviders(config: AppConfig): SourceProvider[] {

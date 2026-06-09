@@ -16,6 +16,20 @@ const STOP_WORDS = new Set([
   'get', 'got', 'make', 'made', 'say', 'said', 'says', 'one', 'two', 'new', 'now', 'way',
 ]);
 
+const VIDEO_HOST_RE = /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|dailymotion\.com|tiktok\.com|archive\.org|\/api\/download-clip)/i;
+
+/** @param {object} asset */
+export function isVideoLikeAsset(asset = {}) {
+  if (asset.type === 'video') return true;
+  const url = `${asset.url || ''} ${asset.sourceUrl || ''}`;
+  return /\.(?:mp4|webm|mov)(?:[?#]|$)/i.test(url) || VIDEO_HOST_RE.test(url);
+}
+
+/** @param {object[]} media @param {string} segmentId */
+export function countSegmentVideos(media = [], segmentId) {
+  return media.filter((m) => m.segmentId === segmentId && isVideoLikeAsset(m)).length;
+}
+
 /** Generic topic words that alone should not keep an asset on-topic. */
 const WEAK_TOPIC_WORDS = new Set([
   'tiktok', 'live', 'stream', 'streamed', 'video', 'news', 'breaking', 'viral',
@@ -270,9 +284,7 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
     perSegment[seg.id] = {
       title: seg.title,
       count: uniqueUrls.size,
-      videoCount: assets.filter(
-        (m) => m.type === 'video' || /\.mp4/i.test(m.url || '') || /\/api\/download-clip/i.test(m.url || ''),
-      ).length,
+      videoCount: countSegmentVideos(project.media || [], seg.id),
     };
   }
 

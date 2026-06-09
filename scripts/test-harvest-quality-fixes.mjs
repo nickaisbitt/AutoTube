@@ -11,6 +11,8 @@ import {
   extractKeywords,
   detectGiphyDominance,
   passesTopUpRelevanceGate,
+  countSegmentVideos,
+  isVideoLikeAsset,
 } from './lib/harvest-quality.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import {
@@ -488,6 +490,23 @@ console.log('\n── 17. untilScore parameterization ──');
 
   const { applied: below7 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 7 });
   assert('At 7.5 with untilScore=7 does not trigger below-target fix', !below7.some((a) => a.includes('below 7')));
+}
+
+// ---------------------------------------------------------------------------
+// 18. countSegmentVideos — vimeo player + proxy clips
+// ---------------------------------------------------------------------------
+console.log('\n── 18. countSegmentVideos ──');
+{
+  const media = [
+    { segmentId: 's1', type: 'image', url: 'https://example.com/a.jpg' },
+    { segmentId: 's1', type: 'video', url: 'https://player.vimeo.com/video/123' },
+    { segmentId: 's1', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fa' },
+    { segmentId: 's2', type: 'video', url: 'https://www.youtube.com/watch?v=x' },
+  ];
+  assert('Vimeo player counts as video', isVideoLikeAsset(media[1]) === true);
+  assert('Proxy clip counts as video', isVideoLikeAsset(media[2]) === true);
+  assert('Segment s1 has 2 videos', countSegmentVideos(media, 's1') === 2);
+  assert('Segment s2 has 1 video', countSegmentVideos(media, 's2') === 1);
 }
 
 // ---------------------------------------------------------------------------

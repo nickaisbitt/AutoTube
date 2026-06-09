@@ -27,6 +27,23 @@ const LONG_NARRATION_BLOCK =
 export function buildShockHookLine(topic, override) {
   if (override?.trim()) return override.trim();
   const t = (topic || 'this story').replace(/\.$/, '');
+  const lower = t.toLowerCase();
+  if (/museum|louvre|heist|robbery|stolen/.test(lower)) {
+    const templates = [
+      'They robbed the Louvre on livestream — and millions watched.',
+      'A billion-dollar heist went viral on TikTok before police arrived.',
+      'The Louvre was hit in broad daylight — then TikTok made it worse.',
+    ];
+    return templates[Math.floor(Math.random() * templates.length)];
+  }
+  if (/tiktok|viral|livestream|streamed live/.test(lower)) {
+    const templates = [
+      'This went viral on TikTok before the news caught up.',
+      'Millions watched this live — then everything changed.',
+      'TikTok turned a crime scene into entertainment overnight.',
+    ];
+    return templates[Math.floor(Math.random() * templates.length)];
+  }
   const templates = [
     `${t} — and almost nobody saw it coming.`,
     `This ${t.toLowerCase()} could affect you by tomorrow.`,

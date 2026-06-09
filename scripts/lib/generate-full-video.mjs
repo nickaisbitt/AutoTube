@@ -25,6 +25,8 @@ import {
   scoreAssetRelevance,
   passesTopUpRelevanceGate,
   extractKeywords,
+  countSegmentVideos,
+  isVideoLikeAsset,
 } from './harvest-quality.mjs';
 
 export function resolveOpenRouterKey() {
@@ -222,7 +224,9 @@ const TOP_UP_VIDEO_ENDPOINTS = [
   '/api/search-bing-videos',
   '/api/search-google-videos',
   '/api/search-videos',
+  '/api/search-vimeo',
 ];
+const VIDEO_TOP_UP_QUERY_SUFFIXES = ['footage', 'news footage', 'documentary clip', 'security camera', 'live stream'];
 const TOP_UP_IMAGE_ENDPOINTS = [
   '/api/search-google-images',
   '/api/search-bing-images',
@@ -243,10 +247,26 @@ async function fetchVideoSearchResults(devServer, endpoint, query) {
   }
 }
 
+function buildVideoTopUpQueries(seg, topic, round = 0) {
+  const base = buildTopUpQuery(seg, topic, round);
+  const segKws = extractKeywords(`${seg.title || ''} ${seg.narration || ''}`, 4).join(' ');
+  const topicKws = extractKeywords(topic, 4).join(' ');
+  const core = `${segKws || seg.title} ${topicKws}`.trim();
+  return [
+    base,
+    ...VIDEO_TOP_UP_QUERY_SUFFIXES.map((suffix) => `${core} ${suffix}`.trim()),
+    `${topic} ${seg.title} b-roll`.trim(),
+  ].filter((q, i, arr) => q && arr.indexOf(q) === i);
+}
+
+function toRelativeClipProxyUrl(devServer, pageUrl, durationSec = 10) {
+  return `/api/download-clip?url=${encodeURIComponent(pageUrl)}&duration=${durationSec}`;
+}
+
 function buildVideoTopUpAsset(r, devServer, seg, query, sourceLabel) {
   const pageUrl = r.url || r.content || r.sourceUrl;
   if (!pageUrl || !/^https?:\/\//i.test(pageUrl)) return null;
-  const clipUrl = `${devServer}/api/download-clip?url=${encodeURIComponent(pageUrl)}&duration=10`;
+  const clipUrl = toRelativeClipProxyUrl(devServer, pageUrl, 10);
   return {
     segmentId: seg.id,
     type: 'video',
@@ -300,11 +320,30 @@ async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topi
   return true;
 }
 
-async function rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords) {
+async function rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords, options = {}) {
   let volume = evaluateHarvestVolume(project, minPerSegment);
-  if (volume.pass) return;
+  const needsVideoQuota = options.harvestVideoFirst && (options.minVideosPerSegment || 0) > 0;
+  const videoShort = needsVideoQuota && (project.script || []).some(
+    (s) => countSegmentVideos(project.media, s.id) < options.minVideosPerSegment,
+  );
+  if (volume.pass && !videoShort) return;
 
   const segments = Object.fromEntries((project.script || []).map((s) => [s.id, s]));
+
+  if (needsVideoQuota && videoShort) {
+    await ensureVideoQuotaPerSegment(
+      project,
+      devServer,
+      report,
+      topic,
+      topicKeywords,
+      options.minVideosPerSegment,
+    );
+    volume = evaluateHarvestVolume(project, minPerSegment);
+    if (volume.pass && !(project.script || []).some(
+      (s) => countSegmentVideos(project.media, s.id) < options.minVideosPerSegment,
+    )) return;
+  }
   const weak = new Set([
     'tiktok', 'live', 'stream', 'streamed', 'video', 'news', 'breaking', 'viral',
     'social', 'media', 'online', 'watch', 'footage', 'clip', 'trending', 'update',
@@ -373,50 +412,14 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
   const topic = project.topic || project.title || '';
   const topicKeywords = extractKeywords(topic, 12);
   const harvestVideoFirst = options.harvestVideoFirst !== false;
-  const minVideosPerSegment = harvestVideoFirst ? 2 : 0;
+  const minVideosPerSegment = harvestVideoFirst ? Math.max(2, options.minVideosPerSegment || 2) : 0;
+
+  if (harvestVideoFirst && minVideosPerSegment > 0) {
+    await ensureVideoQuotaPerSegment(project, devServer, report, topic, topicKeywords, minVideosPerSegment);
+  }
 
   for (const seg of segments) {
     let uniqueCount = segmentUniqueCount(project, seg.id);
-    let videoCount = (project.media || []).filter(
-      (m) => m.segmentId === seg.id && (m.type === 'video' || isProxiedClipUrl(m.url)),
-    ).length;
-
-    if (harvestVideoFirst && videoCount < minVideosPerSegment) {
-      for (let round = 0; round < TOP_UP_VIDEO_ENDPOINTS.length && videoCount < minVideosPerSegment; round += 1) {
-        const q = buildTopUpQuery(seg, topic, round + 2);
-        const results = await fetchVideoSearchResults(devServer, TOP_UP_VIDEO_ENDPOINTS[round], q);
-        for (const r of results) {
-          const draft = buildVideoTopUpAsset(r, devServer, seg, q, r.source || 'Video search');
-          if (!draft) continue;
-          const key = draft.url.split('?')[0];
-          const alreadyInSeg = (project.media || []).some(
-            (m) => m.segmentId === seg.id && (m.url || '').split('?')[0] === key,
-          );
-          if (alreadyInSeg) continue;
-          if (!passesTopUpRelevanceGate(draft, seg, topic, topicKeywords)) continue;
-
-          const probeSanitized = [];
-          if (!(await tryKeepVideoAsset(draft, devServer, probeSanitized, report, { loopMode: true }))) continue;
-          const kept = probeSanitized[0] || draft;
-
-          project.media.push({
-            ...kept,
-            id: `topup-vid-${seg.id}-${videoCount}`,
-          });
-          uniqueCount += 1;
-          videoCount += 1;
-          report.volumeTopUp = report.volumeTopUp || [];
-          report.volumeTopUp.push({
-            segmentId: seg.id,
-            url: kept.sourceUrl || kept.url,
-            endpoint: TOP_UP_VIDEO_ENDPOINTS[round],
-            relevance: scoreAssetRelevance(kept, seg, topic, topicKeywords),
-            type: 'video',
-          });
-          if (videoCount >= minVideosPerSegment) break;
-        }
-      }
-    }
 
     for (let round = 0; round < TOP_UP_IMAGE_ENDPOINTS.length && uniqueCount < minPerSegment; round += 1) {
       const q = buildTopUpQuery(seg, topic, round);
@@ -434,7 +437,14 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
     }
   }
 
-  await rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords);
+  if (harvestVideoFirst && minVideosPerSegment > 0) {
+    await ensureVideoQuotaPerSegment(project, devServer, report, topic, topicKeywords, minVideosPerSegment);
+  }
+
+  await rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords, {
+    minVideosPerSegment,
+    harvestVideoFirst,
+  });
 }
 
 function isJunkHarvestUrl(url) {
@@ -455,14 +465,29 @@ function isJunkHarvestUrl(url) {
   );
 }
 
+function normalizeKeptVideoUrl(asset, devServer) {
+  const pageUrl = asset.sourceUrl || asset.url || '';
+  if (isLikelyVideoHost(pageUrl) || isLikelyVideoHost(asset.url)) {
+    const target = isLikelyVideoHost(pageUrl) ? pageUrl : asset.url;
+    return toRelativeClipProxyUrl(devServer, target, asset.duration || 10);
+  }
+  const downloadUrl = resolveVideoDownloadUrl(asset, devServer);
+  if (isProxiedClipUrl(downloadUrl)) {
+    const rel = downloadUrl.replace(devServer, '');
+    return rel.startsWith('/api/') ? rel : downloadUrl;
+  }
+  return asset.url;
+}
+
 async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode = false } = {}) {
   const downloadUrl = resolveVideoDownloadUrl(asset, devServer);
-  const proxied = isProxiedClipUrl(downloadUrl);
+  const proxied = isProxiedClipUrl(downloadUrl) || isLikelyVideoHost(asset.url) || isLikelyVideoHost(asset.sourceUrl);
   const direct = isDirectVideoUrl(asset.url) && !proxied;
   const reasonPrefix = loopMode ? 'loop mode: ' : '';
+  const keepUrl = normalizeKeptVideoUrl(asset, devServer);
 
   if (proxied) {
-    sanitized.push({ ...asset, type: 'video', url: downloadUrl });
+    sanitized.push({ ...asset, type: 'video', url: keepUrl, sourceUrl: asset.sourceUrl || asset.url });
     report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}proxy clip (no probe)` });
     return true;
   }
@@ -470,7 +495,7 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
   if (direct) {
     const clipOk = await canFetch(downloadUrl, { timeoutMs: 15000, minBytes: 2048, expectVideo: true });
     if (clipOk) {
-      sanitized.push({ ...asset, type: 'video', url: downloadUrl });
+      sanitized.push({ ...asset, type: 'video', url: keepUrl, sourceUrl: asset.sourceUrl || asset.url });
       report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}direct video URL` });
       return true;
     }
@@ -478,12 +503,68 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
 
   const clipOk = await canFetch(downloadUrl, { timeoutMs: 15000, minBytes: 2048, expectVideo: true });
   if (clipOk) {
-    const keepUrl = downloadUrl.startsWith('http') ? downloadUrl : asset.url;
-    sanitized.push({ ...asset, type: 'video', url: keepUrl });
+    sanitized.push({ ...asset, type: 'video', url: keepUrl, sourceUrl: asset.sourceUrl || asset.url });
     report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}clip probe OK` });
     return true;
   }
   return false;
+}
+
+async function addVideoTopUpCandidate(project, seg, draft, devServer, endpoint, report, topic, topicKeywords) {
+  const key = (draft.sourceUrl || draft.url || '').split('?')[0];
+  const alreadyInSeg = (project.media || []).some(
+    (m) => m.segmentId === seg.id && `${m.sourceUrl || m.url || ''}`.split('?')[0] === key,
+  );
+  if (alreadyInSeg) return false;
+  if (!passesTopUpRelevanceGate(draft, seg, topic, topicKeywords)) return false;
+
+  const probeSanitized = [];
+  if (!(await tryKeepVideoAsset(draft, devServer, probeSanitized, report, { loopMode: true }))) return false;
+  const kept = probeSanitized[0] || draft;
+  const videoCount = countSegmentVideos(project.media, seg.id);
+
+  project.media.push({
+    ...kept,
+    id: `topup-vid-${seg.id}-${videoCount}`,
+  });
+  report.volumeTopUp = report.volumeTopUp || [];
+  report.volumeTopUp.push({
+    segmentId: seg.id,
+    url: kept.sourceUrl || kept.url,
+    endpoint,
+    relevance: scoreAssetRelevance(kept, seg, topic, topicKeywords),
+    type: 'video',
+  });
+  return true;
+}
+
+async function ensureVideoQuotaPerSegment(project, devServer, report, topic, topicKeywords, minVideosPerSegment = 2) {
+  const segments = project.script || [];
+  for (const seg of segments) {
+    let videoCount = countSegmentVideos(project.media, seg.id);
+    if (videoCount >= minVideosPerSegment) continue;
+
+    const queries = buildVideoTopUpQueries(seg, topic, 0);
+    let attempts = 0;
+    const maxAttempts = TOP_UP_VIDEO_ENDPOINTS.length * queries.length;
+
+    for (const q of queries) {
+      if (videoCount >= minVideosPerSegment) break;
+      for (const endpoint of TOP_UP_VIDEO_ENDPOINTS) {
+        if (videoCount >= minVideosPerSegment || attempts >= maxAttempts) break;
+        attempts += 1;
+        const results = await fetchVideoSearchResults(devServer, endpoint, q);
+        for (const r of results) {
+          if (videoCount >= minVideosPerSegment) break;
+          const draft = buildVideoTopUpAsset(r, devServer, seg, q, r.source || 'Video search');
+          if (!draft) continue;
+          if (await addVideoTopUpCandidate(project, seg, draft, devServer, endpoint, report, topic, topicKeywords)) {
+            videoCount = countSegmentVideos(project.media, seg.id);
+          }
+        }
+      }
+    }
+  }
 }
 
 async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}) {
@@ -629,6 +710,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   if (loopMode) {
     await topUpHarvestVolume(project, devServer, minPerSegment, report, {
       harvestVideoFirst: options.harvestVideoFirst !== false,
+      minVideosPerSegment: options.minVideosPerSegment || 2,
     });
     report.afterTopUp = project.media.length;
   }
@@ -1016,6 +1098,7 @@ export async function generateFullVideo(options) {
         loopMode: true,
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
         harvestVideoFirst: fixState.harvestVideoFirst !== false,
+        minVideosPerSegment: fixState.minVideosPerSegment || 2,
       });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
       if (mediaReport.relevanceDropped?.length) {

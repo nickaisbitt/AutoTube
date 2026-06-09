@@ -60,6 +60,13 @@ export function validateLoopVideo(videoPath) {
           error: `A/V duration mismatch: video ${manifest.videoSec}s vs mux ${manifest.muxDurationSec}s`,
         };
       }
+      const placeholderPct = manifest.placeholderPct ?? 0;
+      if (placeholderPct > 50) {
+        return {
+          valid: false,
+          error: `render is ${placeholderPct}% placeholders (corrupt/thin output)`,
+        };
+      }
     } catch {
       /* manifest optional */
     }

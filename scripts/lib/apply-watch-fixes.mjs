@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
-import { detectGiphyDominance } from './harvest-quality.mjs';
+import { detectGiphyDominance, countSegmentVideos } from './harvest-quality.mjs';
 
 const CUT_FLOOR = 0.5;
 
@@ -182,8 +182,9 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
   if (visualVariety <= 5) {
     s.harvestVideoFirst = true;
     s.suppressGiphy = true;
+    s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
     s.cutIntervalSec = Math.max(CUT_FLOOR, s.cutIntervalSec ?? CUT_FLOOR);
-    applied.push(`3a. Visual variety ${visualVariety}/10 → harvestVideoFirst + suppressGiphy (cuts floor ${CUT_FLOOR}s)`);
+    applied.push(`3a. Visual variety ${visualVariety}/10 → harvestVideoFirst + suppressGiphy + ≥${s.minVideosPerSegment} video/seg`);
   } else if (visualVariety <= 6) {
     s.suppressGiphy = true;
     applied.push(`3a. Visual variety ${visualVariety}/10 → suppressGiphy=true for next harvest`);
@@ -192,13 +193,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
   const harvestProject = project || loadLastProject();
   if (harvestProject?.media?.length) {
     const segIds = (harvestProject.script || []).map((seg) => seg.id);
-    const videoQuotaMet = segIds.length > 0 && segIds.every((id) => {
-      const assets = harvestProject.media.filter((m) => m.segmentId === id);
-      const videoCount = assets.filter(
-        (m) => m.type === 'video' || (m.url || '').includes('/api/download-clip'),
-      ).length;
-      return videoCount >= 2;
-    });
+    const videoQuotaMet = segIds.length > 0 && segIds.every((id) => countSegmentVideos(harvestProject.media, id) >= 2);
     if (videoQuotaMet && s.suppressGiphy === true) {
       s.suppressGiphy = false;
       applied.push('3c. Video quota met (≥2/seg) → suppressGiphy cleared');

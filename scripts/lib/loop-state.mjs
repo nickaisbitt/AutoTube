@@ -36,6 +36,7 @@ export const DEFAULT_FIX_STATE = {
   whisperAlign: false,
   brollPlacement: true,
   suppressGiphy: false,
+  minVideosPerSegment: 2,
 };
 
 /**

@@ -2124,7 +2124,7 @@ function rankShotCandidates(
         if (meta.includes(term)) score += 10;
       }
 
-      if (candidate.type === 'video') score += 20;
+      if (candidate.type === 'video') score += isLoopVideoFirst() ? 45 : 20;
       // MR-2 fix: prefer the specified type (was inverted — rewarding wrong type)
       if (preferredType && candidate.type === preferredType) score += 18;
       if (preferredType && candidate.type !== preferredType) score -= 4;
@@ -2593,7 +2593,7 @@ export async function sourceSegmentMedia(
     }
 
     if (isLoopVideoFirst()) {
-      const loopMinVideos = 2;
+      const loopMinVideos = 3;
       let videoCount = finalAssets.filter((asset) => asset.type === 'video').length;
       const videoShot = shotsToHarvest[0];
       let videoSearchRound = 0;

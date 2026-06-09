@@ -11,7 +11,8 @@ function escapeDrawtext(text) {
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "'\\''")
     .replace(/:/g, '\\:')
-    .replace(/%/g, '\\%');
+    .replace(/%/g, '\\%')
+    .replace(/;/g, '\\;');
 }
 
 function escapeAss(text) {
@@ -53,15 +54,17 @@ export function overlayHookText(videoPath, project, options = {}) {
   const words = hookText.trim().toUpperCase().split(/\s+/).filter(Boolean);
   const line1 = words.slice(0, 4).join(' ');
   const line2 = words.slice(4, 8).join(' ');
-  const fontSize = Math.min(hookFontPx(h), Math.round(h * 0.075));
-  const durationSec = options.durationSec ?? 3.2;
-  const border = Math.max(4, Math.round(fontSize * 0.06));
+  const fontSize = hookFontPx(h);
+  const durationSec = options.durationSec ?? 4.0;
+  const border = Math.max(6, Math.round(fontSize * 0.10));
+  const boxBorder = Math.round(fontSize * 0.30);
+  const dtCommon = `fontsize=${fontSize}:fontcolor=white:borderw=${border}:bordercolor=black:box=1:boxcolor=black@0.65:boxborderw=${boxBorder}`;
   const filters = [
-    `drawtext=text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=white:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.28:enable='between(t\\,0\\,${durationSec})'`,
+    `drawtext=text='${escapeDrawtext(line1)}':${dtCommon}:x=(w-text_w)/2:y=h*0.25:enable='between(t\\,0\\,${durationSec})'`,
   ];
   if (line2) {
     filters.push(
-      `drawtext=text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=white:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
+      `drawtext=text='${escapeDrawtext(line2)}':${dtCommon}:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
     );
   }
   const vf = filters.join(',');
@@ -73,7 +76,9 @@ export function overlayHookText(videoPath, project, options = {}) {
     { encoding: 'utf8', timeout: 300_000 },
   );
   if (r.status !== 0 || !existsSync(tmpOut)) {
-    return { ok: false, error: (r.stderr || '').slice(-300) };
+    const errMsg = (r.stderr || '').slice(-800);
+    console.error(`  [ffmpeg] hook overlay FAILED (status=${r.status}): ${errMsg}`);
+    return { ok: false, error: errMsg };
   }
   copyFileSync(tmpOut, videoPath);
   try {
@@ -186,7 +191,9 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
   const hook = overlayHookText(videoPath, project);
   results.hook = hook;
   if (hook.ok) {
-    console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}..."`);
+    console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}"`);
+  } else {
+    console.error(`  [ffmpeg] hook overlay FAILED: ${hook.error}`);
   }
   return results;
 }

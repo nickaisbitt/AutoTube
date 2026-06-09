@@ -13,6 +13,7 @@ import {
   passesTopUpRelevanceGate,
   countSegmentVideos,
   isVideoLikeAsset,
+  isUnreliableVideoHost,
 } from './lib/harvest-quality.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import {
@@ -507,6 +508,8 @@ console.log('\n── 18. countSegmentVideos ──');
   assert('Proxy clip counts as video', isVideoLikeAsset(media[2]) === true);
   assert('Segment s1 has 2 videos', countSegmentVideos(media, 's1') === 2);
   assert('Segment s2 has 1 video', countSegmentVideos(media, 's2') === 1);
+  assert('Instagram blocked as unreliable video host', isUnreliableVideoHost('https://www.instagram.com/p/abc') === true);
+  assert('YouTube not blocked', isUnreliableVideoHost('https://www.youtube.com/watch?v=abc') === false);
 }
 
 // ---------------------------------------------------------------------------

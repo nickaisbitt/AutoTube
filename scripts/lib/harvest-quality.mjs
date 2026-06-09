@@ -18,8 +18,17 @@ const STOP_WORDS = new Set([
 
 const VIDEO_HOST_RE = /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|dailymotion\.com|tiktok\.com|archive\.org|\/api\/download-clip)/i;
 
+/** Hosts that often fail download-clip proxy and become ffmpeg placeholders. */
+const UNRELIABLE_VIDEO_HOST_RE = /(?:instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch|news\.artnet\.com\/art-world\/)/i;
+
+/** @param {string} url */
+export function isUnreliableVideoHost(url = '') {
+  return UNRELIABLE_VIDEO_HOST_RE.test(url || '');
+}
+
 /** @param {object} asset */
 export function isVideoLikeAsset(asset = {}) {
+  if (isUnreliableVideoHost(`${asset.url || ''} ${asset.sourceUrl || ''}`)) return false;
   if (asset.type === 'video') return true;
   const url = `${asset.url || ''} ${asset.sourceUrl || ''}`;
   return /\.(?:mp4|webm|mov)(?:[?#]|$)/i.test(url) || VIDEO_HOST_RE.test(url);

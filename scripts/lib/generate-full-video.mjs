@@ -27,6 +27,7 @@ import {
   extractKeywords,
   countSegmentVideos,
   isVideoLikeAsset,
+  isUnreliableVideoHost,
 } from './harvest-quality.mjs';
 
 export function resolveOpenRouterKey() {
@@ -266,6 +267,7 @@ function toRelativeClipProxyUrl(devServer, pageUrl, durationSec = 10) {
 function buildVideoTopUpAsset(r, devServer, seg, query, sourceLabel) {
   const pageUrl = r.url || r.content || r.sourceUrl;
   if (!pageUrl || !/^https?:\/\//i.test(pageUrl)) return null;
+  if (isUnreliableVideoHost(pageUrl)) return null;
   const clipUrl = toRelativeClipProxyUrl(devServer, pageUrl, 10);
   return {
     segmentId: seg.id,
@@ -372,6 +374,29 @@ async function rebalanceFailingSegments(project, devServer, minPerSegment, repor
           }
         }
         if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
+      }
+    }
+
+    if (needsVideoQuota && countSegmentVideos(project.media, fail.segmentId) < options.minVideosPerSegment) {
+      const donorVideo = (project.media || []).find(
+        (m) => m.segmentId !== fail.segmentId
+          && isVideoLikeAsset(m)
+          && countSegmentVideos(project.media, m.segmentId) > options.minVideosPerSegment,
+      );
+      if (donorVideo) {
+        project.media.push({
+          ...donorVideo,
+          id: `topup-vid-share-${fail.segmentId}-${countSegmentVideos(project.media, fail.segmentId)}`,
+          segmentId: fail.segmentId,
+          source: `${donorVideo.source || 'Search'} (video rebalance)`,
+        });
+        report.volumeTopUpShare = report.volumeTopUpShare || [];
+        report.volumeTopUpShare.push({
+          from: donorVideo.segmentId,
+          to: fail.segmentId,
+          url: donorVideo.sourceUrl || donorVideo.url,
+          type: 'video',
+        });
       }
     }
 
@@ -487,8 +512,20 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
   const keepUrl = normalizeKeptVideoUrl(asset, devServer);
 
   if (proxied) {
+    if (isUnreliableVideoHost(`${asset.url || ''} ${asset.sourceUrl || ''}`)) {
+      report.dropped.push({ url: asset.url, reason: 'unreliable video host (instagram/x/article)' });
+      return false;
+    }
+    const probeUrl = downloadUrl.startsWith('http') ? downloadUrl : `${devServer}${keepUrl}`;
+    const clipOk = loopMode
+      ? await canFetch(probeUrl, { timeoutMs: 12000, minBytes: 1024, expectVideo: true })
+      : true;
+    if (!clipOk) {
+      report.dropped.push({ url: asset.url, reason: 'proxy clip probe failed' });
+      return false;
+    }
     sanitized.push({ ...asset, type: 'video', url: keepUrl, sourceUrl: asset.sourceUrl || asset.url });
-    report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}proxy clip (no probe)` });
+    report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}proxy clip probe OK` });
     return true;
   }
 

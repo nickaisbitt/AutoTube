@@ -2099,7 +2099,7 @@ async function harvestMediaWithSafetyNet(
   return { candidates: filteredScored, trace };
 }
 
-function rankShotCandidates(
+export function rankShotCandidates(
   candidates: MediaCandidate[],
   shot: { concept: string; queries: string[]; vibe: string },
   segmentIndex: number,
@@ -2124,10 +2124,12 @@ function rankShotCandidates(
         if (meta.includes(term)) score += 10;
       }
 
-      if (candidate.type === 'video') score += isLoopVideoFirst() ? 45 : 20;
+      const videoFirst = isLoopVideoFirst();
+      if (candidate.type === 'video') score += videoFirst ? 75 : 20;
+      if (videoFirst && candidate.type === 'image') score -= 30;
       // MR-2 fix: prefer the specified type (was inverted — rewarding wrong type)
-      if (preferredType && candidate.type === preferredType) score += 18;
-      if (preferredType && candidate.type !== preferredType) score -= 4;
+      if (preferredType && candidate.type === preferredType) score += videoFirst ? 40 : 18;
+      if (preferredType && candidate.type !== preferredType) score -= videoFirst ? 35 : 4;
 
       if (shot.concept.toLowerCase().includes('chart') && /(chart|graph|market|stock|numbers|data)/i.test(meta)) score += 25;
       if (shot.concept.toLowerCase().includes('portrait') && /(portrait|speaker|interview|person|people)/i.test(meta)) score += 25;
@@ -2388,12 +2390,13 @@ export async function sourceSegmentMedia(
     for (let i = 0; i < shotsToHarvest.length; i++) {
       const shot = shotsToHarvest[i];
       const shotType = i === 0 ? 'primary' : 'secondary';
-      const preferredType =
-        i === 0 && isLoopVideoFirst()
-          ? 'video'
-          : i > 0
-            ? finalAssets[i - 1]?.type
-            : undefined;
+      const videoFirst = isLoopVideoFirst();
+      const videosSoFar = finalAssets.filter((a) => a.type === 'video').length;
+      const preferredType = videoFirst && videosSoFar < 2
+        ? 'video'
+        : i > 0 && !videoFirst
+          ? finalAssets[i - 1]?.type
+          : undefined;
       let best = await pickDistinctShotCandidate(
         uniqueCandidates,
         shot,
@@ -2521,12 +2524,14 @@ export async function sourceSegmentMedia(
     const maxDeficitHarvests = loopMin > 0 ? 10 : 0;
     while (finalAssets.length < targetAssetsPerSegment && !signal?.aborted) {
       const fallbackShot = shotsToHarvest[1] || shotsToHarvest[0];
+      const needMoreVideo = isLoopVideoFirst()
+        && finalAssets.filter((a) => a.type === 'video').length < 2;
       const extra = await pickDistinctShotCandidate(
         uniqueCandidates,
         fallbackShot,
         segmentIndex,
         excludedUrls,
-        undefined,
+        needMoreVideo ? 'video' : undefined,
         blockedUrlsForPick(),
         signal,
       );
@@ -2593,7 +2598,7 @@ export async function sourceSegmentMedia(
     }
 
     if (isLoopVideoFirst()) {
-      const loopMinVideos = 3;
+      const loopMinVideos = Math.max(2, Math.min(3, targetAssetsPerSegment));
       let videoCount = finalAssets.filter((asset) => asset.type === 'video').length;
       const videoShot = shotsToHarvest[0];
       let videoSearchRound = 0;

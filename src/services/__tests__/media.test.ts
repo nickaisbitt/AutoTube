@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { scoreCandidate, searchDDGLocal, searchWikimedia, searchDDGVideos, parseDurationToSeconds } from '../media';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { scoreCandidate, searchDDGLocal, searchWikimedia, searchDDGVideos, parseDurationToSeconds, rankShotCandidates, resetUsedUrlsMap } from '../media';
 import type { MediaCandidate } from '../media';
 import type { TopicContext } from '../../types';
 
@@ -546,5 +546,67 @@ describe('scoreCandidate — emotional clarity scoring', () => {
     const score = scoreCandidate(candidate, baseTopicContext);
     expect(Number.isFinite(score)).toBe(true);
     expect(typeof score).toBe('number');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rankShotCandidates — loop video-first preference
+// ---------------------------------------------------------------------------
+
+describe('rankShotCandidates video-first', () => {
+  const shot = { concept: 'news footage', queries: ['museum heist'], vibe: 'urgent' };
+  const excludedUrls = new Set<string>();
+  const blockedUrls = new Set<string>();
+
+  beforeEach(() => {
+    resetUsedUrlsMap();
+    sessionStorage.clear();
+    sessionStorage.setItem('autotube_loop_fast_mode', 'true');
+    sessionStorage.setItem('autotube_loop_video_first', 'true');
+  });
+
+  afterEach(() => {
+    sessionStorage.clear();
+    resetUsedUrlsMap();
+  });
+
+  it('prefers video over higher-scoring image when loop video-first is on', () => {
+    const image: MediaCandidate = {
+      ...baseCandidate,
+      url: 'https://example.com/still.jpg',
+      alt: 'museum heist news',
+      finalScore: 200,
+      type: 'image',
+    };
+    const video: MediaCandidate = {
+      ...baseCandidate,
+      url: 'https://example.com/clip.mp4',
+      alt: 'museum heist footage',
+      finalScore: 120,
+      type: 'video',
+    };
+
+    const ranked = rankShotCandidates([image, video], shot, 0, excludedUrls, 'video', blockedUrls);
+    expect(ranked[0]?.type).toBe('video');
+  });
+
+  it('applies stronger preferredType bonus for video in video-first mode', () => {
+    const weakVideo: MediaCandidate = {
+      ...baseCandidate,
+      url: 'https://example.com/a.mp4',
+      alt: 'heist clip',
+      finalScore: 80,
+      type: 'video',
+    };
+    const strongImage: MediaCandidate = {
+      ...baseCandidate,
+      url: 'https://example.com/b.jpg',
+      alt: 'heist photo',
+      finalScore: 100,
+      type: 'image',
+    };
+
+    const ranked = rankShotCandidates([strongImage, weakVideo], shot, 0, excludedUrls, 'video', blockedUrls);
+    expect(ranked[0]?.type).toBe('video');
   });
 });

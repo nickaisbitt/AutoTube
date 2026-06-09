@@ -2,14 +2,21 @@
  * Single source of truth for B-roll edit timelines (loop + ffmpeg assembly).
  * Always use post-TTS segment.duration when building for render.
  */
+import { normalizeUrlKey } from './harvest-loop-context.mjs';
 
 /**
  * @param {object} project
- * @param {{ cutIntervalSec?: number, reason?: string }} [options]
+ * @param {{ cutIntervalSec?: number, reason?: string, preferVideo?: boolean, minVideosFirst?: number }} [options]
  * @returns {Array<{ segmentId: string, startSec: number, endSec: number, assetId: string, reason: string }>}
  */
 function urlKey(asset) {
-  return (asset?.url || '').split('?')[0] || asset?.id || '';
+  const normalized = normalizeUrlKey(asset?.url, asset?.sourceUrl);
+  if (normalized) return normalized;
+  return asset?.id || (asset?.url || '').split('?')[0] || '';
+}
+
+function isVideoAsset(asset) {
+  return asset?.type === 'video' || /\/api\/download-clip/i.test(asset?.url || '');
 }
 
 function uniqueAssetsByUrl(assets) {
@@ -24,25 +31,42 @@ function uniqueAssetsByUrl(assets) {
   return out;
 }
 
+/** Put motion clips before stills so early cuts show real video when video-first is on. */
+export function orderAssetsVideoFirst(assets, minVideosFirst = 2) {
+  const unique = uniqueAssetsByUrl(assets);
+  if (minVideosFirst <= 0) return unique;
+  const videos = unique.filter(isVideoAsset);
+  const images = unique.filter((a) => !isVideoAsset(a));
+  if (!videos.length) return unique;
+  return [...videos, ...images];
+}
+
 export function buildEditTimeline(project, options = {}) {
   const cut = options.cutIntervalSec ?? 1.25;
   const reason = options.reason ?? 'heuristic placement';
+  const preferVideo = options.preferVideo === true;
+  const minVideosFirst = options.minVideosFirst ?? 2;
   const entries = [];
-  const globalPool = uniqueAssetsByUrl(project.media || []);
+  const globalPool = orderAssetsVideoFirst(project.media || [], preferVideo ? minVideosFirst : 0);
 
   for (const seg of project.script || []) {
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
     if (!assets.length) {
       assets = globalPool.map((m) => ({ ...m, segmentId: seg.id }));
     }
+    if (preferVideo) {
+      assets = orderAssetsVideoFirst(assets, minVideosFirst);
+    }
     if (!assets.length) continue;
 
+    const videoPool = assets.filter(isVideoAsset);
     const duration = seg.duration || 20;
     const interval = seg.type === 'intro' ? Math.min(cut, 3) : cut;
     let t = 0;
     let ai = 0;
     let lastAssetId = null;
     let lastUrl = null;
+    let videoSlotsUsed = 0;
     while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
       let asset = assets[ai % assets.length];
@@ -56,6 +80,11 @@ export function buildEditTimeline(project, options = {}) {
         }
         return pool[ai % pool.length];
       };
+
+      if (preferVideo && videoPool.length && videoSlotsUsed < minVideosFirst) {
+        asset = pickFrom(videoPool);
+        videoSlotsUsed += 1;
+      }
 
       while (
         attempts < Math.max(assets.length, globalPool.length) &&
@@ -102,7 +131,7 @@ export function mediaForSegment(project, segmentId) {
 /**
  * Rebuild editTimeline when sanitize/balance invalidated asset IDs.
  * @param {object} project
- * @param {{ cutIntervalSec?: number }} [options]
+ * @param {{ cutIntervalSec?: number, preferVideo?: boolean }} [options]
  */
 export function validateEditTimeline(project, options = {}) {
   const mediaIds = new Set((project.media || []).map((m) => m.id));
@@ -117,6 +146,7 @@ export function validateEditTimeline(project, options = {}) {
     project.editTimeline = buildEditTimeline(project, {
       cutIntervalSec: options.cutIntervalSec ?? 1.25,
       reason: 'post-sanitize rebuild',
+      preferVideo: options.preferVideo === true,
     });
   }
   return { rebuilt, staleCount: stale, staleRatio, clipCount: project.editTimeline.length };

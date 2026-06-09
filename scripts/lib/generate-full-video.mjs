@@ -32,6 +32,7 @@ import {
   isVideoLikeAsset,
   isUnreliableVideoHost,
   isTrustedVideoHost,
+  LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
 } from './harvest-quality.mjs';
 
 export { loopMediaTimeoutMs } from './harvest-quality.mjs';
@@ -836,7 +837,10 @@ export async function generateFullVideo(options) {
   const log = (msg) => {
     if (!options.quiet) console.log(msg);
   };
-  const loopMinAssets = Math.max(2, Math.min(8, fixState.minAssetsPerSegment || 6));
+  const loopMinAssets = Math.max(
+    2,
+    Math.min(LOOP_MAX_MIN_ASSETS_PER_SEGMENT, fixState.minAssetsPerSegment || LOOP_MAX_MIN_ASSETS_PER_SEGMENT),
+  );
 
   if (!(await checkDevServer(devServer))) {
     return { ok: false, error: `Dev server not reachable at ${devServer}`, topic, outDir };
@@ -1133,25 +1137,37 @@ export async function generateFullVideo(options) {
     if (realHarvest && preNarrationProject?.script?.length) {
       const volume = evaluateHarvestVolume(preNarrationProject, loopMinAssets);
       const thin = detectThinHarvest(preNarrationProject);
-      if (!volume.pass || !thin.pass) {
+      const emptySegments = (preNarrationProject.script || []).filter((seg) => {
+        const keys = new Set(
+          (preNarrationProject.media || [])
+            .filter((m) => m.segmentId === seg.id)
+            .map((m) => (m.url || '').split('?')[0])
+            .filter(Boolean),
+        );
+        return keys.size === 0;
+      });
+      if (!thin.pass) {
         for (const seg of thin.thin) {
-          log(`   ⚠ Thin browser harvest: "${seg.title}" has ${seg.count} assets (< ${seg.need}/seg)`);
+          log(`   ⚠ Thin browser harvest: "${seg.title}" has ${seg.count} assets (< ${seg.need}/seg) — top-up runs after narration`);
         }
-        if (!volume.pass) {
-          const detail = volume.failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
-          log(`   ⚠ Below loop min (${loopMinAssets}/seg) before narration: ${detail}`);
-        }
+      }
+      if (!volume.pass) {
+        const detail = volume.failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
+        log(`   ⚠ Browser below loop min (${loopMinAssets}/seg) before top-up: ${detail} — continuing`);
+      }
+      writeFileSync(
+        join(outDir, 'thin-harvest-pre-narration.json'),
+        JSON.stringify({ volume, thin, loopMinAssets, emptySegments: emptySegments.map((s) => s.title) }, null, 2),
+      );
+      if (emptySegments.length > 0) {
+        const names = emptySegments.map((s) => s.title).join('; ');
         fixState.reHarvestMedia = true;
         fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
-        writeFileSync(
-          join(outDir, 'thin-harvest-pre-narration.json'),
-          JSON.stringify({ volume, thin, loopMinAssets }, null, 2),
-        );
         await browser.close().catch(() => {});
         browser = null;
         return {
           ok: false,
-          error: `Thin harvest before narration — need ${loopMinAssets}/seg`,
+          error: `Empty browser harvest — no assets for: ${names}`,
           thinHarvest: true,
           harvestQualityFail: true,
           topic,

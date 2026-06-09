@@ -317,8 +317,11 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
   };
 }
 
-/** Warn / re-harvest when any segment has fewer than this many unique assets. */
+/** Warn when browser harvest is below this (top-up runs after narration). */
 export const THIN_HARVEST_WARN_THRESHOLD = 3;
+
+/** Loop cap — raising minAssets above this starves browser harvest before top-up. */
+export const LOOP_MAX_MIN_ASSETS_PER_SEGMENT = 6;
 
 /**
  * Segments with fewer than `warnThreshold` unique asset URLs (browser harvest before top-up).

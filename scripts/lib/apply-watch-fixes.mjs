@@ -5,7 +5,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay } from './patch-project-for-loop.mjs';
-import { detectGiphyDominance, countSegmentVideos } from './harvest-quality.mjs';
+import {
+  detectGiphyDominance,
+  countSegmentVideos,
+  LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+} from './harvest-quality.mjs';
 import { normalizeUrlKey } from './harvest-loop-context.mjs';
 import {
   loadRenderManifest,
@@ -59,7 +63,10 @@ function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
   s.reHarvestMedia = true;
   s.mediaOffset = (s.mediaOffset || 0) + 4;
   s.harvestVideoFirst = true;
-  s.minAssetsPerSegment = Math.min(8, Math.max(6, (s.minAssetsPerSegment || 4) + 1));
+  s.minAssetsPerSegment = Math.min(
+    LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+    Math.max(2, (s.minAssetsPerSegment || 4) + 1),
+  );
   applied.push(
     `${reason} → strategy reharvest (next nonce ${(s.harvestNonce || 0) + 1}, offset ${s.mediaOffset}, ≥${s.minAssetsPerSegment}/seg)`,
   );
@@ -152,7 +159,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       s.suppressGiphy = true;
       s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
       s.fixStrategy = 'reharvest';
-      s.minAssetsPerSegment = Math.min(10, Math.max(6, (s.minAssetsPerSegment || 6) + 1));
+      // Do not raise minAssets — top-up satisfies volume; higher mins starve browser harvest.
+      s.minAssetsPerSegment = Math.min(
+        LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+        s.minAssetsPerSegment || LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+      );
       const harvestProject = project || loadLastProject();
       const manifest = resolveRenderManifest(process.cwd(), options.videoPath || watch.videoPath || '');
       const placeholderKeys = (manifest?.placeholderUrls || [])
@@ -185,7 +196,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
         ? `${placeholderKeys.length} placeholder URL(s) from render-manifest`
         : `${(s.excludedUrls || []).length} excluded URLs`;
       applied.push(
-        `0a. Placeholder gate FAIL (${pctNote}${segDetail ? `; dead segs: ${segDetail}` : ''}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg, video-first, ${excludeNote}`,
+        `0a. Placeholder gate FAIL (${pctNote}${segDetail ? `; dead segs: ${segDetail}` : ''}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, exclude dead URLs, video-first (${excludeNote})`,
       );
     } else if (failed.some((n) => n.startsWith('scene_'))) {
       escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`, { sceneFirst: true });
@@ -241,7 +252,10 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       );
     } else {
       s.reHarvestMedia = true;
-      s.minAssetsPerSegment = Math.min(8, Math.max(6, s.minAssetsPerSegment || 4));
+      s.minAssetsPerSegment = Math.min(
+        LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+        Math.max(2, s.minAssetsPerSegment || LOOP_MAX_MIN_ASSETS_PER_SEGMENT),
+      );
       escalateFixStrategy(s, applied, `2b. Full-tier score below ${untilScore}`);
     }
   }
@@ -254,7 +268,10 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     s.showKineticText = false;
     s.reHarvestMedia = true;
     s.mediaOffset = (s.mediaOffset || 0) + 4;
-    s.minAssetsPerSegment = Math.min(8, Math.max(6, (s.minAssetsPerSegment || 4) + (repeatPct >= 40 ? 2 : 0)));
+    s.minAssetsPerSegment = Math.min(
+      LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+      Math.max(2, (s.minAssetsPerSegment || 4) + (repeatPct >= 40 ? 1 : 0)),
+    );
     s.fixStrategy = 'reharvest';
     const reason = repetitionFail
       ? `Repetition FAIL (${repeatPct}% dup, ${dupRuns} runs)`

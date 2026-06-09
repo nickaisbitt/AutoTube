@@ -13,6 +13,7 @@ import {
   detectThinHarvest,
   loopMediaTimeoutMs,
   THIN_HARVEST_WARN_THRESHOLD,
+  LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
   passesTopUpRelevanceGate,
   countSegmentVideos,
   isVideoLikeAsset,
@@ -20,6 +21,7 @@ import {
   isTrustedVideoHost,
 } from './lib/harvest-quality.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
+import { loadFixState } from './lib/loop-state.mjs';
 import { buildShockHookLine } from '../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay } from './lib/patch-project-for-loop.mjs';
 import { buildRenderEnvFromFixState } from './lib/render-env-from-fix-state.mjs';
@@ -872,7 +874,35 @@ console.log('\n── 19. placeholder gate manifest exclusion ──');
   assert('Excludes manifest placeholder URLs only', fixState.excludedUrls?.length === 2);
   assert('Does not exclude working YouTube URL', !fixState.excludedUrls?.includes('https://www.youtube.com/watch?v=good2'));
   assert('Applied message mentions placeholder URL(s)', applied.some((a) => a.includes('placeholder URL')));
+  assert(
+    'Placeholder fail does not raise minAssets above cap',
+    fixState.minAssetsPerSegment <= LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+    String(fixState.minAssetsPerSegment),
+  );
   rmSync(tmp, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// 25. minAssets cap — loadFixState + variety/reharvest escalation
+// ---------------------------------------------------------------------------
+console.log('\n── 25. minAssets cap ──');
+{
+  const tmp = mkdtempSync(join(tmpdir(), 'autotube-fixstate-'));
+  writeFileSync(join(tmp, 'FIX_STATE.json'), JSON.stringify({ minAssetsPerSegment: 10, harvestNonce: 3 }));
+  const loaded = loadFixState(tmp);
+  assert('loadFixState caps minAssets at 6', loaded.minAssetsPerSegment === LOOP_MAX_MIN_ASSETS_PER_SEGMENT);
+  rmSync(tmp, { recursive: true, force: true });
+
+  const watch = {
+    brutal: { overall: 4, report: { scores: { visualVariety: 4, pacing: 4 } } },
+    repetition: { repeatPct: 45, duplicateRunCount: 3 },
+    objectiveGate: { available: true, pass: true, checks: [] },
+    hookScript: { pass: true },
+    hookVision: { hookPass: true },
+    sceneQa: { available: true, pass: false, longestSceneSec: 6 },
+  };
+  const { fixState } = applyFixesFromWatch(watch, { minAssetsPerSegment: 6 }, 'museum heist', null, { untilScore: 9.1 });
+  assert('Scene/repetition escalation stays at cap', fixState.minAssetsPerSegment <= LOOP_MAX_MIN_ASSETS_PER_SEGMENT);
 }
 
 // ---------------------------------------------------------------------------

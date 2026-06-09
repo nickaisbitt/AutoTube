@@ -3,6 +3,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { LOOP_MAX_MIN_ASSETS_PER_SEGMENT } from './harvest-quality.mjs';
 
 export const FIX_STATE_VERSION = 3;
 
@@ -64,6 +65,9 @@ export function loadFixState(loopDir) {
     }
     if (raw.harvestNonce === undefined) loaded.harvestNonce = 0;
     if (!Array.isArray(raw.excludedUrls)) loaded.excludedUrls = [];
+    if ((loaded.minAssetsPerSegment || 0) > LOOP_MAX_MIN_ASSETS_PER_SEGMENT) {
+      loaded.minAssetsPerSegment = LOOP_MAX_MIN_ASSETS_PER_SEGMENT;
+    }
     return loaded;
   } catch {
     return { ...DEFAULT_FIX_STATE };

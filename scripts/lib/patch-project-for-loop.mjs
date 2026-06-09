@@ -237,7 +237,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     const hook = buildShockHookLine(topic, fixState.hookLine);
     const hookOverlay = buildShortHookOverlay(topic, hook, {
       preferredOverlay: fixState.hookOverlay,
-      visionFix: fixState.hookOverlay,
+      visionFix: fixState.hookOverlay && isInstructionOverlay(fixState.hookOverlay) ? fixState.hookOverlay : undefined,
     });
     project.hookLine = hook;
     rewriteIntroOpener(project, hook);

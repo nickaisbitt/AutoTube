@@ -78,7 +78,41 @@ export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || '
 }
 
 function isLikelyVideoHost(url = '') {
-  return /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|player\.vimeo|archive\.org|giphy)/i.test(url);
+  return /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|player\.vimeo|archive\.org|giphy|tiktok\.com|vm\.tiktok)/i.test(url);
+}
+
+function isDirectGiphyCdnMp4(url = '') {
+  return /^https?:\/\/media\d*\.giphy\.com\/.+\.mp4(?:[?#]|$)/i.test(url || '');
+}
+
+function isDirectVideoUrl(url = '') {
+  return (
+    isDirectGiphyCdnMp4(url)
+    || /^https?:\/\/videos\.pexels\.com\/.+\.mp4/i.test(url || '')
+    || /^https?:\/\/.+\.(mp4|webm|mov)(?:[?#]|$)/i.test(url || '')
+  );
+}
+
+function isProxiedClipUrl(url = '') {
+  return (url || '').includes('/api/download-clip');
+}
+
+function resolveVideoDownloadUrl(asset, devServer) {
+  const pageUrl = asset.sourceUrl || asset.url;
+  if (asset.url?.startsWith('/api/download-clip')) {
+    return `${devServer}${asset.url}`;
+  }
+  if (isDirectGiphyCdnMp4(asset.url)) {
+    return asset.url;
+  }
+  if (isDirectVideoUrl(asset.url) && !isLikelyVideoHost(pageUrl)) {
+    return asset.url;
+  }
+  if (isLikelyVideoHost(pageUrl) || isLikelyVideoHost(asset.url) || !/\.(mp4|webm|mov)/i.test(asset.url || '')) {
+    const target = isLikelyVideoHost(pageUrl) ? pageUrl : asset.url;
+    return `${devServer}/api/download-clip?url=${encodeURIComponent(target)}`;
+  }
+  return asset.url;
 }
 
 function isGiphyAsset(asset = {}) {
@@ -89,6 +123,9 @@ function isGiphyAsset(asset = {}) {
 function giphyStillUrl(asset = {}) {
   if (asset.thumbnailUrl && /\.gif(?:[?#]|$)/i.test(asset.thumbnailUrl)) return asset.thumbnailUrl;
   const mp4 = asset.url || '';
+  if (/giphy\.com\//i.test(mp4) && /\.mp4(?:[?#]|$)/i.test(mp4)) {
+    return mp4.replace(/\.mp4(?=[?#]|$)/i, '.gif');
+  }
   if (/giphy\.mp4/i.test(mp4)) return mp4.replace(/giphy\.mp4/i, 'giphy.gif');
   return asset.thumbnailUrl || '';
 }
@@ -106,7 +143,7 @@ async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = f
     const res = await fetch(url, {
       signal: controller.signal,
       headers: {
-        range: expectVideo ? undefined : 'bytes=0-4095',
+        range: 'bytes=0-16383',
         'user-agent': 'Mozilla/5.0 AutoTube media validator',
       },
     });
@@ -216,10 +253,39 @@ function isJunkHarvestUrl(url) {
     u.includes('gravatar.com/avatar') ||
     /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
     u.includes('/th/id/ovp.') ||
-    u.includes('th?id=ovp.') ||
-    /\.webp(?:[?#]|$)/i.test(u) ||
-    /\.avif(?:[?#]|$)/i.test(u)
+    u.includes('th?id=ovp.')
   );
+}
+
+async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode = false } = {}) {
+  const downloadUrl = resolveVideoDownloadUrl(asset, devServer);
+  const proxied = isProxiedClipUrl(downloadUrl);
+  const direct = isDirectVideoUrl(asset.url) && !proxied;
+  const reasonPrefix = loopMode ? 'loop mode: ' : '';
+
+  if (proxied) {
+    sanitized.push({ ...asset, type: 'video', url: downloadUrl });
+    report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}proxy clip (no probe)` });
+    return true;
+  }
+
+  if (direct) {
+    const clipOk = await canFetch(downloadUrl, { timeoutMs: 15000, minBytes: 2048, expectVideo: true });
+    if (clipOk) {
+      sanitized.push({ ...asset, type: 'video', url: downloadUrl });
+      report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}direct video URL` });
+      return true;
+    }
+  }
+
+  const clipOk = await canFetch(downloadUrl, { timeoutMs: 15000, minBytes: 2048, expectVideo: true });
+  if (clipOk) {
+    const keepUrl = downloadUrl.startsWith('http') ? downloadUrl : asset.url;
+    sanitized.push({ ...asset, type: 'video', url: keepUrl });
+    report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}clip probe OK` });
+    return true;
+  }
+  return false;
 }
 
 async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}) {
@@ -255,93 +321,28 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       continue;
     }
 
-    if (loopMode && asset.type === 'video') {
-      if (isGiphyAsset(asset)) {
-        const stillUrl = giphyStillUrl(asset);
-        if (stillUrl && !isJunkHarvestUrl(stillUrl) && await canFetch(stillUrl, { timeoutMs: 8000 })) {
-          sanitized.push({
-            ...asset,
-            type: 'image',
-            url: stillUrl,
-            source: `${asset.source || 'Giphy'} still`,
-            isFallback: false,
-          });
-          report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl: stillUrl, reason: 'loop mode: giphy→gif still' });
-          continue;
-        }
-      }
-
-      const pageUrl = asset.sourceUrl || asset.url;
-      let downloadUrl = asset.url;
-      if (asset.url?.startsWith('/api/download-clip')) {
-        downloadUrl = `${devServer}${asset.url}`;
-      } else if (isLikelyVideoHost(pageUrl) || !/\.(mp4|webm|mov)/i.test(asset.url || '')) {
-        downloadUrl = `${devServer}/api/download-clip?url=${encodeURIComponent(isLikelyVideoHost(pageUrl) ? pageUrl : asset.url)}`;
-      }
-      const clipOk = await canFetch(downloadUrl, { timeoutMs: 30000, minBytes: 2048, expectVideo: true });
-      if (clipOk) {
-        sanitized.push({ ...asset, url: downloadUrl.startsWith('http') ? downloadUrl : asset.url });
-        report.keptVideo.push({ url: asset.url, reason: 'loop mode: ffmpeg assembly clip OK' });
-        continue;
-      }
-      const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '');
-      if (thumbnailUrl && !isJunkHarvestUrl(thumbnailUrl) && await canFetch(thumbnailUrl, { timeoutMs: 8000 })) {
-        sanitized.push({
-          ...asset,
-          type: 'image',
-          url: thumbnailUrl,
-          source: `${asset.source || 'Video'} still`,
-          isFallback: false,
-        });
-        report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl, reason: 'loop mode: video→still (clip failed)' });
-        continue;
-      }
-      report.dropped.push({ url: asset.url, reason: 'loop mode: video without usable clip or still' });
+    if (await tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode })) {
       continue;
     }
 
-    // Prefer sourceUrl (page) for proxying unreliable video hosts; fall back to url
-    const pageUrl = asset.sourceUrl || asset.url;
-    const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '');
-
-    // Always route video-host or non-direct through the server proxy for fetchability + caching
-    let downloadUrl;
-    if (asset.url?.startsWith('/api/download-clip')) {
-      downloadUrl = `${devServer}${asset.url}`;
-    } else if (isLikelyVideoHost(pageUrl) || isLikelyVideoHost(asset.url) || !/\.(mp4|webm|mov)/i.test(asset.url || '')) {
-      const target = isLikelyVideoHost(pageUrl) ? pageUrl : asset.url;
-      downloadUrl = `${devServer}/api/download-clip?url=${encodeURIComponent(target)}`;
-    } else {
-      downloadUrl = asset.url;
-    }
-
-    // For known flaky video hosts, be willing to accept a good thumbnail even if clip probe is slow/partial
-    const preferThumbnailForHost = isLikelyVideoHost(pageUrl) || isLikelyVideoHost(asset.url);
-
-    const thumbnailOk = thumbnailUrl ? await canFetch(thumbnailUrl, { timeoutMs: 8000 }) : false;
-    const clipOk = downloadUrl ? await canFetch(downloadUrl, { timeoutMs: 30000, minBytes: 2048, expectVideo: true }) : false;
-
-    if (clipOk && !preferThumbnailForHost) {
-      sanitized.push(asset);
-      report.keptVideo.push({ url: asset.url, thumbnailUrl, reason: 'clip fetchable' });
-      continue;
-    }
-
-    if (thumbnailOk) {
+    const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '') || giphyStillUrl(asset);
+    if (thumbnailUrl && !isJunkHarvestUrl(thumbnailUrl) && await canFetch(thumbnailUrl, { timeoutMs: 8000 })) {
       sanitized.push({
         ...asset,
         type: 'image',
         url: thumbnailUrl,
-        source: `${asset.source || 'Video'} thumbnail`,
+        source: `${asset.source || 'Video'} still`,
         isFallback: false,
-        reasoning: `${asset.reasoning || ''} Converted video to fetchable thumbnail before render (clip probe ${clipOk ? 'passed but host prefers stable thumb' : 'failed or slow'}).`.trim(),
       });
-      report.convertedVideoToImage.push({ url: asset.url, thumbnailUrl, reason: 'clip unavailable/slow or host prefers thumbnail' });
+      report.convertedVideoToImage.push({
+        url: asset.url,
+        thumbnailUrl,
+        reason: loopMode ? 'loop mode: video→still (clip unavailable)' : 'clip unavailable/slow',
+      });
       continue;
     }
 
     if (fallbackImage && !isImageLikeUrl(fallbackImage)) {
-      // last resort stable fallback to keep segment populated
       sanitized.push({
         ...asset,
         type: 'image',
@@ -354,7 +355,11 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       continue;
     }
 
-    report.dropped.push({ url: asset.url, thumbnailUrl, reason: 'clip and thumbnail unavailable' });
+    report.dropped.push({
+      url: asset.url,
+      thumbnailUrl,
+      reason: loopMode ? 'loop mode: video without usable clip or still' : 'clip and thumbnail unavailable',
+    });
   }
 
   const validated = [];
@@ -793,6 +798,9 @@ export async function generateFullVideo(options) {
       return { ok: false, error: 'No project with media after pipeline', topic, outDir };
     }
 
+    await browser.close().catch(() => {});
+    browser = null;
+
     patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
     if (realHarvest) {
       const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, {
@@ -845,10 +853,6 @@ export async function generateFullVideo(options) {
 
     const mp4Out = join(outDir, 'final-video.mp4');
     log(`🎥 Render → ${mp4Out}`);
-
-    // Free Playwright/Chromium memory before server-render (4GB cgroup on worker).
-    await browser.close().catch(() => {});
-    browser = null;
 
     const renderEnv = buildRenderEnvFromFixState(fixState, { devServer, projectPath });
     const renderSnapshot = renderEnvJournalSnapshot(fixState);

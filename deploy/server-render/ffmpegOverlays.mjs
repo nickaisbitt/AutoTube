@@ -37,7 +37,9 @@ export function overlayHookText(videoPath, project, options = {}) {
 
   const hookText =
     project.exportSettings?.hookOverlay
+    || process.env.AUTOTUBE_HOOK_OVERLAY
     || project.hookLine
+    || process.env.AUTOTUBE_HOOK_LINE
     || project.exportSettings?.hookLine;
   if (!hookText?.trim()) return { ok: false, error: 'no hook text' };
 

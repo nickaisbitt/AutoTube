@@ -269,7 +269,8 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     musicPreset: 'neutral',
     resolution: '1080p',
     youtubeMode: true,
-    hookOverlay: project.exportSettings?.hookOverlay,
+    hookOverlay: project.exportSettings?.hookOverlay ?? fixState.hookOverlay ?? undefined,
+    hookLine: project.exportSettings?.hookLine ?? project.hookLine ?? fixState.hookLine ?? undefined,
   };
 
   return project;

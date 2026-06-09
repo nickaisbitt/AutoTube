@@ -23,6 +23,8 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (fixState.brollPlacement !== false) env.AUTOTUBE_BROLL_PLACEMENT = '1';
   if (fixState.ffmpegHardCuts !== false) env.AUTOTUBE_FFMPEG_HARD_CUTS = '1';
   if (fixState.whisperAlign || renderTier === 'full') env.AUTOTUBE_WHISPER_ALIGN = '1';
+  if (fixState.hookOverlay) env.AUTOTUBE_HOOK_OVERLAY = fixState.hookOverlay;
+  if (fixState.hookLine) env.AUTOTUBE_HOOK_LINE = fixState.hookLine;
 
   if (renderTier === 'full') {
     env.AUTOTUBE_RENDER_QUALITY = 'high';

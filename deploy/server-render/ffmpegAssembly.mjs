@@ -141,8 +141,9 @@ function cachePathForUrl(url, cacheDir, isVideo) {
 }
 
 async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
+  const timeoutMs = expectVideo || fetchUrl.includes('/api/download-clip') ? 120_000 : 45_000;
   const res = await fetch(fetchUrl, {
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: { 'user-agent': 'Mozilla/5.0 AutoTube/1.0' },
   });
   if (!res.ok) return null;

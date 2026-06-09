@@ -46,6 +46,16 @@ const OFF_TOPIC_BLOCKLIST = [
 
   // Tier-list / ranking graphics — almost never relevant B-roll
   { pattern: /\btier\s*list\b/i, requires: /\btier\s*list\b/i },
+
+  // Social/app logos and avatar crops — never editorial B-roll
+  { pattern: /logojoy\.com|cdn\.logojoy|tiktokcdn\.com\/tos-maliva-avt|sndcdn\.com\/artworks/i, requires: /\b__autotube_never__\b/i },
+
+  // Generic map / timezone infographics — noise unless topic is geographic
+  { pattern: /printable-us-map|guideoftheworld\.com\/map|time-zone-map|timezonesmap|wikiusa\.org.*time-zone/i, requires: /\bmap\b|\btime\s*zone\b|\bgeograph\b/i },
+
+  // Stock lifestyle / clipart / generic infographics
+  { pattern: /\b(?:living\s+room|weight\s*watchers|clipart|teamwork\s+hands)\b/i, requires: /\b(?:living\s+room|weight|clipart|teamwork)\b/i },
+  { pattern: /videoblocks.*thumbnail|cloudfront\.net\/thumbnails\/video/i, requires: /\b__autotube_never__\b/i },
 ];
 
 /**
@@ -91,7 +101,7 @@ export function extractKeywords(text, max = 14) {
  */
 export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   const segText = `${segment?.title || ''} ${segment?.narration || ''}`;
-  const segKeywords = extractKeywords(segText, 10);
+  const segKeywords = extractKeywords(segText, 10).filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
   const topicKws = topicKeywords.length ? topicKeywords : extractKeywords(topic, 12);
   const strongTopicKws = topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
   const corpus = new Set([...strongTopicKws, ...segKeywords]);
@@ -134,6 +144,22 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   return Math.max(0, Math.min(1, score));
 }
 
+/** Stricter gate for volume top-up — rejects weak-keyword-only matches (e.g. TikTok logos). */
+export function passesTopUpRelevanceGate(asset, segment, topic, topicKeywords = []) {
+  const topicKws = topicKeywords.length ? topicKeywords : extractKeywords(topic, 12);
+  const strongTopicKws = topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
+  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+  const contextText = `${topic} ${segment?.title || ''} ${segment?.narration || ''}`.toLowerCase();
+  if (offTopicBlockReason(haystack, contextText)) return false;
+
+  const topicHits = strongTopicKws.filter((kw) => haystack.includes(kw)).length;
+  if (topicHits < 1) return false;
+
+  const score = scoreAssetRelevance(asset, segment, topic, topicKeywords);
+  const minScore = asset?.type === 'video' ? 0.3 : 0.35;
+  return score >= minScore;
+}
+
 /**
  * @param {object[]} media
  * @param {object} project
@@ -162,8 +188,10 @@ export function filterAssetsByRelevance(media, project, options = {}) {
       continue;
     }
 
+    const isTopUp = (asset?.source || '').includes('top-up');
     const score = scoreAssetRelevance(asset, seg, topic, topicKeywords);
-    if (score >= minScore) {
+    const threshold = isTopUp ? Math.max(minScore, 0.35) : minScore;
+    if (score >= threshold && (!isTopUp || passesTopUpRelevanceGate(asset, seg, topic, topicKeywords))) {
       kept.push({ ...asset, relevanceScore: Math.round(score * 100) / 100 });
     } else {
       dropped.push({

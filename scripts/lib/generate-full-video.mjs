@@ -23,6 +23,7 @@ import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
   scoreAssetRelevance,
+  passesTopUpRelevanceGate,
   extractKeywords,
 } from './harvest-quality.mjs';
 
@@ -213,33 +214,100 @@ function buildTopUpQuery(seg, topic, round) {
   return `${combined.join(' ')}${suffix ? ' ' + suffix : ''}`.trim();
 }
 
-/** Minimum relevance score a top-up asset must pass before being accepted. */
-const TOP_UP_MIN_RELEVANCE = 0.15;
+const TOP_UP_VIDEO_ENDPOINTS = [
+  '/api/search-bing-videos',
+  '/api/search-google-videos',
+  '/api/search-videos',
+];
+const TOP_UP_IMAGE_ENDPOINTS = [
+  '/api/search-google-images',
+  '/api/search-bing-images',
+  '/api/search-duckduckgo-images',
+  '/api/search-hybrid',
+  '/api/search-unsplash',
+];
 
-async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
+async function fetchVideoSearchResults(devServer, endpoint, query) {
+  try {
+    const res = await fetch(`${devServer}${endpoint}?q=${encodeURIComponent(query)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const rows = data.results || data;
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function buildVideoTopUpAsset(r, devServer, seg, query, sourceLabel) {
+  const pageUrl = r.url || r.content || r.sourceUrl;
+  if (!pageUrl || !/^https?:\/\//i.test(pageUrl)) return null;
+  const clipUrl = `${devServer}/api/download-clip?url=${encodeURIComponent(pageUrl)}&duration=10`;
+  return {
+    segmentId: seg.id,
+    type: 'video',
+    url: clipUrl,
+    thumbnailUrl: r.thumbnailUrl || r.images?.large,
+    alt: r.title || r.alt || `${seg.title} ${query}`,
+    query,
+    source: `${sourceLabel} (volume video top-up)`,
+    duration: 10,
+    sourceUrl: pageUrl,
+    isFallback: false,
+  };
+}
+
+async function topUpHarvestVolume(project, devServer, minPerSegment, report, options = {}) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
   const topicKeywords = extractKeywords(topic, 12);
+  const harvestVideoFirst = options.harvestVideoFirst !== false;
+  const minVideosPerSegment = harvestVideoFirst ? 2 : 0;
   const usedGlobal = new Set(
     (project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean),
   );
-  const searchEndpoints = [
-    '/api/search-google-images',
-    '/api/search-bing-images',
-    '/api/search-duckduckgo-images',
-    '/api/search-hybrid',
-    '/api/search-unsplash',
-  ];
 
   for (const seg of segments) {
     const segAssets = (project.media || []).filter((m) => m.segmentId === seg.id);
     let uniqueCount = new Set(
       segAssets.map((a) => (a.url || '').split('?')[0]).filter(Boolean),
     ).size;
+    let videoCount = segAssets.filter((m) => m.type === 'video' || isProxiedClipUrl(m.url)).length;
 
-    for (let round = 0; round < searchEndpoints.length && uniqueCount < minPerSegment; round += 1) {
+    if (harvestVideoFirst && videoCount < minVideosPerSegment) {
+      for (let round = 0; round < TOP_UP_VIDEO_ENDPOINTS.length && videoCount < minVideosPerSegment; round += 1) {
+        const q = buildTopUpQuery(seg, topic, round + 2);
+        const results = await fetchVideoSearchResults(devServer, TOP_UP_VIDEO_ENDPOINTS[round], q);
+        for (const r of results) {
+          const draft = buildVideoTopUpAsset(r, devServer, seg, q, r.source || 'Video search');
+          if (!draft) continue;
+          const key = draft.url.split('?')[0];
+          if (usedGlobal.has(key)) continue;
+          if (!passesTopUpRelevanceGate(draft, seg, topic, topicKeywords)) continue;
+
+          project.media.push({
+            ...draft,
+            id: `topup-vid-${seg.id}-${videoCount}`,
+          });
+          usedGlobal.add(key);
+          uniqueCount += 1;
+          videoCount += 1;
+          report.volumeTopUp = report.volumeTopUp || [];
+          report.volumeTopUp.push({
+            segmentId: seg.id,
+            url: draft.sourceUrl,
+            endpoint: TOP_UP_VIDEO_ENDPOINTS[round],
+            relevance: scoreAssetRelevance(draft, seg, topic, topicKeywords),
+            type: 'video',
+          });
+          if (videoCount >= minVideosPerSegment) break;
+        }
+      }
+    }
+
+    for (let round = 0; round < TOP_UP_IMAGE_ENDPOINTS.length && uniqueCount < minPerSegment; round += 1) {
       const q = buildTopUpQuery(seg, topic, round);
-      const results = await fetchImageSearchResults(devServer, searchEndpoints[round], q);
+      const results = await fetchImageSearchResults(devServer, TOP_UP_IMAGE_ENDPOINTS[round], q);
       const candidates = results
         .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
         .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
@@ -249,17 +317,12 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
         const key = r.url.split('?')[0];
         if (usedGlobal.has(key)) continue;
 
-        // Require at least a minimal relevance match to the segment + topic
-        const relevance = scoreAssetRelevance(
-          { url: r.url, alt: r.alt || '', query: q },
-          seg,
-          topic,
-          topicKeywords,
-        );
-        if (relevance < TOP_UP_MIN_RELEVANCE) continue;
+        const asset = { url: r.url, alt: r.alt || '', query: q, type: 'image' };
+        if (!passesTopUpRelevanceGate(asset, seg, topic, topicKeywords)) continue;
 
         if (!(await canFetch(r.url, { timeoutMs: 8000, minBytes: 512 }))) continue;
 
+        const relevance = scoreAssetRelevance(asset, seg, topic, topicKeywords);
         project.media.push({
           id: `topup-${seg.id}-${uniqueCount}`,
           segmentId: seg.id,
@@ -275,10 +338,10 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
         uniqueCount += 1;
         added = true;
         report.volumeTopUp = report.volumeTopUp || [];
-        report.volumeTopUp.push({ segmentId: seg.id, url: r.url, endpoint: searchEndpoints[round], relevance });
+        report.volumeTopUp.push({ segmentId: seg.id, url: r.url, endpoint: TOP_UP_IMAGE_ENDPOINTS[round], relevance });
         if (uniqueCount >= minPerSegment) break;
       }
-      if (!added && round === searchEndpoints.length - 1) {
+      if (!added && round === TOP_UP_IMAGE_ENDPOINTS.length - 1) {
         report.volumeTopUpMiss = report.volumeTopUpMiss || [];
         report.volumeTopUpMiss.push({ segmentId: seg.id, count: uniqueCount, need: minPerSegment });
       }
@@ -476,7 +539,9 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   report.after = project.media.length;
 
   if (loopMode) {
-    await topUpHarvestVolume(project, devServer, minPerSegment, report);
+    await topUpHarvestVolume(project, devServer, minPerSegment, report, {
+      harvestVideoFirst: options.harvestVideoFirst !== false,
+    });
     report.afterTopUp = project.media.length;
   }
 
@@ -860,6 +925,7 @@ export async function generateFullVideo(options) {
       const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, {
         loopMode: true,
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
+        harvestVideoFirst: fixState.harvestVideoFirst !== false,
       });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
       if (mediaReport.relevanceDropped?.length) {

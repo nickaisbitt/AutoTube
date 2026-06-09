@@ -734,6 +734,9 @@ export function scoreCandidate(
   if (c.type === 'video') {
     if (isLoopVideoFirst()) {
       score += 120;
+      const suppressGiphy = typeof sessionStorage !== 'undefined'
+        && sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true';
+      if (suppressGiphy) score += 60;
       if (isPrimaryWebSource(c.source) || /archive\.org|pexels|pixabay/i.test(c.source)) {
         score += 80;
       }
@@ -2555,7 +2558,9 @@ export async function sourceSegmentMedia(
     }
 
     if (isLoopVideoFirst()) {
-      const loopMinVideos = 2;
+      const suppressGiphy = typeof sessionStorage !== 'undefined'
+        && sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true';
+      const loopMinVideos = suppressGiphy ? 3 : 2;
       let videoCount = finalAssets.filter((asset) => asset.type === 'video').length;
       const videoShot = shotsToHarvest[0];
       while (videoCount < loopMinVideos && !signal?.aborted) {

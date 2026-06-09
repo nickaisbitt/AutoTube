@@ -10,6 +10,7 @@ import {
   filterAssetsByRelevance,
   extractKeywords,
   detectGiphyDominance,
+  passesTopUpRelevanceGate,
 } from './lib/harvest-quality.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import {
@@ -332,6 +333,59 @@ console.log('\n── 12. harvest-loop-context suppressGiphy ──');
 
   const cleanPayload = harvestSessionStoragePayload(harvestContextFromFixState({ suppressGiphy: false }));
   assert('No suppress flag when suppressGiphy=false', cleanPayload.autotube_loop_suppress_giphy === undefined);
+}
+
+// ---------------------------------------------------------------------------
+// 13. Top-up relevance gate — reject logos, accept editorial
+// ---------------------------------------------------------------------------
+console.log('\n── 13. Top-up relevance gate ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's1', title: 'TikTok Live Turns Real', narration: 'Louvre security cameras caught the thieves.' };
+  const topicKws = extractKeywords(topic, 12);
+
+  const tiktokLogo = {
+    url: 'https://cdn.logojoy.com/wp-content/uploads/tiktok-social-media-app-logo-768x768.jpg',
+    alt: 'TikTok app logo',
+    query: 'tiktok live museum',
+    type: 'image',
+  };
+  assert('TikTok logo fails top-up gate', passesTopUpRelevanceGate(tiktokLogo, seg, topic, topicKws) === false);
+
+  const louvrePhoto = {
+    url: 'https://static.independent.co.uk/2025/10/19/louvre-museum-robbery-paris.jpeg',
+    alt: 'Louvre museum heist robbery police',
+    query: 'louvre museum heist photograph',
+    type: 'image',
+  };
+  assert('Louvre editorial photo passes top-up gate', passesTopUpRelevanceGate(louvrePhoto, seg, topic, topicKws) === true);
+
+  const soundcloudArt = {
+    url: 'https://i1.sndcdn.com/artworks-Xkem9rlzbfkHfDRv-s9mD8w-t500x500.jpg',
+    alt: 'SoundCloud artwork',
+    query: 'tiktok live stream',
+    type: 'image',
+  };
+  assert('SoundCloud artwork fails top-up gate', passesTopUpRelevanceGate(soundcloudArt, seg, topic, topicKws) === false);
+}
+
+// ---------------------------------------------------------------------------
+// 14. Weak segment keywords do not inflate relevance
+// ---------------------------------------------------------------------------
+console.log('\n── 14. Weak segment keyword exclusion ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's2', title: 'TikTok Live Stream', narration: 'Watch the viral clip spread online.' };
+  const topicKws = extractKeywords(topic, 12);
+
+  const logoOnly = {
+    url: 'https://cdn.logojoy.com/wp-content/uploads/tiktok-logo.jpg',
+    alt: 'tiktok live stream social media',
+    query: 'tiktok live',
+    type: 'image',
+  };
+  const score = scoreAssetRelevance(logoOnly, seg, topic, topicKws);
+  assert('Weak-only seg keywords score 0 for logo URL', score === 0, `score=${score}`);
 }
 
 // ---------------------------------------------------------------------------

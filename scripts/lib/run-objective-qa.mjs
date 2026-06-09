@@ -117,8 +117,20 @@ export function evaluateClipCountGate(videoPath, durationSec = 0) {
  * @param {string} videoPath
  */
 export function evaluatePlaceholderGate(videoPath) {
-  const manifestPath = join(dirname(videoPath), 'ffmpeg-assembly', 'render-manifest.json');
+  const assemblyDir = join(dirname(videoPath), 'ffmpeg-assembly');
+  const manifestPath = join(assemblyDir, 'render-manifest.json');
   if (!existsSync(manifestPath)) {
+    if (existsSync(assemblyDir)) {
+      return {
+        available: true,
+        pass: false,
+        error: 'ffmpeg render-manifest.json missing — cannot verify placeholder_pct',
+        placeholderClipCount: -1,
+        placeholderPct: 100,
+        clipCount: 0,
+        maxPlaceholderPct: MAX_PLACEHOLDER_PCT,
+      };
+    }
     return { available: false };
   }
   try {

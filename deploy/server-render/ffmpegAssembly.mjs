@@ -228,8 +228,20 @@ async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
   let localSrc = await ensureLocalAsset(asset, devServer, cacheDir);
   if (localSrc) return { localSrc, asset };
 
-  const thumb = asset.thumbnailUrl || (asset.type === 'image' ? null : null);
-  if (thumb && thumb !== asset.url) {
+  const sourcePage = asset.sourceUrl;
+  if (sourcePage && sourcePage !== asset.url && /^https?:\/\//i.test(sourcePage)) {
+    const sourceAsset = { ...asset, url: sourcePage };
+    localSrc = await ensureLocalAsset(sourceAsset, devServer, cacheDir);
+    if (localSrc) return { localSrc, asset: sourceAsset };
+  }
+
+  const thumbCandidates = [
+    asset.thumbnailUrl,
+    asset.resolvedUrl,
+    asset.type === 'image' ? asset.url : null,
+  ].filter((t, i, arr) => t && t !== asset.url && arr.indexOf(t) === i);
+
+  for (const thumb of thumbCandidates) {
     const thumbAsset = { ...asset, type: 'image', url: thumb, thumbnailUrl: thumb };
     localSrc = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
     if (localSrc) return { localSrc, asset: thumbAsset };
@@ -401,7 +413,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
     let ok = false;
     if (!localSrc) {
-      console.log(`  [ffmpeg] ${label}: placeholder — asset fetch failed`);
+      const reason = `fetch failed url=${(asset.url || '').slice(0, 80)} thumb=${(asset.thumbnailUrl || 'none').slice(0, 60)}`;
+      console.log(`  [ffmpeg] ${label}: placeholder — ${reason}`);
       ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
       if (ok) placeholderClipCount += 1;
     } else {

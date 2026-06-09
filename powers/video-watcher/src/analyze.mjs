@@ -294,13 +294,24 @@ function buildNumberedReport(ctx) {
 
   if (objectiveQa) {
     lines.push(
-      `${n}. **Objective QA:** score ${objectiveQa.score}/100 | silence first 60s ${objectiveQa.silenceFirst60Sec}s | ${objectiveQa.pass ? 'PASS' : 'FAIL'}`,
+      `${n}. **Technical QA (vision):** score ${objectiveQa.score}/100 | silence first 60s ${objectiveQa.silenceFirst60Sec}s | ${objectiveQa.pass ? 'PASS' : 'FAIL'}`,
     );
     n += 1;
   }
 
+  const placeholderGate = ctx.placeholderGate;
+  if (placeholderGate?.available) {
+    const detail = placeholderGate.error
+      ? placeholderGate.error
+      : `${placeholderGate.placeholderPct}% placeholders (max ${placeholderGate.maxPlaceholderPct}%)`;
+    lines.push(`${n}. **Placeholder gate:** ${placeholderGate.pass ? 'PASS' : 'FAIL'} — ${detail}`);
+    n += 1;
+  }
+
   if (objectiveGate?.available) {
-    lines.push(`${n}. **Objective gate:** ${objectiveGate.pass ? 'PASS' : 'FAIL'} (${objectiveGate.checks.map((c) => `${c.name}:${c.pass ? 'ok' : 'fail'}`).join(', ')})`);
+    lines.push(
+      `${n}. **Composite objective gate:** ${objectiveGate.pass ? 'PASS' : 'FAIL'} (${objectiveGate.checks.map((c) => `${c.name}:${c.pass ? 'ok' : 'fail'}`).join(', ')})`,
+    );
     n += 1;
   }
 
@@ -438,6 +449,7 @@ export async function watchVideo(options = {}) {
     repetition,
     sceneQa,
     objectiveQa,
+    placeholderGate,
     objectiveGate,
     hookScript,
     hookVision,

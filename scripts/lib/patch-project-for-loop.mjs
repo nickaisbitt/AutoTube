@@ -116,8 +116,13 @@ export function stripSceneLayoutsForLoop(project) {
   return project;
 }
 
+function isVideoAsset(asset) {
+  return asset?.type === 'video' || /\/api\/download-clip/i.test(asset?.url || '');
+}
+
 /** Ensure every segment has B-roll; dedupe URLs; steal from over-filled segments. */
-export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
+export function balanceMediaAcrossSegments(project, minPerSegment = 4, options = {}) {
+  const preferVideo = options.harvestVideoFirst === true;
   if (!project?.script?.length || !project?.media?.length) return project;
 
   const segIds = project.script.map((s) => s.id);
@@ -170,6 +175,23 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
         const key = (a.url || '').split('?')[0];
         return key && !used.has(key);
       });
+      if (preferVideo && buckets[needId].filter(isVideoAsset).length < 2) {
+        const videoIdx = buckets[donorId].findIndex((a) => {
+          const key = (a.url || '').split('?')[0];
+          return key && !used.has(key) && isVideoAsset(a);
+        });
+        if (videoIdx >= 0) {
+          const [moved] = buckets[donorId].splice(videoIdx, 1);
+          if (moved) {
+            buckets[needId].push({
+              ...moved,
+              id: `${moved.id}-bal-vid-${needId.slice(0, 6)}-${buckets[needId].length}`,
+              segmentId: needId,
+            });
+            continue;
+          }
+        }
+      }
       if (donorIdx < 0) break;
       const [moved] = buckets[donorId].splice(donorIdx, 1);
       if (!moved) break;
@@ -224,7 +246,9 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   trimProjectForLoop(project, options.maxTotalSec ?? 75);
 
   stripSceneLayoutsForLoop(project);
-  balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4));
+  balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4), {
+    harvestVideoFirst: fixState.harvestVideoFirst !== false,
+  });
 
   if (fixState.brollPlacement !== false && project.script?.length && project.media?.length) {
     project.editTimeline = buildEditTimeline(project, {

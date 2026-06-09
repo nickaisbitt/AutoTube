@@ -395,8 +395,12 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
           if (alreadyInSeg) continue;
           if (!passesTopUpRelevanceGate(draft, seg, topic, topicKeywords)) continue;
 
+          const probeSanitized = [];
+          if (!(await tryKeepVideoAsset(draft, devServer, probeSanitized, report, { loopMode: true }))) continue;
+          const kept = probeSanitized[0] || draft;
+
           project.media.push({
-            ...draft,
+            ...kept,
             id: `topup-vid-${seg.id}-${videoCount}`,
           });
           uniqueCount += 1;
@@ -404,9 +408,9 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
           report.volumeTopUp = report.volumeTopUp || [];
           report.volumeTopUp.push({
             segmentId: seg.id,
-            url: draft.sourceUrl,
+            url: kept.sourceUrl || kept.url,
             endpoint: TOP_UP_VIDEO_ENDPOINTS[round],
-            relevance: scoreAssetRelevance(draft, seg, topic, topicKeywords),
+            relevance: scoreAssetRelevance(kept, seg, topic, topicKeywords),
             type: 'video',
           });
           if (videoCount >= minVideosPerSegment) break;
@@ -726,8 +730,9 @@ export async function generateFullVideo(options) {
   const pixabayKey = resolvePixabayKey();
 
   const harvestStorage = harvestSessionStoragePayload(harvestCtx);
+  const videoFirst = fixState.harvestVideoFirst !== false && realHarvest;
   await browserContext.addInitScript(
-    ({ key, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
+    ({ key, minAssets, pexels, pixabay, rawFirst, videoFirst, harvestStorage: hs }) => {
       localStorage.setItem('autotube_onboarding_seen', 'true');
       localStorage.removeItem('autotube_project');
       sessionStorage.setItem(
@@ -744,7 +749,7 @@ export async function generateFullVideo(options) {
       sessionStorage.setItem('autotube_loop_fast_mode', 'true');
       sessionStorage.setItem('autotube_loop_min_assets', String(minAssets));
       sessionStorage.setItem('autotube_loop_broll_placement', 'true');
-      if (rawFirst) sessionStorage.setItem('autotube_loop_video_first', 'true');
+      if (videoFirst) sessionStorage.setItem('autotube_loop_video_first', 'true');
       for (const [k, v] of Object.entries(hs || {})) {
         sessionStorage.setItem(k, v);
       }
@@ -755,6 +760,7 @@ export async function generateFullVideo(options) {
       pexels: pexelsKey,
       pixabay: pixabayKey,
       rawFirst: realHarvest,
+      videoFirst,
       harvestStorage,
     },
   );

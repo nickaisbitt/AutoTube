@@ -2256,6 +2256,35 @@ export async function sourceSegmentMedia(
         `${topicContext.coreSubject} documentary`,
         `${segment.title} b-roll`,
       ];
+      const suppressGiphy = typeof sessionStorage !== 'undefined'
+        && sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true';
+      if (suppressGiphy && isLoopVideoFirst() && !signal?.aborted) {
+        const videoQuery = buildSpecificQuery(`${segment.title} ${topicContext.coreSubject} footage`, topicContext);
+        try {
+          const [bingVideos, ddgVideos] = await Promise.all([
+            searchBingVideos(videoQuery, signal),
+            searchDDGVideos(videoQuery, signal),
+          ]);
+          const fresh = [...bingVideos, ...ddgVideos].filter((c) => c.type === 'video');
+          if (fresh.length > 0) {
+            for (const c of fresh) {
+              c.finalScore = scoreCandidate(
+                c,
+                topicContext,
+                shotsToHarvest[0]?.vibe,
+                config.sourceType,
+                segment.narration,
+                segment.title,
+              );
+            }
+            allCandidates = [...allCandidates, ...fresh];
+            trace.push(`[S${segmentIndex + 1}] suppressGiphy video-only pre-fill: +${fresh.length} clips`);
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+
       let harvestRound = 2;
       const maxExtraRounds = 5;
       while (
@@ -2359,12 +2388,18 @@ export async function sourceSegmentMedia(
     for (let i = 0; i < shotsToHarvest.length; i++) {
       const shot = shotsToHarvest[i];
       const shotType = i === 0 ? 'primary' : 'secondary';
+      const preferredType =
+        i === 0 && isLoopVideoFirst()
+          ? 'video'
+          : i > 0
+            ? finalAssets[i - 1]?.type
+            : undefined;
       let best = await pickDistinctShotCandidate(
         uniqueCandidates,
         shot,
         segmentIndex,
         excludedUrls,
-        i > 0 ? finalAssets[i - 1]?.type : undefined,
+        preferredType,
         blockedUrlsForPick(),
         signal,
       );
@@ -2558,11 +2593,10 @@ export async function sourceSegmentMedia(
     }
 
     if (isLoopVideoFirst()) {
-      const suppressGiphy = typeof sessionStorage !== 'undefined'
-        && sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true';
-      const loopMinVideos = suppressGiphy ? 3 : 2;
+      const loopMinVideos = 2;
       let videoCount = finalAssets.filter((asset) => asset.type === 'video').length;
       const videoShot = shotsToHarvest[0];
+      let videoSearchRound = 0;
       while (videoCount < loopMinVideos && !signal?.aborted) {
         const videoPick = await pickDistinctShotCandidate(
           uniqueCandidates,
@@ -2573,7 +2607,33 @@ export async function sourceSegmentMedia(
           blockedUrlsForPick(),
           signal,
         );
-        if (!videoPick || videoPick.type !== 'video') break;
+        if (!videoPick || videoPick.type !== 'video') {
+          if (videoSearchRound >= 2) break;
+          const videoQuery = buildSpecificQuery(
+            `${segment.title} ${topicContext.coreSubject} footage`,
+            topicContext,
+          );
+          try {
+            const [bingVideos, ddgVideos] = await Promise.all([
+              searchBingVideos(videoQuery, signal),
+              searchDDGVideos(videoQuery, signal),
+            ]);
+            const fresh = [...bingVideos, ...ddgVideos].filter(
+              (c) => c.type === 'video' && !excludedUrls.has(c.url) && !deduplicationRegistry.usedUrls.has(c.url),
+            );
+            if (fresh.length === 0) break;
+            for (const c of fresh) {
+              c.finalScore = scoreCandidate(c, topicContext, videoShot?.vibe, config.sourceType, segment.narration, segment.title);
+            }
+            allCandidates = [...allCandidates, ...fresh];
+            rebuildUniqueCandidates();
+            trace.push(`[S${segmentIndex + 1}] video-first search round ${videoSearchRound + 1}: +${fresh.length} clips`);
+          } catch {
+            break;
+          }
+          videoSearchRound += 1;
+          continue;
+        }
         usedUrlsMap.set(videoPick.url, segmentIndex);
         registerAsset(deduplicationRegistry, { url: videoPick.url, alt: videoPick.alt, sourceUrl: videoPick.sourceUrl });
         excludedUrls.add(videoPick.url);

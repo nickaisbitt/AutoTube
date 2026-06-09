@@ -348,7 +348,13 @@ async function main() {
     }
 
     if (!uploadReady) {
-      const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState, currentTopic || topic);
+      const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(
+        watch,
+        fixState,
+        currentTopic || topic,
+        null,
+        { untilScore: cfg.untilScore },
+      );
       fixState = nextFix;
       fixesApplied = applied;
       const fixReport = formatFixReport(applied, fixState);

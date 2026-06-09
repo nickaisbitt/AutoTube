@@ -16,6 +16,7 @@ import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import {
   harvestContextFromFixState,
   harvestSessionStoragePayload,
+  normalizeUrlKey,
 } from './lib/harvest-loop-context.mjs';
 
 let passed = 0;
@@ -336,6 +337,32 @@ console.log('\n── 12. harvest-loop-context suppressGiphy ──');
 }
 
 // ---------------------------------------------------------------------------
+// 12b. harvest-loop-context — harvestVideoFirst wired
+// ---------------------------------------------------------------------------
+console.log('\n── 12b. harvest-loop-context harvestVideoFirst ──');
+{
+  const ctx = harvestContextFromFixState({ harvestVideoFirst: true, harvestNonce: 1 });
+  assert('harvestContextFromFixState passes harvestVideoFirst', ctx.harvestVideoFirst === true);
+
+  const payload = harvestSessionStoragePayload(ctx);
+  assert('sessionStorage payload sets autotube_loop_video_first', payload.autotube_loop_video_first === 'true');
+
+  const offPayload = harvestSessionStoragePayload(harvestContextFromFixState({ harvestVideoFirst: false }));
+  assert('No video-first flag when harvestVideoFirst=false', offPayload.autotube_loop_video_first === undefined);
+}
+
+// ---------------------------------------------------------------------------
+// 12c. normalizeUrlKey — embedded source URL, skip bare proxy
+// ---------------------------------------------------------------------------
+console.log('\n── 12c. normalizeUrlKey ──');
+{
+  const proxy = 'http://localhost:5173/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fwatch%3Fv%3Dabc';
+  assert('Extracts embedded YouTube URL', normalizeUrlKey(proxy).includes('youtube.com/watch'));
+  assert('Bare proxy path returns empty', normalizeUrlKey('/api/download-clip') === '');
+  assert('Uses sourceUrl when provided', normalizeUrlKey('/api/x', 'https://vimeo.com/123').includes('vimeo.com/123'));
+}
+
+// ---------------------------------------------------------------------------
 // 13. Top-up relevance gate — reject logos, accept editorial
 // ---------------------------------------------------------------------------
 console.log('\n── 13. Top-up relevance gate ──');
@@ -421,6 +448,46 @@ console.log('\n── 15. Weak segment keyword exclusion ──');
   };
   const score = scoreAssetRelevance(logoOnly, seg, topic, topicKws);
   assert('Weak-only seg keywords score 0 for logo URL', score === 0, `score=${score}`);
+}
+
+// ---------------------------------------------------------------------------
+// 16. suppressGiphy cleared when video quota met
+// ---------------------------------------------------------------------------
+console.log('\n── 16. suppressGiphy clear on video quota ──');
+{
+  const watch = { brutal: { overall: 6, report: { scores: { visualVariety: 7, pacing: 6 } } } };
+  const videoRichProject = {
+    script: [{ id: 's1', title: 'A' }, { id: 's2', title: 'B' }, { id: 's3', title: 'C' }],
+    media: [
+      { segmentId: 's1', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fa' },
+      { segmentId: 's1', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fb' },
+      { segmentId: 's2', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fvimeo.com%2F1' },
+      { segmentId: 's2', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fvimeo.com%2F2' },
+      { segmentId: 's3', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fdailymotion.com%2F1' },
+      { segmentId: 's3', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fdailymotion.com%2F2' },
+    ],
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, { suppressGiphy: true }, 'museum heist', videoRichProject);
+  assert('suppressGiphy cleared when ≥2 video/seg', fixState.suppressGiphy === false);
+  assert('Clear logged in applied fixes', applied.some((a) => a.includes('suppressGiphy cleared')));
+}
+
+// ---------------------------------------------------------------------------
+// 17. untilScore parameterization
+// ---------------------------------------------------------------------------
+console.log('\n── 17. untilScore parameterization ──');
+{
+  const watch = {
+    brutal: { overall: 7.5, report: { scores: { visualVariety: 7, pacing: 7 } } },
+    objectiveGate: { available: true, pass: true, checks: [] },
+    hookScript: { pass: true },
+    hookVision: { hookPass: true },
+  };
+  const { applied: below91 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 9.1 });
+  assert('Below 9.1 triggers reharvest fix', below91.some((a) => a.includes('below 9.1')));
+
+  const { applied: below7 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 7 });
+  assert('At 7.5 with untilScore=7 does not trigger below-target fix', !below7.some((a) => a.includes('below 7')));
 }
 
 // ---------------------------------------------------------------------------

@@ -136,8 +136,11 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   const denom = Math.min(Math.max(corpus.size, 1), 8);
   let score = strongHits / denom;
 
-  if (asset?.type === 'video' || /\.(mp4|webm|mov)/i.test(asset?.url || '')) {
+  if (asset?.type === 'video' || /\.(mp4|webm|mov)/i.test(asset?.url || '') || /\/api\/download-clip/i.test(asset?.url || '')) {
     score += 0.05;
+    if (/youtube|vimeo|dailymotion|news|documentary|archive\.org/i.test(haystack)) {
+      score += 0.1;
+    }
   }
   if (asset?.query && segKeywords.some((k) => asset.query.toLowerCase().includes(k))) {
     score += 0.1;
@@ -156,7 +159,10 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
 export function passesTopUpRelevanceGate(asset, segment, topic, topicKeywords = []) {
   const topicKws = topicKeywords.length ? topicKeywords : extractKeywords(topic, 12);
   const strongTopicKws = topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
-  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+  const proxiedClip = /\/api\/download-clip/i.test(asset?.url || '');
+  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.sourceUrl || ''}${
+    proxiedClip ? ` ${segment?.title || ''} ${topic}` : ''
+  }`.toLowerCase();
   const contextText = `${topic} ${segment?.title || ''} ${segment?.narration || ''}`.toLowerCase();
   if (offTopicBlockReason(haystack, contextText)) return false;
 
@@ -264,7 +270,9 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
     perSegment[seg.id] = {
       title: seg.title,
       count: uniqueUrls.size,
-      videoCount: assets.filter((m) => m.type === 'video' || /\.mp4/i.test(m.url || '')).length,
+      videoCount: assets.filter(
+        (m) => m.type === 'video' || /\.mp4/i.test(m.url || '') || /\/api\/download-clip/i.test(m.url || ''),
+      ).length,
     };
   }
 

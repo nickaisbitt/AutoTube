@@ -80,7 +80,8 @@ function loadLastProject(root = process.cwd()) {
  * @param {object|null} [project] — harvested project (defaults to last-project.json)
  * @returns {{ applied: string[], fixState: object, blockNextTopic: boolean }}
  */
-export function applyFixesFromWatch(watch, fixState, topic = '', project = null) {
+export function applyFixesFromWatch(watch, fixState, topic = '', project = null, options = {}) {
+  const untilScore = options.untilScore ?? 9.1;
   const applied = [];
   const s = { ...fixState };
 
@@ -158,11 +159,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null)
   }
 
   const renderTier = s.renderTier || 'draft';
-  if (renderTier === 'full' && (watch.brutal?.overall ?? 10) < 9.1) {
+  if (renderTier === 'full' && (watch.brutal?.overall ?? 10) < untilScore) {
     s.reHarvestMedia = true;
     s.brollPlacement = true;
     s.minAssetsPerSegment = Math.min(8, Math.max(6, s.minAssetsPerSegment || 4));
-    escalateFixStrategy(s, applied, `2b. Full-tier score below 9.1`);
+    escalateFixStrategy(s, applied, `2b. Full-tier score below ${untilScore}`);
   }
 
   if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6) {
@@ -178,13 +179,31 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null)
     );
   }
 
-  if (visualVariety <= 6) {
+  if (visualVariety <= 5) {
+    s.harvestVideoFirst = true;
+    s.suppressGiphy = true;
+    s.cutIntervalSec = Math.max(CUT_FLOOR, s.cutIntervalSec ?? CUT_FLOOR);
+    applied.push(`3a. Visual variety ${visualVariety}/10 → harvestVideoFirst + suppressGiphy (cuts floor ${CUT_FLOOR}s)`);
+  } else if (visualVariety <= 6) {
     s.suppressGiphy = true;
     applied.push(`3a. Visual variety ${visualVariety}/10 → suppressGiphy=true for next harvest`);
   }
 
   const harvestProject = project || loadLastProject();
   if (harvestProject?.media?.length) {
+    const segIds = (harvestProject.script || []).map((seg) => seg.id);
+    const videoQuotaMet = segIds.length > 0 && segIds.every((id) => {
+      const assets = harvestProject.media.filter((m) => m.segmentId === id);
+      const videoCount = assets.filter(
+        (m) => m.type === 'video' || (m.url || '').includes('/api/download-clip'),
+      ).length;
+      return videoCount >= 2;
+    });
+    if (videoQuotaMet && s.suppressGiphy === true) {
+      s.suppressGiphy = false;
+      applied.push('3c. Video quota met (≥2/seg) → suppressGiphy cleared');
+    }
+
     const { giphyOnlySegments, giphyDominantSegments, giphyTotal } = detectGiphyDominance(harvestProject);
     const giphyHeavy = giphyOnlySegments.length > 0 || giphyDominantSegments.length > 0;
     if (giphyHeavy) {

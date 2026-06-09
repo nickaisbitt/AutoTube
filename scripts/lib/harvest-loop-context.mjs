@@ -16,6 +16,7 @@ export function harvestContextFromFixState(fixState = {}) {
     mediaOffset: fixState.mediaOffset || 0,
     excludeUrls: Array.isArray(fixState.excludedUrls) ? fixState.excludedUrls : [],
     suppressGiphy: fixState.suppressGiphy === true,
+    harvestVideoFirst: fixState.harvestVideoFirst !== false,
   };
 }
 
@@ -32,6 +33,9 @@ export function harvestSessionStoragePayload(ctx) {
   if (ctx.suppressGiphy) {
     payload.autotube_loop_suppress_giphy = 'true';
   }
+  if (ctx.harvestVideoFirst !== false) {
+    payload.autotube_loop_video_first = 'true';
+  }
   return payload;
 }
 
@@ -43,15 +47,37 @@ export function harvestSessionStoragePayload(ctx) {
 export function accumulateExcludedUrls(fixState, project) {
   const prev = new Set((fixState.excludedUrls || []).map((u) => normalizeUrlKey(u)));
   for (const m of project?.media || []) {
-    const key = normalizeUrlKey(m.url);
+    const key = normalizeUrlKey(m.url, m.sourceUrl);
     if (key) prev.add(key);
   }
   fixState.excludedUrls = [...prev].slice(-400);
   return fixState;
 }
 
-function normalizeUrlKey(url = '') {
-  return (url || '').split('?')[0].toLowerCase();
+/**
+ * Stable dedupe key — prefer embedded source URL over bare proxy paths.
+ * @param {string} url
+ * @param {string} [sourceUrl]
+ */
+export function normalizeUrlKey(url = '', sourceUrl = '') {
+  const embedded = extractEmbeddedSourceUrl(url);
+  if (embedded) return embedded.split('?')[0].toLowerCase();
+  const src = (sourceUrl || '').trim();
+  if (src && /^https?:\/\//i.test(src)) return src.split('?')[0].toLowerCase();
+  const bare = (url || '').split('?')[0].toLowerCase();
+  if (bare.includes('/api/download-clip') && !embedded) return '';
+  return bare;
+}
+
+function extractEmbeddedSourceUrl(url = '') {
+  const raw = url || '';
+  const match = raw.match(/[?&]url=([^&]+)/i);
+  if (!match) return '';
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
 }
 
 /**

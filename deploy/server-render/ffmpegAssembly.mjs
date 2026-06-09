@@ -53,6 +53,10 @@ function hardCutsEnabled() {
   return loopMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
 }
 
+function patternInterruptsEnabled() {
+  return process.env.AUTOTUBE_PATTERN_INTERRUPTS === '1';
+}
+
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
   if (assetCount <= 1) return 0;
   if (intervalSec <= 0) return 0;
@@ -212,17 +216,24 @@ async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
   return { localSrc: null, asset };
 }
 
-function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0 }) {
+function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0, isInterruptClip = false }) {
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
   const hardCuts = hardCutsEnabled();
+  const interrupts = patternInterruptsEnabled();
   const frames = Math.max(1, Math.round(durationSec * FPS));
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
   if (!isVideo && hardCuts) {
-    const drift = 0.08 + (clipIndex % 5) * 0.02;
-    vf = `zoompan=z='min(zoom+${drift.toFixed(3)},1.12)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
+    // Interrupt clips punch-zoom to 1.25x; normal clips drift to 1.12x
+    const drift = interrupts && isInterruptClip ? 0.18 : (0.08 + (clipIndex % 5) * 0.02);
+    const maxZoom = interrupts && isInterruptClip ? 1.25 : 1.12;
+    vf = `zoompan=z='min(zoom+${drift.toFixed(3)},${maxZoom})':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   } else if (hardCuts && clipIndex > 0) {
     const fadeOut = Math.max(0.04, durationSec - 0.04);
     vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
+    // Interrupt video clips: brief saturation+brightness boost for visual punch
+    if (interrupts && isInterruptClip) {
+      vf = `eq=saturation=1.4:brightness=0.06,${vf}`;
+    }
   } else if (!isVideo && !draft) {
     vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   }
@@ -293,6 +304,10 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }) 
   return r.status === 0 && existsSync(clipOut);
 }
 
+// Pattern interrupt fires every INTERRUPT_INTERVAL_SEC within the first INTERRUPT_FIRST_SEC
+const INTERRUPT_INTERVAL_SEC = 8;
+const INTERRUPT_FIRST_SEC = 60;
+
 async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
   const interval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
   const targetDuration = segment.duration || 20;
@@ -300,6 +315,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const { w, h } = outputDimensions();
   const preset = ffmpegPreset();
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
+  const segmentStartSec = options.segmentStartSec ?? 0;
+  const interruptsOn = patternInterruptsEnabled();
   const tmpDir = join(dirname(outputPath), `seg-${segment.id}-clips`);
   const cacheDir = join(tmpDir, 'cache');
   mkdirSync(tmpDir, { recursive: true });
@@ -320,6 +337,16 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
+  function isInterruptClip() {
+    if (!interruptsOn) return false;
+    const absTime = segmentStartSec + renderedDuration;
+    if (absTime >= INTERRUPT_FIRST_SEC) return false;
+    // Fire on the clip that crosses an 8-second boundary
+    const prev = absTime;
+    const next = absTime + interval;
+    return Math.floor(next / INTERRUPT_INTERVAL_SEC) > Math.floor(prev / INTERRUPT_INTERVAL_SEC);
+  }
+
   function resolveVideoSeek(asset, localSrc, durationSec, hintOffset = 0) {
     const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
     if (!isVideo) return 0;
@@ -335,6 +362,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   }
 
   async function pushClip(asset, durationSec, label, hintOffset = 0) {
+    const interrupt = isInterruptClip();
     const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
     clipIndex += 1;
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
@@ -346,7 +374,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     } else {
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
       ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
-        w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1,
+        w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, isInterruptClip: interrupt,
       });
       if (!ok) {
         const thumb = resolvedAsset.thumbnailUrl;
@@ -355,7 +383,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
           const thumbLocal = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
           if (thumbLocal) {
             ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
-              w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1,
+              w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1, isInterruptClip: interrupt,
             });
             if (ok) console.log(`  [ffmpeg] ${label}: video → thumbnail still`);
           }
@@ -448,6 +476,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const preset = ffmpegPreset();
 
   const mediaPool = project.media || [];
+  let cumulativeSegStartSec = 0;
 
   for (let si = 0; si < (project.script || []).length; si++) {
     const seg = project.script[si];
@@ -459,10 +488,14 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
 
     console.log(`  [ffmpeg] segment ${si + 1}/${project.script.length}: ${seg.title} (${(seg.duration || 0).toFixed(1)}s)`);
     const segOut = join(workDir, `segment-${si}.mp4`);
-    const result = await renderSegmentClips(seg, segMedia, project, segOut, options);
+    const result = await renderSegmentClips(seg, segMedia, project, segOut, {
+      ...options,
+      segmentStartSec: cumulativeSegStartSec,
+    });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };
     }
+    cumulativeSegStartSec += seg.duration || 0;
     segmentOutputs.push(segOut);
     totalClipCount += result.clipCount;
     totalPlaceholderClips += result.placeholderClipCount || 0;
@@ -567,6 +600,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     perSegment,
     cutIntervalSec: options.cutIntervalSec ?? assetCutIntervalSec(project),
     hardCuts: hardCutsEnabled(),
+    patternInterrupts: patternInterruptsEnabled(),
   };
   const manifestPath = join(workDir, 'render-manifest.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

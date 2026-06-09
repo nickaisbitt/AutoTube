@@ -16,7 +16,7 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (base.projectPath) env.AUTOTUBE_PROJECT_PATH = base.projectPath;
   if (fixState.cutIntervalSec) env.AUTOTUBE_CUT_INTERVAL_SEC = String(fixState.cutIntervalSec);
   if (fixState.showKineticText) env.AUTOTUBE_KINETIC_TEXT = '1';
-  if (fixState.patternInterrupts) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
+  if (fixState.patternInterrupts || (fixState.cutIntervalSec ?? 1.25) <= 0.5) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
   if (fixState.useFastPacing) env.AUTOTUBE_FAST_PACING = '1';
   if (fixState.useFfmpegAssembly !== false) env.AUTOTUBE_RENDER_MODE = 'ffmpeg';
   if (fixState.harvestVideoFirst !== false) env.AUTOTUBE_HARVEST_VIDEO_FIRST = '1';

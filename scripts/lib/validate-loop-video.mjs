@@ -6,7 +6,9 @@ import { existsSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const MIN_DURATION_SEC = 55;
-const MIN_BYTES = 5 * 1024 * 1024;
+// Draft-quality 720p ultrafast renders can legitimately be 4–5 MB for 60 s;
+// 3 MB is a safe floor that still catches empty/corrupt/truncated files.
+const MIN_BYTES = 3 * 1024 * 1024;
 
 /**
  * @param {string} videoPath
@@ -19,7 +21,7 @@ export function validateLoopVideo(videoPath) {
 
   const size = statSync(videoPath).size;
   if (size < MIN_BYTES) {
-    return { valid: false, error: `file too small (${(size / 1024 / 1024).toFixed(2)} MB < 5 MB)` };
+    return { valid: false, error: `file too small (${(size / 1024 / 1024).toFixed(2)} MB < ${(MIN_BYTES / 1024 / 1024).toFixed(0)} MB)` };
   }
 
   const probe = spawnSync(

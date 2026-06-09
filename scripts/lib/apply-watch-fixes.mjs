@@ -1,8 +1,11 @@
 /**
  * Map Video Watcher results → pipeline fixes (applied before next loop iteration).
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
+import { detectGiphyDominance } from './harvest-quality.mjs';
 
 const CUT_FLOOR = 0.5;
 
@@ -57,12 +60,27 @@ function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
 }
 
 /**
+ * @param {string} root
+ * @returns {object|null}
+ */
+function loadLastProject(root = process.cwd()) {
+  const path = join(root, 'test-recordings', 'last-project.json');
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {object} watch — watchVideo() result
  * @param {object} fixState — mutable loop fix state
  * @param {string} [topic] — current video topic (for topic-aware hook lines)
+ * @param {object|null} [project] — harvested project (defaults to last-project.json)
  * @returns {{ applied: string[], fixState: object, blockNextTopic: boolean }}
  */
-export function applyFixesFromWatch(watch, fixState, topic = '') {
+export function applyFixesFromWatch(watch, fixState, topic = '', project = null) {
   const applied = [];
   const s = { ...fixState };
 
@@ -156,6 +174,23 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   if (visualVariety <= 6) {
     s.suppressGiphy = true;
     applied.push(`3a. Visual variety ${visualVariety}/10 → suppressGiphy=true for next harvest`);
+  }
+
+  const harvestProject = project || loadLastProject();
+  if (harvestProject?.media?.length) {
+    const { giphyOnlySegments, giphyDominantSegments, giphyTotal } = detectGiphyDominance(harvestProject);
+    const giphyHeavy = giphyOnlySegments.length > 0 || giphyDominantSegments.length > 0;
+    if (giphyHeavy) {
+      s.forceRealStock = true;
+      s.suppressGiphy = true;
+      s.reHarvestMedia = true;
+      s.harvestVideoFirst = true;
+      s.fixStrategy = 'reharvest';
+      s.mediaOffset = (s.mediaOffset || 0) + 2;
+      applied.push(
+        `3b. Giphy-heavy harvest (${giphyTotal} giphy, ${giphyOnlySegments.length} giphy-only segs) → forceRealStock=true, suppressGiphy=true`,
+      );
+    }
   }
 
   if (renderTier === 'full' && (watch.brutal?.overall ?? 10) <= 5) {

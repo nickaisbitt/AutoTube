@@ -35,6 +35,7 @@ export const DEFAULT_FIX_STATE = {
   harvestVideoFirst: true,
   whisperAlign: false,
   brollPlacement: true,
+  suppressGiphy: false,
 };
 
 /**

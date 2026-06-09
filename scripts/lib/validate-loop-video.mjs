@@ -41,10 +41,16 @@ export function validateLoopVideo(videoPath) {
   if (existsSync(manifestPath)) {
     try {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      if ((manifest.tpadSec ?? 0) > 2) {
+      if ((manifest.tpadSec ?? 0) > 12) {
         return {
           valid: false,
-          error: `render used ${manifest.tpadSec}s video freeze-pad (A/V sync bug)`,
+          error: `render used ${manifest.tpadSec}s video freeze-pad (excessive)`,
+        };
+      }
+      if ((manifest.tpadSec ?? 0) > 2 && (manifest.audioTrimmedSec ?? 0) > 0.5) {
+        return {
+          valid: false,
+          error: `render used ${manifest.tpadSec}s tpad while trimming ${manifest.audioTrimmedSec}s audio (A/V sync bug)`,
         };
       }
       const avDelta = Math.abs((manifest.videoSec ?? durationSec) - (manifest.muxDurationSec ?? durationSec));

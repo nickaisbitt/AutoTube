@@ -126,9 +126,9 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
       s.cutIntervalSec = Math.max(CUT_FLOOR, prev - 0.15);
       applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s`);
     }
-    if (pacing <= 6) {
+    if (pacing <= 8) {
       s.patternInterrupts = true;
-      applied.push(`2a. Pacing ${pacing}/10 ≤6 → patternInterrupts ON`);
+      applied.push(`2a. Pacing ${pacing}/10 ≤8 → patternInterrupts ON`);
     }
   }
 

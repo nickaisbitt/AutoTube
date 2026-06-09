@@ -31,6 +31,27 @@ function trimAudioToDuration(inputPath, outputPath, targetSec) {
   return r.status === 0 && existsSync(outputPath);
 }
 
+/** Extend video by cloning the last frame so narration is not truncated. */
+function padVideoToDuration(inputPath, outputPath, targetSec) {
+  const current = probeMediaDuration(inputPath);
+  const padSec = targetSec - current;
+  if (padSec <= 0.05) {
+    const copy = spawnSync('ffmpeg', ['-y', '-i', inputPath, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    return copy.status === 0 && existsSync(outputPath);
+  }
+  const r = spawnSync(
+    'ffmpeg',
+    [
+      '-y', '-i', inputPath,
+      '-vf', `tpad=stop_mode=clone:stop_duration=${padSec.toFixed(3)}`,
+      '-c:v', 'libx264', '-preset', ffmpegPreset(), '-pix_fmt', 'yuv420p',
+      '-an', outputPath,
+    ],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  return r.status === 0 && existsSync(outputPath);
+}
+
 function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
@@ -227,12 +248,13 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
     const drift = interrupts && isInterruptClip ? 0.18 : (0.08 + (clipIndex % 5) * 0.02);
     const maxZoom = interrupts && isInterruptClip ? 1.25 : 1.12;
     vf = `zoompan=z='min(zoom+${drift.toFixed(3)},${maxZoom})':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
-  } else if (hardCuts && clipIndex > 0) {
-    const fadeOut = Math.max(0.04, durationSec - 0.04);
-    vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
-    // Interrupt video clips: brief saturation+brightness boost for visual punch
+  } else if (hardCuts) {
     if (interrupts && isInterruptClip) {
       vf = `eq=saturation=1.4:brightness=0.06,${vf}`;
+    }
+    if (clipIndex > 0) {
+      const fadeOut = Math.max(0.04, durationSec - 0.04);
+      vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
     }
   } else if (!isVideo && !draft) {
     vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
@@ -337,13 +359,12 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
-  function isInterruptClip() {
+  function isInterruptClip(durationSec) {
     if (!interruptsOn) return false;
     const absTime = segmentStartSec + renderedDuration;
     if (absTime >= INTERRUPT_FIRST_SEC) return false;
-    // Fire on the clip that crosses an 8-second boundary
     const prev = absTime;
-    const next = absTime + interval;
+    const next = absTime + durationSec;
     return Math.floor(next / INTERRUPT_INTERVAL_SEC) > Math.floor(prev / INTERRUPT_INTERVAL_SEC);
   }
 
@@ -362,7 +383,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   }
 
   async function pushClip(asset, durationSec, label, hintOffset = 0) {
-    const interrupt = isInterruptClip();
+    const interrupt = isInterruptClip(durationSec);
     const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
     clipIndex += 1;
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
@@ -538,25 +559,38 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     return { ok: false, error: 'segment merge failed' };
   }
 
-  const videoDurationSec = probeMediaDuration(mergedVideo) || 60;
+  let videoDurationSec = probeMediaDuration(mergedVideo) || 60;
+  const rawVideoSec = videoDurationSec;
   const audioFile = options.mixedAudioPath;
   const audioDurationSec = audioFile && existsSync(audioFile) ? probeMediaDuration(audioFile) : 0;
 
   let audioForMux = audioFile;
   let audioTrimmedSec = 0;
-  const muxDurationSec = videoDurationSec;
+  let tpadSec = 0;
+  let videoForMux = mergedVideo;
+  let muxDurationSec = videoDurationSec;
 
   if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
-    const trimmedAudio = join(workDir, 'narration-trimmed.wav');
-    if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
-      audioForMux = trimmedAudio;
-      audioTrimmedSec = audioDurationSec - videoDurationSec;
-      console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (no video freeze-pad)`);
+    const gap = audioDurationSec - videoDurationSec;
+    const paddedVideo = join(workDir, 'merged-video-padded.mp4');
+    if (gap <= 12 && padVideoToDuration(mergedVideo, paddedVideo, audioDurationSec)) {
+      videoForMux = paddedVideo;
+      tpadSec = gap;
+      muxDurationSec = audioDurationSec;
+      videoDurationSec = probeMediaDuration(paddedVideo) || audioDurationSec;
+      console.log(`  [ffmpeg] padded video ${rawVideoSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (tpad ${gap.toFixed(1)}s, keep full narration)`);
+    } else {
+      const trimmedAudio = join(workDir, 'narration-trimmed.wav');
+      if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
+        audioForMux = trimmedAudio;
+        audioTrimmedSec = gap;
+        console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (video pad failed)`);
+      }
     }
   }
 
   if (audioForMux && existsSync(audioForMux)) {
-    muxVideoWithAudio(mergedVideo, audioForMux, outputPath, muxDurationSec, {
+    muxVideoWithAudio(videoForMux, audioForMux, outputPath, muxDurationSec, {
       backgroundMusic: project.exportSettings?.backgroundMusic !== false,
       musicPreset: project.exportSettings?.musicPreset,
     });
@@ -595,7 +629,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     videoSec: videoDurationSec,
     audioSec: audioDurationSec,
     audioTrimmedSec: Math.round(audioTrimmedSec * 100) / 100,
-    tpadSec: 0,
+    tpadSec: Math.round(tpadSec * 100) / 100,
     muxDurationSec,
     perSegment,
     cutIntervalSec: options.cutIntervalSec ?? assetCutIntervalSec(project),
@@ -605,7 +639,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const manifestPath = join(workDir, 'render-manifest.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(
-    `  [ffmpeg] manifest: ${totalClipCount} clips (${totalPlaceholderClips} placeholders, ${placeholderPct}%), video ${videoDurationSec.toFixed(1)}s, tpad 0s`,
+    `  [ffmpeg] manifest: ${totalClipCount} clips (${totalPlaceholderClips} placeholders, ${placeholderPct}%), video ${videoDurationSec.toFixed(1)}s, tpad ${tpadSec.toFixed(1)}s`,
   );
 
   return {

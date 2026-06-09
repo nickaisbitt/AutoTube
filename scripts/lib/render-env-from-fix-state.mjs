@@ -53,5 +53,6 @@ export function renderEnvJournalSnapshot(fixState = {}) {
     minAssetsPerSegment: fixState.minAssetsPerSegment,
     useFfmpegAssembly: fixState.useFfmpegAssembly !== false,
     harvestVideoFirst: fixState.harvestVideoFirst !== false,
+    patternInterrupts: fixState.patternInterrupts === true,
   };
 }

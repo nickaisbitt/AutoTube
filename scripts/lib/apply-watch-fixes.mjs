@@ -106,9 +106,21 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       s.reHarvestMedia = true;
       s.mediaOffset = (s.mediaOffset || 0) + 2;
       s.harvestVideoFirst = true;
+      s.suppressGiphy = true;
+      s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
       s.fixStrategy = 'reharvest';
       s.minAssetsPerSegment = Math.min(10, Math.max(6, (s.minAssetsPerSegment || 6) + 1));
-      applied.push(`0a. Placeholder gate FAIL → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg`);
+      const harvestProject = project || loadLastProject();
+      if (harvestProject?.media?.length) {
+        const prev = new Set((s.excludedUrls || []).map((u) => (u || '').split('?')[0].toLowerCase()));
+        for (const m of harvestProject.media) {
+          if (m.type !== 'video' && !/\/api\/download-clip/i.test(m.url || '')) continue;
+          const key = (m.sourceUrl || m.url || '').split('?')[0].toLowerCase();
+          if (key) prev.add(key);
+        }
+        s.excludedUrls = [...prev].slice(-400);
+      }
+      applied.push(`0a. Placeholder gate FAIL → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg, video-first`);
     } else if (failed.some((n) => n.startsWith('scene_'))) {
       escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`, { sceneFirst: true });
     } else {

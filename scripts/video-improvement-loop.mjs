@@ -348,11 +348,18 @@ async function main() {
     }
 
     if (!uploadReady) {
+      let loopProject = null;
+      try {
+        const lp = join(ROOT, 'test-recordings', 'last-project.json');
+        if (existsSync(lp)) loopProject = JSON.parse(readFileSync(lp, 'utf8'));
+      } catch {
+        /* optional */
+      }
       const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(
         watch,
         fixState,
         currentTopic || topic,
-        null,
+        loopProject,
         { untilScore: cfg.untilScore },
       );
       fixState = nextFix;

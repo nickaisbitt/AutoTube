@@ -14,6 +14,7 @@ import {
   countSegmentVideos,
   isVideoLikeAsset,
   isUnreliableVideoHost,
+  isTrustedVideoHost,
 } from './lib/harvest-quality.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import {

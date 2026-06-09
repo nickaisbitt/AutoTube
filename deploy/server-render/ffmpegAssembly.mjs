@@ -134,6 +134,22 @@ function assetKey(asset) {
   return asset?.id || asset?.url || '';
 }
 
+/** Stable URL key for manifest exclusion (prefer embedded source page over proxy path). */
+function assetManifestKey(asset) {
+  const src = (asset?.sourceUrl || '').trim();
+  if (src && /^https?:\/\//i.test(src)) return src.split('?')[0].toLowerCase();
+  const url = asset?.url || '';
+  const match = url.match(/[?&]url=([^&]+)/i);
+  if (match) {
+    try {
+      return decodeURIComponent(match[1]).split('?')[0].toLowerCase();
+    } catch {
+      return match[1].split('?')[0].toLowerCase();
+    }
+  }
+  return url.split('?')[0].toLowerCase();
+}
+
 /** Advance per-asset seek position so video B-roll does not replay t=0 every cut. */
 function assignVideoSourceOffsets(clips) {
   const nextOffset = new Map();
@@ -262,9 +278,11 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
     const maxZoom = interrupts && isInterruptClip ? (strong ? 1.38 : 1.25) : 1.12;
     vf = `zoompan=z='min(zoom+${drift.toFixed(3)},${maxZoom})':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   } else if (hardCuts) {
+    // Video hard-cuts: eq punch on interrupt clips (including hook at clipIndex 0).
     if (interrupts && isInterruptClip) {
-      const sat = interruptStrong() ? 1.65 : 1.4;
-      const bright = interruptStrong() ? 0.1 : 0.06;
+      const strong = interruptStrong();
+      const sat = strong ? 1.65 : 1.4;
+      const bright = strong ? 0.1 : 0.06;
       vf = `eq=saturation=${sat}:brightness=${bright},${vf}`;
     }
     if (clipIndex > 0) {
@@ -379,6 +397,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   let renderedDuration = 0;
   let clipIndex = 0;
   let placeholderClipCount = 0;
+  const placeholderUrls = [];
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
@@ -386,6 +405,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (!interruptsOn) return false;
     const absTime = segmentStartSec + renderedDuration;
     if (absTime >= INTERRUPT_FIRST_SEC) return false;
+    // Strong mode: first clip in segment (hook) always gets interrupt punch.
+    if (absTime < 0.01 && interruptStrong()) return true;
     const prev = absTime;
     const next = absTime + durationSec;
     const step = interruptIntervalSec();
@@ -412,11 +433,15 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     clipIndex += 1;
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
     let ok = false;
+    let usedPlaceholder = false;
     if (!localSrc) {
       const reason = `fetch failed url=${(asset.url || '').slice(0, 80)} thumb=${(asset.thumbnailUrl || 'none').slice(0, 60)}`;
       console.log(`  [ffmpeg] ${label}: placeholder — ${reason}`);
       ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
-      if (ok) placeholderClipCount += 1;
+      if (ok) {
+        placeholderClipCount += 1;
+        usedPlaceholder = true;
+      }
     } else {
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
       ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
@@ -438,8 +463,15 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       if (!ok) {
         console.log(`  [ffmpeg] ${label}: encode failed — using placeholder`);
         ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
-        if (ok) placeholderClipCount += 1;
+        if (ok) {
+          placeholderClipCount += 1;
+          usedPlaceholder = true;
+        }
       }
+    }
+    if (usedPlaceholder) {
+      const key = assetManifestKey(resolvedAsset || asset);
+      if (key) placeholderUrls.push(key);
     }
     if (!ok) {
       return false;
@@ -500,6 +532,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     ok: true,
     clipCount: clipPaths.length,
     placeholderClipCount,
+    placeholderUrls,
     scheduleCount: schedule.length,
     intervalSec: interval,
     targetSec: segment.duration || 20,
@@ -519,6 +552,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const perSegment = [];
   let totalClipCount = 0;
   let totalPlaceholderClips = 0;
+  const allPlaceholderUrls = [];
   const preset = ffmpegPreset();
 
   const mediaPool = project.media || [];
@@ -545,11 +579,15 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     segmentOutputs.push(segOut);
     totalClipCount += result.clipCount;
     totalPlaceholderClips += result.placeholderClipCount || 0;
+    for (const u of result.placeholderUrls || []) {
+      if (u) allPlaceholderUrls.push(u);
+    }
     perSegment.push({
       segmentId: seg.id,
       title: seg.title,
       clipCount: result.clipCount,
       placeholderClipCount: result.placeholderClipCount || 0,
+      placeholderUrls: result.placeholderUrls || [],
       scheduleCount: result.scheduleCount,
       targetSec: result.targetSec,
       videoSec: result.videoSec,
@@ -588,6 +626,8 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const rawVideoSec = videoDurationSec;
   const audioFile = options.mixedAudioPath;
   const audioDurationSec = audioFile && existsSync(audioFile) ? probeMediaDuration(audioFile) : 0;
+  const scriptTargetSec = (project.script || []).reduce((sum, s) => sum + (s.duration || 0), 0);
+  const padTargetSec = Math.max(scriptTargetSec, audioDurationSec || 0);
 
   let audioForMux = audioFile;
   let audioTrimmedSec = 0;
@@ -595,7 +635,27 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   let videoForMux = mergedVideo;
   let muxDurationSec = videoDurationSec;
 
-  if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
+  if (videoDurationSec < padTargetSec - 0.15) {
+    const gap = padTargetSec - videoDurationSec;
+    const paddedVideo = join(workDir, 'merged-video-padded.mp4');
+    const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+    const maxPadSec = loopMode ? 45 : 12;
+    if (gap <= maxPadSec && padVideoToDuration(mergedVideo, paddedVideo, padTargetSec)) {
+      videoForMux = paddedVideo;
+      tpadSec = gap;
+      videoDurationSec = probeMediaDuration(paddedVideo) || padTargetSec;
+      muxDurationSec = Math.max(padTargetSec, audioDurationSec || padTargetSec);
+      console.log(`  [ffmpeg] padded video ${rawVideoSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (tpad ${gap.toFixed(1)}s, target ${padTargetSec.toFixed(1)}s)`);
+    } else if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
+      const trimmedAudio = join(workDir, 'narration-trimmed.wav');
+      if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
+        audioForMux = trimmedAudio;
+        audioTrimmedSec = audioDurationSec - videoDurationSec;
+        muxDurationSec = videoDurationSec;
+        console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (video pad failed, gap ${gap.toFixed(1)}s)`);
+      }
+    }
+  } else if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
     const gap = audioDurationSec - videoDurationSec;
     const paddedVideo = join(workDir, 'merged-video-padded.mp4');
     if (gap <= 12 && padVideoToDuration(mergedVideo, paddedVideo, audioDurationSec)) {
@@ -609,6 +669,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
         audioForMux = trimmedAudio;
         audioTrimmedSec = gap;
+        muxDurationSec = videoDurationSec;
         console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (video pad failed)`);
       }
     }
@@ -646,13 +707,16 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const placeholderPct = totalClipCount > 0
     ? Math.round((totalPlaceholderClips / totalClipCount) * 1000) / 10
     : 0;
+  const placeholderUrls = [...new Set(allPlaceholderUrls)];
 
   const manifest = {
     clipCount: totalClipCount,
     placeholderClipCount: totalPlaceholderClips,
     placeholderPct,
+    placeholderUrls,
     videoSec: videoDurationSec,
     audioSec: audioDurationSec,
+    scriptTargetSec: Math.round(scriptTargetSec * 100) / 100,
     audioTrimmedSec: Math.round(audioTrimmedSec * 100) / 100,
     tpadSec: Math.round(tpadSec * 100) / 100,
     muxDurationSec,

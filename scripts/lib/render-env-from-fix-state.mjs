@@ -18,10 +18,14 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (fixState.showKineticText) env.AUTOTUBE_KINETIC_TEXT = '1';
   if (fixState.patternInterrupts || (fixState.cutIntervalSec ?? 1.25) <= 0.5) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
   if (fixState.useFastPacing) env.AUTOTUBE_FAST_PACING = '1';
-  if (
+  const strongInterrupts =
     fixState.patternInterrupts
-    && ((fixState.cutIntervalSec ?? 1.25) <= 0.5 || fixState.useFastPacing)
-  ) {
+    && (
+      renderTier === 'full'
+      || (fixState.cutIntervalSec ?? 1.25) <= 0.5
+      || fixState.useFastPacing
+    );
+  if (strongInterrupts) {
     env.AUTOTUBE_INTERRUPT_INTERVAL_SEC = process.env.AUTOTUBE_INTERRUPT_INTERVAL_SEC || '5';
     env.AUTOTUBE_INTERRUPT_STRONG = '1';
   }

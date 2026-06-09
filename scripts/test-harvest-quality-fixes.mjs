@@ -17,6 +17,7 @@ import {
   isTrustedVideoHost,
 } from './lib/harvest-quality.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
+import { buildRenderEnvFromFixState } from './lib/render-env-from-fix-state.mjs';
 import {
   harvestContextFromFixState,
   harvestSessionStoragePayload,
@@ -511,6 +512,61 @@ console.log('\n── 18. countSegmentVideos ──');
   assert('Segment s2 has 1 video', countSegmentVideos(media, 's2') === 1);
   assert('Instagram blocked as unreliable video host', isUnreliableVideoHost('https://www.instagram.com/p/abc') === true);
   assert('YouTube not blocked', isUnreliableVideoHost('https://www.youtube.com/watch?v=abc') === false);
+  assert('YouTube is trusted video host', isTrustedVideoHost('https://www.youtube.com/watch?v=abc') === true);
+  assert('Instagram is not trusted', isTrustedVideoHost('https://www.instagram.com/p/x') === false);
+}
+
+// ---------------------------------------------------------------------------
+// 19. Full-tier render env wires strong pattern interrupts
+// ---------------------------------------------------------------------------
+console.log('\n── 19. Full-tier strong interrupts env ──');
+{
+  const env = buildRenderEnvFromFixState({
+    renderTier: 'full',
+    patternInterrupts: true,
+    cutIntervalSec: 0.5,
+    useFastPacing: true,
+  });
+  assert('Full tier sets AUTOTUBE_PATTERN_INTERRUPTS', env.AUTOTUBE_PATTERN_INTERRUPTS === '1');
+  assert('Full tier sets AUTOTUBE_INTERRUPT_STRONG', env.AUTOTUBE_INTERRUPT_STRONG === '1');
+  assert('Full tier sets 5s interrupt interval', env.AUTOTUBE_INTERRUPT_INTERVAL_SEC === '5');
+  assert('Full tier render quality high', env.AUTOTUBE_RENDER_QUALITY === 'high');
+}
+
+// ---------------------------------------------------------------------------
+// 20. Pacing plateau (4.8–5) skips reharvest / minAssets escalation
+// ---------------------------------------------------------------------------
+console.log('\n── 20. Pacing plateau skip reharvest ──');
+{
+  const watch = {
+    brutal: { overall: 4.8, report: { scores: { pacing: 4, visualVariety: 5 } } },
+    repetition: { repeatPct: 0, duplicateRunCount: 0 },
+    objectiveGate: { available: true, pass: true, checks: [] },
+    hookScript: { pass: true },
+    hookVision: { hookPass: true },
+  };
+  const cleanProject = {
+    script: [{ id: 's1', title: 'Hook' }, { id: 's2', title: 'Body' }],
+    media: [
+      { segmentId: 's1', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fa' },
+      { segmentId: 's1', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fb' },
+      { segmentId: 's2', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fvimeo.com%2F1' },
+      { segmentId: 's2', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fvimeo.com%2F2' },
+    ],
+  };
+  const { fixState, applied } = applyFixesFromWatch(
+    watch,
+    { renderTier: 'full', cutIntervalSec: 1.25, minAssetsPerSegment: 6 },
+    'museum heist',
+    cleanProject,
+    { untilScore: 9.1 },
+  );
+  assert('Pacing plateau keeps minAssets at 6 (no bump)', fixState.minAssetsPerSegment === 6);
+  assert('Pacing plateau skips reHarvestMedia', fixState.reHarvestMedia !== true);
+  assert('Pacing plateau enables patternInterrupts', fixState.patternInterrupts === true);
+  assert('Pacing plateau hits cut floor', fixState.cutIntervalSec === 0.5);
+  assert('Pacing plateau logs skip reharvest', applied.some((a) => a.includes('pacing plateau')));
+  assert('Pacing plateau does not log repetition reharvest', !applied.some((a) => a.startsWith('3.')));
 }
 
 // ---------------------------------------------------------------------------

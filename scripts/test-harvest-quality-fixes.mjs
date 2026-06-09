@@ -376,6 +376,9 @@ console.log('\n── 12b. harvest-loop-context harvestVideoFirst ──');
 
   const offPayload = harvestSessionStoragePayload(harvestContextFromFixState({ harvestVideoFirst: false }));
   assert('No video-first flag when harvestVideoFirst=false', offPayload.autotube_loop_video_first === undefined);
+
+  const vidPayload = harvestSessionStoragePayload(harvestContextFromFixState({ minVideosPerSegment: 2 }));
+  assert('minVideosPerSegment wired to sessionStorage', vidPayload.autotube_loop_min_videos === '2');
 }
 
 // ---------------------------------------------------------------------------

@@ -28,6 +28,7 @@ import {
   countSegmentVideos,
   isVideoLikeAsset,
   isUnreliableVideoHost,
+  isTrustedVideoHost,
 } from './harvest-quality.mjs';
 
 export function resolveOpenRouterKey() {
@@ -512,20 +513,25 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
   const keepUrl = normalizeKeptVideoUrl(asset, devServer);
 
   if (proxied) {
-    if (isUnreliableVideoHost(`${asset.url || ''} ${asset.sourceUrl || ''}`)) {
+    const hostBlob = `${asset.url || ''} ${asset.sourceUrl || ''}`;
+    if (isUnreliableVideoHost(hostBlob)) {
       report.dropped.push({ url: asset.url, reason: 'unreliable video host (instagram/x/article)' });
       return false;
     }
-    const probeUrl = downloadUrl.startsWith('http') ? downloadUrl : `${devServer}${keepUrl}`;
-    const clipOk = loopMode
-      ? await canFetch(probeUrl, { timeoutMs: 12000, minBytes: 1024, expectVideo: true })
-      : true;
-    if (!clipOk) {
-      report.dropped.push({ url: asset.url, reason: 'proxy clip probe failed' });
-      return false;
+    const trusted = isTrustedVideoHost(hostBlob);
+    if (loopMode && !trusted) {
+      const probeUrl = downloadUrl.startsWith('http') ? downloadUrl : `${devServer}${keepUrl}`;
+      const clipOk = await canFetch(probeUrl, { timeoutMs: 20000, minBytes: 512, expectVideo: false });
+      if (!clipOk) {
+        report.dropped.push({ url: asset.url, reason: 'proxy clip probe failed' });
+        return false;
+      }
     }
     sanitized.push({ ...asset, type: 'video', url: keepUrl, sourceUrl: asset.sourceUrl || asset.url });
-    report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}proxy clip probe OK` });
+    report.keptVideo.push({
+      url: asset.url,
+      reason: `${reasonPrefix}${trusted ? 'trusted host proxy' : 'proxy clip probe OK'}`,
+    });
     return true;
   }
 
@@ -556,7 +562,9 @@ async function addVideoTopUpCandidate(project, seg, draft, devServer, endpoint, 
   if (!passesTopUpRelevanceGate(draft, seg, topic, topicKeywords)) return false;
 
   const probeSanitized = [];
-  if (!(await tryKeepVideoAsset(draft, devServer, probeSanitized, report, { loopMode: true }))) return false;
+  const probeReport = { keptVideo: [], dropped: [] };
+  if (!(await tryKeepVideoAsset(draft, devServer, probeSanitized, probeReport, { loopMode: true }))) return false;
+  report.keptVideo.push(...probeReport.keptVideo);
   const kept = probeSanitized[0] || draft;
   const videoCount = countSegmentVideos(project.media, seg.id);
 

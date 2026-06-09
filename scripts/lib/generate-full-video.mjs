@@ -849,6 +849,12 @@ export async function generateFullVideo(options) {
     browser = null;
 
     patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
+    if (project.exportSettings?.hookOverlay) {
+      fixState.hookOverlay = project.exportSettings.hookOverlay;
+    }
+    if (project.hookLine) {
+      fixState.hookLine = project.hookLine;
+    }
     if (realHarvest) {
       const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, {
         loopMode: true,

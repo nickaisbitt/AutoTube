@@ -15,6 +15,26 @@ function escapeDrawtext(text) {
     .replace(/;/g, '\\;');
 }
 
+/** Up to 3 lines, 3 words each — keeps drawtext within frame width at hook font sizes. */
+function wrapHookLines(words, maxWordsPerLine = 3, maxLines = 3) {
+  const lines = [];
+  for (let i = 0; i < words.length && lines.length < maxLines; i += maxWordsPerLine) {
+    lines.push(words.slice(i, i + maxWordsPerLine).join(' '));
+  }
+  return lines;
+}
+
+/** Shrink font when longest line would exceed ~90% of frame width (vision readability). */
+function fitHookFontSize(lines, height, width) {
+  let fontSize = hookFontPx(height);
+  const longest = Math.max(...lines.map((l) => l.length), 1);
+  const maxWidth = width * 0.90;
+  while (longest * fontSize * 0.58 > maxWidth && fontSize > Math.round(height * 0.06)) {
+    fontSize -= 4;
+  }
+  return fontSize;
+}
+
 function escapeAss(text) {
   return String(text || '').replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}');
 }
@@ -50,23 +70,21 @@ export function overlayHookText(videoPath, project, options = {}) {
     { encoding: 'utf8' },
   );
   const [wStr, hStr] = (probe.stdout || '1280,720').trim().split(',');
+  const w = parseInt(wStr, 10) || 1280;
   const h = parseInt(hStr, 10) || 720;
   const words = hookText.trim().toUpperCase().split(/\s+/).filter(Boolean);
-  const line1 = words.slice(0, 4).join(' ');
-  const line2 = words.slice(4, 8).join(' ');
-  const fontSize = hookFontPx(h);
+  const lines = wrapHookLines(words);
+  const fontSize = fitHookFontSize(lines, h, w);
   const durationSec = options.durationSec ?? 4.0;
   const border = Math.max(6, Math.round(fontSize * 0.10));
   const boxBorder = Math.round(fontSize * 0.30);
   const dtCommon = `fontsize=${fontSize}:fontcolor=white:borderw=${border}:bordercolor=black:box=1:boxcolor=black@0.65:boxborderw=${boxBorder}`;
-  const filters = [
-    `drawtext=text='${escapeDrawtext(line1)}':${dtCommon}:x=(w-text_w)/2:y=h*0.25:enable='between(t\\,0\\,${durationSec})'`,
-  ];
-  if (line2) {
-    filters.push(
-      `drawtext=text='${escapeDrawtext(line2)}':${dtCommon}:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
-    );
-  }
+  const lineCount = lines.length;
+  const yStart = lineCount === 1 ? 0.38 : lineCount === 2 ? 0.28 : 0.22;
+  const yStep = lineCount === 1 ? 0 : lineCount === 2 ? 0.14 : 0.12;
+  const filters = lines.map((line, i) =>
+    `drawtext=text='${escapeDrawtext(line)}':${dtCommon}:x=(w-text_w)/2:y=h*${yStart + i * yStep}:enable='between(t\\,0\\,${durationSec})'`,
+  );
   const vf = filters.join(',');
 
   const tmpOut = videoPath.replace(/\.mp4$/, '-hooked.mp4');

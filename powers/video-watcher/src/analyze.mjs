@@ -292,20 +292,36 @@ function buildNumberedReport(ctx) {
     n += 1;
   }
 
+  const placeholderGate = ctx.placeholderGate;
+
   if (objectiveQa) {
+    const tier = renderTier === 'full' ? 'full' : 'draft';
+    const compositeFail = objectiveGate?.available && objectiveGate.pass === false;
+    const placeholderFail = placeholderGate?.available && placeholderGate.pass === false;
+    const scoreNote =
+      tier === 'draft' && compositeFail && (placeholderFail || objectiveQa.scorePass)
+        ? ' (informational on draft — composite gate failed; tech_score not gating)'
+        : tier === 'draft'
+          ? ' (informational on draft — tech_score deferred to full tier)'
+          : '';
     lines.push(
-      `${n}. **Technical QA (vision):** score ${objectiveQa.score}/100 | silence first 60s ${objectiveQa.silenceFirst60Sec}s | ${objectiveQa.pass ? 'PASS' : 'FAIL'}`,
+      `${n}. **Technical QA (vision):** score ${objectiveQa.score}/100${scoreNote} | silence first 60s ${objectiveQa.silenceFirst60Sec}s | ${objectiveQa.pass ? 'PASS' : 'FAIL'}`,
     );
     n += 1;
   }
 
-  const placeholderGate = ctx.placeholderGate;
   if (placeholderGate?.available) {
     const detail = placeholderGate.error
       ? placeholderGate.error
-      : `${placeholderGate.placeholderPct}% placeholders (max ${placeholderGate.maxPlaceholderPct}%)`;
+      : `${placeholderGate.placeholderPct}% placeholders (${placeholderGate.placeholderClipCount}/${placeholderGate.clipCount} clips, max ${placeholderGate.maxPlaceholderPct}%)`;
     lines.push(`${n}. **Placeholder gate:** ${placeholderGate.pass ? 'PASS' : 'FAIL'} — ${detail}`);
     n += 1;
+    if (!placeholderGate.pass && placeholderGate.badSegments?.length) {
+      lines.push(
+        `${n}. **Placeholder segments:** ${placeholderGate.segmentDetail || placeholderGate.badSegments.map((s) => `${s.title || s.segmentId}:${s.placeholderClipCount}`).join(', ')}`,
+      );
+      n += 1;
+    }
   }
 
   if (objectiveGate?.available) {
@@ -475,6 +491,7 @@ export async function watchVideo(options = {}) {
     sceneQa,
     objectiveQa,
     objectiveGate,
+    placeholderGate,
     hookScript,
     hookVision,
     brutal,

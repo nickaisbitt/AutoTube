@@ -248,7 +248,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
 
   const repetitionFail = repeatPct >= 25 || dupRuns >= 2;
   const varietyFail = visualVariety <= 5 || (visualVariety <= 6 && !pacingPlateau);
-  if (repetitionFail || varietyFail) {
+  if ((repetitionFail || varietyFail) && !pacingPlateau) {
     s.forceRealStock = false;
     s.harvestVideoFirst = true;
     s.showKineticText = false;

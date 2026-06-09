@@ -88,16 +88,47 @@ export function runObjectiveQa(videoPath, options = {}) {
 }
 
 /**
+ * Load ffmpeg-assembly/render-manifest.json adjacent to a rendered video.
+ * @param {string} videoPath
+ * @returns {object|null}
+ */
+export function loadRenderManifest(videoPath) {
+  const manifestPath = join(dirname(videoPath), 'ffmpeg-assembly', 'render-manifest.json');
+  if (!existsSync(manifestPath)) return null;
+  try {
+    return JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Segments with placeholder clips from manifest perSegment rows.
+ * @param {object[]} [perSegment]
+ */
+export function placeholderSegmentsFromManifest(perSegment = []) {
+  return perSegment.filter((s) => (s.placeholderClipCount || 0) > 0);
+}
+
+/**
+ * @param {object[]} segments — manifest perSegment rows with placeholders
+ */
+export function formatPlaceholderSegmentDetail(segments) {
+  return segments
+    .map((s) => `${s.title || s.segmentId}:${s.placeholderClipCount}/${s.clipCount || '?'}`)
+    .join(', ');
+}
+
+/**
  * @param {string} videoPath
  * @param {number} [durationSec]
  */
 export function evaluateClipCountGate(videoPath, durationSec = 0) {
-  const manifestPath = join(dirname(videoPath), 'ffmpeg-assembly', 'render-manifest.json');
-  if (!existsSync(manifestPath)) {
+  const manifest = loadRenderManifest(videoPath);
+  if (!manifest) {
     return { available: false };
   }
   try {
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     const dur = durationSec || manifest.muxDurationSec || manifest.videoSec || 0;
     const minClips = Math.max(1, Math.floor(dur / 5));
     const clipCount = manifest.clipCount || 0;
@@ -118,8 +149,8 @@ export function evaluateClipCountGate(videoPath, durationSec = 0) {
  */
 export function evaluatePlaceholderGate(videoPath) {
   const assemblyDir = join(dirname(videoPath), 'ffmpeg-assembly');
-  const manifestPath = join(assemblyDir, 'render-manifest.json');
-  if (!existsSync(manifestPath)) {
+  const manifest = loadRenderManifest(videoPath);
+  if (!manifest) {
     if (existsSync(assemblyDir)) {
       return {
         available: true,
@@ -129,15 +160,17 @@ export function evaluatePlaceholderGate(videoPath) {
         placeholderPct: 100,
         clipCount: 0,
         maxPlaceholderPct: MAX_PLACEHOLDER_PCT,
+        perSegment: [],
       };
     }
     return { available: false };
   }
   try {
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     const clipCount = manifest.clipCount || 0;
     const placeholderClipCount = manifest.placeholderClipCount ?? 0;
     const placeholderPct = manifest.placeholderPct ?? (clipCount > 0 ? (placeholderClipCount / clipCount) * 100 : 0);
+    const perSegment = manifest.perSegment || [];
+    const badSegments = placeholderSegmentsFromManifest(perSegment);
     return {
       available: true,
       pass: placeholderPct <= MAX_PLACEHOLDER_PCT,
@@ -145,6 +178,9 @@ export function evaluatePlaceholderGate(videoPath) {
       placeholderPct: Math.round(placeholderPct * 10) / 10,
       clipCount,
       maxPlaceholderPct: MAX_PLACEHOLDER_PCT,
+      perSegment,
+      badSegments,
+      segmentDetail: badSegments.length ? formatPlaceholderSegmentDetail(badSegments) : '',
     };
   } catch {
     return { available: false };
@@ -177,10 +213,12 @@ export function evaluateObjectiveGate(parts) {
     });
   }
   if (placeholderGate?.available) {
+    const segNote = placeholderGate.segmentDetail ? ` | dead segs: ${placeholderGate.segmentDetail}` : '';
     checks.push({
       name: 'placeholder_pct',
       pass: placeholderGate.pass === true,
-      detail: `${placeholderGate.placeholderPct}% placeholders (max ${placeholderGate.maxPlaceholderPct}%)`,
+      detail: placeholderGate.error
+        || `${placeholderGate.placeholderPct}% placeholders (max ${placeholderGate.maxPlaceholderPct}%)${segNote}`,
     });
   }
   if (tech) {

@@ -18,6 +18,13 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (fixState.showKineticText) env.AUTOTUBE_KINETIC_TEXT = '1';
   if (fixState.patternInterrupts || (fixState.cutIntervalSec ?? 1.25) <= 0.5) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
   if (fixState.useFastPacing) env.AUTOTUBE_FAST_PACING = '1';
+  if (
+    fixState.patternInterrupts
+    && ((fixState.cutIntervalSec ?? 1.25) <= 0.5 || fixState.useFastPacing)
+  ) {
+    env.AUTOTUBE_INTERRUPT_INTERVAL_SEC = process.env.AUTOTUBE_INTERRUPT_INTERVAL_SEC || '5';
+    env.AUTOTUBE_INTERRUPT_STRONG = '1';
+  }
   if (fixState.useFfmpegAssembly !== false) env.AUTOTUBE_RENDER_MODE = 'ffmpeg';
   if (fixState.harvestVideoFirst !== false) env.AUTOTUBE_HARVEST_VIDEO_FIRST = '1';
   if (fixState.brollPlacement !== false) env.AUTOTUBE_BROLL_PLACEMENT = '1';

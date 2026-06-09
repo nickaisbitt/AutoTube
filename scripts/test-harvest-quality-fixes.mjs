@@ -378,9 +378,36 @@ console.log('\n── 13. Top-up relevance gate ──');
 }
 
 // ---------------------------------------------------------------------------
-// 14. Weak segment keywords do not inflate relevance
+// 14. Fiction/movie stills blocklist
 // ---------------------------------------------------------------------------
-console.log('\n── 14. Weak segment keyword exclusion ──');
+console.log('\n── 14. Fiction/movie stills blocklist ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's3', title: 'Louvre robbery', narration: 'Security footage showed thieves inside the museum.' };
+  const topicKws = extractKeywords(topic, 12);
+
+  const movieStill = {
+    url: 'https://static1.moviewebimages.com/wordpress/wp-content/uploads/2024/10/jason-statham-heist-thriller.jpg',
+    alt: 'heist thriller movie still',
+    query: 'museum heist louvre',
+    type: 'image',
+  };
+  assert('MovieWeb heist still scores 0 for news topic', scoreAssetRelevance(movieStill, seg, topic, topicKws) === 0);
+  assert('Movie still fails top-up gate', passesTopUpRelevanceGate(movieStill, seg, topic, topicKws) === false);
+
+  const redditMeme = {
+    url: 'https://preview.redd.it/f8mb8u9655t61.jpg',
+    alt: 'reddit heist meme',
+    query: 'louvre museum heist',
+    type: 'image',
+  };
+  assert('Reddit preview meme fails top-up gate', passesTopUpRelevanceGate(redditMeme, seg, topic, topicKws) === false);
+}
+
+// ---------------------------------------------------------------------------
+// 15. Weak segment keywords do not inflate relevance
+// ---------------------------------------------------------------------------
+console.log('\n── 15. Weak segment keyword exclusion ──');
 {
   const topic = 'The museum heist streamed live on TikTok';
   const seg = { id: 's2', title: 'TikTok Live Stream', narration: 'Watch the viral clip spread online.' };

@@ -244,13 +244,16 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   const frames = Math.max(1, Math.round(durationSec * FPS));
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
   if (!isVideo && hardCuts) {
-    // Interrupt clips punch-zoom to 1.25x; normal clips drift to 1.12x
-    const drift = interrupts && isInterruptClip ? 0.18 : (0.08 + (clipIndex % 5) * 0.02);
-    const maxZoom = interrupts && isInterruptClip ? 1.25 : 1.12;
+    // Interrupt clips punch-zoom; strong mode for brutal pacing ≤5
+    const strong = interruptStrong();
+    const drift = interrupts && isInterruptClip ? (strong ? 0.28 : 0.18) : (0.08 + (clipIndex % 5) * 0.02);
+    const maxZoom = interrupts && isInterruptClip ? (strong ? 1.38 : 1.25) : 1.12;
     vf = `zoompan=z='min(zoom+${drift.toFixed(3)},${maxZoom})':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   } else if (hardCuts) {
     if (interrupts && isInterruptClip) {
-      vf = `eq=saturation=1.4:brightness=0.06,${vf}`;
+      const sat = interruptStrong() ? 1.65 : 1.4;
+      const bright = interruptStrong() ? 0.1 : 0.06;
+      vf = `eq=saturation=${sat}:brightness=${bright},${vf}`;
     }
     if (clipIndex > 0) {
       const fadeOut = Math.max(0.04, durationSec - 0.04);
@@ -326,9 +329,17 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }) 
   return r.status === 0 && existsSync(clipOut);
 }
 
-// Pattern interrupt fires every INTERRUPT_INTERVAL_SEC within the first INTERRUPT_FIRST_SEC
-const INTERRUPT_INTERVAL_SEC = 8;
+// Pattern interrupt fires every N seconds within the first INTERRUPT_FIRST_SEC
 const INTERRUPT_FIRST_SEC = 60;
+
+function interruptIntervalSec() {
+  const raw = parseFloat(process.env.AUTOTUBE_INTERRUPT_INTERVAL_SEC || '8');
+  return Number.isFinite(raw) && raw > 0 ? raw : 8;
+}
+
+function interruptStrong() {
+  return process.env.AUTOTUBE_INTERRUPT_STRONG === '1';
+}
 
 async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
   const interval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
@@ -365,7 +376,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (absTime >= INTERRUPT_FIRST_SEC) return false;
     const prev = absTime;
     const next = absTime + durationSec;
-    return Math.floor(next / INTERRUPT_INTERVAL_SEC) > Math.floor(prev / INTERRUPT_INTERVAL_SEC);
+    const step = interruptIntervalSec();
+    return Math.floor(next / step) > Math.floor(prev / step);
   }
 
   function resolveVideoSeek(asset, localSrc, durationSec, hintOffset = 0) {

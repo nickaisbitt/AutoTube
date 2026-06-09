@@ -141,12 +141,19 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null)
     s.useFastPacing = true;
     if ((s.cutIntervalSec ?? 1.25) > CUT_FLOOR) {
       const prev = s.cutIntervalSec ?? 1.25;
-      s.cutIntervalSec = Math.max(CUT_FLOOR, prev - 0.15);
+      const step = pacing <= 5 ? 0.35 : 0.15;
+      s.cutIntervalSec = Math.max(CUT_FLOOR, prev - step);
       applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s`);
     }
     if (pacing <= 8) {
       s.patternInterrupts = true;
       applied.push(`2a. Pacing ${pacing}/10 ≤8 → patternInterrupts ON`);
+    }
+    if (pacing <= 5) {
+      s.cutIntervalSec = CUT_FLOOR;
+      s.patternInterrupts = true;
+      s.useFastPacing = true;
+      applied.push(`2c. Pacing ${pacing}/10 ≤5 → cut floor ${CUT_FLOOR}s + strong interrupts`);
     }
   }
 

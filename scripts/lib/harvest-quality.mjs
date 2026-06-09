@@ -60,6 +60,10 @@ const OFF_TOPIC_BLOCKLIST = [
   // Stock lifestyle / clipart / generic infographics
   { pattern: /\b(?:living\s+room|weight\s*watchers|clipart|teamwork\s+hands)\b/i, requires: /\b(?:living\s+room|weight|clipart|teamwork)\b/i },
   { pattern: /videoblocks.*thumbnail|cloudfront\.net\/thumbnails\/video/i, requires: /\b__autotube_never__\b/i },
+
+  // Fiction / movie stills and meme posters — not editorial news B-roll
+  { pattern: /movieweb|pulp[\s-]?fiction|jason[\s-]?statham|talestavern|stealing-pulp|movieposter|film[\s-]?still|heist[\s-]?thriller|heist[\s-]?movie/i, requires: /\b(?:movie|film|cinema|hollywood|statham|actor|fiction)\b/i },
+  { pattern: /preview\.redd\.it\/|redd\.it\/.*\.jpg/i, requires: /\b(?:meme|reddit|fan[\s-]?art)\b/i },
 ];
 
 /**

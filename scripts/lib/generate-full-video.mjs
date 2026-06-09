@@ -261,22 +261,125 @@ function buildVideoTopUpAsset(r, devServer, seg, query, sourceLabel) {
   };
 }
 
+function segmentUniqueCount(project, segmentId) {
+  const keys = new Set(
+    (project.media || [])
+      .filter((m) => m.segmentId === segmentId)
+      .map((a) => (a.url || '').split('?')[0])
+      .filter(Boolean),
+  );
+  return keys.size;
+}
+
+async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords) {
+  const key = r.url.split('?')[0];
+  const alreadyInSeg = (project.media || []).some(
+    (m) => m.segmentId === seg.id && (m.url || '').split('?')[0] === key,
+  );
+  if (alreadyInSeg) return false;
+
+  const asset = { url: r.url, alt: r.alt || '', query: q, type: 'image' };
+  if (!passesTopUpRelevanceGate(asset, seg, topic, topicKeywords)) return false;
+  if (!(await canFetch(r.url, { timeoutMs: 8000, minBytes: 512 }))) return false;
+
+  const relevance = scoreAssetRelevance(asset, seg, topic, topicKeywords);
+  const uniqueCount = segmentUniqueCount(project, seg.id);
+  project.media.push({
+    id: `topup-${seg.id}-${uniqueCount}`,
+    segmentId: seg.id,
+    type: 'image',
+    url: r.url,
+    alt: r.alt || `${seg.title} ${topic}`,
+    query: q,
+    source: `${r.source || 'Search'} (volume top-up)`,
+    duration: 5,
+    isFallback: false,
+  });
+  report.volumeTopUp = report.volumeTopUp || [];
+  report.volumeTopUp.push({ segmentId: seg.id, url: r.url, endpoint, relevance });
+  return true;
+}
+
+async function rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords) {
+  let volume = evaluateHarvestVolume(project, minPerSegment);
+  if (volume.pass) return;
+
+  const segments = Object.fromEntries((project.script || []).map((s) => [s.id, s]));
+  const weak = new Set([
+    'tiktok', 'live', 'stream', 'streamed', 'video', 'news', 'breaking', 'viral',
+    'social', 'media', 'online', 'watch', 'footage', 'clip', 'trending', 'update',
+  ]);
+
+  for (const fail of volume.failing) {
+    const seg = segments[fail.segmentId];
+    if (!seg) continue;
+
+    const extraQueries = [
+      buildTopUpQuery(seg, topic, 3),
+      `${extractKeywords(seg.narration || '', 5).filter((k) => !weak.has(k)).join(' ')} press photo`.trim(),
+      `${extractKeywords(topic, 4).filter((k) => !weak.has(k)).join(' ')} ${extractKeywords(seg.title || '', 3).filter((k) => !weak.has(k)).join(' ')}`.trim(),
+    ].filter(Boolean);
+
+    for (const q of extraQueries) {
+      if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
+      for (const endpoint of TOP_UP_IMAGE_ENDPOINTS) {
+        const results = await fetchImageSearchResults(devServer, endpoint, q);
+        const candidates = results
+          .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
+          .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+        for (const r of candidates) {
+          if (await addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords)) {
+            if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
+          }
+        }
+        if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
+      }
+    }
+
+    let count = segmentUniqueCount(project, fail.segmentId);
+    for (const donor of [...(project.media || [])]) {
+      if (count >= minPerSegment) break;
+      if (donor.segmentId === fail.segmentId) continue;
+      const key = (donor.url || '').split('?')[0];
+      const alreadyInSeg = project.media.some(
+        (m) => m.segmentId === fail.segmentId && (m.url || '').split('?')[0] === key,
+      );
+      if (alreadyInSeg) continue;
+      if (!passesTopUpRelevanceGate(donor, seg, topic, topicKeywords)) continue;
+      project.media.push({
+        ...donor,
+        id: `topup-share-${fail.segmentId}-${count}`,
+        segmentId: fail.segmentId,
+        source: `${donor.source || 'Search'} (segment rebalance)`,
+      });
+      report.volumeTopUpShare = report.volumeTopUpShare || [];
+      report.volumeTopUpShare.push({ from: donor.segmentId, to: fail.segmentId, url: donor.url });
+      count += 1;
+    }
+  }
+
+  volume = evaluateHarvestVolume(project, minPerSegment);
+  if (!volume.pass) {
+    report.volumeTopUpMiss = volume.failing.map((f) => ({
+      segmentId: f.segmentId,
+      count: f.count,
+      need: minPerSegment,
+    }));
+  }
+}
+
 async function topUpHarvestVolume(project, devServer, minPerSegment, report, options = {}) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
   const topicKeywords = extractKeywords(topic, 12);
   const harvestVideoFirst = options.harvestVideoFirst !== false;
   const minVideosPerSegment = harvestVideoFirst ? 2 : 0;
-  const usedGlobal = new Set(
-    (project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean),
-  );
 
   for (const seg of segments) {
-    const segAssets = (project.media || []).filter((m) => m.segmentId === seg.id);
-    let uniqueCount = new Set(
-      segAssets.map((a) => (a.url || '').split('?')[0]).filter(Boolean),
-    ).size;
-    let videoCount = segAssets.filter((m) => m.type === 'video' || isProxiedClipUrl(m.url)).length;
+    let uniqueCount = segmentUniqueCount(project, seg.id);
+    let videoCount = (project.media || []).filter(
+      (m) => m.segmentId === seg.id && (m.type === 'video' || isProxiedClipUrl(m.url)),
+    ).length;
 
     if (harvestVideoFirst && videoCount < minVideosPerSegment) {
       for (let round = 0; round < TOP_UP_VIDEO_ENDPOINTS.length && videoCount < minVideosPerSegment; round += 1) {
@@ -286,14 +389,16 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
           const draft = buildVideoTopUpAsset(r, devServer, seg, q, r.source || 'Video search');
           if (!draft) continue;
           const key = draft.url.split('?')[0];
-          if (usedGlobal.has(key)) continue;
+          const alreadyInSeg = (project.media || []).some(
+            (m) => m.segmentId === seg.id && (m.url || '').split('?')[0] === key,
+          );
+          if (alreadyInSeg) continue;
           if (!passesTopUpRelevanceGate(draft, seg, topic, topicKeywords)) continue;
 
           project.media.push({
             ...draft,
             id: `topup-vid-${seg.id}-${videoCount}`,
           });
-          usedGlobal.add(key);
           uniqueCount += 1;
           videoCount += 1;
           report.volumeTopUp = report.volumeTopUp || [];
@@ -316,41 +421,16 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
         .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
         .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
 
-      let added = false;
       for (const r of candidates) {
-        const key = r.url.split('?')[0];
-        if (usedGlobal.has(key)) continue;
-
-        const asset = { url: r.url, alt: r.alt || '', query: q, type: 'image' };
-        if (!passesTopUpRelevanceGate(asset, seg, topic, topicKeywords)) continue;
-
-        if (!(await canFetch(r.url, { timeoutMs: 8000, minBytes: 512 }))) continue;
-
-        const relevance = scoreAssetRelevance(asset, seg, topic, topicKeywords);
-        project.media.push({
-          id: `topup-${seg.id}-${uniqueCount}`,
-          segmentId: seg.id,
-          type: 'image',
-          url: r.url,
-          alt: r.alt || `${seg.title} ${topic}`,
-          query: q,
-          source: `${r.source || 'Search'} (volume top-up)`,
-          duration: 5,
-          isFallback: false,
-        });
-        usedGlobal.add(key);
-        uniqueCount += 1;
-        added = true;
-        report.volumeTopUp = report.volumeTopUp || [];
-        report.volumeTopUp.push({ segmentId: seg.id, url: r.url, endpoint: TOP_UP_IMAGE_ENDPOINTS[round], relevance });
-        if (uniqueCount >= minPerSegment) break;
-      }
-      if (!added && round === TOP_UP_IMAGE_ENDPOINTS.length - 1) {
-        report.volumeTopUpMiss = report.volumeTopUpMiss || [];
-        report.volumeTopUpMiss.push({ segmentId: seg.id, count: uniqueCount, need: minPerSegment });
+        if (await addImageTopUpCandidate(project, seg, r, q, TOP_UP_IMAGE_ENDPOINTS[round], report, topic, topicKeywords)) {
+          uniqueCount = segmentUniqueCount(project, seg.id);
+          if (uniqueCount >= minPerSegment) break;
+        }
       }
     }
   }
+
+  await rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords);
 }
 
 function isJunkHarvestUrl(url) {

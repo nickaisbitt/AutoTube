@@ -23,34 +23,65 @@
 const LONG_NARRATION_BLOCK =
   'Hospitals paid billions after hackers exploited one weakness — and your medical records were already in the blast radius. Your identity, credit lines, and family safety depend on understanding how clinics adopt automation, where data leaks happen, and which guardrails regulators enforce across Epic, UnitedHealth, Mayo Clinic, and regional providers nationwide.';
 
-/** Shock hook — no year opener (YouTube retention). */
+/** Deterministic pick — stable per topic for tests and loop retries. */
+function pickTopicTemplate(templates, topic) {
+  const seed = [...(topic || 'x')].reduce((a, c) => a + c.charCodeAt(0), 0);
+  return templates[Math.abs(seed) % templates.length];
+}
+
+/** True when vision fix is overlay-style (ALL CAPS headline), not a spoken hook. */
+function isOverlayStyleOverride(text) {
+  const t = (text || '').trim();
+  if (!t || t.length > 120) return false;
+  const letters = t.replace(/[^a-zA-Z]/g, '');
+  if (!letters.length) return false;
+  const upper = letters.replace(/[^A-Z]/g, '').length;
+  return upper / letters.length > 0.85;
+}
+
+/** Shock hook — no year opener (YouTube retention). Topic-specific urgency, no generic fillers. */
 export function buildShockHookLine(topic, override) {
-  if (override?.trim()) return override.trim();
+  const rawOverride = override?.trim();
+  if (rawOverride && !isOverlayStyleOverride(rawOverride)) return rawOverride;
+
   const t = (topic || 'this story').replace(/\.$/, '');
   const lower = t.toLowerCase();
-  if (/museum|louvre|heist|robbery|stolen/.test(lower)) {
-    const templates = [
-      'They robbed the Louvre on livestream — and millions watched.',
-      'A billion-dollar heist went viral on TikTok before police arrived.',
-      'The Louvre was hit in broad daylight — then TikTok made it worse.',
-    ];
-    return templates[Math.floor(Math.random() * templates.length)];
+  const hasMuseum = /museum|louvre|heist|robbery|stolen|jewel/.test(lower);
+  const hasTikTok = /tiktok|livestream|streamed live|went viral|live on/.test(lower);
+
+  if (hasMuseum && hasTikTok) {
+    return pickTopicTemplate([
+      'BREAKING: Thieves hit the Louvre on TikTok LIVE — millions watched before police knew.',
+      'TIKTOK LIVE caught the Louvre heist in real time — and the world could not look away.',
+      'They robbed the Louvre on TikTok LIVE — crown jewels gone while the stream kept rolling.',
+    ], topic);
   }
-  if (/tiktok|viral|livestream|streamed live/.test(lower)) {
-    const templates = [
-      'This went viral on TikTok before the news caught up.',
-      'Millions watched this live — then everything changed.',
-      'TikTok turned a crime scene into entertainment overnight.',
-    ];
-    return templates[Math.floor(Math.random() * templates.length)];
+  if (hasMuseum) {
+    return pickTopicTemplate([
+      'BREAKING: Thieves robbed the Louvre in broad daylight — crown jewels vanished in minutes.',
+      'The Louvre heist happened in daylight — and the getaway was already trending.',
+      'LOUVRE ALERT: Masked thieves grabbed priceless jewels while tourists stood feet away.',
+    ], topic);
   }
-  const templates = [
-    `${t} — and almost nobody saw it coming.`,
-    `This ${t.toLowerCase()} could affect you by tomorrow.`,
-    `Billions lost overnight: ${t}.`,
-    `They tried to hide ${t.toLowerCase()} — here's the proof.`,
-  ];
-  return templates[Math.floor(Math.random() * templates.length)];
+  if (hasTikTok) {
+    return pickTopicTemplate([
+      'BREAKING: This crime went viral on TikTok LIVE before the newsroom even woke up.',
+      'TIKTOK LIVE turned a heist into a spectacle — and millions watched every second.',
+      'They streamed the robbery on TikTok LIVE — police arrived after the clip hit a million views.',
+    ], topic);
+  }
+  if (/hack|breach|ransom|cyber/.test(lower)) {
+    return pickTopicTemplate([
+      'Your data was already in the blast radius — and the hackers are still inside.',
+      'BREAKING: One breach exposed millions of records — yours may be on the list.',
+      'They locked the systems overnight — hospitals, banks, and your inbox are in the crosshairs.',
+    ], topic);
+  }
+  return pickTopicTemplate([
+    `Stop scrolling — ${t} is worse than the headlines admit.`,
+    `This is not a drill: ${t} already changed the rules.`,
+    `Nobody warned you about ${t.toLowerCase()} — until now.`,
+  ], topic);
 }
 
 function buildTopicBody(topic, hookLine) {

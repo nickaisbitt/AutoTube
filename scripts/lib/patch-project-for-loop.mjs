@@ -3,7 +3,8 @@
  */
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
-import { buildEditTimeline } from './build-edit-timeline.mjs';
+import { buildEditTimeline, orderAssetsVideoFirst } from './build-edit-timeline.mjs';
+import { normalizeUrlKey } from './harvest-loop-context.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
 
 const STOP_WORDS = new Set([
@@ -53,6 +54,10 @@ export function extractOverlayFromVisionFix(visionFix) {
   return words.slice(0, 8).join(' ').toUpperCase();
 }
 
+function visionSuggestsBreaking(visionFix) {
+  return /\bbreaking\b/i.test(visionFix || '');
+}
+
 /** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
 export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const preferred = options.preferredOverlay?.trim();
@@ -61,7 +66,26 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   }
 
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
-  if (fromVision) return fromVision;
+  if (fromVision) {
+    if (visionSuggestsBreaking(options.visionFix) && !/^BREAKING:/i.test(fromVision)) {
+      return `BREAKING: ${fromVision.replace(/^BREAKING:\s*/i, '')}`;
+    }
+    return fromVision;
+  }
+
+  const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
+  const hasMuseum = /museum|louvre|heist|robbery|stolen|jewel/.test(t);
+  const hasTikTok = /tiktok|livestream|streamed live|went viral|live on/.test(t);
+
+  if (hasMuseum && hasTikTok) {
+    return 'BREAKING: LOUVRE HEIST TIKTOK LIVE';
+  }
+  if (hasMuseum) {
+    return 'BREAKING: LOUVRE HEIST LIVE';
+  }
+  if (hasTikTok) {
+    return 'BREAKING: TIKTOK LIVE HEIST';
+  }
 
   const headline = (topic || '')
     .replace(/^How\s+/i, '')
@@ -74,7 +98,6 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     .join(' ')
     .toUpperCase() || topicKeywords(topic).join(' ').toUpperCase() || 'CRISIS EXPOSED';
   const core = headline;
-  const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
 
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
     return `EXPOSED: ${core}`;
@@ -82,10 +105,13 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return `EMERGENCY: ${core}`;
   }
-  if (/evict|tenant|landlord|lawsuit|fine|hack|stolen|breach/i.test(t)) {
+  if (/fire|attack|blackout|disaster|death|kill|crash|bomb|stolen|breach|heist|robbery|hack/.test(t)) {
+    return `BREAKING: ${core}`;
+  }
+  if (/evict|tenant|landlord|lawsuit|fine/i.test(t)) {
     return `URGENT: ${core}`;
   }
-  if (/fire|attack|blackout|disaster|death|kill|crash|bomb/i.test(t)) {
+  if (visionSuggestsBreaking(options.visionFix)) {
     return `BREAKING: ${core}`;
   }
   return `URGENT: ${core}`;
@@ -131,7 +157,7 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4, options =
   const visualRegistry = [];
 
   for (const asset of project.media) {
-    const key = (asset.url || '').split('?')[0];
+    const key = normalizeUrlKey(asset.url, asset.sourceUrl) || asset.id || '';
     if (key && seenUrls.has(key)) continue;
 
     const thumb = asset.thumbnailUrl || (asset.type === 'image' ? asset.url : null);
@@ -166,18 +192,20 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4, options =
 
   const needy = segIds.filter((id) => buckets[id].length < effectiveMin);
   for (const needId of needy) {
-    const needUrls = () => new Set(buckets[needId].map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+    const needUrls = () => new Set(
+      buckets[needId].map((a) => normalizeUrlKey(a.url, a.sourceUrl) || a.id || '').filter(Boolean),
+    );
     while (buckets[needId].length < effectiveMin) {
       const used = needUrls();
       const donorId = donors.find((id) => id !== needId && buckets[id].length > 1);
       if (!donorId) break;
       const donorIdx = buckets[donorId].findIndex((a) => {
-        const key = (a.url || '').split('?')[0];
+        const key = normalizeUrlKey(a.url, a.sourceUrl) || a.id || '';
         return key && !used.has(key);
       });
       if (preferVideo && buckets[needId].filter(isVideoAsset).length < 2) {
         const videoIdx = buckets[donorId].findIndex((a) => {
-          const key = (a.url || '').split('?')[0];
+          const key = normalizeUrlKey(a.url, a.sourceUrl) || a.id || '';
           return key && !used.has(key) && isVideoAsset(a);
         });
         if (videoIdx >= 0) {
@@ -203,7 +231,10 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4, options =
     }
   }
 
-  project.media = segIds.flatMap((id) => buckets[id]);
+  project.media = segIds.flatMap((id) => {
+    const bucket = buckets[id];
+    return preferVideo ? orderAssetsVideoFirst(bucket, 2) : bucket;
+  });
   return project;
 }
 
@@ -254,6 +285,8 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     project.editTimeline = buildEditTimeline(project, {
       cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
       reason: 'loop heuristic placement',
+      preferVideo: fixState.harvestVideoFirst !== false,
+      minVideosFirst: 2,
     });
   }
 

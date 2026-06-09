@@ -17,6 +17,8 @@ export function harvestContextFromFixState(fixState = {}) {
     excludeUrls: Array.isArray(fixState.excludedUrls) ? fixState.excludedUrls : [],
     suppressGiphy: fixState.suppressGiphy === true,
     harvestVideoFirst: fixState.harvestVideoFirst !== false,
+    hookLine: fixState.hookLine?.trim() || null,
+    hookOverlay: fixState.hookOverlay?.trim() || null,
   };
 }
 
@@ -35,6 +37,12 @@ export function harvestSessionStoragePayload(ctx) {
   }
   if (ctx.harvestVideoFirst !== false) {
     payload.autotube_loop_video_first = 'true';
+  }
+  if (ctx.hookLine) {
+    payload.autotube_loop_hook_line = ctx.hookLine;
+  }
+  if (ctx.hookOverlay) {
+    payload.autotube_loop_hook_overlay = ctx.hookOverlay;
   }
   return payload;
 }

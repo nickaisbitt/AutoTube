@@ -780,7 +780,12 @@ console.log('\n── 22. Placeholder FAIL excludes dead segment URLs ──');
     uploadReady: false,
   };
   const { fixState, applied } = applyFixesFromWatch(watch, {}, 'museum heist', project);
-  assert('Dead YouTube URL excluded from reharvest', (fixState.excludedUrls || []).some((u) => u.includes('youtube.com/watch?v=dead1')));
+  assert(
+    'Dead segment assets excluded from reharvest',
+    (fixState.excludedUrls || []).some((u) => u.includes('youtube.com/watch'))
+      && (fixState.excludedUrls || []).some((u) => u.includes('dead-thumb.jpg')),
+    (fixState.excludedUrls || []).join(', '),
+  );
   assert('OK segment video URL not excluded', !(fixState.excludedUrls || []).some((u) => u.includes('youtube.com/watch?v=good1')));
   assert('Placeholder fix mentions dead segment breakdown', applied.some((a) => a.includes('dead segs: Dead seg:4/5')));
 }
@@ -867,6 +872,7 @@ console.log('\n── 19. placeholder gate manifest exclusion ──');
   assert('Excludes manifest placeholder URLs only', fixState.excludedUrls?.length === 2);
   assert('Does not exclude working YouTube URL', !fixState.excludedUrls?.includes('https://www.youtube.com/watch?v=good2'));
   assert('Applied message mentions placeholder URL(s)', applied.some((a) => a.includes('placeholder URL')));
+  rmSync(tmp, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------------------

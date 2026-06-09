@@ -520,8 +520,17 @@ export function buildRetentionHookLine(narration: string): string {
   return pick.length > 72 ? `${pick.slice(0, 69)}…` : pick;
 }
 
+/** Loop fix state injected by generate-full-video / improvement loop. */
+function readLoopHookLine(): string {
+  if (typeof sessionStorage === 'undefined') return '';
+  return sessionStorage.getItem('autotube_loop_hook_line')?.trim() || '';
+}
+
 /** Topic-aware hook for project + TTS — bans weak year openers. */
 export function resolveProjectHookLine(segments: ScriptSegment[], topic: string): string {
+  const loopHook = readLoopHookLine();
+  if (loopHook) return loopHook;
+
   const intro = segments.find(s => s.type === 'intro');
   const narration = intro?.narration || '';
   const firstSentence = extractHookLine(segments);
@@ -533,13 +542,23 @@ export function resolveProjectHookLine(segments: ScriptSegment[], topic: string)
     return firstSentence;
   }
   const t = (topic || 'this story').replace(/\.$/, '');
+  const lower = t.toLowerCase();
+  if (/museum|louvre|heist|robbery|stolen|jewel/.test(lower) && /tiktok|livestream|streamed live|went viral|live on/.test(lower)) {
+    return 'BREAKING: Thieves hit the Louvre on TikTok LIVE — millions watched before police knew.';
+  }
+  if (/museum|louvre|heist|robbery|stolen|jewel/.test(lower)) {
+    return 'BREAKING: Thieves robbed the Louvre in broad daylight — crown jewels vanished in minutes.';
+  }
+  if (/tiktok|livestream|streamed live|went viral|live on/.test(lower)) {
+    return 'BREAKING: This crime went viral on TikTok LIVE before the newsroom even woke up.';
+  }
   const templates = [
-    `${t} — and almost nobody saw it coming.`,
-    `This could affect you by tomorrow: ${t}.`,
-    `Billions lost overnight: ${t}.`,
-    `They tried to hide this — ${t}.`,
+    `Stop scrolling — ${t} is worse than the headlines admit.`,
+    `This is not a drill: ${t} already changed the rules.`,
+    `Nobody warned you about ${t.toLowerCase()} — until now.`,
   ];
-  return templates[Math.floor(Math.random() * templates.length)];
+  const seed = [...t].reduce((a, c) => a + c.charCodeAt(0), 0);
+  return templates[Math.abs(seed) % templates.length];
 }
 
 /** Replace intro opener so spoken hook matches on-screen hookLine. */

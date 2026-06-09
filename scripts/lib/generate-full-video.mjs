@@ -293,6 +293,10 @@ function isJunkHarvestUrl(url) {
     /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
     u.includes('/th/id/ovp.') ||
     u.includes('th?id=ovp.') ||
+    // Bing image-preview thumbs (OIP) — low-res search thumbnails, not full images
+    /tse\d\.mm\.bing\.net\/th[/?]id=oip/i.test(u) ||
+    u.includes('/th/id/oip.') ||
+    u.includes('th?id=oip.') ||
     // Pinterest pin-board aggregator — images are low-res reposts, not editorial B-roll
     u.includes('pinterest.com') ||
     u.includes('pinimg.com') ||

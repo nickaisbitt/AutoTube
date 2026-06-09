@@ -22,6 +22,8 @@ import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-e
 import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
+  scoreAssetRelevance,
+  extractKeywords,
 } from './harvest-quality.mjs';
 
 export function resolveOpenRouterKey() {
@@ -188,9 +190,36 @@ async function fetchImageSearchResults(devServer, endpoint, query) {
   }
 }
 
+/**
+ * Build a topic-specific top-up query from segment keywords and topic keywords,
+ * avoiding generic filler words that return unrelated results.
+ */
+function buildTopUpQuery(seg, topic, round) {
+  const segKws = extractKeywords(`${seg.title || ''} ${seg.narration || ''}`, 5);
+  const topicKws = extractKeywords(topic, 4);
+
+  // Prioritise segment keywords first, then fill with topic keywords
+  const combined = [...new Set([...segKws, ...topicKws])].slice(0, 5);
+
+  // Round-specific suffixes that add context without drowning out the topic
+  const suffixes = [
+    '',               // round 0: just the keywords, no filler
+    'photograph',     // round 1: editorial photo angle
+    'footage',        // round 2: video/documentary angle
+    'news image',     // round 3: press/editorial angle
+    'documentary',    // round 4: archival angle
+  ];
+  const suffix = suffixes[round] || '';
+  return `${combined.join(' ')}${suffix ? ' ' + suffix : ''}`.trim();
+}
+
+/** Minimum relevance score a top-up asset must pass before being accepted. */
+const TOP_UP_MIN_RELEVANCE = 0.15;
+
 async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
+  const topicKeywords = extractKeywords(topic, 12);
   const usedGlobal = new Set(
     (project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean),
   );
@@ -209,7 +238,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
     ).size;
 
     for (let round = 0; round < searchEndpoints.length && uniqueCount < minPerSegment; round += 1) {
-      const q = `${seg.title} ${topic} ${round > 0 ? 'news photo' : 'photo'}`;
+      const q = buildTopUpQuery(seg, topic, round);
       const results = await fetchImageSearchResults(devServer, searchEndpoints[round], q);
       const candidates = results
         .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
@@ -219,6 +248,16 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
       for (const r of candidates) {
         const key = r.url.split('?')[0];
         if (usedGlobal.has(key)) continue;
+
+        // Require at least a minimal relevance match to the segment + topic
+        const relevance = scoreAssetRelevance(
+          { url: r.url, alt: r.alt || '', query: q },
+          seg,
+          topic,
+          topicKeywords,
+        );
+        if (relevance < TOP_UP_MIN_RELEVANCE) continue;
+
         if (!(await canFetch(r.url, { timeoutMs: 8000, minBytes: 512 }))) continue;
 
         project.media.push({
@@ -226,7 +265,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
           segmentId: seg.id,
           type: 'image',
           url: r.url,
-          alt: `${seg.title} ${topic}`,
+          alt: r.alt || `${seg.title} ${topic}`,
           query: q,
           source: `${r.source || 'Search'} (volume top-up)`,
           duration: 5,
@@ -236,7 +275,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
         uniqueCount += 1;
         added = true;
         report.volumeTopUp = report.volumeTopUp || [];
-        report.volumeTopUp.push({ segmentId: seg.id, url: r.url, endpoint: searchEndpoints[round] });
+        report.volumeTopUp.push({ segmentId: seg.id, url: r.url, endpoint: searchEndpoints[round], relevance });
         if (uniqueCount >= minPerSegment) break;
       }
       if (!added && round === searchEndpoints.length - 1) {
@@ -253,7 +292,11 @@ function isJunkHarvestUrl(url) {
     u.includes('gravatar.com/avatar') ||
     /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
     u.includes('/th/id/ovp.') ||
-    u.includes('th?id=ovp.')
+    u.includes('th?id=ovp.') ||
+    // Pinterest pin-board aggregator — images are low-res reposts, not editorial B-roll
+    u.includes('pinterest.com') ||
+    u.includes('pinimg.com') ||
+    u.includes('pin.it/')
   );
 }
 

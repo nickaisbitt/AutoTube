@@ -26,6 +26,13 @@ export function isUnreliableVideoHost(url = '') {
   return UNRELIABLE_VIDEO_HOST_RE.test(url || '');
 }
 
+const TRUSTED_VIDEO_HOST_RE = /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|dailymotion\.com|videos\.pexels\.com)/i;
+
+/** @param {string} url */
+export function isTrustedVideoHost(url = '') {
+  return TRUSTED_VIDEO_HOST_RE.test(url || '');
+}
+
 /** @param {object} asset */
 export function isVideoLikeAsset(asset = {}) {
   if (isUnreliableVideoHost(`${asset.url || ''} ${asset.sourceUrl || ''}`)) return false;

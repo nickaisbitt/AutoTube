@@ -16,17 +16,18 @@ const STOP_WORDS = new Set([
   'get', 'got', 'make', 'made', 'say', 'said', 'says', 'one', 'two', 'new', 'now', 'way',
 ]);
 
-const VIDEO_HOST_RE = /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|dailymotion\.com|tiktok\.com|archive\.org|\/api\/download-clip)/i;
+const VIDEO_HOST_RE = /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|dailymotion\.com|videos\.pexels\.com|archive\.org|\/api\/download-clip)/i;
 
 /** Hosts that often fail download-clip proxy and become ffmpeg placeholders. */
-const UNRELIABLE_VIDEO_HOST_RE = /(?:instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch|news\.artnet\.com\/art-world\/)/i;
+const UNRELIABLE_VIDEO_HOST_RE = /(?:tiktok\.com|vm\.tiktok|instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch|news\.artnet\.com\/art-world\/)/i;
 
 /** @param {string} url */
 export function isUnreliableVideoHost(url = '') {
   return UNRELIABLE_VIDEO_HOST_RE.test(url || '');
 }
 
-const TRUSTED_VIDEO_HOST_RE = /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|dailymotion\.com|videos\.pexels\.com)/i;
+/** Motion-clip sources that reliably survive download-clip proxy + ffmpeg encode. */
+const TRUSTED_VIDEO_HOST_RE = /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|videos\.pexels\.com)/i;
 
 /** @param {string} url */
 export function isTrustedVideoHost(url = '') {
@@ -314,4 +315,32 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
     minPerSegment,
     failing,
   };
+}
+
+/** Warn / re-harvest when any segment has fewer than this many unique assets. */
+export const THIN_HARVEST_WARN_THRESHOLD = 3;
+
+/**
+ * Segments with fewer than `warnThreshold` unique asset URLs (browser harvest before top-up).
+ * @param {object} project
+ * @param {number} [warnThreshold]
+ */
+export function detectThinHarvest(project, warnThreshold = THIN_HARVEST_WARN_THRESHOLD) {
+  const volume = evaluateHarvestVolume(project, warnThreshold);
+  const thin = volume.failing.map((f) => ({
+    segmentId: f.segmentId,
+    title: f.title,
+    count: f.count,
+    need: warnThreshold,
+  }));
+  return { pass: thin.length === 0, thin, warnThreshold };
+}
+
+/**
+ * Loop media-step timeout — extra headroom when video-first harvest runs longer.
+ * @param {{ realHarvest?: boolean, videoFirst?: boolean }} options
+ */
+export function loopMediaTimeoutMs({ realHarvest = false, videoFirst = false } = {}) {
+  const base = realHarvest ? 1_200_000 : 300_000;
+  return realHarvest && videoFirst ? base + 300_000 : base;
 }

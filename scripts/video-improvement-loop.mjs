@@ -360,7 +360,7 @@ async function main() {
         fixState,
         currentTopic || topic,
         loopProject,
-        { untilScore: cfg.untilScore },
+        { untilScore: cfg.untilScore, videoPath },
       );
       fixState = nextFix;
       fixesApplied = applied;

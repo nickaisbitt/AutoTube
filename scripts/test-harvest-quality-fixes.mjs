@@ -347,10 +347,18 @@ console.log('\n── 13. Top-up relevance gate ──');
   const tiktokLogo = {
     url: 'https://cdn.logojoy.com/wp-content/uploads/tiktok-social-media-app-logo-768x768.jpg',
     alt: 'TikTok app logo',
-    query: 'tiktok live museum',
+    query: 'museum heist louvre photograph',
     type: 'image',
   };
-  assert('TikTok logo fails top-up gate', passesTopUpRelevanceGate(tiktokLogo, seg, topic, topicKws) === false);
+  assert('TikTok logo fails top-up gate (even with on-topic query)', passesTopUpRelevanceGate(tiktokLogo, seg, topic, topicKws) === false);
+
+  const tiktokAppShot = {
+    url: 'https://tiktokpng.com/assets/img/dl-sc-i2.jpg',
+    alt: 'TikTok app screenshot',
+    query: 'museum heist louvre news image',
+    type: 'image',
+  };
+  assert('TikTok app screenshot fails top-up gate', passesTopUpRelevanceGate(tiktokAppShot, seg, topic, topicKws) === false);
 
   const louvrePhoto = {
     url: 'https://static.independent.co.uk/2025/10/19/louvre-museum-robbery-paris.jpeg',

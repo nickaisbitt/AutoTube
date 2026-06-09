@@ -47,8 +47,12 @@ const OFF_TOPIC_BLOCKLIST = [
   // Tier-list / ranking graphics — almost never relevant B-roll
   { pattern: /\btier\s*list\b/i, requires: /\btier\s*list\b/i },
 
-  // Social/app logos and avatar crops — never editorial B-roll
-  { pattern: /logojoy\.com|cdn\.logojoy|tiktokcdn\.com\/tos-maliva-avt|sndcdn\.com\/artworks/i, requires: /\b__autotube_never__\b/i },
+  // Social/app logos, app-store screenshots, avatar crops — never editorial B-roll
+  { pattern: /logojoy\.com|cdn\.logojoy|tiktokcdn\.com\/tos-maliva-avt|sndcdn\.com\/artworks|tiktokpng\.com|filehippo\.net|mzstatic\.com\/image|androidheadlines\.com.*app/i, requires: /\b__autotube_never__\b/i },
+
+  // Children/nature stock — noise unless topic is about kids/education
+  { pattern: /\b(?:children?\s+(?:playing|exploring|hugging)|nature\s+lover\s+child)\b/i, requires: /\bkid|\bchild|\byouth\b|\beducation\b/i },
+  { pattern: /stockcake\.com|freepik\.com.*child|dreamstime\.com.*child/i, requires: /\bkid|\bchild|\byouth\b/i },
 
   // Generic map / timezone infographics — noise unless topic is geographic
   { pattern: /printable-us-map|guideoftheworld\.com\/map|time-zone-map|timezonesmap|wikiusa\.org.*time-zone/i, requires: /\bmap\b|\btime\s*zone\b|\bgeograph\b/i },
@@ -148,14 +152,20 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
 export function passesTopUpRelevanceGate(asset, segment, topic, topicKeywords = []) {
   const topicKws = topicKeywords.length ? topicKeywords : extractKeywords(topic, 12);
   const strongTopicKws = topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
-  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
   const contextText = `${topic} ${segment?.title || ''} ${segment?.narration || ''}`.toLowerCase();
   if (offTopicBlockReason(haystack, contextText)) return false;
 
+  // Do NOT count asset.query — top-up queries are built from topic keywords and would always self-match.
   const topicHits = strongTopicKws.filter((kw) => haystack.includes(kw)).length;
   if (topicHits < 1) return false;
 
-  const score = scoreAssetRelevance(asset, segment, topic, topicKeywords);
+  const score = scoreAssetRelevance(
+    { ...asset, query: '' },
+    segment,
+    topic,
+    topicKeywords,
+  );
   const minScore = asset?.type === 'video' ? 0.3 : 0.35;
   return score >= minScore;
 }

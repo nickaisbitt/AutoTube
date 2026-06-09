@@ -196,8 +196,12 @@ async function fetchImageSearchResults(devServer, endpoint, query) {
  * avoiding generic filler words that return unrelated results.
  */
 function buildTopUpQuery(seg, topic, round) {
-  const segKws = extractKeywords(`${seg.title || ''} ${seg.narration || ''}`, 5);
-  const topicKws = extractKeywords(topic, 4);
+  const weak = new Set([
+    'tiktok', 'live', 'stream', 'streamed', 'video', 'news', 'breaking', 'viral',
+    'social', 'media', 'online', 'watch', 'footage', 'clip', 'trending', 'update',
+  ]);
+  const segKws = extractKeywords(`${seg.title || ''} ${seg.narration || ''}`, 8).filter((k) => !weak.has(k));
+  const topicKws = extractKeywords(topic, 6).filter((k) => !weak.has(k));
 
   // Prioritise segment keywords first, then fill with topic keywords
   const combined = [...new Set([...segKws, ...topicKws])].slice(0, 5);

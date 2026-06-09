@@ -4,7 +4,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
-import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
+import { buildShortHookOverlay } from './patch-project-for-loop.mjs';
 import { detectGiphyDominance, countSegmentVideos } from './harvest-quality.mjs';
 import { normalizeUrlKey } from './harvest-loop-context.mjs';
 import {
@@ -96,6 +96,24 @@ function loadLastProject(root = process.cwd()) {
 }
 
 /**
+ * Resolve render-manifest from explicit video path or canonical last render.
+ * @param {string} root
+ * @param {string} [videoPath]
+ * @returns {object|null}
+ */
+function resolveRenderManifest(root = process.cwd(), videoPath = '') {
+  const candidates = [
+    videoPath,
+    join(root, 'test-recordings', 'FINAL-VIDEO-final.mp4'),
+  ].filter(Boolean);
+  for (const vp of candidates) {
+    const manifest = loadRenderManifest(vp);
+    if (manifest) return manifest;
+  }
+  return null;
+}
+
+/**
  * @param {object} watch — watchVideo() result
  * @param {object} fixState — mutable loop fix state
  * @param {string} [topic] — current video topic (for topic-aware hook lines)
@@ -136,28 +154,38 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       s.fixStrategy = 'reharvest';
       s.minAssetsPerSegment = Math.min(10, Math.max(6, (s.minAssetsPerSegment || 6) + 1));
       const harvestProject = project || loadLastProject();
-      const manifest = watch.videoPath ? loadRenderManifest(watch.videoPath) : null;
+      const manifest = resolveRenderManifest(process.cwd(), options.videoPath || watch.videoPath || '');
+      const placeholderKeys = (manifest?.placeholderUrls || [])
+        .map((u) => (u || '').split('?')[0].toLowerCase())
+        .filter(Boolean);
       const badSegments = placeholderSegmentsFromManifest(manifest?.perSegment || []);
       const deadSegmentIds = new Set(badSegments.map((seg) => seg.segmentId));
       const segDetail = badSegments.length ? formatPlaceholderSegmentDetail(badSegments) : '';
-      if (harvestProject?.media?.length) {
+      if (harvestProject?.media?.length || placeholderKeys.length) {
         const prev = new Set((s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
-        const deadUrls = collectDeadAssetUrls(harvestProject, deadSegmentIds);
-        if (deadUrls.length) {
-          for (const key of deadUrls) prev.add(key);
+        if (placeholderKeys.length) {
+          for (const key of placeholderKeys) prev.add(key);
         } else {
-          for (const m of harvestProject.media) {
-            if (m.type !== 'video' && !/\/api\/download-clip/i.test(m.url || '')) continue;
-            const key = normalizeUrlKey(m.url, m.sourceUrl);
-            if (key) prev.add(key);
+          const deadUrls = collectDeadAssetUrls(harvestProject, deadSegmentIds);
+          if (deadUrls.length) {
+            for (const key of deadUrls) prev.add(key);
+          } else if (harvestProject?.media?.length) {
+            for (const m of harvestProject.media) {
+              if (m.type !== 'video' && !/\/api\/download-clip/i.test(m.url || '')) continue;
+              const key = normalizeUrlKey(m.url, m.sourceUrl);
+              if (key) prev.add(key);
+            }
           }
         }
         s.excludedUrls = [...prev].slice(-400);
       }
       const pct = watch.placeholderGate?.placeholderPct ?? manifest?.placeholderPct;
       const pctNote = typeof pct === 'number' ? `${pct}%` : 'high';
+      const excludeNote = placeholderKeys.length
+        ? `${placeholderKeys.length} placeholder URL(s) from render-manifest`
+        : `${(s.excludedUrls || []).length} excluded URLs`;
       applied.push(
-        `0a. Placeholder gate FAIL (${pctNote}${segDetail ? `; dead segs: ${segDetail}` : ''}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg, video-first, ${(s.excludedUrls || []).length} excluded URLs`,
+        `0a. Placeholder gate FAIL (${pctNote}${segDetail ? `; dead segs: ${segDetail}` : ''}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg, video-first, ${excludeNote}`,
       );
     } else if (failed.some((n) => n.startsWith('scene_'))) {
       escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`, { sceneFirst: true });

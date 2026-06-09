@@ -8,6 +8,7 @@ import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
 import { muxVideoWithAudio } from './audio.mjs';
+import { orderAssetsVideoFirst } from '../../scripts/lib/build-edit-timeline.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FPS = 24;
@@ -78,6 +79,43 @@ function patternInterruptsEnabled() {
   return process.env.AUTOTUBE_PATTERN_INTERRUPTS === '1';
 }
 
+function harvestVideoFirstEnabled() {
+  return process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === '1'
+    || process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === 'true';
+}
+
+function isVideoAsset(asset) {
+  return asset?.type === 'video'
+    || /\.(mp4|webm|mov)(?:[?#]|$)/i.test(asset?.url || '')
+    || /\/api\/download-clip/i.test(asset?.url || '');
+}
+
+function prepareSegmentMedia(segMedia) {
+  if (!harvestVideoFirstEnabled() || !segMedia?.length) return segMedia;
+  return orderAssetsVideoFirst(segMedia, 2);
+}
+
+function pickAssetAtTime(t, segMedia, intervalSec) {
+  const pool = prepareSegmentMedia(segMedia);
+  if (pool.length <= 1) return pool[0];
+  if (intervalSec <= 0) return pool[0];
+
+  if (harvestVideoFirstEnabled()) {
+    const videos = pool.filter(isVideoAsset);
+    const images = pool.filter((a) => !isVideoAsset(a));
+    const slot = Math.floor(t / intervalSec);
+    if (videos.length && slot < 2) {
+      return videos[slot % videos.length];
+    }
+    const stillPool = videos.length > 2 ? [...videos.slice(2), ...images] : images.length ? images : pool;
+    const stillSlot = Math.max(0, slot - Math.min(2, videos.length));
+    return stillPool[stillSlot % stillPool.length];
+  }
+
+  const idx = Math.floor(t / intervalSec) % pool.length;
+  return pool[idx];
+}
+
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
   if (assetCount <= 1) return 0;
   if (intervalSec <= 0) return 0;
@@ -95,12 +133,13 @@ function resolveTimelineAsset(entry, segMedia, mediaPool = []) {
 
 function buildClipSchedule(segment, segMedia, intervalSec, project) {
   const targetDuration = segment.duration || 20;
+  const orderedMedia = prepareSegmentMedia(segMedia);
   const timeline = (project?.editTimeline || []).filter((e) => e.segmentId === segment.id);
   const clips = [];
 
   if (timeline.length) {
     for (const entry of timeline) {
-      const asset = resolveTimelineAsset(entry, segMedia, project?.media || []);
+      const asset = resolveTimelineAsset(entry, orderedMedia, project?.media || []);
       if (!asset) continue;
       const durationSec = (entry.endSec ?? 0) - (entry.startSec ?? 0);
       if (durationSec <= 0.05) continue;
@@ -116,10 +155,10 @@ function buildClipSchedule(segment, segMedia, intervalSec, project) {
   const covered = clips.reduce((sum, c) => sum + c.durationSec, 0);
   let t = clips.length ? clips[clips.length - 1].endSec : 0;
   while (t < targetDuration - 0.05) {
-    const idx = computeActiveAssetIndex(t, segMedia.length, intervalSec);
+    const asset = pickAssetAtTime(t, orderedMedia, intervalSec);
     const clipEnd = Math.min(targetDuration, t + intervalSec);
     clips.push({
-      asset: segMedia[idx],
+      asset,
       startSec: t,
       endSec: clipEnd,
       durationSec: clipEnd - t,

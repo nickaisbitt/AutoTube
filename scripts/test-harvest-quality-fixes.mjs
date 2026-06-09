@@ -10,6 +10,9 @@ import {
   filterAssetsByRelevance,
   extractKeywords,
   detectGiphyDominance,
+  detectThinHarvest,
+  loopMediaTimeoutMs,
+  THIN_HARVEST_WARN_THRESHOLD,
   passesTopUpRelevanceGate,
   countSegmentVideos,
   isVideoLikeAsset,
@@ -17,12 +20,29 @@ import {
   isTrustedVideoHost,
 } from './lib/harvest-quality.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
+import { buildShockHookLine } from '../e2e/openRouterMock.mjs';
+import { buildShortHookOverlay } from './lib/patch-project-for-loop.mjs';
 import { buildRenderEnvFromFixState } from './lib/render-env-from-fix-state.mjs';
+import {
+  evaluateObjectiveGate,
+  evaluatePlaceholderGate,
+  loadRenderManifest,
+  formatPlaceholderSegmentDetail,
+  placeholderSegmentsFromManifest,
+} from './lib/run-objective-qa.mjs';
 import {
   harvestContextFromFixState,
   harvestSessionStoragePayload,
   normalizeUrlKey,
 } from './lib/harvest-loop-context.mjs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import {
+  validateRenderManifest,
+  minClipCountForDuration,
+  MAX_SHIP_PLACEHOLDER_PCT,
+} from './lib/validate-loop-video.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -511,9 +531,19 @@ console.log('\n── 18. countSegmentVideos ──');
   assert('Segment s1 has 2 videos', countSegmentVideos(media, 's1') === 2);
   assert('Segment s2 has 1 video', countSegmentVideos(media, 's2') === 1);
   assert('Instagram blocked as unreliable video host', isUnreliableVideoHost('https://www.instagram.com/p/abc') === true);
+  assert('TikTok blocked as unreliable video host', isUnreliableVideoHost('https://www.tiktok.com/@user/video/123') === true);
+  assert('vm.tiktok blocked as unreliable video host', isUnreliableVideoHost('https://vm.tiktok.com/ZMabc123') === true);
   assert('YouTube not blocked', isUnreliableVideoHost('https://www.youtube.com/watch?v=abc') === false);
   assert('YouTube is trusted video host', isTrustedVideoHost('https://www.youtube.com/watch?v=abc') === true);
+  assert('Vimeo is trusted video host', isTrustedVideoHost('https://player.vimeo.com/video/123') === true);
+  assert('Pexels is trusted video host', isTrustedVideoHost('https://videos.pexels.com/video-files/abc.mp4') === true);
   assert('Instagram is not trusted', isTrustedVideoHost('https://www.instagram.com/p/x') === false);
+  assert('TikTok is not trusted', isTrustedVideoHost('https://www.tiktok.com/@user/video/123') === false);
+  assert('TikTok proxy not counted as video-like', isVideoLikeAsset({
+    type: 'video',
+    url: '/api/download-clip?url=https%3A%2F%2Fwww.tiktok.com%2Fvideo%2F1',
+    sourceUrl: 'https://www.tiktok.com/@user/video/1',
+  }) === false);
 }
 
 // ---------------------------------------------------------------------------
@@ -567,6 +597,315 @@ console.log('\n── 20. Pacing plateau skip reharvest ──');
   assert('Pacing plateau hits cut floor', fixState.cutIntervalSec === 0.5);
   assert('Pacing plateau logs skip reharvest', applied.some((a) => a.includes('pacing plateau')));
   assert('Pacing plateau does not log repetition reharvest', !applied.some((a) => a.startsWith('3.')));
+}
+
+// ---------------------------------------------------------------------------
+// 24. Render manifest ship gate — placeholder_pct and clip count
+// ---------------------------------------------------------------------------
+console.log('\n── 24. Render manifest ship gate ──');
+{
+  const tmpBase = join(tmpdir(), `autotube-manifest-test-${Date.now()}`);
+  const videoDir = join(tmpBase, 'out');
+  const assemblyDir = join(videoDir, 'ffmpeg-assembly');
+  mkdirSync(assemblyDir, { recursive: true });
+  const videoPath = join(videoDir, 'final-video-final.mp4');
+  writeFileSync(videoPath, Buffer.alloc(64));
+
+  function writeManifest(data) {
+    writeFileSync(join(assemblyDir, 'render-manifest.json'), JSON.stringify(data));
+  }
+
+  writeManifest({ clipCount: 8, placeholderPct: 35, videoSec: 60, muxDurationSec: 60 });
+  const highPlaceholder = validateRenderManifest(videoPath, 60);
+  assert(
+    'placeholderPct > 30% fails before ship',
+    highPlaceholder.valid === false && highPlaceholder.error.includes(`${MAX_SHIP_PLACEHOLDER_PCT}%`),
+    highPlaceholder.error || '',
+  );
+
+  writeManifest({ clipCount: 4, placeholderPct: 5, videoSec: 60, muxDurationSec: 60 });
+  const lowClips = validateRenderManifest(videoPath, 60);
+  const minClips = minClipCountForDuration(60);
+  assert(
+    'clipCount below min fails before ship',
+    lowClips.valid === false && lowClips.error.includes(`${minClips}`),
+    lowClips.error || '',
+  );
+
+  writeManifest({ clipCount: 12, placeholderPct: 10, videoSec: 60, muxDurationSec: 60 });
+  const okManifest = validateRenderManifest(videoPath, 60);
+  assert('healthy manifest passes ship gate', okManifest.valid === true);
+
+  rmSync(tmpBase, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// 19. buildEditTimeline — video-first puts motion clips before stills
+// ---------------------------------------------------------------------------
+console.log('\n── 19. buildEditTimeline video-first ──');
+{
+  const { buildEditTimeline, orderAssetsVideoFirst } = await import('./lib/build-edit-timeline.mjs');
+  const media = [
+    { id: 'img1', segmentId: 's1', type: 'image', url: 'https://example.com/a.jpg' },
+    { id: 'vid1', segmentId: 's1', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fa' },
+    { id: 'img2', segmentId: 's1', type: 'image', url: 'https://example.com/b.jpg' },
+    { id: 'vid2', segmentId: 's1', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fvimeo.com%2F1' },
+  ];
+  const ordered = orderAssetsVideoFirst(media, 2);
+  assert('orderAssetsVideoFirst leads with videos', ordered[0].type === 'video' && ordered[1].type === 'video');
+  assert('orderAssetsVideoFirst trails with images', ordered[2].type === 'image');
+
+  const project = {
+    script: [{ id: 's1', duration: 5 }],
+    media,
+  };
+  const timeline = buildEditTimeline(project, { preferVideo: true, cutIntervalSec: 1.25, minVideosFirst: 2 });
+  const firstTwo = timeline.slice(0, 2).map((e) => media.find((m) => m.id === e.assetId)?.type);
+  assert('First two timeline slots are video when preferVideo', firstTwo.every((t) => t === 'video'), `got ${firstTwo.join(',')}`);
+}
+
+// ---------------------------------------------------------------------------
+// 20. balanceMediaAcrossSegments — video-first segment ordering
+// ---------------------------------------------------------------------------
+console.log('\n── 20. patch balanceMedia video-first ──');
+{
+  const { balanceMediaAcrossSegments } = await import('./lib/patch-project-for-loop.mjs');
+  const project = {
+    script: [{ id: 's1', title: 'Hook' }],
+    media: [
+      { id: 'm1', segmentId: 's1', type: 'image', url: 'https://example.com/1.jpg', alt: 'one' },
+      { id: 'm2', segmentId: 's1', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fa', alt: 'clip' },
+      { id: 'm3', segmentId: 's1', type: 'image', url: 'https://example.com/2.jpg', alt: 'two' },
+      { id: 'm4', segmentId: 's1', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fvimeo.com%2F1', alt: 'motion' },
+    ],
+  };
+  balanceMediaAcrossSegments(project, 4, { harvestVideoFirst: true });
+  const types = project.media.map((m) => m.type);
+  assert('balanceMediaAcrossSegments orders videos before images', types[0] === 'video' && types[1] === 'video');
+}
+
+// ---------------------------------------------------------------------------
+// 21. Gate alignment — placeholder_pct vs draft-tier tech score
+// ---------------------------------------------------------------------------
+console.log('\n── 21. Gate alignment (placeholder vs draft score) ──');
+{
+  const placeholderGate = {
+    available: true,
+    pass: false,
+    placeholderPct: 42.5,
+    placeholderClipCount: 17,
+    clipCount: 40,
+    maxPlaceholderPct: 10,
+    perSegment: [
+      { segmentId: 'seg-hook', title: 'Hook', clipCount: 8, placeholderClipCount: 6 },
+      { segmentId: 'seg-body', title: 'Body', clipCount: 32, placeholderClipCount: 11 },
+    ],
+    badSegments: [
+      { segmentId: 'seg-hook', title: 'Hook', clipCount: 8, placeholderClipCount: 6 },
+      { segmentId: 'seg-body', title: 'Body', clipCount: 32, placeholderClipCount: 11 },
+    ],
+    segmentDetail: 'Hook:6/8, Body:11/32',
+  };
+  const objectiveQa = {
+    pass: true,
+    score: 100,
+    scorePass: true,
+    silencePass: true,
+    silenceFirst60Sec: 0,
+  };
+  const gate = evaluateObjectiveGate({
+    sceneQa: { available: true, hookPass: true, bodyPass: true, longestHookSec: 1.2, longestSceneSec: 2.1 },
+    objectiveQa,
+    clipCountGate: { available: true, pass: true, clipCount: 40, minClips: 12 },
+    placeholderGate,
+    renderTier: 'draft',
+  });
+  assert('Draft composite FAIL when placeholder_pct fails despite score 100', gate.pass === false);
+  assert('Draft gate lists placeholder_pct as failing check', gate.checks.some((c) => c.name === 'placeholder_pct' && !c.pass));
+  assert('Placeholder check detail includes dead segment breakdown', gate.checks.find((c) => c.name === 'placeholder_pct')?.detail.includes('Hook:6/8'));
+
+  const bad = placeholderSegmentsFromManifest(placeholderGate.perSegment);
+  assert('placeholderSegmentsFromManifest finds dead segments', bad.length === 2);
+  assert('formatPlaceholderSegmentDetail renders clip ratios', formatPlaceholderSegmentDetail(bad).includes('Body:11/32'));
+}
+
+// ---------------------------------------------------------------------------
+// 22. applyFixesFromWatch — manifest dead segments → excludedUrls
+// ---------------------------------------------------------------------------
+console.log('\n── 22. Placeholder FAIL excludes dead segment URLs ──');
+{
+  const tmp = mkdtempSync(join(tmpdir(), 'autotube-gate-'));
+  const assemblyDir = join(tmp, 'ffmpeg-assembly');
+  mkdirSync(assemblyDir, { recursive: true });
+  writeFileSync(
+    join(assemblyDir, 'render-manifest.json'),
+    JSON.stringify({
+      clipCount: 10,
+      placeholderClipCount: 4,
+      placeholderPct: 40,
+      perSegment: [
+        { segmentId: 'seg-dead', title: 'Dead seg', clipCount: 5, placeholderClipCount: 4 },
+        { segmentId: 'seg-ok', title: 'OK seg', clipCount: 5, placeholderClipCount: 0 },
+      ],
+    }),
+  );
+  const videoPath = join(tmp, 'FINAL-VIDEO.mp4');
+  writeFileSync(videoPath, '');
+
+  const manifest = loadRenderManifest(videoPath);
+  assert('loadRenderManifest reads adjacent ffmpeg manifest', manifest?.placeholderPct === 40);
+
+  const gateFromDisk = evaluatePlaceholderGate(videoPath);
+  assert('evaluatePlaceholderGate FAIL on high placeholder pct', gateFromDisk.pass === false);
+  assert('evaluatePlaceholderGate exposes badSegments', gateFromDisk.badSegments?.length === 1);
+
+  const project = {
+    script: [{ id: 'seg-dead', title: 'Dead seg' }, { id: 'seg-ok', title: 'OK seg' }],
+    media: [
+      { segmentId: 'seg-dead', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fwatch%3Fv%3Ddead1' },
+      { segmentId: 'seg-dead', type: 'image', url: 'https://images.example.com/dead-thumb.jpg' },
+      { segmentId: 'seg-ok', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fwatch%3Fv%3Dgood1' },
+    ],
+  };
+  const watch = {
+    videoPath,
+    placeholderGate: gateFromDisk,
+    objectiveGate: {
+      available: true,
+      pass: false,
+      checks: [{ name: 'placeholder_pct', pass: false, detail: '40% placeholders' }],
+    },
+    brutal: { overall: 7, report: { scores: { visualVariety: 8, pacing: 7 } } },
+    repetition: { repeatPct: 0, duplicateRunCount: 0 },
+    uploadReady: false,
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, {}, 'museum heist', project);
+  assert('Dead YouTube URL excluded from reharvest', (fixState.excludedUrls || []).some((u) => u.includes('youtube.com/watch?v=dead1')));
+  assert('OK segment video URL not excluded', !(fixState.excludedUrls || []).some((u) => u.includes('youtube.com/watch?v=good1')));
+  assert('Placeholder fix mentions dead segment breakdown', applied.some((a) => a.includes('dead segs: Dead seg:4/5')));
+}
+
+// ---------------------------------------------------------------------------
+// 23. Thin harvest detection + video-first media timeout
+// ---------------------------------------------------------------------------
+console.log('\n── 23. Thin harvest + media timeout ──');
+{
+  const thinProject = {
+    script: [
+      { id: 'seg-a', title: 'Hook' },
+      { id: 'seg-b', title: 'Body' },
+    ],
+    media: [
+      { segmentId: 'seg-a', url: 'https://example.com/a1.jpg' },
+      { segmentId: 'seg-a', url: 'https://example.com/a2.jpg' },
+      { segmentId: 'seg-b', url: 'https://example.com/b1.jpg' },
+    ],
+  };
+  const thin = detectThinHarvest(thinProject);
+  assert('Detects segment below 3 assets', thin.thin.some((s) => s.segmentId === 'seg-b'), `thin=${JSON.stringify(thin.thin)}`);
+  assert('Thin harvest fails pass gate', thin.pass === false);
+  assert('Warn threshold is 3', THIN_HARVEST_WARN_THRESHOLD === 3);
+
+  const okProject = {
+    script: [{ id: 'seg-a', title: 'Hook' }],
+    media: [
+      { segmentId: 'seg-a', url: 'https://example.com/1.jpg' },
+      { segmentId: 'seg-a', url: 'https://example.com/2.jpg' },
+      { segmentId: 'seg-a', url: 'https://example.com/3.jpg' },
+    ],
+  };
+  assert('Healthy harvest passes thin gate', detectThinHarvest(okProject).pass === true);
+
+  assert('Real harvest base timeout 20min', loopMediaTimeoutMs({ realHarvest: true, videoFirst: false }) === 1_200_000);
+  assert('Video-first adds 5min headroom', loopMediaTimeoutMs({ realHarvest: true, videoFirst: true }) === 1_500_000);
+  assert('Mock harvest unchanged', loopMediaTimeoutMs({ realHarvest: false, videoFirst: true }) === 300_000);
+}
+
+// ---------------------------------------------------------------------------
+// 19. applyFixesFromWatch — placeholder gate excludes manifest placeholderUrls
+// ---------------------------------------------------------------------------
+console.log('\n── 19. placeholder gate manifest exclusion ──');
+{
+  const tmp = mkdtempSync(join(tmpdir(), 'autotube-manifest-'));
+  const videoDir = join(tmp, 'run');
+  const assemblyDir = join(videoDir, 'ffmpeg-assembly');
+  mkdirSync(assemblyDir, { recursive: true });
+  writeFileSync(join(videoDir, 'final.mp4'), '');
+  writeFileSync(join(assemblyDir, 'render-manifest.json'), JSON.stringify({
+    clipCount: 10,
+    placeholderClipCount: 2,
+    placeholderPct: 20,
+    placeholderUrls: [
+      'https://www.tiktok.com/@user/video/dead1',
+      'https://www.youtube.com/watch?v=good1',
+    ],
+    perSegment: [{ segmentId: 's1', title: 'Hook', clipCount: 5, placeholderClipCount: 2 }],
+  }));
+
+  const watch = {
+    brutal: { report: { scores: { visualVariety: 7, pacing: 7 } }, overall: 7 },
+    repetition: { repeatPct: 0, duplicateRunCount: 0 },
+    uploadReady: false,
+    objectiveGate: {
+      available: true,
+      pass: false,
+      checks: [{ name: 'placeholder_pct', pass: false, detail: '20% placeholders' }],
+    },
+    placeholderGate: { placeholderPct: 20 },
+    videoPath: join(videoDir, 'final.mp4'),
+  };
+  const project = {
+    script: [{ id: 's1', title: 'Hook' }],
+    media: [
+      { segmentId: 's1', type: 'video', url: '/api/download-clip?url=tiktok', sourceUrl: 'https://www.tiktok.com/@user/video/dead1' },
+      { segmentId: 's1', type: 'video', url: '/api/download-clip?url=yt', sourceUrl: 'https://www.youtube.com/watch?v=good1' },
+      { segmentId: 's1', type: 'video', url: '/api/download-clip?url=yt2', sourceUrl: 'https://www.youtube.com/watch?v=good2' },
+    ],
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, {}, 'topic', project, { videoPath: watch.videoPath });
+  assert('Placeholder fail triggers reharvest', fixState.reHarvestMedia === true);
+  assert('Excludes manifest placeholder URLs only', fixState.excludedUrls?.length === 2);
+  assert('Does not exclude working YouTube URL', !fixState.excludedUrls?.includes('https://www.youtube.com/watch?v=good2'));
+  assert('Applied message mentions placeholder URL(s)', applied.some((a) => a.includes('placeholder URL')));
+}
+
+// ---------------------------------------------------------------------------
+// 24. buildShockHookLine — museum / TikTok topic-specific hooks
+// ---------------------------------------------------------------------------
+console.log('\n── 24. buildShockHookLine museum/TikTok ──');
+{
+  const museumTopic = 'The museum heist streamed live on TikTok';
+  const hook = buildShockHookLine(museumTopic);
+  assert('Museum TikTok hook mentions Louvre or TikTok', /louvre|tiktok/i.test(hook), hook);
+  assert('Museum TikTok hook avoids generic filler', !/almost nobody saw it coming|could affect you by tomorrow/i.test(hook), hook);
+  assert('Museum TikTok hook has urgency marker', /breaking|live|millions|police|robbed|heist/i.test(hook), hook);
+
+  const overlay = buildShortHookOverlay(museumTopic, hook);
+  assert('Museum overlay uses BREAKING prefix', overlay.startsWith('BREAKING:'), overlay);
+  assert('Museum overlay mentions LOUVRE or TIKTOK', /LOUVRE|TIKTOK/.test(overlay), overlay);
+
+  const visionOverlay = buildShortHookOverlay(museumTopic, hook, {
+    visionFix: 'Replace weak opener with BREAKING: LOUVRE HEIST LIVE',
+  });
+  assert('Vision BREAKING suggestion prefixes overlay', visionOverlay.startsWith('BREAKING:'), visionOverlay);
+
+  const ctx = harvestContextFromFixState({ hookLine: hook, hookOverlay: overlay });
+  const payload = harvestSessionStoragePayload(ctx);
+  assert('Hook line wired to sessionStorage', payload.autotube_loop_hook_line === hook);
+  assert('Hook overlay wired to sessionStorage', payload.autotube_loop_hook_overlay === overlay);
+
+  const watch = {
+    hookScript: { pass: false, issue: 'Generic opener' },
+    hookVision: { hookPass: false, fix: 'Start with BREAKING: LOUVRE HEIST TIKTOK LIVE' },
+    brutal: { report: { scores: { visualVariety: 8, pacing: 8 } }, overall: 7 },
+    repetition: { repeatPct: 0, duplicateRunCount: 0 },
+    uploadReady: false,
+    objectiveGate: { pass: true },
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, {}, museumTopic);
+  assert('Hook fail sets topic-specific hookLine', /louvre|tiktok/i.test(fixState.hookLine || ''), fixState.hookLine);
+  assert('Hook fail sets BREAKING overlay', fixState.hookOverlay?.startsWith('BREAKING:'), fixState.hookOverlay);
+  assert('Hook fix logged', applied.some((a) => a.includes('Hook FAIL')));
 }
 
 // ---------------------------------------------------------------------------

@@ -3,12 +3,13 @@
  * Used by generate-full-video.mjs CLI and video-improvement-loop.mjs.
  */
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync, statSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
-import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
-import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
+import { validateRenderManifest, MIN_BYTES as LOOP_MIN_RENDER_BYTES } from './validate-loop-video.mjs';
+import { buildMockScriptForTopic, buildShockHookLine, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
+import { patchProjectForLoop, stockSearchResults, buildShortHookOverlay } from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
@@ -22,6 +23,8 @@ import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-e
 import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
+  detectThinHarvest,
+  loopMediaTimeoutMs,
   scoreAssetRelevance,
   passesTopUpRelevanceGate,
   extractKeywords,
@@ -30,6 +33,8 @@ import {
   isUnreliableVideoHost,
   isTrustedVideoHost,
 } from './harvest-quality.mjs';
+
+export { loopMediaTimeoutMs } from './harvest-quality.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -85,7 +90,8 @@ export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || '
 }
 
 function isLikelyVideoHost(url = '') {
-  return /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|player\.vimeo|archive\.org|giphy|tiktok\.com|vm\.tiktok)/i.test(url);
+  if (isUnreliableVideoHost(url)) return false;
+  return /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|player\.vimeo|archive\.org|videos\.pexels\.com|giphy)/i.test(url);
 }
 
 function isDirectGiphyCdnMp4(url = '') {
@@ -223,10 +229,10 @@ function buildTopUpQuery(seg, topic, round) {
 }
 
 const TOP_UP_VIDEO_ENDPOINTS = [
-  '/api/search-bing-videos',
-  '/api/search-google-videos',
-  '/api/search-videos',
   '/api/search-vimeo',
+  '/api/search-videos',
+  '/api/search-google-videos',
+  '/api/search-bing-videos',
 ];
 const VIDEO_TOP_UP_QUERY_SUFFIXES = ['footage', 'news footage', 'documentary clip', 'security camera', 'live stream'];
 const TOP_UP_IMAGE_ENDPOINTS = [
@@ -269,6 +275,7 @@ function buildVideoTopUpAsset(r, devServer, seg, query, sourceLabel) {
   const pageUrl = r.url || r.content || r.sourceUrl;
   if (!pageUrl || !/^https?:\/\//i.test(pageUrl)) return null;
   if (isUnreliableVideoHost(pageUrl)) return null;
+  if (!isTrustedVideoHost(pageUrl)) return null;
   const clipUrl = toRelativeClipProxyUrl(devServer, pageUrl, 10);
   return {
     segmentId: seg.id,
@@ -515,23 +522,21 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
   if (proxied) {
     const hostBlob = `${asset.url || ''} ${asset.sourceUrl || ''}`;
     if (isUnreliableVideoHost(hostBlob)) {
-      report.dropped.push({ url: asset.url, reason: 'unreliable video host (instagram/x/article)' });
+      report.dropped.push({ url: asset.url, reason: 'unreliable video host (tiktok/instagram/x)' });
       return false;
     }
-    const trusted = isTrustedVideoHost(hostBlob);
-    if (loopMode && !trusted) {
-      const probeUrl = downloadUrl.startsWith('http') ? downloadUrl : `${devServer}${keepUrl}`;
-      const clipOk = await canFetch(probeUrl, { timeoutMs: 20000, minBytes: 512, expectVideo: false });
-      if (!clipOk) {
-        report.dropped.push({ url: asset.url, reason: 'proxy clip probe failed' });
-        return false;
-      }
+    if (!isTrustedVideoHost(hostBlob)) {
+      report.dropped.push({ url: asset.url, reason: 'non-trusted video host (need youtube/vimeo/pexels)' });
+      return false;
+    }
+    const probeUrl = downloadUrl.startsWith('http') ? downloadUrl : `${devServer}${keepUrl}`;
+    const clipOk = await canFetch(probeUrl, { timeoutMs: 20000, minBytes: 512, expectVideo: false });
+    if (!clipOk) {
+      report.dropped.push({ url: asset.url, reason: 'proxy clip probe failed' });
+      return false;
     }
     sanitized.push({ ...asset, type: 'video', url: keepUrl, sourceUrl: asset.sourceUrl || asset.url });
-    report.keptVideo.push({
-      url: asset.url,
-      reason: `${reasonPrefix}${trusted ? 'trusted host proxy' : 'proxy clip probe OK'}`,
-    });
+    report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}trusted host proxy` });
     return true;
   }
 
@@ -812,6 +817,11 @@ export async function generateFullVideo(options) {
     };
   }
 
+  if (fixState.shockHook !== false) {
+    fixState.hookLine = fixState.hookLine?.trim() || buildShockHookLine(topic);
+    fixState.hookOverlay = fixState.hookOverlay?.trim() || buildShortHookOverlay(topic, fixState.hookLine);
+  }
+
   const mockSegments = buildMockScriptForTopic(topic, {
     hookLine: fixState.hookLine,
     loopShort: options.loopShort !== false && !realHarvest,
@@ -835,6 +845,8 @@ export async function generateFullVideo(options) {
   log(`\n🎬 Generate: ${topic}`);
   log(`   Mode: ${realHarvest ? 'real harvest (OpenRouter + live search)' : 'mock (CI/e2e)'}`);
   if (realHarvest) log(`   Loop: ${loopMinAssets} assets/segment, ≤75s target`);
+  if (fixState.hookLine) log(`   Hook: "${fixState.hookLine.slice(0, 72)}${fixState.hookLine.length > 72 ? '…' : ''}"`);
+  if (fixState.hookOverlay) log(`   Overlay: "${fixState.hookOverlay}"`);
   log(`   Out: ${outDir}\n`);
 
   const launchArgs = [
@@ -1026,7 +1038,7 @@ export async function generateFullVideo(options) {
   };
 
   const scriptTimeoutMs = realHarvest ? 240_000 : 180_000;
-  const mediaTimeoutMs = realHarvest ? 1_200_000 : 300_000;
+  const mediaTimeoutMs = loopMediaTimeoutMs({ realHarvest, videoFirst });
   const narrationTimeoutMs = realHarvest ? 900_000 : 600_000;
 
   try {
@@ -1107,6 +1119,46 @@ export async function generateFullVideo(options) {
       writeFileSync(join(outDir, 'ui-state-on-media-timeout.json'), JSON.stringify(uiState, null, 2));
       await page.screenshot({ path: join(outDir, 'media-timeout.png'), fullPage: true }).catch(() => {});
       throw new Error(`Media harvest timed out after ${Math.round(mediaTimeoutMs / 60000)}min waiting for Prepare Narration`);
+    }
+
+    const preNarrationProject = await page.evaluate(() => {
+      const raw = localStorage.getItem('autotube_project');
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw).project ?? null;
+      } catch {
+        return null;
+      }
+    });
+    if (realHarvest && preNarrationProject?.script?.length) {
+      const volume = evaluateHarvestVolume(preNarrationProject, loopMinAssets);
+      const thin = detectThinHarvest(preNarrationProject);
+      if (!volume.pass || !thin.pass) {
+        for (const seg of thin.thin) {
+          log(`   ⚠ Thin browser harvest: "${seg.title}" has ${seg.count} assets (< ${seg.need}/seg)`);
+        }
+        if (!volume.pass) {
+          const detail = volume.failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
+          log(`   ⚠ Below loop min (${loopMinAssets}/seg) before narration: ${detail}`);
+        }
+        fixState.reHarvestMedia = true;
+        fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+        writeFileSync(
+          join(outDir, 'thin-harvest-pre-narration.json'),
+          JSON.stringify({ volume, thin, loopMinAssets }, null, 2),
+        );
+        await browser.close().catch(() => {});
+        browser = null;
+        return {
+          ok: false,
+          error: `Thin harvest before narration — need ${loopMinAssets}/seg`,
+          thinHarvest: true,
+          harvestQualityFail: true,
+          topic,
+          outDir,
+          fixState,
+        };
+      }
     }
 
     await clickPipelineButton(
@@ -1196,32 +1248,55 @@ export async function generateFullVideo(options) {
     const renderSnapshot = renderEnvJournalSnapshot(fixState);
     writeFileSync(join(outDir, 'render-env.json'), JSON.stringify(renderSnapshot, null, 2));
 
-    const render = spawnSync('node', ['server-render.mjs', mp4Out], {
-      cwd: root,
-      env: renderEnv,
-      encoding: 'utf8',
-      timeout: 1_800_000,
-      stdio: ['inherit', 'pipe', 'pipe'],
-    });
-
     const renderLogPath = join(root, 'test-recordings', 'latest-render.log');
-    const renderLogBody = `${render.stdout || ''}\n${render.stderr || ''}`;
-    writeFileSync(renderLogPath, renderLogBody);
-    writeFileSync(join(outDir, 'render.log'), renderLogBody);
 
+    function resolveProducedOutput() {
+      const finalMp4 = mp4Out.replace('.mp4', '-final.mp4');
+      return existsSync(finalMp4) ? finalMp4 : existsSync(mp4Out) ? mp4Out : null;
+    }
+
+    function runServerRender(attemptLabel = 'render') {
+      const render = spawnSync('node', ['server-render.mjs', mp4Out], {
+        cwd: root,
+        env: renderEnv,
+        encoding: 'utf8',
+        timeout: 1_800_000,
+        stdio: ['inherit', 'pipe', 'pipe'],
+      });
+      const renderLogBody = `[${attemptLabel}]\n${render.stdout || ''}\n${render.stderr || ''}`;
+      writeFileSync(renderLogPath, renderLogBody);
+      writeFileSync(join(outDir, 'render.log'), renderLogBody);
+      return render;
+    }
+
+    let render = runServerRender('render-1');
     if (render.status !== 0 && render.status !== null) {
       return { ok: false, error: `server-render exit ${render.status}`, topic, outDir, projectPath };
     }
 
-    const finalMp4 = mp4Out.replace('.mp4', '-final.mp4');
-    const produced = existsSync(finalMp4) ? finalMp4 : existsSync(mp4Out) ? mp4Out : null;
+    let produced = resolveProducedOutput();
     if (!produced) {
       return { ok: false, error: 'No output MP4', topic, outDir };
     }
 
+    let renderRetried = false;
+    const producedSize = statSync(produced).size;
+    if (producedSize < LOOP_MIN_RENDER_BYTES) {
+      log(`   ⚠️ Render output tiny (${(producedSize / 1024 / 1024).toFixed(2)} MB) — retrying once…`);
+      render = runServerRender('render-retry');
+      renderRetried = true;
+      if (render.status !== 0 && render.status !== null) {
+        return { ok: false, error: `server-render retry exit ${render.status}`, topic, outDir, projectPath };
+      }
+      produced = resolveProducedOutput();
+      if (!produced) {
+        return { ok: false, error: 'No output MP4 after render retry', topic, outDir };
+      }
+    }
+
     const gate = validateOutput(produced, 'Render output', { minBytes: MIN_RENDER_OUTPUT_BYTES });
     if (!gate.valid) {
-      return { ok: false, error: gate.error, topic, outDir };
+      return { ok: false, error: gate.error, topic, outDir, renderRetried };
     }
 
     const probe = spawnSync(
@@ -1230,6 +1305,29 @@ export async function generateFullVideo(options) {
       { encoding: 'utf8' },
     );
     const durationSec = probe.stdout ? parseFloat(probe.stdout.trim()) : NaN;
+
+    const manifestGate = validateRenderManifest(produced, durationSec);
+    if (!manifestGate.valid) {
+      return {
+        ok: false,
+        error: `Render manifest gate FAIL — ${manifestGate.error}`,
+        topic,
+        outDir,
+        projectPath,
+        renderRetried,
+        manifestGate,
+      };
+    }
+
+    if (statSync(produced).size < LOOP_MIN_RENDER_BYTES) {
+      return {
+        ok: false,
+        error: `file too small (${(statSync(produced).size / 1024 / 1024).toFixed(2)} MB < ${(LOOP_MIN_RENDER_BYTES / 1024 / 1024).toFixed(0)} MB)`,
+        topic,
+        outDir,
+        renderRetried,
+      };
+    }
 
     copyFileSync(produced, join(outDir, 'FINAL-VIDEO-final.mp4'));
 
@@ -1264,6 +1362,8 @@ export async function generateFullVideo(options) {
       fixState,
       renderEnv: renderSnapshot,
       harvestNonce: fixState.harvestNonce || 0,
+      renderRetried,
+      manifestGate,
     };
   } catch (err) {
     return { ok: false, error: err.message, topic, outDir };

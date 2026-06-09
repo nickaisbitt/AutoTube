@@ -5,10 +5,59 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-const MIN_DURATION_SEC = 55;
+export const MIN_DURATION_SEC = 55;
 // Draft-quality 720p ultrafast renders can legitimately be 4–5 MB for 60 s;
 // 3 MB is a safe floor that still catches empty/corrupt/truncated files.
-const MIN_BYTES = 3 * 1024 * 1024;
+export const MIN_BYTES = 3 * 1024 * 1024;
+/** Fail generate/ship when manifest placeholder share exceeds this (corrupt/thin B-roll). */
+export const MAX_SHIP_PLACEHOLDER_PCT = 30;
+
+export function minClipCountForDuration(durationSec) {
+  return Math.max(1, Math.floor((durationSec || 0) / 5));
+}
+
+/**
+ * @param {string} videoPath
+ * @param {number} [durationSec]
+ * @returns {{ valid: boolean, error?: string, manifest?: object, clipCount?: number, minClips?: number, placeholderPct?: number }}
+ */
+export function validateRenderManifest(videoPath, durationSec = 0) {
+  const manifestPath = join(dirname(videoPath), 'ffmpeg-assembly', 'render-manifest.json');
+  if (!existsSync(manifestPath)) {
+    return { valid: false, error: 'render-manifest.json missing (cannot verify clip/placeholder quality before ship)' };
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const dur = durationSec || manifest.muxDurationSec || manifest.videoSec || 0;
+    const minClips = minClipCountForDuration(dur);
+    const clipCount = manifest.clipCount || 0;
+    const placeholderPct = manifest.placeholderPct ?? 0;
+
+    if (placeholderPct > MAX_SHIP_PLACEHOLDER_PCT) {
+      return {
+        valid: false,
+        error: `render is ${placeholderPct}% placeholders (max ${MAX_SHIP_PLACEHOLDER_PCT}% before ship)`,
+        manifest,
+        clipCount,
+        minClips,
+        placeholderPct,
+      };
+    }
+    if (clipCount < minClips) {
+      return {
+        valid: false,
+        error: `render has ${clipCount} clips (min ${minClips} for ${dur.toFixed(0)}s)`,
+        manifest,
+        clipCount,
+        minClips,
+        placeholderPct,
+      };
+    }
+    return { valid: true, manifest, clipCount, minClips, placeholderPct };
+  } catch (err) {
+    return { valid: false, error: `render-manifest parse failed: ${err.message}` };
+  }
+}
 
 /**
  * @param {string} videoPath
@@ -60,12 +109,9 @@ export function validateLoopVideo(videoPath) {
           error: `A/V duration mismatch: video ${manifest.videoSec}s vs mux ${manifest.muxDurationSec}s`,
         };
       }
-      const placeholderPct = manifest.placeholderPct ?? 0;
-      if (placeholderPct > 50) {
-        return {
-          valid: false,
-          error: `render is ${placeholderPct}% placeholders (corrupt/thin output)`,
-        };
+      const manifestGate = validateRenderManifest(videoPath, durationSec);
+      if (!manifestGate.valid) {
+        return { valid: false, error: manifestGate.error };
       }
     } catch {
       /* manifest optional */

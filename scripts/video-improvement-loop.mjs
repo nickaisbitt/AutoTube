@@ -12,7 +12,7 @@ import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
 import { ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
 import { runLoopPreflight, waitForDevServer } from './loop-preflight.mjs';
 import { pickRandomTopic } from './lib/random-topics.mjs';
-import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
+import { watchVideo, resolveVideoPath, targetScore100 } from '../powers/video-watcher/src/analyze.mjs';
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
@@ -26,7 +26,7 @@ function parseArgs(argv) {
   const cfg = {
     max: 0,
     untilPass: false,
-    untilScore: 9.1,
+    untilScore: 91,
     delaySec: 5,
     reviewOnly: false,
     skipVision: false,
@@ -64,7 +64,7 @@ function appendJournal(entry) {
     `2. **Generate:** ${entry.generateOk ? 'OK' : 'FAIL'}${entry.generateError ? ` — ${entry.generateError}` : ''}`,
     `3. **Video:** \`${entry.videoPath || '—'}\``,
     `4. **Upload-ready:** ${entry.uploadReady ? 'YES' : 'NO'}`,
-    `5. **Brutal score:** ${entry.brutalScore ?? '—'}/10`,
+    `5. **YouTube quality:** ${entry.youtubeScore ?? entry.brutalScore ?? '—'}/100`,
     `6. **Objective gate:** ${entry.objectivePass === true ? 'PASS' : entry.objectivePass === false ? 'FAIL' : '—'} (score ${entry.objectiveScore ?? '—'})`,
     `7. **Scene QA:** ${entry.scenePass === true ? 'PASS' : entry.scenePass === false ? 'FAIL' : '—'} (longest ${entry.longestSceneSec ?? '—'}s)`,
     `8. **Render tier:** ${entry.renderTier || '—'}`,
@@ -106,7 +106,8 @@ async function main() {
 
   console.log('\n🔁 Video improvement loop (fix-gated)');
   console.log(`   Max iterations: ${cfg.max > 0 ? cfg.max : '∞'} (this session)`);
-  console.log(`   Target score: ${cfg.untilScore}/10 (stops when reached)`);
+  const target100 = targetScore100(cfg.untilScore);
+  console.log(`   Target score: ${target100}/100 (stops when reached)`);
   console.log(`   Fix before next topic: YES`);
   console.log(`   Harvest: ${cfg.mockHarvest ? 'mock (fast CI path)' : 'real (OpenRouter + live search; stock 2 assets/segment)'}`);
   console.log(`   Journal: ${JOURNAL_JSONL}\n`);
@@ -283,15 +284,16 @@ async function main() {
       });
     }
 
-    const brutalScore = watch.brutal?.overall ?? 0;
+    const youtubeScore = watch.youtubeScore ?? (watch.brutal?.overall ?? 0) * 10;
+    const brutalScore = watch.brutal?.overall ?? youtubeScore / 10;
     const uploadReady = watch.uploadReady === true;
     const objectivePass = watch.objectiveGate?.pass === true;
     const scenePass = watch.sceneQa?.pass === true;
     const scoreTargetMet =
       objectivePass &&
       renderTier === 'full' &&
-      Number.isFinite(brutalScore) &&
-      brutalScore >= cfg.untilScore;
+      Number.isFinite(youtubeScore) &&
+      youtubeScore >= target100;
     let nextStep = 'new random topic';
     let fixesApplied = [];
 
@@ -316,6 +318,7 @@ async function main() {
         videoPath,
         uploadReady: false,
         brutalScore,
+        youtubeScore,
         objectivePass,
         objectiveScore: watch.objectiveQa?.score,
         scenePass,
@@ -341,8 +344,8 @@ async function main() {
         JSON.stringify(
           {
             reachedAt: new Date().toISOString(),
-            score: brutalScore,
-            target: cfg.untilScore,
+            score: youtubeScore,
+            target: target100,
             topic: currentTopic,
             videoPath,
             reportPath: watch.reportPath,
@@ -352,7 +355,7 @@ async function main() {
           2,
         ),
       );
-      console.log(`\n🎯 TARGET SCORE ${brutalScore}/10 ≥ ${cfg.untilScore} — STOPPING LOOP`);
+      console.log(`\n🎯 TARGET SCORE ${youtubeScore}/100 ≥ ${target100} — STOPPING LOOP`);
       console.log(`   Flag file: ${TARGET_FILE}`);
     }
 
@@ -417,6 +420,7 @@ async function main() {
       videoPath,
       uploadReady,
       brutalScore,
+      youtubeScore,
       scoreTargetMet,
       objectivePass,
       objectiveScore: watch.objectiveQa?.score,

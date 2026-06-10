@@ -24,6 +24,51 @@ function computeFrameTimestamps(durationSec, targetFrames = 8) {
  * Extracts keyframes from the video at specific timestamps using ffmpeg.
  * Returns an array of base64 data URIs.
  */
+/**
+ * Extract frames at explicit timestamps (seconds).
+ * @param {string} videoPath
+ * @param {number[]} timestamps
+ * @returns {Array<{ sec: number, dataUri: string }>}
+ */
+export function extractFramesAtTimes(videoPath, timestamps = []) {
+  const frames = [];
+  const tempDir = join(tmpdir(), `autotube-frames-${Date.now()}`);
+  mkdirSync(tempDir, { recursive: true });
+
+  try {
+    for (let i = 0; i < timestamps.length; i++) {
+      const ts = timestamps[i];
+      const outPath = join(tempDir, `frame-${i}.jpg`);
+      const result = spawnSync('ffmpeg', [
+        '-y',
+        '-ss', String(ts),
+        '-i', videoPath,
+        '-vf', 'eq=brightness=0.12:contrast=1.08',
+        '-frames:v', '1',
+        '-q:v', '2',
+        '-f', 'image2',
+        outPath,
+      ], { timeout: 15000 });
+
+      if (result.status === 0 && existsSync(outPath)) {
+        const fileBuffer = readFileSync(outPath);
+        const base64 = fileBuffer.toString('base64');
+        frames.push({ sec: ts, dataUri: `data:image/jpeg;base64,${base64}` });
+      }
+    }
+  } catch (err) {
+    console.error('Frame extraction failed:', err);
+  } finally {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return frames;
+}
+
 export function extractFrames(videoPath, durationSec, targetFrames = 8) {
   const timestamps = computeFrameTimestamps(durationSec, targetFrames);
   const frames = [];
@@ -58,7 +103,9 @@ export function extractFrames(videoPath, durationSec, targetFrames = 8) {
   } finally {
     try {
       rmSync(tempDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      /* ignore */
+    }
   }
 
   return frames;

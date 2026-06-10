@@ -19,6 +19,24 @@ import {
 
 const CUT_FLOOR = 0.5;
 
+function targetScore100(untilScore = 91) {
+  return untilScore > 10 ? untilScore : Math.round(untilScore * 10);
+}
+
+function watchYoutubeScore(watch) {
+  if (typeof watch.youtubeScore === 'number') return watch.youtubeScore;
+  const legacy = watch.brutal?.overall;
+  return typeof legacy === 'number' ? legacy * 10 : 100;
+}
+
+function retentionScore(watch, key, fallback = 100) {
+  const s100 = watch.brutal?.report?.scores100?.[key];
+  if (typeof s100 === 'number') return s100;
+  const s10 = watch.brutal?.report?.scores?.[key];
+  if (typeof s10 === 'number') return s10 * 10;
+  return fallback;
+}
+
 /**
  * Escalate fix strategy when interval cuts alone are not working.
  * @param {object} s — fix state (mutated)
@@ -133,11 +151,12 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
   const s = { ...fixState };
 
   const hookFail = watch.hookScript?.pass === false || watch.hookVision?.hookPass === false;
-  const pacing = watch.brutal?.report?.scores?.pacing ?? 10;
-  const overall = watch.brutal?.overall ?? 10;
-  // Brutal 4.5–5.5 with weak pacing: fix render-side first, avoid reharvest/minAssets starvation.
-  const pacingPlateau = overall >= 4.5 && overall <= 5.5 && pacing <= 5;
-  const visualVariety = watch.brutal?.report?.scores?.visualVariety ?? 10;
+  const pacing = retentionScore(watch, 'pacing', 100);
+  const overall = watchYoutubeScore(watch);
+  const target100 = targetScore100(untilScore);
+  // Mid-band with weak pacing: fix render-side first, avoid reharvest starvation.
+  const pacingPlateau = overall >= 72 && overall <= 84 && pacing <= 55;
+  const visualVariety = retentionScore(watch, 'visualVariety', 100);
   const repeatPct = watch.repetition?.repeatPct ?? 0;
   const dupRuns = watch.repetition?.duplicateRunCount ?? 0;
   const longestHold = watch.sceneQa?.longestSceneSec ?? watch.repetition?.longestRun?.approxHoldSec ?? 0;
@@ -223,35 +242,35 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     applied.push(`1. Hook FAIL → shock hook "${s.hookLine.slice(0, 60)}…", overlay: "${s.hookOverlay}"`);
   }
 
-  if ((pacing <= 8 || longestHold >= 4) && !sceneFail) {
+  if ((pacing <= 80 || longestHold >= 4) && !sceneFail) {
     s.useFastPacing = true;
     if ((s.cutIntervalSec ?? 1.25) > CUT_FLOOR) {
       const prev = s.cutIntervalSec ?? 1.25;
-      const step = pacing <= 5 ? 0.35 : 0.15;
+      const step = pacing <= 55 ? 0.35 : 0.15;
       s.cutIntervalSec = Math.max(CUT_FLOOR, prev - step);
       applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s`);
     }
-    if (pacing <= 8) {
+    if (pacing <= 80) {
       s.patternInterrupts = true;
-      applied.push(`2a. Pacing ${pacing}/10 ≤8 → patternInterrupts ON`);
+      applied.push(`2a. Pacing ${pacing}/100 ≤80 → patternInterrupts ON`);
     }
-    if (pacing <= 5) {
+    if (pacing <= 55) {
       s.cutIntervalSec = CUT_FLOOR;
       s.patternInterrupts = true;
       s.useFastPacing = true;
-      applied.push(`2c. Pacing ${pacing}/10 ≤5 → cut floor ${CUT_FLOOR}s + strong interrupts`);
+      applied.push(`2c. Pacing ${pacing}/100 ≤55 → cut floor ${CUT_FLOOR}s + strong interrupts`);
     }
   }
 
   const renderTier = s.renderTier || 'draft';
-  if (renderTier === 'full' && overall < untilScore) {
+  if (renderTier === 'full' && overall < target100) {
     s.brollPlacement = true;
     if (pacingPlateau) {
       s.patternInterrupts = true;
       s.useFastPacing = true;
       s.cutIntervalSec = Math.max(CUT_FLOOR, s.cutIntervalSec ?? CUT_FLOOR);
       applied.push(
-        `2b. Full-tier pacing plateau (${overall}/10, pacing ${pacing}/10) → strong interrupts, skip reharvest`,
+        `2b. Full-tier pacing plateau (${overall}/100, pacing ${pacing}/100) → strong interrupts, skip reharvest`,
       );
     } else {
       s.reHarvestMedia = true;
@@ -259,12 +278,12 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
         LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
         Math.max(2, s.minAssetsPerSegment || LOOP_MAX_MIN_ASSETS_PER_SEGMENT),
       );
-      escalateFixStrategy(s, applied, `2b. Full-tier score below ${untilScore}`);
+      escalateFixStrategy(s, applied, `2b. Full-tier score below ${target100}/100`);
     }
   }
 
   const repetitionFail = repeatPct >= 25 || dupRuns >= 2;
-  const varietyFail = visualVariety <= 5 || (visualVariety <= 6 && !pacingPlateau);
+  const varietyFail = visualVariety <= 55 || (visualVariety <= 65 && !pacingPlateau);
   if ((repetitionFail || varietyFail) && !pacingPlateau) {
     s.forceRealStock = false;
     s.harvestVideoFirst = true;
@@ -278,22 +297,22 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     s.fixStrategy = 'reharvest';
     const reason = repetitionFail
       ? `Repetition FAIL (${repeatPct}% dup, ${dupRuns} runs)`
-      : `Visual variety FAIL (${visualVariety}/10)`;
+      : `Visual variety FAIL (${visualVariety}/100)`;
     applied.push(
       `3. ${reason} → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg`,
     );
   }
 
-  if (visualVariety <= 5) {
+  if (visualVariety <= 55) {
     s.harvestVideoFirst = true;
     s.suppressGiphy = true;
     // suppressGiphy removes main GIF source — cap video quota so harvest isn't starved
     s.minVideosPerSegment = 2;
     s.cutIntervalSec = Math.max(CUT_FLOOR, s.cutIntervalSec ?? CUT_FLOOR);
-    applied.push(`3a. Visual variety ${visualVariety}/10 → harvestVideoFirst + suppressGiphy + ≥${s.minVideosPerSegment} video/seg`);
-  } else if (visualVariety <= 6) {
+    applied.push(`3a. Visual variety ${visualVariety}/100 → harvestVideoFirst + suppressGiphy + ≥${s.minVideosPerSegment} video/seg`);
+  } else if (visualVariety <= 65) {
     s.suppressGiphy = true;
-    applied.push(`3a. Visual variety ${visualVariety}/10 → suppressGiphy=true for next harvest`);
+    applied.push(`3a. Visual variety ${visualVariety}/100 → suppressGiphy=true for next harvest`);
   }
 
   const harvestProject = project || loadLastProject();
@@ -320,10 +339,10 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     }
   }
 
-  if (renderTier === 'full' && overall <= 5) {
+  if (renderTier === 'full' && overall <= 50) {
     s.useFastPacing = true;
     s.showKineticText = false;
-    applied.push('4. Overall ≤5/10 on full tier → fast pacing ON, kinetic OFF');
+    applied.push('4. Overall ≤50/100 on full tier → fast pacing ON, kinetic OFF');
   }
 
   if (watch.legacyVision?.technical?.issues?.some((i) => /loudness/i.test(i))) {

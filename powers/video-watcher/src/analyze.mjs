@@ -16,8 +16,10 @@ import {
 } from '../../../scripts/lib/run-objective-qa.mjs';
 import {
   auditHookFromScript,
-  runBrutalVisionReview,
+  runRetentionVisionReview,
   runHookVisionReview,
+  computeYoutubeQualityScore,
+  targetScore100,
 } from './vision-brutal.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -225,9 +227,9 @@ function buildTopFixes({ hookScript, hookVision, repetition, sceneQa, brutal, le
   if (legacyVision?.technical?.issues?.length) {
     fixes.push({ n: p++, text: legacyVision.technical.issues[0] });
   }
-  const pacing = brutal?.report?.scores?.pacing ?? legacyVision?.report?.scores?.pacing;
-  if (typeof pacing === 'number' && pacing <= 5) {
-    fixes.push({ n: p++, text: 'Pacing ≤5/10 — add pattern interrupts every 5–8s in first minute' });
+  const pacing100 = brutal?.report?.scores100?.pacing ?? (brutal?.report?.scores?.pacing ?? 0) * 10;
+  if (typeof pacing100 === 'number' && pacing100 <= 55) {
+    fixes.push({ n: p++, text: 'Pacing ≤55/100 — add pattern interrupts every 3–5s in first minute' });
   }
 
   return fixes.slice(0, 8);
@@ -249,15 +251,15 @@ function buildNumberedReport(ctx) {
     apiKeyUsed,
     mode,
     renderTier,
+    youtubeScore,
   } = ctx;
 
   const analyzedSec = framesMeta.durationSec ?? meta.durationSec;
   const brutalOverall = brutal?.overall;
   const uploadReady =
-    brutal?.uploadReady === true &&
+    (youtubeScore ?? 0) >= 91 &&
     hookVision?.hookPass !== false &&
-    hookScript?.pass !== false &&
-    (brutalOverall ?? 0) >= 7;
+    hookScript?.pass !== false;
 
   const lines = [];
   let n = 1;
@@ -273,11 +275,16 @@ function buildNumberedReport(ctx) {
   );
   n += 1;
 
-  if (typeof brutalOverall === 'number') {
-    lines.push(`${n}. **Brutal overall:** ${brutalOverall}/10 (raw average, not inflated)`);
+  if (typeof youtubeScore === 'number') {
+    lines.push(`${n}. **YouTube quality:** ${youtubeScore}/100 (retention + objective gates)`);
     n += 1;
-    for (const [key, val] of Object.entries(brutal?.report?.scores || {})) {
-      lines.push(`${n}. **${key}:** ${val}/10 — ${brutal.report.feedback?.[key] || '—'}`);
+  }
+  if (typeof brutalOverall === 'number') {
+    lines.push(`${n}. **Retention avg (legacy /10):** ${brutalOverall}/10`);
+    n += 1;
+    const scores100 = brutal?.report?.scores100 || {};
+    for (const [key, val] of Object.entries(scores100)) {
+      lines.push(`${n}. **${key}:** ${val}/100 — ${brutal.report.feedback?.[key] || '—'}`);
       n += 1;
     }
   }
@@ -448,6 +455,7 @@ export async function watchVideo(options = {}) {
   let brutal = null;
   let hookVision = null;
   let legacyVision = null;
+  let youtubeScore = null;
 
   if (!skipVision && apiKey) {
     const dur = framesMeta.durationSec;
@@ -459,7 +467,33 @@ export async function watchVideo(options = {}) {
       hookVision = { hookPass: false, error: e.message };
     }
     try {
-      brutal = await runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 10 : 14);
+      const retention = await runRetentionVisionReview(videoPath, dur, apiKey, {
+        maxFrames: mode === 'quick' ? 14 : 18,
+        expectedOverlay: options.expected_hook_overlay,
+      });
+      const scores = { ...retention.scores };
+      if (typeof hookVision?.hookScore === 'number') {
+        scores.hook = Math.max(scores.hook, hookVision.hookScore);
+      }
+      youtubeScore = computeYoutubeQualityScore({
+        retentionScores: scores,
+        objectiveQa,
+        hookVision,
+        hookScript,
+        sceneQa,
+        placeholderGate,
+        objectiveGate,
+        repetition,
+      });
+      brutal = {
+        success: true,
+        mode: 'retention',
+        overall: Math.round((youtubeScore / 10) * 10) / 10,
+        youtubeScore,
+        uploadReady: youtubeScore >= 91,
+        report: { ...retention.report, scores100: scores },
+        frameCount: retention.frameCount,
+      };
     } catch (e) {
       brutal = { success: false, error: e.message };
     }
@@ -486,6 +520,7 @@ export async function watchVideo(options = {}) {
     apiKeyUsed: Boolean(apiKey) && !skipVision,
     mode,
     renderTier: options.render_tier,
+    youtubeScore,
   });
 
   const reportPath = join(outDir, 'WATCH_REPORT.md');
@@ -508,6 +543,9 @@ export async function watchVideo(options = {}) {
     hookVision,
     brutal,
     legacyVision,
-    uploadReady: reportText.includes('**Upload-ready?** YES'),
+    youtubeScore,
+    uploadReady: (youtubeScore ?? 0) >= 91 && hookVision?.hookPass !== false && hookScript?.pass !== false,
   };
 }
+
+export { targetScore100 };

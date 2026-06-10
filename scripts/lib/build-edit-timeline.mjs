@@ -37,8 +37,8 @@ function rankIntroHookAssets(assets) {
     const score = (asset) => {
       const h = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.source || ''}`.toLowerCase();
       let s = 0;
-      if (/police|heist|robbery|security|jewel|crown|crime|news|cctv|stolen|arrest/.test(h)) s += 4;
-      if (/pyramid|tourist|plaza|walking|architecture|france-museum-paris/.test(h)) s -= 3;
+      if (/police|heist|robbery|security|jewel|crown|crime|news|cctv|stolen|arrest|crowd|protest|face|people|officer/.test(h)) s += 5;
+      if (/pyramid|tourist|plaza|walking|architecture|france-museum-paris|aerial|skyline/.test(h)) s -= 3;
       return s;
     };
     return score(b) - score(a);

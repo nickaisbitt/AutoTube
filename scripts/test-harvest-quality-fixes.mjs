@@ -24,6 +24,7 @@ import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import { loadFixState } from './lib/loop-state.mjs';
 import { buildShockHookLine } from '../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, isBadKineticOverlay } from './lib/patch-project-for-loop.mjs';
+import { computeYoutubeQualityScore, targetScore100, buildRetentionFrameTimestamps } from '../powers/video-watcher/src/vision-brutal.mjs';
 import { buildRenderEnvFromFixState } from './lib/render-env-from-fix-state.mjs';
 import {
   evaluateObjectiveGate,
@@ -310,7 +311,7 @@ console.log('\n── 9. detectGiphyDominance ──');
 console.log('\n── 10. suppressGiphy on low visualVariety ──');
 {
   const watch = {
-    brutal: { report: { scores: { visualVariety: 5, pacing: 7 } }, overall: 6 },
+    brutal: { report: { scores100: { visualVariety: 50, pacing: 70 } }, overall: 6 },
     repetition: { repeatPct: 0, duplicateRunCount: 0 },
     uploadReady: false,
     objectiveGate: { pass: false },
@@ -508,16 +509,17 @@ console.log('\n── 16. suppressGiphy clear on video quota ──');
 console.log('\n── 17. untilScore parameterization ──');
 {
   const watch = {
-    brutal: { overall: 7.5, report: { scores: { visualVariety: 7, pacing: 7 } } },
+    youtubeScore: 75,
+    brutal: { overall: 7.5, report: { scores100: { visualVariety: 70, pacing: 70 } } },
     objectiveGate: { available: true, pass: true, checks: [] },
     hookScript: { pass: true },
     hookVision: { hookPass: true },
   };
-  const { applied: below91 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 9.1 });
-  assert('Below 9.1 triggers reharvest fix', below91.some((a) => a.includes('below 9.1')));
+  const { applied: below91 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 91 });
+  assert('Below 91 triggers reharvest fix', below91.some((a) => a.includes('below 91')));
 
-  const { applied: below7 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 7 });
-  assert('At 7.5 with untilScore=7 does not trigger below-target fix', !below7.some((a) => a.includes('below 7')));
+  const { applied: below70 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 70 });
+  assert('At 75 with untilScore=70 does not trigger below-target fix', !below70.some((a) => a.includes('below 70')));
 }
 
 // ---------------------------------------------------------------------------
@@ -577,7 +579,8 @@ console.log('\n── 19. Full-tier strong interrupts env ──');
 console.log('\n── 20. Pacing plateau skip reharvest ──');
 {
   const watch = {
-    brutal: { overall: 4.8, report: { scores: { pacing: 4, visualVariety: 5 } } },
+    youtubeScore: 78,
+    brutal: { overall: 7.8, report: { scores100: { pacing: 40, visualVariety: 50 } } },
     repetition: { repeatPct: 0, duplicateRunCount: 0 },
     objectiveGate: { available: true, pass: true, checks: [] },
     hookScript: { pass: true },
@@ -597,7 +600,7 @@ console.log('\n── 20. Pacing plateau skip reharvest ──');
     { renderTier: 'full', cutIntervalSec: 1.25, minAssetsPerSegment: 6 },
     'museum heist',
     cleanProject,
-    { untilScore: 9.1 },
+    { untilScore: 91 },
   );
   assert('Pacing plateau keeps minAssets at 6 (no bump)', fixState.minAssetsPerSegment === 6);
   assert('Pacing plateau skips reHarvestMedia', fixState.reHarvestMedia !== true);
@@ -907,7 +910,7 @@ console.log('\n── 25. minAssets cap ──');
     hookVision: { hookPass: true },
     sceneQa: { available: true, pass: false, longestSceneSec: 6 },
   };
-  const { fixState } = applyFixesFromWatch(watch, { minAssetsPerSegment: 6 }, 'museum heist', null, { untilScore: 9.1 });
+  const { fixState } = applyFixesFromWatch(watch, { minAssetsPerSegment: 6 }, 'museum heist', null, { untilScore: 91 });
   assert('Scene/repetition escalation stays at cap', fixState.minAssetsPerSegment <= LOOP_MAX_MIN_ASSETS_PER_SEGMENT);
 }
 
@@ -951,9 +954,46 @@ console.log('\n── 24. buildShockHookLine museum/TikTok ──');
 }
 
 // ---------------------------------------------------------------------------
-// 26. isBadKineticOverlay — reject UI kinetic junk, keep BREAKING hooks
+// 26. YouTube quality score (0–100) + retention frame plan
 // ---------------------------------------------------------------------------
-console.log('\n── 26. isBadKineticOverlay ──');
+console.log('\n── 26. YouTube quality score 0–100 ──');
+{
+  assert('targetScore100 maps 9.1 → 91', targetScore100(9.1) === 91);
+  assert('targetScore100 keeps 91', targetScore100(91) === 91);
+
+  const ts = buildRetentionFrameTimestamps(60, 14);
+  assert('Retention frames include hook cluster', ts[0] === 0 && ts.includes(3));
+  assert('Retention frames dense in first 30s', ts.filter((t) => t <= 30).length >= 8);
+
+  const gatePassScore = computeYoutubeQualityScore({
+    retentionScores: { hook: 72, visualVariety: 68, pacing: 65, captionReadability: 75, youtubeReadiness: 70 },
+    objectiveQa: { score: 88 },
+    hookVision: { hookPass: true },
+    hookScript: { pass: true },
+    sceneQa: { pass: true, longestSceneSec: 1.5 },
+    placeholderGate: { pass: true },
+    objectiveGate: { pass: true },
+    repetition: { repeatPct: 0 },
+  });
+  assert('Gate-passing video scores ≥74', gatePassScore >= 74, String(gatePassScore));
+
+  const weakScore = computeYoutubeQualityScore({
+    retentionScores: { hook: 40, visualVariety: 45, pacing: 42, captionReadability: 50, youtubeReadiness: 40 },
+    objectiveQa: { score: 55 },
+    hookVision: { hookPass: false },
+    hookScript: { pass: false },
+    sceneQa: { pass: false, longestSceneSec: 8 },
+    placeholderGate: { pass: false },
+    objectiveGate: { pass: false },
+    repetition: { repeatPct: 40 },
+  });
+  assert('Weak video scores <60', weakScore < 60, String(weakScore));
+}
+
+// ---------------------------------------------------------------------------
+// 27. isBadKineticOverlay — reject UI kinetic junk, keep BREAKING hooks
+// ---------------------------------------------------------------------------
+console.log('\n── 27. isBadKineticOverlay ──');
 {
   assert('Rejects urgent-question kinetic junk', isBadKineticOverlay("AN URGENT QUESTION: 'DID A HEIST JUST HAPPEN'"));
   assert('Rejects instruction overlays', isBadKineticOverlay('Replace weak opener with BREAKING'));

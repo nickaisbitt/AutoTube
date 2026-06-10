@@ -1184,6 +1184,7 @@ export async function searchDDGVideos(query: string, signal?: AbortSignal): Prom
     const candidates: MediaCandidate[] = (results as DDGVideoResult[])
       .filter((v) => {
         if (!v.content) return false;
+        if (isUnreliableVideoHost(v.content)) return false;
         const seconds = parseDurationToSeconds(v.duration);
         return seconds <= MAX_DURATION_SECONDS;
       })
@@ -1492,7 +1493,11 @@ export async function searchBingVideos(query: string, signal?: AbortSignal): Pro
     const results = (data as Record<string, unknown>).results;
     if (!Array.isArray(results)) return [];
 
-    const candidates: MediaCandidate[] = results.map((v: any) => {
+    const candidates: MediaCandidate[] = results
+      .filter((v: { url?: string; sourceUrl?: string }) =>
+        v.url && !isUnreliableVideoHost(`${v.url} ${v.sourceUrl || ''}`),
+      )
+      .map((v: any) => {
       try {
         if (!v.url) return null;
         const clipUrl = `/api/download-clip?url=${encodeURIComponent(v.url)}&duration=10`;
@@ -1535,7 +1540,11 @@ export async function searchGoogleVideos(query: string, signal?: AbortSignal): P
     const results = (data as Record<string, unknown>).results;
     if (!Array.isArray(results)) return [];
 
-    const candidates: MediaCandidate[] = results.map((v: any) => {
+    const candidates: MediaCandidate[] = results
+      .filter((v: { url?: string; sourceUrl?: string }) =>
+        v.url && !isUnreliableVideoHost(`${v.url} ${v.sourceUrl || ''}`),
+      )
+      .map((v: any) => {
       try {
         if (!v.url) return null;
         const clipUrl = `/api/download-clip?url=${encodeURIComponent(v.url)}&duration=10`;
@@ -1762,11 +1771,18 @@ async function harvestMediaWithSafetyNet(
       trace.push(`[S${depth+1}] Excluded ${before - candidates.length} prior-loop URLs`);
     }
   }
+  {
+    const before = candidates.length;
+    candidates = candidates.filter((c) => !isUnreliableVideoHost(candidateUrlBlob(c)));
+    if (before !== candidates.length) {
+      trace.push(`[S${depth+1}] Dropped ${before - candidates.length} unreliable social video URLs`);
+    }
+  }
   if (isLoopFastMode()) {
     const before = candidates.length;
     candidates = candidates.filter(isLoopTrustedVideoCandidate);
     if (before !== candidates.length) {
-      trace.push(`[S${depth+1}] Dropped ${before - candidates.length} unreliable/non-trusted video URLs`);
+      trace.push(`[S${depth+1}] Dropped ${before - candidates.length} non-trusted video URLs`);
     }
   }
 

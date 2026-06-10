@@ -261,6 +261,7 @@ function cleanupPartialRaw(cacheDir: string, hash: string): void {
 /**
  * GET /api/download-clip?url=...&duration=...
  * Video clip proxy: direct HTTP for mp4/Pexels; yt-dlp for YouTube/Vimeo pages.
+ * Vimeo: vimeo.com/{id} and player.vimeo.com/video/{id} both work via yt-dlp (no oembed step needed).
  */
 export async function handleDownloadClip(
   req: IncomingMessage,

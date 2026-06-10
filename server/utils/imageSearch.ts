@@ -84,6 +84,17 @@ function isLowQualityDomain(url: string): boolean {
   }
 }
 
+function mergeImageResultsDedupeByUrl(primary: WebImageResult[], additional: WebImageResult[]): WebImageResult[] {
+  const seen = new Set(primary.map((r) => r.url));
+  const merged = [...primary];
+  for (const item of additional) {
+    if (!item.url || seen.has(item.url)) continue;
+    seen.add(item.url);
+    merged.push(item);
+  }
+  return merged;
+}
+
 // ---------------------------------------------------------------------------
 // Bing Image Search — parses HTML from www.bing.com/images/search
 // ---------------------------------------------------------------------------
@@ -196,6 +207,16 @@ export async function fetchBingImages(query: string): Promise<WebImageResult[]> 
         // Skip unparseable
       }
     }
+  }
+
+  if (results.length < 10) {
+    const ddgResults = await fetchDuckDuckGoImages(query);
+    const merged = mergeImageResultsDedupeByUrl(results, ddgResults);
+    if (merged.length > results.length) {
+      console.log(`[Bing Images] Merged ${merged.length - results.length} DuckDuckGo fallback images for "${query}"`);
+    }
+    results.length = 0;
+    results.push(...merged);
   }
 
   console.log(`[Bing Images] Found ${results.length} images for "${query}"`);
@@ -472,6 +493,14 @@ export async function fetchGoogleImages(query: string): Promise<WebImageResult[]
     }
   }
 
+  if (results.length === 0) {
+    const ddgResults = await fetchDuckDuckGoImages(query);
+    for (const r of ddgResults) addResult(r);
+    if (results.length > 0) {
+      console.log(`[Google Images] Merged ${results.length} DuckDuckGo fallback images for "${query}"`);
+    }
+  }
+
   console.log(`[Google Images] Found ${results.length} images for "${query}"`);
   return results;
 }
@@ -737,6 +766,15 @@ export async function fetchYandexImages(query: string): Promise<WebImageResult[]
     }
   }
 
+  if (results.length < 10) {
+    const ddgResults = await fetchDuckDuckGoImages(query);
+    const before = results.length;
+    for (const r of ddgResults) addResult(r);
+    if (results.length > before) {
+      console.log(`[Startpage Images] Merged ${results.length - before} DuckDuckGo fallback images for "${query}"`);
+    }
+  }
+
   console.log(`[Startpage Images] Found ${results.length} images for "${query}"`);
   return results;
 }
@@ -829,6 +867,15 @@ export interface WebVideoResult {
   thumbnailUrl?: string;
 }
 
+/** Social hosts that fail download-clip proxy — exclude from Bing video harvest. */
+const BLOCKED_SOCIAL_VIDEO_HOST_RE =
+  /(?:tiktok\.com|vm\.tiktok|instagram\.com|facebook\.com|fb\.watch)/i;
+
+function isBlockedSocialVideoUrl(...urls: Array<string | undefined>): boolean {
+  const blob = urls.filter(Boolean).join(" ");
+  return BLOCKED_SOCIAL_VIDEO_HOST_RE.test(blob);
+}
+
 export async function fetchBingVideos(query: string): Promise<WebVideoResult[]> {
   const searchUrl = `https://www.bing.com/videos/search?q=${encodeURIComponent(query)}&FORM=HDRSC3`;
 
@@ -852,7 +899,8 @@ export async function fetchBingVideos(query: string): Promise<WebVideoResult[]> 
       const raw = vrhmMatch[1].replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
       const data = JSON.parse(raw);
       const murl: string | undefined = data.murl || data.pgurl;
-      if (!murl || seenUrls.has(murl)) continue;
+      const pgurl: string | undefined = data.pgurl;
+      if (!murl || seenUrls.has(murl) || isBlockedSocialVideoUrl(murl, pgurl)) continue;
       seenUrls.add(murl);
 
       let thumbnailUrl: string | undefined = data.smturl;
@@ -893,15 +941,21 @@ export async function fetchBingVideos(query: string): Promise<WebVideoResult[]> 
         url = href.startsWith('http') ? href : `https://www.bing.com${href}`;
       }
 
-      if (!seenUrls.has(url)) {
+      if (!seenUrls.has(url) && !isBlockedSocialVideoUrl(url)) {
         seenUrls.add(url);
         results.push({ url, title, duration });
       }
     }
   }
 
-  console.log(`[Bing Videos] Found ${results.length} videos for "${query}"`);
-  return results;
+  const filtered = results.filter((r) => !isBlockedSocialVideoUrl(r.url, r.sourceUrl));
+  if (filtered.length !== results.length) {
+    console.log(
+      `[Bing Videos] Filtered ${results.length - filtered.length} social-host results for "${query}"`,
+    );
+  }
+  console.log(`[Bing Videos] Found ${filtered.length} videos for "${query}"`);
+  return filtered;
 }
 
 // ---------------------------------------------------------------------------
@@ -1293,55 +1347,151 @@ export async function fetchDailymotionVideos(query: string): Promise<Dailymotion
 }
 
 // ---------------------------------------------------------------------------
-// Unsplash — server-side fetch via internal napi to avoid CORS issues
+// Unsplash — napi (often blocked), HTML scrape, then DDG "unsplash {query}" fallback
 // ---------------------------------------------------------------------------
+
+function isUnsplashImageUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === 'images.unsplash.com' || hostname.endsWith('.unsplash.com');
+  } catch {
+    return false;
+  }
+}
+
+function parseUnsplashNapiPayload(data: {
+  results?: Array<{
+    urls?: { raw?: string; full?: string; regular?: string; small?: string };
+    alt_description?: string;
+    width?: number;
+    height?: number;
+  }>;
+}): WebImageResult[] {
+  const results: WebImageResult[] = [];
+  for (const item of data.results ?? []) {
+    if (!item.urls?.regular) continue;
+    results.push({
+      url: item.urls.full || item.urls.regular,
+      thumbnailUrl: item.urls.small,
+      title: item.alt_description || '',
+      width: item.width,
+      height: item.height,
+    });
+  }
+  return results;
+}
+
+async function fetchUnsplashFromHtmlScrape(query: string): Promise<WebImageResult[]> {
+  await waitForDomain('unsplash.com');
+  const pageUrl = `https://unsplash.com/s/photos/${encodeURIComponent(query)}`;
+  const res = await fetch(pageUrl, {
+    headers: getStealthHeaders('https://unsplash.com/'),
+  });
+
+  if (!res.ok) {
+    console.warn(`[Unsplash HTML] HTTP ${res.status} for "${query}"`);
+    return [];
+  }
+
+  const html = await res.text();
+  if (html.includes('not a bot') || html.includes('anubis_challenge')) {
+    console.warn(`[Unsplash HTML] Bot challenge for "${query}"`);
+    return [];
+  }
+
+  const results: WebImageResult[] = [];
+  const seen = new Set<string>();
+
+  const imgRegex = /https:\/\/images\.unsplash\.com\/photo-[a-zA-Z0-9_-]+[^"'\s\\]*/g;
+  let match: RegExpExecArray | null;
+  while ((match = imgRegex.exec(html)) !== null) {
+    const url = match[0].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+    if (seen.has(url) || !isUnsplashImageUrl(url)) continue;
+    seen.add(url);
+    results.push({
+      url,
+      thumbnailUrl: url.replace(/w=\d+/, 'w=400'),
+      title: query,
+    });
+  }
+
+  return results;
+}
+
+async function fetchUnsplashFromDdg(query: string): Promise<WebImageResult[]> {
+  const ddgResults = await fetchDuckDuckGoImages(`unsplash ${query}`);
+  const results: WebImageResult[] = [];
+  const seen = new Set<string>();
+
+  for (const item of ddgResults) {
+    if (!item.url || !isUnsplashImageUrl(item.url)) continue;
+    if (seen.has(item.url)) continue;
+    seen.add(item.url);
+    results.push({
+      url: item.url,
+      thumbnailUrl: item.thumbnailUrl || item.url,
+      title: item.title || query,
+      sourceUrl: item.sourceUrl || 'https://unsplash.com',
+      width: item.width,
+      height: item.height,
+    });
+  }
+
+  return results;
+}
 
 export async function fetchUnsplashImages(query: string): Promise<WebImageResult[]> {
   await waitForDomain('unsplash.com');
   const apiUrl = `https://unsplash.com/napi/search/photos?query=${encodeURIComponent(query)}&per_page=20`;
 
-  const res = await fetch(apiUrl, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      "Accept": "application/json, text/plain, */*",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Accept-Encoding": "gzip, deflate, br",
-      "Referer": `https://unsplash.com/s/photos/${encodeURIComponent(query)}`,
-      "sec-ch-ua": '"Google Chrome";v="125"',
-      "sec-ch-ua-mobile": "?0",
-      "sec-ch-ua-platform": '"macOS"',
-      "sec-fetch-dest": "empty",
-      "sec-fetch-mode": "cors",
-      "sec-fetch-site": "same-origin",
-    },
-  });
+  let results: WebImageResult[] = [];
 
-  if (!res.ok) {
-    console.warn(`[Unsplash] HTTP ${res.status} for "${query}"`);
-    return [];
+  try {
+    const res = await fetch(apiUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": `https://unsplash.com/s/photos/${encodeURIComponent(query)}`,
+        "sec-ch-ua": '"Google Chrome";v="125"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"macOS"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+      },
+    });
+
+    if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json() as Parameters<typeof parseUnsplashNapiPayload>[0];
+        results = parseUnsplashNapiPayload(data);
+      }
+    } else {
+      console.warn(`[Unsplash] napi HTTP ${res.status} for "${query}"`);
+    }
+  } catch (err) {
+    console.warn(`[Unsplash] napi error for "${query}":`, err);
   }
 
-  const data: {
-    results?: Array<{
-      urls?: { raw?: string; full?: string; regular?: string; small?: string };
-      alt_description?: string;
-      width?: number;
-      height?: number;
-    }>;
-  } = await res.json();
+  if (results.length === 0) {
+    results = await fetchUnsplashFromHtmlScrape(query);
+    if (results.length > 0) {
+      console.log(`[Unsplash] HTML scrape found ${results.length} images for "${query}"`);
+    }
+  }
 
-  const results: WebImageResult[] = [];
+  if (results.length === 0) {
+    results = await fetchUnsplashFromDdg(query);
+    if (results.length > 0) {
+      console.log(`[Unsplash] DDG fallback found ${results.length} images for "${query}"`);
+    }
+  }
 
-  for (const item of data.results ?? []) {
-    if (!item.urls?.regular) continue;
-
-    results.push({
-      url: item.urls.full || item.urls.regular,
-      thumbnailUrl: item.urls.small,
-      title: item.alt_description || query,
-      width: item.width,
-      height: item.height,
-    });
+  for (const item of results) {
+    if (!item.title) item.title = query;
   }
 
   console.log(`[Unsplash] Found ${results.length} images for "${query}"`);
@@ -1462,28 +1612,50 @@ export async function fetchHybridScraperImages(query: string): Promise<WebImageR
   return results;
 }
 
-export async function fetchGovPressImages(query: string): Promise<WebImageResult[]> {
-  const GOV_DOMAINS = ['.gov', '.mil', '.gov.uk', '.gov.au', '.gc.ca'];
+const GOV_PRESS_DOMAINS = ['.gov', '.mil', '.gov.uk', '.gov.au', '.gc.ca'];
 
-  function isGovDomain(url: string): boolean {
-    try {
-      const hostname = new URL(url).hostname.toLowerCase();
-      return GOV_DOMAINS.some(d => hostname.endsWith(d));
-    } catch {
-      return false;
-    }
+function isGovPressDomain(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return GOV_PRESS_DOMAINS.some((d) => hostname.endsWith(d));
+  } catch {
+    return false;
   }
+}
 
+function addGovPressResults(
+  batch: WebImageResult[],
+  results: WebImageResult[],
+  seenUrls: Set<string>,
+  query: string,
+): void {
+  for (const item of batch) {
+    if (!item.url || seenUrls.has(item.url)) continue;
+    if (isLowQualityDomain(item.url)) continue;
+
+    const sourceRef = item.sourceUrl || item.url;
+    if (!isGovPressDomain(sourceRef) && !isGovPressDomain(item.url)) continue;
+
+    seenUrls.add(item.url);
+    results.push({
+      ...item,
+      title: item.title || query,
+      sourceUrl: item.sourceUrl || item.url,
+    });
+  }
+}
+
+export async function fetchGovPressImages(query: string): Promise<WebImageResult[]> {
   const results: WebImageResult[] = [];
   const seenUrls = new Set<string>();
 
-  const searchQueries = [
+  const bingQueries = [
     `site:gov ${query} official photo`,
     `site:mil ${query} official photo`,
     `${query} whitehouse.gov OR defense.gov OR state.gov photo`,
   ];
 
-  const allFetches = searchQueries.map(async (searchQuery) => {
+  const bingFetches = bingQueries.map(async (searchQuery) => {
     const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(searchQuery)}&form=HDRSC2&first=1&count=35`;
 
     try {
@@ -1493,7 +1665,7 @@ export async function fetchGovPressImages(query: string): Promise<WebImageResult
 
       if (!res.ok) {
         console.warn(`[GovPress] HTTP ${res.status} for query`);
-        return [];
+        return [] as WebImageResult[];
       }
 
       const html = await res.text();
@@ -1507,13 +1679,6 @@ export async function fetchGovPressImages(query: string): Promise<WebImageResult
           const imageUrl: string | undefined = data.imgurl || data.murl;
           const pageUrl: string | undefined = data.purl;
           if (!imageUrl) continue;
-          if (isLowQualityDomain(imageUrl)) continue;
-          if (seenUrls.has(imageUrl)) continue;
-
-          const sourceDomain = pageUrl || imageUrl;
-          if (!isGovDomain(sourceDomain)) continue;
-
-          seenUrls.add(imageUrl);
 
           queryResults.push({
             url: imageUrl,
@@ -1531,14 +1696,58 @@ export async function fetchGovPressImages(query: string): Promise<WebImageResult
       return queryResults;
     } catch (err) {
       console.warn(`[GovPress] Error fetching query`, err);
-      return [];
+      return [] as WebImageResult[];
     }
   });
 
-  const settled = await Promise.allSettled(allFetches);
-  for (const result of settled) {
+  const bingSettled = await Promise.allSettled(bingFetches);
+  for (const result of bingSettled) {
     if (result.status === 'fulfilled') {
-      results.push(...result.value);
+      addGovPressResults(result.value, results, seenUrls, query);
+    }
+  }
+
+  if (results.length < 3) {
+    const ddgQueries = [
+      `${query} whitehouse.gov photo`,
+      `${query} defense.gov photo`,
+      `${query} state.gov photo`,
+      `site:gov ${query} photo`,
+    ];
+
+    for (const ddgQuery of ddgQueries) {
+      if (results.length >= 10) break;
+      try {
+        const ddgResults = await fetchDuckDuckGoImages(ddgQuery);
+        addGovPressResults(ddgResults, results, seenUrls, query);
+      } catch (err) {
+        console.warn(`[GovPress] DDG fallback error for "${ddgQuery}":`, err);
+      }
+    }
+  }
+
+  if (results.length < 3) {
+    const broadQueries = [
+      `${query} government official photo`,
+      `${query} federal agency photo`,
+    ];
+
+    for (const broadQuery of broadQueries) {
+      if (results.length >= 10) break;
+      try {
+        const [bingBroad, ddgBroad] = await Promise.allSettled([
+          fetchBingImages(broadQuery),
+          fetchDuckDuckGoImages(broadQuery),
+        ]);
+        if (bingBroad.status === 'fulfilled') {
+          addGovPressResults(bingBroad.value, results, seenUrls, query);
+        }
+        if (ddgBroad.status === 'fulfilled') {
+          addGovPressResults(ddgBroad.value, results, seenUrls, query);
+        }
+      } catch (err) {
+        console.warn(`[GovPress] Broad merge fallback error for "${broadQuery}":`, err);
+      }
     }
   }
 

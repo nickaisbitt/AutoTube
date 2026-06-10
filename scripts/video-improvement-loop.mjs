@@ -64,7 +64,7 @@ function appendJournal(entry) {
     `2. **Generate:** ${entry.generateOk ? 'OK' : 'FAIL'}${entry.generateError ? ` — ${entry.generateError}` : ''}`,
     `3. **Video:** \`${entry.videoPath || '—'}\``,
     `4. **Upload-ready:** ${entry.uploadReady ? 'YES' : 'NO'}`,
-    `5. **YouTube quality:** ${entry.youtubeScore ?? entry.brutalScore ?? '—'}/100`,
+    `5. **Final quality:** ${entry.finalScore ?? entry.youtubeScore ?? entry.brutalScore ?? '—'}/100 (assembly: ${entry.assemblyScore ?? '—'})`,
     `6. **Objective gate:** ${entry.objectivePass === true ? 'PASS' : entry.objectivePass === false ? 'FAIL' : '—'} (score ${entry.objectiveScore ?? '—'})`,
     `7. **Scene QA:** ${entry.scenePass === true ? 'PASS' : entry.scenePass === false ? 'FAIL' : '—'} (longest ${entry.longestSceneSec ?? '—'}s)`,
     `8. **Render tier:** ${entry.renderTier || '—'}`,
@@ -285,15 +285,18 @@ async function main() {
     }
 
     const youtubeScore = watch.youtubeScore ?? (watch.brutal?.overall ?? 0) * 10;
-    const brutalScore = watch.brutal?.overall ?? youtubeScore / 10;
+    const finalScore = watch.finalScore ?? youtubeScore;
+    const assemblyScore = watch.assemblyAudit?.assemblyScore ?? null;
+    const brutalScore = watch.brutal?.overall ?? finalScore / 10;
     const uploadReady = watch.uploadReady === true;
     const objectivePass = watch.objectiveGate?.pass === true;
     const scenePass = watch.sceneQa?.pass === true;
     const scoreTargetMet =
       objectivePass &&
       renderTier === 'full' &&
-      Number.isFinite(youtubeScore) &&
-      youtubeScore >= target100;
+      Number.isFinite(finalScore) &&
+      finalScore >= target100 &&
+      (assemblyScore == null || assemblyScore >= 75);
     let nextStep = 'new random topic';
     let fixesApplied = [];
 
@@ -344,7 +347,9 @@ async function main() {
         JSON.stringify(
           {
             reachedAt: new Date().toISOString(),
-            score: youtubeScore,
+            score: finalScore,
+            retentionScore: youtubeScore,
+            assemblyScore,
             target: target100,
             topic: currentTopic,
             videoPath,
@@ -355,7 +360,7 @@ async function main() {
           2,
         ),
       );
-      console.log(`\n🎯 TARGET SCORE ${youtubeScore}/100 ≥ ${target100} — STOPPING LOOP`);
+      console.log(`\n🎯 TARGET SCORE ${finalScore}/100 ≥ ${target100} (assembly ${assemblyScore ?? '—'}) — STOPPING LOOP`);
       console.log(`   Flag file: ${TARGET_FILE}`);
     }
 
@@ -421,6 +426,8 @@ async function main() {
       uploadReady,
       brutalScore,
       youtubeScore,
+      finalScore,
+      assemblyScore,
       scoreTargetMet,
       objectivePass,
       objectiveScore: watch.objectiveQa?.score,

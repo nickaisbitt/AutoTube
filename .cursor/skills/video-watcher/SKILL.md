@@ -41,4 +41,14 @@ Output: `test-recordings/video-watch-<id>/WATCH_REPORT.md` + frames + contact sh
 
 ## What "good" means here
 
-Brutal YouTube bar: shock hook 0–3s, visual change every 1–2s, ≤4 word captions, voice-over-music, human B-roll, end CTA. Scores ≤6/10 mean not upload-ready.
+**Final quality /100** = retention composite capped by **assembly audit** (contact sheet + frames).
+
+| Score | Meaning |
+|-------|---------|
+| 91+ | Upload-ready (retention + assembly both strong) |
+| 75–90 | Passes gates but assembly weak — not done |
+| &lt;75 | Do not ship |
+
+Assembly audit catches what gates miss: off-topic B-roll, repeated clips, caption gibberish, slideshow energy.
+
+Always read **contact-sheet.jpg** and **Assembly issues** in the report before trusting the score.

@@ -133,17 +133,8 @@ export function computeYoutubeQualityScore(parts = {}) {
 
   const blended = tech * 0.22 + retentionBlend * 0.63 + gatePoints;
 
-  let floor = 0;
-  const allGates =
-    parts.objectiveGate?.pass &&
-    parts.hookVision?.hookPass &&
-    parts.sceneQa?.pass &&
-    parts.placeholderGate?.pass;
-  if (allGates && tech >= 70) floor = 74;
-  if (allGates && tech >= 85 && hook >= 70) floor = 80;
-  if (allGates && tech >= 90 && hook >= 80 && pacing >= 70) floor = 86;
-
-  return Math.min(100, Math.max(floor, Math.round(blended * 10) / 10));
+  // No gate floor — passing technical QA must not inflate retention score
+  return Math.min(100, Math.round(blended * 10) / 10);
 }
 
 /** Normalize loop target: 9.1 → 91, 91 → 91 */

@@ -311,14 +311,19 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   const frames = Math.max(1, Math.round(durationSec * FPS));
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
   if (!isVideo && hardCuts) {
-    // Interrupt clips punch-zoom; strong mode for brutal pacing ≤5
+    // Strong mode: punch-zoom every still so brutal vision sees pattern motion, not static holds.
     const strong = interruptStrong();
-    const drift = interrupts && isInterruptClip ? (strong ? 0.28 : 0.18) : (0.08 + (clipIndex % 5) * 0.02);
-    const maxZoom = interrupts && isInterruptClip ? (strong ? 1.38 : 1.25) : 1.12;
+    const punch = interrupts && (isInterruptClip || strong || clipIndex % 2 === 0);
+    const drift = punch ? (strong ? 0.26 : 0.18) : (0.08 + (clipIndex % 5) * 0.02);
+    const maxZoom = punch ? (strong ? 1.36 : 1.24) : 1.12;
     vf = `zoompan=z='min(zoom+${drift.toFixed(3)},${maxZoom})':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
+    if (interrupts && punch) {
+      const sat = strong ? 1.45 : 1.25;
+      vf = `eq=saturation=${sat}:brightness=${strong ? 0.06 : 0.03},${vf}`;
+    }
   } else if (hardCuts) {
     // Video hard-cuts: eq punch on interrupt clips (including hook at clipIndex 0).
-    if (interrupts && isInterruptClip) {
+    if (interrupts && (isInterruptClip || interruptStrong())) {
       const strong = interruptStrong();
       const sat = strong ? 1.65 : 1.4;
       const bright = strong ? 0.1 : 0.06;

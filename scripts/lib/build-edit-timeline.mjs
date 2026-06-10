@@ -82,7 +82,7 @@ export function buildEditTimeline(project, options = {}) {
       };
 
       if (preferVideo && videoPool.length) {
-        const wantVideo = videoSlotsUsed < minVideosFirst || ai % 2 === 0;
+        const wantVideo = videoSlotsUsed < minVideosFirst || ai % 3 !== 2;
         if (wantVideo) {
           asset = pickFrom(videoPool);
           if (isVideoAsset(asset)) videoSlotsUsed += 1;

@@ -365,6 +365,18 @@ async function rebalanceFailingSegments(project, devServer, minPerSegment, repor
     const seg = segments[fail.segmentId];
     if (!seg) continue;
 
+    if (needsVideoQuota && countSegmentVideos(project.media, fail.segmentId) < options.minVideosPerSegment) {
+      await ensureVideoQuotaPerSegment(
+        project,
+        devServer,
+        report,
+        topic,
+        topicKeywords,
+        options.minVideosPerSegment,
+        [seg],
+      );
+    }
+
     const extraQueries = [
       buildTopUpQuery(seg, topic, 3),
       `${extractKeywords(seg.narration || '', 5).filter((k) => !weak.has(k)).join(' ')} press photo`.trim(),
@@ -384,29 +396,6 @@ async function rebalanceFailingSegments(project, devServer, minPerSegment, repor
           }
         }
         if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
-      }
-    }
-
-    if (needsVideoQuota && countSegmentVideos(project.media, fail.segmentId) < options.minVideosPerSegment) {
-      const donorVideo = (project.media || []).find(
-        (m) => m.segmentId !== fail.segmentId
-          && isVideoLikeAsset(m)
-          && countSegmentVideos(project.media, m.segmentId) > options.minVideosPerSegment,
-      );
-      if (donorVideo) {
-        project.media.push({
-          ...donorVideo,
-          id: `topup-vid-share-${fail.segmentId}-${countSegmentVideos(project.media, fail.segmentId)}`,
-          segmentId: fail.segmentId,
-          source: `${donorVideo.source || 'Search'} (video rebalance)`,
-        });
-        report.volumeTopUpShare = report.volumeTopUpShare || [];
-        report.volumeTopUpShare.push({
-          from: donorVideo.segmentId,
-          to: fail.segmentId,
-          url: donorVideo.sourceUrl || donorVideo.url,
-          type: 'video',
-        });
       }
     }
 
@@ -590,8 +579,16 @@ async function addVideoTopUpCandidate(project, seg, draft, devServer, endpoint, 
   return true;
 }
 
-async function ensureVideoQuotaPerSegment(project, devServer, report, topic, topicKeywords, minVideosPerSegment = 2) {
-  const segments = project.script || [];
+async function ensureVideoQuotaPerSegment(
+  project,
+  devServer,
+  report,
+  topic,
+  topicKeywords,
+  minVideosPerSegment = 2,
+  segmentsOverride = null,
+) {
+  const segments = segmentsOverride?.length ? segmentsOverride : (project.script || []);
   for (const seg of segments) {
     let videoCount = countSegmentVideos(project.media, seg.id);
     if (videoCount >= minVideosPerSegment) continue;

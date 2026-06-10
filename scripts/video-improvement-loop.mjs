@@ -299,6 +299,7 @@ async function main() {
       fixState.patternInterrupts = true;
       fixState.useFastPacing = true;
       fixState.cutIntervalSec = Math.min(fixState.cutIntervalSec ?? 1.25, 0.5);
+      fixState.minVideosPerSegment = Math.max(3, fixState.minVideosPerSegment || 2);
       fixState.pendingTopic = currentTopic;
       fixState.topicRetryCount = Math.max(0, (fixState.topicRetryCount || 0));
       saveFixState(LOOP_DIR, fixState);

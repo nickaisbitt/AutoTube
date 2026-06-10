@@ -203,7 +203,7 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4, options =
         const key = normalizeUrlKey(a.url, a.sourceUrl) || a.id || '';
         return key && !used.has(key);
       });
-      if (preferVideo && buckets[needId].filter(isVideoAsset).length < 2) {
+      if (preferVideo && buckets[needId].filter(isVideoAsset).length < 3) {
         const videoIdx = buckets[donorId].findIndex((a) => {
           const key = normalizeUrlKey(a.url, a.sourceUrl) || a.id || '';
           return key && !used.has(key) && isVideoAsset(a);
@@ -233,7 +233,7 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4, options =
 
   project.media = segIds.flatMap((id) => {
     const bucket = buckets[id];
-    return preferVideo ? orderAssetsVideoFirst(bucket, 2) : bucket;
+    return preferVideo ? orderAssetsVideoFirst(bucket, 3) : bucket;
   });
   return project;
 }

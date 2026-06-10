@@ -566,6 +566,8 @@ console.log('\n── 19. Full-tier strong interrupts env ──');
   assert('Full tier sets AUTOTUBE_INTERRUPT_STRONG', env.AUTOTUBE_INTERRUPT_STRONG === '1');
   assert('Full tier sets 5s interrupt interval', env.AUTOTUBE_INTERRUPT_INTERVAL_SEC === '5');
   assert('Full tier render quality high', env.AUTOTUBE_RENDER_QUALITY === 'high');
+  assert('Full tier always enables pattern interrupts', env.AUTOTUBE_PATTERN_INTERRUPTS === '1');
+  assert('Full tier always enables strong interrupts', env.AUTOTUBE_INTERRUPT_STRONG === '1');
 }
 
 // ---------------------------------------------------------------------------

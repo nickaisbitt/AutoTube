@@ -296,6 +296,9 @@ async function main() {
       console.log('\n✅ Objective gate PASS on draft (scene body OK) — promoting to full-quality render');
       fixState.renderTier = 'full';
       fixState.whisperAlign = true;
+      fixState.patternInterrupts = true;
+      fixState.useFastPacing = true;
+      fixState.cutIntervalSec = Math.min(fixState.cutIntervalSec ?? 1.25, 0.5);
       fixState.pendingTopic = currentTopic;
       fixState.topicRetryCount = Math.max(0, (fixState.topicRetryCount || 0));
       saveFixState(LOOP_DIR, fixState);

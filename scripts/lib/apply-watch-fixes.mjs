@@ -247,6 +247,9 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
   if (renderTier === 'full' && overall < untilScore) {
     s.brollPlacement = true;
     if (pacingPlateau) {
+      s.patternInterrupts = true;
+      s.useFastPacing = true;
+      s.cutIntervalSec = Math.max(CUT_FLOOR, s.cutIntervalSec ?? CUT_FLOOR);
       applied.push(
         `2b. Full-tier pacing plateau (${overall}/10, pacing ${pacing}/10) → strong interrupts, skip reharvest`,
       );

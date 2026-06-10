@@ -1236,7 +1236,11 @@ export async function generateFullVideo(options) {
         };
       }
     }
-    const timelineReport = validateEditTimeline(project, { cutIntervalSec: fixState.cutIntervalSec ?? 1.25 });
+    const timelineReport = validateEditTimeline(project, {
+      cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+      preferVideo: fixState.harvestVideoFirst !== false,
+      minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+    });
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }

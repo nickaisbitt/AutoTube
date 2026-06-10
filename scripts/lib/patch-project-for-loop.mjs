@@ -286,7 +286,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
       cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
       reason: 'loop heuristic placement',
       preferVideo: fixState.harvestVideoFirst !== false,
-      minVideosFirst: 2,
+      minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
     });
   }
 

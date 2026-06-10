@@ -81,9 +81,12 @@ export function buildEditTimeline(project, options = {}) {
         return pool[ai % pool.length];
       };
 
-      if (preferVideo && videoPool.length && videoSlotsUsed < minVideosFirst) {
-        asset = pickFrom(videoPool);
-        videoSlotsUsed += 1;
+      if (preferVideo && videoPool.length) {
+        const wantVideo = videoSlotsUsed < minVideosFirst || ai % 2 === 0;
+        if (wantVideo) {
+          asset = pickFrom(videoPool);
+          if (isVideoAsset(asset)) videoSlotsUsed += 1;
+        }
       }
 
       while (
@@ -147,6 +150,7 @@ export function validateEditTimeline(project, options = {}) {
       cutIntervalSec: options.cutIntervalSec ?? 1.25,
       reason: 'post-sanitize rebuild',
       preferVideo: options.preferVideo === true,
+      minVideosFirst: options.minVideosFirst ?? 2,
     });
   }
   return { rebuilt, staleCount: stale, staleRatio, clipCount: project.editTimeline.length };

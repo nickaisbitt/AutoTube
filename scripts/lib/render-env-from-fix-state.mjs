@@ -16,16 +16,15 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (base.projectPath) env.AUTOTUBE_PROJECT_PATH = base.projectPath;
   if (fixState.cutIntervalSec) env.AUTOTUBE_CUT_INTERVAL_SEC = String(fixState.cutIntervalSec);
   if (fixState.showKineticText) env.AUTOTUBE_KINETIC_TEXT = '1';
-  if (fixState.patternInterrupts || (fixState.cutIntervalSec ?? 1.25) <= 0.5) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
-  if (fixState.useFastPacing) env.AUTOTUBE_FAST_PACING = '1';
-  const strongInterrupts =
+  const cutSec = fixState.cutIntervalSec ?? 1.25;
+  const wantsInterrupts =
     fixState.patternInterrupts
-    && (
-      renderTier === 'full'
-      || (fixState.cutIntervalSec ?? 1.25) <= 0.5
-      || fixState.useFastPacing
-    );
-  if (strongInterrupts) {
+    || renderTier === 'full'
+    || cutSec <= 0.5
+    || fixState.useFastPacing;
+  if (wantsInterrupts) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
+  if (fixState.useFastPacing || renderTier === 'full') env.AUTOTUBE_FAST_PACING = '1';
+  if (wantsInterrupts) {
     env.AUTOTUBE_INTERRUPT_INTERVAL_SEC = process.env.AUTOTUBE_INTERRUPT_INTERVAL_SEC || '5';
     env.AUTOTUBE_INTERRUPT_STRONG = '1';
   }

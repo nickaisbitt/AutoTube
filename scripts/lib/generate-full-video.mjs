@@ -538,7 +538,8 @@ function isJunkHarvestUrl(url) {
     // Pinterest pin-board aggregator — images are low-res reposts, not editorial B-roll
     u.includes('pinterest.com') ||
     u.includes('pinimg.com') ||
-    u.includes('pin.it/')
+    u.includes('pin.it/') ||
+    /gettyimages|shutterstock|alamy|istockphoto/i.test(u)
   );
 }
 

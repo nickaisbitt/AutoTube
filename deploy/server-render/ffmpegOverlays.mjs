@@ -170,15 +170,16 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
       bufferEnd = w.end;
 
       const next = words[wi + 1];
+      const minPhraseWords = 5;
       const atMax = buffer.length >= cm.maxWords;
       const phraseDone = isPhraseEnd(w.word);
       const wouldSplitBad = atMax && next && (isBadSplit(w.word) || isBadSplit(next.word));
 
-      if (phraseDone || (atMax && !wouldSplitBad)) flush();
+      if (phraseDone && buffer.length >= 3) flush();
+      else if (atMax && !wouldSplitBad && buffer.length >= minPhraseWords) flush();
       else if (atMax && wouldSplitBad && buffer.length >= 2) {
-        // Hold phrase together (e.g. "$120 Million") even if > maxWords briefly
-        if (buffer.length >= 6) flush();
-      } else if (atMax) flush();
+        if (buffer.length >= 8) flush();
+      } else if (atMax && buffer.length >= minPhraseWords + 2) flush();
     }
     flush();
   }

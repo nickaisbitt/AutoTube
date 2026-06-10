@@ -99,6 +99,12 @@ const OFF_TOPIC_BLOCKLIST = [
   // Moving/lifestyle stock — noise for crime/news/heist topics
   { pattern: /\b(?:moving\s+box|cardboard\s+box|packing\s+box|selfie|couple\s+smil|new\s+home|housewarming)\b/i, requires: /\b(?:moving|relocat|real\s+estate|home\s+buy|lifestyle\s+vlog)\b/i },
   { pattern: /\b(?:yoga|workout\s+class|salon|spa\s+day|coffee\s+shop\s+lifestyle)\b/i, requires: /\b(?:fitness|wellness|yoga|lifestyle\s+blog)\b/i },
+
+  // Talking-head lifestyle / dinner / vlog presenters — not news B-roll
+  { pattern: /\b(?:what do you want for dinner|dinner tonight|cooking tutorial|recipe video|plain background presenter)\b/i, requires: /\b(?:cooking|recipe|food\s+blog|kitchen|meal\s+prep)\b/i },
+
+  // Watermarked preview stock — never ship in final render
+  { pattern: /gettyimages|shutterstock\s+watermark|alamy\s+watermark|istockphoto.*preview/i, requires: /\b__autotube_never__\b/i },
 ];
 
 /**

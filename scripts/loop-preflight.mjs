@@ -72,6 +72,12 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
     if (!have(bin)) errors.push(`${bin} not found on PATH`);
   }
 
+  if (!have('yt-dlp')) {
+    console.log('[preflight] yt-dlp not on PATH — YouTube clip proxy will fail (pip install yt-dlp)');
+  } else {
+    console.log('[preflight] yt-dlp OK');
+  }
+
   const scenedetect = spawnSync('python3', ['-c', 'import scenedetect'], { encoding: 'utf8' });
   if (scenedetect.status !== 0) {
     console.log('[preflight] scenedetect not installed — run: pip install scenedetect');
@@ -106,7 +112,23 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
     return false;
   }
 
-  console.log('[preflight] OK — dev server, OpenRouter, ffmpeg, TTS');
+  if (process.env.AUTOTUBE_SKIP_HARVEST_SMOKE !== '1') {
+    const smoke = spawnSync('node', ['scripts/harvest-smoke-test.mjs'], {
+      encoding: 'utf8',
+      cwd: process.cwd(),
+      timeout: 240_000,
+    });
+    if (smoke.status !== 0) {
+      console.error((smoke.stdout || smoke.stderr || '').trim());
+      errors.push('Harvest smoke test failed — run: node scripts/harvest-smoke-test.mjs');
+      console.error('\n❌ Loop preflight failed:\n');
+      for (const err of errors) console.error(`  - ${err.split('\n')[0]}`);
+      return false;
+    }
+    console.log('[preflight] harvest smoke OK');
+  }
+
+  console.log('[preflight] OK — dev server, OpenRouter, ffmpeg, TTS, harvest');
   return true;
 }
 

@@ -873,9 +873,8 @@ export async function generateFullVideo(options) {
   const pixabayKey = resolvePixabayKey();
 
   const harvestStorage = harvestSessionStoragePayload(harvestCtx);
-  const videoFirst = fixState.harvestVideoFirst !== false && realHarvest;
   await browserContext.addInitScript(
-    ({ key, minAssets, pexels, pixabay, rawFirst, videoFirst, harvestStorage: hs }) => {
+    ({ key, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
       localStorage.setItem('autotube_onboarding_seen', 'true');
       localStorage.removeItem('autotube_project');
       sessionStorage.setItem(
@@ -892,7 +891,6 @@ export async function generateFullVideo(options) {
       sessionStorage.setItem('autotube_loop_fast_mode', 'true');
       sessionStorage.setItem('autotube_loop_min_assets', String(minAssets));
       sessionStorage.setItem('autotube_loop_broll_placement', 'true');
-      if (videoFirst) sessionStorage.setItem('autotube_loop_video_first', 'true');
       for (const [k, v] of Object.entries(hs || {})) {
         sessionStorage.setItem(k, v);
       }
@@ -903,7 +901,6 @@ export async function generateFullVideo(options) {
       pexels: pexelsKey,
       pixabay: pixabayKey,
       rawFirst: realHarvest,
-      videoFirst,
       harvestStorage,
     },
   );

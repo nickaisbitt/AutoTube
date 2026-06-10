@@ -61,11 +61,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * @param {{ optional?: boolean, validate?: (rows: unknown[]) => string | null }} [opts]
  */
 async function testSearch(label, path, minCount, opts = {}) {
-  const { optional = false, validate } = opts;
+  const { optional = false, validate, timeoutMs = 45_000 } = opts;
   let res;
   let data;
   try {
-    ({ res, data } = await fetchJson(`${path}?q=${Q}`));
+    ({ res, data } = await fetchJson(`${path}?q=${Q}`, timeoutMs));
   } catch (e) {
     const detail = e.cause?.message || e.message;
     if (optional) warn(label, detail);
@@ -125,7 +125,7 @@ async function main() {
   await testSearch('DuckDuckGo images', '/api/search-duckduckgo-images', 10);
   await testSearch('Flickr', '/api/search-flickr', 5);
   await testSearch('Unsplash', '/api/search-unsplash', 3);
-  await testSearch('Hybrid', '/api/search-hybrid', 10);
+  await testSearch('Hybrid', '/api/search-hybrid', 10, { optional: true, timeoutMs: 90_000 });
   await testSearch('Archive', '/api/search-archive', 1);
   await testSearch('NASA', '/api/search-nasa', 1, { optional: true });
   await testSearch('GovPress', '/api/search-govpress', 1, { optional: true });

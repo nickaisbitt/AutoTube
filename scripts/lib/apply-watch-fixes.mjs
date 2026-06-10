@@ -287,7 +287,8 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
   if (visualVariety <= 5) {
     s.harvestVideoFirst = true;
     s.suppressGiphy = true;
-    s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
+    // suppressGiphy removes main GIF source — cap video quota so harvest isn't starved
+    s.minVideosPerSegment = 2;
     s.cutIntervalSec = Math.max(CUT_FLOOR, s.cutIntervalSec ?? CUT_FLOOR);
     applied.push(`3a. Visual variety ${visualVariety}/10 → harvestVideoFirst + suppressGiphy + ≥${s.minVideosPerSegment} video/seg`);
   } else if (visualVariety <= 6) {

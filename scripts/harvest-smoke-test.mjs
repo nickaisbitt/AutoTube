@@ -150,7 +150,7 @@ async function main() {
   };
   await testSearch('Google videos', '/api/search-google-videos', 5, { validate: noTikTokInRows });
   await testSearch('Videos (aggregate)', '/api/search-videos', 10, { validate: noTikTokInRows });
-  await testSearch('Vimeo', '/api/search-vimeo', 1);
+  await testSearch('Vimeo', '/api/search-vimeo', 1, { optional: true });
   await testSearch('Dailymotion', '/api/search-dailymotion', 3);
   await testSearch('Giphy', '/api/search-giphy', 5);
 

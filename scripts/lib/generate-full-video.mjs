@@ -1039,6 +1039,7 @@ export async function generateFullVideo(options) {
   };
 
   const scriptTimeoutMs = realHarvest ? 240_000 : 180_000;
+  const videoFirst = fixState.harvestVideoFirst !== false;
   const mediaTimeoutMs = loopMediaTimeoutMs({ realHarvest, videoFirst });
   const narrationTimeoutMs = realHarvest ? 900_000 : 600_000;
 

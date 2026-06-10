@@ -261,7 +261,7 @@ function buildNumberedReport(ctx) {
   const brutalOverall = brutal?.overall;
   const uploadReady =
     (finalScore ?? youtubeScore ?? 0) >= 91 &&
-    (assemblyAudit?.assemblyScore ?? 0) >= 75 &&
+    (assemblyAudit?.assemblyScore ?? 0) >= 80 &&
     hookVision?.hookPass !== false &&
     hookScript?.pass !== false;
 

@@ -85,16 +85,28 @@ export function buildEditTimeline(project, options = {}) {
     let ai = 0;
     let lastAssetId = null;
     let lastUrl = null;
+    const recentUrls = [];
+    const recentCap = 4;
     let videoSlotsUsed = 0;
+    const introHookPool = seg.type === 'intro' ? rankIntroHookAssets(assets).slice(0, Math.max(6, minVideosFirst + 2)) : assets;
     while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
-      let asset = assets[ai % assets.length];
+      const clipIndex = entries.filter((e) => e.segmentId === seg.id).length;
+      const poolForClip = seg.type === 'intro' && clipIndex < 4 ? introHookPool : assets;
+      let asset = poolForClip[ai % poolForClip.length];
       let attempts = 0;
       const pickFrom = (pool) => {
         for (let j = 0; j < pool.length; j++) {
           const candidate = pool[(ai + j) % pool.length];
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) continue;
+          if (key && recentUrls.includes(key)) continue;
+          return candidate;
+        }
+        for (let j = 0; j < pool.length; j++) {
+          const candidate = pool[(ai + j) % pool.length];
+          const key = urlKey(candidate);
+          if (key && key === lastUrl) continue;
           return candidate;
         }
         return pool[ai % pool.length];
@@ -127,7 +139,12 @@ export function buildEditTimeline(project, options = {}) {
         reason,
       });
       lastAssetId = asset.id;
-      lastUrl = urlKey(asset) || null;
+      const key = urlKey(asset) || null;
+      lastUrl = key;
+      if (key) {
+        recentUrls.push(key);
+        if (recentUrls.length > recentCap) recentUrls.shift();
+      }
       t = end;
       ai += 1;
     }

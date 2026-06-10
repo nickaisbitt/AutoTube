@@ -152,7 +152,9 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
 
   const hookFail = watch.hookScript?.pass === false || watch.hookVision?.hookPass === false;
   const pacing = retentionScore(watch, 'pacing', 100);
-  const overall = watchYoutubeScore(watch);
+  const overall = watch.finalScore ?? watchYoutubeScore(watch);
+  const assemblyScore = watch.assemblyAudit?.assemblyScore ?? 100;
+  const assemblyFail = assemblyScore < 80;
   const target100 = targetScore100(untilScore);
   // Mid-band with weak pacing: fix render-side first, avoid reharvest starvation.
   const pacingPlateau = overall >= 72 && overall <= 84 && pacing <= 55;
@@ -231,6 +233,18 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
   if (watch.objectiveQa && !watch.objectiveQa.silencePass) {
     s.useFastPacing = true;
     applied.push(`0c. Silence gaps ${watch.objectiveQa.silenceFirst60Sec}s in first 60s → tighten pacing`);
+  }
+
+  if (assemblyFail) {
+    s.reHarvestMedia = true;
+    s.harvestNonce = (s.harvestNonce || 0) + 1;
+    s.mediaOffset = (s.mediaOffset || 0) + 4;
+    s.harvestVideoFirst = true;
+    s.suppressGiphy = true;
+    s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
+    s.fixStrategy = 'reharvest';
+    const issues = (watch.assemblyAudit?.issues || []).slice(0, 2).join('; ');
+    applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → reharvest nonce ${s.harvestNonce}: ${issues || 'off-topic/repeat montage'}`);
   }
 
   if (hookFail) {

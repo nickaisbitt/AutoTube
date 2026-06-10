@@ -95,6 +95,10 @@ const OFF_TOPIC_BLOCKLIST = [
   // Fiction / movie stills and meme posters — not editorial news B-roll
   { pattern: /movieweb|pulp[\s-]?fiction|jason[\s-]?statham|talestavern|stealing-pulp|movieposter|film[\s-]?still|heist[\s-]?thriller|heist[\s-]?movie/i, requires: /\b(?:movie|film|cinema|hollywood|statham|actor|fiction)\b/i },
   { pattern: /preview\.redd\.it\/|redd\.it\/.*\.jpg/i, requires: /\b(?:meme|reddit|fan[\s-]?art)\b/i },
+
+  // Moving/lifestyle stock — noise for crime/news/heist topics
+  { pattern: /\b(?:moving\s+box|cardboard\s+box|packing\s+box|selfie|couple\s+smil|new\s+home|housewarming)\b/i, requires: /\b(?:moving|relocat|real\s+estate|home\s+buy|lifestyle\s+vlog)\b/i },
+  { pattern: /\b(?:yoga|workout\s+class|salon|spa\s+day|coffee\s+shop\s+lifestyle)\b/i, requires: /\b(?:fitness|wellness|yoga|lifestyle\s+blog)\b/i },
 ];
 
 /**

@@ -296,7 +296,7 @@ async function main() {
       renderTier === 'full' &&
       Number.isFinite(finalScore) &&
       finalScore >= target100 &&
-      (assemblyScore == null || assemblyScore >= 75);
+      (assemblyScore == null || assemblyScore >= 80);
     let nextStep = 'new random topic';
     let fixesApplied = [];
 

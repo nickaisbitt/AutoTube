@@ -179,6 +179,9 @@ async function main() {
       }
       if (gen.harvestQualityFail) {
         fixState.reHarvestMedia = true;
+        fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
+        // Thin harvest is retriable — don't burn topic retries as fast as hard failures.
+        fixState.maxGenerateFailuresPerTopic = Math.max(fixState.maxGenerateFailuresPerTopic || 2, 4);
       }
       // Score the file we just rendered — canonical may be overwritten by finalize picking stale giants
       videoPath = gen.videoPath || gen.canonicalPath;

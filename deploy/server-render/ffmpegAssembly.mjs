@@ -304,13 +304,22 @@ async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
   return { localSrc: null, asset };
 }
 
-function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0, isInterruptClip = false }) {
+function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0, isInterruptClip = false, isHookClip = false }) {
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
   const hardCuts = hardCutsEnabled();
   const interrupts = patternInterruptsEnabled();
   const frames = Math.max(1, Math.round(durationSec * FPS));
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
-  if (!isVideo && hardCuts) {
+  if (isVideo && hardCuts && (isHookClip || clipIndex === 0)) {
+    const strong = interruptStrong();
+    const punch = interrupts && (isInterruptClip || strong || isHookClip);
+    const drift = punch ? (strong ? 0.18 : 0.12) : 0.06;
+    const maxZoom = punch ? (strong ? 1.32 : 1.22) : 1.12;
+    vf = `zoompan=z='min(zoom+${drift.toFixed(3)},${maxZoom})':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
+    if (interrupts && punch) {
+      vf = `eq=saturation=${strong ? 1.55 : 1.35}:brightness=${strong ? 0.08 : 0.05},${vf}`;
+    }
+  } else if (!isVideo && hardCuts) {
     // Strong mode: punch-zoom every still so brutal vision sees pattern motion, not static holds.
     const strong = interruptStrong();
     const punch = interrupts && (isInterruptClip || strong || clipIndex % 2 === 0);
@@ -476,8 +485,10 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (!localSrc) return { ok: false, resolvedAsset, usedPlaceholder: false };
 
     const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
+    const absTime = segmentStartSec + renderedDuration;
     let ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
       w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, isInterruptClip: interrupt,
+      isHookClip: absTime < 4,
     });
     if (!ok) {
       const thumb = resolvedAsset.thumbnailUrl;
@@ -487,6 +498,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
         if (thumbLocal) {
           ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
             w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1, isInterruptClip: interrupt,
+            isHookClip: absTime < 4,
           });
           if (ok) console.log(`  [ffmpeg] ${label}: video → thumbnail still`);
         }

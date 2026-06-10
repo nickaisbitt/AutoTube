@@ -61,7 +61,9 @@ export function buildEditTimeline(project, options = {}) {
 
     const videoPool = assets.filter(isVideoAsset);
     const duration = seg.duration || 20;
-    const interval = seg.type === 'intro' ? Math.min(cut, 3) : cut;
+    const introCap = cut <= 0.75 ? 1.0 : cut <= 1 ? 1.5 : 2.5;
+    const interval = seg.type === 'intro' ? Math.min(cut, introCap) : cut;
+    const segMinVideos = seg.type === 'intro' ? Math.max(minVideosFirst, 3) : minVideosFirst;
     let t = 0;
     let ai = 0;
     let lastAssetId = null;
@@ -82,7 +84,7 @@ export function buildEditTimeline(project, options = {}) {
       };
 
       if (preferVideo && videoPool.length) {
-        const wantVideo = videoSlotsUsed < minVideosFirst || ai % 3 !== 2;
+        const wantVideo = videoSlotsUsed < segMinVideos || ai % 3 !== 2;
         if (wantVideo) {
           asset = pickFrom(videoPool);
           if (isVideoAsset(asset)) videoSlotsUsed += 1;

@@ -25,7 +25,8 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (wantsInterrupts) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
   if (fixState.useFastPacing || renderTier === 'full') env.AUTOTUBE_FAST_PACING = '1';
   if (wantsInterrupts) {
-    env.AUTOTUBE_INTERRUPT_INTERVAL_SEC = process.env.AUTOTUBE_INTERRUPT_INTERVAL_SEC || '5';
+    const defaultInterval = renderTier === 'full' && cutSec <= 0.75 ? '3' : '5';
+    env.AUTOTUBE_INTERRUPT_INTERVAL_SEC = process.env.AUTOTUBE_INTERRUPT_INTERVAL_SEC || defaultInterval;
     env.AUTOTUBE_INTERRUPT_STRONG = '1';
   }
   if (fixState.useFfmpegAssembly !== false) env.AUTOTUBE_RENDER_MODE = 'ffmpeg';

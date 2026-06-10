@@ -27,6 +27,14 @@ function isInstructionOverlay(text) {
   return /^(replace|start with|use|change|fix|try)\b/i.test((text || '').trim());
 }
 
+/** UI kinetic-text hooks that fail watcher 0–3s audit — never use in loop render. */
+export function isBadKineticOverlay(text) {
+  const t = (text || '').trim();
+  if (!t) return false;
+  if (isInstructionOverlay(t)) return true;
+  return /urgent question|an urgent|just happen|did a heist|watch this before/i.test(t);
+}
+
 /** Pull the suggested hook text from watcher "Replace X with Y" fixes. */
 export function extractOverlayFromVisionFix(visionFix) {
   if (!visionFix?.trim()) return null;
@@ -61,7 +69,7 @@ function visionSuggestsBreaking(visionFix) {
 /** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
 export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const preferred = options.preferredOverlay?.trim();
-  if (preferred && !isInstructionOverlay(preferred)) {
+  if (preferred && !isBadKineticOverlay(preferred)) {
     return preferred.toUpperCase();
   }
 
@@ -326,7 +334,15 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     musicPreset: 'neutral',
     resolution: '1080p',
     youtubeMode: true,
-    hookOverlay: project.exportSettings?.hookOverlay ?? fixState.hookOverlay ?? undefined,
+    hookOverlay: (() => {
+      const fromState = fixState.hookOverlay?.trim();
+      const fromProject = project.exportSettings?.hookOverlay?.trim();
+      if (fromState && !isBadKineticOverlay(fromState)) return fromState.toUpperCase();
+      if (fromProject && !isBadKineticOverlay(fromProject)) return fromProject.toUpperCase();
+      return buildShortHookOverlay(topic, project.hookLine || fixState.hookLine, {
+        preferredOverlay: fromState,
+      });
+    })(),
     hookLine: project.exportSettings?.hookLine ?? project.hookLine ?? fixState.hookLine ?? undefined,
   };
 

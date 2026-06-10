@@ -56,8 +56,10 @@ function formatAssTime(sec) {
 export function overlayHookText(videoPath, project, options = {}) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
 
+  // Loop mode: fixState hook wins over stale UI kinetic overlays in project JSON.
   const hookText =
-    project.exportSettings?.hookOverlay
+    (process.env.AUTOTUBE_LOOP_MODE === '1' && process.env.AUTOTUBE_HOOK_OVERLAY?.trim())
+    || project.exportSettings?.hookOverlay
     || process.env.AUTOTUBE_HOOK_OVERLAY
     || project.hookLine
     || process.env.AUTOTUBE_HOOK_LINE

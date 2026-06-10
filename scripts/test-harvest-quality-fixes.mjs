@@ -23,7 +23,7 @@ import {
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import { loadFixState } from './lib/loop-state.mjs';
 import { buildShockHookLine } from '../e2e/openRouterMock.mjs';
-import { buildShortHookOverlay } from './lib/patch-project-for-loop.mjs';
+import { buildShortHookOverlay, isBadKineticOverlay } from './lib/patch-project-for-loop.mjs';
 import { buildRenderEnvFromFixState } from './lib/render-env-from-fix-state.mjs';
 import {
   evaluateObjectiveGate,
@@ -565,7 +565,7 @@ console.log('\n── 19. Full-tier strong interrupts env ──');
   });
   assert('Full tier sets AUTOTUBE_PATTERN_INTERRUPTS', env.AUTOTUBE_PATTERN_INTERRUPTS === '1');
   assert('Full tier sets AUTOTUBE_INTERRUPT_STRONG', env.AUTOTUBE_INTERRUPT_STRONG === '1');
-  assert('Full tier sets 5s interrupt interval', env.AUTOTUBE_INTERRUPT_INTERVAL_SEC === '5');
+  assert('Full tier fast cuts use 3s interrupt interval', env.AUTOTUBE_INTERRUPT_INTERVAL_SEC === '3');
   assert('Full tier render quality high', env.AUTOTUBE_RENDER_QUALITY === 'high');
   assert('Full tier always enables pattern interrupts', env.AUTOTUBE_PATTERN_INTERRUPTS === '1');
   assert('Full tier always enables strong interrupts', env.AUTOTUBE_INTERRUPT_STRONG === '1');
@@ -948,6 +948,34 @@ console.log('\n── 24. buildShockHookLine museum/TikTok ──');
   assert('Hook fail sets topic-specific hookLine', /louvre|tiktok/i.test(fixState.hookLine || ''), fixState.hookLine);
   assert('Hook fail sets BREAKING overlay', fixState.hookOverlay?.startsWith('BREAKING:'), fixState.hookOverlay);
   assert('Hook fix logged', applied.some((a) => a.includes('Hook FAIL')));
+}
+
+// ---------------------------------------------------------------------------
+// 26. isBadKineticOverlay — reject UI kinetic junk, keep BREAKING hooks
+// ---------------------------------------------------------------------------
+console.log('\n── 26. isBadKineticOverlay ──');
+{
+  assert('Rejects urgent-question kinetic junk', isBadKineticOverlay("AN URGENT QUESTION: 'DID A HEIST JUST HAPPEN'"));
+  assert('Rejects instruction overlays', isBadKineticOverlay('Replace weak opener with BREAKING'));
+  assert('Accepts BREAKING hook overlay', !isBadKineticOverlay('BREAKING: LOUVRE HEIST TIKTOK LIVE'));
+  assert('Empty is not bad', !isBadKineticOverlay(''));
+
+  const museumTopic = 'The museum heist streamed live on TikTok';
+  const hook = buildShockHookLine(museumTopic);
+  const withBadPreferred = buildShortHookOverlay(museumTopic, hook, {
+    preferredOverlay: "AN URGENT QUESTION: DID A HEIST JUST HAPPEN",
+  });
+  assert('Bad preferred overlay ignored', withBadPreferred === 'BREAKING: LOUVRE HEIST TIKTOK LIVE', withBadPreferred);
+
+  const env = buildRenderEnvFromFixState({
+    renderTier: 'full',
+    cutIntervalSec: 0.5,
+    patternInterrupts: true,
+    useFastPacing: true,
+    hookOverlay: 'BREAKING: LOUVRE HEIST TIKTOK LIVE',
+  });
+  assert('Full fast pacing uses 3s interrupts', env.AUTOTUBE_INTERRUPT_INTERVAL_SEC === '3');
+  assert('Hook overlay in render env', env.AUTOTUBE_HOOK_OVERLAY === 'BREAKING: LOUVRE HEIST TIKTOK LIVE');
 }
 
 // ---------------------------------------------------------------------------

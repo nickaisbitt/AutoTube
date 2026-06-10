@@ -302,7 +302,7 @@ function segmentUniqueCount(project, segmentId) {
   return keys.size;
 }
 
-async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords) {
+async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords, { relaxed = false } = {}) {
   if (isUnreliableVideoHost(`${r.url || ''} ${r.sourceUrl || ''}`)) return false;
   const key = r.url.split('?')[0];
   const alreadyInSeg = (project.media || []).some(
@@ -311,7 +311,11 @@ async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topi
   if (alreadyInSeg) return false;
 
   const asset = { url: r.url, alt: r.alt || '', query: q, type: 'image' };
-  if (!passesTopUpRelevanceGate(asset, seg, topic, topicKeywords)) return false;
+  if (!relaxed && !passesTopUpRelevanceGate(asset, seg, topic, topicKeywords)) return false;
+  if (relaxed) {
+    const score = scoreAssetRelevance(asset, seg, topic, topicKeywords);
+    if (score < 0.15) return false;
+  }
   if (!(await canFetch(r.url, { timeoutMs: 8000, minBytes: 512 }))) return false;
 
   const relevance = scoreAssetRelevance(asset, seg, topic, topicKeywords);
@@ -423,11 +427,48 @@ async function rebalanceFailingSegments(project, devServer, minPerSegment, repor
 
   volume = evaluateHarvestVolume(project, minPerSegment);
   if (!volume.pass) {
-    report.volumeTopUpMiss = volume.failing.map((f) => ({
-      segmentId: f.segmentId,
-      count: f.count,
-      need: minPerSegment,
-    }));
+    // Last resort: relaxed relevance so thin segments don't abort the loop.
+    for (const fail of volume.failing) {
+      const seg = segments[fail.segmentId];
+      if (!seg) continue;
+      const fallbackQ = `${extractKeywords(seg.title || '', 4).join(' ')} ${extractKeywords(topic, 3).join(' ')} photo`.trim();
+      for (const endpoint of TOP_UP_IMAGE_ENDPOINTS) {
+        if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
+        const results = await fetchImageSearchResults(devServer, endpoint, fallbackQ);
+        for (const r of results) {
+          const url = r.url || r.thumbnailUrl;
+          if (!url || !isDirectImageCandidate(url) || isJunkHarvestUrl(url)) continue;
+          if (await addImageTopUpCandidate(
+            project, seg, { url, alt: r.alt || r.title || seg.title, source: r.source },
+            fallbackQ, endpoint, report, topic, topicKeywords, { relaxed: true },
+          )) {
+            if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
+          }
+        }
+      }
+      let count = segmentUniqueCount(project, fail.segmentId);
+      for (const donor of [...(project.media || [])]) {
+        if (count >= minPerSegment) break;
+        if (donor.segmentId === fail.segmentId) continue;
+        const key = (donor.url || '').split('?')[0];
+        if (project.media.some((m) => m.segmentId === fail.segmentId && (m.url || '').split('?')[0] === key)) continue;
+        project.media.push({
+          ...donor,
+          id: `topup-relaxed-${fail.segmentId}-${count}`,
+          segmentId: fail.segmentId,
+          source: `${donor.source || 'Search'} (relaxed rebalance)`,
+        });
+        count += 1;
+      }
+    }
+    volume = evaluateHarvestVolume(project, minPerSegment);
+    if (!volume.pass) {
+      report.volumeTopUpMiss = volume.failing.map((f) => ({
+        segmentId: f.segmentId,
+        count: f.count,
+        need: minPerSegment,
+      }));
+    }
   }
 }
 
@@ -1198,12 +1239,21 @@ export async function generateFullVideo(options) {
     browser = null;
 
     patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
-    if (project.exportSettings?.hookOverlay) {
-      fixState.hookOverlay = project.exportSettings.hookOverlay;
-    }
-    if (project.hookLine) {
+    // fixState hook wins — never adopt UI kinetic overlays that fail watcher 0–3s audit
+    if (project.hookLine && !fixState.hookLine) {
       fixState.hookLine = project.hookLine;
     }
+    const loopOverlay = buildShortHookOverlay(topic, project.hookLine || fixState.hookLine, {
+      preferredOverlay: fixState.hookOverlay,
+    });
+    fixState.hookOverlay = loopOverlay;
+    fixState.hookLine = project.hookLine || fixState.hookLine;
+    project.exportSettings = {
+      ...(project.exportSettings || {}),
+      hookOverlay: loopOverlay,
+      hookLine: fixState.hookLine,
+    };
+    project.hookLine = fixState.hookLine;
     if (realHarvest) {
       const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, {
         loopMode: true,

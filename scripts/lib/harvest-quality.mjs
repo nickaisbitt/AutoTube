@@ -19,7 +19,7 @@ const STOP_WORDS = new Set([
 const VIDEO_HOST_RE = /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|dailymotion\.com|videos\.pexels\.com|archive\.org|\/api\/download-clip)/i;
 
 /** Hosts that often fail download-clip proxy and become ffmpeg placeholders. */
-const UNRELIABLE_VIDEO_HOST_RE = /(?:tiktok\.com|vm\.tiktok|instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch|news\.artnet\.com\/art-world\/)/i;
+const UNRELIABLE_VIDEO_HOST_RE = /(?:tiktok\.com|vm\.tiktok|tiktokcdn\.com|instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch|news\.artnet\.com\/art-world\/)/i;
 
 /** @param {string} url */
 export function isUnreliableVideoHost(url = '') {

@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { waitForDomain } from './domainRateLimit';
+import { filterSocialVideoResults, isBlockedSocialVideoUrl } from './blockedVideoHosts.js';
 
 let _puppeteer: typeof import("puppeteer-extra") | null = null;
 async function getPuppeteer() {
@@ -867,15 +868,6 @@ export interface WebVideoResult {
   thumbnailUrl?: string;
 }
 
-/** Social hosts that fail download-clip proxy — exclude from Bing video harvest. */
-const BLOCKED_SOCIAL_VIDEO_HOST_RE =
-  /(?:tiktok\.com|vm\.tiktok|instagram\.com|facebook\.com|fb\.watch)/i;
-
-function isBlockedSocialVideoUrl(...urls: Array<string | undefined>): boolean {
-  const blob = urls.filter(Boolean).join(" ");
-  return BLOCKED_SOCIAL_VIDEO_HOST_RE.test(blob);
-}
-
 export async function fetchBingVideos(query: string): Promise<WebVideoResult[]> {
   const searchUrl = `https://www.bing.com/videos/search?q=${encodeURIComponent(query)}&FORM=HDRSC3`;
 
@@ -1003,7 +995,7 @@ export async function fetchGoogleVideos(query: string): Promise<WebVideoResult[]
     return bingResults;
   }
 
-  const VIDEO_DOMAINS = /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|cnn\.com|bbc\.com|nbcnews\.com|abcnews\.go\.com|foxnews\.com|reuters\.com|bloomberg\.com|ted\.com|tiktok\.com|instagram\.com|facebook\.com|twitter\.com|x\.com)/i;
+  const VIDEO_DOMAINS = /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|cnn\.com|bbc\.com|nbcnews\.com|abcnews\.go\.com|foxnews\.com|reuters\.com|bloomberg\.com|ted\.com)/i;
 
   const urlQRegex = /\/url\?q=(https?[^"&]+)/g;
   let urlMatch: RegExpExecArray | null;
@@ -1073,8 +1065,14 @@ export async function fetchGoogleVideos(query: string): Promise<WebVideoResult[]
     return bingResults;
   }
 
-  console.log(`[Google Videos] Found ${results.length} videos for "${query}"`);
-  return results;
+  const filtered = filterSocialVideoResults(results);
+  if (filtered.length !== results.length) {
+    console.log(
+      `[Google Videos] Filtered ${results.length - filtered.length} social-host results for "${query}"`,
+    );
+  }
+  console.log(`[Google Videos] Found ${filtered.length} videos for "${query}"`);
+  return filtered;
 }
 
 // ---------------------------------------------------------------------------

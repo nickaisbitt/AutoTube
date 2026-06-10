@@ -50,7 +50,7 @@ function isLoopVideoFirst(): boolean {
 
 /** Hosts that fail download-clip proxy and become ffmpeg placeholders. */
 function isUnreliableVideoHost(url = ''): boolean {
-  return /(?:tiktok\.com|vm\.tiktok|instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch)/i.test(url);
+  return /(?:tiktok\.com|vm\.tiktok|tiktokcdn\.com|instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch)/i.test(url);
 }
 
 /** Motion sources that survive proxy + ffmpeg in loop mode. */

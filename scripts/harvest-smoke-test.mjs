@@ -141,8 +141,15 @@ async function main() {
       return null;
     },
   });
-  await testSearch('Google videos', '/api/search-google-videos', 5);
-  await testSearch('Videos (aggregate)', '/api/search-videos', 10);
+  const noTikTokInRows = (rows) => {
+    const tiktok = rows.filter((r) =>
+      /tiktok/i.test(`${r.url || ''} ${r.sourceUrl || ''} ${r.content || ''}`),
+    ).length;
+    if (tiktok > 0) return `${tiktok} tiktok result(s) — expected none`;
+    return null;
+  };
+  await testSearch('Google videos', '/api/search-google-videos', 5, { validate: noTikTokInRows });
+  await testSearch('Videos (aggregate)', '/api/search-videos', 10, { validate: noTikTokInRows });
   await testSearch('Vimeo', '/api/search-vimeo', 1);
   await testSearch('Dailymotion', '/api/search-dailymotion', 3);
   await testSearch('Giphy', '/api/search-giphy', 5);

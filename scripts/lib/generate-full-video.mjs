@@ -474,6 +474,8 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
 function isJunkHarvestUrl(url) {
   const u = (url || '').toLowerCase();
   return (
+    isUnreliableVideoHost(url) ||
+    /tiktokcdn\.com|tiktokpng\.com|tiktokv\.com|muscdn\.com|byteoversea\.com/i.test(u) ||
     u.includes('gravatar.com/avatar') ||
     /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
     u.includes('/th/id/ovp.') ||

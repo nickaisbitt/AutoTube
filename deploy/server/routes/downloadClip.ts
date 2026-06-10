@@ -12,12 +12,9 @@ import {
   statSync,
 } from "fs";
 import crypto from "crypto";
+import { isBlockedSocialVideoUrl } from "../utils/blockedVideoHosts.js";
 
 const MAX_CACHE_SIZE = 100;
-
-/** Hosts that fail proxy download and become render placeholders. */
-const UNRELIABLE_HOST_RE =
-  /(?:tiktok\.com|vm\.tiktok|instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch)/i;
 
 interface ClipCacheEntry {
   path: string;
@@ -27,7 +24,7 @@ interface ClipCacheEntry {
 const clipCache = new Map<string, ClipCacheEntry>();
 
 function isUnreliableVideoHost(url: string): boolean {
-  return UNRELIABLE_HOST_RE.test(url);
+  return isBlockedSocialVideoUrl(url);
 }
 
 /** Direct file URLs — fetch over HTTP instead of yt-dlp. */

@@ -538,6 +538,7 @@ console.log('\n── 18. countSegmentVideos ──');
   assert('Instagram blocked as unreliable video host', isUnreliableVideoHost('https://www.instagram.com/p/abc') === true);
   assert('TikTok blocked as unreliable video host', isUnreliableVideoHost('https://www.tiktok.com/@user/video/123') === true);
   assert('vm.tiktok blocked as unreliable video host', isUnreliableVideoHost('https://vm.tiktok.com/ZMabc123') === true);
+  assert('tiktokcdn blocked as unreliable video host', isUnreliableVideoHost('https://p16-sign.tiktokcdn.com/obj/foo.mp4') === true);
   assert('YouTube not blocked', isUnreliableVideoHost('https://www.youtube.com/watch?v=abc') === false);
   assert('YouTube is trusted video host', isTrustedVideoHost('https://www.youtube.com/watch?v=abc') === true);
   assert('Vimeo is trusted video host', isTrustedVideoHost('https://player.vimeo.com/video/123') === true);

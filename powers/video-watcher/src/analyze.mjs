@@ -452,7 +452,9 @@ export async function watchVideo(options = {}) {
   if (!skipVision && apiKey) {
     const dur = framesMeta.durationSec;
     try {
-      hookVision = await runHookVisionReview(videoPath, apiKey);
+      hookVision = await runHookVisionReview(videoPath, apiKey, {
+        expectedOverlay: options.expected_hook_overlay,
+      });
     } catch (e) {
       hookVision = { hookPass: false, error: e.message };
     }

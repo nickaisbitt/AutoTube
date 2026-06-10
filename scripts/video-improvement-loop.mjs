@@ -253,6 +253,7 @@ async function main() {
         skip_vision: cfg.skipVision || skipBrutalOnDraft || cfg.objectiveOnly,
         script_text: scriptText,
         render_tier: renderTier,
+        expected_hook_overlay: fixState.hookOverlay,
         api_key: resolveOpenRouterKey(),
       });
     } catch (e) {

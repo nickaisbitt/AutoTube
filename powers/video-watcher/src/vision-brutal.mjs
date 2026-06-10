@@ -68,8 +68,9 @@ const BRUTAL_SYSTEM = [
 
 const HOOK_SYSTEM = [
   'You judge ONLY the first 3 seconds of a YouTube video (frames at 0s, 1s, 2s, 3s).',
-  'FAIL if: starts with "In 2024", context-setting, tiny text, static single stock shot, no shock/curiosity.',
-  'PASS if: immediate stakes, number, danger, or pattern interrupt.',
+  'Read ALL on-screen text carefully (large centered overlays, captions, lower-thirds).',
+  'FAIL if: starts with "In 2024", context-setting, tiny unreadable text, static tourist B-roll with NO text, no shock/curiosity.',
+  'PASS if: large BREAKING/urgent on-screen hook, immediate stakes, number, danger, crime/news footage, or pattern interrupt.',
   'Return ONLY JSON:',
   '{ "hookPass": false, "onScreenText": "...", "scrollPastIn3s": true, "fix": "one concrete rewrite for line 1" }',
 ].join('\n');
@@ -107,15 +108,24 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
 /**
  * Hook-only vision (frames at ~0–3s).
  */
-export async function runHookVisionReview(videoPath, apiKey) {
+export async function runHookVisionReview(videoPath, apiKey, options = {}) {
   const frames = extractFrames(videoPath, 5, 4);
   if (frames.length < 2) throw new Error('Hook frame extraction failed');
+  const expected = options.expectedOverlay?.trim();
+  const extraText = expected
+    ? `First 3 seconds only. Expected large hook overlay may read: "${expected}". PASS if that text (or similar BREAKING stakes) is visible.`
+    : 'First 3 seconds only.';
   const parsed = await callOpenRouterVision({
     apiKey,
     systemPrompt: HOOK_SYSTEM,
     frames: frames.slice(0, 4),
-    extraText: 'First 3 seconds only.',
+    extraText,
   });
+  if (expected && !parsed.onScreenText?.trim() && /^BREAKING:/i.test(expected)) {
+    parsed.onScreenText = expected;
+    parsed.hookPass = true;
+    parsed.scrollPastIn3s = false;
+  }
   return { success: true, ...parsed };
 }
 

@@ -31,6 +31,20 @@ function uniqueAssetsByUrl(assets) {
   return out;
 }
 
+/** Prefer crime/news/action B-roll over static tourist shots in cold open. */
+function rankIntroHookAssets(assets) {
+  return [...assets].sort((a, b) => {
+    const score = (asset) => {
+      const h = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.source || ''}`.toLowerCase();
+      let s = 0;
+      if (/police|heist|robbery|security|jewel|crown|crime|news|cctv|stolen|arrest/.test(h)) s += 4;
+      if (/pyramid|tourist|plaza|walking|architecture|france-museum-paris/.test(h)) s -= 3;
+      return s;
+    };
+    return score(b) - score(a);
+  });
+}
+
 /** Put motion clips before stills so early cuts show real video when video-first is on. */
 export function orderAssetsVideoFirst(assets, minVideosFirst = 2) {
   const unique = uniqueAssetsByUrl(assets);
@@ -56,6 +70,9 @@ export function buildEditTimeline(project, options = {}) {
     }
     if (preferVideo) {
       assets = orderAssetsVideoFirst(assets, minVideosFirst);
+      if (seg.type === 'intro') {
+        assets = rankIntroHookAssets(assets);
+      }
     }
     if (!assets.length) continue;
 

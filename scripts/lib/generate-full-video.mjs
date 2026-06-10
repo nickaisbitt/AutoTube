@@ -261,11 +261,21 @@ function buildVideoTopUpQueries(seg, topic, round = 0) {
   const segKws = extractKeywords(`${seg.title || ''} ${seg.narration || ''}`, 4).join(' ');
   const topicKws = extractKeywords(topic, 4).join(' ');
   const core = `${segKws || seg.title} ${topicKws}`.trim();
-  return [
+  const queries = [
     base,
     ...VIDEO_TOP_UP_QUERY_SUFFIXES.map((suffix) => `${core} ${suffix}`.trim()),
     `${topic} ${seg.title} b-roll`.trim(),
-  ].filter((q, i, arr) => q && arr.indexOf(q) === i);
+  ];
+  const ctx = `${topic} ${seg.title || ''} ${seg.type || ''}`.toLowerCase();
+  if (/museum|louvre|heist|robbery|jewel/.test(ctx) && (seg.type === 'intro' || round === 0)) {
+    queries.unshift(
+      'museum heist security camera footage',
+      'paris jewelry robbery news',
+      'police crime scene news footage',
+      'crown jewels stolen news report',
+    );
+  }
+  return queries.filter((q, i, arr) => q && arr.indexOf(q) === i);
 }
 
 function toRelativeClipProxyUrl(devServer, pageUrl, durationSec = 10) {

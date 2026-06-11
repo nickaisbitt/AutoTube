@@ -3,7 +3,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { LOOP_MAX_MIN_ASSETS_PER_SEGMENT } from './harvest-quality.mjs';
+import { LOOP_MAX_MIN_ASSETS_PER_SEGMENT } from './assembly-system.mjs';
 import { sanitizeExcludedUrls } from './harvest-loop-context.mjs';
 
 export const FIX_STATE_VERSION = 3;

@@ -6,8 +6,8 @@
   "shockHook": true,
   "hookLine": "They robbed the Louvre on TikTok LIVE — crown jewels gone while the stream kept rolling.",
   "forceRealStock": false,
-  "mediaOffset": 12,
-  "harvestNonce": 10,
+  "mediaOffset": 0,
+  "harvestNonce": 0,
   "excludedUrls": [
     "https://routenote.com/blog/a-musicians-guide-to-tiktok-for-artists/",
     "https://buffer.com/resources/tiktok-live/",

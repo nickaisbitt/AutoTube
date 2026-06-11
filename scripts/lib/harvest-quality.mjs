@@ -1,6 +1,7 @@
 /**
  * Harvest quality gates: topic/segment relevance + per-segment volume.
  */
+export { LOOP_MAX_MIN_ASSETS_PER_SEGMENT } from './assembly-system.mjs';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
@@ -438,7 +439,7 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
 export const THIN_HARVEST_WARN_THRESHOLD = 3;
 
 /** Loop cap — raising minAssets above this starves browser harvest before top-up. */
-export const LOOP_MAX_MIN_ASSETS_PER_SEGMENT = 6;
+export { LOOP_MAX_MIN_ASSETS_PER_SEGMENT } from './assembly-system.mjs';
 
 /**
  * Segments with fewer than `warnThreshold` unique asset URLs (browser harvest before top-up).

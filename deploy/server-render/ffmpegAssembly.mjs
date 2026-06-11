@@ -760,6 +760,24 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
         console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (video pad failed)`);
       }
     }
+  } else if (audioFile && existsSync(audioFile) && audioDurationSec > 0.5 && audioDurationSec < videoDurationSec - 0.15) {
+    const trimmedVideo = join(workDir, 'merged-video-trimmed.mp4');
+    const tr = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-i', videoForMux,
+        '-t', audioDurationSec.toFixed(3),
+        '-c:v', 'libx264', '-preset', ffmpegPreset(), '-pix_fmt', 'yuv420p',
+        '-an', trimmedVideo,
+      ],
+      { encoding: 'utf8', timeout: 300_000 },
+    );
+    if (tr.status === 0 && existsSync(trimmedVideo) && statSync(trimmedVideo).size > 50_000) {
+      videoForMux = trimmedVideo;
+      videoDurationSec = probeMediaDuration(trimmedVideo) || audioDurationSec;
+      muxDurationSec = videoDurationSec;
+      console.log(`  [ffmpeg] trimmed video ${rawVideoSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (narration shorter than B-roll)`);
+    }
   }
 
   if (audioForMux && existsSync(audioForMux)) {

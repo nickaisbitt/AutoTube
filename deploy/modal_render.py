@@ -44,10 +44,19 @@ image = (
 app = modal.App(APP_NAME, image=image)
 
 
-def _extract_bundle(bundle_bytes: bytes, work_dir: Path) -> None:
+def _extract_bundle(bundle_bytes: bytes, work_dir: Path) -> Path:
     work_dir.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(bundle_bytes), mode="r:gz") as tar:
         tar.extractall(work_dir)
+    if (work_dir / "project.json").exists():
+        return work_dir
+    nested = work_dir / "modal-bundle"
+    if (nested / "project.json").exists():
+        return nested
+    for child in work_dir.iterdir():
+        if child.is_dir() and (child / "project.json").exists():
+            return child
+    return work_dir
 
 
 def _run_assembly(work_dir: Path) -> bytes:
@@ -104,8 +113,8 @@ class AutoTubeRenderWorker:
     def render_bundle(self, bundle_bytes: bytes) -> bytes:
         with tempfile.TemporaryDirectory(prefix="autotube-") as tmp:
             work = Path(tmp) / "bundle"
-            _extract_bundle(bundle_bytes, work)
-            return _run_assembly(work)
+            resolved = _extract_bundle(bundle_bytes, work)
+            return _run_assembly(resolved)
 
     @modal.asgi_app()
     def serve(self):
@@ -123,8 +132,8 @@ class AutoTubeRenderWorker:
                     raise HTTPException(status_code=400, detail="bundle too small")
                 with tempfile.TemporaryDirectory(prefix="autotube-http-") as tmp:
                     work = Path(tmp) / "bundle"
-                    _extract_bundle(bundle_bytes, work)
-                    out = _run_assembly(work)
+                    resolved = _extract_bundle(bundle_bytes, work)
+                    out = _run_assembly(resolved)
                 return Response(
                     content=out,
                     media_type="video/mp4",

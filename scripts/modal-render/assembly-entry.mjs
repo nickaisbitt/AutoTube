@@ -8,12 +8,25 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderViaFfmpegAssembly } from '../../deploy/server-render/ffmpegAssembly.mjs';
 import { buildEditTimeline } from '../lib/build-edit-timeline.mjs';
+import { spawnSync } from 'node:child_process';
 import { validateOutput } from '../../deploy/server-render/pipelineReliability.mjs';
+
+function probeDurationSec(videoPath) {
+  const probe = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', videoPath],
+    { encoding: 'utf8' },
+  );
+  const d = parseFloat((probe.stdout || '').trim());
+  return Number.isFinite(d) ? d : 0;
+}
 
 const workDir = process.env.MODAL_WORK_DIR || '/work';
 const projectPath = join(workDir, 'project.json');
 const envPath = join(workDir, 'render-env.json');
-const mixedAudio = join(workDir, 'narration-mix.wav');
+const mixedAudio = ['narration-mix.m4a', 'narration-mix.wav', 'narration-mix.aac']
+  .map((f) => join(workDir, f))
+  .find((p) => existsSync(p));
 const outputBase = join(workDir, 'final-video.mp4');
 
 if (!existsSync(projectPath)) {
@@ -61,12 +74,12 @@ project.editTimeline = buildEditTimeline(project, {
   minVideosFirst: process.env.AUTOTUBE_RENDER_QUALITY === 'high' ? 3 : 2,
 });
 
-console.log(`[modal-assembly] ${project.editTimeline?.length ?? 0} clips, audio ${existsSync(mixedAudio) ? 'yes' : 'no'}`);
+console.log(`[modal-assembly] ${project.editTimeline?.length ?? 0} clips, audio ${mixedAudio ? 'yes' : 'no'}`);
 
 const ffResult = await renderViaFfmpegAssembly(project, outputBase, {
   devServer: 'http://127.0.0.1:1',
   cutIntervalSec: cutInterval,
-  mixedAudioPath: existsSync(mixedAudio) ? mixedAudio : null,
+  mixedAudioPath: mixedAudio || null,
 });
 
 if (!ffResult.ok) {
@@ -83,8 +96,9 @@ if (existsSync(outputBase)) {
 }
 
 const gate = validateOutput(finalMp4, 'Modal assembly output');
-if (!gate.valid) {
-  console.error('[modal-assembly] output gate:', gate.error);
+const dur = probeDurationSec(finalMp4);
+if (!gate.valid || dur < 10) {
+  console.error('[modal-assembly] output gate:', gate.error || `invalid duration ${dur}s`);
   process.exit(1);
 }
 

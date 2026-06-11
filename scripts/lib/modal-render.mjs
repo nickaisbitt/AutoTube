@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { generateNarration } from '../../server-render/narration.mjs';
 import { parseVttWordTimestamps } from '../../server-render/subtitleParser.mjs';
+import { concatenateAudio } from '../../deploy/server-render/audio.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
 
 const MODAL_CLI = process.env.MODAL_CLI
@@ -23,19 +24,6 @@ export function shouldUseModalRender() {
 
 function modalCliAvailable() {
   return existsSync(MODAL_CLI);
-}
-
-async function concatenateAudio(audioFiles, outputFile) {
-  if (!audioFiles.length) return false;
-  if (audioFiles.length === 1) {
-    const r = spawnSync('ffmpeg', ['-y', '-i', audioFiles[0].file, '-c:a', 'pcm_s16le', outputFile], {
-      encoding: 'utf8',
-      timeout: 120_000,
-    });
-    return r.status === 0;
-  }
-  const { concatenateAudio: concat } = await import('../../server-render/audio.mjs');
-  return concat(audioFiles, outputFile);
 }
 
 async function fetchAssetToBundle(asset, devServer, assetsDir) {
@@ -106,8 +94,11 @@ async function runLocalNarrationPhase(project, bundleDir, renderEnv) {
     }
   }
 
-  const mixedAudio = join(bundleDir, 'narration-mix.wav');
-  await concatenateAudio(audioFiles, mixedAudio);
+  const mixedAudio = join(bundleDir, 'narration-mix.m4a');
+  const mixedOk = await concatenateAudio(audioFiles, mixedAudio);
+  if (!mixedOk) {
+    throw new Error('Modal pre-render: failed to concatenate narration audio');
+  }
 
   const cutInterval = parseFloat(renderEnv.AUTOTUBE_CUT_INTERVAL_SEC || '1.25');
   project.editTimeline = buildEditTimeline(project, {
@@ -121,9 +112,7 @@ async function runLocalNarrationPhase(project, bundleDir, renderEnv) {
 }
 
 function createTarball(bundleDir, tarPath) {
-  const parent = dirname(bundleDir);
-  const base = basename(bundleDir);
-  const r = spawnSync('tar', ['-czf', tarPath, '-C', parent, base], { encoding: 'utf8', timeout: 300_000 });
+  const r = spawnSync('tar', ['-czf', tarPath, '-C', bundleDir, '.'], { encoding: 'utf8', timeout: 300_000 });
   return r.status === 0 && existsSync(tarPath);
 }
 
@@ -188,15 +177,18 @@ export async function renderViaModal({ project, mp4Out, renderEnv, devServer, ou
   log(`   … ${fetched}/${project.media?.length ?? 0} assets cached for Modal`);
 
   const modalRenderEnv = {
-    ...renderEnv,
     AUTOTUBE_FORCE_CPU: '0',
     AUTOTUBE_RENDER_MODE: 'ffmpeg',
   };
+  for (const [k, v] of Object.entries(renderEnv)) {
+    if (k.startsWith('AUTOTUBE_') && v != null && v !== '') modalRenderEnv[k] = String(v);
+  }
   writeFileSync(join(bundleDir, 'project.json'), JSON.stringify(project, null, 2));
   writeFileSync(join(bundleDir, 'render-env.json'), JSON.stringify(modalRenderEnv, null, 2));
   writeFileSync(join(bundleDir, 'word-timestamps.json'), JSON.stringify(narration.wordTimestamps, null, 2));
   if (existsSync(narration.mixedAudio)) {
-    copyFileSync(narration.mixedAudio, join(bundleDir, 'narration-mix.wav'));
+    const dest = join(bundleDir, narration.mixedAudio.endsWith('.m4a') ? 'narration-mix.m4a' : 'narration-mix.wav');
+    copyFileSync(narration.mixedAudio, dest);
   }
 
   const tarPath = join(outDir, 'modal-bundle.tar.gz');

@@ -7,6 +7,18 @@ import { normalizeUrlKey } from './harvest-loop-context.mjs';
 /** Hard cap on how many times a single URL may appear across the full 60 s timeline. */
 export const MAX_USES_PER_URL = 2;
 
+/** Hook zone duration (seconds from video start). Clips here are subject to a tighter hold cap. */
+export const HOOK_ZONE_SEC = 10;
+
+/**
+ * Max clip duration (seconds) allowed within the hook zone.
+ * Override via AUTOTUBE_HOOK_MAX_HOLD_SEC env var.
+ */
+export const HOOK_MAX_HOLD_SEC = (() => {
+  const v = parseFloat(process.env.AUTOTUBE_HOOK_MAX_HOLD_SEC || '');
+  return Number.isFinite(v) && v > 0 ? v : 2.0;
+})();
+
 /**
  * Minimum unique assets a segment pool must have before being supplemented
  * with cross-segment assets from the global pool.
@@ -93,6 +105,10 @@ export function buildEditTimeline(project, options = {}) {
   const globalUrlUse = new Map();
   const maxUsesPerUrl = MAX_USES_PER_URL;
 
+  // Track absolute video time so hook-zone clips can be capped independently of the
+  // pool-widened effective cut interval.
+  let cumSegStart = 0;
+
   for (const seg of project.script || []) {
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
     if (!assets.length) {
@@ -132,7 +148,12 @@ export function buildEditTimeline(project, options = {}) {
     let videoSlotsUsed = 0;
     const introHookPool = seg.type === 'intro' ? rankIntroHookAssets(assets).slice(0, Math.max(6, minVideosFirst + 2)) : assets;
     while (t < duration - 0.05) {
-      const end = Math.min(duration, t + interval);
+      // Clips whose absolute start falls within the hook zone are capped to HOOK_MAX_HOLD_SEC
+      // regardless of the pool-widened effective cut interval, so PySceneDetect never flags
+      // a single hold > 2 s in the first 10 s of the video.
+      const absStart = cumSegStart + t;
+      const hookInterval = absStart < HOOK_ZONE_SEC ? Math.min(interval, HOOK_MAX_HOLD_SEC) : interval;
+      const end = Math.min(duration, t + hookInterval);
       const clipIndex = entries.filter((e) => e.segmentId === seg.id).length;
       const poolForClip = seg.type === 'intro' && clipIndex < 4 ? introHookPool : assets;
       let asset = poolForClip[ai % poolForClip.length];
@@ -206,6 +227,7 @@ export function buildEditTimeline(project, options = {}) {
       t = end;
       ai += 1;
     }
+    cumSegStart += duration;
   }
 
   return entries;

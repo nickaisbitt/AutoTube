@@ -8,7 +8,7 @@ import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
 import { muxVideoWithAudio } from './audio.mjs';
-import { orderAssetsVideoFirst, effectiveCutInterval } from '../../scripts/lib/build-edit-timeline.mjs';
+import { orderAssetsVideoFirst, effectiveCutInterval, HOOK_ZONE_SEC, HOOK_MAX_HOLD_SEC } from '../../scripts/lib/build-edit-timeline.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FPS = 24;
@@ -142,7 +142,7 @@ function resolveTimelineAsset(entry, segMedia, mediaPool = []) {
   return segMedia[idx] || segMedia[0];
 }
 
-function buildClipSchedule(segment, segMedia, intervalSec, project) {
+function buildClipSchedule(segment, segMedia, intervalSec, project, segmentStartSec = 0) {
   const targetDuration = segment.duration || 20;
   const orderedMedia = prepareSegmentMedia(segMedia);
   const timeline = (project?.editTimeline || []).filter((e) => e.segmentId === segment.id);
@@ -167,7 +167,10 @@ function buildClipSchedule(segment, segMedia, intervalSec, project) {
   let t = clips.length ? clips[clips.length - 1].endSec : 0;
   while (t < targetDuration - 0.05) {
     const asset = pickAssetAtTime(t, orderedMedia, intervalSec);
-    const clipEnd = Math.min(targetDuration, t + intervalSec);
+    // Cap clips in the hook zone to HOOK_MAX_HOLD_SEC regardless of the pool-widened interval.
+    const absT = segmentStartSec + t;
+    const effectiveInterval = absT < HOOK_ZONE_SEC ? Math.min(intervalSec, HOOK_MAX_HOLD_SEC) : intervalSec;
+    const clipEnd = Math.min(targetDuration, t + effectiveInterval);
     clips.push({
       asset,
       startSec: t,
@@ -441,11 +444,11 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   // leaving later segments with nothing but fallback cycling.
   const interval = effectiveCutInterval(project, rawInterval);
   const targetDuration = segment.duration || 20;
-  const schedule = buildClipSchedule(segment, segMedia, interval, project);
+  const segmentStartSec = options.segmentStartSec ?? 0;
+  const schedule = buildClipSchedule(segment, segMedia, interval, project, segmentStartSec);
   const { w, h } = outputDimensions();
   const preset = ffmpegPreset();
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
-  const segmentStartSec = options.segmentStartSec ?? 0;
   const interruptsOn = patternInterruptsEnabled();
   const tmpDir = join(dirname(outputPath), `seg-${segment.id}-clips`);
   const cacheDir = join(tmpDir, 'cache');
@@ -578,7 +581,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   let fillerRound = 0;
   while (renderedDuration < targetDuration - 0.05 && segMedia.length && fillerRound < segMedia.length * 4) {
     const asset = segMedia[fillerRound % segMedia.length];
-    const needSec = Math.min(interval, targetDuration - renderedDuration);
+    const absFillerStart = segmentStartSec + renderedDuration;
+    const fillerInterval = absFillerStart < HOOK_ZONE_SEC ? Math.min(interval, HOOK_MAX_HOLD_SEC) : interval;
+    const needSec = Math.min(fillerInterval, targetDuration - renderedDuration);
     if (needSec <= 0.05) break;
     const added = await pushClip(asset, needSec, `filler ${fillerRound + 1} (+${needSec.toFixed(2)}s)`);
     fillerRound += 1;

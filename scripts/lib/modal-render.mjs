@@ -165,16 +165,24 @@ export async function renderViaModal({ project, mp4Out, renderEnv, devServer, ou
   log('🎙 Local narration (edge-tts — unchanged)...');
   const narration = await runLocalNarrationPhase(project, bundleDir, renderEnv);
 
-  log('📦 Prefetching B-roll for Modal...');
+  // Only bundle assets that appear in the editTimeline — avoids 100+ MB tarballs
+  // from downloading every harvested clip. The editTimeline was built in
+  // runLocalNarrationPhase; Modal rebuilds it from project.media which contains only
+  // the assets fetched here (non-bundled assets are stripped before saving project.json).
+  const timelineAssetIds = new Set((project.editTimeline || []).map((e) => e.assetId));
+  const timelineAssets = (project.media || []).filter((a) => timelineAssetIds.has(a.id));
+  log(`📦 Prefetching B-roll for Modal (${timelineAssets.length} timeline assets of ${project.media?.length ?? 0} total)...`);
   let fetched = 0;
-  for (const asset of project.media || []) {
+  const bundledAssetIds = new Set();
+  for (const asset of timelineAssets) {
     const bundleFile = await fetchAssetToBundle(asset, devServer, assetsDir);
     if (bundleFile) {
       asset._bundleFile = bundleFile;
       fetched += 1;
+      bundledAssetIds.add(asset.id);
     }
   }
-  log(`   … ${fetched}/${project.media?.length ?? 0} assets cached for Modal`);
+  log(`   … ${fetched}/${timelineAssets.length} timeline assets cached for Modal`);
 
   const modalRenderEnv = {
     AUTOTUBE_FORCE_CPU: '0',
@@ -183,7 +191,15 @@ export async function renderViaModal({ project, mp4Out, renderEnv, devServer, ou
   for (const [k, v] of Object.entries(renderEnv)) {
     if (k.startsWith('AUTOTUBE_') && v != null && v !== '') modalRenderEnv[k] = String(v);
   }
-  writeFileSync(join(bundleDir, 'project.json'), JSON.stringify(project, null, 2));
+
+  // Trim project.media to only assets that were successfully bundled.
+  // This ensures the Modal-side timeline rebuild only references locally cached files
+  // and avoids placeholder clips from unreachable relative-URL assets.
+  const projectForBundle = {
+    ...project,
+    media: (project.media || []).filter((a) => bundledAssetIds.has(a.id)),
+  };
+  writeFileSync(join(bundleDir, 'project.json'), JSON.stringify(projectForBundle, null, 2));
   writeFileSync(join(bundleDir, 'render-env.json'), JSON.stringify(modalRenderEnv, null, 2));
   writeFileSync(join(bundleDir, 'word-timestamps.json'), JSON.stringify(narration.wordTimestamps, null, 2));
   if (existsSync(narration.mixedAudio)) {

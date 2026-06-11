@@ -1033,8 +1033,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     report.uniqueUrlCount = uniqueUrls.size;
     const { requiredUniqueUrls: minUnique } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
 
-    // Last-chance per-segment fill: relaxed relevance for segments within 1 of quota.
-    if (!volume.pass && volume.failing.every((f) => f.count >= minPerSegment - 1)) {
+    // Last-chance per-segment fill: relaxed relevance for segments within 2 of quota.
+    if (!volume.pass && volume.failing.every((f) => f.count >= minPerSegment - 2)) {
       const topic = project.topic || project.title || '';
       const topicKeywords = extractKeywords(topic, 12);
       const segmentsById = Object.fromEntries((project.script || []).map((s) => [s.id, s]));
@@ -1070,8 +1070,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       report.uniqueUrlCount = uniqueUrls.size;
     }
 
-    // Soft-pass: all segments within 1 of quota and global unique URL pool meets clip budget.
-    if (!volume.pass && volume.failing.every((f) => f.count >= minPerSegment - 1) && uniqueUrls.size >= minUnique) {
+    // Soft-pass: segments within 2 of quota when global unique URL pool meets clip budget.
+    if (!volume.pass && volume.failing.every((f) => f.count >= minPerSegment - 2) && uniqueUrls.size >= minUnique) {
       report.volumeSoftPass = true;
       volume = { ...volume, pass: true };
     }

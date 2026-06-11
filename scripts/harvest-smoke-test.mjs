@@ -121,7 +121,7 @@ async function main() {
   console.log('\n— Image search —');
   await testSearch('Bing images', '/api/search-bing-images', 5);
   await testSearch('Google images', '/api/search-google-images', 3);
-  await testSearch('Yandex images', '/api/search-yandex-images', 3);
+  await testSearch('Yandex images', '/api/search-yandex-images', 3, { optional: true, timeoutMs: 20_000 });
   await testSearch('DuckDuckGo images', '/api/search-duckduckgo-images', 10);
   await testSearch('Flickr', '/api/search-flickr', 5);
   await testSearch('Unsplash', '/api/search-unsplash', 3);

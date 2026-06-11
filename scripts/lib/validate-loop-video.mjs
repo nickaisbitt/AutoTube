@@ -4,6 +4,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { diversityProxyGate } from './assembly-system.mjs';
 
 /** Loop shorts target ~60s; ultrafast mux can land 54–55s — use env or 50s floor. */
 export const MIN_DURATION_SEC = Number(process.env.MIN_DURATION_SEC) || 50;
@@ -53,6 +54,21 @@ export function validateRenderManifest(videoPath, durationSec = 0) {
         minClips,
         placeholderPct,
       };
+    }
+    // Diversity gate: only applies when the manifest includes diversity fields
+    // (written by ffmpegAssembly; absent for Modal-only or older renders).
+    if (manifest.uniqueUrlsUsed !== undefined) {
+      const gate = diversityProxyGate(manifest);
+      if (!gate.pass) {
+        return {
+          valid: false,
+          error: `diversity gate: ${gate.reason}`,
+          manifest,
+          clipCount,
+          minClips,
+          placeholderPct,
+        };
+      }
     }
     return { valid: true, manifest, clipCount, minClips, placeholderPct };
   } catch (err) {

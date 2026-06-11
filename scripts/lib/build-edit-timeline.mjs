@@ -3,9 +3,16 @@
  * Always use post-TTS segment.duration when building for render.
  */
 import { normalizeUrlKey } from './harvest-loop-context.mjs';
+import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
 
 /** Hard cap on how many times a single URL may appear across the full 60 s timeline. */
 export const MAX_USES_PER_URL = 2;
+
+/** Per-segment cap: no single URL may exceed this share of segment clips (0–100). */
+export const MAX_URL_SHARE_PCT = 40;
+
+/** Minimum seconds that must separate two uses of the same URL on the full timeline. */
+export const URL_SPACING_SEC = 12;
 
 /** Hook zone duration (seconds from video start). Clips here are subject to a tighter hold cap. */
 export const HOOK_ZONE_SEC = 10;
@@ -137,6 +144,32 @@ export function buildEditTimeline(project, options = {}) {
   const globalUrlUse = new Map();
   const maxUsesPerUrl = MAX_USES_PER_URL;
 
+  // Diversity-enforcement state shared across all segments.
+  const globalUrlLastAbsTime = new Map(); // urlKey → last abs start time used
+  const pHashRegistry = []; // hashes of all committed clips
+  const pHashCache = new Map(); // assetId/src → hash (null if failed)
+
+  const getThumbnailSrc = (asset) => {
+    const thumb = asset?.thumbnailUrl;
+    if (thumb && /^https?:\/\//i.test(thumb)) return thumb;
+    if (asset?.type === 'image') {
+      const u = asset?.url || '';
+      if (/^https?:\/\//i.test(u)) return u;
+    }
+    return null;
+  };
+
+  // Returns false when the candidate is visually similar to an already-committed clip.
+  // Always returns true when no thumbnail is available or hash computation fails.
+  const checkPHash = (candidate) => {
+    const src = getThumbnailSrc(candidate);
+    if (!src) return true;
+    const cid = candidate.id || src;
+    if (!pHashCache.has(cid)) pHashCache.set(cid, aHashFromImage(src));
+    const hash = pHashCache.get(cid);
+    return hash ? !isSimilarToRegistry(hash, pHashRegistry) : true;
+  };
+
   // Track absolute video time so hook-zone clips can be capped independently of the
   // pool-widened effective cut interval.
   let cumSegStart = 0;
@@ -179,6 +212,12 @@ export function buildEditTimeline(project, options = {}) {
     const recentCap = Math.max(8, assets.length);
     let videoSlotsUsed = 0;
     const introHookPool = seg.type === 'intro' ? rankIntroHookAssets(assets).slice(0, Math.max(6, minVideosFirst + 2)) : assets;
+
+    // Per-segment URL diversity state.
+    const segUrlCount = new Map(); // urlKey → clip count in this segment
+    const estimatedSegClips = Math.max(1, Math.ceil(duration / interval));
+    const maxSegUrlUses = Math.max(1, Math.ceil(estimatedSegClips * MAX_URL_SHARE_PCT / 100));
+
     while (t < duration - 0.05) {
       // Clips whose absolute start falls within the hook zone are capped to HOOK_MAX_HOLD_SEC
       // regardless of the pool-widened effective cut interval, so PySceneDetect never flags
@@ -191,14 +230,23 @@ export function buildEditTimeline(project, options = {}) {
       let asset = poolForClip[ai % poolForClip.length];
       let attempts = 0;
       const pickFrom = (pool) => {
+        // Loop 1: strict — non-adjacent, non-recent, under global cap, URL spacing,
+        // per-segment share cap, and perceptual-hash dedup.
         for (let j = 0; j < pool.length; j++) {
           const candidate = pool[(ai + j) % pool.length];
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) continue;
           if (key && recentUrls.includes(key)) continue;
           if (key && (globalUrlUse.get(key) || 0) >= maxUsesPerUrl) continue;
+          if (key) {
+            const lastTime = globalUrlLastAbsTime.get(key);
+            if (lastTime !== undefined && absStart - lastTime < URL_SPACING_SEC) continue;
+          }
+          if (key && (segUrlCount.get(key) || 0) >= maxSegUrlUses) continue;
+          if (!checkPHash(candidate)) continue;
           return candidate;
         }
+        // Loop 2: relax recent, URL-spacing, and per-segment cap — keep non-adjacent + global cap.
         for (let j = 0; j < pool.length; j++) {
           const candidate = pool[(ai + j) % pool.length];
           const key = urlKey(candidate);
@@ -206,20 +254,28 @@ export function buildEditTimeline(project, options = {}) {
           if (key && (globalUrlUse.get(key) || 0) >= maxUsesPerUrl) continue;
           return candidate;
         }
-        // Pool exhausted — return least-used asset, preferring a different URL than lastUrl.
-        // This prevents any clip from exceeding the cap when the pool is tiny.
-        let bestFallback = pool[ai % pool.length];
-        let bestFallbackUses = Infinity;
+        // Pool exhausted — cycle to non-adjacent URL, preferring the one used furthest back in time.
+        // Never return the same URL as lastUrl; prefer any different URL over an adjacent repeat.
+        let bestFallback = null;
+        let oldestUseTime = Infinity;
         for (let j = 0; j < pool.length; j++) {
           const c = pool[(ai + j) % pool.length];
           const k = urlKey(c);
-          const uses = k ? (globalUrlUse.get(k) || 0) : 0;
-          if ((!k || k !== lastUrl) && uses < bestFallbackUses) {
-            bestFallbackUses = uses;
+          if (k && k === lastUrl) continue;
+          const lastTime = k ? (globalUrlLastAbsTime.get(k) ?? -1) : -1;
+          if (lastTime < oldestUseTime) {
+            oldestUseTime = lastTime;
             bestFallback = c;
           }
         }
-        return bestFallback;
+        if (bestFallback) return bestFallback;
+        // Truly single-URL pool — prefer any asset that is not lastUrl, otherwise cycle.
+        for (let j = 1; j < pool.length; j++) {
+          const c = pool[(ai + j) % pool.length];
+          const k = urlKey(c);
+          if (!k || k !== lastUrl) return c;
+        }
+        return pool[ai % pool.length];
       };
 
       if (preferVideo && videoPool.length) {
@@ -265,6 +321,18 @@ export function buildEditTimeline(project, options = {}) {
         recentUrls.push(key);
         if (recentUrls.length > recentCap) recentUrls.shift();
         globalUrlUse.set(key, (globalUrlUse.get(key) || 0) + 1);
+        segUrlCount.set(key, (segUrlCount.get(key) || 0) + 1);
+        globalUrlLastAbsTime.set(key, absStart);
+      }
+      // Register the selected asset's perceptual hash so future picks avoid visual duplicates.
+      {
+        const thumbSrc = getThumbnailSrc(asset);
+        if (thumbSrc) {
+          const cid = asset.id || thumbSrc;
+          if (!pHashCache.has(cid)) pHashCache.set(cid, aHashFromImage(thumbSrc));
+          const hash = pHashCache.get(cid);
+          if (hash && !isSimilarToRegistry(hash, pHashRegistry)) pHashRegistry.push(hash);
+        }
       }
       t = end;
       ai += 1;

@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
 import { muxVideoWithAudio } from './audio.mjs';
 import { orderAssetsVideoFirst, effectiveCutInterval, HOOK_ZONE_SEC, HOOK_MAX_HOLD_SEC } from '../../scripts/lib/build-edit-timeline.mjs';
+import { computeTimelineDiversityMetrics } from '../../scripts/lib/assembly-system.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FPS = 24;
@@ -828,6 +829,12 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     : 0;
   const placeholderUrls = [...new Set(allPlaceholderUrls)];
 
+  const diversityMetrics = computeTimelineDiversityMetrics(
+    project.editTimeline || [],
+    project.media || [],
+    project.script || [],
+  );
+
   const manifest = {
     clipCount: totalClipCount,
     placeholderClipCount: totalPlaceholderClips,
@@ -843,6 +850,11 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     cutIntervalSec: options.cutIntervalSec ?? assetCutIntervalSec(project),
     hardCuts: hardCutsEnabled(),
     patternInterrupts: patternInterruptsEnabled(),
+    uniqueUrlsUsed: diversityMetrics.uniqueUrlsUsed,
+    maxUrlSharePct: diversityMetrics.maxUrlSharePct,
+    adjacentRepeatCount: diversityMetrics.adjacentRepeatCount,
+    requiredUniqueUrls: diversityMetrics.requiredUniqueUrls,
+    spacingViolations: diversityMetrics.spacingViolations,
   };
   const manifestPath = join(workDir, 'render-manifest.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

@@ -246,12 +246,16 @@ export function buildEditTimeline(project, options = {}) {
           if (!checkPHash(candidate)) continue;
           return candidate;
         }
-        // Loop 2: relax recent, URL-spacing, and per-segment cap — keep non-adjacent + global cap.
+        // Loop 2: relax recent and per-segment cap — keep non-adjacent, URL spacing, global cap.
         for (let j = 0; j < pool.length; j++) {
           const candidate = pool[(ai + j) % pool.length];
           const key = urlKey(candidate);
           if (key && key === lastUrl) continue;
           if (key && (globalUrlUse.get(key) || 0) >= maxUsesPerUrl) continue;
+          if (key) {
+            const lastTime = globalUrlLastAbsTime.get(key);
+            if (lastTime !== undefined && absStart - lastTime < URL_SPACING_SEC) continue;
+          }
           return candidate;
         }
         // Pool exhausted — cycle to non-adjacent URL, preferring the one used furthest back in time.
@@ -263,6 +267,7 @@ export function buildEditTimeline(project, options = {}) {
           const k = urlKey(c);
           if (k && k === lastUrl) continue;
           const lastTime = k ? (globalUrlLastAbsTime.get(k) ?? -1) : -1;
+          if (k && lastTime >= 0 && absStart - lastTime < URL_SPACING_SEC) continue;
           if (lastTime < oldestUseTime) {
             oldestUseTime = lastTime;
             bestFallback = c;
@@ -273,6 +278,9 @@ export function buildEditTimeline(project, options = {}) {
         for (let j = 1; j < pool.length; j++) {
           const c = pool[(ai + j) % pool.length];
           const k = urlKey(c);
+          if (k && k === lastUrl) continue;
+          const lastTime = k ? (globalUrlLastAbsTime.get(k) ?? -1) : -1;
+          if (k && lastTime >= 0 && absStart - lastTime < URL_SPACING_SEC) continue;
           if (!k || k !== lastUrl) return c;
         }
         return pool[ai % pool.length];

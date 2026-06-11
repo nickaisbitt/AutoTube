@@ -5,6 +5,39 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
+import { MIN_CAPTION_WORDS } from './assembly-system.mjs';
+
+/** Preferred minimum words per phrase, or phrase must end with punctuation. */
+const PREFERRED_CAPTION_WORDS = 4;
+
+/** Seconds before which words are skipped (hook zone). */
+const HOOK_END_SEC = 3.2;
+
+const isPhraseEnd = (word) => /[.!?;]$/.test(word) || /^[—–-]$/.test(word);
+
+/** A word that should not start or continue a break point alone: currency/numeric tokens or ALL-CAPS acronyms. */
+const isBadSplit = (word) => /^\$?\d[\d,.]*$/.test(word) || /^[A-Z]{2,}$/.test(word);
+
+/** Words that read poorly as the first or last word of a standalone caption line. */
+const isWeakLeadIn = (word) => /^(about|this|using|the|in|a|an|or|and|with|for|to|of)$/i.test(word);
+
+/**
+ * A phrase is valid for emission when it is long enough and well-formed.
+ * - Must have >= MIN_CAPTION_WORDS words.
+ * - Must have >= PREFERRED_CAPTION_WORDS words OR end with punctuation.
+ * - Must not start or end with a weak lead-in word.
+ * - Must not have > 50% isBadSplit words.
+ */
+function phraseIsValid(buf) {
+  if (buf.length < MIN_CAPTION_WORDS) return false;
+  const endsWithPunct = isPhraseEnd(buf[buf.length - 1]);
+  if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct) return false;
+  if (isWeakLeadIn(buf[0])) return false;
+  if (isWeakLeadIn(buf[buf.length - 1])) return false;
+  const badCount = buf.filter((w) => isBadSplit(w)).length;
+  if (badCount / buf.length > 0.5) return false;
+  return true;
+}
 
 function escapeDrawtext(text) {
   return String(text || '')
@@ -110,6 +143,149 @@ export function overlayHookText(videoPath, project, options = {}) {
 }
 
 /**
+ * Build phrase-grouped dialogue lines from flattened word timestamps.
+ * Pure function — no file I/O. Returns ASS Dialogue lines and caption count.
+ *
+ * Phrase-quality rules:
+ * 1. Punctuation-first: prefer breaking at sentence-end .!?; before forcing a maxWords flush.
+ *    When at maxWords but punctuation is within 2 words ahead, extend the buffer.
+ * 2. phraseIsValid gate: a phrase must be >=PREFERRED_CAPTION_WORDS OR end with punctuation,
+ *    must not start/end with a weak lead-in word, and must not be >50% isBadSplit tokens.
+ * 3. Segment boundary: discard short carry when it ends with isWeakLeadIn or isBadSplit.
+ *
+ * @param {Array<{word:string,start:number,end:number,segIdx:number}>} allWords
+ * @param {{ maxWords: number }} cm  caption metrics (only maxWords used)
+ * @returns {{ dialogueLines: string[], captionCount: number }}
+ */
+function buildDialogueLines(allWords, cm) {
+  const dialogueLines = [];
+  let captionCount = 0;
+  let buffer = [];
+  let bufferStart = 0;
+  let bufferEnd = 0;
+
+  const flush = () => {
+    if (buffer.length < MIN_CAPTION_WORDS) {
+      buffer = [];
+      return;
+    }
+    const text = escapeAss(buffer.join(' ').toUpperCase());
+    dialogueLines.push(
+      `Dialogue: 0,${formatAssTime(bufferStart)},${formatAssTime(bufferEnd)},Default,,0,0,0,,${text}`,
+    );
+    captionCount += 1;
+    buffer = [];
+  };
+
+  // At a segment boundary: flush if buffer is phrase-length; discard carry if it ends
+  // with a weak lead-in or bad-split token (don't pollute the next segment's phrase).
+  const flushAtBoundary = () => {
+    if (buffer.length > 0) {
+      const lastWord = buffer[buffer.length - 1];
+      if (isWeakLeadIn(lastWord) || isBadSplit(lastWord)) {
+        buffer = [];
+        return;
+      }
+    }
+    if (buffer.length >= MIN_CAPTION_WORDS) {
+      flush();
+    }
+    // buffer.length < MIN_CAPTION_WORDS and clean tail → carry forward into next segment.
+  };
+
+  for (let wi = 0; wi < allWords.length; wi += 1) {
+    const w = allWords[wi];
+    if (w.end <= HOOK_END_SEC) continue;
+    const start = Math.max(w.start, HOOK_END_SEC);
+
+    if (buffer.length > 0 && wi > 0 && allWords[wi - 1].segIdx !== w.segIdx) {
+      flushAtBoundary();
+    }
+
+    if (!buffer.length) bufferStart = start;
+    buffer.push(w.word);
+    bufferEnd = w.end;
+
+    const next = allWords[wi + 1];
+    const atMax = buffer.length >= cm.maxWords;
+    const phraseDone = isPhraseEnd(w.word);
+
+    // Punctuation-first: when at maxWords but not yet at punctuation, look ahead ≤2 words
+    // within the same segment. If punctuation is near, extend the buffer to reach it.
+    const nearPunctuation = atMax && !phraseDone && (() => {
+      for (let k = wi + 1; k <= wi + 2 && k < allWords.length; k++) {
+        if (allWords[k].segIdx !== w.segIdx) break;
+        if (isPhraseEnd(allWords[k].word)) return true;
+      }
+      return false;
+    })();
+
+    // Prevent splitting immediately before a number/currency token or ALL-CAPS acronym
+    // so those tokens don't start the next phrase in isolation.
+    const wouldSplitBad = next && next.segIdx === w.segIdx
+      && (isBadSplit(next.word) || isWeakLeadIn(next.word));
+
+    if (phraseDone && phraseIsValid(buffer) && !wouldSplitBad) {
+      flush();
+    } else if (atMax && !nearPunctuation && phraseIsValid(buffer) && !wouldSplitBad) {
+      flush();
+    } else if (buffer.length >= cm.maxWords + 2) {
+      // Force flush to prevent runaway buffer; bypasses phraseIsValid to preserve content.
+      if (buffer.length >= MIN_CAPTION_WORDS) flush();
+      else buffer = [];
+    }
+  }
+
+  // Emit remainder.
+  if (buffer.length >= MIN_CAPTION_WORDS) {
+    flush();
+  }
+
+  return { dialogueLines, captionCount };
+}
+
+/**
+ * Build a complete ASS subtitle file from word timestamps.
+ * Pure function — no file I/O, no ffmpeg calls. Suitable for unit tests.
+ *
+ * @param {Map<number, Array<{ word: string, start: number, end: number }>>} wordTimestampCache
+ * @param {number[]} [segmentStartTimes]
+ * @param {number} [h]
+ * @param {number} [w]
+ * @returns {string} Full ASS file content
+ */
+export function buildCaptionAss(wordTimestampCache, segmentStartTimes = [], h = 720, w = 1280) {
+  const cm = captionMetrics(h, w);
+  const fontSize = cm.currentPx;
+
+  const header = [
+    '[Script Info]',
+    'Title: AutoTube',
+    'WrapStyle: 0',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Default,Arial Bold,${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,${cm.strokePx},0,2,40,40,${cm.bottomPad},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ];
+
+  // Flatten all segments into a single word list with absolute video timestamps.
+  const allWords = [];
+  for (const [segIdx, segWords] of wordTimestampCache) {
+    const offset = segmentStartTimes[segIdx] ?? 0;
+    for (const word of segWords) {
+      allWords.push({ word: word.word, start: word.start + offset, end: word.end + offset, segIdx });
+    }
+  }
+  allWords.sort((a, b) => a.start - b.start);
+
+  const { dialogueLines } = buildDialogueLines(allWords, cm);
+  return [...header, ...dialogueLines].join('\n');
+}
+
+/**
  * Burn word-timed captions (YouTube-style, 4–6 words per phrase).
  * @param {string} videoPath
  * @param {Map<number, Array<{ word: string, start: number, end: number }>>} wordTimestampCache
@@ -129,116 +305,15 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   const [wStr, hStr] = (probe.stdout || '1280,720').trim().split(',');
   const w = parseInt(wStr, 10) || 1280;
   const h = parseInt(hStr, 10) || 720;
-  const cm = captionMetrics(h, w);
-  const fontSize = cm.currentPx;
+
+  const assContent = buildCaptionAss(wordTimestampCache, segmentStartTimes, h, w);
+  const captionCount = (assContent.match(/^Dialogue:/mg) || []).length;
+
+  if (captionCount === 0) return { ok: false, error: 'no word timestamps' };
 
   const assPath = join(dirname(videoPath), 'captions-overlay.ass');
-  const header = [
-    '[Script Info]',
-    'Title: AutoTube',
-    'WrapStyle: 0',
-    '',
-    '[V4+ Styles]',
-    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: Default,Arial Bold,${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,${cm.strokePx},0,2,40,40,${cm.bottomPad},1`,
-    '',
-    '[Events]',
-    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-  ];
+  writeFileSync(assPath, assContent);
 
-  // Flatten all segments into a single word list with absolute video timestamps.
-  // segmentStartTimes[segIdx] is the absolute start time of that segment in the video.
-  // Without offsets all segments restart at t=0, producing overlapping/orphan captions.
-  // Each word carries its segIdx so segment boundaries can be detected while phrase-building.
-  const allWords = [];
-  for (const [segIdx, segWords] of wordTimestampCache) {
-    const offset = segmentStartTimes[segIdx] ?? 0;
-    for (const w of segWords) {
-      allWords.push({ word: w.word, start: w.start + offset, end: w.end + offset, segIdx });
-    }
-  }
-  // Sort by start time to ensure chronological order (in case cache iteration is unordered).
-  allWords.sort((a, b) => a.start - b.start);
-
-  const lines = [...header];
-  let idx = 0;
-  let buffer = [];
-  let bufferStart = 0;
-  let bufferEnd = 0;
-
-  // Minimum words per emitted caption line — enforces 3-word floor to eliminate
-  // 1-2 word orphan fragments that are unreadable at YouTube caption sizes.
-  const minPhraseWords = 3;
-
-  const flush = () => {
-    if (buffer.length < minPhraseWords) {
-      // Safety guard: never emit a sub-threshold line; discard if somehow called short.
-      buffer = [];
-      return;
-    }
-    const text = escapeAss(buffer.join(' ').toUpperCase());
-    lines.push(`Dialogue: 0,${formatAssTime(bufferStart)},${formatAssTime(bufferEnd)},Default,,0,0,0,,${text}`);
-    idx += 1;
-    buffer = [];
-  };
-
-  // At a segment boundary: flush if we have a phrase-length buffer; otherwise carry the
-  // orphan words forward into the next segment's phrase rather than silently dropping them.
-  // This preserves content at hook→scene transitions while preventing sub-threshold lines.
-  const flushAtBoundary = () => {
-    if (buffer.length >= minPhraseWords) {
-      flush();
-    }
-    // If buffer < minPhraseWords, leave it intact so next segment's words merge with it.
-  };
-
-  const hookEndSec = 3.2;
-  const isPhraseEnd = (word) => /[.!?]$/.test(word) || /^[—–-]$/.test(word);
-  // A word that should not start a new phrase alone: currency/numeric tokens or ALL-CAPS acronyms.
-  const isBadSplit = (word) => /^\$?\d[\d,.]*$/.test(word) || /^[A-Z]{2,}$/.test(word);
-  const isWeakLeadIn = (word) => /^(about|this|using|the|in|a|an|or|and|with|for|to|of)$/i.test(word);
-
-  for (let wi = 0; wi < allWords.length; wi += 1) {
-    const w = allWords[wi];
-    if (w.end <= hookEndSec) continue;
-    const start = Math.max(w.start, hookEndSec);
-
-    // Segment boundary: flush buffer if it has enough words, or carry a short orphan tail
-    // forward into this segment's phrase so no words are silently dropped at transitions.
-    if (buffer.length > 0 && wi > 0 && allWords[wi - 1].segIdx !== w.segIdx) {
-      flushAtBoundary();
-    }
-
-    if (!buffer.length) bufferStart = start;
-    buffer.push(w.word);
-    bufferEnd = w.end;
-
-    const next = allWords[wi + 1];
-    const atMax = buffer.length >= cm.maxWords;
-    const phraseDone = isPhraseEnd(w.word);
-    // Prevent splitting immediately before a number/currency token or ALL-CAPS acronym
-    // so those words don't start the next phrase in isolation.
-    const wouldSplitBad = next && next.segIdx === w.segIdx && (isBadSplit(next.word) || isWeakLeadIn(next.word));
-    const tailWeak = buffer.length < minPhraseWords
-      && buffer.some((bw) => isWeakLeadIn(bw) || isBadSplit(bw));
-
-    if (phraseDone && buffer.length >= minPhraseWords && !wouldSplitBad) {
-      flush();
-    } else if (atMax && !wouldSplitBad && buffer.length >= minPhraseWords) {
-      flush();
-    } else if (buffer.length >= cm.maxWords + 2 && !tailWeak) {
-      // Force flush to prevent runaway buffer even when next word is a bad-split candidate.
-      flush();
-    }
-  }
-  // Flush tail: emit 3+ word remainders; discard 1-2 word end-of-video orphans.
-  if (buffer.length >= minPhraseWords) {
-    flush();
-  }
-
-  if (idx === 0) return { ok: false, error: 'no word timestamps' };
-
-  writeFileSync(assPath, lines.join('\n'));
   const tmpOut = videoPath.replace(/\.mp4$/, '-captioned.mp4');
   const assEsc = assPath.replace(/'/g, "'\\''");
   const r = spawnSync(
@@ -256,7 +331,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   } catch {
     /* ignore */
   }
-  return { ok: true, captionCount: idx };
+  return { ok: true, captionCount };
 }
 
 /**

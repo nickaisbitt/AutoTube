@@ -1023,8 +1023,60 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     project.editTimeline = [];
   }
 
-  const volume = evaluateHarvestVolume(project, minPerSegment);
+  let volume = evaluateHarvestVolume(project, minPerSegment);
   report.harvestQuality = volume;
+
+  if (loopMode) {
+    const uniqueUrls = new Set(
+      (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+    );
+    report.uniqueUrlCount = uniqueUrls.size;
+    const { requiredUniqueUrls: minUnique } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
+
+    // Last-chance per-segment fill: relaxed relevance for segments within 1 of quota.
+    if (!volume.pass && volume.failing.every((f) => f.count >= minPerSegment - 1)) {
+      const topic = project.topic || project.title || '';
+      const topicKeywords = extractKeywords(topic, 12);
+      const segmentsById = Object.fromEntries((project.script || []).map((s) => [s.id, s]));
+      for (const fail of volume.failing) {
+        const seg = segmentsById[fail.segmentId];
+        if (!seg) continue;
+        const rescueQueries = [
+          buildTopUpQuery(seg, topic, 4),
+          ...buildMetaphorTopUpQueries(seg, topic),
+        ].filter(Boolean);
+        for (const q of rescueQueries) {
+          if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
+          for (const endpoint of [...TOP_UP_NEWS_ENDPOINTS, ...TOP_UP_IMAGE_ENDPOINTS]) {
+            if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
+            const results = await fetchImageSearchResults(devServer, endpoint, q);
+            const candidates = results
+              .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source || endpoint }))
+              .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+            for (const r of candidates) {
+              if (await addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords, { relaxed: true })) {
+                if (segmentUniqueCount(project, fail.segmentId) >= minPerSegment) break;
+              }
+            }
+          }
+        }
+      }
+      volume = evaluateHarvestVolume(project, minPerSegment);
+      report.harvestQuality = volume;
+      for (const a of project.media || []) {
+        const k = normalizeUrlKey(a.url, a.sourceUrl);
+        if (k) uniqueUrls.add(k);
+      }
+      report.uniqueUrlCount = uniqueUrls.size;
+    }
+
+    // Soft-pass: all segments within 1 of quota and global unique URL pool meets clip budget.
+    if (!volume.pass && volume.failing.every((f) => f.count >= minPerSegment - 1) && uniqueUrls.size >= minUnique) {
+      report.volumeSoftPass = true;
+      volume = { ...volume, pass: true };
+    }
+  }
+
   report.volumePass = volume.pass;
 
   if (loopMode) {

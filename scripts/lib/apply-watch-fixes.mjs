@@ -326,6 +326,12 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       applied.push(
         `2b. Full-tier pacing plateau (${overall}/100, pacing ${pacing}/100) → strong interrupts, skip reharvest`,
       );
+    } else if (assemblyRepeatIssue) {
+      // Repeat-montage (step 0c/0d) already widened cuts + scheduled reharvest.
+      // Calling escalateFixStrategy here would undo that wider-cut fix via tryInterval().
+      applied.push(
+        `2b. Full-tier score ${overall}/${target100} — interval escalation skipped (repeat-montage active, reharvest already queued)`,
+      );
     } else {
       s.reHarvestMedia = true;
       s.minAssetsPerSegment = Math.min(

@@ -8,7 +8,7 @@ import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
 import { muxVideoWithAudio } from './audio.mjs';
-import { orderAssetsVideoFirst } from '../../scripts/lib/build-edit-timeline.mjs';
+import { orderAssetsVideoFirst, effectiveCutInterval } from '../../scripts/lib/build-edit-timeline.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FPS = 24;
@@ -436,7 +436,10 @@ function interruptStrong() {
 }
 
 async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
-  const interval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
+  const rawInterval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
+  // Apply pool-aware widening so thin pools don't exhaust max-uses in the first segment,
+  // leaving later segments with nothing but fallback cycling.
+  const interval = effectiveCutInterval(project, rawInterval);
   const targetDuration = segment.duration || 20;
   const schedule = buildClipSchedule(segment, segMedia, interval, project);
   const { w, h } = outputDimensions();

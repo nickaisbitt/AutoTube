@@ -8,6 +8,12 @@ import { normalizeUrlKey } from './harvest-loop-context.mjs';
 export const MAX_USES_PER_URL = 2;
 
 /**
+ * Minimum unique assets a segment pool must have before being supplemented
+ * with cross-segment assets from the global pool.
+ */
+const MIN_SEGMENT_POOL = 5;
+
+/**
  * @param {object} project
  * @param {{ cutIntervalSec?: number, reason?: string, preferVideo?: boolean, minVideosFirst?: number }} [options]
  * @returns {Array<{ segmentId: string, startSec: number, endSec: number, assetId: string, reason: string }>}
@@ -91,6 +97,16 @@ export function buildEditTimeline(project, options = {}) {
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
     if (!assets.length) {
       assets = globalPool.map((m) => ({ ...m, segmentId: seg.id }));
+    } else if (assets.length < MIN_SEGMENT_POOL && globalPool.length > assets.length) {
+      // Thin segment pool — pull in cross-segment assets to widen variety before the
+      // global-URL-use cap forces fallback cycling.
+      const segKeys = new Set(assets.map(urlKey).filter(Boolean));
+      const need = MIN_SEGMENT_POOL - assets.length;
+      const extras = globalPool
+        .filter((a) => { const k = urlKey(a); return k && !segKeys.has(k); })
+        .slice(0, need)
+        .map((a) => ({ ...a, segmentId: seg.id }));
+      if (extras.length) assets = [...assets, ...extras];
     }
     if (preferVideo) {
       assets = orderAssetsVideoFirst(assets, minVideosFirst);
@@ -110,7 +126,9 @@ export function buildEditTimeline(project, options = {}) {
     let lastAssetId = null;
     let lastUrl = null;
     const recentUrls = [];
-    const recentCap = 8;
+    // Scale anti-repeat window with pool size so the full pool cycles before any URL
+    // is allowed to repeat within a segment (floor at 8 for small pools).
+    const recentCap = Math.max(8, assets.length);
     let videoSlotsUsed = 0;
     const introHookPool = seg.type === 'intro' ? rankIntroHookAssets(assets).slice(0, Math.max(6, minVideosFirst + 2)) : assets;
     while (t < duration - 0.05) {

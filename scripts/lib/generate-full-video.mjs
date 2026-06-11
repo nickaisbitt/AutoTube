@@ -245,6 +245,18 @@ const TOP_UP_IMAGE_ENDPOINTS = [
   '/api/search-unsplash',
 ];
 
+/** News/archive endpoints for editorial crime/news topics — thumbnails are real press photos. */
+const TOP_UP_NEWS_ENDPOINTS = [
+  '/api/search-bing-news',
+  '/api/search-archive',
+  '/api/search-govpress',
+];
+
+/** True when the topic is primarily a crime, heist, or law-enforcement news story. */
+function isCrimeNewsTopic(topic) {
+  return /museum|heist|robbery|theft|crime|police|arrest|jewel|stolen|louvre|murder|fraud|scam/i.test(topic);
+}
+
 async function fetchVideoSearchResults(devServer, endpoint, query) {
   try {
     const res = await fetch(`${devServer}${endpoint}?q=${encodeURIComponent(query)}`);
@@ -290,29 +302,62 @@ function buildVideoTopUpQueries(seg, topic, round = 0) {
 /** Visual-metaphor top-up queries (EditBuddy-style) — emotion/action, not literal transcript words. */
 function buildMetaphorTopUpQueries(seg, topic) {
   const ctx = `${topic} ${seg.title || ''} ${seg.narration || ''}`.toLowerCase();
-  if (/museum|louvre|heist|robbery|jewel|crown/.test(ctx)) {
-    return [
-      'security camera museum interior',
-      'police lights crime scene night',
-      'jewelry display case close up',
-      'masked robber news footage',
+  const segType = (seg.type || '').toLowerCase();
+
+  if (/museum|louvre|heist|robbery|jewel|crown|stolen|theft/.test(ctx)) {
+    const coreHeist = [
+      'security camera cctv museum interior footage',
+      'police crime scene yellow tape investigation',
+      'detective examining evidence stolen jewelry',
+      'diamond necklace display case jewelry vault broken',
+      'museum gallery empty shattered display case theft',
+      'news anchor breaking heist report television studio',
+      'paris police crime investigation scene louvre',
+      'crown jewels display glass case museum security',
     ];
+    if (/arrest|caught|suspect|charged|trial/.test(ctx)) {
+      return [
+        'police handcuff arrest suspect crime scene news',
+        'detective interview investigation suspect footage news',
+        ...coreHeist,
+      ];
+    }
+    if (/tiktok|live|stream|viral|broadcast/.test(ctx)) {
+      return [
+        'cctv security camera live footage crime viral',
+        'viral crime news broadcast television report breaking',
+        ...coreHeist,
+      ];
+    }
+    if (segType === 'intro' || /introduction|overview|start/.test(ctx)) {
+      return [
+        'museum heist security camera footage night robbery',
+        'masked robber news report stolen jewels breaking news',
+        ...coreHeist,
+      ];
+    }
+    return coreHeist;
   }
+
   if (/cult|church|leader|empire|youtube|follower/.test(ctx)) {
     return [
-      'documentary crowd gathering serious',
-      'news anchor breaking story',
-      'courtroom gavel trial footage',
-      'protest crowd news aerial',
+      'documentary crowd gathering protest serious',
+      'news anchor breaking story investigation',
+      'courtroom gavel trial testimony footage',
+      'protest crowd aerial news footage police',
+      'religious leader followers documentary interview',
+      'investigative journalism report footage expose',
     ];
   }
+
   if (/tiktok|live|stream/.test(ctx)) {
     return [
-      'smartphone screen recording news',
-      'viral news story television',
-      'reporter breaking news desk',
+      'news reporter breaking story live television broadcast',
+      'news anchor desk live report camera studio',
+      'viral moment news coverage footage breaking story',
     ];
   }
+
   return [];
 }
 
@@ -557,6 +602,32 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
 
   if (harvestVideoFirst && minVideosPerSegment > 0) {
     await ensureVideoQuotaPerSegment(project, devServer, report, topic, topicKeywords, minVideosPerSegment);
+  }
+
+  // For crime/news topics, supplement with news/archive endpoints using action-first metaphor queries.
+  // These endpoints return press-photo thumbnails that image search engines often miss.
+  if (isCrimeNewsTopic(topic)) {
+    for (const seg of segments) {
+      let uniqueCount = segmentUniqueCount(project, seg.id);
+      if (uniqueCount >= minPerSegment) continue;
+      const metaphorQueries = buildMetaphorTopUpQueries(seg, topic);
+      for (const q of metaphorQueries) {
+        if (uniqueCount >= minPerSegment) break;
+        for (const endpoint of TOP_UP_NEWS_ENDPOINTS) {
+          if (uniqueCount >= minPerSegment) break;
+          const results = await fetchImageSearchResults(devServer, endpoint, q);
+          const candidates = results
+            .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source || endpoint }))
+            .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+          for (const r of candidates) {
+            if (await addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords)) {
+              uniqueCount = segmentUniqueCount(project, seg.id);
+              if (uniqueCount >= minPerSegment) break;
+            }
+          }
+        }
+      }
+    }
   }
 
   await rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords, {
@@ -814,8 +885,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
 
+  // Loop mode: 0.35 keeps editorial press photos that score below 0.45 due to sparse metadata
+  // while still rejecting clearly off-topic stock filler (score < 0.35).
   const relevance = filterAssetsByRelevance(validated, project, {
-    minScore: loopMode ? 0.45 : 0.25,
+    minScore: loopMode ? 0.35 : 0.25,
   });
   report.relevanceDropped = relevance.dropped;
   if (relevance.dropped.length) {
@@ -877,9 +950,51 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     );
     report.uniqueUrlCount = uniqueUrls.size;
     const minUnique = Math.max(10, (project.script?.length || 3) * 3);
+
     if (uniqueUrls.size < minUnique) {
-      report.thinPoolAbort = true;
-      throw new Error(`Thin media pool (${uniqueUrls.size} unique URLs < ${minUnique}) — reharvest required`);
+      // Rescue round: attempt one more aggressive top-up before declaring a thin pool.
+      // For crime/news topics this searches news/archive endpoints; all topics get the
+      // relaxed rebalance path so no single off-keyword segment blocks the whole batch.
+      const topic = project.topic || project.title || '';
+      const topicKeywords = extractKeywords(topic, 12);
+      const segments = project.script || [];
+
+      if (isCrimeNewsTopic(topic)) {
+        for (const seg of segments) {
+          let count = segmentUniqueCount(project, seg.id);
+          const rescueQueries = buildMetaphorTopUpQueries(seg, topic);
+          for (const q of rescueQueries) {
+            if (count >= minUnique) break;
+            for (const endpoint of [...TOP_UP_NEWS_ENDPOINTS, ...TOP_UP_IMAGE_ENDPOINTS]) {
+              if (count >= minUnique) break;
+              const results = await fetchImageSearchResults(devServer, endpoint, q);
+              const candidates = results
+                .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source || endpoint }))
+                .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+              for (const r of candidates) {
+                if (await addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords, { relaxed: true })) {
+                  count = segmentUniqueCount(project, seg.id);
+                }
+              }
+            }
+          }
+        }
+      } else {
+        // Generic topics: relaxed rebalance pass to fill thin segments
+        await rebalanceFailingSegments(project, devServer, minUnique, report, topic, topicKeywords, {});
+      }
+
+      // Re-check after rescue round
+      const uniqueUrlsAfterRescue = new Set(
+        (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+      );
+      report.uniqueUrlCount = uniqueUrlsAfterRescue.size;
+      report.rescueRoundAdded = uniqueUrlsAfterRescue.size - uniqueUrls.size;
+
+      if (uniqueUrlsAfterRescue.size < minUnique) {
+        report.thinPoolAbort = true;
+        throw new Error(`Thin media pool (${uniqueUrlsAfterRescue.size} unique URLs < ${minUnique}) — reharvest required`);
+      }
     }
   }
 

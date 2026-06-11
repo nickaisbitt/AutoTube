@@ -242,6 +242,11 @@ const HARVEST_OFF_TOPIC_RULES: Array<{ pattern: RegExp; requires: RegExp }> = [
   // Dinner/cooking presenter talking-head in plain background
   { pattern: /\bwhat[\s-]?do[\s-]?you[\s-]?want[\s-]?for[\s-]?dinner|dinner[\s-]?tonight|plain[\s-]?background[\s-]?presenter/i, requires: /\b(?:cooking|recipe|food[\s-]?blog|kitchen|meal)\b/i },
 
+  // Desk / interview / yellow-shirt talking-head lifestyle stock — not news B-roll
+  { pattern: /\b(?:yellow[\s-]?shirt[\s-]?(?:man|woman|person|talking|presenter|host)|talking[\s-]?head[\s-]?yellow)\b/i, requires: /\b__autotube_never__\b/ },
+  { pattern: /\b(?:desk[\s-]?talking[\s-]?head|talking[\s-]?head[\s-]?desk[\s-]?setup|creator[\s-]?at[\s-]?desk|youtube[\s-]?creator[\s-]?desk|vlog[\s-]?desk[\s-]?setup)\b/i, requires: /\b(?:vlog|creator[\s-]?tips|youtube\s+tips|remote[\s-]?work|home[\s-]?office)\b/i },
+  { pattern: /\binterview[\s-]?(?:setup|stock|background|sofa|couch|casual[\s-]?sit)\b|\bsofa[\s-]?interview[\s-]?stock\b/i, requires: /\b(?:news|journalism|interview|crime|police|politics|documentary)\b/i },
+
   // TikTok "how to go live" UI guides — not heist/news B-roll
   { pattern: /\b(?:how\s+to\s+go\s+live|go\s+live\s+on\s+tiktok|tiktok\s+live\s+streaming\s+guide|onestream\.live|buffer\.com\/resources\/tiktok)\b/i, requires: /\b(?:tutorial|creator\s+tips|marketing\s+guide)\b/i },
 

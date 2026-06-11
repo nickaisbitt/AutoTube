@@ -907,7 +907,7 @@ console.log('\n── 25. minAssets cap ──');
   const tmp = mkdtempSync(join(tmpdir(), 'autotube-fixstate-'));
   writeFileSync(join(tmp, 'FIX_STATE.json'), JSON.stringify({ minAssetsPerSegment: 10, harvestNonce: 3 }));
   const loaded = loadFixState(tmp);
-  assert('loadFixState caps minAssets at 6', loaded.minAssetsPerSegment === LOOP_MAX_MIN_ASSETS_PER_SEGMENT);
+  assert(`loadFixState caps minAssets at ${LOOP_MAX_MIN_ASSETS_PER_SEGMENT}`, loaded.minAssetsPerSegment === LOOP_MAX_MIN_ASSETS_PER_SEGMENT);
   rmSync(tmp, { recursive: true, force: true });
 
   const watch = {
@@ -1584,6 +1584,235 @@ console.log('\n── 49. Crime/action metaphor query expansion ──');
     const arrestScore = scoreAssetRelevance(arrestAsset, arrestSeg, topic, topicKws);
     assert('Arrest/crown-jewels-theft asset scores > 0 for heist arrest segment', arrestScore > 0, `score=${arrestScore}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// 50. computeClipBudget — basic formula checks
+// ---------------------------------------------------------------------------
+console.log('\n── 50. computeClipBudget ──');
+{
+  const { computeClipBudget, LOOP_MAX_MIN_ASSETS_PER_SEGMENT: CAP, TOP_UP_MAX_PASSES } = await import('./lib/assembly-system.mjs');
+
+  assert('LOOP_MAX_MIN_ASSETS_PER_SEGMENT is 8', CAP === 8, String(CAP));
+  assert('TOP_UP_MAX_PASSES is 3', TOP_UP_MAX_PASSES === 3, String(TOP_UP_MAX_PASSES));
+
+  // 3 segments × 20 s = 60 s total at 1.25 s/cut → 48 clips → 24 unique URLs needed
+  // segFloor = ceil(3 × 8/2) = 12 → requiredUniqueUrls = max(12, 24) = 24
+  const project3seg = {
+    script: [
+      { id: 's1', duration: 20 },
+      { id: 's2', duration: 20 },
+      { id: 's3', duration: 20 },
+    ],
+    media: Array.from({ length: 30 }, (_, i) => ({ id: `a${i}`, url: `https://example.com/${i}.jpg` })),
+  };
+  const budget3 = computeClipBudget(project3seg, 1.25);
+  assert('3-seg 60s budget requiredUniqueUrls ≥ 20', budget3.requiredUniqueUrls >= 20, `got=${budget3.requiredUniqueUrls}`);
+  assert('3-seg budget has correct totalDuration', budget3.totalDuration === 60, `dur=${budget3.totalDuration}`);
+  assert('3-seg budget cut is ≥ 1.25', budget3.cut >= 1.25, `cut=${budget3.cut}`);
+
+  // Thin pool: 6 assets in 3 segments → effectiveCutInterval widens → budget must still be sane
+  const thinProject = {
+    script: [{ id: 's1', duration: 20 }, { id: 's2', duration: 20 }],
+    media: Array.from({ length: 6 }, (_, i) => ({ id: `t${i}`, url: `https://example.com/t${i}.jpg` })),
+  };
+  const thinBudget = computeClipBudget(thinProject, 1.25);
+  assert('Thin-pool budget is a positive integer', Number.isInteger(thinBudget.requiredUniqueUrls) && thinBudget.requiredUniqueUrls > 0);
+  assert('Thin-pool segFloor ≥ num_segs × (CAP/2)', thinBudget.requiredUniqueUrls >= Math.ceil(2 * (CAP / 2)), `got=${thinBudget.requiredUniqueUrls}`);
+
+  // Empty project — should not throw, returns sensible defaults
+  const emptyBudget = computeClipBudget({ script: [], media: [] }, 1.25);
+  assert('Empty project budget is a positive number', emptyBudget.requiredUniqueUrls > 0);
+}
+
+// ---------------------------------------------------------------------------
+// 51. shouldUseGlobalUrlDedup — pool-size threshold
+// ---------------------------------------------------------------------------
+console.log('\n── 51. shouldUseGlobalUrlDedup deferred dedup ──');
+{
+  const { shouldUseGlobalUrlDedup } = await import('./lib/assembly-system.mjs');
+
+  // Pool = 30, required = 18 → 30 ≥ 18×1.5=27 → dedup now
+  assert('Large pool (≥1.5× budget) enables dedup', shouldUseGlobalUrlDedup(30, 18) === true);
+
+  // Pool = 20, required = 18 → 20 < 27 → defer dedup
+  assert('Tight pool (<1.5× budget) defers dedup', shouldUseGlobalUrlDedup(20, 18) === false);
+
+  // Pool exactly at threshold: 27 ≥ 27 → dedup
+  assert('Pool exactly at threshold (1.5×) enables dedup', shouldUseGlobalUrlDedup(27, 18) === true);
+
+  // Very thin pool
+  assert('Very thin pool defers dedup', shouldUseGlobalUrlDedup(10, 24) === false);
+
+  // Pool is 0 — always defer
+  assert('Zero pool always defers dedup', shouldUseGlobalUrlDedup(0, 10) === false);
+}
+
+// ---------------------------------------------------------------------------
+// 52. New lifestyle/interview/yellow-shirt blocklist patterns
+// ---------------------------------------------------------------------------
+console.log('\n── 52. Lifestyle desk/interview/yellow-shirt blocklist ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's1', title: 'Louvre robbery', narration: 'Security cameras caught the thieves inside the museum.' };
+  const topicKws = extractKeywords(topic, 12);
+
+  const yellowShirt = {
+    url: 'https://stock.example.com/yellow-shirt-man-talking-presenter.jpg',
+    alt: 'yellow shirt man talking head presenter stock',
+    query: 'museum heist louvre',
+    type: 'image',
+  };
+  assert('Yellow-shirt talking head scores 0', scoreAssetRelevance(yellowShirt, seg, topic, topicKws) === 0);
+  assert('Yellow-shirt talking head fails top-up gate', passesTopUpRelevanceGate(yellowShirt, seg, topic, topicKws) === false);
+
+  const deskTalkingHead = {
+    url: 'https://stock.example.com/desk-talking-head-creator.jpg',
+    alt: 'desk talking head youtube creator setup stock',
+    query: 'louvre museum heist',
+    type: 'image',
+  };
+  assert('Desk talking-head stock scores 0 for heist topic', scoreAssetRelevance(deskTalkingHead, seg, topic, topicKws) === 0);
+
+  const sofaInterview = {
+    url: 'https://stock.example.com/sofa-interview-stock-background.jpg',
+    alt: 'sofa interview stock casual background setup',
+    query: 'museum robbery interview',
+    type: 'image',
+  };
+  assert('Sofa interview stock scores 0 for heist topic', scoreAssetRelevance(sofaInterview, seg, topic, topicKws) === 0);
+
+  // Real news interview should NOT be blocked (has journalism/crime context)
+  const newsInterview = {
+    url: 'https://bbc.com/news/louvre-heist-police-interview.jpg',
+    alt: 'police interview investigation heist louvre museum',
+    query: 'louvre museum heist police interview',
+    type: 'image',
+  };
+  const newsInterviewScore = scoreAssetRelevance(newsInterview, seg, topic, topicKws);
+  assert('Legitimate news police interview scores > 0', newsInterviewScore > 0, `score=${newsInterviewScore}`);
+
+  // Batch filter: lifestyle blocks dropped, news interview kept
+  const { media: kept, dropped } = filterAssetsByRelevance(
+    [yellowShirt, deskTalkingHead, sofaInterview, newsInterview],
+    { topic, script: [seg] },
+    { minScore: 0.25 },
+  );
+  assert('Batch: lifestyle/stock dropped (≥3 of 4)', dropped.length >= 3, `dropped=${dropped.length}`);
+  assert('Batch: news interview kept', kept.some((m) => m.url.includes('bbc.com')));
+}
+
+// ---------------------------------------------------------------------------
+// 53. passesTopUpRelevanceGate — crime topics require 2+ strong hits
+// ---------------------------------------------------------------------------
+console.log('\n── 53. Crime topic top-up gate requires 2+ hits ──');
+{
+  const crimeTopic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's1', title: 'Louvre robbery', narration: 'Security cameras caught the thieves inside the museum.' };
+  const topicKws = extractKeywords(crimeTopic, 12);
+
+  // Only 1 strong hit: "louvre" → should FAIL for crime topic
+  const singleHit = {
+    url: 'https://example.com/louvre-exterior.jpg',
+    alt: 'louvre exterior daytime tourist photo',
+    type: 'image',
+  };
+  assert(
+    'Crime topic: 1 strong hit fails top-up gate',
+    passesTopUpRelevanceGate(singleHit, seg, crimeTopic, topicKws) === false,
+  );
+
+  // 2 strong hits: "museum" + "heist" → should PASS
+  const doubleHit = {
+    url: 'https://example.com/museum-heist-robbery-news.jpg',
+    alt: 'museum heist robbery news report louvre',
+    type: 'image',
+  };
+  assert(
+    'Crime topic: 2 strong hits passes top-up gate',
+    passesTopUpRelevanceGate(doubleHit, seg, crimeTopic, topicKws) === true,
+  );
+
+  // Non-crime topic: 1 strong hit is enough
+  const genericTopic = 'AI startup funding Silicon Valley 2026';
+  const genericSeg = { id: 'g1', title: 'Venture capital rounds', narration: 'Billions flow into AI startups.' };
+  const genericKws = extractKeywords(genericTopic, 12);
+  const singleHitGeneric = {
+    url: 'https://example.com/silicon-valley-vc-funding.jpg',
+    alt: 'silicon valley venture capital startup funding',
+    type: 'image',
+  };
+  assert(
+    'Non-crime topic: 1 strong hit passes top-up gate',
+    passesTopUpRelevanceGate(singleHitGeneric, genericSeg, genericTopic, genericKws) === true,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 55. overlayKaraokeCaptions phrase quality — no caption line < MIN_CAPTION_WORDS
+// ---------------------------------------------------------------------------
+console.log('\n── 55. karaoke caption phrase quality (≥3 words per line) ──');
+{
+  const { buildCaptionAss } = await import('../deploy/server-render/ffmpegOverlays.mjs');
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname: _dirname, join: _join } = await import('node:path');
+  const __file = fileURLToPath(import.meta.url);
+  const repoRoot = _dirname(_dirname(__file));
+
+  // Load the real-world word timestamps from the modal-retest recording.
+  const wtPath = _join(repoRoot, 'test-recordings/modal-retest-1781153023038/modal-bundle/word-timestamps.json');
+  const projPath = _join(repoRoot, 'test-recordings/modal-retest-1781153023038/modal-bundle/project.json');
+
+  const rawWt = JSON.parse(readFileSync(wtPath, 'utf8'));
+  const rawProj = JSON.parse(readFileSync(projPath, 'utf8'));
+
+  // Build Map<segIdx, words[]> matching overlayKaraokeCaptions contract.
+  const wordTimestampCache = new Map(
+    Object.entries(rawWt).map(([k, v]) => [Number(k), v]),
+  );
+
+  // Derive segment start times from cumulative durations (project.json has no startTime).
+  const script = rawProj.script || [];
+  const segmentStartTimes = [];
+  let cumOffset = 0;
+  for (const seg of script) {
+    segmentStartTimes.push(cumOffset);
+    cumOffset += seg.duration ?? 0;
+  }
+
+  // Generate ASS content at standard 720p dimensions.
+  const assContent = buildCaptionAss(wordTimestampCache, segmentStartTimes, 720, 1280);
+
+  // Extract all Dialogue lines and count words per line.
+  const dialogueLines = assContent.split('\n').filter((l) => l.startsWith('Dialogue:'));
+  assert(`Generated ≥1 caption line from modal-retest fixture`, dialogueLines.length >= 1,
+    `got ${dialogueLines.length} lines`);
+
+  // Each Dialogue line format: "Dialogue: 0,h:mm:ss.cc,h:mm:ss.cc,Default,,0,0,0,,TEXT"
+  // The TEXT is the last comma-separated field.
+  let shortLineCount = 0;
+  let shortLineExample = '';
+  for (const line of dialogueLines) {
+    // Find the text after the 9th comma (fields 0-8 are fixed ASS metadata).
+    const parts = line.split(',');
+    if (parts.length < 10) continue;
+    const text = parts.slice(9).join(',').trim();
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    if (wordCount < 3) {
+      shortLineCount += 1;
+      shortLineExample = shortLineExample || `"${text}" (${wordCount} word${wordCount === 1 ? '' : 's'})`;
+    }
+  }
+  assert(
+    `No caption line has fewer than 3 words (${dialogueLines.length} total lines)`,
+    shortLineCount === 0,
+    shortLineExample ? `first short line: ${shortLineExample}` : '',
+  );
+
+  // Also verify the ASS has a valid header.
+  assert('ASS output has Script Info header', assContent.includes('[Script Info]'));
+  assert('ASS output has V4+ Styles section', assContent.includes('[V4+ Styles]'));
 }
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,8 @@ import {
   buildShortHookOverlay,
   hookOverrideMatchesTopic,
 } from './patch-project-for-loop.mjs';
-import { validateEditTimeline } from './build-edit-timeline.mjs';
+import { validateEditTimeline, effectiveCutInterval } from './build-edit-timeline.mjs';
+import { computeClipBudget, shouldUseGlobalUrlDedup, TOP_UP_MAX_PASSES } from './assembly-system.mjs';
 import { shouldUseModalRender, renderViaModal } from './modal-render.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
@@ -39,6 +40,7 @@ import {
   isVideoLikeAsset,
   isUnreliableVideoHost,
   isTrustedVideoHost,
+  isCrimeNewsTopic,
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
   dedupHarvestByUrl,
 } from './harvest-quality.mjs';
@@ -286,11 +288,6 @@ const TOP_UP_NEWS_ENDPOINTS = [
   '/api/search-archive',
   '/api/search-govpress',
 ];
-
-/** True when the topic is primarily a crime, heist, or law-enforcement news story. */
-function isCrimeNewsTopic(topic) {
-  return /museum|heist|robbery|theft|crime|police|arrest|jewel|stolen|louvre|murder|fraud|scam|chase|surveillance|cctv/i.test(topic);
-}
 
 async function fetchVideoSearchResults(devServer, endpoint, query) {
   try {
@@ -957,10 +954,24 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   // URL-level cross-segment dedup: prevent the same shot appearing in multiple segment pools.
   // This runs after phash dedup so that visually distinct but URL-identical assets are already
   // collapsed. First occurrence (original segment assignment) wins.
-  const urlDeduped = dedupHarvestByUrl(deduped.media);
-  project.media = urlDeduped.media;
-  if (urlDeduped.dupCount) {
-    report.crossSegDupCount = urlDeduped.dupCount;
+  // When the pool is thin relative to the clip budget, defer this dedup until after top-up so
+  // we don't shrink an already-marginal pool before top-up has a chance to fill it.
+  const uniqueUrlsPreDedup = new Set(
+    deduped.media.map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+  ).size;
+  const _preTopUpBudget = computeClipBudget(
+    { script: project.script, media: deduped.media },
+    options.cutIntervalSec ?? 1.25,
+  );
+  if (shouldUseGlobalUrlDedup(uniqueUrlsPreDedup, _preTopUpBudget.requiredUniqueUrls)) {
+    const urlDeduped = dedupHarvestByUrl(deduped.media);
+    project.media = urlDeduped.media;
+    if (urlDeduped.dupCount) {
+      report.crossSegDupCount = urlDeduped.dupCount;
+    }
+  } else {
+    project.media = deduped.media;
+    report.deferredGlobalDedup = true;
   }
 
   const minPerSeg = loopMode ? minPerSegment : Math.min(4, minPerSegment);
@@ -1021,47 +1032,61 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
     );
     report.uniqueUrlCount = uniqueUrls.size;
-    const minUnique = Math.max(15, (project.script?.length || 3) * 4);
+    const { requiredUniqueUrls: minUnique } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
 
     if (uniqueUrls.size < minUnique) {
-      // Rescue round: attempt one more aggressive top-up before declaring a thin pool.
-      // For crime/news topics this searches news/archive endpoints; all topics get the
-      // relaxed rebalance path so no single off-keyword segment blocks the whole batch.
+      // Escalating rescue: up to TOP_UP_MAX_PASSES aggressive top-up passes before abort.
+      // For crime/news topics each pass searches news/archive endpoints; generic topics use
+      // the relaxed rebalance path so thin segments don't block the whole batch.
       const topic = project.topic || project.title || '';
       const topicKeywords = extractKeywords(topic, 12);
       const segments = project.script || [];
 
-      if (isCrimeNewsTopic(topic)) {
-        for (const seg of segments) {
-          let count = segmentUniqueCount(project, seg.id);
-          const rescueQueries = buildMetaphorTopUpQueries(seg, topic);
-          for (const q of rescueQueries) {
-            if (count >= minUnique) break;
-            for (const endpoint of [...TOP_UP_NEWS_ENDPOINTS, ...TOP_UP_IMAGE_ENDPOINTS]) {
+      let rescueAdded = 0;
+      for (let pass = 0; pass < TOP_UP_MAX_PASSES; pass++) {
+        const currentUnique = new Set(
+          (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+        );
+        if (currentUnique.size >= minUnique) break;
+
+        if (isCrimeNewsTopic(topic)) {
+          for (const seg of segments) {
+            let count = segmentUniqueCount(project, seg.id);
+            const rescueQueries = buildMetaphorTopUpQueries(seg, topic);
+            for (const q of rescueQueries) {
               if (count >= minUnique) break;
-              const results = await fetchImageSearchResults(devServer, endpoint, q);
-              const candidates = results
-                .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source || endpoint }))
-                .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
-              for (const r of candidates) {
-                if (await addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords, { relaxed: true })) {
-                  count = segmentUniqueCount(project, seg.id);
+              for (const endpoint of [...TOP_UP_NEWS_ENDPOINTS, ...TOP_UP_IMAGE_ENDPOINTS]) {
+                if (count >= minUnique) break;
+                const results = await fetchImageSearchResults(devServer, endpoint, q);
+                const candidates = results
+                  .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source || endpoint }))
+                  .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+                for (const r of candidates) {
+                  if (await addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords, { relaxed: true })) {
+                    count = segmentUniqueCount(project, seg.id);
+                  }
                 }
               }
             }
           }
+        } else {
+          // Generic topics: relaxed rebalance pass to fill thin segments
+          await rebalanceFailingSegments(project, devServer, minUnique, report, topic, topicKeywords, {});
         }
-      } else {
-        // Generic topics: relaxed rebalance pass to fill thin segments
-        await rebalanceFailingSegments(project, devServer, minUnique, report, topic, topicKeywords, {});
+
+        const afterPass = new Set(
+          (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+        );
+        rescueAdded += afterPass.size - currentUnique.size;
+        if (afterPass.size >= minUnique) break;
       }
 
-      // Re-check after rescue round
+      // Re-check after rescue rounds
       const uniqueUrlsAfterRescue = new Set(
         (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
       );
       report.uniqueUrlCount = uniqueUrlsAfterRescue.size;
-      report.rescueRoundAdded = uniqueUrlsAfterRescue.size - uniqueUrls.size;
+      report.rescueRoundAdded = rescueAdded;
 
       if (uniqueUrlsAfterRescue.size < minUnique) {
         report.thinPoolAbort = true;

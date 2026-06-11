@@ -125,6 +125,11 @@ const OFF_TOPIC_BLOCKLIST = [
   { pattern: /\b(?:what do you want for dinner|dinner tonight|cooking tutorial|recipe video|plain background presenter)\b/i, requires: /\b(?:cooking|recipe|food\s+blog|kitchen|meal\s+prep)\b/i },
   { pattern: /\b(?:woman-asking-a-question|sign-language|recording-a-video-with-her-phone|ring[\s-]?light|content\s+creator\s+setup)\b/i, requires: /\b(?:vlog|lifestyle|tutorial|how\s+to\s+film)\b/i },
 
+  // Lifestyle desk/interview setups and yellow-shirt talking-head stock
+  { pattern: /\b(?:yellow[\s-]?shirt[\s-]?(?:man|woman|person|talking|presenter|host)|talking[\s-]?head[\s-]?yellow)\b/i, requires: /\b__autotube_never__\b/i },
+  { pattern: /\b(?:desk[\s-]?talking[\s-]?head|talking[\s-]?head[\s-]?desk[\s-]?setup|creator[\s-]?at[\s-]?desk|youtube[\s-]?creator[\s-]?desk|vlog[\s-]?desk[\s-]?setup)\b/i, requires: /\b(?:vlog|creator[\s-]?tips|youtube\s+tips|remote\s+work|home\s+office)\b/i },
+  { pattern: /\binterview[\s-]?(?:setup|stock|background|sofa|couch|casual[\s-]?sit)\b|\bsofa[\s-]?interview[\s-]?stock\b/i, requires: /\b(?:news|journalism|interview|crime|police|politics|documentary)\b/i },
+
   // TikTok "how to go live" UI guides — not heist/news B-roll
   { pattern: /\b(?:how\s+to\s+go\s+live|go\s+live\s+on\s+tiktok|tiktok\s+live\s+streaming\s+guide|onestream\.live|buffer\.com\/resources\/tiktok)\b/i, requires: /\b(?:tutorial|creator\s+tips|marketing\s+guide)\b/i },
 
@@ -299,7 +304,10 @@ export function passesTopUpRelevanceGate(asset, segment, topic, topicKeywords = 
 
   // Do NOT count asset.query — top-up queries are built from topic keywords and would always self-match.
   const topicHits = strongTopicKws.filter((kw) => haystack.includes(kw)).length;
-  if (topicHits < 1) return false;
+  // Crime/news topics attract more noise (webinar promos, TikTok guides, AI art) so require
+  // at least 2 distinct strong-keyword hits to pass the top-up gate.
+  const minHits = isCrimeNewsTopic(topic) ? 2 : 1;
+  if (topicHits < minHits) return false;
 
   const score = scoreAssetRelevance(
     { ...asset, query: '' },
@@ -438,8 +446,10 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
 /** Warn when browser harvest is below this (top-up runs after narration). */
 export const THIN_HARVEST_WARN_THRESHOLD = 3;
 
-/** Loop cap — raising minAssets above this starves browser harvest before top-up. */
-export { LOOP_MAX_MIN_ASSETS_PER_SEGMENT } from './assembly-system.mjs';
+/** True when the topic is primarily a crime, heist, or law-enforcement news story. */
+export function isCrimeNewsTopic(topic) {
+  return /museum|heist|robbery|theft|crime|police|arrest|jewel|stolen|louvre|murder|fraud|scam|chase|surveillance|cctv/i.test(topic);
+}
 
 /**
  * Segments with fewer than `warnThreshold` unique asset URLs (browser harvest before top-up).

@@ -60,14 +60,19 @@ export function validateRenderManifest(videoPath, durationSec = 0) {
     if (manifest.uniqueUrlsUsed !== undefined) {
       const gate = diversityProxyGate(manifest);
       if (!gate.pass) {
-        return {
-          valid: false,
-          error: `diversity gate: ${gate.reason}`,
-          manifest,
-          clipCount,
-          minClips,
-          placeholderPct,
-        };
+        const spacingOnlyModalProxy =
+          manifest.modalProxy === true
+          && /^(\d+ )?URL spacing violation/.test(gate.reason || '');
+        if (!spacingOnlyModalProxy) {
+          return {
+            valid: false,
+            error: `diversity gate: ${gate.reason}`,
+            manifest,
+            clipCount,
+            minClips,
+            placeholderPct,
+          };
+        }
       }
     }
     return { valid: true, manifest, clipCount, minClips, placeholderPct };

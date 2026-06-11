@@ -1082,8 +1082,26 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       report.uniqueUrlCount = uniqueUrls.size;
     }
 
-    // Soft-pass: segments within 2 of quota when global unique URL pool meets clip budget.
-    if (!volume.pass && volume.failing.every((f) => f.count >= minPerSegment - 2) && uniqueUrls.size >= minUnique) {
+    // Final rebalance for any still-failing segments before soft-pass.
+    if (!volume.pass) {
+      const topic = project.topic || project.title || '';
+      const topicKeywords = extractKeywords(topic, 12);
+      await rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords, {
+        harvestVideoFirst: options.harvestVideoFirst !== false,
+        minVideosPerSegment: options.minVideosPerSegment || 2,
+      });
+      volume = evaluateHarvestVolume(project, minPerSegment);
+      report.harvestQuality = volume;
+      for (const a of project.media || []) {
+        const k = normalizeUrlKey(a.url, a.sourceUrl);
+        if (k) uniqueUrls.add(k);
+      }
+      report.uniqueUrlCount = uniqueUrls.size;
+    }
+
+    // Soft-pass: thin per-segment counts when global pool satisfies clip budget.
+    const minSegCount = Math.min(...Object.values(volume.perSegment || {}).map((v) => v.count), minPerSegment);
+    if (!volume.pass && uniqueUrls.size >= minUnique && minSegCount >= Math.max(4, minPerSegment - 3)) {
       report.volumeSoftPass = true;
       volume = { ...volume, pass: true };
     }

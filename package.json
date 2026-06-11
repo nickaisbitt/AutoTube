@@ -32,6 +32,7 @@
     "loop:video": "node scripts/video-improvement-loop.mjs --until-score 9.1",
     "loop:preflight": "node scripts/loop-preflight.mjs",
     "harvest:smoke": "node scripts/harvest-smoke-test.mjs",
+    "modal:render:deploy": "modal deploy deploy/modal_render.py",
     "loop:serve": "npm run dev -- --port 5173 --host 0.0.0.0",
     "loop:video:mock": "node scripts/video-improvement-loop.mjs --until-score 9.1 --mock-harvest",
     "loop:video:once": "node scripts/video-improvement-loop.mjs --max 1",

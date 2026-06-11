@@ -8,7 +8,8 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   const env = {
     ...process.env,
     DEV_SERVER_URL: base.devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173',
-    AUTOTUBE_FORCE_CPU: process.env.AUTOTUBE_FORCE_CPU || '1',
+    AUTOTUBE_FORCE_CPU: process.env.AUTOTUBE_FORCE_CPU
+      ?? (process.env.AUTOTUBE_MODAL_RENDER === '1' || process.env.MODAL_RENDER_URL ? '0' : '1'),
     AUTOTUBE_LOOP_MODE: '1',
     AUTOTUBE_YOUTUBE_MODE: process.env.AUTOTUBE_YOUTUBE_MODE || '1',
   };

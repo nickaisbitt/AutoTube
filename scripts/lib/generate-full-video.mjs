@@ -16,6 +16,7 @@ import {
   hookOverrideMatchesTopic,
 } from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
+import { shouldUseModalRender, renderViaModal } from './modal-render.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 import {
@@ -1547,28 +1548,53 @@ export async function generateFullVideo(options) {
       return render;
     }
 
-    let render = runServerRender('render-1');
-    if (render.status !== 0 && render.status !== null) {
-      return { ok: false, error: `server-render exit ${render.status}`, topic, outDir, projectPath };
-    }
-
-    let produced = resolveProducedOutput();
-    if (!produced) {
-      return { ok: false, error: 'No output MP4', topic, outDir };
-    }
-
     let renderRetried = false;
-    const producedSize = statSync(produced).size;
-    if (producedSize < LOOP_MIN_RENDER_BYTES) {
-      log(`   ⚠️ Render output tiny (${(producedSize / 1024 / 1024).toFixed(2)} MB) — retrying once…`);
-      render = runServerRender('render-retry');
-      renderRetried = true;
-      if (render.status !== 0 && render.status !== null) {
-        return { ok: false, error: `server-render retry exit ${render.status}`, topic, outDir, projectPath };
+    let produced = null;
+
+    if (shouldUseModalRender()) {
+      log(`🎥 Render (Modal GPU — TTS local, ffmpeg on Modal) → ${mp4Out}`);
+      const modalResult = await renderViaModal({
+        project,
+        mp4Out,
+        renderEnv,
+        devServer,
+        outDir,
+        log,
+      });
+      writeFileSync(
+        join(outDir, 'render.log'),
+        modalResult.ok
+          ? `modal-render OK ${modalResult.bytes} bytes in ${modalResult.elapsedMs}ms`
+          : `modal-render FAIL: ${modalResult.error}`,
+      );
+      writeFileSync(renderLogPath, readFileSync(join(outDir, 'render.log')));
+      if (!modalResult.ok) {
+        return { ok: false, error: modalResult.error || 'Modal render failed', topic, outDir, projectPath };
       }
+      produced = modalResult.videoPath || resolveProducedOutput();
+    } else {
+      let render = runServerRender('render-1');
+      if (render.status !== 0 && render.status !== null) {
+        return { ok: false, error: `server-render exit ${render.status}`, topic, outDir, projectPath };
+      }
+
       produced = resolveProducedOutput();
       if (!produced) {
-        return { ok: false, error: 'No output MP4 after render retry', topic, outDir };
+        return { ok: false, error: 'No output MP4', topic, outDir };
+      }
+
+      const producedSize = statSync(produced).size;
+      if (producedSize < LOOP_MIN_RENDER_BYTES) {
+        log(`   ⚠️ Render output tiny (${(producedSize / 1024 / 1024).toFixed(2)} MB) — retrying once…`);
+        render = runServerRender('render-retry');
+        renderRetried = true;
+        if (render.status !== 0 && render.status !== null) {
+          return { ok: false, error: `server-render retry exit ${render.status}`, topic, outDir, projectPath };
+        }
+        produced = resolveProducedOutput();
+        if (!produced) {
+          return { ok: false, error: 'No output MP4 after render retry', topic, outDir };
+        }
       }
     }
 

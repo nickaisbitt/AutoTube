@@ -102,6 +102,19 @@ const OFF_TOPIC_BLOCKLIST = [
 
   // Talking-head lifestyle / dinner / vlog presenters — not news B-roll
   { pattern: /\b(?:what do you want for dinner|dinner tonight|cooking tutorial|recipe video|plain background presenter)\b/i, requires: /\b(?:cooking|recipe|food\s+blog|kitchen|meal\s+prep)\b/i },
+  { pattern: /\b(?:woman-asking-a-question|sign-language|recording-a-video-with-her-phone|ring[\s-]?light|content\s+creator\s+setup)\b/i, requires: /\b(?:vlog|lifestyle|tutorial|how\s+to\s+film)\b/i },
+
+  // TikTok "how to go live" UI guides — not heist/news B-roll
+  { pattern: /\b(?:how\s+to\s+go\s+live|go\s+live\s+on\s+tiktok|tiktok\s+live\s+streaming\s+guide|onestream\.live|buffer\.com\/resources\/tiktok)\b/i, requires: /\b(?:tutorial|creator\s+tips|marketing\s+guide)\b/i },
+
+  // Cyber / webinar "digital heist" promos — wrong heist for museum crime topics
+  { pattern: /\b(?:strategink|digital[\s-]?heist[\s-]?summit|slideshare.*digital[\s-]?heist|data[\s-]?breach(?:es)?|cyber[\s-]?heist|protect\s+your\s+vdr)\b/i, requires: /\b(?:cyber|data\s+protection|webinar|summit|hacker|infosec)\b/i },
+
+  // AI-generated / clipart crime illustrations — not editorial footage
+  { pattern: /\bcraiyon\.com|ai[\s-]?generated\s+illustration|digital\s+illustration\s+of\s+a\s+museum\s+heist\b/i, requires: /\b(?:ai\s+art|illustration|cartoon)\b/i },
+
+  // Smartphone/social-media lifestyle stock — noise for crime/news
+  { pattern: /\b(?:smartphone[\s-]?user[\s-]?engaged|woman[\s-]?art[\s-]?iphone|social[\s-]?media\s+addict|scrolling\s+tiktok)\b/i, requires: /\b(?:phone\s+addiction|social\s+media\s+habit|lifestyle)\b/i },
 
   // Watermarked preview stock — never ship in final render
   { pattern: /gettyimages|shutterstock\s+watermark|alamy\s+watermark|istockphoto.*preview/i, requires: /\b__autotube_never__\b/i },

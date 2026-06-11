@@ -1019,6 +1019,70 @@ console.log('\n── 27. isBadKineticOverlay ──');
 }
 
 // ---------------------------------------------------------------------------
+// 35. Lifestyle / webinar / digital-heist blocklist (museum crime topic)
+// ---------------------------------------------------------------------------
+console.log('\n── 35. Lifestyle and webinar blocklist ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's2', title: 'TikTok live stream', narration: 'The thieves broadcast while stealing crown jewels.' };
+  const topicKws = extractKeywords(topic, 12);
+
+  const ringLight = {
+    url: 'https://www.pexels.com/video/a-young-woman-recording-a-video-with-her-phone-and-a-ring-light-12433102/',
+    alt: 'woman recording with ring light',
+    query: 'tiktok live stream',
+    type: 'video',
+  };
+  assert('Ring-light lifestyle video scores 0', scoreAssetRelevance(ringLight, seg, topic, topicKws) === 0);
+
+  const strategink = {
+    url: 'https://www.strategink.com/digital-heist-summit/1st-edition/bengaluru/img/email-banner.jpg',
+    alt: 'Digital Heist Summit promo',
+    query: 'digital heist',
+    type: 'image',
+  };
+  assert('Strategink webinar promo scores 0', scoreAssetRelevance(strategink, seg, topic, topicKws) === 0);
+
+  const goLiveGuide = {
+    url: 'https://buffer.com/resources/tiktok-live/',
+    alt: 'How to Go Live on TikTok',
+    query: 'tiktok live guide',
+    type: 'image',
+  };
+  assert('TikTok go-live tutorial scores 0', scoreAssetRelevance(goLiveGuide, seg, topic, topicKws) === 0);
+
+  const { media, dropped } = filterAssetsByRelevance(
+    [ringLight, strategink, goLiveGuide],
+    { topic, script: [seg] },
+    { minScore: 0.38 },
+  );
+  assert('Batch filter drops lifestyle/webinar assets', media.length === 0 && dropped.length === 3);
+}
+
+// ---------------------------------------------------------------------------
+// 36. Assembly FAIL excludes all media URLs from failed project
+// ---------------------------------------------------------------------------
+console.log('\n── 36. Assembly FAIL URL exclusion ──');
+{
+  const watch = {
+    finalScore: 45,
+    assemblyAudit: { assemblyScore: 30, issues: ['Off-topic stock images'] },
+    brutal: { overall: 4.5, report: { scores: { pacing: 7.5, visualVariety: 7 } } },
+    objectiveGate: { available: true, pass: true, checks: [] },
+  };
+  const badProject = {
+    media: [
+      { url: 'https://www.strategink.com/digital-heist-summit/banner.jpg', sourceUrl: 'https://www.strategink.com/digital-heist-summit/banner.jpg' },
+      { url: '/api/download-clip?url=https%3A%2F%2Fpexels.com%2Fring-light', sourceUrl: 'https://www.pexels.com/video/ring-light-12433102/' },
+    ],
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, { harvestNonce: 3 }, 'museum heist', badProject);
+  assert('Assembly fail excludes strategink URL', (fixState.excludedUrls || []).some((u) => u.includes('strategink')));
+  assert('Assembly fail excludes pexels ring-light URL', (fixState.excludedUrls || []).some((u) => u.includes('pexels.com')));
+  assert('Assembly fail logs URL exclusion', applied.some((a) => a.includes('exclude')));
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log(`\n════════════════════════════════`);

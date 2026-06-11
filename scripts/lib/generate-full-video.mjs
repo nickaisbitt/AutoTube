@@ -693,8 +693,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
 
   for (const asset of project.media) {
-    // Only reject on primary URL — thumbnailUrl is often a Bing/OIP search preview while url is a full editorial image.
-    if (isJunkHarvestUrl(asset.url)) {
+    // Reject junk on primary URL or embedded source — proxy paths hide getty/stock hosts.
+    if (isJunkHarvestUrl(asset.url) || isJunkHarvestUrl(asset.sourceUrl)) {
       report.dropped.push({ url: asset.url, reason: 'junk URL (avatar/video-thumb placeholder)' });
       continue;
     }
@@ -770,7 +770,9 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
 
-  const relevance = filterAssetsByRelevance(validated, project);
+  const relevance = filterAssetsByRelevance(validated, project, {
+    minScore: loopMode ? 0.38 : 0.25,
+  });
   report.relevanceDropped = relevance.dropped;
   if (relevance.dropped.length) {
     report.beforeRelevance = validated.length;

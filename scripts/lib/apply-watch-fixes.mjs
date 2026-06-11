@@ -10,7 +10,7 @@ import {
   countSegmentVideos,
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
 } from './harvest-quality.mjs';
-import { normalizeUrlKey } from './harvest-loop-context.mjs';
+import { normalizeUrlKey, accumulateExcludedUrls } from './harvest-loop-context.mjs';
 import {
   loadRenderManifest,
   formatPlaceholderSegmentDetail,
@@ -243,8 +243,15 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     s.suppressGiphy = true;
     s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
     s.fixStrategy = 'reharvest';
-    const issues = (watch.assemblyAudit?.issues || []).slice(0, 2).join('; ');
-    applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → reharvest nonce ${s.harvestNonce}: ${issues || 'off-topic/repeat montage'}`);
+    const harvestProject = project || loadLastProject();
+    if (harvestProject?.media?.length) {
+      const before = (s.excludedUrls || []).length;
+      accumulateExcludedUrls(s, harvestProject);
+      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → exclude ${s.excludedUrls.length - before} URLs, reharvest nonce ${s.harvestNonce}`);
+    } else {
+      const issues = (watch.assemblyAudit?.issues || []).slice(0, 2).join('; ');
+      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → reharvest nonce ${s.harvestNonce}: ${issues || 'off-topic/repeat montage'}`);
+    }
   }
 
   if (hookFail) {

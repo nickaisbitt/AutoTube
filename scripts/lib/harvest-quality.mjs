@@ -128,13 +128,34 @@ const OFF_TOPIC_BLOCKLIST = [
  * @param {string} contextText
  * @returns {string|null}
  */
-function offTopicBlockReason(haystack, contextText) {
+export function offTopicBlockReason(haystack, contextText) {
   for (const rule of OFF_TOPIC_BLOCKLIST) {
     if (rule.pattern.test(haystack) && !rule.requires.test(contextText)) {
       return `blocklist: ${rule.pattern}`;
     }
   }
   return null;
+}
+
+/** URLs to ban after assembly fail — off-topic/lifestyle only, not editorial news images. */
+export function collectAssemblyExcludeUrls(project) {
+  const topic = `${project?.topic || ''} ${project?.title || ''}`.toLowerCase();
+  const out = new Set();
+  for (const asset of project?.media || []) {
+    const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+    if (offTopicBlockReason(haystack, topic)) {
+      const key = (asset.sourceUrl || asset.url || '').split('?')[0].toLowerCase();
+      if (key) out.add(key);
+    }
+    if (
+      /pexels\.com\/video\/(?:a-young-woman|woman-writing|ring-light|smartphone-user|woman-art-iphone)/i.test(haystack)
+      || /\/video\/(?:woman|ring-light|smartphone)/i.test(haystack)
+    ) {
+      const key = (asset.sourceUrl || asset.url || '').split('?')[0].toLowerCase();
+      if (key) out.add(key);
+    }
+  }
+  return [...out];
 }
 
 /**

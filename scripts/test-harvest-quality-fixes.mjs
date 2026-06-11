@@ -1071,14 +1071,17 @@ console.log('\n── 36. Assembly FAIL URL exclusion ──');
     objectiveGate: { available: true, pass: true, checks: [] },
   };
   const badProject = {
+    topic: 'The museum heist streamed live on TikTok',
     media: [
       { url: 'https://www.strategink.com/digital-heist-summit/banner.jpg', sourceUrl: 'https://www.strategink.com/digital-heist-summit/banner.jpg' },
       { url: '/api/download-clip?url=https%3A%2F%2Fpexels.com%2Fring-light', sourceUrl: 'https://www.pexels.com/video/ring-light-12433102/' },
+      { url: 'https://abcnews.go.com/International/louvre-heist', alt: 'Louvre heist news photo' },
     ],
   };
   const { fixState, applied } = applyFixesFromWatch(watch, { harvestNonce: 3 }, 'museum heist', badProject);
   assert('Assembly fail excludes strategink URL', (fixState.excludedUrls || []).some((u) => u.includes('strategink')));
   assert('Assembly fail excludes pexels ring-light URL', (fixState.excludedUrls || []).some((u) => u.includes('pexels.com')));
+  assert('Assembly fail keeps editorial Louvre news URL', !(fixState.excludedUrls || []).some((u) => u.includes('abcnews.go.com')));
   assert('Assembly fail logs URL exclusion', applied.some((a) => a.includes('exclude')));
 }
 

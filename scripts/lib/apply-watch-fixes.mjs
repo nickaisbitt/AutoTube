@@ -10,7 +10,8 @@ import {
   countSegmentVideos,
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
 } from './harvest-quality.mjs';
-import { normalizeUrlKey, accumulateExcludedUrls } from './harvest-loop-context.mjs';
+import { normalizeUrlKey } from './harvest-loop-context.mjs';
+import { collectAssemblyExcludeUrls } from './harvest-quality.mjs';
 import {
   loadRenderManifest,
   formatPlaceholderSegmentDetail,
@@ -251,8 +252,13 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     const harvestProject = project || loadLastProject();
     if (harvestProject?.media?.length) {
       const before = (s.excludedUrls || []).length;
-      accumulateExcludedUrls(s, harvestProject);
-      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → exclude ${s.excludedUrls.length - before} URLs, reharvest nonce ${s.harvestNonce}`);
+      const prev = new Set((s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
+      for (const key of collectAssemblyExcludeUrls(harvestProject)) {
+        if (key) prev.add(key);
+      }
+      s.excludedUrls = [...prev].slice(-400);
+      const added = s.excludedUrls.length - before;
+      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → exclude ${added} off-topic URL(s), reharvest nonce ${s.harvestNonce}`);
     } else {
       const issues = (watch.assemblyAudit?.issues || []).slice(0, 2).join('; ');
       applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → reharvest nonce ${s.harvestNonce}: ${issues || 'off-topic/repeat montage'}`);

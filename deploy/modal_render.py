@@ -29,6 +29,7 @@ root = Path(__file__).resolve().parent.parent
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
+    .pip_install("fastapi")
     .apt_install("ffmpeg", "curl", "ca-certificates", "gnupg")
     .run_commands(
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",

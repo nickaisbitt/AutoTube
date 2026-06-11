@@ -8,6 +8,7 @@ import { buildShortHookOverlay } from './patch-project-for-loop.mjs';
 import {
   detectGiphyDominance,
   countSegmentVideos,
+  countRealSegmentVideos,
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
 } from './harvest-quality.mjs';
 import { normalizeUrlKey, isOverBroadExcludeUrl, sanitizeExcludedUrls, pruneExcludedUrlsForReharvest } from './harvest-loop-context.mjs';
@@ -371,10 +372,12 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
   const harvestProject = project || loadLastProject();
   if (harvestProject?.media?.length) {
     const segIds = (harvestProject.script || []).map((seg) => seg.id);
-    const videoQuotaMet = segIds.length > 0 && segIds.every((id) => countSegmentVideos(harvestProject.media, id) >= 2);
+    // Use real-video count (non-Giphy) so that Giphy loops don't satisfy the quota
+    // and cause suppressGiphy to be prematurely cleared — Giphy dominance is the failure mode.
+    const videoQuotaMet = segIds.length > 0 && segIds.every((id) => countRealSegmentVideos(harvestProject.media, id) >= 2);
     if (videoQuotaMet && s.suppressGiphy === true) {
       s.suppressGiphy = false;
-      applied.push('3c. Video quota met (≥2/seg) → suppressGiphy cleared');
+      applied.push('3c. Real video quota met (≥2 non-Giphy clips/seg) → suppressGiphy cleared');
     }
 
     const { giphyOnlySegments, giphyDominantSegments, giphyTotal } = detectGiphyDominance(harvestProject);

@@ -47,6 +47,26 @@ export function countSegmentVideos(media = [], segmentId) {
   return media.filter((m) => m.segmentId === segmentId && isVideoLikeAsset(m)).length;
 }
 
+/** Returns true if the asset is a Giphy GIF/loop (not an editorial video clip). */
+function isGiphySource(asset = {}) {
+  return (
+    (asset.source || '').toLowerCase().includes('giphy')
+    || /giphy\.com/i.test(`${asset.url || ''} ${asset.sourceUrl || ''}`)
+  );
+}
+
+/**
+ * Like countSegmentVideos but excludes Giphy loops.
+ * Used for the suppressGiphy quota check so that Giphy loops can't satisfy the
+ * real-video-per-segment quota and cause suppressGiphy to be prematurely cleared.
+ * @param {object[]} media @param {string} segmentId
+ */
+export function countRealSegmentVideos(media = [], segmentId) {
+  return media.filter(
+    (m) => m.segmentId === segmentId && isVideoLikeAsset(m) && !isGiphySource(m),
+  ).length;
+}
+
 /** Generic topic words that alone should not keep an asset on-topic. */
 const WEAK_TOPIC_WORDS = new Set([
   'tiktok', 'live', 'stream', 'streamed', 'video', 'news', 'breaking', 'viral',
@@ -219,7 +239,11 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
 
   const strongHits = topicHits + segHits;
   if (strongHits === 0) return 0;
-  if (segHits === 0 && topicHits < 2) return 0;
+  // When the topic has very few strong keywords (e.g. "museum heist" → only 2 after
+  // filtering WEAK_TOPIC_WORDS), allow a single topic-keyword hit so that legitimate
+  // editorial museum/heist images aren't dropped just because the segment's own
+  // keywords are all weak words like "stream", "live", "tiktok".
+  if (segHits === 0 && topicHits < 2 && corpus.size >= 3) return 0;
 
   const denom = Math.min(Math.max(corpus.size, 1), 8);
   let score = strongHits / denom;
@@ -311,7 +335,25 @@ export function filterAssetsByRelevance(media, project, options = {}) {
     }
   }
 
-  return { media: kept, dropped, minScore };
+  // Per-segment Giphy cap: keep at most 2 Giphy assets per segment so that non-Giphy
+  // editorial images can dominate the pool even when suppressGiphy is false.
+  const giphyPerSeg = new Map();
+  const keptFiltered = [];
+  const giphyDropped = [];
+  for (const asset of kept) {
+    const isGiphy = (asset.source || '').toLowerCase() === 'giphy';
+    if (isGiphy) {
+      const segCount = giphyPerSeg.get(asset.segmentId) || 0;
+      if (segCount >= 2) {
+        giphyDropped.push({ url: asset.url, segmentId: asset.segmentId, score: asset.relevanceScore, reason: 'giphy cap (>2/seg)' });
+        continue;
+      }
+      giphyPerSeg.set(asset.segmentId, segCount + 1);
+    }
+    keptFiltered.push(asset);
+  }
+
+  return { media: keptFiltered, dropped: [...dropped, ...giphyDropped], minScore };
 }
 
 /**

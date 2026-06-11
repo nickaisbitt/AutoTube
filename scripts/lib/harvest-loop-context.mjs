@@ -28,9 +28,15 @@ export function harvestContextFromFixState(fixState = {}) {
  * @param {object} ctx
  */
 export function harvestSessionStoragePayload(ctx) {
+  // Cap the offset sent to the browser. Requesting page 5+ of results reliably
+  // returns empty sets for most search APIs, which causes empty-segment aborts.
+  const safeOffset = Math.min(ctx.mediaOffset || 0, 4);
+  // Cap nonce at 3 — diversity tokens beyond "take 3" produce nonsense queries
+  // like "museum heist investigation take 6" that return zero results.
+  const safeNonce = Math.min(ctx.harvestNonce || 0, 3);
   const payload = {
-    autotube_loop_harvest_nonce: String(ctx.harvestNonce || 0),
-    autotube_loop_media_offset: String(ctx.mediaOffset || 0),
+    autotube_loop_harvest_nonce: String(safeNonce),
+    autotube_loop_media_offset: String(safeOffset),
     autotube_loop_exclude_urls: JSON.stringify((ctx.excludeUrls || []).slice(0, 300)),
   };
   if (ctx.suppressGiphy) {

@@ -150,6 +150,21 @@ const OFF_TOPIC_BLOCKLIST = [
 
   // Watermarked preview stock — never ship in final render
   { pattern: /gettyimages|shutterstock\s+watermark|alamy\s+watermark|istockphoto.*preview/i, requires: /\b__autotube_never__\b/i },
+
+  // Musicians / creators TikTok marketing guides and social-media tutorial sites
+  { pattern: /routenote\.com|musicianwave\.com|sosiakita\.com|distrokid.*tiktok|soundcharts\.com.*tiktok|artists?\s+(?:guide\s+to\s+tiktok|tiktok\s+tips)|musicians?\s+guide\s+to\s+tiktok/i, requires: /\b(?:music|musician|artist|band|singer|record[\s-]?label|indie)\b/i },
+
+  // TikTok music trend / mashup / dance challenge — wrong TikTok for heist/crime news
+  { pattern: /\btiktok\s+(?:mashup|music\s+compilation|trend\s+(?:2\d{3}|song|music)|dance\s+challenge(?:\s+\d{4})?|viral\s+(?:dance|music|song)(?:\s+\d{4})?)\b/i, requires: /\b(?:music|dance|entertainment|pop\s+culture|chart|trending\s+music)\b/i },
+
+  // Additional AI-art generator platforms and generic AI-art terms — never editorial B-roll
+  { pattern: /artbreeder\.com|nightcafe\.studio|leonardo\.ai|ideogram\.ai|playground\.ai|bing\s+image\s+creator\b|ai[\s-]?art[\s-]?generator|generative[\s-]?ai\s+(?:art|image)\b/i, requires: /\b__autotube_never__\b/i },
+
+  // Motorcycle / vehicle stunt lifestyle stock — not crime/heist B-roll
+  { pattern: /\b(?:motorcycle\s+(?:stunt|gang\s+ride|club\s+stock|rider\s+lifestyle)|dirt\s+bike\s+(?:stunt|jump\s+stock)|superbike\s+(?:racing\s+stock|photography\s+stock))\b/i, requires: /\b(?:motorcycle|biker|moto(?:rbike)?|stunt|gang)\b/i },
+
+  // Sunset / golden-hour landscape lifestyle — noise for crime/news topics
+  { pattern: /\b(?:golden\s+hour\s+(?:photography|photo)\s+stock|sunset\s+(?:silhouette|landscape)\s+(?:stock|wallpaper|background)|nature\s+landscape\s+stock\s+(?:photo|photography))\b/i, requires: /\b(?:sunset|landscape|nature|travel|outdoor|scenic|photography\s+tips)\b/i },
 ];
 
 /**
@@ -180,6 +195,9 @@ export function collectAssemblyExcludeUrls(project) {
       /pexels\.com\/video\/(?:a-young-woman|woman-writing|ring-light|smartphone-user|woman-art-iphone)/i.test(haystack)
       || /\/video\/(?:woman|ring-light|smartphone)/i.test(haystack)
       || /i\.ytimg\.com\/vi\//i.test(haystack)
+      || /routenote\.com|musicianwave\.com|sosiakita\.com|distrokid.*tiktok/i.test(haystack)
+      || /\btiktok\s+(?:mashup|music\s+compilation|trend\s+2\d{3})\b/i.test(haystack)
+      || /artbreeder\.com|nightcafe\.studio|ideogram\.ai|playground\.ai/i.test(haystack)
     ) {
       const key = (asset.sourceUrl || asset.url || '').split('?')[0].toLowerCase();
       if (key) out.add(key);

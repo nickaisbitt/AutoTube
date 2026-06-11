@@ -196,24 +196,93 @@ const WATERMARK_INDICATOR_PENALTY = -300;
  */
 const HARVEST_OFF_TOPIC_RULES: Array<{ pattern: RegExp; requires: RegExp }> = [
   // YouTube video-player thumbnails are never editorial B-roll
-  { pattern: /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/sddefault\.|\/oar\d*\.jpg/i, requires: /\b__autotube_never__\b/ },
+  { pattern: /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/sddefault\.|\/oar\d*\.jpg|\/maxres2\.jpg|\/mq\d\.jpg/i, requires: /\b__autotube_never__\b/ },
+
+  // Pinterest pin-board aggregator — almost never quality B-roll
+  { pattern: /pinterest\.com|pinimg\.com/i, requires: /\bpinterest\b/i },
+
+  // Geographic map images (Texas map, state/county maps, OpenStreetMap tiles)
+  { pattern: /\btexas\s*map|\bstate\s*map|\bcounty\s*map|\bgeographic\s*map/i, requires: /\bmap\b|\bgeograph|\btexas\b/i },
+  { pattern: /openstreetmap\.org|\/api\/static-map/i, requires: /\bmap\b|\bgeograph|\blocation\b|\bstreet\b/i },
+
+  // Hydration / water-bottle lifestyle shots
+  { pattern: /\bhydration\b|\bdrinking\s+water\b|\bwater\s+bottle\b/i, requires: /\bhydrat|\bwater\s+drink|\bdrink|\bfitness\b|\bhealth\b|\bwellness\b/i },
+
+  // Royalty-free children stock photos
+  { pattern: /royalty.{0,5}free\s+(?:kids?|child(?:ren)?)|(?:kids?|children)\s+stock\s+photo/i, requires: /\bkid|\bchild|\byouth\b|\beducation\b/i },
+
+  // Tier-list / ranking graphics — almost never relevant B-roll
+  { pattern: /\btier\s*list\b/i, requires: /\btier\s*list\b/i },
+
+  // Social/app logos, app-store screenshots, avatar crops
+  { pattern: /logojoy\.com|cdn\.logojoy|tiktokcdn\.com\/tos-maliva-avt|sndcdn\.com\/artworks|tiktokpng\.com|filehippo\.net|mzstatic\.com\/image|androidheadlines\.com.*app/i, requires: /\b__autotube_never__\b/ },
+
+  // Children/nature stock
+  { pattern: /\b(?:children?\s+(?:playing|exploring|hugging)|nature\s+lover\s+child)\b/i, requires: /\bkid|\bchild|\byouth\b|\beducation\b/i },
+  { pattern: /stockcake\.com|freepik\.com.*child|dreamstime\.com.*child/i, requires: /\bkid|\bchild|\byouth\b/i },
+
+  // Generic map / timezone infographics
+  { pattern: /printable-us-map|guideoftheworld\.com\/map|time-zone-map|timezonesmap|wikiusa\.org.*time-zone/i, requires: /\bmap\b|\btime\s*zone\b|\bgeograph\b/i },
+
+  // Stock lifestyle / clipart / generic infographics
+  { pattern: /\b(?:living\s+room|weight\s*watchers|clipart|teamwork\s+hands)\b/i, requires: /\b(?:living\s+room|weight|clipart|teamwork)\b/i },
+  { pattern: /videoblocks.*thumbnail|cloudfront\.net\/thumbnails\/video/i, requires: /\b__autotube_never__\b/ },
+
+  // Fiction / movie stills and meme posters — not editorial news B-roll
+  { pattern: /movieweb|pulp[\s-]?fiction|jason[\s-]?statham|talestavern|stealing-pulp|movieposter|film[\s-]?still|heist[\s-]?thriller|heist[\s-]?movie/i, requires: /\b(?:movie|film|cinema|hollywood|statham|actor|fiction)\b/i },
+  { pattern: /preview\.redd\.it\/|redd\.it\/.*\.jpg/i, requires: /\b(?:meme|reddit|fan[\s-]?art)\b/i },
+
+  // Moving/lifestyle stock — noise for crime/news/heist topics
+  { pattern: /\b(?:moving\s+box|cardboard\s+box|packing\s+box|selfie|couple\s+smil|new\s+home|housewarming)\b/i, requires: /\b(?:moving|relocat|real\s+estate|home\s+buy|lifestyle\s+vlog)\b/i },
+  { pattern: /\b(?:yoga|workout\s+class|salon|spa\s+day|coffee\s+shop\s+lifestyle)\b/i, requires: /\b(?:fitness|wellness|yoga|lifestyle\s+blog)\b/i },
 
   // Lifestyle vlogger setups — ring-light, recording-with-phone, content-creator rig
   { pattern: /\bring[\s-]?light\b|recording[\s-]?a[\s-]?video[\s-]?with[\s-]?(?:her|his)[\s-]?phone|content[\s-]?creator[\s-]?setup/i, requires: /\b(?:vlog|lifestyle|creator[\s-]?tips|tutorial|how[\s-]?to[\s-]?film)\b/i },
+
   // Dinner/cooking presenter talking-head in plain background
   { pattern: /\bwhat[\s-]?do[\s-]?you[\s-]?want[\s-]?for[\s-]?dinner|dinner[\s-]?tonight|plain[\s-]?background[\s-]?presenter/i, requires: /\b(?:cooking|recipe|food[\s-]?blog|kitchen|meal)\b/i },
+
+  // TikTok "how to go live" UI guides — not heist/news B-roll
+  { pattern: /\b(?:how\s+to\s+go\s+live|go\s+live\s+on\s+tiktok|tiktok\s+live\s+streaming\s+guide|onestream\.live|buffer\.com\/resources\/tiktok)\b/i, requires: /\b(?:tutorial|creator\s+tips|marketing\s+guide)\b/i },
+
+  // Cyber / webinar "digital heist" promos — wrong heist for museum crime topics
+  { pattern: /strategink\.com|digital[\s-]?heist[\s-]?summit|slideshare.*digital[\s-]?heist|data[\s-]?breach(?:es)?|protect[\s-]?your[\s-]?vdr|cyber[\s-]?heist(?:\s+webinar)?/i, requires: /\b(?:cyber|data[\s-]?protection|webinar|summit|hacker|infosec)\b/i },
+
+  // AI-generated / cartoon illustrations — never editorial B-roll
+  { pattern: /\bcraiyon\.com|dall[\s-]?e|midjourney|stable[\s-]?diffusion|ai[\s-]?generated|cartoon\s+heist|animated\s+heist|digital\s+illustration|clipart\s+robbery|vector\s+illustration\s+of\s+(?:a\s+)?(?:museum|heist|robbery)/i, requires: /\b__autotube_never__\b/ },
+
+  // Additional AI-art generator platforms
+  { pattern: /artbreeder\.com|nightcafe\.studio|leonardo\.ai|ideogram\.ai|playground\.ai|bing\s+image\s+creator\b|ai[\s-]?art[\s-]?generator|generative[\s-]?ai\s+(?:art|image)\b/i, requires: /\b__autotube_never__\b/ },
+
+  // Smartphone/social-media lifestyle stock
+  { pattern: /\b(?:smartphone[\s-]?user[\s-]?engaged|woman[\s-]?art[\s-]?iphone|social[\s-]?media\s+addict|scrolling\s+tiktok)\b/i, requires: /\b(?:phone\s+addiction|social\s+media\s+habit|lifestyle)\b/i },
+
+  // Office/laptop lifestyle presenters
+  { pattern: /\b(?:woman[\s-]?writing[\s-]?notes|working[\s-]?on[\s-]?laptop|surgical[\s-]?mask.*laptop|office\s+worker\s+stock)\b/i, requires: /\b(?:remote\s+work|office\s+life|productivity\s+tips)\b/i },
 
   // Psychology / Freud textbook slides
   { pattern: /\bfreudian[\s-]?defen[cs]e|defense[\s-]?mechanisms|psychology[\s-]?lecture|psych[\s-]?101\b/i, requires: /\b(?:psychology|therapy|mental[\s-]?health)\b/i },
 
-  // Episode thumbnails from unrelated shows (trapping series, wildlife podcast clips)
+  // Episode thumbnails from unrelated shows
   { pattern: /\btrapping[\s-]?series[\s-]?ep|episode[\s-]?\d+[\s-]?thumbnail\b/i, requires: /\b(?:trapping|wildlife[\s-]?show|podcast[\s-]?ep)\b/i },
 
-  // Webinar / cyber-heist-summit promos — wrong "heist" for real-world crime topics
-  { pattern: /strategink\.com|digital[\s-]?heist[\s-]?summit|protect[\s-]?your[\s-]?vdr|cyber[\s-]?heist[\s-]?webinar/i, requires: /\b(?:cyber|data[\s-]?protection|webinar|summit|infosec)\b/i },
+  // Other-video episode thumbnails / promo graphics
+  { pattern: /\b(?:mind\s+style\s+hub|slideshow|infographic)\b/i, requires: /\b(?:wildlife\s+show|podcast\s+ep|slideshow\s+topic)\b/i },
 
-  // AI-generated / cartoon illustrations — never editorial B-roll
-  { pattern: /\bcraiyon\.com|dall[\s-]?e|midjourney|stable[\s-]?diffusion|ai[\s-]?generated|cartoon\s+heist|animated\s+heist|digital\s+illustration|clipart\s+robbery|vector\s+illustration/i, requires: /\b__autotube_never__\b/ },
+  // Watermarked preview stock — never ship in final render
+  { pattern: /gettyimages|shutterstock\s+watermark|alamy\s+watermark|istockphoto.*preview/i, requires: /\b__autotube_never__\b/ },
+
+  // Musicians / creators TikTok marketing guides and social-media tutorial sites
+  { pattern: /routenote\.com|musicianwave\.com|sosiakita\.com|distrokid.*tiktok|soundcharts\.com.*tiktok|artists?\s+(?:guide\s+to\s+tiktok|tiktok\s+tips)|musicians?\s+guide\s+to\s+tiktok/i, requires: /\b(?:music|musician|artist|band|singer|record[\s-]?label|indie)\b/i },
+
+  // TikTok music trend / mashup / dance challenge content — wrong TikTok for heist/crime news
+  { pattern: /\btiktok\s+(?:mashup|music\s+compilation|trend\s+(?:2\d{3}|song|music)|dance\s+challenge(?:\s+\d{4})?|viral\s+(?:dance|music|song)(?:\s+\d{4})?)\b/i, requires: /\b(?:music|dance|entertainment|pop\s+culture|chart|trending\s+music)\b/i },
+
+  // Motorcycle / vehicle stunt lifestyle stock
+  { pattern: /\b(?:motorcycle\s+(?:stunt|gang\s+ride|club\s+stock|rider\s+lifestyle)|dirt\s+bike\s+(?:stunt|jump\s+stock)|superbike\s+(?:racing\s+stock|photography\s+stock))\b/i, requires: /\b(?:motorcycle|biker|moto(?:rbike)?|stunt|gang)\b/i },
+
+  // Sunset / golden-hour landscape lifestyle stock
+  { pattern: /\b(?:golden\s+hour\s+(?:photography|photo)\s+stock|sunset\s+(?:silhouette|landscape)\s+(?:stock|wallpaper|background)|nature\s+landscape\s+stock\s+(?:photo|photography))\b/i, requires: /\b(?:sunset|landscape|nature|travel|outdoor|scenic|photography\s+tips)\b/i },
 ];
 
 /**

@@ -1350,6 +1350,139 @@ console.log('\n── 45. thinHarvest prunes exclusion list ──');
 }
 
 // ---------------------------------------------------------------------------
+// 46. Musicians / TikTok-trend / AI-art-generator blocklist (new entries)
+// ---------------------------------------------------------------------------
+console.log('\n── 46. Musicians / TikTok-trend / AI-art blocklist ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's1', title: 'Louvre robbery', narration: 'Security cameras caught the thieves inside the museum.' };
+  const topicKws = extractKeywords(topic, 12);
+
+  // Musicians TikTok guide — off-topic for heist/crime news
+  const musicianGuide = {
+    url: 'https://routenote.com/blog/a-musicians-guide-to-tiktok-for-artists/',
+    alt: "A Musician's Guide to TikTok for Artists",
+    query: 'tiktok live museum heist',
+    type: 'image',
+  };
+  assert('routenote.com musicians guide scores 0', scoreAssetRelevance(musicianGuide, seg, topic, topicKws) === 0);
+  assert('routenote.com musicians guide fails top-up gate', passesTopUpRelevanceGate(musicianGuide, seg, topic, topicKws) === false);
+
+  // sosiakita.com Indonesian TikTok tutorial — off-topic even with museum/heist in query
+  const sosiakitaGuide = {
+    url: 'https://sosiakita.com/hal-yang-tidak-boleh-dilakukan-live-streaming-tiktok',
+    alt: 'Awas Banned! 7 Hal yang Tidak Boleh Dilakukan dalam Live Streaming TikTok',
+    query: 'museum heist tiktok live',
+    sourceUrl: 'https://sosiakita.com/hal-yang-tidak-boleh-dilakukan',
+    type: 'image',
+  };
+  assert('sosiakita.com TikTok guide scores 0 (blocklist, not query self-match)',
+    scoreAssetRelevance(sosiakitaGuide, seg, topic, topicKws) === 0);
+  assert('sosiakita.com TikTok guide fails top-up gate',
+    passesTopUpRelevanceGate(sosiakitaGuide, seg, topic, topicKws) === false);
+
+  // TikTok mashup trend content — off-topic for heist news
+  const tiktokMashup = {
+    url: 'https://example.com/tiktok-mashup-2026-may.mp4',
+    alt: 'TikTok Mashup 2026 May Trend',
+    query: 'tiktok museum heist',
+    type: 'video',
+  };
+  assert('TikTok mashup trend scores 0 for heist topic', scoreAssetRelevance(tiktokMashup, seg, topic, topicKws) === 0);
+
+  // Nightcafe AI art generator — never editorial B-roll
+  const nightcafeArt = {
+    url: 'https://nightcafe.studio/create/museum-heist-artwork',
+    alt: 'nightcafe.studio AI art museum heist illustration',
+    query: 'museum heist artwork',
+    type: 'image',
+  };
+  assert('Nightcafe AI art generator scores 0', scoreAssetRelevance(nightcafeArt, seg, topic, topicKws) === 0);
+  assert('Nightcafe AI art fails top-up gate', passesTopUpRelevanceGate(nightcafeArt, seg, topic, topicKws) === false);
+
+  // Ideogram AI art generator — never editorial B-roll
+  const ideogramArt = {
+    url: 'https://ideogram.ai/assets/museum-heist.jpg',
+    alt: 'ideogram.ai generated image louvre heist',
+    query: 'louvre heist',
+    type: 'image',
+  };
+  assert('Ideogram AI art scores 0', scoreAssetRelevance(ideogramArt, seg, topic, topicKws) === 0);
+
+  // Batch filter — all three off-topic sources dropped
+  const { media: kept, dropped } = filterAssetsByRelevance(
+    [musicianGuide, tiktokMashup, nightcafeArt, ideogramArt],
+    { topic, script: [seg] },
+    { minScore: 0.25 },
+  );
+  assert('Batch: all 4 off-topic sources dropped', kept.length === 0 && dropped.length === 4,
+    `kept=${kept.length} dropped=${dropped.length}`);
+}
+
+// ---------------------------------------------------------------------------
+// 47. Motorcycle / sunset landscape lifestyle blocklist (new entries)
+// ---------------------------------------------------------------------------
+console.log('\n── 47. Motorcycle / sunset lifestyle blocklist ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's1', title: 'Louvre robbery', narration: 'The thieves escaped through the Louvre tunnels.' };
+  const topicKws = extractKeywords(topic, 12);
+
+  // Motorcycle stunt lifestyle stock — not heist B-roll
+  const motoStunt = {
+    url: 'https://stock.example.com/motorcycle-stunt-photography-stock.jpg',
+    alt: 'motorcycle stunt photography stock rider lifestyle',
+    query: 'heist escape vehicle',
+    type: 'image',
+  };
+  assert('Motorcycle stunt stock scores 0 for heist topic', scoreAssetRelevance(motoStunt, seg, topic, topicKws) === 0);
+
+  // Sunset silhouette landscape stock — not heist B-roll
+  const sunsetStock = {
+    url: 'https://stock.example.com/sunset-silhouette-landscape-stock.jpg',
+    alt: 'sunset silhouette landscape stock background wallpaper',
+    query: 'louvre heist outdoors',
+    type: 'image',
+  };
+  assert('Sunset silhouette landscape stock scores 0 for heist topic', scoreAssetRelevance(sunsetStock, seg, topic, topicKws) === 0);
+
+  // collectAssemblyExcludeUrls picks up routenote and sosiakita
+  const { collectAssemblyExcludeUrls } = await import('./lib/harvest-quality.mjs');
+  const badProject = {
+    topic,
+    title: topic,
+    script: [seg],
+    media: [
+      {
+        url: 'https://routenote.com/blog/a-musicians-guide-to-tiktok-for-artists/',
+        alt: "Musician's TikTok guide",
+        sourceUrl: 'https://routenote.com/blog/a-musicians-guide-to-tiktok-for-artists/',
+        segmentId: 's1',
+      },
+      {
+        url: 'https://sosiakita.com/hal-yang-tidak-boleh-dilakukan-live-streaming-tiktok',
+        alt: 'Awas Banned! Live Streaming TikTok guide',
+        sourceUrl: 'https://sosiakita.com/hal-yang-tidak-boleh-dilakukan',
+        segmentId: 's1',
+      },
+      {
+        url: 'https://www.bbc.com/news/louvre-heist-suspects.jpg',
+        alt: 'Louvre heist suspects museum robbery BBC News',
+        sourceUrl: 'https://www.bbc.com/news/louvre-heist-suspects',
+        segmentId: 's1',
+      },
+    ],
+  };
+  const excludeUrls = collectAssemblyExcludeUrls(badProject);
+  assert('collectAssemblyExcludeUrls captures routenote.com URL',
+    excludeUrls.some((u) => u.includes('routenote.com')));
+  assert('collectAssemblyExcludeUrls captures sosiakita.com URL',
+    excludeUrls.some((u) => u.includes('sosiakita.com')));
+  assert('collectAssemblyExcludeUrls does NOT exclude BBC Louvre news URL',
+    !excludeUrls.some((u) => u.includes('bbc.com')));
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log(`\n════════════════════════════════`);

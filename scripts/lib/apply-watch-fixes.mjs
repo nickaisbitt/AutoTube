@@ -10,7 +10,7 @@ import {
   countSegmentVideos,
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
 } from './harvest-quality.mjs';
-import { normalizeUrlKey, isOverBroadExcludeUrl, sanitizeExcludedUrls } from './harvest-loop-context.mjs';
+import { normalizeUrlKey, isOverBroadExcludeUrl, sanitizeExcludedUrls, pruneExcludedUrlsForReharvest } from './harvest-loop-context.mjs';
 import { collectAssemblyExcludeUrls } from './harvest-quality.mjs';
 import {
   loadRenderManifest,
@@ -238,6 +238,19 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     applied.push(`0c. Silence gaps ${watch.objectiveQa.silenceFirst60Sec}s in first 60s → tighten pacing`);
   }
 
+  if (watch.thinHarvest) {
+    s.reHarvestMedia = true;
+    s.harvestNonce = (s.harvestNonce || 0) + 1;
+    s.mediaOffset = (s.mediaOffset || 0) + 2;
+    s.harvestVideoFirst = true;
+    s.fixStrategy = 'reharvest';
+    const beforePrune = (s.excludedUrls || []).length;
+    s.excludedUrls = pruneExcludedUrlsForReharvest(s.excludedUrls || []);
+    applied.push(
+      `0e. Thin harvest (empty browser) → pruned ${beforePrune} exclusions → ${s.excludedUrls.length} lifestyle-only, reharvest nonce ${s.harvestNonce}`,
+    );
+  }
+
   if (assemblyFail) {
     s.reHarvestMedia = true;
     s.harvestNonce = (s.harvestNonce || 0) + 1;
@@ -253,14 +266,13 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     }
     const harvestProject = project || loadLastProject();
     if (harvestProject?.media?.length) {
-      const before = (s.excludedUrls || []).length;
       const prev = new Set(sanitizeExcludedUrls(s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
       for (const key of collectAssemblyExcludeUrls(harvestProject)) {
         if (key && !isOverBroadExcludeUrl(key)) prev.add(key);
       }
-      s.excludedUrls = [...prev].slice(-400);
-      const added = s.excludedUrls.length - before;
-      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → exclude ${added} off-topic URL(s), reharvest nonce ${s.harvestNonce}`);
+      // Prune to lifestyle-only entries (max 30) to prevent harvest pool starvation across iterations.
+      s.excludedUrls = pruneExcludedUrlsForReharvest([...prev]);
+      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → exclude ${s.excludedUrls.length} off-topic URL(s), reharvest nonce ${s.harvestNonce}`);
     } else {
       const issues = (watch.assemblyAudit?.issues || []).slice(0, 2).join('; ');
       applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → reharvest nonce ${s.harvestNonce}: ${issues || 'off-topic/repeat montage'}`);

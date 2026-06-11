@@ -70,6 +70,38 @@ export function accumulateExcludedUrls(fixState, project) {
   return fixState;
 }
 
+/**
+ * On reharvest, prune accumulated excludedUrls to at most 30 confirmed lifestyle/spam-only entries.
+ * Releases specific video/news/stock URLs back into the harvest pool to prevent browser harvest
+ * starvation from over-accumulated exclusions across many loop iterations.
+ *
+ * Keeps: ytimg thumbnails, strategink webinars, pexels lifestyle page slug URLs,
+ * and known "how-to" lifestyle guide domains.
+ * Releases: raw pexels video-file URLs, vimeo player URLs, editorial news images (gettyimages etc.),
+ * freepik stock images, and any other legitimate sources that were excluded from prior runs.
+ *
+ * @param {string[]} excludedUrls
+ * @returns {string[]}
+ */
+export function pruneExcludedUrlsForReharvest(excludedUrls = []) {
+  const LIFESTYLE_PATTERNS = [
+    /strategink\.com/i,
+    /ytimg\.com/i,
+    // Pexels page URLs with descriptive slugs (e.g. /video/ring-light-12433102) — not raw video-files/ID paths
+    /pexels\.com\/video\/[a-z][a-z-]+-\d/i,
+    /buffer\.com\/resources\//i,
+    /onestream\.live\//i,
+    /routenote\.com\/blog\//i,
+    /logojoy\.com/i,
+    /tiktokpng\.com/i,
+    /sndcdn\.com\/artworks/i,
+  ];
+  const lifestyle = (excludedUrls || []).filter((u) =>
+    LIFESTYLE_PATTERNS.some((p) => p.test(u))
+  );
+  return lifestyle.slice(-30);
+}
+
 /** Drop provider-wide patterns that starve harvest (e.g. bare youtube.com/watch). */
 export function sanitizeExcludedUrls(urls = []) {
   const out = [];

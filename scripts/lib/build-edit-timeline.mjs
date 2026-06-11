@@ -283,6 +283,12 @@ export function buildEditTimeline(project, options = {}) {
           if (k && lastTime >= 0 && absStart - lastTime < URL_SPACING_SEC) continue;
           if (!k || k !== lastUrl) return c;
         }
+        // Last resort: any non-adjacent URL (spacing may still fail on tiny pools).
+        for (let j = 1; j < pool.length; j++) {
+          const c = pool[(ai + j) % pool.length];
+          const k = urlKey(c);
+          if (!k || k !== lastUrl) return c;
+        }
         return pool[ai % pool.length];
       };
 

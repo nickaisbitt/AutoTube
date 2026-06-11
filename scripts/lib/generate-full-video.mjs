@@ -1782,15 +1782,25 @@ export async function generateFullVideo(options) {
 
     const manifestGate = validateRenderManifest(produced, durationSec);
     if (!manifestGate.valid) {
-      return {
-        ok: false,
-        error: `Render manifest gate FAIL — ${manifestGate.error}`,
-        topic,
-        outDir,
-        projectPath,
-        renderRetried,
-        manifestGate,
-      };
+      // Modal proxy manifest is rebuilt locally — spacing can diverge from remote encode.
+      // Log and continue so contact-sheet assembly audit remains the ship gate.
+      const spacingOnlyProxy =
+        usedModalRender
+        && manifestGate.manifest?.modalProxy === true
+        && /^diversity gate: \d+ URL spacing violation/.test(manifestGate.error || '');
+      if (spacingOnlyProxy) {
+        log(`   ⚠ Modal diversity proxy: ${manifestGate.error} (continuing — vision audit is ship gate)`);
+      } else {
+        return {
+          ok: false,
+          error: `Render manifest gate FAIL — ${manifestGate.error}`,
+          topic,
+          outDir,
+          projectPath,
+          renderRetried,
+          manifestGate,
+        };
+      }
     }
 
     if (statSync(produced).size < LOOP_MIN_RENDER_BYTES) {

@@ -39,6 +39,7 @@ import {
   normalizeUrlKey,
   isOverBroadExcludeUrl,
   sanitizeExcludedUrls,
+  pruneExcludedUrlsForReharvest,
 } from './lib/harvest-loop-context.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1107,6 +1108,119 @@ console.log('\n── 37. effectiveCutInterval thin pool ──');
 }
 
 // ---------------------------------------------------------------------------
+// 41. buildEditTimeline — global URL use hard cap (no URL > 2 times)
+// ---------------------------------------------------------------------------
+console.log('\n── 41. buildEditTimeline global URL hard cap ──');
+{
+  const { buildEditTimeline, MAX_USES_PER_URL, effectiveCutInterval } = await import('./lib/build-edit-timeline.mjs');
+  assert('MAX_USES_PER_URL exported as 2', MAX_USES_PER_URL === 2);
+
+  // 12 unique assets over 60 s (2×30 s segments).
+  // effectiveCutInterval: targetClips=120, maxClipsFromPool=12*2=24 → widen to min(2.5, 60/24)=2.5s
+  // Resulting clips: 60/2.5 = 24 = 12*2 → each URL used exactly twice, at the cap.
+  const project = {
+    script: [{ id: 's1', duration: 30 }, { id: 's2', duration: 30 }],
+    media: Array.from({ length: 12 }, (_, i) => ({
+      id: `a${i}`,
+      segmentId: 's1',
+      type: 'image',
+      url: `https://example.com/img${i}.jpg`,
+    })),
+  };
+  const eci = effectiveCutInterval(project, 0.5);
+  assert('effectiveCutInterval widens to 2.5s for 12-asset pool', eci === 2.5, `eci=${eci}`);
+
+  const timeline = buildEditTimeline(project, { cutIntervalSec: 0.5, preferVideo: false });
+  const urlUseCounts = new Map();
+  for (const entry of timeline) {
+    const asset = project.media.find((m) => m.id === entry.assetId);
+    const key = asset ? (asset.url || '').split('?')[0] : null;
+    if (key) urlUseCounts.set(key, (urlUseCounts.get(key) || 0) + 1);
+  }
+  const maxUse = urlUseCounts.size ? Math.max(...urlUseCounts.values()) : 0;
+  assert('No URL used more than MAX_USES_PER_URL times (pool-matched scenario)', maxUse <= MAX_USES_PER_URL, `max use=${maxUse}`);
+  assert('Timeline has expected clip count', timeline.length >= 12, `clips=${timeline.length}`);
+
+  // When pool IS exhausted (tiny pool vs long video), the fallback must minimise excess.
+  // With 3 assets, 30s, 0.5s request: eci=min(2.5, 30/6)=2.5s → 12 clips, pool fits 6.
+  // Excess clips (> pool capacity) must prefer the least-used asset, keeping max use ≤ 4.
+  const tinyProject = {
+    script: [{ id: 's1', duration: 30 }],
+    media: Array.from({ length: 3 }, (_, i) => ({
+      id: `t${i}`, segmentId: 's1', type: 'image',
+      url: `https://example.com/tiny${i}.jpg`,
+    })),
+  };
+  const tinyTimeline = buildEditTimeline(tinyProject, { cutIntervalSec: 0.5, preferVideo: false });
+  const tinyCounts = new Map();
+  for (const entry of tinyTimeline) {
+    const asset = tinyProject.media.find((m) => m.id === entry.assetId);
+    const key = asset ? (asset.url || '').split('?')[0] : null;
+    if (key) tinyCounts.set(key, (tinyCounts.get(key) || 0) + 1);
+  }
+  const tinyMax = tinyCounts.size ? Math.max(...tinyCounts.values()) : 0;
+  const tinyMin = tinyCounts.size ? Math.min(...tinyCounts.values()) : 0;
+  assert('Tiny pool fallback distributes evenly (max - min ≤ 1)', tinyMax - tinyMin <= 1, `max=${tinyMax} min=${tinyMin}`);
+}
+
+// ---------------------------------------------------------------------------
+// 42. buildEditTimeline — never same URL twice in a row with 2-asset pool
+// ---------------------------------------------------------------------------
+console.log('\n── 42. buildEditTimeline no consecutive same URL ──');
+{
+  const { buildEditTimeline } = await import('./lib/build-edit-timeline.mjs');
+  const twoMedia = [
+    { id: 'b1', segmentId: 's1', type: 'image', url: 'https://example.com/x.jpg' },
+    { id: 'b2', segmentId: 's1', type: 'image', url: 'https://example.com/y.jpg' },
+  ];
+  const project2 = { script: [{ id: 's1', duration: 10 }], media: twoMedia };
+  const timeline2 = buildEditTimeline(project2, { cutIntervalSec: 1.25, preferVideo: false });
+  let consecutiveSame = false;
+  for (let i = 1; i < timeline2.length; i++) {
+    const prev = twoMedia.find((a) => a.id === timeline2[i - 1].assetId);
+    const curr = twoMedia.find((a) => a.id === timeline2[i].assetId);
+    if (prev && curr && prev.url === curr.url) { consecutiveSame = true; break; }
+  }
+  assert('2-asset pool never repeats same URL consecutively', !consecutiveSame,
+    timeline2.map((e) => twoMedia.find((a) => a.id === e.assetId)?.url?.slice(-10)).join(' → '));
+}
+
+// ---------------------------------------------------------------------------
+// 43. balanceMediaAcrossSegments — phash-similar assets rejected cross-segment
+// ---------------------------------------------------------------------------
+console.log('\n── 43. balanceMediaAcrossSegments phash cross-segment dedup ──');
+{
+  const { balanceMediaAcrossSegments } = await import('./lib/patch-project-for-loop.mjs');
+  // Craft three visually distinct fake hashes (hamming distances >> VISUAL_DUP_MAX_DISTANCE=10).
+  const hashA = '1111111111111111111111111111111111111111111111111111111111111111'; // 64 ones
+  const hashB = '0000000000000000000000000000000000000000000000000000000000000000'; // 64 zeros
+  const hashC = '1010101010101010101010101010101010101010101010101010101010101010'; // alternating
+
+  // s1 has 4 assets: m1+m2 share hashA (same visual as m5 in s2), m3→hashB, m4→hashC
+  // s2 has only m5 (hashA) and needs 4 assets
+  // Cross-segment transfers should reject m1 and m2 (visually ≈ m5), accept m3/m4
+  const project = {
+    script: [{ id: 's1', title: 'A' }, { id: 's2', title: 'B' }],
+    media: [
+      { id: 'm1', segmentId: 's1', type: 'image', url: 'https://example.com/a1.jpg', _phash: hashA },
+      { id: 'm2', segmentId: 's1', type: 'image', url: 'https://example.com/a2.jpg', _phash: hashA },
+      { id: 'm3', segmentId: 's1', type: 'image', url: 'https://example.com/b1.jpg', _phash: hashB },
+      { id: 'm4', segmentId: 's1', type: 'image', url: 'https://example.com/c1.jpg', _phash: hashC },
+      { id: 'm5', segmentId: 's2', type: 'image', url: 'https://example.com/a3.jpg', _phash: hashA },
+    ],
+  };
+  balanceMediaAcrossSegments(project, 4, { harvestVideoFirst: false });
+  const s2Urls = project.media.filter((m) => m.segmentId === 's2').map((m) => m.url);
+  assert('s2 receives non-phash-similar assets from s1',
+    s2Urls.some((u) => u.includes('b1') || u.includes('c1')),
+    `s2 urls: ${s2Urls.join(', ')}`);
+  assert('phash-similar clones (a1, a2) not both copied to s2 that already has a3',
+    !(s2Urls.includes('https://example.com/a1.jpg') && s2Urls.includes('https://example.com/a2.jpg')),
+    `s2 urls: ${s2Urls.join(', ')}`);
+  assert('_phash field stripped from final media', project.media.every((m) => !('_phash' in m)));
+}
+
+// ---------------------------------------------------------------------------
 // 38. Office lifestyle stock blocklist
 // ---------------------------------------------------------------------------
 console.log('\n── 38. Office lifestyle blocklist ──');
@@ -1152,6 +1266,76 @@ console.log('\n── 40. Over-broad exclude sanitization ──');
   ]);
   assert('Sanitize drops bare watch URL', !cleaned.some((u) => u === 'https://www.youtube.com/watch'));
   assert('Sanitize keeps specific video', cleaned.some((u) => u.includes('v=good12345')));
+}
+
+// ---------------------------------------------------------------------------
+// 44. pruneExcludedUrlsForReharvest — releases video URLs, keeps lifestyle/spam
+// ---------------------------------------------------------------------------
+console.log('\n── 44. pruneExcludedUrlsForReharvest ──');
+{
+  const mixed = [
+    'https://videos.pexels.com/video-files/26756749/12001159_3840_2160_24fps.mp4',
+    'https://player.vimeo.com/video/951927495',
+    'https://media.gettyimages.com/id/2162536010/photo/paris-louvre-security.jpg',
+    'https://img.freepik.com/premium-photo/louvre-pyramid-crystal.jpg',
+    'https://www.strategink.com/digital-heist-summit/1st-edition/bengaluru/img/email-banner.jpg',
+    'https://i.ytimg.com/vi/pvxnyzbvigy/oar2.jpg',
+    'https://www.pexels.com/video/ring-light-12433102',
+    'https://buffer.com/resources/tiktok-live/',
+    'https://onestream.live/blog/how-to-go-live-on-tiktok/',
+    'https://routenote.com/blog/a-musicians-guide-to-tiktok-for-artists/',
+  ];
+  const pruned = pruneExcludedUrlsForReharvest(mixed);
+  assert('Prune releases generic pexels video-file URLs', !pruned.some((u) => u.includes('video-files/26756749')));
+  assert('Prune releases vimeo player URLs', !pruned.some((u) => u.includes('vimeo.com/video')));
+  assert('Prune releases editorial gettyimages', !pruned.some((u) => u.includes('gettyimages.com')));
+  assert('Prune releases freepik stock images', !pruned.some((u) => u.includes('freepik.com')));
+  assert('Prune keeps strategink webinar URL', pruned.some((u) => u.includes('strategink')));
+  assert('Prune keeps ytimg thumbnail', pruned.some((u) => u.includes('ytimg.com')));
+  assert('Prune keeps pexels lifestyle slug URL', pruned.some((u) => u.includes('ring-light-12433102')));
+  assert('Prune keeps buffer tiktok guide', pruned.some((u) => u.includes('buffer.com')));
+  assert('Prune keeps onestream lifestyle guide', pruned.some((u) => u.includes('onestream.live')));
+  assert('Prune limit is 30 entries max',
+    pruneExcludedUrlsForReharvest(Array.from({ length: 50 }, (_, i) => `https://strategink.com/promo-${i}`)).length <= 30,
+  );
+  assert('Empty input returns empty array', pruneExcludedUrlsForReharvest([]).length === 0);
+}
+
+// ---------------------------------------------------------------------------
+// 45. applyFixesFromWatch — watch.thinHarvest prunes exclusion list
+// ---------------------------------------------------------------------------
+console.log('\n── 45. thinHarvest prunes exclusion list ──');
+{
+  const bloatedExcludedUrls = [
+    ...Array.from({ length: 20 }, (_, i) => `https://videos.pexels.com/video-files/${10000 + i}/file.mp4`),
+    ...Array.from({ length: 15 }, (_, i) => `https://player.vimeo.com/video/${9000 + i}`),
+    'https://i.ytimg.com/vi/abc123/maxresdefault.jpg',
+    'https://www.strategink.com/digital-heist-summit/banner.jpg',
+    'https://buffer.com/resources/tiktok-live/',
+  ];
+  const watch = {
+    thinHarvest: true,
+    brutal: { overall: 5, report: { scores: { visualVariety: 5, pacing: 5 } } },
+    repetition: { repeatPct: 0, duplicateRunCount: 0 },
+    uploadReady: false,
+    objectiveGate: { pass: true },
+  };
+  const { fixState, applied } = applyFixesFromWatch(
+    watch,
+    { harvestNonce: 2, excludedUrls: bloatedExcludedUrls },
+    'museum heist',
+    null,
+  );
+  assert('Thin harvest sets reHarvestMedia', fixState.reHarvestMedia === true);
+  assert('Thin harvest bumps harvestNonce', fixState.harvestNonce === 3);
+  assert('Thin harvest prunes exclusion list to ≤30', (fixState.excludedUrls || []).length <= 30);
+  assert('Thin harvest releases generic pexels video files',
+    !(fixState.excludedUrls || []).some((u) => u.includes('video-files/')));
+  assert('Thin harvest keeps ytimg thumbnail in exclusions',
+    (fixState.excludedUrls || []).some((u) => u.includes('ytimg.com')));
+  assert('Thin harvest keeps strategink in exclusions',
+    (fixState.excludedUrls || []).some((u) => u.includes('strategink')));
+  assert('Thin harvest prune logged in applied fixes', applied.some((a) => a.includes('Thin harvest')));
 }
 
 // ---------------------------------------------------------------------------

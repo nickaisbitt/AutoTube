@@ -163,21 +163,27 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4, options =
   const buckets = Object.fromEntries(segIds.map((id) => [id, []]));
   const seenUrls = new Set();
   const visualRegistry = [];
+  // Per-segment hash registries used to reject phash-similar assets during cross-segment transfers.
+  const segVisualRegistries = Object.fromEntries(segIds.map((id) => [id, []]));
 
   for (const asset of project.media) {
     const key = normalizeUrlKey(asset.url, asset.sourceUrl) || asset.id || '';
     if (key && seenUrls.has(key)) continue;
 
     const thumb = asset.thumbnailUrl || (asset.type === 'image' ? asset.url : null);
+    let assetHash = null;
     if (thumb) {
       const hash = aHashFromImage(thumb);
       if (hash && isSimilarToRegistry(hash, visualRegistry)) continue;
-      if (hash) visualRegistry.push(hash);
+      if (hash) { visualRegistry.push(hash); assetHash = hash; }
     }
+    // Accept a pre-computed _phash from the asset (used in tests / offline pipelines).
+    const segHash = assetHash || (typeof asset._phash === 'string' ? asset._phash : null);
 
     if (key) seenUrls.add(key);
     const sid = segIds.includes(asset.segmentId) ? asset.segmentId : segIds[0];
-    buckets[sid].push({ ...asset, segmentId: sid });
+    if (segHash) segVisualRegistries[sid].push(segHash);
+    buckets[sid].push({ ...asset, segmentId: sid, _phash: segHash });
   }
 
   const effectiveMin = Math.min(
@@ -209,12 +215,16 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4, options =
       if (!donorId) break;
       const donorIdx = buckets[donorId].findIndex((a) => {
         const key = normalizeUrlKey(a.url, a.sourceUrl) || a.id || '';
-        return key && !used.has(key);
+        if (!key || used.has(key)) return false;
+        if (a._phash && isSimilarToRegistry(a._phash, segVisualRegistries[needId])) return false;
+        return true;
       });
       if (preferVideo && buckets[needId].filter(isVideoAsset).length < 3) {
         const videoIdx = buckets[donorId].findIndex((a) => {
           const key = normalizeUrlKey(a.url, a.sourceUrl) || a.id || '';
-          return key && !used.has(key) && isVideoAsset(a);
+          if (!key || used.has(key) || !isVideoAsset(a)) return false;
+          if (a._phash && isSimilarToRegistry(a._phash, segVisualRegistries[needId])) return false;
+          return true;
         });
         if (videoIdx >= 0) {
           const [moved] = buckets[donorId].splice(videoIdx, 1);
@@ -224,6 +234,7 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4, options =
               id: `${moved.id}-bal-vid-${needId.slice(0, 6)}-${buckets[needId].length}`,
               segmentId: needId,
             });
+            if (moved._phash) segVisualRegistries[needId].push(moved._phash);
             continue;
           }
         }
@@ -236,12 +247,15 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4, options =
         id: `${moved.id}-bal-${needId.slice(0, 6)}-${buckets[needId].length}`,
         segmentId: needId,
       });
+      if (moved._phash) segVisualRegistries[needId].push(moved._phash);
     }
   }
 
   project.media = segIds.flatMap((id) => {
     const bucket = buckets[id];
-    return preferVideo ? orderAssetsVideoFirst(bucket, 3) : bucket;
+    const ordered = preferVideo ? orderAssetsVideoFirst(bucket, 3) : bucket;
+    // Strip the internal _phash field before returning to callers.
+    return ordered.map(({ _phash: _h, ...rest }) => rest);
   });
   return project;
 }

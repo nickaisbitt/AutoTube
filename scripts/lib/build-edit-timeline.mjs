@@ -4,6 +4,9 @@
  */
 import { normalizeUrlKey } from './harvest-loop-context.mjs';
 
+/** Hard cap on how many times a single URL may appear across the full 60 s timeline. */
+export const MAX_USES_PER_URL = 2;
+
 /**
  * @param {object} project
  * @param {{ cutIntervalSec?: number, reason?: string, preferVideo?: boolean, minVideosFirst?: number }} [options]
@@ -66,7 +69,7 @@ export function effectiveCutInterval(project, cutIntervalSec = 1.25) {
   const poolSize = uniqueUrls.size || 1;
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (seg.duration || 0), 0) || 60;
   const targetClips = totalDur / Math.max(0.25, cut);
-  const maxReusesPerAsset = 2.5;
+  const maxReusesPerAsset = MAX_USES_PER_URL;
   const maxClipsFromPool = poolSize * maxReusesPerAsset;
   if (targetClips > maxClipsFromPool) {
     return Math.min(2.5, totalDur / maxClipsFromPool);
@@ -82,7 +85,7 @@ export function buildEditTimeline(project, options = {}) {
   const entries = [];
   const globalPool = orderAssetsVideoFirst(project.media || [], preferVideo ? minVideosFirst : 0);
   const globalUrlUse = new Map();
-  const maxUsesPerUrl = 2;
+  const maxUsesPerUrl = MAX_USES_PER_URL;
 
   for (const seg of project.script || []) {
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
@@ -132,7 +135,20 @@ export function buildEditTimeline(project, options = {}) {
           if (key && (globalUrlUse.get(key) || 0) >= maxUsesPerUrl) continue;
           return candidate;
         }
-        return pool[ai % pool.length];
+        // Pool exhausted — return least-used asset, preferring a different URL than lastUrl.
+        // This prevents any clip from exceeding the cap when the pool is tiny.
+        let bestFallback = pool[ai % pool.length];
+        let bestFallbackUses = Infinity;
+        for (let j = 0; j < pool.length; j++) {
+          const c = pool[(ai + j) % pool.length];
+          const k = urlKey(c);
+          const uses = k ? (globalUrlUse.get(k) || 0) : 0;
+          if ((!k || k !== lastUrl) && uses < bestFallbackUses) {
+            bestFallbackUses = uses;
+            bestFallback = c;
+          }
+        }
+        return bestFallback;
       };
 
       if (preferVideo && videoPool.length) {

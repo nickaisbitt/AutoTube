@@ -1728,11 +1728,7 @@ export async function generateFullVideo(options) {
     );
     const durationSec = probe.stdout ? parseFloat(probe.stdout.trim()) : NaN;
 
-    // Modal renders execute ffmpeg remotely — render-manifest.json is not shipped back.
-    // Skip the manifest gate for Modal renders; size + duration checks above are sufficient.
-    const manifestGate = usedModalRender
-      ? { valid: true }
-      : validateRenderManifest(produced, durationSec);
+    const manifestGate = validateRenderManifest(produced, durationSec);
     if (!manifestGate.valid) {
       return {
         ok: false,

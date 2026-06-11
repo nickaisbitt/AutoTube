@@ -11,6 +11,7 @@ import { generateNarration } from '../../server-render/narration.mjs';
 import { parseVttWordTimestamps } from '../../server-render/subtitleParser.mjs';
 import { concatenateAudio } from '../../deploy/server-render/audio.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
+import { computeTimelineDiversityMetrics } from './assembly-system.mjs';
 
 const MODAL_CLI = process.env.MODAL_CLI
   || '/workspace/repos/nickaisbitt/audra-voice-api/tts-service/.venv-modal/bin/modal';
@@ -231,5 +232,44 @@ export async function renderViaModal({ project, mp4Out, renderEnv, devServer, ou
   if (!result.ok) return result;
   log(`   ✓ Modal render ${(result.bytes / 1024 / 1024).toFixed(1)} MB in ${(result.elapsedMs / 1000).toFixed(0)}s`);
   if (existsSync(mp4Out)) copyFileSync(finalOut, mp4Out);
+
+  // Modal encodes remotely — ship diversity proxy manifest locally for validate-loop-video.
+  try {
+    const bundled = JSON.parse(readFileSync(join(bundleDir, 'project.json'), 'utf8'));
+    const cutInterval = parseFloat(modalRenderEnv.AUTOTUBE_CUT_INTERVAL_SEC || '1.25');
+    const preferVideo = modalRenderEnv.AUTOTUBE_HARVEST_VIDEO_FIRST !== '0';
+    const minVideosFirst = modalRenderEnv.AUTOTUBE_RENDER_QUALITY === 'high' ? 3 : 2;
+    bundled.editTimeline = buildEditTimeline(bundled, {
+      cutIntervalSec: cutInterval,
+      reason: 'post-modal local manifest',
+      preferVideo,
+      minVideosFirst,
+    });
+    const diversity = computeTimelineDiversityMetrics(
+      bundled.editTimeline || [],
+      bundled.media || [],
+      bundled.script || [],
+    );
+    const manifestDir = join(dirname(finalOut), 'ffmpeg-assembly');
+    mkdirSync(manifestDir, { recursive: true });
+    const clipCount = bundled.editTimeline?.length || 0;
+    writeFileSync(
+      join(manifestDir, 'render-manifest.json'),
+      `${JSON.stringify({
+        clipCount,
+        placeholderClipCount: 0,
+        placeholderPct: 0,
+        uniqueUrlsUsed: diversity.uniqueUrlsUsed,
+        maxUrlSharePct: diversity.maxUrlSharePct,
+        adjacentRepeatCount: diversity.adjacentRepeatCount,
+        requiredUniqueUrls: diversity.requiredUniqueUrls,
+        spacingViolations: diversity.spacingViolations,
+        modalProxy: true,
+      }, null, 2)}\n`,
+    );
+  } catch (err) {
+    log(`   ⚠ Modal diversity manifest proxy failed: ${err.message}`);
+  }
+
   return { ok: true, videoPath: finalOut, modal: true, ...result };
 }

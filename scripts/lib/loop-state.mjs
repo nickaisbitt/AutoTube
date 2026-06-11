@@ -26,6 +26,8 @@ export const DEFAULT_FIX_STATE = {
   topicRetryCount: 0,
   maxRetriesPerTopic: 4,
   pendingTopic: null,
+  /** When set, loop never advances to a random topic (E2E quality gate). */
+  lockedTopic: null,
   iteration: 0,
   appliedFixes: [],
   minAssetsPerSegment: 4,

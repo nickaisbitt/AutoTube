@@ -5,7 +5,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-export const MIN_DURATION_SEC = 55;
+/** Loop shorts target ~60s; ultrafast mux can land 54–55s — use env or 50s floor. */
+export const MIN_DURATION_SEC = Number(process.env.MIN_DURATION_SEC) || 50;
 // Draft-quality 720p ultrafast renders can legitimately be 4–5 MB for 60 s;
 // 3 MB is a safe floor that still catches empty/corrupt/truncated files.
 export const MIN_BYTES = 3 * 1024 * 1024;

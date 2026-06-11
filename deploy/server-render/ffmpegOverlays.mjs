@@ -185,7 +185,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
     // so those words don't start the next phrase in isolation.
     const wouldSplitBad = next && isBadSplit(next.word);
 
-    if (phraseDone && buffer.length >= 2) {
+    if (phraseDone && buffer.length >= minPhraseWords) {
       flush();
     } else if (atMax && !wouldSplitBad && buffer.length >= minPhraseWords) {
       flush();
@@ -194,8 +194,17 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
       flush();
     }
   }
-  // Flush any remaining words (tail of last segment).
-  if (buffer.length >= 2) flush();
+  // Flush tail — merge short orphans into previous line instead of 2-word gibberish captions.
+  if (buffer.length >= minPhraseWords) {
+    flush();
+  } else if (buffer.length >= 2 && idx > 0) {
+    const orphan = escapeAss(buffer.join(' ').toUpperCase());
+    const lastIdx = lines.length - 1;
+    lines[lastIdx] = `${lines[lastIdx]} ${orphan}`;
+    idx += 1;
+  } else if (buffer.length >= 2) {
+    flush();
+  }
 
   if (idx === 0) return { ok: false, error: 'no word timestamps' };
 

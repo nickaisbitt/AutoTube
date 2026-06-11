@@ -23,7 +23,11 @@ import {
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import { loadFixState } from './lib/loop-state.mjs';
 import { buildShockHookLine } from '../e2e/openRouterMock.mjs';
-import { buildShortHookOverlay, isBadKineticOverlay } from './lib/patch-project-for-loop.mjs';
+import {
+  buildShortHookOverlay,
+  hookOverrideMatchesTopic,
+  isBadKineticOverlay,
+} from './lib/patch-project-for-loop.mjs';
 import { computeYoutubeQualityScore, targetScore100, buildRetentionFrameTimestamps } from '../powers/video-watcher/src/vision-brutal.mjs';
 import { buildRenderEnvFromFixState } from './lib/render-env-from-fix-state.mjs';
 import {
@@ -954,6 +958,13 @@ console.log('\n── 24. buildShockHookLine museum/TikTok ──');
   assert('Hook fail sets topic-specific hookLine', /louvre|tiktok/i.test(fixState.hookLine || ''), fixState.hookLine);
   assert('Hook fail sets BREAKING overlay', fixState.hookOverlay?.startsWith('BREAKING:'), fixState.hookOverlay);
   assert('Hook fix logged', applied.some((a) => a.includes('Hook FAIL')));
+
+  const prisonHook = 'Stop scrolling — The prison escape planned entirely on Discord is worse than the headlines admit.';
+  assert('Prison hook rejected for museum topic', !hookOverrideMatchesTopic(prisonHook, museumTopic));
+  const staleOverlay = buildShortHookOverlay(museumTopic, buildShockHookLine(museumTopic), {
+    preferredOverlay: 'URGENT: PRISON ESCAPE PLANNED ENTIRELY ON DISCORD',
+  });
+  assert('Stale prison overlay ignored for museum', staleOverlay.includes('LOUVRE'), staleOverlay);
 }
 
 // ---------------------------------------------------------------------------

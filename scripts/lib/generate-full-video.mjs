@@ -9,7 +9,12 @@ import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
 import { validateRenderManifest, MIN_BYTES as LOOP_MIN_RENDER_BYTES } from './validate-loop-video.mjs';
 import { buildMockScriptForTopic, buildShockHookLine, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
-import { patchProjectForLoop, stockSearchResults, buildShortHookOverlay } from './patch-project-for-loop.mjs';
+import {
+  patchProjectForLoop,
+  stockSearchResults,
+  buildShortHookOverlay,
+  hookOverrideMatchesTopic,
+} from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
@@ -1048,8 +1053,10 @@ export async function generateFullVideo(options) {
   }
 
   if (fixState.shockHook !== false) {
-    fixState.hookLine = fixState.hookLine?.trim() || buildShockHookLine(topic);
-    fixState.hookOverlay = fixState.hookOverlay?.trim() || buildShortHookOverlay(topic, fixState.hookLine);
+    const hookOverride = hookOverrideMatchesTopic(fixState.hookLine, topic) ? fixState.hookLine?.trim() : null;
+    const overlayOverride = hookOverrideMatchesTopic(fixState.hookOverlay, topic) ? fixState.hookOverlay?.trim() : null;
+    fixState.hookLine = hookOverride || buildShockHookLine(topic);
+    fixState.hookOverlay = overlayOverride || buildShortHookOverlay(topic, fixState.hookLine);
   }
 
   const mockSegments = buildMockScriptForTopic(topic, {
@@ -1279,7 +1286,19 @@ export async function generateFullVideo(options) {
       await page.getByTestId('onboarding-skip').click();
     }
 
-    await page.getByTestId('topic-input').fill(topic);
+    const fillTopic = async () => {
+      const input = page.getByTestId('topic-input');
+      await input.waitFor({ state: 'visible', timeout: 45_000 });
+      await input.click({ clickCount: 3 }).catch(() => {});
+      await input.fill(topic);
+      const value = await input.inputValue().catch(() => '');
+      if (!value.includes(topic.slice(0, Math.min(12, topic.length)))) {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await input.waitFor({ state: 'visible', timeout: 45_000 });
+        await input.fill(topic);
+      }
+    };
+    await fillTopic();
     await page.getByTestId('duration-select').selectOption('3').catch(() => {});
     await page.getByTestId('generate-script-only').click();
     log('⏳ Script (live OpenRouter — fast loop mode)...');
@@ -1427,15 +1446,18 @@ export async function generateFullVideo(options) {
     browser = null;
 
     patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
-    // fixState hook wins — never adopt UI kinetic overlays that fail watcher 0–3s audit
-    if (project.hookLine && !fixState.hookLine) {
-      fixState.hookLine = project.hookLine;
+    // Never keep hook/overlay overrides from a prior topic (watcher script/overlay drift).
+    if (fixState.hookLine && !hookOverrideMatchesTopic(fixState.hookLine, topic)) {
+      delete fixState.hookLine;
     }
-    const loopOverlay = buildShortHookOverlay(topic, project.hookLine || fixState.hookLine, {
+    if (fixState.hookOverlay && !hookOverrideMatchesTopic(fixState.hookOverlay, topic)) {
+      delete fixState.hookOverlay;
+    }
+    fixState.hookLine = project.hookLine || fixState.hookLine;
+    const loopOverlay = buildShortHookOverlay(topic, fixState.hookLine, {
       preferredOverlay: fixState.hookOverlay,
     });
     fixState.hookOverlay = loopOverlay;
-    fixState.hookLine = project.hookLine || fixState.hookLine;
     project.exportSettings = {
       ...(project.exportSettings || {}),
       hookOverlay: loopOverlay,

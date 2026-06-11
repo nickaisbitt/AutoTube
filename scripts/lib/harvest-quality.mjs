@@ -111,7 +111,7 @@ const OFF_TOPIC_BLOCKLIST = [
   { pattern: /\b(?:strategink|digital[\s-]?heist[\s-]?summit|slideshare.*digital[\s-]?heist|data[\s-]?breach(?:es)?|cyber[\s-]?heist|protect\s+your\s+vdr)\b/i, requires: /\b(?:cyber|data\s+protection|webinar|summit|hacker|infosec)\b/i },
 
   // AI-generated / clipart crime illustrations — not editorial footage
-  { pattern: /\bcraiyon\.com|ai[\s-]?generated\s+illustration|digital\s+illustration\s+of\s+a\s+museum\s+heist\b/i, requires: /\b(?:ai\s+art|illustration|cartoon)\b/i },
+  { pattern: /\bcraiyon\.com|dall[\s-]?e|midjourney|stable[\s-]?diffusion|ai[\s-]?generated|cartoon\s+heist|animated\s+heist|digital\s+illustration|clipart\s+robbery|vector\s+illustration\s+of\s+(?:a\s+)?(?:museum|heist|robbery)/i, requires: /\b__autotube_never__\b/i },
 
   // Smartphone/social-media lifestyle stock — noise for crime/news
   { pattern: /\b(?:smartphone[\s-]?user[\s-]?engaged|woman[\s-]?art[\s-]?iphone|social[\s-]?media\s+addict|scrolling\s+tiktok)\b/i, requires: /\b(?:phone\s+addiction|social\s+media\s+habit|lifestyle)\b/i },

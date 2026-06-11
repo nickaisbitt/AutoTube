@@ -211,6 +211,9 @@ const HARVEST_OFF_TOPIC_RULES: Array<{ pattern: RegExp; requires: RegExp }> = [
 
   // Webinar / cyber-heist-summit promos — wrong "heist" for real-world crime topics
   { pattern: /strategink\.com|digital[\s-]?heist[\s-]?summit|protect[\s-]?your[\s-]?vdr|cyber[\s-]?heist[\s-]?webinar/i, requires: /\b(?:cyber|data[\s-]?protection|webinar|summit|infosec)\b/i },
+
+  // AI-generated / cartoon illustrations — never editorial B-roll
+  { pattern: /\bcraiyon\.com|dall[\s-]?e|midjourney|stable[\s-]?diffusion|ai[\s-]?generated|cartoon\s+heist|animated\s+heist|digital\s+illustration|clipart\s+robbery|vector\s+illustration/i, requires: /\b__autotube_never__\b/ },
 ];
 
 /**

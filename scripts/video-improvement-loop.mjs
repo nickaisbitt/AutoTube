@@ -124,7 +124,7 @@ async function main() {
 
     const isRetry = Boolean(currentTopic);
     if (!currentTopic && !cfg.reviewOnly) {
-      currentTopic = pickRandomTopic();
+      currentTopic = fixState.lockedTopic?.trim() || pickRandomTopic();
       fixState.topicRetryCount = 0;
       fixState.fixStrategy = 'interval';
       delete fixState.hookLine;
@@ -209,11 +209,15 @@ async function main() {
         fixState.generateFailureCount = generateFailureCount;
         const maxGenerateFailuresPerTopic = fixState.maxGenerateFailuresPerTopic || 2;
         const shouldAdvanceTopic = generateFailureCount >= maxGenerateFailuresPerTopic;
-        if (shouldAdvanceTopic) {
+        if (shouldAdvanceTopic && !fixState.lockedTopic?.trim()) {
           currentTopic = null;
           fixState.pendingTopic = null;
           fixState.generateFailureCount = 0;
           fixState.topicRetryCount = 0;
+        } else if (shouldAdvanceTopic && fixState.lockedTopic?.trim()) {
+          fixState.generateFailureCount = 0;
+          fixState.pendingTopic = fixState.lockedTopic.trim();
+          currentTopic = fixState.lockedTopic.trim();
         } else {
           fixState.pendingTopic = currentTopic;
         }
@@ -392,15 +396,25 @@ async function main() {
         nextStep = `RETRY same topic with fixes (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`;
         console.log(`\n⛔ Not advancing topic — ${nextStep}`);
       } else if (fixState.topicRetryCount >= fixState.maxRetriesPerTopic) {
-        console.log(`\n⚠ Max retries on topic — advancing with accumulated fixes`);
-        currentTopic = null;
-        fixState.pendingTopic = null;
-        fixState.topicRetryCount = 0;
-        fixState.generateFailureCount = 0;
-        fixState.mediaOffset = 0;
-        fixState.renderTier = 'draft';
-        fixState.fixStrategy = 'interval';
-        nextStep = 'new topic (max retries hit, fixes retained)';
+        if (fixState.lockedTopic?.trim()) {
+          console.log(`\n⚠ Max retries on locked topic — resetting retry count, keeping "${fixState.lockedTopic}"`);
+          fixState.topicRetryCount = 0;
+          fixState.pendingTopic = fixState.lockedTopic.trim();
+          currentTopic = fixState.lockedTopic.trim();
+          delete fixState.hookLine;
+          delete fixState.hookOverlay;
+          nextStep = `retry locked topic (max retries hit, hooks reset)`;
+        } else {
+          console.log(`\n⚠ Max retries on topic — advancing with accumulated fixes`);
+          currentTopic = null;
+          fixState.pendingTopic = null;
+          fixState.topicRetryCount = 0;
+          fixState.generateFailureCount = 0;
+          fixState.mediaOffset = 0;
+          fixState.renderTier = 'draft';
+          fixState.fixStrategy = 'interval';
+          nextStep = 'new topic (max retries hit, fixes retained)';
+        }
       }
     } else {
       console.log('\n✅ Upload-ready — advancing to new random topic');

@@ -23,6 +23,16 @@ function topicKeywords(topic) {
     .slice(0, 4);
 }
 
+/** Reject hook/overlay overrides left over from a prior topic (prevents script/overlay drift). */
+export function hookOverrideMatchesTopic(override, topic) {
+  const text = (override || '').trim();
+  if (!text) return true;
+  const keys = topicKeywords(topic).map((w) => w.toLowerCase());
+  if (!keys.length) return true;
+  const lower = text.toLowerCase();
+  return keys.some((k) => lower.includes(k));
+}
+
 function isInstructionOverlay(text) {
   return /^(replace|start with|use|change|fix|try)\b/i.test((text || '').trim());
 }
@@ -69,7 +79,7 @@ function visionSuggestsBreaking(visionFix) {
 /** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
 export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const preferred = options.preferredOverlay?.trim();
-  if (preferred && !isBadKineticOverlay(preferred)) {
+  if (preferred && !isBadKineticOverlay(preferred) && hookOverrideMatchesTopic(preferred, topic)) {
     return preferred.toUpperCase();
   }
 
@@ -313,10 +323,12 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   }
 
   if (fixState.shockHook !== false && project.script?.length) {
-    const hook = buildShockHookLine(topic, fixState.hookLine);
+    const hookOverride = hookOverrideMatchesTopic(fixState.hookLine, topic) ? fixState.hookLine : null;
+    const overlayOverride = hookOverrideMatchesTopic(fixState.hookOverlay, topic) ? fixState.hookOverlay : null;
+    const hook = buildShockHookLine(topic, hookOverride);
     const hookOverlay = buildShortHookOverlay(topic, hook, {
-      preferredOverlay: fixState.hookOverlay,
-      visionFix: fixState.hookOverlay && isInstructionOverlay(fixState.hookOverlay) ? fixState.hookOverlay : undefined,
+      preferredOverlay: overlayOverride,
+      visionFix: overlayOverride && isInstructionOverlay(overlayOverride) ? overlayOverride : undefined,
     });
     project.hookLine = hook;
     rewriteIntroOpener(project, hook);
@@ -351,13 +363,18 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     hookOverlay: (() => {
       const fromState = fixState.hookOverlay?.trim();
       const fromProject = project.exportSettings?.hookOverlay?.trim();
-      if (fromState && !isBadKineticOverlay(fromState)) return fromState.toUpperCase();
-      if (fromProject && !isBadKineticOverlay(fromProject)) return fromProject.toUpperCase();
+      if (fromState && !isBadKineticOverlay(fromState) && hookOverrideMatchesTopic(fromState, topic)) {
+        return fromState.toUpperCase();
+      }
+      if (fromProject && !isBadKineticOverlay(fromProject) && hookOverrideMatchesTopic(fromProject, topic)) {
+        return fromProject.toUpperCase();
+      }
       return buildShortHookOverlay(topic, project.hookLine || fixState.hookLine, {
-        preferredOverlay: fromState,
+        preferredOverlay: hookOverrideMatchesTopic(fromState, topic) ? fromState : undefined,
       });
     })(),
-    hookLine: project.exportSettings?.hookLine ?? project.hookLine ?? fixState.hookLine ?? undefined,
+    hookLine: project.exportSettings?.hookLine ?? project.hookLine
+      ?? (hookOverrideMatchesTopic(fixState.hookLine, topic) ? fixState.hookLine : undefined),
   };
 
   return project;

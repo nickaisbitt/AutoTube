@@ -166,22 +166,30 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   let bufferStart = 0;
   let bufferEnd = 0;
 
+  // Minimum words per emitted caption line — enforces 3-word floor to eliminate
+  // 1-2 word orphan fragments that are unreadable at YouTube caption sizes.
+  const minPhraseWords = 3;
+
   const flush = () => {
-    if (!buffer.length) return;
+    if (buffer.length < minPhraseWords) {
+      // Safety guard: never emit a sub-threshold line; discard if somehow called short.
+      buffer = [];
+      return;
+    }
     const text = escapeAss(buffer.join(' ').toUpperCase());
     lines.push(`Dialogue: 0,${formatAssTime(bufferStart)},${formatAssTime(bufferEnd)},Default,,0,0,0,,${text}`);
     idx += 1;
     buffer = [];
   };
 
-  // At a segment boundary, flush only if we have a full phrase; otherwise drop the
-  // orphan tail so words from one segment never bleed into the next caption.
+  // At a segment boundary: flush if we have a phrase-length buffer; otherwise carry the
+  // orphan words forward into the next segment's phrase rather than silently dropping them.
+  // This preserves content at hook→scene transitions while preventing sub-threshold lines.
   const flushAtBoundary = () => {
     if (buffer.length >= minPhraseWords) {
       flush();
-    } else {
-      buffer = [];
     }
+    // If buffer < minPhraseWords, leave it intact so next segment's words merge with it.
   };
 
   const hookEndSec = 3.2;
@@ -189,16 +197,14 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   // A word that should not start a new phrase alone: currency/numeric tokens or ALL-CAPS acronyms.
   const isBadSplit = (word) => /^\$?\d[\d,.]*$/.test(word) || /^[A-Z]{2,}$/.test(word);
   const isWeakLeadIn = (word) => /^(about|this|using|the|in|a|an|or|and|with|for|to|of)$/i.test(word);
-  // Minimum words before flushing at a non-sentence boundary (prevents short orphan phrases).
-  const minPhraseWords = 4;
 
   for (let wi = 0; wi < allWords.length; wi += 1) {
     const w = allWords[wi];
     if (w.end <= hookEndSec) continue;
     const start = Math.max(w.start, hookEndSec);
 
-    // Segment boundary: flush/discard whatever is buffered so segment transitions produce
-    // clean phrase starts rather than blending the tail of one segment with the head of the next.
+    // Segment boundary: flush buffer if it has enough words, or carry a short orphan tail
+    // forward into this segment's phrase so no words are silently dropped at transitions.
     if (buffer.length > 0 && wi > 0 && allWords[wi - 1].segIdx !== w.segIdx) {
       flushAtBoundary();
     }
@@ -225,7 +231,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
       flush();
     }
   }
-  // Flush tail only when phrase is long enough — drop orphan fragments instead of gibberish merges.
+  // Flush tail: emit 3+ word remainders; discard 1-2 word end-of-video orphans.
   if (buffer.length >= minPhraseWords) {
     flush();
   }

@@ -19,7 +19,10 @@ const isPhraseEnd = (word) => /[.!?;]$/.test(word) || /^[—–-]$/.test(word);
 const isBadSplit = (word) => /^\$?\d[\d,.]*$/.test(word) || /^[A-Z]{2,}$/.test(word);
 
 /** Words that read poorly as the first or last word of a standalone caption line. */
-const isWeakLeadIn = (word) => /^(about|this|using|the|in|a|an|or|and|with|for|to|of)$/i.test(word);
+const isWeakLeadIn = (word) => /^(about|this|using|the|in|a|an|or|and|with|for|to|of|who|that|too|at|on|as|by|it|is|was|were|be)$/i.test(word);
+
+/** Trailing comma with no sentence end — orphan fragment (e.g. "WHO,"). */
+const isOrphanFragment = (word) => /^[a-z]{1,4},$/i.test(word) && !isPhraseEnd(word);
 
 /**
  * A phrase is valid for emission when it is long enough and well-formed.
@@ -34,6 +37,7 @@ function phraseIsValid(buf) {
   if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct) return false;
   if (isWeakLeadIn(buf[0])) return false;
   if (isWeakLeadIn(buf[buf.length - 1])) return false;
+  if (buf.some((w) => isOrphanFragment(w))) return false;
   const badCount = buf.filter((w) => isBadSplit(w)).length;
   if (badCount / buf.length > 0.5) return false;
   return true;
@@ -230,15 +234,17 @@ function buildDialogueLines(allWords, cm) {
     } else if (atMax && !nearPunctuation && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
     } else if (buffer.length >= cm.maxWords + 2) {
-      // Force flush to prevent runaway buffer; bypasses phraseIsValid to preserve content.
-      if (buffer.length >= MIN_CAPTION_WORDS) flush();
+      // Runaway buffer — emit only if phrase-valid, otherwise discard orphans.
+      if (phraseIsValid(buffer)) flush();
       else buffer = [];
     }
   }
 
-  // Emit remainder.
-  if (buffer.length >= MIN_CAPTION_WORDS) {
+  // Emit remainder only when phrase passes validity gate.
+  if (phraseIsValid(buffer)) {
     flush();
+  } else {
+    buffer = [];
   }
 
   return { dialogueLines, captionCount };

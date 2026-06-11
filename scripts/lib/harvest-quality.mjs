@@ -133,6 +133,9 @@ const OFF_TOPIC_BLOCKLIST = [
   // TikTok "how to go live" UI guides — not heist/news B-roll
   { pattern: /\b(?:how\s+to\s+go\s+live|go\s+live\s+on\s+tiktok|tiktok\s+live\s+streaming\s+guide|onestream\.live|buffer\.com\/resources\/tiktok)\b/i, requires: /\b(?:tutorial|creator\s+tips|marketing\s+guide)\b/i },
 
+  // TikTok promo / "watch free movies" app ads — not crime B-roll
+  { pattern: /\b(?:watch\s+free\s+movies?\s+on\s+tiktok|free\s+movies?\s+on\s+tiktok|tiktok\s+movies?\s+free|download\s+tiktok\s+movies?)\b/i, requires: /\b__autotube_never__\b/i },
+
   // Cyber / webinar "digital heist" promos — wrong heist for museum crime topics
   { pattern: /\b(?:strategink|digital[\s-]?heist[\s-]?summit|slideshare.*digital[\s-]?heist|data[\s-]?breach(?:es)?|cyber[\s-]?heist|protect\s+your\s+vdr)\b/i, requires: /\b(?:cyber|data\s+protection|webinar|summit|hacker|infosec)\b/i },
 
@@ -286,6 +289,11 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   // score so news/stock/documentary sources always rank above them.
   if ((asset?.source || '').toLowerCase() === 'giphy') {
     score = Math.min(score, 0.35);
+  }
+
+  // Deprioritize generic tourist pyramid / plaza shots for crime/heist topics.
+  if (isCrimeNewsTopic(topic) && /pyramid|france-museum-paris|tourist|plaza|aerial.*louvre|louvre.*exterior/i.test(haystack)) {
+    score = Math.max(0, score - 0.2);
   }
 
   return Math.max(0, Math.min(1, score));

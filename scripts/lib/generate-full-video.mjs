@@ -701,7 +701,8 @@ function isJunkHarvestUrl(url) {
     u.includes('pinimg.com') ||
     u.includes('pin.it/') ||
     /gettyimages|shutterstock|alamy|istockphoto/i.test(u) ||
-    /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/oar\d*\.jpg/i.test(u)
+    /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/oar\d*\.jpg/i.test(u) ||
+    /watch\s+free\s+movies?\s+on\s+tiktok|free\s+movies?\s+on\s+tiktok/i.test(u)
   );
 }
 
@@ -945,10 +946,21 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     report.afterRelevance = relevance.media.length;
   }
 
-  const deduped = dedupeMediaByPHash(relevance.media, {
-    devServer,
-    onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
-  });
+  const prePhashBudget = computeClipBudget(
+    { script: project.script, media: relevance.media },
+    options.cutIntervalSec ?? 1.25,
+  );
+  const uniqueBeforePhash = new Set(
+    relevance.media.map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+  ).size;
+  const skipPhashDedup = loopMode && uniqueBeforePhash < prePhashBudget.requiredUniqueUrls * 1.25;
+  const deduped = skipPhashDedup
+    ? { media: relevance.media, hashCount: 0 }
+    : dedupeMediaByPHash(relevance.media, {
+      devServer,
+      onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
+    });
+  if (skipPhashDedup) report.deferredPhashDedup = true;
   report.phashHashCount = deduped.hashCount;
 
   // URL-level cross-segment dedup: prevent the same shot appearing in multiple segment pools.

@@ -14,6 +14,9 @@ export const MAX_URL_SHARE_PCT = 40;
 /** Minimum seconds that must separate two uses of the same URL on the full timeline. */
 export const URL_SPACING_SEC = 12;
 
+/** Minimum seconds between visually similar clips (pHash) on the full timeline. */
+export const VISUAL_SPACING_SEC = 8;
+
 /** Hook zone duration (seconds from video start). Clips here are subject to a tighter hold cap. */
 export const HOOK_ZONE_SEC = 10;
 
@@ -147,6 +150,7 @@ export function buildEditTimeline(project, options = {}) {
   // Diversity-enforcement state shared across all segments.
   const globalUrlLastAbsTime = new Map(); // urlKey → last abs start time used
   const pHashRegistry = []; // hashes of all committed clips
+  const pHashLastAbsTime = new Map(); // hash → last absolute start time
   const pHashCache = new Map(); // assetId/src → hash (null if failed)
 
   const getThumbnailSrc = (asset) => {
@@ -161,13 +165,40 @@ export function buildEditTimeline(project, options = {}) {
 
   // Returns false when the candidate is visually similar to an already-committed clip.
   // Always returns true when no thumbnail is available or hash computation fails.
-  const checkPHash = (candidate) => {
+  const hashForAsset = (candidate) => {
     const src = getThumbnailSrc(candidate);
-    if (!src) return true;
+    if (!src) return null;
     const cid = candidate.id || src;
     if (!pHashCache.has(cid)) pHashCache.set(cid, aHashFromImage(src));
-    const hash = pHashCache.get(cid);
-    return hash ? !isSimilarToRegistry(hash, pHashRegistry) : true;
+    return pHashCache.get(cid) || null;
+  };
+
+  const checkPHash = (candidate, absTime = 0, strict = false) => {
+    const hash = hashForAsset(candidate);
+    if (!hash) return true;
+    if (isSimilarToRegistry(hash, pHashRegistry)) return false;
+    const lastVisual = pHashLastAbsTime.get(hash);
+    if (lastVisual !== undefined && absTime - lastVisual < VISUAL_SPACING_SEC) return false;
+    if (strict) {
+      for (const [h, t] of pHashLastAbsTime) {
+        if (hammingLike(hash, h) <= 8 && absTime - t < VISUAL_SPACING_SEC) return false;
+      }
+    }
+    return true;
+  };
+
+  const hammingLike = (a, b) => {
+    if (!a || !b || a.length !== b.length) return 64;
+    let d = 0;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d += 1;
+    return d;
+  };
+
+  const registerPHash = (asset, absTime) => {
+    const hash = hashForAsset(asset);
+    if (!hash) return;
+    if (!isSimilarToRegistry(hash, pHashRegistry)) pHashRegistry.push(hash);
+    pHashLastAbsTime.set(hash, absTime);
   };
 
   // Track absolute video time so hook-zone clips can be capped independently of the
@@ -211,8 +242,6 @@ export function buildEditTimeline(project, options = {}) {
     // is allowed to repeat within a segment (floor at 8 for small pools).
     const recentCap = Math.max(8, assets.length);
     let videoSlotsUsed = 0;
-    const introHookPool = seg.type === 'intro' ? rankIntroHookAssets(assets).slice(0, Math.max(6, minVideosFirst + 2)) : assets;
-
     // Per-segment URL diversity state.
     const segUrlCount = new Map(); // urlKey → clip count in this segment
     const estimatedSegClips = Math.max(1, Math.ceil(duration / interval));
@@ -226,10 +255,14 @@ export function buildEditTimeline(project, options = {}) {
       const hookInterval = absStart < HOOK_ZONE_SEC ? Math.min(interval, HOOK_MAX_HOLD_SEC) : interval;
       const end = Math.min(duration, t + hookInterval);
       const clipIndex = entries.filter((e) => e.segmentId === seg.id).length;
-      const poolForClip = seg.type === 'intro' && clipIndex < 4 ? introHookPool : assets;
+      const inHookZone = absStart < HOOK_ZONE_SEC;
+      const poolForClip = inHookZone && clipIndex < 6
+        ? rankIntroHookAssets(uniqueAssetsByUrl(globalPool.length > assets.length ? globalPool : assets))
+        : assets;
       let asset = poolForClip[ai % poolForClip.length];
       let attempts = 0;
       const pickFrom = (pool) => {
+        const visualStrict = inHookZone;
         // Loop 1: strict — non-adjacent, non-recent, under global cap, URL spacing,
         // per-segment share cap, and perceptual-hash dedup.
         for (let j = 0; j < pool.length; j++) {
@@ -243,10 +276,10 @@ export function buildEditTimeline(project, options = {}) {
             if (lastTime !== undefined && absStart - lastTime < URL_SPACING_SEC) continue;
           }
           if (key && (segUrlCount.get(key) || 0) >= maxSegUrlUses) continue;
-          if (!checkPHash(candidate)) continue;
+          if (!checkPHash(candidate, absStart, visualStrict)) continue;
           return candidate;
         }
-        // Loop 2: relax recent and per-segment cap — keep non-adjacent, URL spacing, global cap.
+        // Loop 2: relax recent and per-segment cap — keep non-adjacent, URL spacing, global cap, pHash.
         for (let j = 0; j < pool.length; j++) {
           const candidate = pool[(ai + j) % pool.length];
           const key = urlKey(candidate);
@@ -256,6 +289,7 @@ export function buildEditTimeline(project, options = {}) {
             const lastTime = globalUrlLastAbsTime.get(key);
             if (lastTime !== undefined && absStart - lastTime < URL_SPACING_SEC) continue;
           }
+          if (!checkPHash(candidate, absStart, visualStrict)) continue;
           return candidate;
         }
         // Pool exhausted — cycle to non-adjacent URL, preferring the one used furthest back in time.
@@ -268,6 +302,7 @@ export function buildEditTimeline(project, options = {}) {
           if (k && k === lastUrl) continue;
           const lastTime = k ? (globalUrlLastAbsTime.get(k) ?? -1) : -1;
           if (k && lastTime >= 0 && absStart - lastTime < URL_SPACING_SEC) continue;
+          if (!checkPHash(c, absStart, inHookZone)) continue;
           if (lastTime < oldestUseTime) {
             oldestUseTime = lastTime;
             bestFallback = c;
@@ -338,16 +373,7 @@ export function buildEditTimeline(project, options = {}) {
         segUrlCount.set(key, (segUrlCount.get(key) || 0) + 1);
         globalUrlLastAbsTime.set(key, absStart);
       }
-      // Register the selected asset's perceptual hash so future picks avoid visual duplicates.
-      {
-        const thumbSrc = getThumbnailSrc(asset);
-        if (thumbSrc) {
-          const cid = asset.id || thumbSrc;
-          if (!pHashCache.has(cid)) pHashCache.set(cid, aHashFromImage(thumbSrc));
-          const hash = pHashCache.get(cid);
-          if (hash && !isSimilarToRegistry(hash, pHashRegistry)) pHashRegistry.push(hash);
-        }
-      }
+      registerPHash(asset, absStart);
       t = end;
       ai += 1;
     }

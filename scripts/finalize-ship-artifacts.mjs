@@ -24,8 +24,10 @@ function probeDuration(filePath) {
 
 function findCandidates() {
   if (!existsSync(RECORDINGS)) return [];
+  // Only look at the top-level canonical files and the run-specific outputs in full-* dirs.
+  // Do NOT recurse into improvement-loop/ run dirs — those contain copies, not originals.
   const files = readdirSync(RECORDINGS)
-    .filter((n) => n.endsWith('-final.mp4'))
+    .filter((n) => n.endsWith('-final.mp4') && !n.startsWith('run-'))
     .map((n) => join(RECORDINGS, n))
     .filter((p) => existsSync(p));
   const fullDirs = readdirSync(RECORDINGS)
@@ -39,8 +41,9 @@ function score(path) {
   const size = statSync(path).size;
   const duration = probeDuration(path) ?? 0;
   const mtime = statSync(path).mtimeMs;
-  // Prefer newest render with long duration — avoid overwriting fresh mux with stale copies
-  return mtime * 1_000 + duration * 10_000 + size;
+  // In non-loop mode, prefer recent renders. Duration and size act as tiebreakers
+  // but time is weighted most heavily to avoid a large stale file winning over a fresh one.
+  return mtime * 10_000 + duration * 1_000 + size;
 }
 
 mkdirSync(RECORDINGS, { recursive: true });

@@ -16,6 +16,7 @@ import { watchVideo, resolveVideoPath, targetScore100 } from '../powers/video-wa
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
+import { pruneExcludedUrlsForReharvest } from './lib/harvest-loop-context.mjs';
 
 const ROOT = process.cwd();
 const LOOP_DIR = join(ROOT, 'test-recordings', 'improvement-loop');
@@ -153,8 +154,9 @@ async function main() {
     let renderEnv = null;
 
     if (!cfg.reviewOnly) {
-      if (!(await waitForDevServer())) {
-        console.error('\n❌ Dev server not reachable — restart: npm run dev -- --port 5173 --host 0.0.0.0');
+      // autoSpawn: true — if Vite crashed mid-loop, attempt to restart it automatically
+      if (!(await waitForDevServer(undefined, { maxWaitMs: 150_000, pollMs: 5000, autoSpawn: true }))) {
+        console.error('\n❌ Dev server not reachable after 150s — manual restart: npm run loop:serve');
         sessionCount -= 1;
         iteration -= 1;
         fixState.iteration = iteration;
@@ -183,9 +185,23 @@ async function main() {
         fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
         // Thin harvest is retriable — don't burn topic retries as fast as hard failures.
         fixState.maxGenerateFailuresPerTopic = Math.max(fixState.maxGenerateFailuresPerTopic || 2, 4);
+        // Prune accumulated excludedUrls so repeated empty-harvest retries don't
+        // lock out legitimate video/news URLs from the pool.
+        const beforePrune = (fixState.excludedUrls || []).length;
+        fixState.excludedUrls = pruneExcludedUrlsForReharvest(fixState.excludedUrls || []);
+        if (beforePrune > fixState.excludedUrls.length) {
+          console.log(`   🗑 Pruned exclude list: ${beforePrune} → ${fixState.excludedUrls.length} (lifestyle-only retained)`);
+        }
       }
-      // Score the file we just rendered — canonical may be overwritten by finalize picking stale giants
-      videoPath = gen.videoPath || gen.canonicalPath;
+      // Always score the freshly rendered file from the run's outDir, never the shared
+      // canonical path (test-recordings/FINAL-VIDEO-final.mp4) which may be a stale giant.
+      // gen.videoPath = the render output inside full-RUNID/; gen.canonicalPath = the copy.
+      videoPath = gen.videoPath || null;
+      if (!videoPath && gen.canonicalPath && existsSync(gen.canonicalPath)) {
+        // Fallback only when the run-specific file is missing (e.g. Modal render path).
+        console.warn(`[loop] Warning: using canonical path for scoring (run-specific videoPath missing)`);
+        videoPath = gen.canonicalPath;
+      }
       scriptText = gen.scriptText || '';
       renderEnv = gen.renderEnv || null;
 

@@ -91,6 +91,43 @@ function loopMaxGiphyPerSegment(): number {
   return 2;
 }
 
+/**
+ * Stable exclude key that survives a sessionStorage round-trip.
+ *
+ * The problem with a bare `.split('?')[0]` is that YouTube watch URLs stored
+ * as "https://www.youtube.com/watch?v=VIDEO_ID" lose their video-ID param,
+ * collapsing all of them into the overbroad key "https://www.youtube.com/watch".
+ * That single overbroad key then blocks every YouTube watch candidate, zeroing
+ * the harvest.  This function preserves the ?v= param so each YouTube URL maps
+ * to a unique key, and keeps similar semantics for other URL shapes.
+ */
+function loopNormalizeExcludeKey(url: string, sourceUrl?: string): string {
+  const raw = (url || '').trim();
+  if (!raw) return '';
+  // YouTube watch URL — keep the video-ID query param as part of the key
+  const ytMatch = raw.match(/[?&]v=([\w-]{4,})/i);
+  if (ytMatch && /youtube\.com\/watch/i.test(raw)) {
+    return `https://www.youtube.com/watch?v=${ytMatch[1].toLowerCase()}`;
+  }
+  // Proxy URL with embedded source — extract the source URL so the key is
+  // host-agnostic and survives proxy URL changes.
+  const embMatch = raw.match(/[?&]url=([^&]+)/i);
+  if (embMatch) {
+    try {
+      return decodeURIComponent(embMatch[1]).split('?')[0].toLowerCase();
+    } catch {
+      return embMatch[1].split('?')[0].toLowerCase();
+    }
+  }
+  // A separate sourceUrl takes priority over a bare proxy path.
+  const src = (sourceUrl || '').trim();
+  if (src && /^https?:\/\//i.test(src)) return src.split('?')[0].toLowerCase();
+  // Bare /api/download-clip paths with no embedded source are not useful keys.
+  const bare = raw.split('?')[0].toLowerCase();
+  if (bare.includes('/api/download-clip')) return '';
+  return bare;
+}
+
 function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<string> } {
   if (!isLoopFastMode() || typeof sessionStorage === 'undefined') {
     return { offset: 0, nonce: 0, exclude: new Set() };
@@ -102,7 +139,8 @@ function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<str
     const raw = sessionStorage.getItem('autotube_loop_exclude_urls');
     if (raw) {
       for (const u of JSON.parse(raw) as string[]) {
-        if (u) exclude.add(u.split('?')[0].toLowerCase());
+        const key = loopNormalizeExcludeKey(u);
+        if (key) exclude.add(key);
       }
     }
   } catch {
@@ -111,7 +149,13 @@ function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<str
   return { offset, nonce, exclude };
 }
 
-const LOOP_DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investigation', 'report', 'leaked', 'official'];
+// Visual-metaphor tokens for loop-mode query diversification.  Each successive
+// loop iteration picks the next token so providers see meaningfully different
+// queries and return fresh assets instead of repeating the same top results.
+const LOOP_DIVERSITY_TOKENS = [
+  'news', 'documentary', 'archive', 'footage', 'investigation',
+  'report', 'leaked', 'official', 'crime', 'breaking', 'protest', 'surveillance',
+];
 
 function diversifyLoopQuery(query: string, ctx: { offset: number; nonce: number }): string {
   if (ctx.offset === 0 && ctx.nonce === 0) return query;
@@ -140,6 +184,48 @@ export const WATERMARK_INDICATORS = [
 
 const WATERMARK_DOMAIN_PENALTY = -500;
 const WATERMARK_INDICATOR_PENALTY = -300;
+
+// ---------------------------------------------------------------------------
+// Harvest Off-Topic Blocklist — hard-reject at source before scoring
+// ---------------------------------------------------------------------------
+
+/**
+ * Rules: if `pattern` matches the candidate haystack AND `requires` does NOT
+ * match the topic text, the candidate is rejected outright.
+ * Use `requires: /\b__autotube_never__\b/` for unconditional blocks.
+ */
+const HARVEST_OFF_TOPIC_RULES: Array<{ pattern: RegExp; requires: RegExp }> = [
+  // YouTube video-player thumbnails are never editorial B-roll
+  { pattern: /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/sddefault\.|\/oar\d*\.jpg/i, requires: /\b__autotube_never__\b/ },
+
+  // Lifestyle vlogger setups — ring-light, recording-with-phone, content-creator rig
+  { pattern: /\bring[\s-]?light\b|recording[\s-]?a[\s-]?video[\s-]?with[\s-]?(?:her|his)[\s-]?phone|content[\s-]?creator[\s-]?setup/i, requires: /\b(?:vlog|lifestyle|creator[\s-]?tips|tutorial|how[\s-]?to[\s-]?film)\b/i },
+  // Dinner/cooking presenter talking-head in plain background
+  { pattern: /\bwhat[\s-]?do[\s-]?you[\s-]?want[\s-]?for[\s-]?dinner|dinner[\s-]?tonight|plain[\s-]?background[\s-]?presenter/i, requires: /\b(?:cooking|recipe|food[\s-]?blog|kitchen|meal)\b/i },
+
+  // Psychology / Freud textbook slides
+  { pattern: /\bfreudian[\s-]?defen[cs]e|defense[\s-]?mechanisms|psychology[\s-]?lecture|psych[\s-]?101\b/i, requires: /\b(?:psychology|therapy|mental[\s-]?health)\b/i },
+
+  // Episode thumbnails from unrelated shows (trapping series, wildlife podcast clips)
+  { pattern: /\btrapping[\s-]?series[\s-]?ep|episode[\s-]?\d+[\s-]?thumbnail\b/i, requires: /\b(?:trapping|wildlife[\s-]?show|podcast[\s-]?ep)\b/i },
+
+  // Webinar / cyber-heist-summit promos — wrong "heist" for real-world crime topics
+  { pattern: /strategink\.com|digital[\s-]?heist[\s-]?summit|protect[\s-]?your[\s-]?vdr|cyber[\s-]?heist[\s-]?webinar/i, requires: /\b(?:cyber|data[\s-]?protection|webinar|summit|infosec)\b/i },
+];
+
+/**
+ * Returns true when the candidate should be hard-rejected at harvest time.
+ * @param haystack - lowercased concatenation of candidate alt + url + query + sourceUrl
+ * @param topicText - lowercased topic / resolvedTitle / narration context
+ */
+export function isHarvestOffTopicCandidate(haystack: string, topicText: string): boolean {
+  for (const rule of HARVEST_OFF_TOPIC_RULES) {
+    if (rule.pattern.test(haystack) && !rule.requires.test(topicText)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Copyright Claim Prevention (Task 178)
@@ -1766,7 +1852,11 @@ async function harvestMediaWithSafetyNet(
   candidates = candidates.filter(meetsMinimumSize);
   if (loopCtx.exclude.size > 0) {
     const before = candidates.length;
-    candidates = candidates.filter((c) => !loopCtx.exclude.has((c.url || '').split('?')[0].toLowerCase()));
+    candidates = candidates.filter((c) => {
+      const key = loopNormalizeExcludeKey(c.url || '', c.sourceUrl);
+      // Empty key means we cannot derive a stable exclude key — let the candidate through.
+      return !key || !loopCtx.exclude.has(key);
+    });
     if (before !== candidates.length) {
       trace.push(`[S${depth+1}] Excluded ${before - candidates.length} prior-loop URLs`);
     }
@@ -1814,7 +1904,25 @@ async function harvestMediaWithSafetyNet(
     logger.warn('DomainFilter', `Rejected: ${rejCandidate.url} [${category}] matched pattern "${pattern}"`);
   }
 
-  let scored = accepted.map(c => ({
+  // Off-topic hard-reject — drop harvest noise (YouTube thumbnails, lifestyle stock,
+  // psychology slides, webinar promos, etc.) before scoring so they never enter the pool.
+  const topicText = `${topicContext.topic || ''} ${topicContext.resolvedTitle || ''} ${narrationText || ''} ${segmentTitle || ''}`.toLowerCase();
+  const offTopicBlocked: MediaCandidate[] = [];
+  const offTopicClean: MediaCandidate[] = [];
+  for (const c of accepted) {
+    const hay = `${c.alt || ''} ${c.url || ''} ${c.query || ''} ${c.sourceUrl || ''}`.toLowerCase();
+    if (isHarvestOffTopicCandidate(hay, topicText)) {
+      offTopicBlocked.push(c);
+    } else {
+      offTopicClean.push(c);
+    }
+  }
+  if (offTopicBlocked.length > 0) {
+    trace.push(`[S${depth + 1}] Off-topic block: dropped ${offTopicBlocked.length} harvest noise candidate(s)`);
+    logger.info('OffTopicFilter', `Dropped ${offTopicBlocked.length} off-topic candidates for query "${searchQuery}"`);
+  }
+
+  let scored = offTopicClean.map(c => ({
     ...c,
     finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle)
   })).sort((a, b) => b.finalScore - a.finalScore);

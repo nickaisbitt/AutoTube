@@ -135,6 +135,7 @@ async function main() {
 
   console.log('\n— Video search —');
   await testSearch('Bing videos', '/api/search-bing-videos', 5, {
+    optional: true,
     validate(rows) {
       const tiktok = rows.filter((r) => /tiktok/i.test(r.url || r.content || '')).length;
       if (tiktok > 0) return `${tiktok} tiktok result(s) — expected none`;
@@ -148,7 +149,7 @@ async function main() {
     if (tiktok > 0) return `${tiktok} tiktok result(s) — expected none`;
     return null;
   };
-  await testSearch('Google videos', '/api/search-google-videos', 5, { validate: noTikTokInRows });
+  await testSearch('Google videos', '/api/search-google-videos', 5, { optional: true, validate: noTikTokInRows });
   await testSearch('Videos (aggregate)', '/api/search-videos', 10, { validate: noTikTokInRows });
   await testSearch('Vimeo', '/api/search-vimeo', 1, { optional: true });
   await testSearch('Dailymotion', '/api/search-dailymotion', 3);

@@ -37,6 +37,8 @@ import {
   harvestContextFromFixState,
   harvestSessionStoragePayload,
   normalizeUrlKey,
+  isOverBroadExcludeUrl,
+  sanitizeExcludedUrls,
 } from './lib/harvest-loop-context.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1118,6 +1120,38 @@ console.log('\n── 38. Office lifestyle blocklist ──');
     type: 'video',
   };
   assert('Office lifestyle clip scores 0', scoreAssetRelevance(officeClip, seg, topic, topicKws) === 0);
+}
+
+// ---------------------------------------------------------------------------
+// 39. YouTube thumbnail URLs blocked as B-roll
+// ---------------------------------------------------------------------------
+console.log('\n── 39. YouTube thumbnail blocklist ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's1', title: 'Louvre heist', narration: 'Crown jewels stolen from the museum.' };
+  const topicKws = extractKeywords(topic, 12);
+  const ytThumb = {
+    url: 'https://i.ytimg.com/vi/abc123/maxresdefault.jpg',
+    alt: 'louvre heist youtube thumbnail',
+    type: 'image',
+  };
+  assert('YouTube maxresdefault thumbnail scores 0', scoreAssetRelevance(ytThumb, seg, topic, topicKws) === 0);
+}
+
+// ---------------------------------------------------------------------------
+// 40. Over-broad exclude URL sanitization
+// ---------------------------------------------------------------------------
+console.log('\n── 40. Over-broad exclude sanitization ──');
+{
+  assert('Bare youtube.com/watch is over-broad', isOverBroadExcludeUrl('https://www.youtube.com/watch'));
+  assert('Specific YouTube video is not over-broad', !isOverBroadExcludeUrl('https://www.youtube.com/watch?v=abc12345'));
+  const cleaned = sanitizeExcludedUrls([
+    'https://www.youtube.com/watch',
+    'https://www.strategink.com/banner.jpg',
+    'https://www.youtube.com/watch?v=good12345',
+  ]);
+  assert('Sanitize drops bare watch URL', !cleaned.some((u) => u === 'https://www.youtube.com/watch'));
+  assert('Sanitize keeps specific video', cleaned.some((u) => u.includes('v=good12345')));
 }
 
 // ---------------------------------------------------------------------------

@@ -57,13 +57,31 @@ export function harvestSessionStoragePayload(ctx) {
  * @param {object} project
  */
 export function accumulateExcludedUrls(fixState, project) {
-  const prev = new Set((fixState.excludedUrls || []).map((u) => normalizeUrlKey(u)));
+  const prev = new Set(
+    (fixState.excludedUrls || [])
+      .map((u) => normalizeUrlKey(u))
+      .filter((key) => key && !isOverBroadExcludeUrl(key)),
+  );
   for (const m of project?.media || []) {
     const key = normalizeUrlKey(m.url, m.sourceUrl);
-    if (key) prev.add(key);
+    if (key && !isOverBroadExcludeUrl(key)) prev.add(key);
   }
   fixState.excludedUrls = [...prev].slice(-400);
   return fixState;
+}
+
+/** Drop provider-wide patterns that starve harvest (e.g. bare youtube.com/watch). */
+export function sanitizeExcludedUrls(urls = []) {
+  const out = [];
+  const seen = new Set();
+  for (const u of urls) {
+    if (!u || isOverBroadExcludeUrl(u)) continue;
+    const key = normalizeUrlKey(u) || (u || '').split('?')[0].toLowerCase();
+    if (!key || isOverBroadExcludeUrl(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
 }
 
 /**
@@ -71,7 +89,31 @@ export function accumulateExcludedUrls(fixState, project) {
  * @param {string} url
  * @param {string} [sourceUrl]
  */
+/** Bare host paths that would block entire providers if stored as excludes. */
+export function isOverBroadExcludeUrl(url = '') {
+  const raw = (url || '').trim();
+  if (/[?&]v=[\w-]{4,}/i.test(raw) || /\/watch\/[\w-]{4,}/i.test(raw)) return false;
+  const bare = raw.split('?')[0].toLowerCase().replace(/\/$/, '');
+  return (
+    bare === 'https://www.youtube.com/watch'
+    || bare === 'http://www.youtube.com/watch'
+    || bare === 'https://youtube.com/watch'
+    || bare.endsWith('/watch')
+  );
+}
+
+function youtubeWatchKey(url = '') {
+  const raw = (url || '').trim();
+  const m = raw.match(/[?&]v=([\w-]{4,})/i);
+  if (m && /youtube\.com\/watch/i.test(raw)) {
+    return `https://www.youtube.com/watch?v=${m[1].toLowerCase()}`;
+  }
+  return '';
+}
+
 export function normalizeUrlKey(url = '', sourceUrl = '') {
+  const yt = youtubeWatchKey(url) || youtubeWatchKey(sourceUrl);
+  if (yt) return yt;
   const embedded = extractEmbeddedSourceUrl(url);
   if (embedded) return embedded.split('?')[0].toLowerCase();
   const src = (sourceUrl || '').trim();

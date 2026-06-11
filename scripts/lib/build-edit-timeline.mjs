@@ -81,6 +81,8 @@ export function buildEditTimeline(project, options = {}) {
   const minVideosFirst = options.minVideosFirst ?? 2;
   const entries = [];
   const globalPool = orderAssetsVideoFirst(project.media || [], preferVideo ? minVideosFirst : 0);
+  const globalUrlUse = new Map();
+  const maxUsesPerUrl = 2;
 
   for (const seg of project.script || []) {
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
@@ -105,7 +107,7 @@ export function buildEditTimeline(project, options = {}) {
     let lastAssetId = null;
     let lastUrl = null;
     const recentUrls = [];
-    const recentCap = 4;
+    const recentCap = 8;
     let videoSlotsUsed = 0;
     const introHookPool = seg.type === 'intro' ? rankIntroHookAssets(assets).slice(0, Math.max(6, minVideosFirst + 2)) : assets;
     while (t < duration - 0.05) {
@@ -120,12 +122,14 @@ export function buildEditTimeline(project, options = {}) {
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) continue;
           if (key && recentUrls.includes(key)) continue;
+          if (key && (globalUrlUse.get(key) || 0) >= maxUsesPerUrl) continue;
           return candidate;
         }
         for (let j = 0; j < pool.length; j++) {
           const candidate = pool[(ai + j) % pool.length];
           const key = urlKey(candidate);
           if (key && key === lastUrl) continue;
+          if (key && (globalUrlUse.get(key) || 0) >= maxUsesPerUrl) continue;
           return candidate;
         }
         return pool[ai % pool.length];
@@ -163,6 +167,7 @@ export function buildEditTimeline(project, options = {}) {
       if (key) {
         recentUrls.push(key);
         if (recentUrls.length > recentCap) recentUrls.shift();
+        globalUrlUse.set(key, (globalUrlUse.get(key) || 0) + 1);
       }
       t = end;
       ai += 1;

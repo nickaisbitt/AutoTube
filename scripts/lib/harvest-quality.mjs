@@ -119,6 +119,15 @@ const OFF_TOPIC_BLOCKLIST = [
   // Office/laptop lifestyle presenters — not crime B-roll
   { pattern: /\b(?:woman[\s-]?writing[\s-]?notes|working[\s-]?on[\s-]?laptop|surgical[\s-]?mask.*laptop|office\s+worker\s+stock)\b/i, requires: /\b(?:remote\s+work|office\s+life|productivity\s+tips)\b/i },
 
+  // YouTube preview thumbnails — never editorial B-roll (i.ytimg.com/vi/*/maxresdefault)
+  { pattern: /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/oar\d*\.jpg|\/sddefault\./i, requires: /\b__autotube_never__\b/i },
+
+  // Other-video episode thumbnails / promo graphics scraped as images
+  { pattern: /\b(?:trapping\s+series\s+ep|episode\s+\d+\s+thumbnail|mind\s+style\s+hub|slideshow|infographic)\b/i, requires: /\b(?:trapping|wildlife\s+show|podcast\s+ep)\b/i },
+
+  // Psychology textbook / Freud slides — noise for crime/cult/news topics
+  { pattern: /\b(?:freudian\s+defence|defense\s+mechanisms|psychology\s+lecture|psych\s+101)\b/i, requires: /\b(?:psychology|therapy|mental\s+health\s+course)\b/i },
+
   // Watermarked preview stock — never ship in final render
   { pattern: /gettyimages|shutterstock\s+watermark|alamy\s+watermark|istockphoto.*preview/i, requires: /\b__autotube_never__\b/i },
 ];
@@ -150,6 +159,7 @@ export function collectAssemblyExcludeUrls(project) {
     if (
       /pexels\.com\/video\/(?:a-young-woman|woman-writing|ring-light|smartphone-user|woman-art-iphone)/i.test(haystack)
       || /\/video\/(?:woman|ring-light|smartphone)/i.test(haystack)
+      || /i\.ytimg\.com\/vi\//i.test(haystack)
     ) {
       const key = (asset.sourceUrl || asset.url || '').split('?')[0].toLowerCase();
       if (key) out.add(key);

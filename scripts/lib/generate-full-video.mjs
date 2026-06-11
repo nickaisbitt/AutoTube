@@ -18,6 +18,7 @@ import {
   harvestContextFromFixState,
   harvestSessionStoragePayload,
   loadLastProjectUrls,
+  normalizeUrlKey,
 } from './harvest-loop-context.mjs';
 import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-env-from-fix-state.mjs';
 import {
@@ -275,7 +276,44 @@ function buildVideoTopUpQueries(seg, topic, round = 0) {
       'crown jewels stolen news report',
     );
   }
+  if (/cult|church|leader|empire|documentary|investigation/.test(ctx) && (seg.type === 'intro' || round === 0)) {
+    queries.unshift(
+      'cult documentary investigation footage',
+      'news interview talking head serious',
+      'crowd gathering news report',
+      'police arrest news footage',
+    );
+  }
   return queries.filter((q, i, arr) => q && arr.indexOf(q) === i);
+}
+
+/** Visual-metaphor top-up queries (EditBuddy-style) — emotion/action, not literal transcript words. */
+function buildMetaphorTopUpQueries(seg, topic) {
+  const ctx = `${topic} ${seg.title || ''} ${seg.narration || ''}`.toLowerCase();
+  if (/museum|louvre|heist|robbery|jewel|crown/.test(ctx)) {
+    return [
+      'security camera museum interior',
+      'police lights crime scene night',
+      'jewelry display case close up',
+      'masked robber news footage',
+    ];
+  }
+  if (/cult|church|leader|empire|youtube|follower/.test(ctx)) {
+    return [
+      'documentary crowd gathering serious',
+      'news anchor breaking story',
+      'courtroom gavel trial footage',
+      'protest crowd news aerial',
+    ];
+  }
+  if (/tiktok|live|stream/.test(ctx)) {
+    return [
+      'smartphone screen recording news',
+      'viral news story television',
+      'reporter breaking news desk',
+    ];
+  }
+  return [];
 }
 
 function toRelativeClipProxyUrl(devServer, pageUrl, durationSec = 10) {
@@ -497,16 +535,21 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
     let uniqueCount = segmentUniqueCount(project, seg.id);
 
     for (let round = 0; round < TOP_UP_IMAGE_ENDPOINTS.length && uniqueCount < minPerSegment; round += 1) {
-      const q = buildTopUpQuery(seg, topic, round);
-      const results = await fetchImageSearchResults(devServer, TOP_UP_IMAGE_ENDPOINTS[round], q);
-      const candidates = results
-        .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
-        .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+      const queries = round === 0
+        ? [...buildMetaphorTopUpQueries(seg, topic), buildTopUpQuery(seg, topic, round)]
+        : [buildTopUpQuery(seg, topic, round)];
+      for (const q of queries) {
+        if (uniqueCount >= minPerSegment) break;
+        const results = await fetchImageSearchResults(devServer, TOP_UP_IMAGE_ENDPOINTS[round], q);
+        const candidates = results
+          .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
+          .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
 
-      for (const r of candidates) {
-        if (await addImageTopUpCandidate(project, seg, r, q, TOP_UP_IMAGE_ENDPOINTS[round], report, topic, topicKeywords)) {
-          uniqueCount = segmentUniqueCount(project, seg.id);
-          if (uniqueCount >= minPerSegment) break;
+        for (const r of candidates) {
+          if (await addImageTopUpCandidate(project, seg, r, q, TOP_UP_IMAGE_ENDPOINTS[round], report, topic, topicKeywords)) {
+            uniqueCount = segmentUniqueCount(project, seg.id);
+            if (uniqueCount >= minPerSegment) break;
+          }
         }
       }
     }
@@ -539,7 +582,8 @@ function isJunkHarvestUrl(url) {
     u.includes('pinterest.com') ||
     u.includes('pinimg.com') ||
     u.includes('pin.it/') ||
-    /gettyimages|shutterstock|alamy|istockphoto/i.test(u)
+    /gettyimages|shutterstock|alamy|istockphoto/i.test(u) ||
+    /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/oar\d*\.jpg/i.test(u)
   );
 }
 
@@ -771,7 +815,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   }
 
   const relevance = filterAssetsByRelevance(validated, project, {
-    minScore: loopMode ? 0.38 : 0.25,
+    minScore: loopMode ? 0.45 : 0.25,
   });
   report.relevanceDropped = relevance.dropped;
   if (relevance.dropped.length) {
@@ -826,6 +870,19 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const volume = evaluateHarvestVolume(project, minPerSegment);
   report.harvestQuality = volume;
   report.volumePass = volume.pass;
+
+  if (loopMode) {
+    const uniqueUrls = new Set(
+      (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+    );
+    report.uniqueUrlCount = uniqueUrls.size;
+    const minUnique = Math.max(10, (project.script?.length || 3) * 3);
+    if (uniqueUrls.size < minUnique) {
+      report.thinPoolAbort = true;
+      throw new Error(`Thin media pool (${uniqueUrls.size} unique URLs < ${minUnique}) — reharvest required`);
+    }
+  }
+
   writeFileSync(join(outDir, 'harvest-quality.json'), JSON.stringify(volume, null, 2));
   writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
   return report;

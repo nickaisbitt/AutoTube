@@ -10,7 +10,7 @@ import {
   countSegmentVideos,
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
 } from './harvest-quality.mjs';
-import { normalizeUrlKey } from './harvest-loop-context.mjs';
+import { normalizeUrlKey, isOverBroadExcludeUrl, sanitizeExcludedUrls } from './harvest-loop-context.mjs';
 import { collectAssemblyExcludeUrls } from './harvest-quality.mjs';
 import {
   loadRenderManifest,
@@ -189,16 +189,18 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       const harvestProject = project || loadLastProject();
       const manifest = resolveRenderManifest(process.cwd(), options.videoPath || watch.videoPath || '');
       const placeholderKeys = (manifest?.placeholderUrls || [])
-        .map((u) => (u || '').split('?')[0].toLowerCase())
-        .filter(Boolean);
+        .map((u) => normalizeUrlKey(u) || (u || '').split('?')[0].toLowerCase())
+        .filter((k) => k && !isOverBroadExcludeUrl(k));
       const badSegments = placeholderSegmentsFromManifest(manifest?.perSegment || []);
       const deadSegmentIds = new Set(badSegments.map((seg) => seg.segmentId));
       const segDetail = badSegments.length ? formatPlaceholderSegmentDetail(badSegments) : '';
       if (harvestProject?.media?.length || placeholderKeys.length) {
-        const prev = new Set((s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
-        if (placeholderKeys.length) {
-          for (const key of placeholderKeys) prev.add(key);
-        } else {
+      const prev = new Set(sanitizeExcludedUrls(s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
+      if (placeholderKeys.length) {
+        for (const key of placeholderKeys) {
+          if (!isOverBroadExcludeUrl(key)) prev.add(key);
+        }
+      } else {
           const deadUrls = collectDeadAssetUrls(harvestProject, deadSegmentIds);
           if (deadUrls.length) {
             for (const key of deadUrls) prev.add(key);
@@ -252,9 +254,9 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     const harvestProject = project || loadLastProject();
     if (harvestProject?.media?.length) {
       const before = (s.excludedUrls || []).length;
-      const prev = new Set((s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
+      const prev = new Set(sanitizeExcludedUrls(s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
       for (const key of collectAssemblyExcludeUrls(harvestProject)) {
-        if (key) prev.add(key);
+        if (key && !isOverBroadExcludeUrl(key)) prev.add(key);
       }
       s.excludedUrls = [...prev].slice(-400);
       const added = s.excludedUrls.length - before;

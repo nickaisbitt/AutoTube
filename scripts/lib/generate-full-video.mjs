@@ -40,6 +40,7 @@ import {
   isUnreliableVideoHost,
   isTrustedVideoHost,
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+  dedupHarvestByUrl,
 } from './harvest-quality.mjs';
 
 export { loopMediaTimeoutMs } from './harvest-quality.mjs';
@@ -288,7 +289,7 @@ const TOP_UP_NEWS_ENDPOINTS = [
 
 /** True when the topic is primarily a crime, heist, or law-enforcement news story. */
 function isCrimeNewsTopic(topic) {
-  return /museum|heist|robbery|theft|crime|police|arrest|jewel|stolen|louvre|murder|fraud|scam/i.test(topic);
+  return /museum|heist|robbery|theft|crime|police|arrest|jewel|stolen|louvre|murder|fraud|scam|chase|surveillance|cctv/i.test(topic);
 }
 
 async function fetchVideoSearchResults(devServer, endpoint, query) {
@@ -320,6 +321,8 @@ function buildVideoTopUpQueries(seg, topic, round = 0) {
       'paris jewelry robbery news',
       'police crime scene news footage',
       'crown jewels stolen news report',
+      'police chase robbery suspect arrest footage',
+      'surveillance cctv caught crime news report',
     );
   }
   if (/cult|church|leader|empire|documentary|investigation/.test(ctx) && (seg.type === 'intro' || round === 0)) {
@@ -348,11 +351,20 @@ function buildMetaphorTopUpQueries(seg, topic) {
       'news anchor breaking heist report television studio',
       'paris police crime investigation scene louvre',
       'crown jewels display glass case museum security',
+      // action / pursuit B-roll
+      'police chase suspect robbery arrest news footage',
+      'surveillance camera street caught crime suspect',
+      'armed robbery cctv footage breaking news',
+      'police perimeter crime scene crowd reporters',
+      'louvre heist suspects arrested investigation news',
+      'thief running getaway escape police pursuit',
+      'art theft crown jewels heist documentary footage',
     ];
     if (/arrest|caught|suspect|charged|trial/.test(ctx)) {
       return [
         'police handcuff arrest suspect crime scene news',
         'detective interview investigation suspect footage news',
+        'police car pursuit chase robbery suspect arrested',
         ...coreHeist,
       ];
     }
@@ -360,6 +372,7 @@ function buildMetaphorTopUpQueries(seg, topic) {
       return [
         'cctv security camera live footage crime viral',
         'viral crime news broadcast television report breaking',
+        'surveillance camera robbery streamed live viral',
         ...coreHeist,
       ];
     }
@@ -367,6 +380,7 @@ function buildMetaphorTopUpQueries(seg, topic) {
       return [
         'museum heist security camera footage night robbery',
         'masked robber news report stolen jewels breaking news',
+        'police chase suspect robbery fleeing news footage',
         ...coreHeist,
       ];
     }
@@ -432,10 +446,12 @@ function segmentUniqueCount(project, segmentId) {
 async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords, { relaxed = false } = {}) {
   if (isUnreliableVideoHost(`${r.url || ''} ${r.sourceUrl || ''}`)) return false;
   const key = r.url.split('?')[0];
-  const alreadyInSeg = (project.media || []).some(
-    (m) => m.segmentId === seg.id && (m.url || '').split('?')[0] === key,
+  // Global URL dedup: reject if this URL already exists in ANY segment pool.
+  // Per-segment uniqueness is a subset of this check.
+  const alreadyInProject = (project.media || []).some(
+    (m) => (m.url || '').split('?')[0] === key,
   );
-  if (alreadyInSeg) return false;
+  if (alreadyInProject) return false;
 
   const asset = { url: r.url, alt: r.alt || '', query: q, type: 'image' };
   if (!relaxed && !passesTopUpRelevanceGate(asset, seg, topic, topicKeywords)) return false;
@@ -754,10 +770,11 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
 
 async function addVideoTopUpCandidate(project, seg, draft, devServer, endpoint, report, topic, topicKeywords) {
   const key = (draft.sourceUrl || draft.url || '').split('?')[0];
-  const alreadyInSeg = (project.media || []).some(
-    (m) => m.segmentId === seg.id && `${m.sourceUrl || m.url || ''}`.split('?')[0] === key,
+  // Global URL dedup: reject if this source URL already exists in ANY segment pool.
+  const alreadyInProject = (project.media || []).some(
+    (m) => `${m.sourceUrl || m.url || ''}`.split('?')[0] === key,
   );
-  if (alreadyInSeg) return false;
+  if (alreadyInProject) return false;
   if (!passesTopUpRelevanceGate(draft, seg, topic, topicKeywords)) return false;
 
   const probeSanitized = [];
@@ -935,8 +952,16 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     devServer,
     onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
   });
-  project.media = [...deduped.media];
   report.phashHashCount = deduped.hashCount;
+
+  // URL-level cross-segment dedup: prevent the same shot appearing in multiple segment pools.
+  // This runs after phash dedup so that visually distinct but URL-identical assets are already
+  // collapsed. First occurrence (original segment assignment) wins.
+  const urlDeduped = dedupHarvestByUrl(deduped.media);
+  project.media = urlDeduped.media;
+  if (urlDeduped.dupCount) {
+    report.crossSegDupCount = urlDeduped.dupCount;
+  }
 
   const minPerSeg = loopMode ? minPerSegment : Math.min(4, minPerSegment);
   const bySegmentAfter = {};
@@ -972,6 +997,14 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       harvestVideoFirst: options.harvestVideoFirst !== false,
       minVideosPerSegment: options.minVideosPerSegment || 2,
     });
+    // Re-apply URL dedup after top-up: top-up candidates pass per-segment uniqueness checks
+    // but a URL could still appear in multiple segments if search returns the same result
+    // for different segment queries.
+    const topupDeduped = dedupHarvestByUrl(project.media);
+    if (topupDeduped.dupCount) {
+      report.topUpDupCount = topupDeduped.dupCount;
+      project.media = topupDeduped.media;
+    }
     report.afterTopUp = project.media.length;
     // Force-clear the stale browser-generated editTimeline so validateEditTimeline
     // always rebuilds a fresh timeline that includes top-up assets. Without this,

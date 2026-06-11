@@ -78,6 +78,11 @@ export function orderAssetsVideoFirst(assets, minVideosFirst = 2) {
 
 /**
  * Widen cuts when the unique asset pool cannot support fast pacing without obvious repeats.
+ *
+ * When the widened cut exceeds HOOK_MAX_HOLD_SEC, the hook zone forces shorter clips in the
+ * first segment, causing it to consume more of the pool budget than expected. A segment-aware
+ * correction ensures each segment stays within its share of the global pool budget.
+ *
  * @param {object} project
  * @param {number} cutIntervalSec
  */
@@ -85,14 +90,41 @@ export function effectiveCutInterval(project, cutIntervalSec = 1.25) {
   const cut = cutIntervalSec ?? 1.25;
   const uniqueUrls = new Set((project.media || []).map((a) => urlKey(a)).filter(Boolean));
   const poolSize = uniqueUrls.size || 1;
-  const totalDur = (project.script || []).reduce((sum, seg) => sum + (seg.duration || 0), 0) || 60;
+  const segs = project.script || [];
+  const totalDur = segs.reduce((sum, seg) => sum + (seg.duration || 0), 0) || 60;
   const targetClips = totalDur / Math.max(0.25, cut);
   const maxReusesPerAsset = MAX_USES_PER_URL;
   const maxClipsFromPool = poolSize * maxReusesPerAsset;
-  if (targetClips > maxClipsFromPool) {
-    return Math.min(2.5, totalDur / maxClipsFromPool);
+  if (targetClips <= maxClipsFromPool) return cut;
+
+  const baseWidened = totalDur / maxClipsFromPool;
+
+  // If the widened cut would trigger hook-zone shortening (baseWidened > HOOK_MAX_HOLD_SEC),
+  // compute the minimum cut that keeps each hook-zone segment within its share of the pool
+  // budget, so wrap-around clips don't overflow the global URL cap.
+  if (baseWidened > HOOK_MAX_HOLD_SEC && segs.length > 0) {
+    const numSegs = segs.length;
+    const segBudget = maxClipsFromPool / numSegs;
+    let minCutRequired = baseWidened;
+
+    let cumStart = 0;
+    for (const seg of segs) {
+      const segDur = seg.duration || 0;
+      const hookDurInSeg = Math.max(0, Math.min(HOOK_ZONE_SEC - cumStart, segDur));
+      if (hookDurInSeg > 0) {
+        const hookClips = Math.ceil(hookDurInSeg / HOOK_MAX_HOLD_SEC);
+        const restDurInSeg = segDur - hookDurInSeg;
+        const restBudget = segBudget - hookClips;
+        if (restBudget > 0 && restDurInSeg > 0) {
+          minCutRequired = Math.max(minCutRequired, restDurInSeg / restBudget);
+        }
+      }
+      cumStart += segDur;
+    }
+    return Math.min(3.5, minCutRequired);
   }
-  return cut;
+
+  return Math.min(2.5, baseWidened);
 }
 
 export function buildEditTimeline(project, options = {}) {
@@ -195,6 +227,16 @@ export function buildEditTimeline(project, options = {}) {
         if (wantVideo) {
           asset = pickFrom(videoPool);
           if (isVideoAsset(asset)) videoSlotsUsed += 1;
+        }
+      }
+
+      // If the round-robin candidate has already hit the global URL cap, use pickFrom to
+      // find a less-used asset. This prevents wrap-around from recycling capped URLs when
+      // the hook-zone or other interval changes cause more clips than the pool math expected.
+      {
+        const candidateKey = urlKey(asset);
+        if (candidateKey && (globalUrlUse.get(candidateKey) || 0) >= maxUsesPerUrl) {
+          asset = pickFrom(poolForClip.length > 1 ? poolForClip : globalPool);
         }
       }
 

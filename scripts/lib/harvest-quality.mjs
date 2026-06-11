@@ -464,3 +464,39 @@ export function loopMediaTimeoutMs({ realHarvest = false, videoFirst = false } =
   const base = realHarvest ? 1_200_000 : 300_000;
   return realHarvest && videoFirst ? base + 300_000 : base;
 }
+
+/**
+ * Remove assets whose normalized URL key already appears in the global pool (cross-segment dedup).
+ * Prevents the same image or video being recycled across multiple segment pools.
+ * First occurrence wins (preserves the original segment assignment).
+ *
+ * @param {object[]} media
+ * @returns {{ media: object[], dupCount: number }}
+ */
+export function dedupHarvestByUrl(media) {
+  const seen = new Set();
+  const kept = [];
+  let dupCount = 0;
+
+  for (const asset of media) {
+    const raw = asset.url || '';
+    // Resolve embedded source URL for proxy paths (/api/download-clip?url=...).
+    const embeddedMatch = raw.match(/[?&]url=([^&]+)/i);
+    const embedded = embeddedMatch
+      ? (() => { try { return decodeURIComponent(embeddedMatch[1]); } catch { return embeddedMatch[1]; } })()
+      : '';
+    const src = (asset.sourceUrl || '').split('?')[0].toLowerCase().trim();
+    const emb = embedded.split('?')[0].toLowerCase().trim();
+    const bare = raw.split('?')[0].toLowerCase().trim();
+    // Canonical key: embedded > sourceUrl > bare. Skip bare proxy-only paths.
+    const key = (emb && !emb.includes('/api/download-clip')) ? emb
+      : (src || bare);
+
+    if (!key) { kept.push(asset); continue; }
+    if (seen.has(key)) { dupCount++; continue; }
+    seen.add(key);
+    kept.push(asset);
+  }
+
+  return { media: kept, dupCount };
+}

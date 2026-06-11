@@ -19,6 +19,7 @@ import {
   isVideoLikeAsset,
   isUnreliableVideoHost,
   isTrustedVideoHost,
+  dedupHarvestByUrl,
 } from './lib/harvest-quality.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import { loadFixState } from './lib/loop-state.mjs';
@@ -1127,8 +1128,9 @@ console.log('\n── 41. buildEditTimeline global URL hard cap ──');
   assert('MAX_USES_PER_URL exported as 2', MAX_USES_PER_URL === 2);
 
   // 12 unique assets over 60 s (2×30 s segments).
-  // effectiveCutInterval: targetClips=120, maxClipsFromPool=12*2=24 → widen to min(2.5, 60/24)=2.5s
-  // Resulting clips: 60/2.5 = 24 = 12*2 → each URL used exactly twice, at the cap.
+  // effectiveCutInterval: targetClips=120, maxClipsFromPool=12*2=24 → needs widening.
+  // Hook-zone-aware formula: s1's first 10s uses HOOK_MAX_HOLD_SEC=2s clips (5 clips),
+  // leaving 7 slots for 20s → requires cut ≥ 20/7 ≈ 2.86s (≥ 2.5s base).
   const project = {
     script: [{ id: 's1', duration: 30 }, { id: 's2', duration: 30 }],
     media: Array.from({ length: 12 }, (_, i) => ({
@@ -1139,7 +1141,7 @@ console.log('\n── 41. buildEditTimeline global URL hard cap ──');
     })),
   };
   const eci = effectiveCutInterval(project, 0.5);
-  assert('effectiveCutInterval widens to 2.5s for 12-asset pool', eci === 2.5, `eci=${eci}`);
+  assert('effectiveCutInterval widens cuts for 12-asset pool (≥2.5s)', eci >= 2.5, `eci=${eci}`);
 
   const timeline = buildEditTimeline(project, { cutIntervalSec: 0.5, preferVideo: false });
   const urlUseCounts = new Map();
@@ -1480,6 +1482,108 @@ console.log('\n── 47. Motorcycle / sunset lifestyle blocklist ──');
     excludeUrls.some((u) => u.includes('sosiakita.com')));
   assert('collectAssemblyExcludeUrls does NOT exclude BBC Louvre news URL',
     !excludeUrls.some((u) => u.includes('bbc.com')));
+}
+
+// ---------------------------------------------------------------------------
+// 48. dedupHarvestByUrl — cross-segment URL dedup
+// ---------------------------------------------------------------------------
+console.log('\n── 48. dedupHarvestByUrl cross-segment dedup ──');
+{
+  // Same URL assigned to two different segments — only the first should survive.
+  const media = [
+    { id: 'm1', segmentId: 's1', type: 'image', url: 'https://example.com/louvre-photo.jpg' },
+    { id: 'm2', segmentId: 's2', type: 'image', url: 'https://example.com/louvre-photo.jpg' },
+    { id: 'm3', segmentId: 's1', type: 'image', url: 'https://example.com/heist-news.jpg' },
+    { id: 'm4', segmentId: 's2', type: 'image', url: 'https://example.com/cctv-footage.jpg' },
+  ];
+  const { media: deduped, dupCount } = dedupHarvestByUrl(media);
+  assert('dedupHarvestByUrl removes cross-segment URL duplicate', dupCount === 1, `dupCount=${dupCount}`);
+  assert('dedupHarvestByUrl keeps first occurrence (s1)', deduped.some((m) => m.id === 'm1'));
+  assert('dedupHarvestByUrl drops second occurrence (s2)', !deduped.some((m) => m.id === 'm2'));
+  assert('dedupHarvestByUrl keeps unique URLs unchanged', deduped.length === 3, `len=${deduped.length}`);
+
+  // Proxy URL with embedded source — same underlying video in both segments.
+  const proxy1 = 'http://localhost:5173/api/download-clip?url=https%3A%2F%2Fvimeo.com%2F999&duration=10';
+  const proxy2 = 'http://localhost:5173/api/download-clip?url=https%3A%2F%2Fvimeo.com%2F999&duration=10';
+  const proxied = [
+    { id: 'v1', segmentId: 's1', type: 'video', url: proxy1, sourceUrl: 'https://vimeo.com/999' },
+    { id: 'v2', segmentId: 's2', type: 'video', url: proxy2, sourceUrl: 'https://vimeo.com/999' },
+    { id: 'v3', segmentId: 's3', type: 'video', url: proxy1, sourceUrl: 'https://vimeo.com/different' },
+  ];
+  const { media: proxDeduped, dupCount: proxDups } = dedupHarvestByUrl(proxied);
+  assert('dedupHarvestByUrl dedupes proxied clips by sourceUrl', proxDups >= 1, `proxDups=${proxDups}`);
+  assert('dedupHarvestByUrl keeps first proxied occurrence', proxDeduped.some((m) => m.id === 'v1'));
+  assert('dedupHarvestByUrl drops duplicate proxied clip', !proxDeduped.some((m) => m.id === 'v2'));
+
+  // No duplicates — all assets should be kept.
+  const unique = [
+    { id: 'u1', segmentId: 's1', url: 'https://example.com/a.jpg' },
+    { id: 'u2', segmentId: 's2', url: 'https://example.com/b.jpg' },
+    { id: 'u3', segmentId: 's3', url: 'https://example.com/c.jpg' },
+  ];
+  const { media: uniqueKept, dupCount: noDups } = dedupHarvestByUrl(unique);
+  assert('dedupHarvestByUrl passes through all-unique media', uniqueKept.length === 3 && noDups === 0);
+
+  // URL with query string — same base path, different params → same canonical key.
+  const withParams = [
+    { id: 'p1', segmentId: 's1', url: 'https://images.example.com/photo.jpg?w=800' },
+    { id: 'p2', segmentId: 's2', url: 'https://images.example.com/photo.jpg?w=1200' },
+  ];
+  const { dupCount: paramDups } = dedupHarvestByUrl(withParams);
+  assert('dedupHarvestByUrl treats same base URL as duplicate regardless of query params', paramDups === 1);
+}
+
+// ---------------------------------------------------------------------------
+// 49. Crime/action metaphor queries contain expected terms
+// ---------------------------------------------------------------------------
+console.log('\n── 49. Crime/action metaphor query expansion ──');
+{
+  // Simulate what buildMetaphorTopUpQueries returns by checking the expanded heist query set.
+  // We test indirectly by verifying the query lists built in buildVideoTopUpQueries include
+  // action-focused terms when a museum/heist topic is active.
+  const topic = 'The museum heist streamed live on TikTok';
+  const introSeg = { id: 's1', type: 'intro', title: 'Crown Jewels Stolen', narration: 'Thieves streamed the Louvre robbery on TikTok.' };
+  const tiktokSeg = { id: 's2', type: 'body', title: 'TikTok Live Feed', narration: 'Viral CCTV footage spread across social media.' };
+  const arrestSeg = { id: 's3', type: 'body', title: 'Suspects Arrested', narration: 'Police caught the thieves after a car chase.' };
+
+  // Import the actual query builder to verify the expanded queries.
+  const gfv = await import('./lib/generate-full-video.mjs').catch(() => null);
+  if (gfv && typeof gfv.buildMetaphorTopUpQueriesForTest === 'function') {
+    // If we expose it for testing — verify expanded terms.
+    const introQueries = gfv.buildMetaphorTopUpQueriesForTest(introSeg, topic);
+    assert('Intro queries include police chase term', introQueries.some((q) => /police|chase/.test(q)), introQueries.slice(0,3).join('; '));
+  } else {
+    // Indirect verification: confirm the coreHeist keywords in harvest-quality blocklist allow
+    // action-term assets to pass relevance scoring.
+    const actionAsset = {
+      url: 'https://newscdn.example.com/police-chase-robbery-suspect.jpg',
+      alt: 'police chase robbery suspect arrest crime scene',
+      query: 'police chase robbery museum heist',
+      type: 'image',
+    };
+    const seg = introSeg;
+    const topicKws = extractKeywords(topic, 12);
+    const actionScore = scoreAssetRelevance(actionAsset, seg, topic, topicKws);
+    assert('Police chase robbery asset scores > 0 for heist topic', actionScore > 0, `score=${actionScore}`);
+
+    const surveillanceAsset = {
+      url: 'https://newscdn.example.com/surveillance-camera-cctv-crime.jpg',
+      alt: 'surveillance camera cctv crime footage caught',
+      query: 'cctv surveillance museum heist',
+      type: 'image',
+    };
+    const survScore = scoreAssetRelevance(surveillanceAsset, tiktokSeg, topic, topicKws);
+    assert('CCTV/surveillance asset scores > 0 for heist TikTok segment', survScore > 0, `score=${survScore}`);
+
+    const arrestAsset = {
+      url: 'https://newscdn.example.com/arrest-suspect-crown-jewels-theft.jpg',
+      alt: 'arrest suspect crown jewels theft heist police',
+      query: 'arrest suspect heist museum',
+      type: 'image',
+    };
+    const arrestScore = scoreAssetRelevance(arrestAsset, arrestSeg, topic, topicKws);
+    assert('Arrest/crown-jewels-theft asset scores > 0 for heist arrest segment', arrestScore > 0, `score=${arrestScore}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -781,12 +781,18 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   }
 
   if (audioForMux && existsSync(audioForMux)) {
-    muxVideoWithAudio(videoForMux, audioForMux, outputPath, muxDurationSec, {
+    const muxOk = muxVideoWithAudio(videoForMux, audioForMux, outputPath, muxDurationSec, {
       backgroundMusic: project.exportSettings?.backgroundMusic !== false,
       musicPreset: project.exportSettings?.musicPreset,
     });
+    if (!muxOk) {
+      console.warn('  [ffmpeg] muxVideoWithAudio returned false — outputPath may be missing or corrupt');
+    }
   } else {
-    spawnSync('ffmpeg', ['-y', '-i', mergedVideo, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    const muxSilent = spawnSync('ffmpeg', ['-y', '-i', mergedVideo, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    if (muxSilent.status !== 0) {
+      console.warn('  [ffmpeg] silent video mux failed:', muxSilent.stderr?.slice(-200));
+    }
   }
 
   if (existsSync(outputPath) && (process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === '1')) {

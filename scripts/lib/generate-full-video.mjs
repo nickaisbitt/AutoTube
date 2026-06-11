@@ -63,19 +63,47 @@ export function resolvePixabayKey() {
 
 async function clickPipelineButton(page, locator, { settleMs = 2000, timeout = 120_000 } = {}) {
   await locator.waitFor({ state: 'visible', timeout });
+
+  // Wait for any in-progress spinners / loading overlays to clear before clicking.
+  // This prevents a "click intercepted" failure when the harvest step is still finishing.
+  try {
+    await page.waitForFunction(
+      () => !document.querySelector('[data-loading="true"], .loading-overlay, [aria-busy="true"]'),
+      { timeout: 10_000 },
+    );
+  } catch {
+    /* spinner check is best-effort */
+  }
+
   if (settleMs > 0) await page.waitForTimeout(settleMs);
+
+  // Attempt 1: normal click
   try {
     await locator.click({ timeout: 20_000 });
     return;
   } catch {
     /* fall through */
   }
+
+  // Attempt 2: scroll into view then click
+  try {
+    await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    await locator.click({ timeout: 15_000 });
+    return;
+  } catch {
+    /* fall through */
+  }
+
+  // Attempt 3: force click
   try {
     await locator.click({ force: true, timeout });
     return;
   } catch {
     /* fall through */
   }
+
+  // Attempt 4: JS dispatchEvent fallback
   const clicked = await page.evaluate(() => {
     const btn =
       document.querySelector('[data-testid="media-step-next"]') ||
@@ -891,10 +919,11 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
 
-  // Loop mode: 0.35 keeps editorial press photos that score below 0.45 due to sparse metadata
-  // while still rejecting clearly off-topic stock filler (score < 0.35).
+  // Loop mode: 0.28 keeps editorial press photos that score in the 0.25–0.35 range due to
+  // sparse keyword metadata (e.g. museum images for TikTok-stream segments), while the
+  // scoreAssetRelevance early-exit gate still rejects assets with zero keyword hits.
   const relevance = filterAssetsByRelevance(validated, project, {
-    minScore: loopMode ? 0.35 : 0.25,
+    minScore: loopMode ? 0.28 : 0.25,
   });
   report.relevanceDropped = relevance.dropped;
   if (relevance.dropped.length) {
@@ -944,6 +973,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       minVideosPerSegment: options.minVideosPerSegment || 2,
     });
     report.afterTopUp = project.media.length;
+    // Force-clear the stale browser-generated editTimeline so validateEditTimeline
+    // always rebuilds a fresh timeline that includes top-up assets. Without this,
+    // top-up assets are silently ignored when the old timeline's stale-ratio is < 10%.
+    project.editTimeline = [];
   }
 
   const volume = evaluateHarvestVolume(project, minPerSegment);
@@ -1289,14 +1322,41 @@ export async function generateFullVideo(options) {
 
     const fillTopic = async () => {
       const input = page.getByTestId('topic-input');
-      await input.waitFor({ state: 'visible', timeout: 45_000 });
-      await input.click({ clickCount: 3 }).catch(() => {});
-      await input.fill(topic);
-      const value = await input.inputValue().catch(() => '');
-      if (!value.includes(topic.slice(0, Math.min(12, topic.length)))) {
-        await page.reload({ waitUntil: 'domcontentloaded' });
-        await input.waitFor({ state: 'visible', timeout: 45_000 });
-        await input.fill(topic);
+      const topicCheck = topic.slice(0, Math.min(12, topic.length));
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await input.waitFor({ state: 'visible', timeout: 45_000 });
+        } catch (waitErr) {
+          if (attempt === 3) throw waitErr;
+          // If topic input isn't visible, try reloading the page
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 3000 }).catch(() => false)) {
+            await page.getByTestId('onboarding-skip').click().catch(() => {});
+          }
+          continue;
+        }
+
+        await input.click({ clickCount: 3, timeout: 10_000 }).catch(() => {});
+        // Use explicit 30s timeout on fill so we never silently stall
+        await input.fill(topic, { timeout: 45_000 });
+
+        const value = await input.inputValue({ timeout: 5000 }).catch(() => '');
+        if (value.includes(topicCheck)) return;
+
+        // Value didn't stick — reload and try again
+        if (attempt < 3) {
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 3000 }).catch(() => false)) {
+            await page.getByTestId('onboarding-skip').click().catch(() => {});
+          }
+        }
+      }
+
+      // Last chance: verify fill worked
+      const finalValue = await input.inputValue({ timeout: 5000 }).catch(() => '');
+      if (!finalValue.includes(topicCheck)) {
+        throw new Error(`Topic fill failed after 3 attempts — got "${finalValue.slice(0, 40)}", expected "${topicCheck}"`);
       }
     };
     await fillTopic();
@@ -1550,6 +1610,7 @@ export async function generateFullVideo(options) {
 
     let renderRetried = false;
     let produced = null;
+    let usedModalRender = false;
 
     if (shouldUseModalRender()) {
       log(`🎥 Render (Modal GPU — TTS local, ffmpeg on Modal) → ${mp4Out}`);
@@ -1561,16 +1622,15 @@ export async function generateFullVideo(options) {
         outDir,
         log,
       });
-      writeFileSync(
-        join(outDir, 'render.log'),
-        modalResult.ok
-          ? `modal-render OK ${modalResult.bytes} bytes in ${modalResult.elapsedMs}ms`
-          : `modal-render FAIL: ${modalResult.error}`,
-      );
-      writeFileSync(renderLogPath, readFileSync(join(outDir, 'render.log')));
+      const modalRenderLogLine = modalResult.ok
+        ? `modal-render OK ${modalResult.bytes} bytes in ${modalResult.elapsedMs}ms`
+        : `modal-render FAIL: ${modalResult.error}`;
+      writeFileSync(join(outDir, 'render.log'), modalRenderLogLine);
+      writeFileSync(renderLogPath, modalRenderLogLine);
       if (!modalResult.ok) {
         return { ok: false, error: modalResult.error || 'Modal render failed', topic, outDir, projectPath };
       }
+      usedModalRender = true;
       produced = modalResult.videoPath || resolveProducedOutput();
     } else {
       let render = runServerRender('render-1');
@@ -1610,7 +1670,11 @@ export async function generateFullVideo(options) {
     );
     const durationSec = probe.stdout ? parseFloat(probe.stdout.trim()) : NaN;
 
-    const manifestGate = validateRenderManifest(produced, durationSec);
+    // Modal renders execute ffmpeg remotely — render-manifest.json is not shipped back.
+    // Skip the manifest gate for Modal renders; size + duration checks above are sufficient.
+    const manifestGate = usedModalRender
+      ? { valid: true }
+      : validateRenderManifest(produced, durationSec);
     if (!manifestGate.valid) {
       return {
         ok: false,

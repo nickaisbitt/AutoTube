@@ -136,6 +136,12 @@ const OFF_TOPIC_BLOCKLIST = [
   // TikTok promo / "watch free movies" app ads — not crime B-roll
   { pattern: /\b(?:watch\s+free\s+movies?\s+on\s+tiktok|free\s+movies?\s+on\s+tiktok|tiktok\s+movies?\s+free|download\s+tiktok\s+movies?)\b/i, requires: /\b__autotube_never__\b/i },
 
+  // TikTok lifestyle stock — people holding #tiktok signs, generic app promo
+  { pattern: /\b#tiktok\b|holding.*tiktok\s+sign|tiktok\s+logo\s+sign|young\s+people.*tiktok/i, requires: /\b__autotube_never__\b/i },
+
+  // Library/archive shelf interiors — not museum heist action B-roll
+  { pattern: /\b(?:library\s+shelf|archive\s+shelf|book\s+stack|narrow\s+aisle.*shelf|rows?\s+of\s+books)\b/i, requires: /\b(?:library|book|archive|research|history\s+class)\b/i },
+
   // Cyber / webinar "digital heist" promos — wrong heist for museum crime topics
   { pattern: /\b(?:strategink|digital[\s-]?heist[\s-]?summit|slideshare.*digital[\s-]?heist|data[\s-]?breach(?:es)?|cyber[\s-]?heist|protect\s+your\s+vdr)\b/i, requires: /\b(?:cyber|data\s+protection|webinar|summit|hacker|infosec)\b/i },
 

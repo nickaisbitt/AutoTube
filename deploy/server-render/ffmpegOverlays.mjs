@@ -34,6 +34,9 @@ const isOrphanFragment = (word) => /^[a-z]{1,4},$/i.test(word) && !isPhraseEnd(w
 function phraseIsValid(buf) {
   if (buf.length < MIN_CAPTION_WORDS) return false;
   const endsWithPunct = isPhraseEnd(buf[buf.length - 1]);
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
+  const minWords = loopMode ? Math.max(PREFERRED_CAPTION_WORDS, 5) : PREFERRED_CAPTION_WORDS;
+  if (buf.length < minWords && !endsWithPunct) return false;
   if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct) return false;
   if (isWeakLeadIn(buf[0])) return false;
   if (isWeakLeadIn(buf[buf.length - 1])) return false;

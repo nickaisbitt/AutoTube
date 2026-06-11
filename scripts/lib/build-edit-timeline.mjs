@@ -145,7 +145,8 @@ export function buildEditTimeline(project, options = {}) {
   const entries = [];
   const globalPool = orderAssetsVideoFirst(project.media || [], preferVideo ? minVideosFirst : 0);
   const globalUrlUse = new Map();
-  const maxUsesPerUrl = MAX_USES_PER_URL;
+  const uniquePoolSize = new Set((project.media || []).map((a) => urlKey(a)).filter(Boolean)).size;
+  const maxUsesPerUrl = uniquePoolSize < 18 ? 1 : MAX_USES_PER_URL;
 
   // Diversity-enforcement state shared across all segments.
   const globalUrlLastAbsTime = new Map(); // urlKey → last abs start time used

@@ -954,7 +954,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
     );
     report.uniqueUrlCount = uniqueUrls.size;
-    const minUnique = Math.max(10, (project.script?.length || 3) * 3);
+    const minUnique = Math.max(15, (project.script?.length || 3) * 4);
 
     if (uniqueUrls.size < minUnique) {
       // Rescue round: attempt one more aggressive top-up before declaring a thin pool.

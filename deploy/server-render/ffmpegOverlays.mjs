@@ -166,7 +166,8 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
   const hookEndSec = 3.2;
   const isPhraseEnd = (word) => /[.!?]$/.test(word) || /^[—–-]$/.test(word);
   // A word that should not start a new phrase alone: currency/numeric tokens or ALL-CAPS acronyms.
-  const isBadSplit = (word) => /^\$?\d+$/.test(word) || /^[A-Z]{2,}$/.test(word);
+  const isBadSplit = (word) => /^\$?\d[\d,.]*$/.test(word) || /^[A-Z]{2,}$/.test(word);
+  const isWeakLeadIn = (word) => /^(about|this|using|the|in|a|an|or|and|with|for|to|of)$/i.test(word);
   // Minimum words before flushing at a non-sentence boundary (prevents short orphan phrases).
   const minPhraseWords = 4;
 
@@ -183,26 +184,21 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
     const phraseDone = isPhraseEnd(w.word);
     // Prevent splitting immediately before a number/currency token or ALL-CAPS acronym
     // so those words don't start the next phrase in isolation.
-    const wouldSplitBad = next && isBadSplit(next.word);
+    const wouldSplitBad = next && (isBadSplit(next.word) || isWeakLeadIn(next.word));
+    const tailWeak = buffer.length < minPhraseWords
+      && buffer.some((bw) => isWeakLeadIn(bw) || isBadSplit(bw));
 
-    if (phraseDone && buffer.length >= minPhraseWords) {
+    if (phraseDone && buffer.length >= minPhraseWords && !wouldSplitBad) {
       flush();
     } else if (atMax && !wouldSplitBad && buffer.length >= minPhraseWords) {
       flush();
-    } else if (buffer.length >= cm.maxWords + 2) {
+    } else if (buffer.length >= cm.maxWords + 2 && !tailWeak) {
       // Force flush to prevent runaway buffer even when next word is a bad-split candidate.
       flush();
     }
   }
-  // Flush tail — merge short orphans into previous line instead of 2-word gibberish captions.
+  // Flush tail only when phrase is long enough — drop orphan fragments instead of gibberish merges.
   if (buffer.length >= minPhraseWords) {
-    flush();
-  } else if (buffer.length >= 2 && idx > 0) {
-    const orphan = escapeAss(buffer.join(' ').toUpperCase());
-    const lastIdx = lines.length - 1;
-    lines[lastIdx] = `${lines[lastIdx]} ${orphan}`;
-    idx += 1;
-  } else if (buffer.length >= 2) {
     flush();
   }
 

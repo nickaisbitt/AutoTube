@@ -1,12 +1,13 @@
 {
   "version": 3,
-  "cutIntervalSec": 1.1,
+  "cutIntervalSec": 1.2000000000000002,
   "showKineticText": false,
   "useFastPacing": true,
   "shockHook": true,
+  "hookLine": "They robbed the Louvre on TikTok LIVE — crown jewels gone while the stream kept rolling.",
   "forceRealStock": false,
-  "mediaOffset": 0,
-  "harvestNonce": 0,
+  "mediaOffset": 4,
+  "harvestNonce": 2,
   "excludedUrls": [
     "https://routenote.com/blog/a-musicians-guide-to-tiktok-for-artists/",
     "https://buffer.com/resources/tiktok-live/",
@@ -27,12 +28,19 @@
   ],
   "fixStrategy": "interval",
   "ffmpegHardCuts": true,
-  "topicRetryCount": 0,
+  "topicRetryCount": 1,
   "maxRetriesPerTopic": 8,
   "pendingTopic": "The museum heist streamed live on TikTok",
   "lockedTopic": "The museum heist streamed live on TikTok",
-  "iteration": 25,
-  "appliedFixes": [],
+  "iteration": 27,
+  "appliedFixes": [
+    "[2026-06-11T03:47:37.919Z] 0c. Assembly repeat montage → widen cuts to 1.6s (thin asset pool)",
+    "[2026-06-11T03:47:37.920Z] 0d. Assembly FAIL (30/100) → exclude 16 off-topic URL(s), reharvest nonce 2",
+    "[2026-06-11T03:47:37.920Z] 2. Pacing/hold FAIL → cut interval 1.6s → 1.4500000000000002s",
+    "[2026-06-11T03:47:37.920Z] 2a. Pacing 75/100 ≤80 → patternInterrupts ON",
+    "[2026-06-11T03:47:37.920Z] 2b. Full-tier score below 91/100 → strategy interval (cuts 1.4500000000000002s→1.2000000000000002s)",
+    "[2026-06-11T03:47:37.920Z] 4. Overall ≤50/100 on full tier → fast pacing ON, kinetic OFF"
+  ],
   "minAssetsPerSegment": 6,
   "maxGenerateFailuresPerTopic": 4,
   "reHarvestMedia": true,
@@ -42,7 +50,8 @@
   "harvestVideoFirst": true,
   "whisperAlign": true,
   "brollPlacement": true,
-  "suppressGiphy": false,
+  "suppressGiphy": true,
   "minVideosPerSegment": 2,
-  "generateFailureCount": 0
+  "generateFailureCount": 0,
+  "hookOverlay": "BREAKING: LOUVRE HEIST TIKTOK LIVE"
 }

@@ -3,7 +3,7 @@
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, statSync } from 'node:fs';
 import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
@@ -50,7 +50,18 @@ function padVideoToDuration(inputPath, outputPath, targetSec) {
     ],
     { encoding: 'utf8', timeout: 300_000 },
   );
-  return r.status === 0 && existsSync(outputPath);
+  if (r.status !== 0 || !existsSync(outputPath)) return false;
+  const size = statSync(outputPath).size;
+  const dur = probeMediaDuration(outputPath);
+  if (size < 50_000 || dur < current + padSec * 0.5) {
+    try {
+      unlinkSync(outputPath);
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+  return true;
 }
 
 function outputDimensions() {
@@ -722,6 +733,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       muxDurationSec = Math.max(padTargetSec, audioDurationSec || padTargetSec);
       console.log(`  [ffmpeg] padded video ${rawVideoSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (tpad ${gap.toFixed(1)}s, target ${padTargetSec.toFixed(1)}s)`);
     } else if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
+      console.log(`  [ffmpeg] video pad unavailable (gap ${gap.toFixed(1)}s) — trimming narration to ${videoDurationSec.toFixed(1)}s`);
       const trimmedAudio = join(workDir, 'narration-trimmed.wav');
       if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
         audioForMux = trimmedAudio;

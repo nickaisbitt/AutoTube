@@ -21,6 +21,44 @@ function probeDurationSec(videoPath) {
   return Number.isFinite(d) ? d : 0;
 }
 
+/**
+ * Compute the absolute video start time (seconds) for each narration segment by probing
+ * the individual audio files in the bundle's narration directory.
+ *
+ * The mixed audio layout produced by generateNarration() is:
+ *   silence-intro → [silence-N → narration-N → breath-N]* → silence-end
+ *
+ * Returns an array indexed by segment number with each segment's absolute start time.
+ * Falls back to [0, 0, ...] if the narration directory is missing.
+ */
+function computeNarrationSegmentStartTimes(narrationDir, segCount) {
+  if (!existsSync(narrationDir) || segCount === 0) return [];
+
+  const probe = (file) => {
+    if (!existsSync(file)) return 0;
+    const r = spawnSync(
+      'ffprobe',
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file],
+      { encoding: 'utf8' },
+    );
+    return parseFloat((r.stdout || '').trim()) || 0;
+  };
+
+  const startTimes = [];
+  let t = probe(join(narrationDir, 'silence-intro.wav'));
+
+  for (let i = 0; i < segCount; i++) {
+    t += probe(join(narrationDir, `silence-${i}.wav`));
+    startTimes.push(t);
+    t += probe(join(narrationDir, `narration-${i}.wav`));
+    if (i < segCount - 1) {
+      t += probe(join(narrationDir, `breath-${i}.wav`));
+    }
+  }
+
+  return startTimes;
+}
+
 const workDir = process.env.MODAL_WORK_DIR || '/work';
 const projectPath = join(workDir, 'project.json');
 const envPath = join(workDir, 'render-env.json');
@@ -66,6 +104,15 @@ if (existsSync(wtPath)) {
   }
 }
 
+// Compute absolute segment start times from the bundled narration audio files.
+// word-timestamps.json stores per-segment 0-based timestamps; without offsets,
+// all segments would overlap at t=0 in the ASS file producing orphan captions.
+const narrationDir = join(workDir, 'narration');
+const segmentStartTimes = computeNarrationSegmentStartTimes(narrationDir, wordTimestampCache.size);
+if (segmentStartTimes.length) {
+  console.log(`[modal-assembly] narration offsets: ${segmentStartTimes.map((t, i) => `seg${i}=+${t.toFixed(2)}s`).join(', ')}`);
+}
+
 const cutInterval = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.25');
 project.editTimeline = buildEditTimeline(project, {
   cutIntervalSec: cutInterval,
@@ -88,7 +135,7 @@ if (!ffResult.ok) {
 }
 
 const { applyFfmpegYoutubeOverlays } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
-applyFfmpegYoutubeOverlays(outputBase, project, wordTimestampCache);
+applyFfmpegYoutubeOverlays(outputBase, project, wordTimestampCache, segmentStartTimes);
 
 const finalMp4 = outputBase.replace('.mp4', '-final.mp4');
 if (existsSync(outputBase)) {

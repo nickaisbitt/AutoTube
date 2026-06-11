@@ -113,8 +113,12 @@ export function overlayHookText(videoPath, project, options = {}) {
  * Burn word-timed captions (YouTube-style, 4–6 words per phrase).
  * @param {string} videoPath
  * @param {Map<number, Array<{ word: string, start: number, end: number }>>} wordTimestampCache
+ * @param {number[]} [segmentStartTimes] - Absolute video start time (seconds) for each segment,
+ *   indexed by the Map key. When provided, segment-relative word timestamps are offset to
+ *   absolute video timeline positions so captions land on the correct frame.
+ *   Without this, all segments overlap at t=0 producing orphan/gibberish captions.
  */
-export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
+export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentStartTimes = []) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
 
   const probe = spawnSync(
@@ -142,12 +146,19 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
 
-  // Flatten all segments into a single word list so phrases carry across narration boundaries
-  // without being cut at segment edges, preventing 2-word orphan captions.
+  // Flatten all segments into a single word list with absolute video timestamps.
+  // segmentStartTimes[segIdx] is the absolute start time of that segment in the video.
+  // Without offsets all segments restart at t=0, producing overlapping/orphan captions.
+  // Each word carries its segIdx so segment boundaries can be detected while phrase-building.
   const allWords = [];
-  for (const [, segWords] of wordTimestampCache) {
-    allWords.push(...segWords);
+  for (const [segIdx, segWords] of wordTimestampCache) {
+    const offset = segmentStartTimes[segIdx] ?? 0;
+    for (const w of segWords) {
+      allWords.push({ word: w.word, start: w.start + offset, end: w.end + offset, segIdx });
+    }
   }
+  // Sort by start time to ensure chronological order (in case cache iteration is unordered).
+  allWords.sort((a, b) => a.start - b.start);
 
   const lines = [...header];
   let idx = 0;
@@ -163,6 +174,16 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
     buffer = [];
   };
 
+  // At a segment boundary, flush only if we have a full phrase; otherwise drop the
+  // orphan tail so words from one segment never bleed into the next caption.
+  const flushAtBoundary = () => {
+    if (buffer.length >= minPhraseWords) {
+      flush();
+    } else {
+      buffer = [];
+    }
+  };
+
   const hookEndSec = 3.2;
   const isPhraseEnd = (word) => /[.!?]$/.test(word) || /^[—–-]$/.test(word);
   // A word that should not start a new phrase alone: currency/numeric tokens or ALL-CAPS acronyms.
@@ -175,6 +196,13 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
     const w = allWords[wi];
     if (w.end <= hookEndSec) continue;
     const start = Math.max(w.start, hookEndSec);
+
+    // Segment boundary: flush/discard whatever is buffered so segment transitions produce
+    // clean phrase starts rather than blending the tail of one segment with the head of the next.
+    if (buffer.length > 0 && wi > 0 && allWords[wi - 1].segIdx !== w.segIdx) {
+      flushAtBoundary();
+    }
+
     if (!buffer.length) bufferStart = start;
     buffer.push(w.word);
     bufferEnd = w.end;
@@ -184,7 +212,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
     const phraseDone = isPhraseEnd(w.word);
     // Prevent splitting immediately before a number/currency token or ALL-CAPS acronym
     // so those words don't start the next phrase in isolation.
-    const wouldSplitBad = next && (isBadSplit(next.word) || isWeakLeadIn(next.word));
+    const wouldSplitBad = next && next.segIdx === w.segIdx && (isBadSplit(next.word) || isWeakLeadIn(next.word));
     const tailWeak = buffer.length < minPhraseWords
       && buffer.some((bw) => isWeakLeadIn(bw) || isBadSplit(bw));
 
@@ -227,13 +255,17 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
 
 /**
  * Apply YouTube overlays after ffmpeg assembly mux.
+ * @param {string} videoPath
+ * @param {object} project
+ * @param {Map<number, Array<{ word: string, start: number, end: number }>>} wordTimestampCache
+ * @param {number[]} [segmentStartTimes] - Absolute start times per segment (see overlayKaraokeCaptions)
  */
-export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCache) {
+export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCache, segmentStartTimes = []) {
   const results = {};
   if (!isYouTubeExportMode(project)) return results;
 
   if (wordTimestampCache?.size) {
-    const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache);
+    const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentStartTimes);
     results.captions = caps;
     if (caps.ok) {
       console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);

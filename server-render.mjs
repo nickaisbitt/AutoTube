@@ -3221,14 +3221,22 @@ async function runFfmpegAssemblyRender(project) {
 
   wordTimestampCache.clear();
   let narrationSegIdx = 0;
+  // Track cumulative audio time so word timestamps can be offset to absolute video positions.
+  // audioFiles contains silence, narration, and breath files in playback order.
+  let cumulativeNarrationSec = 0;
+  const captionSegmentStartTimes = [];
   for (const af of audioFiles) {
     if (af.subtitleFile && existsSync(af.subtitleFile)) {
       const words = parseVttWordTimestamps(af.subtitleFile);
       if (words.length > 0) {
         wordTimestampCache.set(narrationSegIdx, words);
-        log('info', `  📝 Loaded ${words.length} word timestamps for segment ${narrationSegIdx + 1}`);
+        captionSegmentStartTimes[narrationSegIdx] = cumulativeNarrationSec;
+        log('info', `  📝 Loaded ${words.length} word timestamps for segment ${narrationSegIdx + 1} (+${cumulativeNarrationSec.toFixed(2)}s)`);
       }
+      cumulativeNarrationSec += af.duration || 0;
       narrationSegIdx++;
+    } else {
+      cumulativeNarrationSec += af.duration || 0;
     }
   }
 
@@ -3279,7 +3287,7 @@ async function runFfmpegAssemblyRender(project) {
   log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments, ${ffResult.manifest?.clipCount ?? '?'} clips, tpad ${ffResult.manifest?.tpadSec ?? 0}s)`);
   try {
     const { applyFfmpegYoutubeOverlays } = await import('./server-render/ffmpegOverlays.mjs');
-    const overlayResults = applyFfmpegYoutubeOverlays(OUTPUT_FILE, project, wordTimestampCache);
+    const overlayResults = applyFfmpegYoutubeOverlays(OUTPUT_FILE, project, wordTimestampCache, captionSegmentStartTimes);
     if (overlayResults.hook?.ok === false && overlayResults.hook?.error) {
       log('warn', `  ⚠ Hook overlay skipped: ${overlayResults.hook.error}`);
     }

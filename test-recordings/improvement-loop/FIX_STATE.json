@@ -1,13 +1,13 @@
 {
   "version": 3,
-  "cutIntervalSec": 2.0000000000000004,
+  "cutIntervalSec": 1.6000000000000005,
   "showKineticText": false,
-  "useFastPacing": false,
+  "useFastPacing": true,
   "shockHook": true,
   "hookLine": "They robbed the Louvre on TikTok LIVE — crown jewels gone while the stream kept rolling.",
   "forceRealStock": false,
-  "mediaOffset": 6,
-  "harvestNonce": 4,
+  "mediaOffset": 12,
+  "harvestNonce": 10,
   "excludedUrls": [
     "https://routenote.com/blog/a-musicians-guide-to-tiktok-for-artists/",
     "https://buffer.com/resources/tiktok-live/",
@@ -26,13 +26,13 @@
     "https://i.ytimg.com/vi/xv2dae6_kwc/maxresdefault.jpg",
     "https://i.ytimg.com/vi/vxwlpr5ash4/hqdefault.jpg"
   ],
-  "fixStrategy": "reharvest",
+  "fixStrategy": "interval",
   "ffmpegHardCuts": true,
-  "topicRetryCount": 4,
+  "topicRetryCount": 5,
   "maxRetriesPerTopic": 8,
   "pendingTopic": "The museum heist streamed live on TikTok",
   "lockedTopic": "The museum heist streamed live on TikTok",
-  "iteration": 41,
+  "iteration": 42,
   "appliedFixes": [
     "[2026-06-11T03:47:37.919Z] 0c. Assembly repeat montage → widen cuts to 1.6s (thin asset pool)",
     "[2026-06-11T03:47:37.920Z] 0d. Assembly FAIL (30/100) → exclude 16 off-topic URL(s), reharvest nonce 2",
@@ -52,7 +52,13 @@
     "[2026-06-11T14:15:34.199Z] 0b. Objective scene FAIL (scene_hook) → strategy interval (cuts 1.6500000000000004s→1.4000000000000004s)",
     "[2026-06-11T14:15:34.199Z] 0c. Assembly repeat montage → widen cuts to 2.0000000000000004s (thin asset pool)",
     "[2026-06-11T14:15:34.199Z] 0d. Assembly FAIL (45/100) → exclude 16 off-topic URL(s), reharvest nonce 4",
-    "[2026-06-11T14:15:34.199Z] 2b. Full-tier score 60/91 — interval escalation skipped (repeat-montage active, reharvest already queued)"
+    "[2026-06-11T14:15:34.199Z] 2b. Full-tier score 60/91 — interval escalation skipped (repeat-montage active, reharvest already queued)",
+    "[2026-06-11T15:31:00.000Z] WAVE4: Reset harvestNonce=8, mediaOffset=8 for fresh harvest with dedupHarvestByUrl + crime-action queries + hook-zone cuts + 3-word captions + HOOK_MAX_HOLD_SEC=2s",
+    "[2026-06-11T15:46:05.524Z] 0d. Assembly FAIL (45/100) → exclude 16 off-topic URL(s), reharvest nonce 10",
+    "[2026-06-11T15:46:05.524Z] 2. Pacing/hold FAIL → cut interval 2.0000000000000004s → 1.8500000000000005s",
+    "[2026-06-11T15:46:05.524Z] 2a. Pacing 75/100 ≤80 → patternInterrupts ON",
+    "[2026-06-11T15:46:05.524Z] 2b. Full-tier score below 91/100 → strategy interval (cuts 1.8500000000000005s→1.6000000000000005s)",
+    "[2026-06-11T15:46:05.524Z] 3c. Real video quota met (≥2 non-Giphy clips/seg) → suppressGiphy cleared"
   ],
   "minAssetsPerSegment": 6,
   "maxGenerateFailuresPerTopic": 4,
@@ -63,7 +69,7 @@
   "harvestVideoFirst": true,
   "whisperAlign": true,
   "brollPlacement": true,
-  "suppressGiphy": true,
+  "suppressGiphy": false,
   "minVideosPerSegment": 2,
   "generateFailureCount": 0,
   "hookOverlay": "BREAKING: LOUVRE HEIST TIKTOK LIVE"

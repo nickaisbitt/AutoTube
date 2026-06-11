@@ -1083,6 +1083,41 @@ console.log('\n── 36. Assembly FAIL URL exclusion ──');
 }
 
 // ---------------------------------------------------------------------------
+// 37. effectiveCutInterval widens when asset pool is thin
+// ---------------------------------------------------------------------------
+console.log('\n── 37. effectiveCutInterval thin pool ──');
+{
+  const { effectiveCutInterval } = await import('./lib/build-edit-timeline.mjs');
+  const thinProject = {
+    script: [{ id: 's1', duration: 20 }, { id: 's2', duration: 20 }, { id: 's3', duration: 20 }],
+    media: Array.from({ length: 11 }, (_, i) => ({ id: `a${i}`, url: `https://example.com/img${i}.jpg` })),
+  };
+  const wide = effectiveCutInterval(thinProject, 0.5);
+  assert('Thin pool widens 0.5s cuts to ≥1.5s', wide >= 1.5, `cut=${wide}`);
+  const richProject = {
+    script: [{ id: 's1', duration: 30 }],
+    media: Array.from({ length: 30 }, (_, i) => ({ id: `a${i}`, url: `https://example.com/img${i}.jpg` })),
+  };
+  assert('Rich pool keeps fast cuts', effectiveCutInterval(richProject, 0.5) === 0.5);
+}
+
+// ---------------------------------------------------------------------------
+// 38. Office lifestyle stock blocklist
+// ---------------------------------------------------------------------------
+console.log('\n── 38. Office lifestyle blocklist ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's2', title: 'Protect your accounts', narration: 'The heist went viral online.' };
+  const topicKws = extractKeywords(topic, 12);
+  const officeClip = {
+    url: 'https://www.pexels.com/video/woman-writing-notes-while-working-6930353/',
+    alt: 'woman writing notes while working',
+    type: 'video',
+  };
+  assert('Office lifestyle clip scores 0', scoreAssetRelevance(officeClip, seg, topic, topicKws) === 0);
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log(`\n════════════════════════════════`);

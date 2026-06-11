@@ -175,15 +175,14 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
       const phraseDone = isPhraseEnd(w.word);
       const wouldSplitBad = atMax && next && (isBadSplit(w.word) || isBadSplit(next.word));
 
-      if (phraseDone && buffer.length >= 3) flush();
+      if (phraseDone && buffer.length >= minPhraseWords) flush();
       else if (atMax && !wouldSplitBad && buffer.length >= minPhraseWords) flush();
-      else if (atMax && wouldSplitBad && buffer.length >= 2) {
-        if (buffer.length >= 8) flush();
-      } else if (atMax && buffer.length >= minPhraseWords + 2) flush();
+      else if (atMax && wouldSplitBad && buffer.length >= minPhraseWords) flush();
+      else if (atMax && buffer.length >= minPhraseWords + 2) flush();
     }
-    flush();
+    // Carry partial phrases across narration segments — avoid 2-word orphan captions.
   }
-  flush();
+  if (buffer.length >= 3) flush();
 
   if (idx === 0) return { ok: false, error: 'no word timestamps' };
 

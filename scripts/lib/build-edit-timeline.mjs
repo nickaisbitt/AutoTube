@@ -55,8 +55,27 @@ export function orderAssetsVideoFirst(assets, minVideosFirst = 2) {
   return [...videos, ...images];
 }
 
+/**
+ * Widen cuts when the unique asset pool cannot support fast pacing without obvious repeats.
+ * @param {object} project
+ * @param {number} cutIntervalSec
+ */
+export function effectiveCutInterval(project, cutIntervalSec = 1.25) {
+  const cut = cutIntervalSec ?? 1.25;
+  const uniqueUrls = new Set((project.media || []).map((a) => urlKey(a)).filter(Boolean));
+  const poolSize = uniqueUrls.size || 1;
+  const totalDur = (project.script || []).reduce((sum, seg) => sum + (seg.duration || 0), 0) || 60;
+  const targetClips = totalDur / Math.max(0.25, cut);
+  const maxReusesPerAsset = 2.5;
+  const maxClipsFromPool = poolSize * maxReusesPerAsset;
+  if (targetClips > maxClipsFromPool) {
+    return Math.min(2.5, totalDur / maxClipsFromPool);
+  }
+  return cut;
+}
+
 export function buildEditTimeline(project, options = {}) {
-  const cut = options.cutIntervalSec ?? 1.25;
+  const cut = effectiveCutInterval(project, options.cutIntervalSec ?? 1.25);
   const reason = options.reason ?? 'heuristic placement';
   const preferVideo = options.preferVideo === true;
   const minVideosFirst = options.minVideosFirst ?? 2;

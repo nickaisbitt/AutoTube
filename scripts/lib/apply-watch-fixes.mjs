@@ -243,6 +243,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     s.suppressGiphy = true;
     s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
     s.fixStrategy = 'reharvest';
+    const repeatMontage = (watch.assemblyAudit?.issues || []).some((i) => /repeat|identical|same\s+shot/i.test(i));
+    if (repeatMontage && (s.cutIntervalSec ?? 1.25) < 1.5) {
+      s.cutIntervalSec = Math.min(2, (s.cutIntervalSec ?? 0.5) + 0.5);
+      applied.push(`0c. Assembly repeat montage → widen cuts to ${s.cutIntervalSec}s (thin asset pool)`);
+    }
     const harvestProject = project || loadLastProject();
     if (harvestProject?.media?.length) {
       const before = (s.excludedUrls || []).length;

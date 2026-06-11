@@ -116,6 +116,9 @@ const OFF_TOPIC_BLOCKLIST = [
   // Smartphone/social-media lifestyle stock — noise for crime/news
   { pattern: /\b(?:smartphone[\s-]?user[\s-]?engaged|woman[\s-]?art[\s-]?iphone|social[\s-]?media\s+addict|scrolling\s+tiktok)\b/i, requires: /\b(?:phone\s+addiction|social\s+media\s+habit|lifestyle)\b/i },
 
+  // Office/laptop lifestyle presenters — not crime B-roll
+  { pattern: /\b(?:woman[\s-]?writing[\s-]?notes|working[\s-]?on[\s-]?laptop|surgical[\s-]?mask.*laptop|office\s+worker\s+stock)\b/i, requires: /\b(?:remote\s+work|office\s+life|productivity\s+tips)\b/i },
+
   // Watermarked preview stock — never ship in final render
   { pattern: /gettyimages|shutterstock\s+watermark|alamy\s+watermark|istockphoto.*preview/i, requires: /\b__autotube_never__\b/i },
 ];

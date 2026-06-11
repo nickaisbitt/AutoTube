@@ -791,23 +791,26 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   for (const asset of project.media) {
     bySegmentAfter[asset.segmentId] = (bySegmentAfter[asset.segmentId] || 0) + 1;
   }
-  const usedUrls = new Set(project.media.map((a) => (a.url || '').split('?')[0]).filter(Boolean));
-  for (const segId of [...new Set(project.media.map((a) => a.segmentId))]) {
-    while ((bySegmentAfter[segId] || 0) < minPerSeg) {
-      const replacement = deduped.media.find((r) => {
-        const key = (r.url || '').split('?')[0];
-        if (!key || usedUrls.has(key)) return false;
-        return !project.media.some((v) => v.segmentId === segId && v.url === r.url);
-      });
-      if (!replacement) break;
-      const key = (replacement.url || '').split('?')[0];
-      if (key) usedUrls.add(key);
-      project.media.push({
-        ...replacement,
-        segmentId: segId,
-        id: `${replacement.id}-ph-${segId.slice(0, 6)}-${bySegmentAfter[segId]}`,
-      });
-      bySegmentAfter[segId] = (bySegmentAfter[segId] || 0) + 1;
+  // Loop mode: never clone the same URL into segments — forces top-up instead of repeat montage.
+  if (!loopMode) {
+    const usedUrls = new Set(project.media.map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+    for (const segId of [...new Set(project.media.map((a) => a.segmentId))]) {
+      while ((bySegmentAfter[segId] || 0) < minPerSeg) {
+        const replacement = deduped.media.find((r) => {
+          const key = (r.url || '').split('?')[0];
+          if (!key || usedUrls.has(key)) return false;
+          return !project.media.some((v) => v.segmentId === segId && v.url === r.url);
+        });
+        if (!replacement) break;
+        const key = (replacement.url || '').split('?')[0];
+        if (key) usedUrls.add(key);
+        project.media.push({
+          ...replacement,
+          segmentId: segId,
+          id: `${replacement.id}-ph-${segId.slice(0, 6)}-${bySegmentAfter[segId]}`,
+        });
+        bySegmentAfter[segId] = (bySegmentAfter[segId] || 0) + 1;
+      }
     }
   }
   report.after = project.media.length;

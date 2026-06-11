@@ -110,7 +110,7 @@ export function overlayHookText(videoPath, project, options = {}) {
 }
 
 /**
- * Burn word-timed captions (YouTube-style, max 4 words per line).
+ * Burn word-timed captions (YouTube-style, 4–6 words per phrase).
  * @param {string} videoPath
  * @param {Map<number, Array<{ word: string, start: number, end: number }>>} wordTimestampCache
  */
@@ -142,6 +142,13 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
 
+  // Flatten all segments into a single word list so phrases carry across narration boundaries
+  // without being cut at segment edges, preventing 2-word orphan captions.
+  const allWords = [];
+  for (const [, segWords] of wordTimestampCache) {
+    allWords.push(...segWords);
+  }
+
   const lines = [...header];
   let idx = 0;
   let buffer = [];
@@ -158,31 +165,37 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
 
   const hookEndSec = 3.2;
   const isPhraseEnd = (word) => /[.!?]$/.test(word) || /^[—–-]$/.test(word);
+  // A word that should not start a new phrase alone: currency/numeric tokens or ALL-CAPS acronyms.
   const isBadSplit = (word) => /^\$?\d+$/.test(word) || /^[A-Z]{2,}$/.test(word);
+  // Minimum words before flushing at a non-sentence boundary (prevents short orphan phrases).
+  const minPhraseWords = 4;
 
-  for (const [, words] of wordTimestampCache) {
-    for (let wi = 0; wi < words.length; wi += 1) {
-      const w = words[wi];
-      if (w.end <= hookEndSec) continue;
-      const start = Math.max(w.start, hookEndSec);
-      if (!buffer.length) bufferStart = start;
-      buffer.push(w.word);
-      bufferEnd = w.end;
+  for (let wi = 0; wi < allWords.length; wi += 1) {
+    const w = allWords[wi];
+    if (w.end <= hookEndSec) continue;
+    const start = Math.max(w.start, hookEndSec);
+    if (!buffer.length) bufferStart = start;
+    buffer.push(w.word);
+    bufferEnd = w.end;
 
-      const next = words[wi + 1];
-      const minPhraseWords = 5;
-      const atMax = buffer.length >= cm.maxWords;
-      const phraseDone = isPhraseEnd(w.word);
-      const wouldSplitBad = atMax && next && (isBadSplit(w.word) || isBadSplit(next.word));
+    const next = allWords[wi + 1];
+    const atMax = buffer.length >= cm.maxWords;
+    const phraseDone = isPhraseEnd(w.word);
+    // Prevent splitting immediately before a number/currency token or ALL-CAPS acronym
+    // so those words don't start the next phrase in isolation.
+    const wouldSplitBad = next && isBadSplit(next.word);
 
-      if (phraseDone && buffer.length >= minPhraseWords) flush();
-      else if (atMax && !wouldSplitBad && buffer.length >= minPhraseWords) flush();
-      else if (atMax && wouldSplitBad && buffer.length >= minPhraseWords) flush();
-      else if (atMax && buffer.length >= minPhraseWords + 2) flush();
+    if (phraseDone && buffer.length >= 2) {
+      flush();
+    } else if (atMax && !wouldSplitBad && buffer.length >= minPhraseWords) {
+      flush();
+    } else if (buffer.length >= cm.maxWords + 2) {
+      // Force flush to prevent runaway buffer even when next word is a bad-split candidate.
+      flush();
     }
-    // Carry partial phrases across narration segments — avoid 2-word orphan captions.
   }
-  if (buffer.length >= 3) flush();
+  // Flush any remaining words (tail of last segment).
+  if (buffer.length >= 2) flush();
 
   if (idx === 0) return { ok: false, error: 'no word timestamps' };
 

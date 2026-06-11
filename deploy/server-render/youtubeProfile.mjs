@@ -18,8 +18,8 @@ export function captionMetrics(height, width) {
   const strokePx = Math.max(8, Math.round(height * 0.009));
   const bottomPad = Math.round(height * 0.14);
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
-  // VidNo/EngageMedia: 4–6 words per phrase; loop uses longer phrases to avoid gibberish fragments.
-  const maxWords = loopMode ? 6 : 4;
+  // VidNo/EngageMedia: 4–6 words per phrase; loop uses longer phrases for better readability.
+  const maxWords = loopMode ? 8 : 6;
   return { basePx, currentPx, strokePx, bottomPad, maxWords, barWidth: width * 0.94 };
 }
 

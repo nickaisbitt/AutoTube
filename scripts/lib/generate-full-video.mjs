@@ -1119,6 +1119,19 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
         }
       }
     }
+
+    // Post-vision pHash dedup on full-res sources — catches same shot under different URLs.
+    const postVisionDedup = dedupeMediaByPHash(project.media, {
+      devServer,
+      onDrop: (item, reason) => report.postVisionPhashDropped = [
+        ...(report.postVisionPhashDropped || []),
+        { url: item.url, reason },
+      ],
+    });
+    if ((report.postVisionPhashDropped || []).length) {
+      project.media = postVisionDedup.media;
+      report.postVisionPhashCount = report.postVisionPhashDropped.length;
+    }
   }
 
   let volume = evaluateHarvestVolume(project, minPerSegment);
@@ -1784,6 +1797,7 @@ export async function generateFullVideo(options) {
       cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
       preferVideo: fixState.harvestVideoFirst !== false,
       minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+      devServer,
     });
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);

@@ -283,6 +283,25 @@ export function collectAssemblyExcludeUrls(project) {
   return [...out];
 }
 
+const EDITORIAL_NEWS_HOST_RE = /(?:nytimes|\.nyt\.com|bbc\.co|bbc\.com|foxnews|nbcnews|nbcboston|cbsnews|globalnews|independent\.co|reuters|apnews|theguardian|cnn\.com|washingtonpost)/i;
+
+/**
+ * Implicit story keywords not always present in the topic string (e.g. Louvre for museum heist).
+ * @param {string} topic
+ * @returns {string[]}
+ */
+export function expandTopicKeywords(topic = '') {
+  const t = `${topic}`.toLowerCase();
+  const extra = [];
+  if (/museum|heist|robbery|jewel|crown|louvre|stolen/.test(t)) {
+    extra.push('louvre', 'paris', 'museum', 'jewel', 'heist', 'france');
+  }
+  if (/tiktok|live|stream/.test(t)) {
+    extra.push('viral', 'broadcast');
+  }
+  return [...new Set(extra)];
+}
+
 /**
  * @param {string} text
  * @param {number} [max]
@@ -313,11 +332,16 @@ export function extractKeywords(text, max = 14) {
 export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   const segText = `${segment?.title || ''} ${segment?.narration || ''}`;
   const segKeywords = extractKeywords(segText, 10).filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
-  const topicKws = topicKeywords.length ? topicKeywords : extractKeywords(topic, 12);
-  const strongTopicKws = topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
+  const topicKws = topicKeywords.length
+    ? topicKeywords
+    : [...extractKeywords(topic, 12), ...expandTopicKeywords(topic)];
+  const strongTopicKws = [...new Set(topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw)))];
   const corpus = new Set([...strongTopicKws, ...segKeywords]);
 
-  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+  const proxiedClip = /\/api\/download-clip/i.test(asset?.url || '');
+  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''}${
+    proxiedClip ? ` ${segment?.title || ''} ${topic}` : ''
+  }`.toLowerCase();
   if (!haystack.trim()) return 0;
 
   const contextText = `${topic} ${segText}`.toLowerCase();
@@ -362,6 +386,15 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   // Deprioritize generic tourist pyramid / plaza shots for crime/heist topics.
   if (isCrimeNewsTopic(topic) && /pyramid|france-museum-paris|tourist|plaza|aerial.*louvre|louvre.*exterior/i.test(haystack)) {
     score = Math.max(0, score - 0.2);
+  }
+
+  // Editorial news URLs often lack alt text — boost when URL path matches story.
+  if (isCrimeNewsTopic(topic) && EDITORIAL_NEWS_HOST_RE.test(haystack)) {
+    if (/louvre|museum|heist|jewel|robbery|stolen|paris|crown/.test(haystack)) {
+      score = Math.max(score, 0.55);
+    } else if (strongHits >= 1) {
+      score += 0.15;
+    }
   }
 
   return Math.max(0, Math.min(1, score));

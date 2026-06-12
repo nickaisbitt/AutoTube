@@ -2,7 +2,7 @@
 /**
  * Preflight before video improvement loop (never prints secrets).
  */
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { statSync, unlinkSync } from 'node:fs';
 import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
 import { ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
@@ -38,13 +38,39 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Attempt to spawn the dev server in the background.
+ * Returns immediately — the caller should then poll waitForDevServer.
+ */
+function trySpawnDevServer() {
+  try {
+    const child = spawn('npm', ['run', 'loop:serve'], {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env },
+    });
+    child.unref();
+    console.log('[preflight] Spawned dev server (npm run loop:serve) — waiting for it to become ready...');
+    return true;
+  } catch (err) {
+    console.log(`[preflight] Could not auto-spawn dev server: ${err.message}`);
+    return false;
+  }
+}
+
 /** Wait for dev server between loop iterations (worker may OOM-kill Vite). */
-export async function waitForDevServer(devServer, { maxWaitMs = 120_000, pollMs = 5000 } = {}) {
+export async function waitForDevServer(devServer, { maxWaitMs = 120_000, pollMs = 5000, autoSpawn = false } = {}) {
   const url = devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173';
   const deadline = Date.now() + maxWaitMs;
+  let spawned = false;
   while (Date.now() < deadline) {
     if (await checkDevServer(url)) return true;
     console.log(`[preflight] Waiting for dev server at ${url}...`);
+    // Attempt auto-spawn once if the server is still down after first poll
+    if (autoSpawn && !spawned) {
+      spawned = trySpawnDevServer();
+    }
     await sleep(pollMs);
   }
   return false;
@@ -58,8 +84,8 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
   const url = devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173';
 
   if (!(await checkDevServer(url))) {
-    console.log(`[preflight] Dev server down — waiting up to 90s (restart: npm run loop:serve)`);
-    if (!(await waitForDevServer(url, { maxWaitMs: 90_000, pollMs: 5000 }))) {
+    console.log(`[preflight] Dev server down — attempting auto-spawn + waiting up to 120s (or: npm run loop:serve)`);
+    if (!(await waitForDevServer(url, { maxWaitMs: 120_000, pollMs: 5000, autoSpawn: true }))) {
       errors.push(`Dev server not reachable at ${url} — run: npm run loop:serve (vite preview lacks /api routes)`);
     }
   }
@@ -70,6 +96,12 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
 
   for (const bin of ['ffmpeg', 'ffprobe']) {
     if (!have(bin)) errors.push(`${bin} not found on PATH`);
+  }
+
+  if (!have('yt-dlp')) {
+    console.log('[preflight] yt-dlp not on PATH — YouTube clip proxy will fail (pip install yt-dlp)');
+  } else {
+    console.log('[preflight] yt-dlp OK');
   }
 
   const scenedetect = spawnSync('python3', ['-c', 'import scenedetect'], { encoding: 'utf8' });
@@ -104,6 +136,30 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
     console.error('\n❌ Loop preflight failed:\n');
     for (const err of errors) console.error(`  - ${err.split('\n')[0]}`);
     return false;
+  }
+
+  // Harvest smoke is optional — flaky Bing/Google endpoints should not block the loop.
+  // Set AUTOTUBE_REQUIRE_HARVEST_SMOKE=1 to make it blocking (CI quality gate).
+  const requireSmoke = process.env.AUTOTUBE_REQUIRE_HARVEST_SMOKE === '1';
+  if (process.env.AUTOTUBE_SKIP_HARVEST_SMOKE !== '1') {
+    const smoke = spawnSync('node', ['scripts/harvest-smoke-test.mjs'], {
+      encoding: 'utf8',
+      cwd: process.cwd(),
+      timeout: 240_000,
+    });
+    if (smoke.status !== 0) {
+      console.error((smoke.stdout || smoke.stderr || '').trim());
+      if (requireSmoke) {
+        errors.push('Harvest smoke test failed — run: node scripts/harvest-smoke-test.mjs');
+        console.error('\n❌ Loop preflight failed:\n');
+        for (const err of errors) console.error(`  - ${err.split('\n')[0]}`);
+        return false;
+      } else {
+        console.warn('[preflight] ⚠ Harvest smoke test failed (non-blocking) — set AUTOTUBE_REQUIRE_HARVEST_SMOKE=1 to enforce');
+      }
+    } else {
+      console.log('[preflight] harvest smoke OK');
+    }
   }
 
   console.log('[preflight] OK — dev server, OpenRouter, ffmpeg, TTS');

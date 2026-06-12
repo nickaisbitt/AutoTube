@@ -16,12 +16,25 @@ import {
 } from '../../../scripts/lib/run-objective-qa.mjs';
 import {
   auditHookFromScript,
-  runBrutalVisionReview,
+  runRetentionVisionReview,
   runHookVisionReview,
+  computeYoutubeQualityScore,
+  targetScore100,
 } from './vision-brutal.mjs';
+import { runAssemblyAudit, blendWithAssemblyAudit } from './assembly-audit.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = resolve(__dirname, '../../..');
+
+function resolveOpenRouterApiKey(options = {}) {
+  return (
+    options.api_key
+    || process.env.OPENROUTER_API_KEY
+    || process.env.VITE_OPENROUTER_KEY
+    || process.env.OPENROUTER_KEY
+    || ''
+  ).trim();
+}
 
 export const DEFAULT_CANDIDATES = [
   'docs/artifacts/FINAL-VIDEO-youtube-full.mp4',
@@ -215,9 +228,9 @@ function buildTopFixes({ hookScript, hookVision, repetition, sceneQa, brutal, le
   if (legacyVision?.technical?.issues?.length) {
     fixes.push({ n: p++, text: legacyVision.technical.issues[0] });
   }
-  const pacing = brutal?.report?.scores?.pacing ?? legacyVision?.report?.scores?.pacing;
-  if (typeof pacing === 'number' && pacing <= 5) {
-    fixes.push({ n: p++, text: 'Pacing ≤5/10 — add pattern interrupts every 5–8s in first minute' });
+  const pacing100 = brutal?.report?.scores100?.pacing ?? (brutal?.report?.scores?.pacing ?? 0) * 10;
+  if (typeof pacing100 === 'number' && pacing100 <= 55) {
+    fixes.push({ n: p++, text: 'Pacing ≤55/100 — add pattern interrupts every 3–5s in first minute' });
   }
 
   return fixes.slice(0, 8);
@@ -239,15 +252,18 @@ function buildNumberedReport(ctx) {
     apiKeyUsed,
     mode,
     renderTier,
+    youtubeScore,
+    assemblyAudit,
+    finalScore,
   } = ctx;
 
   const analyzedSec = framesMeta.durationSec ?? meta.durationSec;
   const brutalOverall = brutal?.overall;
   const uploadReady =
-    brutal?.uploadReady === true &&
+    (finalScore ?? youtubeScore ?? 0) >= 91 &&
+    (assemblyAudit?.assemblyScore ?? 0) >= 80 &&
     hookVision?.hookPass !== false &&
-    hookScript?.pass !== false &&
-    (brutalOverall ?? 0) >= 7;
+    hookScript?.pass !== false;
 
   const lines = [];
   let n = 1;
@@ -263,11 +279,28 @@ function buildNumberedReport(ctx) {
   );
   n += 1;
 
-  if (typeof brutalOverall === 'number') {
-    lines.push(`${n}. **Brutal overall:** ${brutalOverall}/10 (raw average, not inflated)`);
+  if (typeof finalScore === 'number') {
+    lines.push(`${n}. **Final quality:** ${finalScore}/100 (retention + assembly audit)`);
     n += 1;
-    for (const [key, val] of Object.entries(brutal?.report?.scores || {})) {
-      lines.push(`${n}. **${key}:** ${val}/10 — ${brutal.report.feedback?.[key] || '—'}`);
+  }
+  if (typeof youtubeScore === 'number') {
+    lines.push(`${n}. **Retention composite:** ${youtubeScore}/100 (vision + objective gates)`);
+    n += 1;
+  }
+  if (assemblyAudit?.success) {
+    lines.push(`${n}. **Assembly audit:** ${assemblyAudit.assemblyScore}/100 — ${assemblyAudit.verdict || 'see issues'}`);
+    n += 1;
+    if (assemblyAudit.issues?.length) {
+      lines.push(`${n}. **Assembly issues:** ${assemblyAudit.issues.slice(0, 5).join('; ')}`);
+      n += 1;
+    }
+  }
+  if (typeof brutalOverall === 'number') {
+    lines.push(`${n}. **Retention avg (legacy /10):** ${brutalOverall}/10`);
+    n += 1;
+    const scores100 = brutal?.report?.scores100 || {};
+    for (const [key, val] of Object.entries(scores100)) {
+      lines.push(`${n}. **${key}:** ${val}/100 — ${brutal.report.feedback?.[key] || '—'}`);
       n += 1;
     }
   }
@@ -292,15 +325,42 @@ function buildNumberedReport(ctx) {
     n += 1;
   }
 
+  const placeholderGate = ctx.placeholderGate;
+
   if (objectiveQa) {
+    const tier = renderTier === 'full' ? 'full' : 'draft';
+    const compositeFail = objectiveGate?.available && objectiveGate.pass === false;
+    const placeholderFail = placeholderGate?.available && placeholderGate.pass === false;
+    const scoreNote =
+      tier === 'draft' && compositeFail && (placeholderFail || objectiveQa.scorePass)
+        ? ' (informational on draft — composite gate failed; tech_score not gating)'
+        : tier === 'draft'
+          ? ' (informational on draft — tech_score deferred to full tier)'
+          : '';
     lines.push(
-      `${n}. **Objective QA:** score ${objectiveQa.score}/100 | silence first 60s ${objectiveQa.silenceFirst60Sec}s | ${objectiveQa.pass ? 'PASS' : 'FAIL'}`,
+      `${n}. **Technical QA (vision):** score ${objectiveQa.score}/100${scoreNote} | silence first 60s ${objectiveQa.silenceFirst60Sec}s | ${objectiveQa.pass ? 'PASS' : 'FAIL'}`,
     );
     n += 1;
   }
 
+  if (placeholderGate?.available) {
+    const detail = placeholderGate.error
+      ? placeholderGate.error
+      : `${placeholderGate.placeholderPct}% placeholders (${placeholderGate.placeholderClipCount}/${placeholderGate.clipCount} clips, max ${placeholderGate.maxPlaceholderPct}%)`;
+    lines.push(`${n}. **Placeholder gate:** ${placeholderGate.pass ? 'PASS' : 'FAIL'} — ${detail}`);
+    n += 1;
+    if (!placeholderGate.pass && placeholderGate.badSegments?.length) {
+      lines.push(
+        `${n}. **Placeholder segments:** ${placeholderGate.segmentDetail || placeholderGate.badSegments.map((s) => `${s.title || s.segmentId}:${s.placeholderClipCount}`).join(', ')}`,
+      );
+      n += 1;
+    }
+  }
+
   if (objectiveGate?.available) {
-    lines.push(`${n}. **Objective gate:** ${objectiveGate.pass ? 'PASS' : 'FAIL'} (${objectiveGate.checks.map((c) => `${c.name}:${c.pass ? 'ok' : 'fail'}`).join(', ')})`);
+    lines.push(
+      `${n}. **Composite objective gate:** ${objectiveGate.pass ? 'PASS' : 'FAIL'} (${objectiveGate.checks.map((c) => `${c.name}:${c.pass ? 'ok' : 'fail'}`).join(', ')})`,
+    );
     n += 1;
   }
 
@@ -405,22 +465,68 @@ export async function watchVideo(options = {}) {
   });
   const scriptText = options.script_text || loadOptionalScript();
   const hookScript = auditHookFromScript(scriptText);
-  const apiKey = options.api_key || process.env.OPENROUTER_API_KEY || '';
+  const apiKey = resolveOpenRouterApiKey(options);
   const skipVision = options.skip_vision === true;
 
   let brutal = null;
   let hookVision = null;
   let legacyVision = null;
+  let youtubeScore = null;
+  let assemblyAudit = null;
+  let finalScore = null;
 
   if (!skipVision && apiKey) {
     const dur = framesMeta.durationSec;
     try {
-      hookVision = await runHookVisionReview(videoPath, apiKey);
+      hookVision = await runHookVisionReview(videoPath, apiKey, {
+        expectedOverlay: options.expected_hook_overlay,
+      });
     } catch (e) {
       hookVision = { hookPass: false, error: e.message };
     }
     try {
-      brutal = await runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 10 : 14);
+      const retention = await runRetentionVisionReview(videoPath, dur, apiKey, {
+        maxFrames: mode === 'quick' ? 14 : 18,
+        expectedOverlay: options.expected_hook_overlay,
+      });
+      const scores = { ...retention.scores };
+      if (typeof hookVision?.hookScore === 'number') {
+        scores.hook = Math.max(scores.hook, hookVision.hookScore);
+      }
+      youtubeScore = computeYoutubeQualityScore({
+        retentionScores: scores,
+        objectiveQa,
+        hookVision,
+        hookScript,
+        sceneQa,
+        placeholderGate,
+        objectiveGate,
+        repetition,
+      });
+      try {
+        const topic = scriptText?.slice(0, 120) || options.topic || '';
+        assemblyAudit = await runAssemblyAudit({
+          videoPath,
+          contactSheetPath: framesMeta.contactSheet,
+          framePaths: framesMeta.frames?.filter((f) => f.timestampSec <= 45).map((f) => f.path),
+          apiKey,
+          topic,
+        });
+        finalScore = blendWithAssemblyAudit(youtubeScore, assemblyAudit);
+      } catch (e) {
+        assemblyAudit = { success: false, error: e.message };
+        finalScore = youtubeScore;
+      }
+      brutal = {
+        success: true,
+        mode: 'retention',
+        overall: Math.round(((finalScore ?? youtubeScore) / 10) * 10) / 10,
+        youtubeScore,
+        finalScore,
+        uploadReady: (finalScore ?? 0) >= 91,
+        report: { ...retention.report, scores100: scores },
+        frameCount: retention.frameCount,
+      };
     } catch (e) {
       brutal = { success: false, error: e.message };
     }
@@ -438,6 +544,7 @@ export async function watchVideo(options = {}) {
     repetition,
     sceneQa,
     objectiveQa,
+    placeholderGate,
     objectiveGate,
     hookScript,
     hookVision,
@@ -446,6 +553,9 @@ export async function watchVideo(options = {}) {
     apiKeyUsed: Boolean(apiKey) && !skipVision,
     mode,
     renderTier: options.render_tier,
+    youtubeScore,
+    assemblyAudit,
+    finalScore,
   });
 
   const reportPath = join(outDir, 'WATCH_REPORT.md');
@@ -463,10 +573,20 @@ export async function watchVideo(options = {}) {
     sceneQa,
     objectiveQa,
     objectiveGate,
+    placeholderGate,
     hookScript,
     hookVision,
     brutal,
     legacyVision,
-    uploadReady: reportText.includes('**Upload-ready?** YES'),
+    youtubeScore,
+    finalScore,
+    assemblyAudit,
+    uploadReady:
+      (finalScore ?? youtubeScore ?? 0) >= 91
+      && (assemblyAudit?.assemblyScore ?? 0) >= 80
+      && hookVision?.hookPass !== false
+      && hookScript?.pass !== false,
   };
 }
+
+export { targetScore100 };

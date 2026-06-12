@@ -13,6 +13,8 @@ export const DOMAIN_BLOCKLIST = new Map<string, string[]>([
   ['watermarked-stock', ['shutterstock', 'gettyimages', 'istockphoto', '123rf', 'dreamstime', 'depositphotos', 'alamy']],
   ['low-quality', ['9gag', 'imgur', 'memegenerator', 'knowyourmeme', 'ifunny', 'cheezburger', 'buzzfeed']],
   ['adult-content', ['pornhub', 'xvideos', 'xhamster', 'redtube', 'youporn']],
+  /** Social platforms — app promos / unreliable clips, not editorial B-roll */
+  ['unreliable-social', ['tiktok.com', 'vm.tiktok', 'tiktokcdn', 'tiktokpng', 'tiktokv.com', 'muscdn.com', 'byteoversea.com']],
 ]);
 
 // ---------------------------------------------------------------------------

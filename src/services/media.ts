@@ -48,6 +48,86 @@ function isLoopVideoFirst(): boolean {
   );
 }
 
+/** Hosts that fail download-clip proxy and become ffmpeg placeholders. */
+function isUnreliableVideoHost(url = ''): boolean {
+  return /(?:tiktok\.com|vm\.tiktok|tiktokcdn\.com|instagram\.com|x\.com|twitter\.com|facebook\.com|fb\.watch)/i.test(url);
+}
+
+/** Motion sources that survive proxy + ffmpeg in loop mode. */
+function isTrustedVideoHost(url = ''): boolean {
+  return /(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo|videos\.pexels\.com)/i.test(url);
+}
+
+function candidateUrlBlob(c: { url?: string; sourceUrl?: string; thumbnailUrl?: string }): string {
+  return `${c.url || ''} ${c.sourceUrl || ''} ${c.thumbnailUrl || ''}`;
+}
+
+function loopMinVideosPerSegment(targetAssetsPerSegment: number): number {
+  if (!isLoopFastMode() || typeof sessionStorage === 'undefined') {
+    return Math.max(2, Math.min(3, targetAssetsPerSegment));
+  }
+  const raw = sessionStorage.getItem('autotube_loop_min_videos');
+  const parsed = raw ? parseInt(raw, 10) : 0;
+  const base = Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
+  // When Giphy is suppressed, keep min at 2 — do not raise to 3 and starve harvest.
+  if (sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true') {
+    return Math.max(2, base);
+  }
+  return Math.max(2, Math.min(3, base));
+}
+
+function isLoopTrustedVideoCandidate(c: MediaCandidate): boolean {
+  const blob = candidateUrlBlob(c);
+  if (isUnreliableVideoHost(blob)) return false;
+  if (c.type !== 'video') return true;
+  if (!isLoopVideoFirst()) return true;
+  return isTrustedVideoHost(blob) || /\.(?:mp4|webm|mov)(?:[?#]|$)/i.test(blob);
+}
+
+/** Max number of Giphy candidates to keep per segment in loop mode (0 = suppressed). */
+function loopMaxGiphyPerSegment(): number {
+  if (!isLoopFastMode() || typeof sessionStorage === 'undefined') return Infinity;
+  if (sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true') return 0;
+  return 2;
+}
+
+/**
+ * Stable exclude key that survives a sessionStorage round-trip.
+ *
+ * The problem with a bare `.split('?')[0]` is that YouTube watch URLs stored
+ * as "https://www.youtube.com/watch?v=VIDEO_ID" lose their video-ID param,
+ * collapsing all of them into the overbroad key "https://www.youtube.com/watch".
+ * That single overbroad key then blocks every YouTube watch candidate, zeroing
+ * the harvest.  This function preserves the ?v= param so each YouTube URL maps
+ * to a unique key, and keeps similar semantics for other URL shapes.
+ */
+function loopNormalizeExcludeKey(url: string, sourceUrl?: string): string {
+  const raw = (url || '').trim();
+  if (!raw) return '';
+  // YouTube watch URL — keep the video-ID query param as part of the key
+  const ytMatch = raw.match(/[?&]v=([\w-]{4,})/i);
+  if (ytMatch && /youtube\.com\/watch/i.test(raw)) {
+    return `https://www.youtube.com/watch?v=${ytMatch[1].toLowerCase()}`;
+  }
+  // Proxy URL with embedded source — extract the source URL so the key is
+  // host-agnostic and survives proxy URL changes.
+  const embMatch = raw.match(/[?&]url=([^&]+)/i);
+  if (embMatch) {
+    try {
+      return decodeURIComponent(embMatch[1]).split('?')[0].toLowerCase();
+    } catch {
+      return embMatch[1].split('?')[0].toLowerCase();
+    }
+  }
+  // A separate sourceUrl takes priority over a bare proxy path.
+  const src = (sourceUrl || '').trim();
+  if (src && /^https?:\/\//i.test(src)) return src.split('?')[0].toLowerCase();
+  // Bare /api/download-clip paths with no embedded source are not useful keys.
+  const bare = raw.split('?')[0].toLowerCase();
+  if (bare.includes('/api/download-clip')) return '';
+  return bare;
+}
+
 function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<string> } {
   if (!isLoopFastMode() || typeof sessionStorage === 'undefined') {
     return { offset: 0, nonce: 0, exclude: new Set() };
@@ -59,7 +139,8 @@ function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<str
     const raw = sessionStorage.getItem('autotube_loop_exclude_urls');
     if (raw) {
       for (const u of JSON.parse(raw) as string[]) {
-        if (u) exclude.add(u.split('?')[0].toLowerCase());
+        const key = loopNormalizeExcludeKey(u);
+        if (key) exclude.add(key);
       }
     }
   } catch {
@@ -68,7 +149,13 @@ function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<str
   return { offset, nonce, exclude };
 }
 
-const LOOP_DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investigation', 'report', 'leaked', 'official'];
+// Visual-metaphor tokens for loop-mode query diversification.  Each successive
+// loop iteration picks the next token so providers see meaningfully different
+// queries and return fresh assets instead of repeating the same top results.
+const LOOP_DIVERSITY_TOKENS = [
+  'news', 'documentary', 'archive', 'footage', 'investigation',
+  'report', 'leaked', 'official', 'crime', 'breaking', 'protest', 'surveillance',
+];
 
 function diversifyLoopQuery(query: string, ctx: { offset: number; nonce: number }): string {
   if (ctx.offset === 0 && ctx.nonce === 0) return query;
@@ -97,6 +184,125 @@ export const WATERMARK_INDICATORS = [
 
 const WATERMARK_DOMAIN_PENALTY = -500;
 const WATERMARK_INDICATOR_PENALTY = -300;
+
+// ---------------------------------------------------------------------------
+// Harvest Off-Topic Blocklist — hard-reject at source before scoring
+// ---------------------------------------------------------------------------
+
+/**
+ * Rules: if `pattern` matches the candidate haystack AND `requires` does NOT
+ * match the topic text, the candidate is rejected outright.
+ * Use `requires: /\b__autotube_never__\b/` for unconditional blocks.
+ */
+const HARVEST_OFF_TOPIC_RULES: Array<{ pattern: RegExp; requires: RegExp }> = [
+  // YouTube video-player thumbnails are never editorial B-roll
+  { pattern: /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/sddefault\.|\/oar\d*\.jpg|\/maxres2\.jpg|\/mq\d\.jpg/i, requires: /\b__autotube_never__\b/ },
+
+  // Pinterest pin-board aggregator — almost never quality B-roll
+  { pattern: /pinterest\.com|pinimg\.com/i, requires: /\bpinterest\b/i },
+
+  // Geographic map images (Texas map, state/county maps, OpenStreetMap tiles)
+  { pattern: /\btexas\s*map|\bstate\s*map|\bcounty\s*map|\bgeographic\s*map/i, requires: /\bmap\b|\bgeograph|\btexas\b/i },
+  { pattern: /openstreetmap\.org|\/api\/static-map/i, requires: /\bmap\b|\bgeograph|\blocation\b|\bstreet\b/i },
+
+  // Hydration / water-bottle lifestyle shots
+  { pattern: /\bhydration\b|\bdrinking\s+water\b|\bwater\s+bottle\b/i, requires: /\bhydrat|\bwater\s+drink|\bdrink|\bfitness\b|\bhealth\b|\bwellness\b/i },
+
+  // Royalty-free children stock photos
+  { pattern: /royalty.{0,5}free\s+(?:kids?|child(?:ren)?)|(?:kids?|children)\s+stock\s+photo/i, requires: /\bkid|\bchild|\byouth\b|\beducation\b/i },
+
+  // Tier-list / ranking graphics — almost never relevant B-roll
+  { pattern: /\btier\s*list\b/i, requires: /\btier\s*list\b/i },
+
+  // Social/app logos, app-store screenshots, avatar crops
+  { pattern: /logojoy\.com|cdn\.logojoy|tiktokcdn\.com\/tos-maliva-avt|sndcdn\.com\/artworks|tiktokpng\.com|filehippo\.net|mzstatic\.com\/image|androidheadlines\.com.*app/i, requires: /\b__autotube_never__\b/ },
+
+  // Children/nature stock
+  { pattern: /\b(?:children?\s+(?:playing|exploring|hugging)|nature\s+lover\s+child)\b/i, requires: /\bkid|\bchild|\byouth\b|\beducation\b/i },
+  { pattern: /stockcake\.com|freepik\.com.*child|dreamstime\.com.*child/i, requires: /\bkid|\bchild|\byouth\b/i },
+
+  // Generic map / timezone infographics
+  { pattern: /printable-us-map|guideoftheworld\.com\/map|time-zone-map|timezonesmap|wikiusa\.org.*time-zone/i, requires: /\bmap\b|\btime\s*zone\b|\bgeograph\b/i },
+
+  // Stock lifestyle / clipart / generic infographics
+  { pattern: /\b(?:living\s+room|weight\s*watchers|clipart|teamwork\s+hands)\b/i, requires: /\b(?:living\s+room|weight|clipart|teamwork)\b/i },
+  { pattern: /videoblocks.*thumbnail|cloudfront\.net\/thumbnails\/video/i, requires: /\b__autotube_never__\b/ },
+
+  // Fiction / movie stills and meme posters — not editorial news B-roll
+  { pattern: /movieweb|pulp[\s-]?fiction|jason[\s-]?statham|talestavern|stealing-pulp|movieposter|film[\s-]?still|heist[\s-]?thriller|heist[\s-]?movie/i, requires: /\b(?:movie|film|cinema|hollywood|statham|actor|fiction)\b/i },
+  { pattern: /preview\.redd\.it\/|redd\.it\/.*\.jpg/i, requires: /\b(?:meme|reddit|fan[\s-]?art)\b/i },
+
+  // Moving/lifestyle stock — noise for crime/news/heist topics
+  { pattern: /\b(?:moving\s+box|cardboard\s+box|packing\s+box|selfie|couple\s+smil|new\s+home|housewarming)\b/i, requires: /\b(?:moving|relocat|real\s+estate|home\s+buy|lifestyle\s+vlog)\b/i },
+  { pattern: /\b(?:yoga|workout\s+class|salon|spa\s+day|coffee\s+shop\s+lifestyle)\b/i, requires: /\b(?:fitness|wellness|yoga|lifestyle\s+blog)\b/i },
+
+  // Lifestyle vlogger setups — ring-light, recording-with-phone, content-creator rig
+  { pattern: /\bring[\s-]?light\b|recording[\s-]?a[\s-]?video[\s-]?with[\s-]?(?:her|his)[\s-]?phone|content[\s-]?creator[\s-]?setup/i, requires: /\b(?:vlog|lifestyle|creator[\s-]?tips|tutorial|how[\s-]?to[\s-]?film)\b/i },
+
+  // Dinner/cooking presenter talking-head in plain background
+  { pattern: /\bwhat[\s-]?do[\s-]?you[\s-]?want[\s-]?for[\s-]?dinner|dinner[\s-]?tonight|plain[\s-]?background[\s-]?presenter/i, requires: /\b(?:cooking|recipe|food[\s-]?blog|kitchen|meal)\b/i },
+
+  // Desk / interview / yellow-shirt talking-head lifestyle stock — not news B-roll
+  { pattern: /\b(?:yellow[\s-]?shirt[\s-]?(?:man|woman|person|talking|presenter|host)|talking[\s-]?head[\s-]?yellow)\b/i, requires: /\b__autotube_never__\b/ },
+  { pattern: /\b(?:desk[\s-]?talking[\s-]?head|talking[\s-]?head[\s-]?desk[\s-]?setup|creator[\s-]?at[\s-]?desk|youtube[\s-]?creator[\s-]?desk|vlog[\s-]?desk[\s-]?setup)\b/i, requires: /\b(?:vlog|creator[\s-]?tips|youtube\s+tips|remote[\s-]?work|home[\s-]?office)\b/i },
+  { pattern: /\binterview[\s-]?(?:setup|stock|background|sofa|couch|casual[\s-]?sit)\b|\bsofa[\s-]?interview[\s-]?stock\b/i, requires: /\b(?:news|journalism|interview|crime|police|politics|documentary)\b/i },
+
+  // TikTok "how to go live" UI guides — not heist/news B-roll
+  { pattern: /\b(?:how\s+to\s+go\s+live|go\s+live\s+on\s+tiktok|tiktok\s+live\s+streaming\s+guide|onestream\.live|buffer\.com\/resources\/tiktok)\b/i, requires: /\b(?:tutorial|creator\s+tips|marketing\s+guide)\b/i },
+
+  // Cyber / webinar "digital heist" promos — wrong heist for museum crime topics
+  { pattern: /strategink\.com|digital[\s-]?heist[\s-]?summit|slideshare.*digital[\s-]?heist|data[\s-]?breach(?:es)?|protect[\s-]?your[\s-]?vdr|cyber[\s-]?heist(?:\s+webinar)?/i, requires: /\b(?:cyber|data[\s-]?protection|webinar|summit|hacker|infosec)\b/i },
+
+  // AI-generated / cartoon illustrations — never editorial B-roll
+  { pattern: /\bcraiyon\.com|dall[\s-]?e|midjourney|stable[\s-]?diffusion|ai[\s-]?generated|cartoon\s+heist|animated\s+heist|digital\s+illustration|clipart\s+robbery|vector\s+illustration\s+of\s+(?:a\s+)?(?:museum|heist|robbery)/i, requires: /\b__autotube_never__\b/ },
+
+  // Additional AI-art generator platforms
+  { pattern: /artbreeder\.com|nightcafe\.studio|leonardo\.ai|ideogram\.ai|playground\.ai|bing\s+image\s+creator\b|ai[\s-]?art[\s-]?generator|generative[\s-]?ai\s+(?:art|image)\b/i, requires: /\b__autotube_never__\b/ },
+
+  // Smartphone/social-media lifestyle stock
+  { pattern: /\b(?:smartphone[\s-]?user[\s-]?engaged|woman[\s-]?art[\s-]?iphone|social[\s-]?media\s+addict|scrolling\s+tiktok)\b/i, requires: /\b(?:phone\s+addiction|social\s+media\s+habit|lifestyle)\b/i },
+
+  // Office/laptop lifestyle presenters
+  { pattern: /\b(?:woman[\s-]?writing[\s-]?notes|working[\s-]?on[\s-]?laptop|surgical[\s-]?mask.*laptop|office\s+worker\s+stock)\b/i, requires: /\b(?:remote\s+work|office\s+life|productivity\s+tips)\b/i },
+
+  // Psychology / Freud textbook slides
+  { pattern: /\bfreudian[\s-]?defen[cs]e|defense[\s-]?mechanisms|psychology[\s-]?lecture|psych[\s-]?101\b/i, requires: /\b(?:psychology|therapy|mental[\s-]?health)\b/i },
+
+  // Episode thumbnails from unrelated shows
+  { pattern: /\btrapping[\s-]?series[\s-]?ep|episode[\s-]?\d+[\s-]?thumbnail\b/i, requires: /\b(?:trapping|wildlife[\s-]?show|podcast[\s-]?ep)\b/i },
+
+  // Other-video episode thumbnails / promo graphics
+  { pattern: /\b(?:mind\s+style\s+hub|slideshow|infographic)\b/i, requires: /\b(?:wildlife\s+show|podcast\s+ep|slideshow\s+topic)\b/i },
+
+  // Watermarked preview stock — never ship in final render
+  { pattern: /gettyimages|shutterstock\s+watermark|alamy\s+watermark|istockphoto.*preview/i, requires: /\b__autotube_never__\b/ },
+
+  // Musicians / creators TikTok marketing guides and social-media tutorial sites
+  { pattern: /routenote\.com|musicianwave\.com|sosiakita\.com|distrokid.*tiktok|soundcharts\.com.*tiktok|artists?\s+(?:guide\s+to\s+tiktok|tiktok\s+tips)|musicians?\s+guide\s+to\s+tiktok/i, requires: /\b(?:music|musician|artist|band|singer|record[\s-]?label|indie)\b/i },
+
+  // TikTok music trend / mashup / dance challenge content — wrong TikTok for heist/crime news
+  { pattern: /\btiktok\s+(?:mashup|music\s+compilation|trend\s+(?:2\d{3}|song|music)|dance\s+challenge(?:\s+\d{4})?|viral\s+(?:dance|music|song)(?:\s+\d{4})?)\b/i, requires: /\b(?:music|dance|entertainment|pop\s+culture|chart|trending\s+music)\b/i },
+
+  // Motorcycle / vehicle stunt lifestyle stock
+  { pattern: /\b(?:motorcycle\s+(?:stunt|gang\s+ride|club\s+stock|rider\s+lifestyle)|dirt\s+bike\s+(?:stunt|jump\s+stock)|superbike\s+(?:racing\s+stock|photography\s+stock))\b/i, requires: /\b(?:motorcycle|biker|moto(?:rbike)?|stunt|gang)\b/i },
+
+  // Sunset / golden-hour landscape lifestyle stock
+  { pattern: /\b(?:golden\s+hour\s+(?:photography|photo)\s+stock|sunset\s+(?:silhouette|landscape)\s+(?:stock|wallpaper|background)|nature\s+landscape\s+stock\s+(?:photo|photography))\b/i, requires: /\b(?:sunset|landscape|nature|travel|outdoor|scenic|photography\s+tips)\b/i },
+];
+
+/**
+ * Returns true when the candidate should be hard-rejected at harvest time.
+ * @param haystack - lowercased concatenation of candidate alt + url + query + sourceUrl
+ * @param topicText - lowercased topic / resolvedTitle / narration context
+ */
+export function isHarvestOffTopicCandidate(haystack: string, topicText: string): boolean {
+  for (const rule of HARVEST_OFF_TOPIC_RULES) {
+    if (rule.pattern.test(haystack) && !rule.requires.test(topicText)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Copyright Claim Prevention (Task 178)
@@ -663,6 +869,46 @@ export function scoreCandidate(
     }
   }
 
+  // 9e. Low-signal aggregate source penalties — Pinterest, tier lists, unrelated maps/hydration
+  {
+    const srcLower = (c.sourceUrl || c.url || '').toLowerCase();
+    const topicLower = (_topicContext.resolvedTitle || _topicContext.topic || '').toLowerCase();
+
+    // Pinterest: pin-board aggregator returns low-res reposts with no editorial context
+    if (/pinterest\.com|pinimg\.com/i.test(srcLower) || /pinterest\.com|pinimg\.com/i.test(urlLower)) {
+      score -= 400;
+    }
+
+    // Tier-list ranking graphics — almost never usable B-roll
+    if (/\btier\s*list\b/i.test(meta)) {
+      score -= 300;
+    }
+
+    // Static map screenshots when the topic is not about geography / locations
+    if (
+      /openstreetmap\.org|static.?map/i.test(srcLower) &&
+      !/\bmap\b|\bgeograph|\blocation\b|\bstreet\b/.test(topicLower)
+    ) {
+      score -= 350;
+    }
+
+    // Hydration / water-bottle lifestyle when topic is not health/fitness/drinks
+    if (
+      /\bhydration\b|\bwater\s+bottle\b/i.test(meta) &&
+      !/\bhydrat|\bdrink|\bfitness\b|\bhealth\b|\bwellness\b/.test(topicLower)
+    ) {
+      score -= 250;
+    }
+
+    // Royalty-free children stock photos when topic is not about kids/education
+    if (
+      /royalty.{0,5}free\s+(?:kids?|child(?:ren)?)|(?:kids?|children)\s+stock/i.test(meta) &&
+      !/\bkid|\bchild|\byouth\b|\beducation\b/.test(topicLower)
+    ) {
+      score -= 300;
+    }
+  }
+
   // 9c. Deep Harvest boost — images extracted from topic-specific article pages
   if (c.source.includes('Deep Harvest')) {
     score += 45;
@@ -687,6 +933,9 @@ export function scoreCandidate(
   if (c.type === 'video') {
     if (isLoopVideoFirst()) {
       score += 120;
+      const suppressGiphy = typeof sessionStorage !== 'undefined'
+        && sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true';
+      if (suppressGiphy) score += 60;
       if (isPrimaryWebSource(c.source) || /archive\.org|pexels|pixabay/i.test(c.source)) {
         score += 80;
       }
@@ -1098,6 +1347,7 @@ export async function searchDDGVideos(query: string, signal?: AbortSignal): Prom
     const candidates: MediaCandidate[] = (results as DDGVideoResult[])
       .filter((v) => {
         if (!v.content) return false;
+        if (isUnreliableVideoHost(v.content)) return false;
         const seconds = parseDurationToSeconds(v.duration);
         return seconds <= MAX_DURATION_SECONDS;
       })
@@ -1406,7 +1656,11 @@ export async function searchBingVideos(query: string, signal?: AbortSignal): Pro
     const results = (data as Record<string, unknown>).results;
     if (!Array.isArray(results)) return [];
 
-    const candidates: MediaCandidate[] = results.map((v: any) => {
+    const candidates: MediaCandidate[] = results
+      .filter((v: { url?: string; sourceUrl?: string }) =>
+        v.url && !isUnreliableVideoHost(`${v.url} ${v.sourceUrl || ''}`),
+      )
+      .map((v: any) => {
       try {
         if (!v.url) return null;
         const clipUrl = `/api/download-clip?url=${encodeURIComponent(v.url)}&duration=10`;
@@ -1449,7 +1703,11 @@ export async function searchGoogleVideos(query: string, signal?: AbortSignal): P
     const results = (data as Record<string, unknown>).results;
     if (!Array.isArray(results)) return [];
 
-    const candidates: MediaCandidate[] = results.map((v: any) => {
+    const candidates: MediaCandidate[] = results
+      .filter((v: { url?: string; sourceUrl?: string }) =>
+        v.url && !isUnreliableVideoHost(`${v.url} ${v.sourceUrl || ''}`),
+      )
+      .map((v: any) => {
       try {
         if (!v.url) return null;
         const clipUrl = `/api/download-clip?url=${encodeURIComponent(v.url)}&duration=10`;
@@ -1671,9 +1929,27 @@ async function harvestMediaWithSafetyNet(
   candidates = candidates.filter(meetsMinimumSize);
   if (loopCtx.exclude.size > 0) {
     const before = candidates.length;
-    candidates = candidates.filter((c) => !loopCtx.exclude.has((c.url || '').split('?')[0].toLowerCase()));
+    candidates = candidates.filter((c) => {
+      const key = loopNormalizeExcludeKey(c.url || '', c.sourceUrl);
+      // Empty key means we cannot derive a stable exclude key — let the candidate through.
+      return !key || !loopCtx.exclude.has(key);
+    });
     if (before !== candidates.length) {
       trace.push(`[S${depth+1}] Excluded ${before - candidates.length} prior-loop URLs`);
+    }
+  }
+  {
+    const before = candidates.length;
+    candidates = candidates.filter((c) => !isUnreliableVideoHost(candidateUrlBlob(c)));
+    if (before !== candidates.length) {
+      trace.push(`[S${depth+1}] Dropped ${before - candidates.length} unreliable social video URLs`);
+    }
+  }
+  if (isLoopFastMode()) {
+    const before = candidates.length;
+    candidates = candidates.filter(isLoopTrustedVideoCandidate);
+    if (before !== candidates.length) {
+      trace.push(`[S${depth+1}] Dropped ${before - candidates.length} non-trusted video URLs`);
     }
   }
 
@@ -1705,7 +1981,25 @@ async function harvestMediaWithSafetyNet(
     logger.warn('DomainFilter', `Rejected: ${rejCandidate.url} [${category}] matched pattern "${pattern}"`);
   }
 
-  let scored = accepted.map(c => ({
+  // Off-topic hard-reject — drop harvest noise (YouTube thumbnails, lifestyle stock,
+  // psychology slides, webinar promos, etc.) before scoring so they never enter the pool.
+  const topicText = `${topicContext.topic || ''} ${topicContext.resolvedTitle || ''} ${narrationText || ''} ${segmentTitle || ''}`.toLowerCase();
+  const offTopicBlocked: MediaCandidate[] = [];
+  const offTopicClean: MediaCandidate[] = [];
+  for (const c of accepted) {
+    const hay = `${c.alt || ''} ${c.url || ''} ${c.query || ''} ${c.sourceUrl || ''}`.toLowerCase();
+    if (isHarvestOffTopicCandidate(hay, topicText)) {
+      offTopicBlocked.push(c);
+    } else {
+      offTopicClean.push(c);
+    }
+  }
+  if (offTopicBlocked.length > 0) {
+    trace.push(`[S${depth + 1}] Off-topic block: dropped ${offTopicBlocked.length} harvest noise candidate(s)`);
+    logger.info('OffTopicFilter', `Dropped ${offTopicBlocked.length} off-topic candidates for query "${searchQuery}"`);
+  }
+
+  let scored = offTopicClean.map(c => ({
     ...c,
     finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle)
   })).sort((a, b) => b.finalScore - a.finalScore);
@@ -2049,7 +2343,7 @@ async function harvestMediaWithSafetyNet(
   return { candidates: filteredScored, trace };
 }
 
-function rankShotCandidates(
+export function rankShotCandidates(
   candidates: MediaCandidate[],
   shot: { concept: string; queries: string[]; vibe: string },
   segmentIndex: number,
@@ -2074,10 +2368,12 @@ function rankShotCandidates(
         if (meta.includes(term)) score += 10;
       }
 
-      if (candidate.type === 'video') score += 20;
+      const videoFirst = isLoopVideoFirst();
+      if (candidate.type === 'video') score += videoFirst ? 75 : 20;
+      if (videoFirst && candidate.type === 'image') score -= 30;
       // MR-2 fix: prefer the specified type (was inverted — rewarding wrong type)
-      if (preferredType && candidate.type === preferredType) score += 18;
-      if (preferredType && candidate.type !== preferredType) score -= 4;
+      if (preferredType && candidate.type === preferredType) score += videoFirst ? 40 : 18;
+      if (preferredType && candidate.type !== preferredType) score -= videoFirst ? 35 : 4;
 
       if (shot.concept.toLowerCase().includes('chart') && /(chart|graph|market|stock|numbers|data)/i.test(meta)) score += 25;
       if (shot.concept.toLowerCase().includes('portrait') && /(portrait|speaker|interview|person|people)/i.test(meta)) score += 25;
@@ -2206,6 +2502,35 @@ export async function sourceSegmentMedia(
         `${topicContext.coreSubject} documentary`,
         `${segment.title} b-roll`,
       ];
+      const suppressGiphy = typeof sessionStorage !== 'undefined'
+        && sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true';
+      if (suppressGiphy && isLoopVideoFirst() && !signal?.aborted) {
+        const videoQuery = buildSpecificQuery(`${segment.title} ${topicContext.coreSubject} footage`, topicContext);
+        try {
+          const [bingVideos, ddgVideos] = await Promise.all([
+            searchBingVideos(videoQuery, signal),
+            searchDDGVideos(videoQuery, signal),
+          ]);
+          const fresh = [...bingVideos, ...ddgVideos].filter((c) => c.type === 'video');
+          if (fresh.length > 0) {
+            for (const c of fresh) {
+              c.finalScore = scoreCandidate(
+                c,
+                topicContext,
+                shotsToHarvest[0]?.vibe,
+                config.sourceType,
+                segment.narration,
+                segment.title,
+              );
+            }
+            allCandidates = [...allCandidates, ...fresh];
+            trace.push(`[S${segmentIndex + 1}] suppressGiphy video-only pre-fill: +${fresh.length} clips`);
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+
       let harvestRound = 2;
       const maxExtraRounds = 5;
       while (
@@ -2243,6 +2568,23 @@ export async function sourceSegmentMedia(
     const rebuildUniqueCandidates = () => {
       uniqueCandidates = allCandidates.filter((candidate, index, arr) => arr.findIndex((item) => item.url === candidate.url) === index);
     };
+
+    // Loop mode: cap giphy candidates per segment to prevent visual monotony.
+    // Keep up to loopMaxGiphyPerSegment() highest-scored giphy results; demote the rest.
+    if (loopMin > 0) {
+      const maxGiphy = loopMaxGiphyPerSegment();
+      const giphyOverflow = allCandidates
+        .filter((c) => c.source === 'giphy')
+        .sort((a, b) => b.finalScore - a.finalScore)
+        .slice(maxGiphy)
+        .map((c) => c.url);
+      if (giphyOverflow.length > 0) {
+        const overflow = new Set(giphyOverflow);
+        allCandidates = allCandidates.filter((c) => !overflow.has(c.url));
+        rebuildUniqueCandidates();
+      }
+    }
+
     const excludedUrls = new Set<string>();
     const blockedUrlsForPick = () => (
       loopMin > 0
@@ -2292,12 +2634,19 @@ export async function sourceSegmentMedia(
     for (let i = 0; i < shotsToHarvest.length; i++) {
       const shot = shotsToHarvest[i];
       const shotType = i === 0 ? 'primary' : 'secondary';
+      const videoFirst = isLoopVideoFirst();
+      const videosSoFar = finalAssets.filter((a) => a.type === 'video').length;
+      const preferredType = videoFirst && videosSoFar < 2
+        ? 'video'
+        : i > 0 && !videoFirst
+          ? finalAssets[i - 1]?.type
+          : undefined;
       let best = await pickDistinctShotCandidate(
         uniqueCandidates,
         shot,
         segmentIndex,
         excludedUrls,
-        i > 0 ? finalAssets[i - 1]?.type : undefined,
+        preferredType,
         blockedUrlsForPick(),
         signal,
       );
@@ -2419,12 +2768,14 @@ export async function sourceSegmentMedia(
     const maxDeficitHarvests = loopMin > 0 ? 10 : 0;
     while (finalAssets.length < targetAssetsPerSegment && !signal?.aborted) {
       const fallbackShot = shotsToHarvest[1] || shotsToHarvest[0];
+      const needMoreVideo = isLoopVideoFirst()
+        && finalAssets.filter((a) => a.type === 'video').length < 2;
       const extra = await pickDistinctShotCandidate(
         uniqueCandidates,
         fallbackShot,
         segmentIndex,
         excludedUrls,
-        undefined,
+        needMoreVideo ? 'video' : undefined,
         blockedUrlsForPick(),
         signal,
       );
@@ -2491,9 +2842,10 @@ export async function sourceSegmentMedia(
     }
 
     if (isLoopVideoFirst()) {
-      const loopMinVideos = 2;
+      const loopMinVideos = loopMinVideosPerSegment(targetAssetsPerSegment);
       let videoCount = finalAssets.filter((asset) => asset.type === 'video').length;
       const videoShot = shotsToHarvest[0];
+      let videoSearchRound = 0;
       while (videoCount < loopMinVideos && !signal?.aborted) {
         const videoPick = await pickDistinctShotCandidate(
           uniqueCandidates,
@@ -2504,7 +2856,37 @@ export async function sourceSegmentMedia(
           blockedUrlsForPick(),
           signal,
         );
-        if (!videoPick || videoPick.type !== 'video') break;
+        if (!videoPick || videoPick.type !== 'video') {
+          if (videoSearchRound >= 2) break;
+          const videoQuery = buildSpecificQuery(
+            `${segment.title} ${topicContext.coreSubject} footage`,
+            topicContext,
+          );
+          try {
+            const [bingVideos, ddgVideos] = await Promise.all([
+              searchBingVideos(videoQuery, signal),
+              searchDDGVideos(videoQuery, signal),
+            ]);
+            const fresh = [...bingVideos, ...ddgVideos].filter(
+              (c) =>
+                c.type === 'video'
+                && !excludedUrls.has(c.url)
+                && !deduplicationRegistry.usedUrls.has(c.url)
+                && isLoopTrustedVideoCandidate(c),
+            );
+            if (fresh.length === 0) break;
+            for (const c of fresh) {
+              c.finalScore = scoreCandidate(c, topicContext, videoShot?.vibe, config.sourceType, segment.narration, segment.title);
+            }
+            allCandidates = [...allCandidates, ...fresh];
+            rebuildUniqueCandidates();
+            trace.push(`[S${segmentIndex + 1}] video-first search round ${videoSearchRound + 1}: +${fresh.length} clips`);
+          } catch {
+            break;
+          }
+          videoSearchRound += 1;
+          continue;
+        }
         usedUrlsMap.set(videoPick.url, segmentIndex);
         registerAsset(deduplicationRegistry, { url: videoPick.url, alt: videoPick.alt, sourceUrl: videoPick.sourceUrl });
         excludedUrls.add(videoPick.url);

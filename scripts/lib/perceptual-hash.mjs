@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 
 export const VISUAL_DUP_MAX_DISTANCE = 10;
 
-function hamming(a, b) {
+export function hammingDistance(a, b) {
   if (!a || !b || a.length !== b.length) return 64;
   let d = 0;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d += 1;
@@ -51,7 +51,7 @@ export function aHashFromImage(imagePathOrUrl, workDir = join(tmpdir(), 'autotub
  */
 export function isSimilarToRegistry(hash, registry) {
   if (!hash) return false;
-  return registry.some((h) => hamming(hash, h) <= VISUAL_DUP_MAX_DISTANCE);
+  return registry.some((h) => hammingDistance(hash, h) <= VISUAL_DUP_MAX_DISTANCE);
 }
 
 /**

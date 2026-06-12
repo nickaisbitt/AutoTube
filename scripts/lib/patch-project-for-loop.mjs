@@ -3,7 +3,8 @@
  */
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
-import { buildEditTimeline } from './build-edit-timeline.mjs';
+import { buildEditTimeline, orderAssetsVideoFirst } from './build-edit-timeline.mjs';
+import { normalizeUrlKey } from './harvest-loop-context.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
 
 const STOP_WORDS = new Set([
@@ -22,8 +23,26 @@ function topicKeywords(topic) {
     .slice(0, 4);
 }
 
+/** Reject hook/overlay overrides left over from a prior topic (prevents script/overlay drift). */
+export function hookOverrideMatchesTopic(override, topic) {
+  const text = (override || '').trim();
+  if (!text) return true;
+  const keys = topicKeywords(topic).map((w) => w.toLowerCase());
+  if (!keys.length) return true;
+  const lower = text.toLowerCase();
+  return keys.some((k) => lower.includes(k));
+}
+
 function isInstructionOverlay(text) {
   return /^(replace|start with|use|change|fix|try)\b/i.test((text || '').trim());
+}
+
+/** UI kinetic-text hooks that fail watcher 0–3s audit — never use in loop render. */
+export function isBadKineticOverlay(text) {
+  const t = (text || '').trim();
+  if (!t) return false;
+  if (isInstructionOverlay(t)) return true;
+  return /urgent question|an urgent|just happen|did a heist|watch this before/i.test(t);
 }
 
 /** Pull the suggested hook text from watcher "Replace X with Y" fixes. */
@@ -53,15 +72,38 @@ export function extractOverlayFromVisionFix(visionFix) {
   return words.slice(0, 8).join(' ').toUpperCase();
 }
 
+function visionSuggestsBreaking(visionFix) {
+  return /\bbreaking\b/i.test(visionFix || '');
+}
+
 /** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
 export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const preferred = options.preferredOverlay?.trim();
-  if (preferred && !isInstructionOverlay(preferred)) {
+  if (preferred && !isBadKineticOverlay(preferred) && hookOverrideMatchesTopic(preferred, topic)) {
     return preferred.toUpperCase();
   }
 
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
-  if (fromVision) return fromVision;
+  if (fromVision) {
+    if (visionSuggestsBreaking(options.visionFix) && !/^BREAKING:/i.test(fromVision)) {
+      return `BREAKING: ${fromVision.replace(/^BREAKING:\s*/i, '')}`;
+    }
+    return fromVision;
+  }
+
+  const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
+  const hasMuseum = /museum|louvre|heist|robbery|stolen|jewel/.test(t);
+  const hasTikTok = /tiktok|livestream|streamed live|went viral|live on/.test(t);
+
+  if (hasMuseum && hasTikTok) {
+    return 'BREAKING: LOUVRE HEIST TIKTOK LIVE';
+  }
+  if (hasMuseum) {
+    return 'BREAKING: LOUVRE HEIST LIVE';
+  }
+  if (hasTikTok) {
+    return 'BREAKING: TIKTOK LIVE HEIST';
+  }
 
   const headline = (topic || '')
     .replace(/^How\s+/i, '')
@@ -74,7 +116,6 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     .join(' ')
     .toUpperCase() || topicKeywords(topic).join(' ').toUpperCase() || 'CRISIS EXPOSED';
   const core = headline;
-  const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
 
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
     return `EXPOSED: ${core}`;
@@ -82,10 +123,13 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return `EMERGENCY: ${core}`;
   }
-  if (/evict|tenant|landlord|lawsuit|fine|hack|stolen|breach/i.test(t)) {
+  if (/fire|attack|blackout|disaster|death|kill|crash|bomb|stolen|breach|heist|robbery|hack/.test(t)) {
+    return `BREAKING: ${core}`;
+  }
+  if (/evict|tenant|landlord|lawsuit|fine/i.test(t)) {
     return `URGENT: ${core}`;
   }
-  if (/fire|attack|blackout|disaster|death|kill|crash|bomb/i.test(t)) {
+  if (visionSuggestsBreaking(options.visionFix)) {
     return `BREAKING: ${core}`;
   }
   return `URGENT: ${core}`;
@@ -116,29 +160,40 @@ export function stripSceneLayoutsForLoop(project) {
   return project;
 }
 
+function isVideoAsset(asset) {
+  return asset?.type === 'video' || /\/api\/download-clip/i.test(asset?.url || '');
+}
+
 /** Ensure every segment has B-roll; dedupe URLs; steal from over-filled segments. */
-export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
+export function balanceMediaAcrossSegments(project, minPerSegment = 4, options = {}) {
+  const preferVideo = options.harvestVideoFirst === true;
   if (!project?.script?.length || !project?.media?.length) return project;
 
   const segIds = project.script.map((s) => s.id);
   const buckets = Object.fromEntries(segIds.map((id) => [id, []]));
   const seenUrls = new Set();
   const visualRegistry = [];
+  // Per-segment hash registries used to reject phash-similar assets during cross-segment transfers.
+  const segVisualRegistries = Object.fromEntries(segIds.map((id) => [id, []]));
 
   for (const asset of project.media) {
-    const key = (asset.url || '').split('?')[0];
+    const key = normalizeUrlKey(asset.url, asset.sourceUrl) || asset.id || '';
     if (key && seenUrls.has(key)) continue;
 
     const thumb = asset.thumbnailUrl || (asset.type === 'image' ? asset.url : null);
+    let assetHash = null;
     if (thumb) {
       const hash = aHashFromImage(thumb);
       if (hash && isSimilarToRegistry(hash, visualRegistry)) continue;
-      if (hash) visualRegistry.push(hash);
+      if (hash) { visualRegistry.push(hash); assetHash = hash; }
     }
+    // Accept a pre-computed _phash from the asset (used in tests / offline pipelines).
+    const segHash = assetHash || (typeof asset._phash === 'string' ? asset._phash : null);
 
     if (key) seenUrls.add(key);
     const sid = segIds.includes(asset.segmentId) ? asset.segmentId : segIds[0];
-    buckets[sid].push({ ...asset, segmentId: sid });
+    if (segHash) segVisualRegistries[sid].push(segHash);
+    buckets[sid].push({ ...asset, segmentId: sid, _phash: segHash });
   }
 
   const effectiveMin = Math.min(
@@ -161,15 +216,39 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
 
   const needy = segIds.filter((id) => buckets[id].length < effectiveMin);
   for (const needId of needy) {
-    const needUrls = () => new Set(buckets[needId].map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+    const needUrls = () => new Set(
+      buckets[needId].map((a) => normalizeUrlKey(a.url, a.sourceUrl) || a.id || '').filter(Boolean),
+    );
     while (buckets[needId].length < effectiveMin) {
       const used = needUrls();
       const donorId = donors.find((id) => id !== needId && buckets[id].length > 1);
       if (!donorId) break;
       const donorIdx = buckets[donorId].findIndex((a) => {
-        const key = (a.url || '').split('?')[0];
-        return key && !used.has(key);
+        const key = normalizeUrlKey(a.url, a.sourceUrl) || a.id || '';
+        if (!key || used.has(key)) return false;
+        if (a._phash && isSimilarToRegistry(a._phash, segVisualRegistries[needId])) return false;
+        return true;
       });
+      if (preferVideo && buckets[needId].filter(isVideoAsset).length < 3) {
+        const videoIdx = buckets[donorId].findIndex((a) => {
+          const key = normalizeUrlKey(a.url, a.sourceUrl) || a.id || '';
+          if (!key || used.has(key) || !isVideoAsset(a)) return false;
+          if (a._phash && isSimilarToRegistry(a._phash, segVisualRegistries[needId])) return false;
+          return true;
+        });
+        if (videoIdx >= 0) {
+          const [moved] = buckets[donorId].splice(videoIdx, 1);
+          if (moved) {
+            buckets[needId].push({
+              ...moved,
+              id: `${moved.id}-bal-vid-${needId.slice(0, 6)}-${buckets[needId].length}`,
+              segmentId: needId,
+            });
+            if (moved._phash) segVisualRegistries[needId].push(moved._phash);
+            continue;
+          }
+        }
+      }
       if (donorIdx < 0) break;
       const [moved] = buckets[donorId].splice(donorIdx, 1);
       if (!moved) break;
@@ -178,10 +257,16 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
         id: `${moved.id}-bal-${needId.slice(0, 6)}-${buckets[needId].length}`,
         segmentId: needId,
       });
+      if (moved._phash) segVisualRegistries[needId].push(moved._phash);
     }
   }
 
-  project.media = segIds.flatMap((id) => buckets[id]);
+  project.media = segIds.flatMap((id) => {
+    const bucket = buckets[id];
+    const ordered = preferVideo ? orderAssetsVideoFirst(bucket, 3) : bucket;
+    // Strip the internal _phash field before returning to callers.
+    return ordered.map(({ _phash: _h, ...rest }) => rest);
+  });
   return project;
 }
 
@@ -224,20 +309,26 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   trimProjectForLoop(project, options.maxTotalSec ?? 75);
 
   stripSceneLayoutsForLoop(project);
-  balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4));
+  balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4), {
+    harvestVideoFirst: fixState.harvestVideoFirst !== false,
+  });
 
   if (fixState.brollPlacement !== false && project.script?.length && project.media?.length) {
     project.editTimeline = buildEditTimeline(project, {
       cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
       reason: 'loop heuristic placement',
+      preferVideo: fixState.harvestVideoFirst !== false,
+      minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
     });
   }
 
   if (fixState.shockHook !== false && project.script?.length) {
-    const hook = buildShockHookLine(topic, fixState.hookLine);
+    const hookOverride = hookOverrideMatchesTopic(fixState.hookLine, topic) ? fixState.hookLine : null;
+    const overlayOverride = hookOverrideMatchesTopic(fixState.hookOverlay, topic) ? fixState.hookOverlay : null;
+    const hook = buildShockHookLine(topic, hookOverride);
     const hookOverlay = buildShortHookOverlay(topic, hook, {
-      preferredOverlay: fixState.hookOverlay,
-      visionFix: fixState.hookOverlay && isInstructionOverlay(fixState.hookOverlay) ? fixState.hookOverlay : undefined,
+      preferredOverlay: overlayOverride,
+      visionFix: overlayOverride && isInstructionOverlay(overlayOverride) ? overlayOverride : undefined,
     });
     project.hookLine = hook;
     rewriteIntroOpener(project, hook);
@@ -269,8 +360,21 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     musicPreset: 'neutral',
     resolution: '1080p',
     youtubeMode: true,
-    hookOverlay: project.exportSettings?.hookOverlay ?? fixState.hookOverlay ?? undefined,
-    hookLine: project.exportSettings?.hookLine ?? project.hookLine ?? fixState.hookLine ?? undefined,
+    hookOverlay: (() => {
+      const fromState = fixState.hookOverlay?.trim();
+      const fromProject = project.exportSettings?.hookOverlay?.trim();
+      if (fromState && !isBadKineticOverlay(fromState) && hookOverrideMatchesTopic(fromState, topic)) {
+        return fromState.toUpperCase();
+      }
+      if (fromProject && !isBadKineticOverlay(fromProject) && hookOverrideMatchesTopic(fromProject, topic)) {
+        return fromProject.toUpperCase();
+      }
+      return buildShortHookOverlay(topic, project.hookLine || fixState.hookLine, {
+        preferredOverlay: hookOverrideMatchesTopic(fromState, topic) ? fromState : undefined,
+      });
+    })(),
+    hookLine: project.exportSettings?.hookLine ?? project.hookLine
+      ?? (hookOverrideMatchesTopic(fixState.hookLine, topic) ? fixState.hookLine : undefined),
   };
 
   return project;

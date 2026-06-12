@@ -8,7 +8,8 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   const env = {
     ...process.env,
     DEV_SERVER_URL: base.devServer || process.env.DEV_SERVER_URL || 'http://localhost:5173',
-    AUTOTUBE_FORCE_CPU: process.env.AUTOTUBE_FORCE_CPU || '1',
+    AUTOTUBE_FORCE_CPU: process.env.AUTOTUBE_FORCE_CPU
+      ?? (process.env.AUTOTUBE_MODAL_RENDER === '1' || process.env.MODAL_RENDER_URL ? '0' : '1'),
     AUTOTUBE_LOOP_MODE: '1',
     AUTOTUBE_YOUTUBE_MODE: process.env.AUTOTUBE_YOUTUBE_MODE || '1',
   };
@@ -16,15 +17,28 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (base.projectPath) env.AUTOTUBE_PROJECT_PATH = base.projectPath;
   if (fixState.cutIntervalSec) env.AUTOTUBE_CUT_INTERVAL_SEC = String(fixState.cutIntervalSec);
   if (fixState.showKineticText) env.AUTOTUBE_KINETIC_TEXT = '1';
-  if (fixState.patternInterrupts) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
-  if (fixState.useFastPacing) env.AUTOTUBE_FAST_PACING = '1';
+  const cutSec = fixState.cutIntervalSec ?? 1.25;
+  const wantsInterrupts =
+    fixState.patternInterrupts
+    || renderTier === 'full'
+    || cutSec <= 0.5
+    || fixState.useFastPacing;
+  if (wantsInterrupts) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
+  if (fixState.useFastPacing || renderTier === 'full') env.AUTOTUBE_FAST_PACING = '1';
+  if (wantsInterrupts) {
+    const defaultInterval = renderTier === 'full' && cutSec <= 0.75 ? '3' : '5';
+    env.AUTOTUBE_INTERRUPT_INTERVAL_SEC = process.env.AUTOTUBE_INTERRUPT_INTERVAL_SEC || defaultInterval;
+    env.AUTOTUBE_INTERRUPT_STRONG = '1';
+  }
   if (fixState.useFfmpegAssembly !== false) env.AUTOTUBE_RENDER_MODE = 'ffmpeg';
   if (fixState.harvestVideoFirst !== false) env.AUTOTUBE_HARVEST_VIDEO_FIRST = '1';
   if (fixState.brollPlacement !== false) env.AUTOTUBE_BROLL_PLACEMENT = '1';
   if (fixState.ffmpegHardCuts !== false) env.AUTOTUBE_FFMPEG_HARD_CUTS = '1';
   if (fixState.whisperAlign || renderTier === 'full') env.AUTOTUBE_WHISPER_ALIGN = '1';
-  if (fixState.hookOverlay) env.AUTOTUBE_HOOK_OVERLAY = fixState.hookOverlay;
-  if (fixState.hookLine) env.AUTOTUBE_HOOK_LINE = fixState.hookLine;
+  const hookOverlay = fixState.hookOverlay?.trim();
+  const hookLine = fixState.hookLine?.trim();
+  if (hookOverlay) env.AUTOTUBE_HOOK_OVERLAY = hookOverlay;
+  if (hookLine) env.AUTOTUBE_HOOK_LINE = hookLine;
 
   if (renderTier === 'full') {
     env.AUTOTUBE_RENDER_QUALITY = 'high';
@@ -53,5 +67,7 @@ export function renderEnvJournalSnapshot(fixState = {}) {
     minAssetsPerSegment: fixState.minAssetsPerSegment,
     useFfmpegAssembly: fixState.useFfmpegAssembly !== false,
     harvestVideoFirst: fixState.harvestVideoFirst !== false,
+    patternInterrupts: fixState.patternInterrupts === true,
+    hookOverlay: fixState.hookOverlay || null,
   };
 }

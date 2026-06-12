@@ -17,11 +17,14 @@ export function captionMetrics(height, width) {
   const currentPx = Math.round(height * 0.092);
   const strokePx = Math.max(8, Math.round(height * 0.009));
   const bottomPad = Math.round(height * 0.14);
-  return { basePx, currentPx, strokePx, bottomPad, maxWords: 4, barWidth: width * 0.94 };
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  // VidNo/EngageMedia: 4–6 words per phrase; loop uses longer phrases for better readability.
+  const maxWords = loopMode ? 8 : 6;
+  return { basePx, currentPx, strokePx, bottomPad, maxWords, barWidth: width * 0.94 };
 }
 
 export function hookFontPx(height) {
-  return Math.round(height * 0.09);
+  return Math.round(height * 0.11);
 }
 
 /** Max seconds before switching B-roll within a segment (YouTube retention). */

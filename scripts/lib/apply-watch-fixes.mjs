@@ -1,10 +1,43 @@
 /**
  * Map Video Watcher results → pipeline fixes (applied before next loop iteration).
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
-import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
+import { buildShortHookOverlay } from './patch-project-for-loop.mjs';
+import {
+  detectGiphyDominance,
+  countSegmentVideos,
+  countRealSegmentVideos,
+  LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+} from './harvest-quality.mjs';
+import { normalizeUrlKey, isOverBroadExcludeUrl, sanitizeExcludedUrls, pruneExcludedUrlsForReharvest } from './harvest-loop-context.mjs';
+import { collectAssemblyExcludeUrls } from './harvest-quality.mjs';
+import {
+  loadRenderManifest,
+  formatPlaceholderSegmentDetail,
+  placeholderSegmentsFromManifest,
+} from './run-objective-qa.mjs';
 
 const CUT_FLOOR = 0.5;
+
+function targetScore100(untilScore = 91) {
+  return untilScore > 10 ? untilScore : Math.round(untilScore * 10);
+}
+
+function watchYoutubeScore(watch) {
+  if (typeof watch.youtubeScore === 'number') return watch.youtubeScore;
+  const legacy = watch.brutal?.overall;
+  return typeof legacy === 'number' ? legacy * 10 : 100;
+}
+
+function retentionScore(watch, key, fallback = 100) {
+  const s100 = watch.brutal?.report?.scores100?.[key];
+  if (typeof s100 === 'number') return s100;
+  const s10 = watch.brutal?.report?.scores?.[key];
+  if (typeof s10 === 'number') return s10 * 10;
+  return fallback;
+}
 
 /**
  * Escalate fix strategy when interval cuts alone are not working.
@@ -50,25 +83,84 @@ function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
   s.reHarvestMedia = true;
   s.mediaOffset = (s.mediaOffset || 0) + 4;
   s.harvestVideoFirst = true;
-  s.minAssetsPerSegment = Math.min(8, Math.max(6, (s.minAssetsPerSegment || 4) + 1));
+  s.minAssetsPerSegment = Math.min(
+    LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+    Math.max(2, (s.minAssetsPerSegment || 4) + 1),
+  );
   applied.push(
     `${reason} → strategy reharvest (next nonce ${(s.harvestNonce || 0) + 1}, offset ${s.mediaOffset}, ≥${s.minAssetsPerSegment}/seg)`,
   );
 }
 
 /**
+ * Collect normalized URLs for media in segments that rendered placeholder clips.
+ * @param {object|null} project
+ * @param {Set<string>} deadSegmentIds
+ */
+function collectDeadAssetUrls(project, deadSegmentIds) {
+  const urls = [];
+  if (!project?.media?.length || deadSegmentIds.size === 0) return urls;
+  for (const m of project.media) {
+    if (!deadSegmentIds.has(m.segmentId)) continue;
+    const key = normalizeUrlKey(m.url, m.sourceUrl);
+    if (key) urls.push(key);
+  }
+  return urls;
+}
+
+/**
+ * @param {string} root
+ * @returns {object|null}
+ */
+function loadLastProject(root = process.cwd()) {
+  const path = join(root, 'test-recordings', 'last-project.json');
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve render-manifest from explicit video path or canonical last render.
+ * @param {string} root
+ * @param {string} [videoPath]
+ * @returns {object|null}
+ */
+function resolveRenderManifest(root = process.cwd(), videoPath = '') {
+  const candidates = [
+    videoPath,
+    join(root, 'test-recordings', 'FINAL-VIDEO-final.mp4'),
+  ].filter(Boolean);
+  for (const vp of candidates) {
+    const manifest = loadRenderManifest(vp);
+    if (manifest) return manifest;
+  }
+  return null;
+}
+
+/**
  * @param {object} watch — watchVideo() result
  * @param {object} fixState — mutable loop fix state
  * @param {string} [topic] — current video topic (for topic-aware hook lines)
+ * @param {object|null} [project] — harvested project (defaults to last-project.json)
  * @returns {{ applied: string[], fixState: object, blockNextTopic: boolean }}
  */
-export function applyFixesFromWatch(watch, fixState, topic = '') {
+export function applyFixesFromWatch(watch, fixState, topic = '', project = null, options = {}) {
+  const untilScore = options.untilScore ?? 9.1;
   const applied = [];
   const s = { ...fixState };
 
   const hookFail = watch.hookScript?.pass === false || watch.hookVision?.hookPass === false;
-  const pacing = watch.brutal?.report?.scores?.pacing ?? 10;
-  const visualVariety = watch.brutal?.report?.scores?.visualVariety ?? 10;
+  const pacing = retentionScore(watch, 'pacing', 100);
+  const overall = watch.finalScore ?? watchYoutubeScore(watch);
+  const assemblyScore = watch.assemblyAudit?.assemblyScore ?? 100;
+  const assemblyFail = assemblyScore < 80;
+  const target100 = targetScore100(untilScore);
+  // Mid-band with weak pacing: fix render-side first, avoid reharvest starvation.
+  const pacingPlateau = overall >= 72 && overall <= 84 && pacing <= 55;
+  const visualVariety = retentionScore(watch, 'visualVariety', 100);
   const repeatPct = watch.repetition?.repeatPct ?? 0;
   const dupRuns = watch.repetition?.duplicateRunCount ?? 0;
   const longestHold = watch.sceneQa?.longestSceneSec ?? watch.repetition?.longestRun?.approxHoldSec ?? 0;
@@ -87,9 +179,50 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
       s.reHarvestMedia = true;
       s.mediaOffset = (s.mediaOffset || 0) + 2;
       s.harvestVideoFirst = true;
+      s.suppressGiphy = true;
+      s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
       s.fixStrategy = 'reharvest';
-      s.minAssetsPerSegment = Math.min(10, Math.max(6, (s.minAssetsPerSegment || 6) + 1));
-      applied.push(`0a. Placeholder gate FAIL → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg`);
+      // Do not raise minAssets — top-up satisfies volume; higher mins starve browser harvest.
+      s.minAssetsPerSegment = Math.min(
+        LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+        s.minAssetsPerSegment || LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+      );
+      const harvestProject = project || loadLastProject();
+      const manifest = resolveRenderManifest(process.cwd(), options.videoPath || watch.videoPath || '');
+      const placeholderKeys = (manifest?.placeholderUrls || [])
+        .map((u) => normalizeUrlKey(u) || (u || '').split('?')[0].toLowerCase())
+        .filter((k) => k && !isOverBroadExcludeUrl(k));
+      const badSegments = placeholderSegmentsFromManifest(manifest?.perSegment || []);
+      const deadSegmentIds = new Set(badSegments.map((seg) => seg.segmentId));
+      const segDetail = badSegments.length ? formatPlaceholderSegmentDetail(badSegments) : '';
+      if (harvestProject?.media?.length || placeholderKeys.length) {
+      const prev = new Set(sanitizeExcludedUrls(s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
+      if (placeholderKeys.length) {
+        for (const key of placeholderKeys) {
+          if (!isOverBroadExcludeUrl(key)) prev.add(key);
+        }
+      } else {
+          const deadUrls = collectDeadAssetUrls(harvestProject, deadSegmentIds);
+          if (deadUrls.length) {
+            for (const key of deadUrls) prev.add(key);
+          } else if (harvestProject?.media?.length) {
+            for (const m of harvestProject.media) {
+              if (m.type !== 'video' && !/\/api\/download-clip/i.test(m.url || '')) continue;
+              const key = normalizeUrlKey(m.url, m.sourceUrl);
+              if (key) prev.add(key);
+            }
+          }
+        }
+        s.excludedUrls = [...prev].slice(-400);
+      }
+      const pct = watch.placeholderGate?.placeholderPct ?? manifest?.placeholderPct;
+      const pctNote = typeof pct === 'number' ? `${pct}%` : 'high';
+      const excludeNote = placeholderKeys.length
+        ? `${placeholderKeys.length} placeholder URL(s) from render-manifest`
+        : `${(s.excludedUrls || []).length} excluded URLs`;
+      applied.push(
+        `0a. Placeholder gate FAIL (${pctNote}${segDetail ? `; dead segs: ${segDetail}` : ''}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, exclude dead URLs, video-first (${excludeNote})`,
+      );
     } else if (failed.some((n) => n.startsWith('scene_'))) {
       escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`, { sceneFirst: true });
     } else {
@@ -106,52 +239,172 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push(`0c. Silence gaps ${watch.objectiveQa.silenceFirst60Sec}s in first 60s → tighten pacing`);
   }
 
-  if (hookFail) {
-    s.shockHook = true;
-    const visionFix = watch.hookVision?.fix?.trim();
-    const extracted = extractOverlayFromVisionFix(visionFix);
-    const topicHint = (topic || '').toLowerCase().slice(0, 24);
-    const fixMatchesTopic =
-      topicHint.length > 0 && visionFix && visionFix.toLowerCase().includes(topicHint.split(/\s+/)[0]);
-    s.hookLine = buildShockHookLine(topic, fixMatchesTopic ? extracted || visionFix : undefined);
-    s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, { visionFix });
-    applied.push(`1. Hook FAIL → overlay: "${s.hookOverlay}"`);
+  if (watch.thinHarvest) {
+    s.reHarvestMedia = true;
+    s.harvestNonce = (s.harvestNonce || 0) + 1;
+    s.mediaOffset = (s.mediaOffset || 0) + 2;
+    s.harvestVideoFirst = true;
+    s.fixStrategy = 'reharvest';
+    const beforePrune = (s.excludedUrls || []).length;
+    s.excludedUrls = pruneExcludedUrlsForReharvest(s.excludedUrls || []);
+    applied.push(
+      `0e. Thin harvest (empty browser) → pruned ${beforePrune} exclusions → ${s.excludedUrls.length} lifestyle-only, reharvest nonce ${s.harvestNonce}`,
+    );
   }
 
-  if ((pacing <= 8 || longestHold >= 4) && !sceneFail) {
+  if (assemblyFail) {
+    s.reHarvestMedia = true;
+    s.harvestNonce = (s.harvestNonce || 0) + 1;
+    s.mediaOffset = (s.mediaOffset || 0) + 4;
+    s.harvestVideoFirst = true;
+    s.suppressGiphy = true;
+    s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
+    s.fixStrategy = 'reharvest';
+    const repeatMontage = (watch.assemblyAudit?.issues || []).some((i) => /repeat|identical|same\s+(shot|location|footage)|redundan/i.test(i));
+    if (repeatMontage) {
+      s.cutIntervalSec = Math.min(2.5, Math.max(1.8, (s.cutIntervalSec ?? 0.5) + 0.6));
+      s.useFastPacing = false;
+      applied.push(`0c. Assembly repeat montage → widen cuts to ${s.cutIntervalSec}s (thin asset pool)`);
+    }
+    const harvestProject = project || loadLastProject();
+    if (harvestProject?.media?.length) {
+      const prev = new Set(sanitizeExcludedUrls(s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
+      for (const key of collectAssemblyExcludeUrls(harvestProject)) {
+        if (key && !isOverBroadExcludeUrl(key)) prev.add(key);
+      }
+      // Prune to lifestyle-only entries (max 30) to prevent harvest pool starvation across iterations.
+      s.excludedUrls = pruneExcludedUrlsForReharvest([...prev]);
+      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → exclude ${s.excludedUrls.length} off-topic URL(s), reharvest nonce ${s.harvestNonce}`);
+    } else {
+      const issues = (watch.assemblyAudit?.issues || []).slice(0, 2).join('; ');
+      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → reharvest nonce ${s.harvestNonce}: ${issues || 'off-topic/repeat montage'}`);
+    }
+  }
+
+  if (hookFail) {
+    s.shockHook = true;
+    s.patternInterrupts = true;
+    const visionFix = watch.hookVision?.fix?.trim();
+    s.hookLine = buildShockHookLine(topic);
+    s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, { visionFix });
+    applied.push(`1. Hook FAIL → shock hook "${s.hookLine.slice(0, 60)}…", overlay: "${s.hookOverlay}"`);
+  }
+
+  const assemblyRepeatIssue = assemblyFail && (
+    (watch.assemblyAudit?.issues || []).some((i) => /repeat|identical|same\s+(shot|location|footage)|redundan/i.test(i))
+    || repeatPct >= 15
+    || dupRuns >= 1
+  );
+
+  if ((pacing <= 80 || longestHold >= 4) && !sceneFail && !assemblyRepeatIssue) {
     s.useFastPacing = true;
     if ((s.cutIntervalSec ?? 1.25) > CUT_FLOOR) {
       const prev = s.cutIntervalSec ?? 1.25;
-      s.cutIntervalSec = Math.max(CUT_FLOOR, prev - 0.15);
+      const step = pacing <= 55 ? 0.35 : 0.15;
+      s.cutIntervalSec = Math.max(CUT_FLOOR, prev - step);
       applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s`);
+    }
+    if (pacing <= 80) {
+      s.patternInterrupts = true;
+      applied.push(`2a. Pacing ${pacing}/100 ≤80 → patternInterrupts ON`);
+    }
+    if (pacing <= 55) {
+      s.cutIntervalSec = CUT_FLOOR;
+      s.patternInterrupts = true;
+      s.useFastPacing = true;
+      applied.push(`2c. Pacing ${pacing}/100 ≤55 → cut floor ${CUT_FLOOR}s + strong interrupts`);
     }
   }
 
   const renderTier = s.renderTier || 'draft';
-  if (renderTier === 'full' && (watch.brutal?.overall ?? 10) < 9.1) {
-    s.reHarvestMedia = true;
+  if (renderTier === 'full' && overall < target100) {
     s.brollPlacement = true;
-    s.minAssetsPerSegment = Math.min(8, Math.max(6, s.minAssetsPerSegment || 4));
-    escalateFixStrategy(s, applied, `2b. Full-tier score below 9.1`);
+    if (pacingPlateau) {
+      s.patternInterrupts = true;
+      s.useFastPacing = true;
+      s.cutIntervalSec = Math.max(CUT_FLOOR, s.cutIntervalSec ?? CUT_FLOOR);
+      applied.push(
+        `2b. Full-tier pacing plateau (${overall}/100, pacing ${pacing}/100) → strong interrupts, skip reharvest`,
+      );
+    } else if (assemblyRepeatIssue) {
+      // Repeat-montage (step 0c/0d) already widened cuts + scheduled reharvest.
+      // Calling escalateFixStrategy here would undo that wider-cut fix via tryInterval().
+      applied.push(
+        `2b. Full-tier score ${overall}/${target100} — interval escalation skipped (repeat-montage active, reharvest already queued)`,
+      );
+    } else {
+      s.reHarvestMedia = true;
+      s.minAssetsPerSegment = Math.min(
+        LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+        Math.max(2, s.minAssetsPerSegment || LOOP_MAX_MIN_ASSETS_PER_SEGMENT),
+      );
+      escalateFixStrategy(s, applied, `2b. Full-tier score below ${target100}/100`);
+    }
   }
 
-  if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6) {
+  const repetitionFail = repeatPct >= 25 || dupRuns >= 2;
+  const varietyFail = visualVariety <= 55 || (visualVariety <= 65 && !pacingPlateau);
+  if ((repetitionFail || varietyFail) && !pacingPlateau) {
     s.forceRealStock = false;
     s.harvestVideoFirst = true;
     s.showKineticText = false;
     s.reHarvestMedia = true;
     s.mediaOffset = (s.mediaOffset || 0) + 4;
-    s.minAssetsPerSegment = Math.min(8, Math.max(6, (s.minAssetsPerSegment || 4) + (repeatPct >= 40 ? 2 : 0)));
+    s.minAssetsPerSegment = Math.min(
+      LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
+      Math.max(2, (s.minAssetsPerSegment || 4) + (repeatPct >= 40 ? 1 : 0)),
+    );
     s.fixStrategy = 'reharvest';
+    const reason = repetitionFail
+      ? `Repetition FAIL (${repeatPct}% dup, ${dupRuns} runs)`
+      : `Visual variety FAIL (${visualVariety}/100)`;
     applied.push(
-      `3. Repetition FAIL (${repeatPct}% dup, ${dupRuns} runs) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg`,
+      `3. ${reason} → reharvest next nonce ${(s.harvestNonce || 0) + 1}, ≥${s.minAssetsPerSegment}/seg`,
     );
   }
 
-  if (renderTier === 'full' && (watch.brutal?.overall ?? 10) <= 5) {
+  if (visualVariety <= 55) {
+    s.harvestVideoFirst = true;
+    s.suppressGiphy = true;
+    // suppressGiphy removes main GIF source — cap video quota so harvest isn't starved
+    s.minVideosPerSegment = 2;
+    s.cutIntervalSec = Math.max(CUT_FLOOR, s.cutIntervalSec ?? CUT_FLOOR);
+    applied.push(`3a. Visual variety ${visualVariety}/100 → harvestVideoFirst + suppressGiphy + ≥${s.minVideosPerSegment} video/seg`);
+  } else if (visualVariety <= 65) {
+    s.suppressGiphy = true;
+    applied.push(`3a. Visual variety ${visualVariety}/100 → suppressGiphy=true for next harvest`);
+  }
+
+  const harvestProject = project || loadLastProject();
+  if (harvestProject?.media?.length) {
+    const segIds = (harvestProject.script || []).map((seg) => seg.id);
+    // Use real-video count (non-Giphy) so that Giphy loops don't satisfy the quota
+    // and cause suppressGiphy to be prematurely cleared — Giphy dominance is the failure mode.
+    const videoQuotaMet = segIds.length > 0 && segIds.every((id) => countRealSegmentVideos(harvestProject.media, id) >= 2);
+    if (videoQuotaMet && s.suppressGiphy === true) {
+      s.suppressGiphy = false;
+      applied.push('3c. Real video quota met (≥2 non-Giphy clips/seg) → suppressGiphy cleared');
+    }
+
+    const { giphyOnlySegments, giphyDominantSegments, giphyTotal } = detectGiphyDominance(harvestProject);
+    const giphyHeavy = giphyOnlySegments.length > 0 || giphyDominantSegments.length > 0;
+    if (giphyHeavy) {
+      s.forceRealStock = true;
+      s.suppressGiphy = true;
+      s.reHarvestMedia = true;
+      s.harvestVideoFirst = true;
+      s.fixStrategy = 'reharvest';
+      s.mediaOffset = (s.mediaOffset || 0) + 2;
+      applied.push(
+        `3b. Giphy-heavy harvest (${giphyTotal} giphy, ${giphyOnlySegments.length} giphy-only segs) → forceRealStock=true, suppressGiphy=true`,
+      );
+    }
+  }
+
+  if (renderTier === 'full' && overall <= 50) {
     s.useFastPacing = true;
     s.showKineticText = false;
-    applied.push('4. Overall ≤5/10 on full tier → fast pacing ON, kinetic OFF');
+    applied.push('4. Overall ≤50/100 on full tier → fast pacing ON, kinetic OFF');
   }
 
   if (watch.legacyVision?.technical?.issues?.some((i) => /loudness/i.test(i))) {
@@ -205,6 +458,7 @@ export function formatFixReport(applied, fixState) {
   lines.push(`15. generateFailureCount: ${fixState.generateFailureCount || 0}/${fixState.maxGenerateFailuresPerTopic || 2}`);
   lines.push(`16. patternInterrupts: ${fixState.patternInterrupts === true}`);
   lines.push(`17. forceRealStock: ${fixState.forceRealStock === true}`);
+  lines.push(`17a. suppressGiphy: ${fixState.suppressGiphy === true}`);
   lines.push(`18. renderTier: ${fixState.renderTier || 'draft'}`);
   lines.push(`19. useFfmpegAssembly: ${fixState.useFfmpegAssembly !== false}`);
   lines.push(`20. harvestVideoFirst: ${fixState.harvestVideoFirst !== false}`);

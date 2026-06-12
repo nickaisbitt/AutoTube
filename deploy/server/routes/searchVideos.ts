@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import { fetchDDGVideos } from "../utils/ddg.js";
+import { filterSocialVideoResults } from "../utils/blockedVideoHosts.js";
 
 /**
  * GET /api/search-videos?q=...
@@ -36,7 +37,16 @@ export async function handleSearchVideos(
 
   try {
     console.log(`[Video Search] Scraping DDG videos for: "${query}"`);
-    const results = await fetchDDGVideos(query);
+    const raw = await fetchDDGVideos(query);
+    const results =
+      raw && typeof raw === "object" && Array.isArray((raw as { results?: unknown }).results)
+        ? {
+            ...(raw as Record<string, unknown>),
+            results: filterSocialVideoResults(
+              (raw as { results: Array<{ url?: string; sourceUrl?: string; content?: string }> }).results,
+            ),
+          }
+        : raw;
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.end(JSON.stringify(results));

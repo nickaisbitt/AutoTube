@@ -316,10 +316,18 @@ Target Duration: ${config.targetDuration} minutes`;
     topicDataBlock = `\n=== TOPIC CONTEXT DATA ===\nNo Wikipedia data available for "${safeTopic}". Use the topic name and your knowledge to craft the hook. Do NOT fabricate specific statistics — instead use style-appropriate dramatic framing based on what is publicly known about this topic.\n=== END TOPIC CONTEXT DATA ===\n`;
   }
 
+  const loopHookLine =
+    typeof sessionStorage !== 'undefined'
+      ? sessionStorage.getItem('autotube_loop_hook_line')?.trim() || ''
+      : '';
+  const mandatoryHookBlock = loopHookLine
+    ? `\nMANDATORY OPENING HOOK (NON-NEGOTIABLE): The intro segment's FIRST SENTENCE must deliver this hook verbatim or with equivalent urgency and named entities: "${loopHookLine}". Do NOT substitute a generic welcome, calendar-year opener ("In 2024"), or vague teaser.\n`
+    : '';
+
   const userPrompt = `Write a ${config.targetDuration}-minute video script about: "${safeTopic}"
-${topicDataBlock}${seoKeywordsBlock}${webContext}
+${topicDataBlock}${seoKeywordsBlock}${webContext}${mandatoryHookBlock}
 CRITICAL RULES:
-1. HOOK-FIRST: The intro MUST open with a specific claim, statistic, or consequence derived from the TOPIC CONTEXT DATA above — NOT "Welcome to", "In this video", or any generic opener. If context data is available, pull a real number or fact from it and attribute it. If no context data is available, use dramatic framing around the topic name without fabricating statistics.
+1. HOOK-FIRST: The intro MUST open with a specific claim, statistic, or consequence derived from the TOPIC CONTEXT DATA above — NOT "Welcome to", "In this video", or any generic opener. If context data is available, pull a real number or fact from it and attribute it. If no context data is available, use dramatic framing around the topic name without fabricating statistics.${loopHookLine ? ` The mandatory opening hook above overrides any other hook suggestion.` : ''}
 2. Pick ONE central story/example and build the whole video around it. Don't list 5+ equal examples.
 3. The first two segments (intro + first section) MUST lead with a named person's story or real human example. Tell a MINI-STORY about one NAMED real person — reference them at least TWICE: once when introduced, and once later when the lesson connects back to them.
 4. Each segment MUST escalate stakes beyond the previous one. Build like a staircase — curiosity → concern → alarm. Use explicit bridge lines: "But that's not even the worst part", "And it gets worse."

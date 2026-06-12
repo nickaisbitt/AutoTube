@@ -12,10 +12,11 @@ import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
 import { ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
 import { runLoopPreflight, waitForDevServer } from './loop-preflight.mjs';
 import { pickRandomTopic } from './lib/random-topics.mjs';
-import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
+import { watchVideo, resolveVideoPath, targetScore100 } from '../powers/video-watcher/src/analyze.mjs';
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
+import { pruneExcludedUrlsForReharvest } from './lib/harvest-loop-context.mjs';
 
 const ROOT = process.cwd();
 const LOOP_DIR = join(ROOT, 'test-recordings', 'improvement-loop');
@@ -26,7 +27,7 @@ function parseArgs(argv) {
   const cfg = {
     max: 0,
     untilPass: false,
-    untilScore: 9.1,
+    untilScore: 91,
     delaySec: 5,
     reviewOnly: false,
     skipVision: false,
@@ -64,7 +65,7 @@ function appendJournal(entry) {
     `2. **Generate:** ${entry.generateOk ? 'OK' : 'FAIL'}${entry.generateError ? ` — ${entry.generateError}` : ''}`,
     `3. **Video:** \`${entry.videoPath || '—'}\``,
     `4. **Upload-ready:** ${entry.uploadReady ? 'YES' : 'NO'}`,
-    `5. **Brutal score:** ${entry.brutalScore ?? '—'}/10`,
+    `5. **Final quality:** ${entry.finalScore ?? entry.youtubeScore ?? entry.brutalScore ?? '—'}/100 (assembly: ${entry.assemblyScore ?? '—'})`,
     `6. **Objective gate:** ${entry.objectivePass === true ? 'PASS' : entry.objectivePass === false ? 'FAIL' : '—'} (score ${entry.objectiveScore ?? '—'})`,
     `7. **Scene QA:** ${entry.scenePass === true ? 'PASS' : entry.scenePass === false ? 'FAIL' : '—'} (longest ${entry.longestSceneSec ?? '—'}s)`,
     `8. **Render tier:** ${entry.renderTier || '—'}`,
@@ -106,7 +107,8 @@ async function main() {
 
   console.log('\n🔁 Video improvement loop (fix-gated)');
   console.log(`   Max iterations: ${cfg.max > 0 ? cfg.max : '∞'} (this session)`);
-  console.log(`   Target score: ${cfg.untilScore}/10 (stops when reached)`);
+  const target100 = targetScore100(cfg.untilScore);
+  console.log(`   Target score: ${target100}/100 (stops when reached)`);
   console.log(`   Fix before next topic: YES`);
   console.log(`   Harvest: ${cfg.mockHarvest ? 'mock (fast CI path)' : 'real (OpenRouter + live search; stock 2 assets/segment)'}`);
   console.log(`   Journal: ${JOURNAL_JSONL}\n`);
@@ -123,7 +125,7 @@ async function main() {
 
     const isRetry = Boolean(currentTopic);
     if (!currentTopic && !cfg.reviewOnly) {
-      currentTopic = pickRandomTopic();
+      currentTopic = fixState.lockedTopic?.trim() || pickRandomTopic();
       fixState.topicRetryCount = 0;
       fixState.fixStrategy = 'interval';
       delete fixState.hookLine;
@@ -152,8 +154,9 @@ async function main() {
     let renderEnv = null;
 
     if (!cfg.reviewOnly) {
-      if (!(await waitForDevServer())) {
-        console.error('\n❌ Dev server not reachable — restart: npm run dev -- --port 5173 --host 0.0.0.0');
+      // autoSpawn: true — if Vite crashed mid-loop, attempt to restart it automatically
+      if (!(await waitForDevServer(undefined, { maxWaitMs: 150_000, pollMs: 5000, autoSpawn: true }))) {
+        console.error('\n❌ Dev server not reachable after 150s — manual restart: npm run loop:serve');
         sessionCount -= 1;
         iteration -= 1;
         fixState.iteration = iteration;
@@ -179,9 +182,26 @@ async function main() {
       }
       if (gen.harvestQualityFail) {
         fixState.reHarvestMedia = true;
+        fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
+        // Thin harvest is retriable — don't burn topic retries as fast as hard failures.
+        fixState.maxGenerateFailuresPerTopic = Math.max(fixState.maxGenerateFailuresPerTopic || 2, 4);
+        // Prune accumulated excludedUrls so repeated empty-harvest retries don't
+        // lock out legitimate video/news URLs from the pool.
+        const beforePrune = (fixState.excludedUrls || []).length;
+        fixState.excludedUrls = pruneExcludedUrlsForReharvest(fixState.excludedUrls || []);
+        if (beforePrune > fixState.excludedUrls.length) {
+          console.log(`   🗑 Pruned exclude list: ${beforePrune} → ${fixState.excludedUrls.length} (lifestyle-only retained)`);
+        }
       }
-      // Score the file we just rendered — canonical may be overwritten by finalize picking stale giants
-      videoPath = gen.videoPath || gen.canonicalPath;
+      // Always score the freshly rendered file from the run's outDir, never the shared
+      // canonical path (test-recordings/FINAL-VIDEO-final.mp4) which may be a stale giant.
+      // gen.videoPath = the render output inside full-RUNID/; gen.canonicalPath = the copy.
+      videoPath = gen.videoPath || null;
+      if (!videoPath && gen.canonicalPath && existsSync(gen.canonicalPath)) {
+        // Fallback only when the run-specific file is missing (e.g. Modal render path).
+        console.warn(`[loop] Warning: using canonical path for scoring (run-specific videoPath missing)`);
+        videoPath = gen.canonicalPath;
+      }
       scriptText = gen.scriptText || '';
       renderEnv = gen.renderEnv || null;
 
@@ -205,11 +225,15 @@ async function main() {
         fixState.generateFailureCount = generateFailureCount;
         const maxGenerateFailuresPerTopic = fixState.maxGenerateFailuresPerTopic || 2;
         const shouldAdvanceTopic = generateFailureCount >= maxGenerateFailuresPerTopic;
-        if (shouldAdvanceTopic) {
+        if (shouldAdvanceTopic && !fixState.lockedTopic?.trim()) {
           currentTopic = null;
           fixState.pendingTopic = null;
           fixState.generateFailureCount = 0;
           fixState.topicRetryCount = 0;
+        } else if (shouldAdvanceTopic && fixState.lockedTopic?.trim()) {
+          fixState.generateFailureCount = 0;
+          fixState.pendingTopic = fixState.lockedTopic.trim();
+          currentTopic = fixState.lockedTopic.trim();
         } else {
           fixState.pendingTopic = currentTopic;
         }
@@ -250,6 +274,8 @@ async function main() {
         skip_vision: cfg.skipVision || skipBrutalOnDraft || cfg.objectiveOnly,
         script_text: scriptText,
         render_tier: renderTier,
+        expected_hook_overlay: fixState.hookOverlay,
+        api_key: resolveOpenRouterKey(),
       });
     } catch (e) {
       console.error(`❌ Watch failed: ${e.message}`);
@@ -278,15 +304,19 @@ async function main() {
       });
     }
 
-    const brutalScore = watch.brutal?.overall ?? 0;
+    const youtubeScore = watch.youtubeScore ?? (watch.brutal?.overall ?? 0) * 10;
+    const finalScore = watch.finalScore ?? youtubeScore;
+    const assemblyScore = watch.assemblyAudit?.assemblyScore ?? null;
+    const brutalScore = watch.brutal?.overall ?? finalScore / 10;
     const uploadReady = watch.uploadReady === true;
     const objectivePass = watch.objectiveGate?.pass === true;
     const scenePass = watch.sceneQa?.pass === true;
     const scoreTargetMet =
       objectivePass &&
       renderTier === 'full' &&
-      Number.isFinite(brutalScore) &&
-      brutalScore >= cfg.untilScore;
+      Number.isFinite(finalScore) &&
+      finalScore >= target100 &&
+      (assemblyScore == null || assemblyScore >= 80);
     let nextStep = 'new random topic';
     let fixesApplied = [];
 
@@ -295,6 +325,10 @@ async function main() {
       console.log('\n✅ Objective gate PASS on draft (scene body OK) — promoting to full-quality render');
       fixState.renderTier = 'full';
       fixState.whisperAlign = true;
+      fixState.patternInterrupts = true;
+      fixState.useFastPacing = true;
+      fixState.cutIntervalSec = Math.min(fixState.cutIntervalSec ?? 1.25, 0.5);
+      fixState.minVideosPerSegment = Math.max(3, fixState.minVideosPerSegment || 2);
       fixState.pendingTopic = currentTopic;
       fixState.topicRetryCount = Math.max(0, (fixState.topicRetryCount || 0));
       saveFixState(LOOP_DIR, fixState);
@@ -307,6 +341,7 @@ async function main() {
         videoPath,
         uploadReady: false,
         brutalScore,
+        youtubeScore,
         objectivePass,
         objectiveScore: watch.objectiveQa?.score,
         scenePass,
@@ -332,8 +367,10 @@ async function main() {
         JSON.stringify(
           {
             reachedAt: new Date().toISOString(),
-            score: brutalScore,
-            target: cfg.untilScore,
+            score: finalScore,
+            retentionScore: youtubeScore,
+            assemblyScore,
+            target: target100,
             topic: currentTopic,
             videoPath,
             reportPath: watch.reportPath,
@@ -343,12 +380,25 @@ async function main() {
           2,
         ),
       );
-      console.log(`\n🎯 TARGET SCORE ${brutalScore}/10 ≥ ${cfg.untilScore} — STOPPING LOOP`);
+      console.log(`\n🎯 TARGET SCORE ${finalScore}/100 ≥ ${target100} (assembly ${assemblyScore ?? '—'}) — STOPPING LOOP`);
       console.log(`   Flag file: ${TARGET_FILE}`);
     }
 
     if (!uploadReady) {
-      const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState, currentTopic || topic);
+      let loopProject = null;
+      try {
+        const lp = join(ROOT, 'test-recordings', 'last-project.json');
+        if (existsSync(lp)) loopProject = JSON.parse(readFileSync(lp, 'utf8'));
+      } catch {
+        /* optional */
+      }
+      const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(
+        watch,
+        fixState,
+        currentTopic || topic,
+        loopProject,
+        { untilScore: cfg.untilScore, videoPath },
+      );
       fixState = nextFix;
       fixesApplied = applied;
       const fixReport = formatFixReport(applied, fixState);
@@ -362,15 +412,25 @@ async function main() {
         nextStep = `RETRY same topic with fixes (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`;
         console.log(`\n⛔ Not advancing topic — ${nextStep}`);
       } else if (fixState.topicRetryCount >= fixState.maxRetriesPerTopic) {
-        console.log(`\n⚠ Max retries on topic — advancing with accumulated fixes`);
-        currentTopic = null;
-        fixState.pendingTopic = null;
-        fixState.topicRetryCount = 0;
-        fixState.generateFailureCount = 0;
-        fixState.mediaOffset = 0;
-        fixState.renderTier = 'draft';
-        fixState.fixStrategy = 'interval';
-        nextStep = 'new topic (max retries hit, fixes retained)';
+        if (fixState.lockedTopic?.trim()) {
+          console.log(`\n⚠ Max retries on locked topic — resetting retry count, keeping "${fixState.lockedTopic}"`);
+          fixState.topicRetryCount = 0;
+          fixState.pendingTopic = fixState.lockedTopic.trim();
+          currentTopic = fixState.lockedTopic.trim();
+          delete fixState.hookLine;
+          delete fixState.hookOverlay;
+          nextStep = `retry locked topic (max retries hit, hooks reset)`;
+        } else {
+          console.log(`\n⚠ Max retries on topic — advancing with accumulated fixes`);
+          currentTopic = null;
+          fixState.pendingTopic = null;
+          fixState.topicRetryCount = 0;
+          fixState.generateFailureCount = 0;
+          fixState.mediaOffset = 0;
+          fixState.renderTier = 'draft';
+          fixState.fixStrategy = 'interval';
+          nextStep = 'new topic (max retries hit, fixes retained)';
+        }
       }
     } else {
       console.log('\n✅ Upload-ready — advancing to new random topic');
@@ -395,6 +455,9 @@ async function main() {
       videoPath,
       uploadReady,
       brutalScore,
+      youtubeScore,
+      finalScore,
+      assemblyScore,
       scoreTargetMet,
       objectivePass,
       objectiveScore: watch.objectiveQa?.score,

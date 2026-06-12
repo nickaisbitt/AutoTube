@@ -248,9 +248,48 @@ export function getAllProviders(): SourceProvider[] {
   return allProviders.filter((p) => !isProviderDisabled(p.name));
 }
 
+function isLoopSuppressGiphy(): boolean {
+  return (
+    typeof sessionStorage !== 'undefined' &&
+    sessionStorage.getItem('autotube_loop_fast_mode') === 'true' &&
+    sessionStorage.getItem('autotube_loop_suppress_giphy') === 'true'
+  );
+}
+
+function isLoopFastMode(): boolean {
+  return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
+}
+
+function isLoopVideoFirst(): boolean {
+  return (
+    isLoopFastMode() &&
+    typeof sessionStorage !== 'undefined' &&
+    sessionStorage.getItem('autotube_loop_video_first') === 'true'
+  );
+}
+
+const VIDEO_PROVIDER_NAMES = new Set([
+  'Bing Videos',
+  'Google Videos',
+  'DDG Video',
+  'Vimeo',
+  'Dailymotion',
+  'Pexels Video',
+  'Pixabay Video',
+]);
+
+function providerTimeoutMs(providerName: string): number {
+  if (!isLoopFastMode()) return 8_000;
+  if (VIDEO_PROVIDER_NAMES.has(providerName)) {
+    return isLoopVideoFirst() ? 22_000 : 18_000;
+  }
+  return 8_000;
+}
+
 export function getAvailableProviders(config: AppConfig): SourceProvider[] {
   return allProviders.filter((provider) => {
     if (isProviderDisabled(provider.name)) return false;
+    if (isLoopSuppressGiphy() && provider.name === 'Giphy') return false;
     const providerConfig = mapAppConfigToProviderConfig(provider, config);
     return provider.isAvailable(providerConfig);
   });
@@ -267,9 +306,10 @@ export async function queryAllProviders(
     available.map(async (provider) => {
       const providerConfig = mapAppConfigToProviderConfig(provider, config, signal);
 
+      const timeoutMs = providerTimeoutMs(provider.name);
       const providerSignal = signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-        : AbortSignal.timeout(8_000);
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs);
 
       try {
         const candidates = await provider.search(query, { ...providerConfig, signal: providerSignal });
@@ -381,9 +421,10 @@ export async function queryAllProvidersWithHealth(
       const providerConfig = mapAppConfigToProviderConfig(provider, config, signal);
       const start = performance.now();
 
+      const timeoutMs = providerTimeoutMs(provider.name);
       const providerSignal = signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-        : AbortSignal.timeout(8_000);
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs);
 
       try {
         const candidates = await provider.search(query, { ...providerConfig, signal: providerSignal });

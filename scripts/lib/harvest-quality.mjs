@@ -142,6 +142,12 @@ const OFF_TOPIC_BLOCKLIST = [
   // Library/archive shelf interiors — not museum heist action B-roll
   { pattern: /\b(?:library\s+shelf|archive\s+shelf|book\s+stack|narrow\s+aisle.*shelf|rows?\s+of\s+books)\b/i, requires: /\b(?:library|book|archive|research|history\s+class)\b/i },
 
+  // Construction scaffolding / billboard unrelated to crime story
+  { pattern: /\b(?:scaffolding|construction\s+site\s+banner|building\s+renovation\s+banner|billboard\s+woman)\b/i, requires: /\b(?:construction|renovation|real\s+estate|architecture)\b/i },
+
+  // TikTok app UI mockups / interface overlays — not heist footage
+  { pattern: /\btiktok\s+(?:app\s+)?interface\b|tiktok\s+ui\s+overlay|mockup.*tiktok|phone\s+screen.*tiktok\s+logo/i, requires: /\b__autotube_never__\b/i },
+
   // Cyber / webinar "digital heist" promos — wrong heist for museum crime topics
   { pattern: /\b(?:strategink|digital[\s-]?heist[\s-]?summit|slideshare.*digital[\s-]?heist|data[\s-]?breach(?:es)?|cyber[\s-]?heist|protect\s+your\s+vdr)\b/i, requires: /\b(?:cyber|data\s+protection|webinar|summit|hacker|infosec)\b/i },
 

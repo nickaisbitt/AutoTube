@@ -19,7 +19,7 @@ import { validateEditTimeline, effectiveCutInterval } from './build-edit-timelin
 import { computeClipBudget, shouldUseGlobalUrlDedup, TOP_UP_MAX_PASSES } from './assembly-system.mjs';
 import { shouldUseModalRender, renderViaModal } from './modal-render.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
-import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
+import { STOCK_HEALTHCARE_IMAGES, STOCK_CRIME_NEWS_IMAGES } from './stock-media-urls.mjs';
 import {
   accumulateExcludedUrls,
   harvestContextFromFixState,
@@ -438,6 +438,47 @@ function segmentUniqueCount(project, segmentId) {
       .filter(Boolean),
   );
   return keys.size;
+}
+
+/** Inject curated editorial crime/museum stock when live harvest pool is below clip budget. */
+function injectCrimeFallbackPool(project, minPerSegment, report) {
+  const topic = project.topic || project.title || '';
+  if (!isCrimeNewsTopic(topic)) return 0;
+
+  const used = new Set(
+    (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+  );
+  let added = 0;
+  let stockIdx = 0;
+  const segments = project.script || [];
+
+  for (const seg of segments) {
+    let count = segmentUniqueCount(project, seg.id);
+    while (count < minPerSegment && stockIdx < STOCK_CRIME_NEWS_IMAGES.length) {
+      const stock = STOCK_CRIME_NEWS_IMAGES[stockIdx];
+      stockIdx += 1;
+      const key = normalizeUrlKey(stock.url);
+      if (!key || used.has(key)) continue;
+      used.add(key);
+      project.media.push({
+        id: `crime-fallback-${stockIdx}-${seg.id.slice(0, 8)}`,
+        segmentId: seg.id,
+        type: 'image',
+        url: stock.url,
+        thumbnailUrl: stock.url.replace('w=1920', 'w=400'),
+        alt: stock.alt,
+        source: 'crime-fallback-stock',
+        query: topic,
+      });
+      count += 1;
+      added += 1;
+    }
+  }
+
+  if (added) {
+    report.crimeFallbackInjected = added;
+  }
+  return added;
 }
 
 async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords, { relaxed = false } = {}) {
@@ -1029,6 +1070,16 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       project.media = topupDeduped.media;
     }
     report.afterTopUp = project.media.length;
+
+    const topicForFallback = project.topic || project.title || '';
+    const uniqueAfterTopUp = new Set(
+      (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+    ).size;
+    const { requiredUniqueUrls: budgetAfterTopUp } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
+    if (isCrimeNewsTopic(topicForFallback) && uniqueAfterTopUp < budgetAfterTopUp) {
+      injectCrimeFallbackPool(project, minPerSegment, report);
+    }
+
     // Force-clear the stale browser-generated editTimeline so validateEditTimeline
     // always rebuilds a fresh timeline that includes top-up assets. Without this,
     // top-up assets are silently ignored when the old timeline's stale-ratio is < 10%.

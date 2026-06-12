@@ -10,8 +10,8 @@ import { MIN_CAPTION_WORDS } from './assembly-system.mjs';
 /** Preferred minimum words per phrase, or phrase must end with punctuation. */
 const PREFERRED_CAPTION_WORDS = 4;
 
-/** Seconds before which words are skipped (hook zone). */
-const HOOK_END_SEC = 3.2;
+/** Seconds before which words are skipped (hook zone — must clear hook drawtext burn-in). */
+const HOOK_END_SEC = 4.5;
 
 const isPhraseEnd = (word) => /[.!?;]$/.test(word) || /^[—–-]$/.test(word);
 
@@ -250,7 +250,13 @@ function buildDialogueLines(allWords, cm) {
     buffer = [];
   }
 
-  return { dialogueLines, captionCount };
+  const filtered = dialogueLines.filter((line) => {
+    const text = line.split(',,').pop() || '';
+    const words = text.trim().split(/\s+/).filter(Boolean);
+    return words.length >= MIN_CAPTION_WORDS;
+  });
+
+  return { dialogueLines: filtered, captionCount: filtered.length };
 }
 
 /**

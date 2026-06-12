@@ -3,7 +3,7 @@
  * Always use post-TTS segment.duration when building for render.
  */
 import { normalizeUrlKey } from './harvest-loop-context.mjs';
-import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
+import { aHashFromImage, isSimilarToRegistry, hammingDistance, VISUAL_DUP_MAX_DISTANCE } from './perceptual-hash.mjs';
 
 /** Hard cap on how many times a single URL may appear across the full 60 s timeline. */
 export const MAX_USES_PER_URL = 2;
@@ -15,7 +15,7 @@ export const MAX_URL_SHARE_PCT = 40;
 export const URL_SPACING_SEC = 12;
 
 /** Minimum seconds between visually similar clips (pHash) on the full timeline. */
-export const VISUAL_SPACING_SEC = 8;
+export const VISUAL_SPACING_SEC = 14;
 
 /** Hook zone duration (seconds from video start). Clips here are subject to a tighter hold cap. */
 export const HOOK_ZONE_SEC = 10;
@@ -182,17 +182,10 @@ export function buildEditTimeline(project, options = {}) {
     if (lastVisual !== undefined && absTime - lastVisual < VISUAL_SPACING_SEC) return false;
     if (strict) {
       for (const [h, t] of pHashLastAbsTime) {
-        if (hammingLike(hash, h) <= 8 && absTime - t < VISUAL_SPACING_SEC) return false;
+        if (hammingDistance(hash, h) <= 8 && absTime - t < VISUAL_SPACING_SEC) return false;
       }
     }
     return true;
-  };
-
-  const hammingLike = (a, b) => {
-    if (!a || !b || a.length !== b.length) return 64;
-    let d = 0;
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d += 1;
-    return d;
   };
 
   const registerPHash = (asset, absTime) => {
@@ -379,6 +372,81 @@ export function buildEditTimeline(project, options = {}) {
       ai += 1;
     }
     cumSegStart += duration;
+  }
+
+  return repairTimelineVisualRepeats(entries, project);
+}
+
+/**
+ * Post-pass: swap clip assignments when visually similar shots land within VISUAL_SPACING_SEC.
+ * Catches duplicates that slip through when the asset pool is thin and pick fallbacks fire.
+ */
+export function repairTimelineVisualRepeats(entries, project) {
+  if (!entries?.length || !(project.media?.length)) return entries;
+
+  const mediaById = new Map((project.media || []).map((m) => [m.id, m]));
+  const pool = project.media || [];
+  const segStarts = new Map();
+  let cum = 0;
+  for (const seg of project.script || []) {
+    segStarts.set(seg.id, cum);
+    cum += seg.duration || 0;
+  }
+
+  const thumbSrc = (asset) => {
+    const thumb = asset?.thumbnailUrl;
+    if (thumb && /^https?:\/\//i.test(thumb)) return thumb;
+    if (asset?.type === 'image') {
+      const u = asset?.url || '';
+      if (/^https?:\/\//i.test(u)) return u;
+    }
+    return null;
+  };
+
+  const hashCache = new Map();
+  const assetHash = (asset) => {
+    if (!asset) return null;
+    const src = thumbSrc(asset);
+    if (!src) return null;
+    const cid = asset.id || src;
+    if (!hashCache.has(cid)) hashCache.set(cid, aHashFromImage(src));
+    return hashCache.get(cid) || null;
+  };
+
+  const committed = [];
+
+  const tooClose = (hash, absStart) => {
+    if (!hash) return false;
+    for (const c of committed) {
+      if (hammingDistance(hash, c.hash) <= VISUAL_DUP_MAX_DISTANCE && absStart - c.absTime < VISUAL_SPACING_SEC) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  for (const entry of entries) {
+    const absStart = (segStarts.get(entry.segmentId) ?? 0) + (entry.startSec ?? 0);
+    let asset = mediaById.get(entry.assetId);
+    let hash = assetHash(asset);
+
+    if (tooClose(hash, absStart)) {
+      const replacement = pool.find((candidate) => {
+        if (candidate.id === entry.assetId) return false;
+        const key = urlKey(candidate);
+        const sameUrl = key && key === urlKey(asset);
+        if (sameUrl) return false;
+        const h = assetHash(candidate);
+        return !tooClose(h, absStart);
+      });
+      if (replacement) {
+        entry.assetId = replacement.id;
+        asset = replacement;
+        hash = assetHash(replacement);
+      }
+    }
+
+    if (hash) committed.push({ hash, absTime: absStart });
   }
 
   return entries;

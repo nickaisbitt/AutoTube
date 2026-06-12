@@ -9,6 +9,7 @@ import {
   MAX_URL_SHARE_PCT,
   URL_SPACING_SEC,
 } from '../scripts/lib/assembly-system.mjs';
+import { repairTimelineVisualRepeats } from '../scripts/lib/build-edit-timeline.mjs';
 
 const SCRIPT = [{ id: 's1', duration: 60 }];
 
@@ -148,5 +149,22 @@ describe('diversityProxyGate', () => {
     const gate = diversityProxyGate({ ...goodMetrics, spacingViolations: 3 });
     expect(gate.pass).toBe(false);
     expect(gate.reason).toMatch(/spacing/i);
+  });
+});
+
+describe('repairTimelineVisualRepeats', () => {
+  it('returns a timeline of the same length without throwing', () => {
+    const media = [
+      { id: 'a1', url: 'https://example.com/a.jpg', type: 'image', segmentId: 's1' },
+      { id: 'a2', url: 'https://example.com/b.jpg', type: 'image', segmentId: 's1' },
+    ];
+    const project = { script: [{ id: 's1', duration: 10 }], media };
+    const timeline = [
+      { segmentId: 's1', assetId: 'a1', startSec: 0, endSec: 1.5 },
+      { segmentId: 's1', assetId: 'a1', startSec: 1.5, endSec: 3 },
+    ];
+    const repaired = repairTimelineVisualRepeats(timeline, project);
+    expect(repaired).toHaveLength(2);
+    expect(repaired.every((e) => e.assetId)).toBe(true);
   });
 });

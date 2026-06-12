@@ -389,7 +389,40 @@ export function buildEditTimeline(project, options = {}) {
     cumSegStart += duration;
   }
 
-  return repairTimelineVisualRepeats(entries, project, { thinPool, devServer });
+  return repairTimelineVisualRepeats(
+    repairTimelineAdjacentRepeats(entries, project),
+    project,
+    { thinPool, devServer },
+  );
+}
+
+/**
+ * Post-pass: break back-to-back clips that share the same URL.
+ */
+export function repairTimelineAdjacentRepeats(entries, project) {
+  if (!entries?.length || !(project.media?.length)) return entries;
+
+  const mediaById = new Map((project.media || []).map((m) => [m.id, m]));
+  const pool = project.media || [];
+  const entryKey = (entry) => urlKey(mediaById.get(entry?.assetId));
+
+  for (let i = 1; i < entries.length; i += 1) {
+    const prevKey = entryKey(entries[i - 1]);
+    const curKey = entryKey(entries[i]);
+    if (!prevKey || !curKey || prevKey !== curKey) continue;
+
+    const nextKey = i + 1 < entries.length ? entryKey(entries[i + 1]) : null;
+    const replacement = pool.find((candidate) => {
+      const key = urlKey(candidate);
+      if (!key || key === curKey) return false;
+      if (key === prevKey) return false;
+      if (nextKey && key === nextKey) return false;
+      return true;
+    });
+    if (replacement) entries[i].assetId = replacement.id;
+  }
+
+  return entries;
 }
 
 /**

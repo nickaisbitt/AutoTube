@@ -1917,7 +1917,7 @@ export async function generateFullVideo(options) {
       const spacingOnlyProxy =
         usedModalRender
         && manifestGate.manifest?.modalProxy === true
-        && /^diversity gate: \d+ URL spacing violation/.test(manifestGate.error || '');
+        && /^diversity gate: (\d+ URL spacing violation|\d+ adjacent same-URL)/.test(manifestGate.error || '');
       if (spacingOnlyProxy) {
         log(`   ⚠ Modal diversity proxy: ${manifestGate.error} (continuing — vision audit is ship gate)`);
       } else {

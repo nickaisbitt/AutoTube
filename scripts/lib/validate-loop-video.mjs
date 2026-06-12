@@ -62,7 +62,7 @@ export function validateRenderManifest(videoPath, durationSec = 0) {
       if (!gate.pass) {
         const spacingOnlyModalProxy =
           manifest.modalProxy === true
-          && /^(\d+ )?URL spacing violation/.test(gate.reason || '');
+          && /^(?:\d+ adjacent same-URL clip\(s\)|\d+ URL spacing violation)/.test(gate.reason || '');
         if (!spacingOnlyModalProxy) {
           return {
             valid: false,

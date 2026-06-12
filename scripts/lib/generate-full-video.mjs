@@ -44,6 +44,7 @@ import {
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
   dedupHarvestByUrl,
 } from './harvest-quality.mjs';
+import { filterAssetsByVision } from './harvest-vision.mjs';
 
 export { loopMediaTimeoutMs } from './harvest-quality.mjs';
 
@@ -1084,6 +1085,53 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     // always rebuilds a fresh timeline that includes top-up assets. Without this,
     // top-up assets are silently ignored when the old timeline's stale-ratio is < 10%.
     project.editTimeline = [];
+
+    // Vision-screen harvested stills (browser vision is off in loop fast mode).
+    if (options.visionHarvest !== false) {
+      const apiKey = resolveOpenRouterKey();
+      if (apiKey) {
+        const vision = await filterAssetsByVision(project.media, project, { apiKey });
+        if (vision.dropped?.length) {
+          report.visionDropped = vision.dropped;
+          report.visionScanned = vision.scanned;
+          project.media = vision.media;
+          const uniqueAfterVision = new Set(
+            (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+          ).size;
+          const { requiredUniqueUrls: budgetAfterVision } = computeClipBudget(
+            project,
+            options.cutIntervalSec ?? 1.25,
+          );
+          if (uniqueAfterVision < budgetAfterVision) {
+            await topUpHarvestVolume(project, devServer, minPerSegment, report, {
+              harvestVideoFirst: options.harvestVideoFirst !== false,
+              minVideosPerSegment: options.minVideosPerSegment || 2,
+              visionTopUpPass: true,
+            });
+            const visionTopUpDedup = dedupHarvestByUrl(project.media);
+            if (visionTopUpDedup.dupCount) {
+              report.visionTopUpDupCount = visionTopUpDedup.dupCount;
+              project.media = visionTopUpDedup.media;
+            }
+          }
+        } else {
+          report.visionScanned = vision.scanned;
+        }
+      }
+    }
+
+    // Post-vision pHash dedup on full-res sources — catches same shot under different URLs.
+    const postVisionDedup = dedupeMediaByPHash(project.media, {
+      devServer,
+      onDrop: (item, reason) => report.postVisionPhashDropped = [
+        ...(report.postVisionPhashDropped || []),
+        { url: item.url, reason },
+      ],
+    });
+    if ((report.postVisionPhashDropped || []).length) {
+      project.media = postVisionDedup.media;
+      report.postVisionPhashCount = report.postVisionPhashDropped.length;
+    }
   }
 
   let volume = evaluateHarvestVolume(project, minPerSegment);
@@ -1749,6 +1797,7 @@ export async function generateFullVideo(options) {
       cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
       preferVideo: fixState.harvestVideoFirst !== false,
       minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+      devServer,
     });
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
@@ -1868,7 +1917,7 @@ export async function generateFullVideo(options) {
       const spacingOnlyProxy =
         usedModalRender
         && manifestGate.manifest?.modalProxy === true
-        && /^diversity gate: \d+ URL spacing violation/.test(manifestGate.error || '');
+        && /^diversity gate: (\d+ URL spacing violation|\d+ adjacent same-URL)/.test(manifestGate.error || '');
       if (spacingOnlyProxy) {
         log(`   ⚠ Modal diversity proxy: ${manifestGate.error} (continuing — vision audit is ship gate)`);
       } else {

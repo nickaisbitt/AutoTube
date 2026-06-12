@@ -8,6 +8,50 @@ import { tmpdir } from 'node:os';
 
 export const VISUAL_DUP_MAX_DISTANCE = 10;
 
+/** Thumbnail URL patterns that are too small for reliable visual dedup. */
+const TINY_THUMB_RE = /(?:[_-]\d{2,3}x\d{2,3}|w=\d{1,3}(?:[&,]|$)|h=\d{1,3}(?:[&,]|$)|\/hqdefault\.|\/mqdefault\.|\/sddefault\.)/i;
+
+/**
+ * Prefer full-resolution image URLs over tiny CDN thumbs for hashing.
+ * @param {object} asset
+ * @param {string} [devServer]
+ * @returns {string|null}
+ */
+export function resolveAssetHashSource(asset, devServer = 'http://localhost:5173') {
+  const candidates = [];
+  const push = (u) => {
+    if (!u || typeof u !== 'string') return;
+    if (u.startsWith('data:') || u.startsWith('blob:')) return;
+    if (/^https?:\/\//i.test(u)) {
+      candidates.push(u);
+      return;
+    }
+    if (u.startsWith('/api/') || u.startsWith('/')) {
+      candidates.push(`${devServer}${u.startsWith('/') ? '' : '/'}${u}`);
+    }
+  };
+
+  if (asset?.type === 'image' || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(asset?.url || '')) {
+    push(asset.url);
+  }
+  push(asset?.sourceUrl);
+  const thumb = asset?.thumbnailUrl;
+  if (thumb && !TINY_THUMB_RE.test(thumb)) push(thumb);
+  if (!candidates.length && thumb) push(thumb);
+
+  return candidates.find((u) => !TINY_THUMB_RE.test(u)) || candidates[0] || null;
+}
+
+/**
+ * @param {object} asset
+ * @param {{ devServer?: string, workDir?: string }} [options]
+ */
+export function aHashFromAsset(asset, options = {}) {
+  const src = resolveAssetHashSource(asset, options.devServer);
+  if (!src) return null;
+  return aHashFromImage(src, options.workDir);
+}
+
 export function hammingDistance(a, b) {
   if (!a || !b || a.length !== b.length) return 64;
   let d = 0;
@@ -65,18 +109,11 @@ export function dedupeMediaByPHash(media, options = {}) {
   const devServer = options.devServer || 'http://localhost:5173';
 
   for (const asset of media) {
-    const thumb = asset.thumbnailUrl || (asset.type === 'image' ? asset.url : null);
-    if (!thumb) {
+    const hash = aHashFromAsset(asset, { devServer });
+    if (!hash) {
       kept.push(asset);
       continue;
     }
-
-    const src = thumb.startsWith('http')
-      ? thumb
-      : thumb.startsWith('/api/') || thumb.startsWith('/')
-        ? `${devServer}${thumb.startsWith('/') ? '' : '/'}${thumb}`
-        : thumb;
-    const hash = aHashFromImage(src);
     if (hash && isSimilarToRegistry(hash, registry)) {
       options.onDrop?.(asset, `pHash dup (≤${VISUAL_DUP_MAX_DISTANCE} bits)`);
       continue;

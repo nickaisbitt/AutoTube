@@ -186,16 +186,42 @@ const OFF_TOPIC_BLOCKLIST = [
 
   // Sunset / golden-hour landscape lifestyle — noise for crime/news topics
   { pattern: /\b(?:golden\s+hour\s+(?:photography|photo)\s+stock|sunset\s+(?:silhouette|landscape)\s+(?:stock|wallpaper|background)|nature\s+landscape\s+stock\s+(?:photo|photography))\b/i, requires: /\b(?:sunset|landscape|nature|travel|outdoor|scenic|photography\s+tips)\b/i },
+
+  // TikTok LIVE Studio / app tutorial graphics — not heist B-roll
+  { pattern: /\b(?:get\s+access\s+to\s+live\s+studio|tiktok\s+live\s+studio|how\s+to\s+.*live\s+studio)\b/i, requires: /\b__autotube_never__\b/i },
+
+  // Ring-light lifestyle dancer / creator setup — not crime B-roll
+  { pattern: /\b(?:ring[\s-]?light.*danc|danc.*ring[\s-]?light|dancing\s+in\s+front\s+of.*(?:ring|phone)|content\s+creator\s+danc)\b/i, requires: /\b(?:dance\s+class|fitness|workout|creator\s+tips)\b/i },
+
+  // Motorcycle / stunt wheelie lifestyle — not museum heist B-roll
+  { pattern: /\b(?:motorcycle\s+wheelie|dirt\s+bike\s+wheelie|stunt\s+rider\s+wheelie|wheelie\s+on\s+motorcycle)\b/i, requires: /\b(?:motorcycle|stunt|motocross|biker)\b/i },
+
+  // Travel bucket-list / unrelated US city features for non-local topics
+  { pattern: /\bbucket\s+list\s+boston\b|\bkate\s+weiser\b/i, requires: /\bboston\b|\bbucket\s+list\b/i },
 ];
 
 /** Landmark/region tokens that conflict with a topic's primary geography. */
 const GEO_MISMATCH_RULES = [
   {
     topic: /\blouvre\b|\bparis\b|\bfrench\s+museum\b|museum\s+heist/i,
-    block: /\bflorence\b|\baccademia\b|\buffizi\b|\btuscany\b|\bmichelangelo\b|\bstatue\s+of\s+david\b|\bdavid\s+statue\b|\bgalleria\s+dell[\s']?accademia\b|\brome\b|\bvatican\b|\bvenice\b|\bmilan\b|\bitaly\b/i,
+    block: /\bflorence\b|\baccademia\b|\buffizi\b|\btuscany\b|\bmichelangelo\b|\bstatue\s+of\s+david\b|\bdavid\s+statue\b|\bgalleria\s+dell[\s']?accademia\b|\brome\b|\bvatican\b|\bvenice\b|\bmilan\b|\bitaly\b|\bboston\b|\bbucket\s+list\b|\bnew\s+york\b|\bnyc\b|\blondon\b|\bchicago\b|\bberlin\b|\btokyo\b|\bsydney\b|\bmiami\b|\blos\s+angeles\b/i,
     allowInAsset: /\bparis\b|\blouvre\b|\bfrance\b|\bfrench\b/i,
   },
 ];
+
+/**
+ * Primary story geography for vision + text gates (null when unknown).
+ * @param {string} topic
+ * @returns {string|null}
+ */
+export function extractStoryLocation(topic = '') {
+  const t = `${topic}`.toLowerCase();
+  if (/\blouvre\b|\bparis\b|museum\s+heist/i.test(t)) return 'Paris, France — Louvre Museum area';
+  if (/\blondon\b|\bbritish\s+museum\b/i.test(t)) return 'London, United Kingdom';
+  if (/\bnew\s+york\b|\bnyc\b|\bmanhattan\b/i.test(t)) return 'New York City, USA';
+  if (/\bboston\b/i.test(t)) return 'Boston, USA';
+  return null;
+}
 
 /**
  * Reject assets whose geography contradicts the story location (e.g. Florence David for Louvre heist).
@@ -257,6 +283,25 @@ export function collectAssemblyExcludeUrls(project) {
   return [...out];
 }
 
+const EDITORIAL_NEWS_HOST_RE = /(?:nytimes|\.nyt\.com|bbc\.co|bbc\.com|foxnews|nbcnews|nbcboston|cbsnews|globalnews|independent\.co|reuters|apnews|theguardian|cnn\.com|washingtonpost)/i;
+
+/**
+ * Implicit story keywords not always present in the topic string (e.g. Louvre for museum heist).
+ * @param {string} topic
+ * @returns {string[]}
+ */
+export function expandTopicKeywords(topic = '') {
+  const t = `${topic}`.toLowerCase();
+  const extra = [];
+  if (/museum|heist|robbery|jewel|crown|louvre|stolen/.test(t)) {
+    extra.push('louvre', 'paris', 'museum', 'jewel', 'heist', 'france');
+  }
+  if (/tiktok|live|stream/.test(t)) {
+    extra.push('viral', 'broadcast');
+  }
+  return [...new Set(extra)];
+}
+
 /**
  * @param {string} text
  * @param {number} [max]
@@ -287,11 +332,16 @@ export function extractKeywords(text, max = 14) {
 export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   const segText = `${segment?.title || ''} ${segment?.narration || ''}`;
   const segKeywords = extractKeywords(segText, 10).filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
-  const topicKws = topicKeywords.length ? topicKeywords : extractKeywords(topic, 12);
-  const strongTopicKws = topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
+  const topicKws = topicKeywords.length
+    ? topicKeywords
+    : [...extractKeywords(topic, 12), ...expandTopicKeywords(topic)];
+  const strongTopicKws = [...new Set(topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw)))];
   const corpus = new Set([...strongTopicKws, ...segKeywords]);
 
-  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+  const proxiedClip = /\/api\/download-clip/i.test(asset?.url || '');
+  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''}${
+    proxiedClip ? ` ${segment?.title || ''} ${topic}` : ''
+  }`.toLowerCase();
   if (!haystack.trim()) return 0;
 
   const contextText = `${topic} ${segText}`.toLowerCase();
@@ -336,6 +386,15 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   // Deprioritize generic tourist pyramid / plaza shots for crime/heist topics.
   if (isCrimeNewsTopic(topic) && /pyramid|france-museum-paris|tourist|plaza|aerial.*louvre|louvre.*exterior/i.test(haystack)) {
     score = Math.max(0, score - 0.2);
+  }
+
+  // Editorial news URLs often lack alt text — boost when URL path matches story.
+  if (isCrimeNewsTopic(topic) && EDITORIAL_NEWS_HOST_RE.test(haystack)) {
+    if (/louvre|museum|heist|jewel|robbery|stolen|paris|crown/.test(haystack)) {
+      score = Math.max(score, 0.55);
+    } else if (strongHits >= 1) {
+      score += 0.15;
+    }
   }
 
   return Math.max(0, Math.min(1, score));

@@ -22,7 +22,11 @@ import {
   dedupHarvestByUrl,
   geoMismatchBlockReason,
   offTopicBlockReason,
+  extractStoryLocation,
+  expandTopicKeywords,
 } from './lib/harvest-quality.mjs';
+import { isVisionFetchableUrl } from './lib/harvest-vision.mjs';
+import { resolveAssetHashSource } from './lib/perceptual-hash.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import { loadFixState } from './lib/loop-state.mjs';
 import { buildShockHookLine } from '../e2e/openRouterMock.mjs';
@@ -1751,7 +1755,7 @@ console.log('\n── 53. Crime topic top-up gate requires 2+ hits ──');
 }
 
 // ---------------------------------------------------------------------------
-// 54. Geographic mismatch — Florence David blocked for Louvre/Paris topics
+// 54. Geographic mismatch + story location + expanded blocklist
 // ---------------------------------------------------------------------------
 console.log('\n── 54. Geographic mismatch harvest rejection ──');
 {
@@ -1778,6 +1782,46 @@ console.log('\n── 54. Geographic mismatch harvest rejection ──');
     'offTopicBlockReason surfaces geo mismatch',
     offTopicBlockReason(davidFlorence, louvreTopic)?.includes('geo mismatch') === true,
   );
+  assert(
+    'Boston bucket-list blocked for Louvre topic',
+    offTopicBlockReason('kate weiser bucket list boston fbi', louvreTopic) !== null,
+  );
+  assert(
+    'TikTok LIVE Studio UI blocked for heist topic',
+    offTopicBlockReason('how to get access to live studio tiktok', louvreTopic) !== null,
+  );
+  assert(
+    'extractStoryLocation returns Paris for Louvre heist',
+    extractStoryLocation(louvreTopic)?.includes('Paris') === true,
+  );
+  assert('Vision fetchable accepts https unsplash', isVisionFetchableUrl('https://images.unsplash.com/photo-1.jpg') === true);
+  assert('Vision fetchable rejects relative paths', isVisionFetchableUrl('/api/proxy-image') === false);
+}
+
+// ---------------------------------------------------------------------------
+// 54b. Editorial news + expanded topic keywords + hash source preference
+// ---------------------------------------------------------------------------
+console.log('\n── 54b. Editorial relevance + pHash source ──');
+{
+  const louvreTopic = 'The museum heist streamed live on TikTok';
+  const seg = { id: 's1', title: 'Your Phone Is Part of It', narration: 'The stream kept rolling.' };
+  const topicKws = [...extractKeywords(louvreTopic, 12), ...expandTopicKeywords(louvreTopic)];
+  const nyt = {
+    url: 'https://static01.nyt.com/images/2025/10/20/multimedia/2025-10-20-louvre-heist-index/2025-10-20-louvre-heist-index-videoSixteenByNine3000-v6.jpg',
+    alt: '',
+    type: 'image',
+  };
+  const nytScore = scoreAssetRelevance(nyt, seg, louvreTopic, topicKws);
+  assert('NYT Louvre URL scores ≥0.28 for museum heist topic', nytScore >= 0.28, `score=${nytScore}`);
+
+  const tinyThumb = {
+    type: 'image',
+    url: 'https://cdn.example.com/louvre-heist-full.jpg',
+    thumbnailUrl: 'https://i.vimeocdn.com/video/1284765603-db3292a171cfae1799030745b16e5d292a3b198cf19be9ed8_295x166?region=us',
+  };
+  const src = resolveAssetHashSource(tinyThumb);
+  assert('pHash prefers full image URL over tiny vimeo thumb', src.includes('louvre-heist-full.jpg'), src || 'null');
+  assert('expandTopicKeywords includes louvre for museum heist', expandTopicKeywords(louvreTopic).includes('louvre'));
 }
 
 // ---------------------------------------------------------------------------

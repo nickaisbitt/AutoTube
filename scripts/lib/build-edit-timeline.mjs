@@ -3,7 +3,7 @@
  * Always use post-TTS segment.duration when building for render.
  */
 import { normalizeUrlKey } from './harvest-loop-context.mjs';
-import { aHashFromImage, isSimilarToRegistry, hammingDistance, VISUAL_DUP_MAX_DISTANCE } from './perceptual-hash.mjs';
+import { aHashFromAsset, isSimilarToRegistry, hammingDistance, VISUAL_DUP_MAX_DISTANCE } from './perceptual-hash.mjs';
 
 /** Hard cap on how many times a single URL may appear across the full 60 s timeline. */
 export const MAX_USES_PER_URL = 2;
@@ -142,6 +142,7 @@ export function buildEditTimeline(project, options = {}) {
   const reason = options.reason ?? 'heuristic placement';
   const preferVideo = options.preferVideo === true;
   const minVideosFirst = options.minVideosFirst ?? 2;
+  const devServer = options.devServer || 'http://localhost:5173';
   const entries = [];
   const globalPool = orderAssetsVideoFirst(project.media || [], preferVideo ? minVideosFirst : 0);
   const globalUrlUse = new Map();
@@ -156,23 +157,9 @@ export function buildEditTimeline(project, options = {}) {
   const pHashLastAbsTime = new Map(); // hash → last absolute start time
   const pHashCache = new Map(); // assetId/src → hash (null if failed)
 
-  const getThumbnailSrc = (asset) => {
-    const thumb = asset?.thumbnailUrl;
-    if (thumb && /^https?:\/\//i.test(thumb)) return thumb;
-    if (asset?.type === 'image') {
-      const u = asset?.url || '';
-      if (/^https?:\/\//i.test(u)) return u;
-    }
-    return null;
-  };
-
-  // Returns false when the candidate is visually similar to an already-committed clip.
-  // Always returns true when no thumbnail is available or hash computation fails.
   const hashForAsset = (candidate) => {
-    const src = getThumbnailSrc(candidate);
-    if (!src) return null;
-    const cid = candidate.id || src;
-    if (!pHashCache.has(cid)) pHashCache.set(cid, aHashFromImage(src));
+    const cid = candidate.id || candidate.url || '';
+    if (!pHashCache.has(cid)) pHashCache.set(cid, aHashFromAsset(candidate, { devServer }));
     return pHashCache.get(cid) || null;
   };
 
@@ -402,7 +389,40 @@ export function buildEditTimeline(project, options = {}) {
     cumSegStart += duration;
   }
 
-  return repairTimelineVisualRepeats(entries, project, { thinPool });
+  return repairTimelineVisualRepeats(
+    repairTimelineAdjacentRepeats(entries, project),
+    project,
+    { thinPool, devServer },
+  );
+}
+
+/**
+ * Post-pass: break back-to-back clips that share the same URL.
+ */
+export function repairTimelineAdjacentRepeats(entries, project) {
+  if (!entries?.length || !(project.media?.length)) return entries;
+
+  const mediaById = new Map((project.media || []).map((m) => [m.id, m]));
+  const pool = project.media || [];
+  const entryKey = (entry) => urlKey(mediaById.get(entry?.assetId));
+
+  for (let i = 1; i < entries.length; i += 1) {
+    const prevKey = entryKey(entries[i - 1]);
+    const curKey = entryKey(entries[i]);
+    if (!prevKey || !curKey || prevKey !== curKey) continue;
+
+    const nextKey = i + 1 < entries.length ? entryKey(entries[i + 1]) : null;
+    const replacement = pool.find((candidate) => {
+      const key = urlKey(candidate);
+      if (!key || key === curKey) return false;
+      if (key === prevKey) return false;
+      if (nextKey && key === nextKey) return false;
+      return true;
+    });
+    if (replacement) entries[i].assetId = replacement.id;
+  }
+
+  return entries;
 }
 
 /**
@@ -425,23 +445,12 @@ export function repairTimelineVisualRepeats(entries, project, options = {}) {
     cum += seg.duration || 0;
   }
 
-  const thumbSrc = (asset) => {
-    const thumb = asset?.thumbnailUrl;
-    if (thumb && /^https?:\/\//i.test(thumb)) return thumb;
-    if (asset?.type === 'image') {
-      const u = asset?.url || '';
-      if (/^https?:\/\//i.test(u)) return u;
-    }
-    return null;
-  };
-
+  const devServer = options.devServer || 'http://localhost:5173';
   const hashCache = new Map();
   const assetHash = (asset) => {
     if (!asset) return null;
-    const src = thumbSrc(asset);
-    if (!src) return null;
-    const cid = asset.id || src;
-    if (!hashCache.has(cid)) hashCache.set(cid, aHashFromImage(src));
+    const cid = asset.id || asset.url || '';
+    if (!hashCache.has(cid)) hashCache.set(cid, aHashFromAsset(asset, { devServer }));
     return hashCache.get(cid) || null;
   };
 
@@ -528,6 +537,7 @@ export function validateEditTimeline(project, options = {}) {
       reason: 'post-sanitize rebuild',
       preferVideo: options.preferVideo === true,
       minVideosFirst: options.minVideosFirst ?? 2,
+      devServer: options.devServer,
     });
   }
   return { rebuilt, staleCount: stale, staleRatio, clipCount: project.editTimeline.length };

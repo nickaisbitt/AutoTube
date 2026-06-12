@@ -13,7 +13,12 @@ const PREFERRED_CAPTION_WORDS = 4;
 /** Seconds before which words are skipped (hook zone — must clear hook drawtext burn-in). */
 const HOOK_END_SEC = 4.5;
 
-const isPhraseEnd = (word) => /[.!?;]$/.test(word) || /^[—–-]$/.test(word);
+const isPhraseEnd = (word) => {
+  if (/[.!?;]$/.test(word) || /^[—–-]$/.test(word)) return true;
+  // TTS word streams use commas more than periods — treat as clause end in loop mode only.
+  if (process.env.AUTOTUBE_LOOP_MODE === '1' && /,$/.test(word)) return true;
+  return false;
+};
 
 /** A word that should not start or continue a break point alone: currency/numeric tokens or ALL-CAPS acronyms. */
 const isBadSplit = (word) => /^\$?\d[\d,.]*$/.test(word) || /^[A-Z]{2,}$/.test(word);

@@ -202,6 +202,12 @@ export async function filterAssetsByVision(media, project, options = {}) {
       if (!result) continue;
       scanned += 1;
       if (!result.pass) {
+        const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+        const crimeEditorial = /heist|robbery|museum|jewel|louvre|stolen|police|arrest|crime|theft/.test(haystack);
+        // Keep editorial crime/news shots when vision geo-fails on city name in URL (e.g. NBC Boston art heist).
+        if (result.geoMatch === false && crimeEditorial && result.relevance >= 4) {
+          continue;
+        }
         dropIdx.add(idx);
         dropped.push({
           url: asset.url,

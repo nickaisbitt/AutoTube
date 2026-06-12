@@ -20,6 +20,8 @@ import {
   isUnreliableVideoHost,
   isTrustedVideoHost,
   dedupHarvestByUrl,
+  geoMismatchBlockReason,
+  offTopicBlockReason,
 } from './lib/harvest-quality.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import { loadFixState } from './lib/loop-state.mjs';
@@ -1745,6 +1747,36 @@ console.log('\n── 53. Crime topic top-up gate requires 2+ hits ──');
   assert(
     'Non-crime topic: 1 strong hit passes top-up gate',
     passesTopUpRelevanceGate(singleHitGeneric, genericSeg, genericTopic, genericKws) === true,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 54. Geographic mismatch — Florence David blocked for Louvre/Paris topics
+// ---------------------------------------------------------------------------
+console.log('\n── 54. Geographic mismatch harvest rejection ──');
+{
+  const louvreTopic = 'The museum heist streamed live on TikTok';
+  const davidFlorence = 'statue of david accademia gallery florence italy michelangelo';
+  assert(
+    'Florence David blocked for Louvre heist topic',
+    geoMismatchBlockReason(davidFlorence, louvreTopic) !== null,
+  );
+  assert(
+    'Paris Louvre asset allowed for Louvre heist topic',
+    geoMismatchBlockReason('louvre museum paris france interior', louvreTopic) === null,
+  );
+  const { dropped } = filterAssetsByRelevance(
+    [
+      { id: 'a1', url: 'https://example.com/david.jpg', alt: davidFlorence, segmentId: 's1' },
+      { id: 'a2', url: 'https://example.com/louvre.jpg', alt: 'louvre museum paris france heist police', segmentId: 's1' },
+    ],
+    { topic: louvreTopic, script: [{ id: 's1', title: 'Louvre', narration: 'Thieves inside the Louvre museum in Paris.' }] },
+    { minScore: 0.25 },
+  );
+  assert('Filter drops Florence David asset', !dropped.some((d) => d.url.includes('david.jpg')) || dropped.some((d) => d.reason?.includes('geo mismatch')));
+  assert(
+    'offTopicBlockReason surfaces geo mismatch',
+    offTopicBlockReason(davidFlorence, louvreTopic)?.includes('geo mismatch') === true,
   );
 }
 

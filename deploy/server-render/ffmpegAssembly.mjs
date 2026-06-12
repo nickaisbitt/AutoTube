@@ -553,6 +553,27 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     }
 
     if (!ok) {
+      const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+      if (loopMode && clipPaths.length > 0) {
+        const lastClip = clipPaths[clipPaths.length - 1];
+        const clone = spawnSync(
+          'ffmpeg',
+          [
+            '-y', '-i', lastClip,
+            '-t', String(durationSec),
+            '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
+            '-an', clipOut,
+          ],
+          { encoding: 'utf8', timeout: 120_000 },
+        );
+        if (clone.status === 0 && existsSync(clipOut)) {
+          ok = true;
+          console.log(`  [ffmpeg] ${label}: cloned last good clip (loop mode, no placeholder)`);
+        }
+      }
+    }
+
+    if (!ok) {
       const reason = `fetch/encode failed url=${(asset.url || '').slice(0, 80)} tried=${tried.size} alts`;
       console.log(`  [ffmpeg] ${label}: placeholder — ${reason}`);
       ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });

@@ -31,11 +31,14 @@ const isOrphanFragment = (word) => /^[a-z]{1,4},$/i.test(word) && !isPhraseEnd(w
  * - Must not start or end with a weak lead-in word.
  * - Must not have > 50% isBadSplit words.
  */
-function phraseIsValid(buf) {
+function phraseIsValid(buf, { requireSentenceEnd = false } = {}) {
   if (buf.length < MIN_CAPTION_WORDS) return false;
   const endsWithPunct = isPhraseEnd(buf[buf.length - 1]);
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
   const minWords = loopMode ? Math.max(PREFERRED_CAPTION_WORDS, 5) : PREFERRED_CAPTION_WORDS;
+  if (loopMode || requireSentenceEnd) {
+    if (!endsWithPunct) return false;
+  }
   if (buf.length < minWords && !endsWithPunct) return false;
   if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct) return false;
   if (isWeakLeadIn(buf[0])) return false;
@@ -165,6 +168,7 @@ export function overlayHookText(videoPath, project, options = {}) {
  * @returns {{ dialogueLines: string[], captionCount: number }}
  */
 function buildDialogueLines(allWords, cm) {
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
   const dialogueLines = [];
   let captionCount = 0;
   let buffer = [];
@@ -234,17 +238,23 @@ function buildDialogueLines(allWords, cm) {
 
     if (phraseDone && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
-    } else if (atMax && !nearPunctuation && phraseIsValid(buffer) && !wouldSplitBad) {
+    } else if (!loopMode && atMax && !nearPunctuation && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
-    } else if (buffer.length >= cm.maxWords + 2) {
+    } else if (!loopMode && buffer.length >= cm.maxWords + 2) {
       // Runaway buffer — emit only if phrase-valid, otherwise discard orphans.
       if (phraseIsValid(buffer)) flush();
       else buffer = [];
+    } else if (loopMode && buffer.length >= cm.maxWords + 6) {
+      // Loop mode: never flush mid-clause; drop runaway orphans instead of burning fragments.
+      buffer = [];
     }
   }
 
-  // Emit remainder only when phrase passes validity gate.
-  if (phraseIsValid(buffer)) {
+  // Loop mode: only burn full sentences (clause ends with punctuation).
+  if (loopMode) {
+    if (phraseIsValid(buffer)) flush();
+    else buffer = [];
+  } else if (phraseIsValid(buffer)) {
     flush();
   } else {
     buffer = [];

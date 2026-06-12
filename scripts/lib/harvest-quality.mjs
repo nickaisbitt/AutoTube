@@ -188,12 +188,42 @@ const OFF_TOPIC_BLOCKLIST = [
   { pattern: /\b(?:golden\s+hour\s+(?:photography|photo)\s+stock|sunset\s+(?:silhouette|landscape)\s+(?:stock|wallpaper|background)|nature\s+landscape\s+stock\s+(?:photo|photography))\b/i, requires: /\b(?:sunset|landscape|nature|travel|outdoor|scenic|photography\s+tips)\b/i },
 ];
 
+/** Landmark/region tokens that conflict with a topic's primary geography. */
+const GEO_MISMATCH_RULES = [
+  {
+    topic: /\blouvre\b|\bparis\b|\bfrench\s+museum\b|museum\s+heist/i,
+    block: /\bflorence\b|\baccademia\b|\buffizi\b|\btuscany\b|\bmichelangelo\b|\bstatue\s+of\s+david\b|\bdavid\s+statue\b|\bgalleria\s+dell[\s']?accademia\b|\brome\b|\bvatican\b|\bvenice\b|\bmilan\b|\bitaly\b/i,
+    allowInAsset: /\bparis\b|\blouvre\b|\bfrance\b|\bfrench\b/i,
+  },
+];
+
+/**
+ * Reject assets whose geography contradicts the story location (e.g. Florence David for Louvre heist).
+ * @param {string} haystack
+ * @param {string} topic
+ * @returns {string|null}
+ */
+export function geoMismatchBlockReason(haystack, topic = '') {
+  const context = `${topic}`.toLowerCase();
+  const h = `${haystack}`.toLowerCase();
+  for (const rule of GEO_MISMATCH_RULES) {
+    if (!rule.topic.test(context)) continue;
+    if (rule.allowInAsset?.test(h)) continue;
+    if (rule.block.test(h)) {
+      return 'geo mismatch: landmark outside story location';
+    }
+  }
+  return null;
+}
+
 /**
  * @param {string} haystack
  * @param {string} contextText
  * @returns {string|null}
  */
 export function offTopicBlockReason(haystack, contextText) {
+  const geo = geoMismatchBlockReason(haystack, contextText);
+  if (geo) return geo;
   for (const rule of OFF_TOPIC_BLOCKLIST) {
     if (rule.pattern.test(haystack) && !rule.requires.test(contextText)) {
       return `blocklist: ${rule.pattern}`;

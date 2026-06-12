@@ -43,6 +43,7 @@ function phraseIsValid(buf, { requireSentenceEnd = false } = {}) {
   const minWords = loopMode ? Math.max(PREFERRED_CAPTION_WORDS, 5) : PREFERRED_CAPTION_WORDS;
   if (loopMode || requireSentenceEnd) {
     if (!endsWithPunct) return false;
+    if (loopMode && buf.length < minWords) return false;
   }
   if (buf.length < minWords && !endsWithPunct) return false;
   if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct) return false;

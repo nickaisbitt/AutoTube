@@ -22,7 +22,9 @@ import {
   dedupHarvestByUrl,
   geoMismatchBlockReason,
   offTopicBlockReason,
+  extractStoryLocation,
 } from './lib/harvest-quality.mjs';
+import { isVisionFetchableUrl } from './lib/harvest-vision.mjs';
 import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
 import { loadFixState } from './lib/loop-state.mjs';
 import { buildShockHookLine } from '../e2e/openRouterMock.mjs';
@@ -1751,7 +1753,7 @@ console.log('\n── 53. Crime topic top-up gate requires 2+ hits ──');
 }
 
 // ---------------------------------------------------------------------------
-// 54. Geographic mismatch — Florence David blocked for Louvre/Paris topics
+// 54. Geographic mismatch + story location + expanded blocklist
 // ---------------------------------------------------------------------------
 console.log('\n── 54. Geographic mismatch harvest rejection ──');
 {
@@ -1778,6 +1780,20 @@ console.log('\n── 54. Geographic mismatch harvest rejection ──');
     'offTopicBlockReason surfaces geo mismatch',
     offTopicBlockReason(davidFlorence, louvreTopic)?.includes('geo mismatch') === true,
   );
+  assert(
+    'Boston bucket-list blocked for Louvre topic',
+    offTopicBlockReason('kate weiser bucket list boston fbi', louvreTopic) !== null,
+  );
+  assert(
+    'TikTok LIVE Studio UI blocked for heist topic',
+    offTopicBlockReason('how to get access to live studio tiktok', louvreTopic) !== null,
+  );
+  assert(
+    'extractStoryLocation returns Paris for Louvre heist',
+    extractStoryLocation(louvreTopic)?.includes('Paris') === true,
+  );
+  assert('Vision fetchable accepts https unsplash', isVisionFetchableUrl('https://images.unsplash.com/photo-1.jpg') === true);
+  assert('Vision fetchable rejects relative paths', isVisionFetchableUrl('/api/proxy-image') === false);
 }
 
 // ---------------------------------------------------------------------------

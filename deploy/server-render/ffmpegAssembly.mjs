@@ -464,6 +464,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   }
 
   const clipPaths = [];
+  const renderedTimeline = [];
   const devServer = options.devServer || 'http://localhost:5173';
   let renderedDuration = 0;
   let clipIndex = 0;
@@ -590,6 +591,12 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (!ok) {
       return false;
     }
+    renderedTimeline.push({
+      segmentId: segment.id,
+      assetId: (lastResolved || asset).id,
+      startSec: renderedDuration,
+      endSec: renderedDuration + durationSec,
+    });
     clipPaths.push(clipOut);
     renderedDuration += durationSec;
     return true;
@@ -653,6 +660,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     intervalSec: interval,
     targetSec: segment.duration || 20,
     videoSec,
+    renderedTimeline,
   };
 }
 
@@ -669,6 +677,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   let totalClipCount = 0;
   let totalPlaceholderClips = 0;
   const allPlaceholderUrls = [];
+  const allRenderedTimeline = [];
   const preset = ffmpegPreset();
 
   const mediaPool = project.media || [];
@@ -697,6 +706,9 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     totalPlaceholderClips += result.placeholderClipCount || 0;
     for (const u of result.placeholderUrls || []) {
       if (u) allPlaceholderUrls.push(u);
+    }
+    if (result.renderedTimeline?.length) {
+      allRenderedTimeline.push(...result.renderedTimeline);
     }
     perSegment.push({
       segmentId: seg.id,
@@ -851,7 +863,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const placeholderUrls = [...new Set(allPlaceholderUrls)];
 
   const diversityMetrics = computeTimelineDiversityMetrics(
-    project.editTimeline || [],
+    allRenderedTimeline.length ? allRenderedTimeline : (project.editTimeline || []),
     project.media || [],
     project.script || [],
   );

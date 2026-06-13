@@ -11,10 +11,12 @@ const DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investig
  * @returns {{ harvestNonce: number, mediaOffset: number, excludeUrls: string[] }}
  */
 export function harvestContextFromFixState(fixState = {}) {
+  const visionRejected = Array.isArray(fixState.visionRejectedUrls) ? fixState.visionRejectedUrls : [];
+  const lifestyleExcluded = Array.isArray(fixState.excludedUrls) ? fixState.excludedUrls : [];
   return {
     harvestNonce: fixState.harvestNonce || 0,
     mediaOffset: fixState.mediaOffset || 0,
-    excludeUrls: Array.isArray(fixState.excludedUrls) ? fixState.excludedUrls : [],
+    excludeUrls: [...new Set([...lifestyleExcluded, ...visionRejected])],
     suppressGiphy: fixState.suppressGiphy === true,
     harvestVideoFirst: fixState.harvestVideoFirst !== false,
     minVideosPerSegment: Math.max(2, fixState.minVideosPerSegment || 2),
@@ -62,6 +64,25 @@ export function harvestSessionStoragePayload(ctx) {
  * @param {object} fixState
  * @param {object} project
  */
+/**
+ * Append vision-rejected URLs (separate from lifestyle excludedUrls).
+ * @param {object} fixState
+ * @param {string[]} urls
+ */
+export function accumulateVisionRejectedUrls(fixState, urls = []) {
+  const prev = new Set(
+    (fixState.visionRejectedUrls || [])
+      .map((u) => normalizeUrlKey(u))
+      .filter((key) => key && !isOverBroadExcludeUrl(key)),
+  );
+  for (const u of urls) {
+    const key = normalizeUrlKey(u);
+    if (key && !isOverBroadExcludeUrl(key)) prev.add(key);
+  }
+  fixState.visionRejectedUrls = [...prev].slice(-200);
+  return fixState;
+}
+
 export function accumulateExcludedUrls(fixState, project) {
   const prev = new Set(
     (fixState.excludedUrls || [])

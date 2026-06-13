@@ -16,12 +16,14 @@ import {
   hookOverrideMatchesTopic,
 } from './patch-project-for-loop.mjs';
 import { validateEditTimeline, effectiveCutInterval } from './build-edit-timeline.mjs';
-import { computeClipBudget, shouldUseGlobalUrlDedup, TOP_UP_MAX_PASSES } from './assembly-system.mjs';
+import { computeClipBudget, computeTimelineDiversityMetrics, shouldUseGlobalUrlDedup, TOP_UP_MAX_PASSES } from './assembly-system.mjs';
 import { shouldUseModalRender, renderViaModal } from './modal-render.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import { STOCK_HEALTHCARE_IMAGES, STOCK_CRIME_NEWS_IMAGES } from './stock-media-urls.mjs';
+import { injectCuratedTopicPool } from './curated-topic-pools.mjs';
 import {
   accumulateExcludedUrls,
+  accumulateVisionRejectedUrls,
   harvestContextFromFixState,
   harvestSessionStoragePayload,
   loadLastProjectUrls,
@@ -37,6 +39,7 @@ import {
   passesTopUpRelevanceGate,
   extractKeywords,
   countSegmentVideos,
+  countRealSegmentVideos,
   isVideoLikeAsset,
   isUnreliableVideoHost,
   isTrustedVideoHost,
@@ -224,10 +227,33 @@ async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = f
 
 function isDirectImageCandidate(url = '') {
   const u = (url || '').toLowerCase();
+  if (isOvpThumbUrl(u)) return false;
   return (
     /\.(jpg|jpeg|png|gif|webp)(?:[?#]|$)/i.test(u)
-    || /(?:th\d*\.bing\.net|upload\.wikimedia|images\.|pexels|pixabay|unsplash|gettyimages|alamy|shutterstock)/i.test(u)
+    || /(?:upload\.wikimedia|images\.|pexels|pixabay|unsplash)/i.test(u)
   );
+}
+
+/** Bing OVP/OIP preview thumbs — not full editorial images. */
+function isOvpThumbUrl(url = '') {
+  const u = (url || '').toLowerCase();
+  return (
+    /tse\d\.mm\.bing\.net\/th[/?]id=(?:ovp|oip)/i.test(u)
+    || /\/th\/id\/(?:ovp|oip)\./i.test(u)
+    || /th\?id=(?:ovp|oip)\./i.test(u)
+    || /th\.bing\.com\/th\/id\//i.test(u)
+    || /[_-]\d{2,3}x\d{2,3}(?:\.|\/|$)/i.test(u)
+    || /[?&]w=\d{1,3}(?:&|$)/i.test(u)
+  );
+}
+
+/** Prefer full-size Bing pgurl over tiny murl/thumbnail. */
+function resolveTopUpImageUrl(r = {}) {
+  const pg = r.sourceUrl || r.pgurl || '';
+  if (pg && isDirectImageCandidate(pg) && !isJunkHarvestUrl(pg)) return pg;
+  const primary = r.url || r.thumbnailUrl || '';
+  if (primary && isDirectImageCandidate(primary) && !isJunkHarvestUrl(primary)) return primary;
+  return '';
 }
 
 async function fetchImageSearchResults(devServer, endpoint, query) {
@@ -446,10 +472,11 @@ function injectCrimeFallbackPool(project, minPerSegment, report) {
   const topic = project.topic || project.title || '';
   if (!isCrimeNewsTopic(topic)) return 0;
 
+  let added = injectCuratedTopicPool(project, minPerSegment, report);
+
   const used = new Set(
     (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
   );
-  let added = 0;
   let stockIdx = 0;
   const segments = project.script || [];
 
@@ -484,21 +511,22 @@ function injectCrimeFallbackPool(project, minPerSegment, report) {
 
 async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords, { relaxed = false } = {}) {
   if (isUnreliableVideoHost(`${r.url || ''} ${r.sourceUrl || ''}`)) return false;
-  const key = r.url.split('?')[0];
+  const imageUrl = resolveTopUpImageUrl(r);
+  if (!imageUrl) return false;
+  const key = imageUrl.split('?')[0];
   // Global URL dedup: reject if this URL already exists in ANY segment pool.
-  // Per-segment uniqueness is a subset of this check.
   const alreadyInProject = (project.media || []).some(
     (m) => (m.url || '').split('?')[0] === key,
   );
   if (alreadyInProject) return false;
 
-  const asset = { url: r.url, alt: r.alt || '', query: q, type: 'image' };
+  const asset = { url: imageUrl, alt: r.alt || '', query: q, type: 'image' };
   if (!relaxed && !passesTopUpRelevanceGate(asset, seg, topic, topicKeywords)) return false;
   if (relaxed) {
     const score = scoreAssetRelevance(asset, seg, topic, topicKeywords);
     if (score < 0.15) return false;
   }
-  if (!(await canFetch(r.url, { timeoutMs: 8000, minBytes: 512 }))) return false;
+  if (!(await canFetch(imageUrl, { timeoutMs: 8000, minBytes: 8192 }))) return false;
 
   const relevance = scoreAssetRelevance(asset, seg, topic, topicKeywords);
   const uniqueCount = segmentUniqueCount(project, seg.id);
@@ -506,7 +534,7 @@ async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topi
     id: `topup-${seg.id}-${uniqueCount}`,
     segmentId: seg.id,
     type: 'image',
-    url: r.url,
+    url: imageUrl,
     alt: r.alt || `${seg.title} ${topic}`,
     query: q,
     source: `${r.source || 'Search'} (volume top-up)`,
@@ -514,7 +542,7 @@ async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topi
     isFallback: false,
   });
   report.volumeTopUp = report.volumeTopUp || [];
-  report.volumeTopUp.push({ segmentId: seg.id, url: r.url, endpoint, relevance });
+  report.volumeTopUp.push({ segmentId: seg.id, url: imageUrl, endpoint, relevance });
   return true;
 }
 
@@ -654,51 +682,69 @@ async function rebalanceFailingSegments(project, devServer, minPerSegment, repor
   }
 }
 
+async function topUpSegmentImages(project, devServer, seg, minPerSegment, report, topic, topicKeywords) {
+  let uniqueCount = segmentUniqueCount(project, seg.id);
+
+  for (let round = 0; round < TOP_UP_IMAGE_ENDPOINTS.length && uniqueCount < minPerSegment; round += 1) {
+    const queries = round === 0
+      ? [...buildMetaphorTopUpQueries(seg, topic), buildTopUpQuery(seg, topic, round)]
+      : [buildTopUpQuery(seg, topic, round)];
+    for (const q of queries) {
+      if (uniqueCount >= minPerSegment) break;
+      const results = await fetchImageSearchResults(devServer, TOP_UP_IMAGE_ENDPOINTS[round], q);
+      const candidates = results
+        .map((r) => ({
+          url: resolveTopUpImageUrl(r),
+          alt: r.alt || r.title || seg.title,
+          source: r.source,
+          sourceUrl: r.sourceUrl,
+        }))
+        .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+
+      for (const r of candidates) {
+        if (await addImageTopUpCandidate(project, seg, r, q, TOP_UP_IMAGE_ENDPOINTS[round], report, topic, topicKeywords)) {
+          uniqueCount = segmentUniqueCount(project, seg.id);
+          if (uniqueCount >= minPerSegment) break;
+        }
+      }
+    }
+  }
+  return uniqueCount;
+}
+
 async function topUpHarvestVolume(project, devServer, minPerSegment, report, options = {}) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
   const topicKeywords = extractKeywords(topic, 12);
-  const harvestVideoFirst = options.harvestVideoFirst !== false;
+  let harvestVideoFirst = options.harvestVideoFirst !== false;
   const minVideosPerSegment = harvestVideoFirst ? Math.max(2, options.minVideosPerSegment || 2) : 0;
+
+  const totalRealVideos = (segments || []).reduce(
+    (sum, seg) => sum + countRealSegmentVideos(project.media, seg.id),
+    0,
+  );
+  if (isCrimeNewsTopic(topic) && totalRealVideos === 0) {
+    harvestVideoFirst = false;
+    report.videoFirstRelaxed = true;
+  }
 
   if (harvestVideoFirst && minVideosPerSegment > 0) {
     await ensureVideoQuotaPerSegment(project, devServer, report, topic, topicKeywords, minVideosPerSegment);
   }
 
-  for (const seg of segments) {
-    let uniqueCount = segmentUniqueCount(project, seg.id);
-
-    for (let round = 0; round < TOP_UP_IMAGE_ENDPOINTS.length && uniqueCount < minPerSegment; round += 1) {
-      const queries = round === 0
-        ? [...buildMetaphorTopUpQueries(seg, topic), buildTopUpQuery(seg, topic, round)]
-        : [buildTopUpQuery(seg, topic, round)];
-      for (const q of queries) {
-        if (uniqueCount >= minPerSegment) break;
-        const results = await fetchImageSearchResults(devServer, TOP_UP_IMAGE_ENDPOINTS[round], q);
-        const candidates = results
-          .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
-          .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
-
-        for (const r of candidates) {
-          if (await addImageTopUpCandidate(project, seg, r, q, TOP_UP_IMAGE_ENDPOINTS[round], report, topic, topicKeywords)) {
-            uniqueCount = segmentUniqueCount(project, seg.id);
-            if (uniqueCount >= minPerSegment) break;
-          }
-        }
-      }
-    }
-  }
+  await Promise.all(
+    segments.map((seg) => topUpSegmentImages(project, devServer, seg, minPerSegment, report, topic, topicKeywords)),
+  );
 
   if (harvestVideoFirst && minVideosPerSegment > 0) {
     await ensureVideoQuotaPerSegment(project, devServer, report, topic, topicKeywords, minVideosPerSegment);
   }
 
   // For crime/news topics, supplement with news/archive endpoints using action-first metaphor queries.
-  // These endpoints return press-photo thumbnails that image search engines often miss.
   if (isCrimeNewsTopic(topic)) {
-    for (const seg of segments) {
+    await Promise.all(segments.map(async (seg) => {
       let uniqueCount = segmentUniqueCount(project, seg.id);
-      if (uniqueCount >= minPerSegment) continue;
+      if (uniqueCount >= minPerSegment) return;
       const metaphorQueries = buildMetaphorTopUpQueries(seg, topic);
       for (const q of metaphorQueries) {
         if (uniqueCount >= minPerSegment) break;
@@ -706,7 +752,12 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
           if (uniqueCount >= minPerSegment) break;
           const results = await fetchImageSearchResults(devServer, endpoint, q);
           const candidates = results
-            .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source || endpoint }))
+            .map((r) => ({
+              url: resolveTopUpImageUrl(r),
+              alt: r.alt || r.title || seg.title,
+              source: r.source || endpoint,
+              sourceUrl: r.sourceUrl,
+            }))
             .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
           for (const r of candidates) {
             if (await addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords)) {
@@ -716,11 +767,11 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
           }
         }
       }
-    }
+    }));
   }
 
   await rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords, {
-    minVideosPerSegment,
+    minVideosPerSegment: harvestVideoFirst ? minVideosPerSegment : 0,
     harvestVideoFirst,
   });
 }
@@ -729,16 +780,15 @@ function isJunkHarvestUrl(url) {
   const u = (url || '').toLowerCase();
   return (
     isUnreliableVideoHost(url) ||
+    isOvpThumbUrl(u) ||
     /tiktokcdn\.com|tiktokpng\.com|tiktokv\.com|muscdn\.com|byteoversea\.com/i.test(u) ||
     u.includes('gravatar.com/avatar') ||
     /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
     u.includes('/th/id/ovp.') ||
     u.includes('th?id=ovp.') ||
-    // Bing image-preview thumbs (OIP) — low-res search thumbnails, not full images
     /tse\d\.mm\.bing\.net\/th[/?]id=oip/i.test(u) ||
     u.includes('/th/id/oip.') ||
     u.includes('th?id=oip.') ||
-    // Pinterest pin-board aggregator — images are low-res reposts, not editorial B-roll
     u.includes('pinterest.com') ||
     u.includes('pinimg.com') ||
     u.includes('pin.it/') ||
@@ -1091,6 +1141,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       const apiKey = resolveOpenRouterKey();
       if (apiKey) {
         const vision = await filterAssetsByVision(project.media, project, { apiKey });
+        report.visionRejectedUrls = vision.rejectedUrls || [];
         if (vision.dropped?.length) {
           report.visionDropped = vision.dropped;
           report.visionScanned = vision.scanned;
@@ -1116,13 +1167,20 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
           }
         } else {
           report.visionScanned = vision.scanned;
+          report.visionRejectedUrls = vision.rejectedUrls || [];
         }
       }
     }
 
     // Post-vision pHash dedup on full-res sources — catches same shot under different URLs.
+    const uniqueBeforePostVision = new Set(
+      (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+    ).size;
+    const { requiredUniqueUrls: budgetPostVision } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
+    const thinForPhash = uniqueBeforePostVision < Math.max(18, budgetPostVision);
     const postVisionDedup = dedupeMediaByPHash(project.media, {
       devServer,
+      maxDistance: thinForPhash ? 8 : 10,
       onDrop: (item, reason) => report.postVisionPhashDropped = [
         ...(report.postVisionPhashDropped || []),
         { url: item.url, reason },
@@ -1707,19 +1765,8 @@ export async function generateFullVideo(options) {
       );
       if (emptySegments.length > 0) {
         const names = emptySegments.map((s) => s.title).join('; ');
-        fixState.reHarvestMedia = true;
-        fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
-        await browser.close().catch(() => {});
-        browser = null;
-        return {
-          ok: false,
-          error: `Empty browser harvest — no assets for: ${names}`,
-          thinHarvest: true,
-          harvestQualityFail: true,
-          topic,
-          outDir,
-          fixState,
-        };
+        fixState.thinHarvest = true;
+        log(`   ⚠ Empty browser segments (${names}) — continuing to narration; server top-up will fill pool`);
       }
     }
 
@@ -1738,8 +1785,16 @@ export async function generateFullVideo(options) {
       return JSON.parse(raw).project ?? null;
     });
 
-    if (!project || !(project.media?.length > 0)) {
-      return { ok: false, error: 'No project with media after pipeline', topic, outDir };
+    if (!project) {
+      return { ok: false, error: 'No project after pipeline', topic, outDir };
+    }
+    if (!project.media?.length) {
+      if (realHarvest) {
+        project.media = [];
+        log('   ⚠ No browser media after pipeline — server top-up will build pool');
+      } else {
+        return { ok: false, error: 'No project with media after pipeline', topic, outDir };
+      }
     }
 
     await browser.close().catch(() => {});
@@ -1778,11 +1833,20 @@ export async function generateFullVideo(options) {
       if (mediaReport.phashDropped?.length) {
         log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
       }
+      if (mediaReport.visionRejectedUrls?.length) {
+        accumulateVisionRejectedUrls(fixState, mediaReport.visionRejectedUrls);
+      }
+      const { requiredUniqueUrls: harvestBudget } = computeClipBudget(project, fixState.cutIntervalSec ?? 1.25);
+      if ((mediaReport.uniqueUrlCount || 0) < harvestBudget) {
+        fixState.mediaOffset = 0;
+        fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
+        log(`   ⚠ Thin pool (${mediaReport.uniqueUrlCount}/${harvestBudget} URLs) — reset mediaOffset, nonce ${fixState.harvestNonce}`);
+      }
       if (mediaReport.volumePass === false) {
         const failing = mediaReport.harvestQuality?.failing || [];
         const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
         fixState.reHarvestMedia = true;
-        fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+        fixState.mediaOffset = 0;
         return {
           ok: false,
           error: `Harvest volume gate FAIL — ${detail}`,
@@ -1802,6 +1866,14 @@ export async function generateFullVideo(options) {
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }
+    writeFileSync(
+      join(outDir, 'timeline-diversity.json'),
+      JSON.stringify(
+        computeTimelineDiversityMetrics(project.editTimeline || [], project.media || [], project.script || []),
+        null,
+        2,
+      ),
+    );
     accumulateExcludedUrls(fixState, project);
 
     try {
@@ -1914,10 +1986,16 @@ export async function generateFullVideo(options) {
     if (!manifestGate.valid) {
       // Modal proxy manifest is rebuilt locally — spacing can diverge from remote encode.
       // Log and continue so contact-sheet assembly audit remains the ship gate.
+      const manifest = manifestGate.manifest || {};
+      const required = manifest.requiredUniqueUrls || 0;
+      const withinBudget = required === 0 || (manifest.uniqueUrlsUsed || 0) >= required * 0.9;
+      const adjacentFail = (manifest.adjacentRepeatCount || 0) > 0;
       const spacingOnlyProxy =
         usedModalRender
-        && manifestGate.manifest?.modalProxy === true
-        && /^diversity gate: (\d+ URL spacing violation|\d+ adjacent same-URL)/.test(manifestGate.error || '');
+        && !adjacentFail
+        && withinBudget
+        && (manifest.uniqueUrlsUsed || 0) >= required
+        && /spacing violation/i.test(manifestGate.error || '');
       if (spacingOnlyProxy) {
         log(`   ⚠ Modal diversity proxy: ${manifestGate.error} (continuing — vision audit is ship gate)`);
       } else {

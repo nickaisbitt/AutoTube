@@ -40,7 +40,7 @@ function phraseIsValid(buf, { requireSentenceEnd = false } = {}) {
   if (buf.length < MIN_CAPTION_WORDS) return false;
   const endsWithPunct = isPhraseEnd(buf[buf.length - 1]);
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
-  const minWords = loopMode ? Math.max(PREFERRED_CAPTION_WORDS, 5) : PREFERRED_CAPTION_WORDS;
+  const minWords = loopMode ? 6 : PREFERRED_CAPTION_WORDS;
   if (loopMode || requireSentenceEnd) {
     if (!endsWithPunct) return false;
     if (loopMode && buf.length < minWords) return false;
@@ -197,6 +197,11 @@ function buildDialogueLines(allWords, cm) {
   // At a segment boundary: flush if buffer is phrase-length; discard carry if it ends
   // with a weak lead-in or bad-split token (don't pollute the next segment's phrase).
   const flushAtBoundary = () => {
+    if (loopMode) {
+      if (phraseIsValid(buffer)) flush();
+      else buffer = [];
+      return;
+    }
     if (buffer.length > 0) {
       const lastWord = buffer[buffer.length - 1];
       if (isWeakLeadIn(lastWord) || isBadSplit(lastWord)) {
@@ -269,10 +274,18 @@ function buildDialogueLines(allWords, cm) {
   const filtered = dialogueLines.filter((line) => {
     const text = line.split(',,').pop() || '';
     const words = text.trim().split(/\s+/).filter(Boolean);
-    return words.length >= MIN_CAPTION_WORDS;
+    return words.length >= (loopMode ? 6 : MIN_CAPTION_WORDS);
   });
 
-  return { dialogueLines: filtered, captionCount: filtered.length };
+  const wordCounts = filtered.map((line) => {
+    const text = line.split(',,').pop() || '';
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  });
+  const avgWordsPerLine = wordCounts.length
+    ? wordCounts.reduce((a, b) => a + b, 0) / wordCounts.length
+    : 0;
+
+  return { dialogueLines: filtered, captionCount: filtered.length, avgWordsPerLine };
 }
 
 /**
@@ -312,7 +325,7 @@ export function buildCaptionAss(wordTimestampCache, segmentStartTimes = [], h = 
   }
   allWords.sort((a, b) => a.start - b.start);
 
-  const { dialogueLines } = buildDialogueLines(allWords, cm);
+  const { dialogueLines, avgWordsPerLine } = buildDialogueLines(allWords, cm);
   return [...header, ...dialogueLines].join('\n');
 }
 
@@ -338,7 +351,15 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   const h = parseInt(hStr, 10) || 720;
 
   const assContent = buildCaptionAss(wordTimestampCache, segmentStartTimes, h, w);
-  const captionCount = (assContent.match(/^Dialogue:/mg) || []).length;
+  const dialogueLines = assContent.split('\n').filter((l) => l.startsWith('Dialogue:'));
+  const captionCount = dialogueLines.length;
+  const wordCounts = dialogueLines.map((line) => {
+    const text = line.split(',,').pop() || '';
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  });
+  const avgWordsPerLine = wordCounts.length
+    ? wordCounts.reduce((a, b) => a + b, 0) / wordCounts.length
+    : 0;
 
   if (captionCount === 0) return { ok: false, error: 'no word timestamps' };
 
@@ -362,7 +383,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   } catch {
     /* ignore */
   }
-  return { ok: true, captionCount };
+  return { ok: true, captionCount, avgWordsPerLine };
 }
 
 /**
@@ -381,6 +402,19 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
     results.captions = caps;
     if (caps.ok) {
       console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);
+      try {
+        writeFileSync(
+          join(dirname(videoPath), 'caption-stats.json'),
+          JSON.stringify({
+            captionCount: caps.captionCount,
+            avgWordsPerLine: caps.avgWordsPerLine ?? 0,
+          }),
+        );
+      } catch {
+        /* ignore */
+      }
+    } else if (process.env.AUTOTUBE_LOOP_MODE === '1') {
+      results.captionFail = caps.error || 'caption burn failed';
     }
   }
 

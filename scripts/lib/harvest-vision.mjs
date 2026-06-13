@@ -163,7 +163,7 @@ export async function checkHarvestAssetVision(imageUrl, ctx, apiKey) {
 export async function filterAssetsByVision(media, project, options = {}) {
   const apiKey = options.apiKey?.trim();
   if (!apiKey || !media?.length) {
-    return { media: media || [], dropped: [], scanned: 0 };
+    return { media: media || [], dropped: [], scanned: 0, rejectedUrls: [] };
   }
 
   const topic = project.topic || project.title || '';
@@ -224,8 +224,14 @@ export async function filterAssetsByVision(media, project, options = {}) {
   }
 
   if (!dropIdx.size) {
-    return { media, dropped, scanned };
+    return { media, dropped, scanned, rejectedUrls: [] };
   }
 
-  return { media: media.filter((_, idx) => !dropIdx.has(idx)), dropped, scanned };
+  const rejectedUrls = dropped.map((d) => d.url).filter(Boolean);
+  return {
+    media: media.filter((_, idx) => !dropIdx.has(idx)),
+    dropped,
+    scanned,
+    rejectedUrls,
+  };
 }

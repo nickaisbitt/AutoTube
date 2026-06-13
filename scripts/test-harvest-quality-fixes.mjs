@@ -1103,7 +1103,7 @@ console.log('\n── 36. Assembly FAIL URL exclusion ──');
   assert('Assembly fail excludes strategink URL', (fixState.excludedUrls || []).some((u) => u.includes('strategink')));
   assert('Assembly fail excludes pexels ring-light URL', (fixState.excludedUrls || []).some((u) => u.includes('pexels.com')));
   assert('Assembly fail keeps editorial Louvre news URL', !(fixState.excludedUrls || []).some((u) => u.includes('abcnews.go.com')));
-  assert('Assembly fail logs URL exclusion', applied.some((a) => a.includes('exclude')));
+  assert('Assembly fail logs routing fix', applied.some((a) => /exclude|reharvest|repeatPenalty|curated|topicRelevance/i.test(a)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1889,6 +1889,34 @@ console.log('\n── 55. karaoke caption phrase quality (≥3 words per line) �
   // Also verify the ASS has a valid header.
   assert('ASS output has Script Info header', assContent.includes('[Script Info]'));
   assert('ASS output has V4+ Styles section', assContent.includes('[V4+ Styles]'));
+}
+
+// ---------------------------------------------------------------------------
+// 56. Curated topic pool for museum heist
+// ---------------------------------------------------------------------------
+console.log('\n── 56. curated topic pool (museum heist) ──');
+{
+  const {
+    getCuratedPoolForTopic,
+    matchCuratedPoolKey,
+    injectCuratedTopicPool,
+  } = await import('./lib/curated-topic-pools.mjs');
+  const topic = 'The museum heist streamed live on TikTok';
+  assert('matchCuratedPoolKey returns museum-heist', matchCuratedPoolKey(topic) === 'museum-heist');
+  const pool = getCuratedPoolForTopic(topic);
+  assert('curated pool has at least 40 URLs', pool.length >= 40);
+
+  const project = {
+    topic,
+    script: [{ id: 'seg1', title: 'Intro', duration: 20 }, { id: 'seg2', title: 'Body', duration: 25 }],
+    media: [],
+  };
+  const report = {};
+  const added = injectCuratedTopicPool(project, 4, report);
+  assert('injectCuratedTopicPool adds assets', added > 0);
+  assert('report tracks curatedPoolInjected', (report.curatedPoolInjected || 0) > 0);
+  const unique = new Set(project.media.map((m) => m.url));
+  assert('injected URLs are unique', unique.size === project.media.length);
 }
 
 // ---------------------------------------------------------------------------

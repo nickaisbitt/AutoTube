@@ -60,10 +60,15 @@ export function validateRenderManifest(videoPath, durationSec = 0) {
     if (manifest.uniqueUrlsUsed !== undefined) {
       const gate = diversityProxyGate(manifest);
       if (!gate.pass) {
-        const spacingOnlyModalProxy =
-          manifest.modalProxy === true
-          && /^(?:\d+ adjacent same-URL clip\(s\)|\d+ URL spacing violation)/.test(gate.reason || '');
-        if (!spacingOnlyModalProxy) {
+        const required = manifest.requiredUniqueUrls || 0;
+        const withinBudget = required === 0 || manifest.uniqueUrlsUsed >= required * 0.9;
+        const adjacentFail = (manifest.adjacentRepeatCount || 0) > 0;
+        const spacingOnly =
+          !adjacentFail
+          && withinBudget
+          && (manifest.uniqueUrlsUsed || 0) >= required
+          && /spacing violation/i.test(gate.reason || '');
+        if (!spacingOnly) {
           return {
             valid: false,
             error: `diversity gate: ${gate.reason}`,

@@ -13,6 +13,7 @@ import {
   evaluateObjectiveGate,
   evaluateClipCountGate,
   evaluatePlaceholderGate,
+  evaluateCaptionGate,
 } from '../../../scripts/lib/run-objective-qa.mjs';
 import {
   auditHookFromScript,
@@ -262,6 +263,8 @@ function buildNumberedReport(ctx) {
   const uploadReady =
     (finalScore ?? youtubeScore ?? 0) >= 91 &&
     (assemblyAudit?.assemblyScore ?? 0) >= 80 &&
+    (assemblyAudit?.captionCoherence ?? 100) >= 75 &&
+    (assemblyAudit?.topicRelevance ?? 100) >= 75 &&
     hookVision?.hookPass !== false &&
     hookScript?.pass !== false;
 
@@ -456,11 +459,14 @@ export async function watchVideo(options = {}) {
   const objectiveQa = runObjectiveQa(videoPath, { skipVision: options.skip_vision === true });
   const clipCountGate = evaluateClipCountGate(videoPath, framesMeta.durationSec);
   const placeholderGate = evaluatePlaceholderGate(videoPath);
+  const captionGate = evaluateCaptionGate(videoPath);
   const objectiveGate = evaluateObjectiveGate({
     sceneQa,
     objectiveQa,
     clipCountGate,
     placeholderGate,
+    captionGate,
+    repetition,
     renderTier: options.render_tier,
   });
   const scriptText = options.script_text || loadOptionalScript();
@@ -584,8 +590,16 @@ export async function watchVideo(options = {}) {
     uploadReady:
       (finalScore ?? youtubeScore ?? 0) >= 91
       && (assemblyAudit?.assemblyScore ?? 0) >= 80
+      && (assemblyAudit?.captionCoherence ?? 100) >= 75
+      && (assemblyAudit?.topicRelevance ?? 100) >= 75
       && hookVision?.hookPass !== false
       && hookScript?.pass !== false,
+    assemblySubScores: assemblyAudit?.success ? {
+      topicRelevance: assemblyAudit.topicRelevance,
+      captionCoherence: assemblyAudit.captionCoherence,
+      visualCohesion: assemblyAudit.visualCohesion,
+      repeatPenalty: assemblyAudit.repeatPenalty,
+    } : null,
   };
 }
 

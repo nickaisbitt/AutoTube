@@ -234,23 +234,6 @@ function assignVideoSourceOffsets(clips) {
   });
 }
 
-async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
-  const nextOffset = new Map();
-  return clips.map((clip) => {
-    const key = assetKey(clip.asset);
-    const isVideo =
-      clip.asset?.type === 'video' || /\.(mp4|webm|mov)/i.test(clip.asset?.url || '');
-    if (!isVideo) {
-      return { ...clip, sourceStartSec: 0 };
-    }
-    let offset = nextOffset.get(key) || 0;
-    const maxSrc = Math.max(clip.asset?.duration || 0, 30);
-    if (offset + clip.durationSec > maxSrc - 0.15) offset = 0;
-    nextOffset.set(key, offset + clip.durationSec);
-    return { ...clip, sourceStartSec: offset };
-  });
-}
-
 function cachePathForUrl(url, cacheDir, isVideo) {
   const hash = createHash('sha1').update(url).digest('hex').slice(0, 16);
   let ext = '.jpg';

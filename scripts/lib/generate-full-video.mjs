@@ -468,11 +468,13 @@ function segmentUniqueCount(project, segmentId) {
 }
 
 /** Inject curated editorial crime/museum stock when live harvest pool is below clip budget. */
-function injectCrimeFallbackPool(project, minPerSegment, report) {
+function injectCrimeFallbackPool(project, minPerSegment, report, { forceCurated = false } = {}) {
   const topic = project.topic || project.title || '';
-  if (!isCrimeNewsTopic(topic)) return 0;
-
-  let added = injectCuratedTopicPool(project, minPerSegment, report);
+  let added = 0;
+  if (forceCurated || isCrimeNewsTopic(topic)) {
+    added += injectCuratedTopicPool(project, minPerSegment, report);
+  }
+  if (!isCrimeNewsTopic(topic) && !forceCurated) return added;
 
   const used = new Set(
     (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
@@ -1046,14 +1048,14 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const uniqueBeforePhash = new Set(
     relevance.media.map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
   ).size;
-  const skipPhashDedup = loopMode && uniqueBeforePhash < prePhashBudget.requiredUniqueUrls * 1.25;
-  const deduped = skipPhashDedup
-    ? { media: relevance.media, hashCount: 0 }
-    : dedupeMediaByPHash(relevance.media, {
-      devServer,
-      onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
-    });
-  if (skipPhashDedup) report.deferredPhashDedup = true;
+  const skipPhashDedup = false;
+  const thinPoolPhash = loopMode && uniqueBeforePhash < prePhashBudget.requiredUniqueUrls * 1.25;
+  const deduped = dedupeMediaByPHash(relevance.media, {
+    devServer,
+    maxDistance: thinPoolPhash ? 8 : 10,
+    onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
+  });
+  if (thinPoolPhash) report.thinPoolPhashTight = true;
   report.phashHashCount = deduped.hashCount;
 
   // URL-level cross-segment dedup: prevent the same shot appearing in multiple segment pools.
@@ -1128,8 +1130,11 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
     ).size;
     const { requiredUniqueUrls: budgetAfterTopUp } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
-    if (isCrimeNewsTopic(topicForFallback) && uniqueAfterTopUp < budgetAfterTopUp) {
-      injectCrimeFallbackPool(project, minPerSegment, report);
+    const needsCurated = uniqueAfterTopUp < budgetAfterTopUp;
+    if (needsCurated && (isCrimeNewsTopic(topicForFallback) || options.useCuratedPool)) {
+      injectCrimeFallbackPool(project, minPerSegment, report, {
+        forceCurated: options.useCuratedPool === true,
+      });
     }
 
     // Force-clear the stale browser-generated editTimeline so validateEditTimeline
@@ -1764,6 +1769,14 @@ export async function generateFullVideo(options) {
         join(outDir, 'thin-harvest-pre-narration.json'),
         JSON.stringify({ volume, thin, loopMinAssets, emptySegments: emptySegments.map((s) => s.title) }, null, 2),
       );
+      const browserThinFlag = await page.evaluate(() => {
+        try {
+          return sessionStorage.getItem('autotube_thin_harvest') === 'true';
+        } catch {
+          return false;
+        }
+      });
+      if (browserThinFlag) fixState.thinHarvest = true;
       if (emptySegments.length > 0) {
         const names = emptySegments.map((s) => s.title).join('; ');
         fixState.thinHarvest = true;
@@ -1826,7 +1839,10 @@ export async function generateFullVideo(options) {
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
         harvestVideoFirst: fixState.harvestVideoFirst !== false,
         minVideosPerSegment: fixState.minVideosPerSegment || 2,
+        useCuratedPool: fixState.useCuratedPool === true,
+        cutIntervalSec: fixState.cutIntervalSec ?? 1.4,
       });
+      if (fixState.useCuratedPool) fixState.useCuratedPool = false;
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
       if (mediaReport.relevanceDropped?.length) {
         log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
@@ -2053,6 +2069,7 @@ export async function generateFullVideo(options) {
       sizeMb: (gate.size / 1024 / 1024).toFixed(2),
       realHarvest,
       fixState,
+      thinHarvest: fixState.thinHarvest === true,
       renderEnv: renderSnapshot,
       harvestNonce: fixState.harvestNonce || 0,
       renderRetried,

@@ -152,6 +152,7 @@ async function main() {
     let videoPath = null;
     let scriptText = '';
     let renderEnv = null;
+    let thinHarvestFlag = false;
 
     if (!cfg.reviewOnly) {
       // autoSpawn: true — if Vite crashed mid-loop, attempt to restart it automatically
@@ -204,6 +205,7 @@ async function main() {
       }
       scriptText = gen.scriptText || '';
       renderEnv = gen.renderEnv || null;
+      thinHarvestFlag = gen.thinHarvest === true || fixState.thinHarvest === true;
 
       if (gen.ok && videoPath && existsSync(videoPath)) {
         const videoCheck = validateLoopVideo(videoPath);
@@ -224,6 +226,7 @@ async function main() {
             ['media-sanitization.json', 'media-sanitization.json'],
             ['harvest-quality.json', 'harvest-quality.json'],
             ['timeline-diversity.json', 'timeline-diversity.json'],
+            ['caption-stats.json', 'caption-stats.json'],
           ];
           for (const [name, dest] of artifactPairs) {
             const src = join(gen.outDir, name);
@@ -288,6 +291,10 @@ async function main() {
         expected_hook_overlay: fixState.hookOverlay,
         api_key: resolveOpenRouterKey(),
       });
+      if (thinHarvestFlag) {
+        watch.thinHarvest = true;
+        fixState.thinHarvest = false;
+      }
     } catch (e) {
       console.error(`❌ Watch failed: ${e.message}`);
       appendJournal({

@@ -233,6 +233,44 @@ export async function renderViaModal({ project, mp4Out, renderEnv, devServer, ou
   log(`   ✓ Modal render ${(result.bytes / 1024 / 1024).toFixed(1)} MB in ${(result.elapsedMs / 1000).toFixed(0)}s`);
   if (existsSync(mp4Out)) copyFileSync(finalOut, mp4Out);
 
+  // Burn captions locally so caption-stats.json exists for objective QA (Modal worker may skip sidecar copy).
+  try {
+    const wordTimestampCache = new Map();
+    for (const [k, v] of Object.entries(narration.wordTimestamps || {})) {
+      wordTimestampCache.set(Number(k), v);
+    }
+    const segCount = wordTimestampCache.size;
+    const narrationDir = join(bundleDir, 'narration');
+    const segmentStartTimes = [];
+    if (existsSync(narrationDir) && segCount > 0) {
+      const probe = (file) => {
+        if (!existsSync(file)) return 0;
+        const r = spawnSync(
+          'ffprobe',
+          ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file],
+          { encoding: 'utf8' },
+        );
+        return parseFloat((r.stdout || '').trim()) || 0;
+      };
+      let t = probe(join(narrationDir, 'silence-intro.wav'));
+      for (let i = 0; i < segCount; i++) {
+        t += probe(join(narrationDir, `silence-${i}.wav`));
+        segmentStartTimes.push(t);
+        t += probe(join(narrationDir, `narration-${i}.wav`));
+        if (i < segCount - 1) t += probe(join(narrationDir, `breath-${i}.wav`));
+      }
+    }
+    const { applyFfmpegYoutubeOverlays } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
+    const overlayTarget = existsSync(finalOut) ? finalOut : mp4Out;
+    applyFfmpegYoutubeOverlays(overlayTarget, project, wordTimestampCache, segmentStartTimes);
+    const captionStats = join(dirname(overlayTarget), 'caption-stats.json');
+    if (existsSync(captionStats) && outDir) {
+      copyFileSync(captionStats, join(outDir, 'caption-stats.json'));
+    }
+  } catch (err) {
+    log(`   ⚠ Post-Modal caption overlay: ${err.message}`);
+  }
+
   // Modal encodes remotely — ship diversity proxy manifest locally for validate-loop-video.
   try {
     const bundled = JSON.parse(readFileSync(join(bundleDir, 'project.json'), 'utf8'));

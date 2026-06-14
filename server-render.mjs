@@ -3270,7 +3270,7 @@ async function runFfmpegAssemblyRender(project) {
     `  📐 Rebuilt editTimeline: ${project.editTimeline.length} clips across ${project.script.length} segments (${measuredSec.toFixed(1)}s measured narration)`,
   );
 
-  const mixedAudio = join(audioDir, 'narration-mix.wav');
+  const mixedAudio = join(audioDir, 'narration-mix.m4a');
   try {
     await concatenateAudio(audioFiles, mixedAudio);
   } catch (err) {

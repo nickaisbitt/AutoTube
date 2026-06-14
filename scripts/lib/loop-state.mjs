@@ -21,6 +21,8 @@ export const DEFAULT_FIX_STATE = {
   mediaOffset: 0,
   harvestNonce: 0,
   excludedUrls: [],
+  /** Vision-rejected URLs — kept separate from lifestyle excludedUrls prune bucket. */
+  visionRejectedUrls: [],
   fixStrategy: 'interval',
   ffmpegHardCuts: true,
   topicRetryCount: 0,
@@ -69,6 +71,8 @@ export function loadFixState(loopDir) {
     if (raw.harvestNonce === undefined) loaded.harvestNonce = 0;
     if (!Array.isArray(raw.excludedUrls)) loaded.excludedUrls = [];
     else loaded.excludedUrls = sanitizeExcludedUrls(raw.excludedUrls);
+    if (!Array.isArray(raw.visionRejectedUrls)) loaded.visionRejectedUrls = [];
+    else loaded.visionRejectedUrls = sanitizeExcludedUrls(raw.visionRejectedUrls);
     if ((loaded.minAssetsPerSegment || 0) > LOOP_MAX_MIN_ASSETS_PER_SEGMENT) {
       loaded.minAssetsPerSegment = LOOP_MAX_MIN_ASSETS_PER_SEGMENT;
     }

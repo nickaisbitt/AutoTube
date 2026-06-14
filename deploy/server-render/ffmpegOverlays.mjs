@@ -36,16 +36,17 @@ const isOrphanFragment = (word) => /^[a-z]{1,4},$/i.test(word) && !isPhraseEnd(w
  * - Must not start or end with a weak lead-in word.
  * - Must not have > 50% isBadSplit words.
  */
-function phraseIsValid(buf, { requireSentenceEnd = false } = {}) {
+function phraseIsValid(buf, { requirePunct = true } = {}) {
   if (buf.length < MIN_CAPTION_WORDS) return false;
   const endsWithPunct = isPhraseEnd(buf[buf.length - 1]);
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
-  const minWords = loopMode ? Math.max(PREFERRED_CAPTION_WORDS, 5) : PREFERRED_CAPTION_WORDS;
-  if (loopMode || requireSentenceEnd) {
+  const minWords = loopMode ? 5 : PREFERRED_CAPTION_WORDS;
+  if (requirePunct && (loopMode || requirePunct)) {
     if (!endsWithPunct) return false;
+    if (loopMode && buf.length < minWords) return false;
   }
   if (buf.length < minWords && !endsWithPunct) return false;
-  if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct) return false;
+  if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct && requirePunct) return false;
   if (isWeakLeadIn(buf[0])) return false;
   if (isWeakLeadIn(buf[buf.length - 1])) return false;
   if (buf.some((w) => isOrphanFragment(w))) return false;
@@ -196,6 +197,11 @@ function buildDialogueLines(allWords, cm) {
   // At a segment boundary: flush if buffer is phrase-length; discard carry if it ends
   // with a weak lead-in or bad-split token (don't pollute the next segment's phrase).
   const flushAtBoundary = () => {
+    if (loopMode) {
+      if (phraseIsValid(buffer)) flush();
+      else buffer = [];
+      return;
+    }
     if (buffer.length > 0) {
       const lastWord = buffer[buffer.length - 1];
       if (isWeakLeadIn(lastWord) || isBadSplit(lastWord)) {
@@ -243,6 +249,9 @@ function buildDialogueLines(allWords, cm) {
 
     if (phraseDone && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
+    } else if (loopMode && atMax && buffer.length >= 5 && !wouldSplitBad) {
+      // TTS word streams rarely carry punctuation — emit full phrases at maxWords.
+      flush();
     } else if (!loopMode && atMax && !nearPunctuation && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
     } else if (!loopMode && buffer.length >= cm.maxWords + 2) {
@@ -268,10 +277,18 @@ function buildDialogueLines(allWords, cm) {
   const filtered = dialogueLines.filter((line) => {
     const text = line.split(',,').pop() || '';
     const words = text.trim().split(/\s+/).filter(Boolean);
-    return words.length >= MIN_CAPTION_WORDS;
+    return words.length >= (loopMode ? 5 : MIN_CAPTION_WORDS);
   });
 
-  return { dialogueLines: filtered, captionCount: filtered.length };
+  const wordCounts = filtered.map((line) => {
+    const text = line.split(',,').pop() || '';
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  });
+  const avgWordsPerLine = wordCounts.length
+    ? wordCounts.reduce((a, b) => a + b, 0) / wordCounts.length
+    : 0;
+
+  return { dialogueLines: filtered, captionCount: filtered.length, avgWordsPerLine };
 }
 
 /**
@@ -311,7 +328,7 @@ export function buildCaptionAss(wordTimestampCache, segmentStartTimes = [], h = 
   }
   allWords.sort((a, b) => a.start - b.start);
 
-  const { dialogueLines } = buildDialogueLines(allWords, cm);
+  const { dialogueLines, avgWordsPerLine } = buildDialogueLines(allWords, cm);
   return [...header, ...dialogueLines].join('\n');
 }
 
@@ -337,22 +354,34 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   const h = parseInt(hStr, 10) || 720;
 
   const assContent = buildCaptionAss(wordTimestampCache, segmentStartTimes, h, w);
-  const captionCount = (assContent.match(/^Dialogue:/mg) || []).length;
+  const dialogueLines = assContent.split('\n').filter((l) => l.startsWith('Dialogue:'));
+  const captionCount = dialogueLines.length;
+  const wordCounts = dialogueLines.map((line) => {
+    const text = line.split(',,').pop() || '';
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  });
+  const avgWordsPerLine = wordCounts.length
+    ? wordCounts.reduce((a, b) => a + b, 0) / wordCounts.length
+    : 0;
 
   if (captionCount === 0) return { ok: false, error: 'no word timestamps' };
 
-  const assPath = join(dirname(videoPath), 'captions-overlay.ass');
+  const assPath = join('/tmp', `autotube-captions-${process.pid}.ass`);
   writeFileSync(assPath, assContent);
 
   const tmpOut = videoPath.replace(/\.mp4$/, '-captioned.mp4');
-  const assEsc = assPath.replace(/'/g, "'\\''");
-  const r = spawnSync(
-    'ffmpeg',
-    ['-y', '-i', videoPath, '-vf', `ass='${assEsc}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
-    { encoding: 'utf8', timeout: 600_000 },
-  );
+  const assFilter = `ass=${assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")}`;
+  const encodeArgs = ['-y', '-i', videoPath, '-vf', assFilter, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut];
+  let r = spawnSync('ffmpeg', encodeArgs, { encoding: 'utf8', timeout: 900_000 });
   if (r.status !== 0 || !existsSync(tmpOut)) {
-    return { ok: false, error: (r.stderr || '').slice(-300) };
+    r = spawnSync(
+      'ffmpeg',
+      ['-y', '-i', videoPath, '-vf', `subtitles='${assPath.replace(/'/g, "'\\''")}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
+      { encoding: 'utf8', timeout: 900_000 },
+    );
+  }
+  if (r.status !== 0 || !existsSync(tmpOut)) {
+    return { ok: false, error: (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-8).join(' | ') };
   }
   copyFileSync(tmpOut, videoPath);
   try {
@@ -361,7 +390,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   } catch {
     /* ignore */
   }
-  return { ok: true, captionCount };
+  return { ok: true, captionCount, avgWordsPerLine };
 }
 
 /**
@@ -380,6 +409,19 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
     results.captions = caps;
     if (caps.ok) {
       console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);
+      try {
+        writeFileSync(
+          join(dirname(videoPath), 'caption-stats.json'),
+          JSON.stringify({
+            captionCount: caps.captionCount,
+            avgWordsPerLine: caps.avgWordsPerLine ?? 0,
+          }),
+        );
+      } catch {
+        /* ignore */
+      }
+    } else if (process.env.AUTOTUBE_LOOP_MODE === '1') {
+      results.captionFail = caps.error || 'caption burn failed';
     }
   }
 

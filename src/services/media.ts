@@ -851,8 +851,12 @@ export function scoreCandidate(
   const urlLower = (c.url || '').toLowerCase();
   if (
     urlLower.includes('gravatar.com/avatar') ||
-    /tse\d\.mm\.bing\.net\/th\/id\/ovp/i.test(urlLower) ||
-    urlLower.includes('/th/id/ovp.') ||
+    /tse\d\.mm\.bing\.net\/th[/?]id=(?:ovp|oip)/i.test(urlLower) ||
+    /\/th\/id\/(?:ovp|oip)\./i.test(urlLower) ||
+    /th\?id=(?:ovp|oip)\./i.test(urlLower) ||
+    /th\.bing\.com\/th\/id\//i.test(urlLower) ||
+    /[_-]\d{2,3}x\d{2,3}(?:\.|\/|$)/i.test(urlLower) ||
+    /[?&]w=\d{1,3}(?:&|$)/.test(urlLower) ||
     (!isLoopVideoFirst() && /\.webp(?:[?#]|$)/.test(urlLower)) ||
     (!isLoopVideoFirst() && /\.avif(?:[?#]|$)/.test(urlLower))
   ) {

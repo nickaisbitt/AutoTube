@@ -388,6 +388,13 @@ export async function executeSourceMedia(
           `Thin browser harvest: segment "${segment.title}" has ${count} assets (< 3/seg) before narration`,
         );
       }
+      if (count === 0) {
+        try {
+          sessionStorage.setItem('autotube_thin_harvest', 'true');
+        } catch {
+          /* ignore */
+        }
+      }
     }
   }
 

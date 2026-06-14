@@ -188,16 +188,42 @@ export function evaluatePlaceholderGate(videoPath) {
 }
 
 /**
+ * Loop-mode caption quality gate from overlay sidecar.
+ * @param {string} videoPath
+ */
+export function evaluateCaptionGate(videoPath) {
+  if (process.env.AUTOTUBE_LOOP_MODE !== '1') return { available: false };
+  const statsPath = join(dirname(videoPath), 'caption-stats.json');
+  if (!existsSync(statsPath)) return { available: false };
+  try {
+    const stats = JSON.parse(readFileSync(statsPath, 'utf8'));
+    const avg = stats.avgWordsPerLine ?? 0;
+    const count = stats.captionCount ?? 0;
+    const minAvg = 4;
+    return {
+      available: true,
+      pass: count > 0 && avg >= minAvg,
+      captionCount: count,
+      avgWordsPerLine: Math.round(avg * 10) / 10,
+      detail: `${count} lines, avg ${avg.toFixed(1)} words/line (min ${minAvg})`,
+    };
+  } catch {
+    return { available: false };
+  }
+}
+
+/**
  * Composite objective gate from scene QA + technical QA.
  * Draft tier: scene + clip-count + silence + placeholder (tech score deferred to full tier).
  * Full tier: all checks including tech_score.
- * @param {{ sceneQa?: object, objectiveQa?: object, clipCountGate?: object, placeholderGate?: object, renderTier?: string }} parts
+ * @param {{ sceneQa?: object, objectiveQa?: object, clipCountGate?: object, placeholderGate?: object, captionGate?: object, repetition?: object, renderTier?: string }} parts
  */
 export function evaluateObjectiveGate(parts) {
   const scene = parts.sceneQa;
   const tech = parts.objectiveQa;
   const clipGate = parts.clipCountGate;
   const placeholderGate = parts.placeholderGate;
+  const captionGate = parts.captionGate;
   const tier = parts.renderTier === 'full' ? 'full' : 'draft';
   const checks = [];
 
@@ -221,6 +247,22 @@ export function evaluateObjectiveGate(parts) {
         || `${placeholderGate.placeholderPct}% placeholders (max ${placeholderGate.maxPlaceholderPct}%)${segNote}`,
     });
   }
+  if (captionGate?.available) {
+    checks.push({
+      name: 'caption_coherence',
+      pass: captionGate.pass === true,
+      detail: captionGate.detail || `avg ${captionGate.avgWordsPerLine} words/line`,
+    });
+  }
+  const repetition = parts.repetition;
+  if (repetition) {
+    const repFail = (repetition.duplicateRunCount ?? 0) >= 1 || (repetition.repeatPct ?? 0) >= 12;
+    checks.push({
+      name: 'visual_repetition',
+      pass: !repFail,
+      detail: `${repetition.duplicateRunCount ?? 0} runs, ${repetition.repeatPct ?? 0}% adjacent`,
+    });
+  }
   if (tech) {
     checks.push({ name: 'silence', pass: tech.silencePass === true, detail: `${tech.silenceFirst60Sec}s silence in first 60s` });
     if (tier === 'full') {
@@ -234,7 +276,9 @@ export function evaluateObjectiveGate(parts) {
       c.name.startsWith('scene_')
       || c.name === 'silence'
       || c.name === 'clip_count'
-      || c.name === 'placeholder_pct',
+      || c.name === 'placeholder_pct'
+      || c.name === 'caption_coherence'
+      || c.name === 'visual_repetition',
   );
   const pass =
     tier === 'draft'

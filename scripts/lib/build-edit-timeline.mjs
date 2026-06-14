@@ -3,7 +3,14 @@
  * Always use post-TTS segment.duration when building for render.
  */
 import { normalizeUrlKey } from './harvest-loop-context.mjs';
-import { aHashFromImage, isSimilarToRegistry, hammingDistance, VISUAL_DUP_MAX_DISTANCE } from './perceptual-hash.mjs';
+import {
+  aHashFromAsset,
+  isSimilarAtDistance,
+  hammingDistance,
+  VISUAL_DUP_MAX_DISTANCE,
+  effectiveVisualDupDistance,
+} from './perceptual-hash.mjs';
+import { computeClipBudget } from './assembly-system.mjs';
 
 /** Hard cap on how many times a single URL may appear across the full 60 s timeline. */
 export const MAX_USES_PER_URL = 2;
@@ -142,11 +149,14 @@ export function buildEditTimeline(project, options = {}) {
   const reason = options.reason ?? 'heuristic placement';
   const preferVideo = options.preferVideo === true;
   const minVideosFirst = options.minVideosFirst ?? 2;
+  const devServer = options.devServer || 'http://localhost:5173';
   const entries = [];
   const globalPool = orderAssetsVideoFirst(project.media || [], preferVideo ? minVideosFirst : 0);
   const globalUrlUse = new Map();
   const uniquePoolSize = new Set((project.media || []).map((a) => urlKey(a)).filter(Boolean)).size;
-  const thinPool = uniquePoolSize < 18;
+  const { requiredUniqueUrls: clipBudget } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
+  const thinPool = uniquePoolSize < Math.max(18, clipBudget);
+  const dupDistance = effectiveVisualDupDistance(thinPool);
   const maxUsesPerUrl = thinPool ? 1 : MAX_USES_PER_URL;
   const globalVisualHashes = [];
 
@@ -156,41 +166,27 @@ export function buildEditTimeline(project, options = {}) {
   const pHashLastAbsTime = new Map(); // hash → last absolute start time
   const pHashCache = new Map(); // assetId/src → hash (null if failed)
 
-  const getThumbnailSrc = (asset) => {
-    const thumb = asset?.thumbnailUrl;
-    if (thumb && /^https?:\/\//i.test(thumb)) return thumb;
-    if (asset?.type === 'image') {
-      const u = asset?.url || '';
-      if (/^https?:\/\//i.test(u)) return u;
-    }
-    return null;
-  };
-
-  // Returns false when the candidate is visually similar to an already-committed clip.
-  // Always returns true when no thumbnail is available or hash computation fails.
   const hashForAsset = (candidate) => {
-    const src = getThumbnailSrc(candidate);
-    if (!src) return null;
-    const cid = candidate.id || src;
-    if (!pHashCache.has(cid)) pHashCache.set(cid, aHashFromImage(src));
+    const cid = candidate.id || candidate.url || '';
+    if (!pHashCache.has(cid)) pHashCache.set(cid, aHashFromAsset(candidate, { devServer }));
     return pHashCache.get(cid) || null;
   };
 
   const visualAlreadyUsed = (hash) => {
     if (!hash) return false;
-    return globalVisualHashes.some((h) => hammingDistance(hash, h) <= VISUAL_DUP_MAX_DISTANCE);
+    return globalVisualHashes.some((h) => hammingDistance(hash, h) <= dupDistance);
   };
 
   const checkPHash = (candidate, absTime = 0, strict = false) => {
     const hash = hashForAsset(candidate);
     if (!hash) return true;
     if (thinPool && visualAlreadyUsed(hash)) return false;
-    if (isSimilarToRegistry(hash, pHashRegistry)) return false;
+    if (isSimilarAtDistance(hash, pHashRegistry, dupDistance)) return false;
     const lastVisual = pHashLastAbsTime.get(hash);
     if (lastVisual !== undefined && absTime - lastVisual < VISUAL_SPACING_SEC) return false;
     if (strict || thinPool) {
       for (const [h, t] of pHashLastAbsTime) {
-        if (hammingDistance(hash, h) <= VISUAL_DUP_MAX_DISTANCE && absTime - t < VISUAL_SPACING_SEC) return false;
+        if (hammingDistance(hash, h) <= dupDistance && absTime - t < VISUAL_SPACING_SEC) return false;
       }
     }
     return true;
@@ -199,8 +195,8 @@ export function buildEditTimeline(project, options = {}) {
   const registerPHash = (asset, absTime) => {
     const hash = hashForAsset(asset);
     if (!hash) return;
-    if (!isSimilarToRegistry(hash, pHashRegistry)) pHashRegistry.push(hash);
-    if (!globalVisualHashes.some((h) => hammingDistance(hash, h) <= VISUAL_DUP_MAX_DISTANCE)) {
+    if (!isSimilarAtDistance(hash, pHashRegistry, dupDistance)) pHashRegistry.push(hash);
+    if (!globalVisualHashes.some((h) => hammingDistance(hash, h) <= dupDistance)) {
       globalVisualHashes.push(hash);
     }
     pHashLastAbsTime.set(hash, absTime);
@@ -402,7 +398,81 @@ export function buildEditTimeline(project, options = {}) {
     cumSegStart += duration;
   }
 
-  return repairTimelineVisualRepeats(entries, project, { thinPool });
+  return repairTimelineVisualRepeats(
+    repairTimelineAdjacentRepeats(entries, project, { thinPool, clipBudget }),
+    project,
+    { thinPool, devServer, dupDistance },
+  );
+}
+
+/**
+ * Post-pass: break back-to-back clips that share the same URL.
+ */
+export function repairTimelineAdjacentRepeats(entries, project, options = {}) {
+  if (!entries?.length || !(project.media?.length)) return entries;
+
+  const uniquePoolSize = new Set((project.media || []).map((a) => urlKey(a)).filter(Boolean)).size;
+  const thinPool = options.thinPool ?? uniquePoolSize < Math.max(18, options.clipBudget || 18);
+  const maxUses = thinPool ? 1 : MAX_USES_PER_URL;
+
+  const mediaById = new Map((project.media || []).map((m) => [m.id, m]));
+  const pool = project.media || [];
+  const entryKey = (entry) => urlKey(mediaById.get(entry?.assetId));
+
+  const segStarts = new Map();
+  let cum = 0;
+  for (const seg of project.script || []) {
+    segStarts.set(seg.id, cum);
+    cum += seg.duration || 0;
+  }
+  const absStart = (entry) => (segStarts.get(entry.segmentId) ?? 0) + (entry.startSec ?? 0);
+
+  const sorted = [...entries].sort((a, b) => absStart(a) - absStart(b));
+  const urlUseCount = new Map();
+  const urlLastAbs = new Map();
+
+  for (let i = 0; i < sorted.length; i += 1) {
+    const entry = sorted[i];
+    const key = entryKey(entry);
+    const t = absStart(entry);
+    const prev = i > 0 ? sorted[i - 1] : null;
+    const prevKey = prev ? entryKey(prev) : null;
+    const uses = key ? (urlUseCount.get(key) || 0) : 0;
+    const lastUse = key ? urlLastAbs.get(key) : undefined;
+    const spacingViol = key && lastUse !== undefined && t - lastUse < URL_SPACING_SEC;
+    const adjacentDup = key && prevKey && key === prevKey;
+
+    if (adjacentDup || spacingViol || (key && uses >= maxUses)) {
+      const nextKey = i + 1 < sorted.length ? entryKey(sorted[i + 1]) : null;
+      const replacement = pool.find((candidate) => {
+        const rKey = urlKey(candidate);
+        if (!rKey || rKey === key) return false;
+        if (rKey === prevKey) return false;
+        if (nextKey && rKey === nextKey) return false;
+        const rUses = urlUseCount.get(rKey) || 0;
+        if (rUses >= maxUses) return false;
+        const rLast = urlLastAbs.get(rKey);
+        if (rLast !== undefined && t - rLast < URL_SPACING_SEC) return false;
+        return true;
+      });
+      if (replacement) {
+        entry.assetId = replacement.id;
+        const newKey = urlKey(replacement);
+        if (newKey) {
+          urlUseCount.set(newKey, (urlUseCount.get(newKey) || 0) + 1);
+          urlLastAbs.set(newKey, t);
+        }
+        continue;
+      }
+    }
+
+    if (key) {
+      urlUseCount.set(key, uses + 1);
+      urlLastAbs.set(key, t);
+    }
+  }
+
+  return entries;
 }
 
 /**
@@ -414,10 +484,14 @@ export function repairTimelineVisualRepeats(entries, project, options = {}) {
 
   const uniquePoolSize = new Set((project.media || []).map((a) => urlKey(a)).filter(Boolean)).size;
   const thinPool = options.thinPool ?? uniquePoolSize < 18;
+  const dupDistance = options.dupDistance ?? effectiveVisualDupDistance(thinPool);
+  const maxUses = thinPool ? 1 : MAX_USES_PER_URL;
 
   const mediaById = new Map((project.media || []).map((m) => [m.id, m]));
   const pool = project.media || [];
   const usedVisualHashes = [];
+  const urlUseCount = new Map();
+  const urlLastAbs = new Map();
   const segStarts = new Map();
   let cum = 0;
   for (const seg of project.script || []) {
@@ -425,23 +499,12 @@ export function repairTimelineVisualRepeats(entries, project, options = {}) {
     cum += seg.duration || 0;
   }
 
-  const thumbSrc = (asset) => {
-    const thumb = asset?.thumbnailUrl;
-    if (thumb && /^https?:\/\//i.test(thumb)) return thumb;
-    if (asset?.type === 'image') {
-      const u = asset?.url || '';
-      if (/^https?:\/\//i.test(u)) return u;
-    }
-    return null;
-  };
-
+  const devServer = options.devServer || 'http://localhost:5173';
   const hashCache = new Map();
   const assetHash = (asset) => {
     if (!asset) return null;
-    const src = thumbSrc(asset);
-    if (!src) return null;
-    const cid = asset.id || src;
-    if (!hashCache.has(cid)) hashCache.set(cid, aHashFromImage(src));
+    const cid = asset.id || asset.url || '';
+    if (!hashCache.has(cid)) hashCache.set(cid, aHashFromAsset(asset, { devServer }));
     return hashCache.get(cid) || null;
   };
 
@@ -449,14 +512,20 @@ export function repairTimelineVisualRepeats(entries, project, options = {}) {
 
   const visualUsed = (hash) => {
     if (!hash) return false;
-    return usedVisualHashes.some((h) => hammingDistance(hash, h) <= VISUAL_DUP_MAX_DISTANCE);
+    return usedVisualHashes.some((h) => hammingDistance(hash, h) <= dupDistance);
   };
 
-  const tooClose = (hash, absStart) => {
+  const tooClose = (hash, absStart, assetKey) => {
     if (!hash) return false;
     if (thinPool && visualUsed(hash)) return true;
+    if (assetKey) {
+      const uses = urlUseCount.get(assetKey) || 0;
+      if (uses >= maxUses) return true;
+      const lastUrl = urlLastAbs.get(assetKey);
+      if (lastUrl !== undefined && absStart - lastUrl < URL_SPACING_SEC) return true;
+    }
     for (const c of committed) {
-      if (hammingDistance(hash, c.hash) <= VISUAL_DUP_MAX_DISTANCE && absStart - c.absTime < VISUAL_SPACING_SEC) {
+      if (hammingDistance(hash, c.hash) <= dupDistance && absStart - c.absTime < VISUAL_SPACING_SEC) {
         return true;
       }
     }
@@ -467,14 +536,19 @@ export function repairTimelineVisualRepeats(entries, project, options = {}) {
     const absStart = (segStarts.get(entry.segmentId) ?? 0) + (entry.startSec ?? 0);
     let asset = mediaById.get(entry.assetId);
     let hash = assetHash(asset);
+    const assetKey = urlKey(asset);
 
-    if (tooClose(hash, absStart)) {
+    if (tooClose(hash, absStart, assetKey)) {
       const replacement = pool.find((candidate) => {
         if (candidate.id === entry.assetId) return false;
         const key = urlKey(candidate);
-        if (key && key === urlKey(asset)) return false;
+        if (key && key === assetKey) return false;
+        const rUses = key ? (urlUseCount.get(key) || 0) : 0;
+        if (key && rUses >= maxUses) return false;
+        const rLast = key ? urlLastAbs.get(key) : undefined;
+        if (key && rLast !== undefined && absStart - rLast < URL_SPACING_SEC) return false;
         const h = assetHash(candidate);
-        return h ? !tooClose(h, absStart) : true;
+        return h ? !tooClose(h, absStart, key) : true;
       });
       if (replacement) {
         entry.assetId = replacement.id;
@@ -485,9 +559,14 @@ export function repairTimelineVisualRepeats(entries, project, options = {}) {
 
     if (hash) {
       committed.push({ hash, absTime: absStart });
-      if (!usedVisualHashes.some((h) => hammingDistance(hash, h) <= VISUAL_DUP_MAX_DISTANCE)) {
+      if (!usedVisualHashes.some((h) => hammingDistance(hash, h) <= dupDistance)) {
         usedVisualHashes.push(hash);
       }
+    }
+    const finalKey = urlKey(asset);
+    if (finalKey) {
+      urlUseCount.set(finalKey, (urlUseCount.get(finalKey) || 0) + 1);
+      urlLastAbs.set(finalKey, absStart);
     }
   }
 
@@ -528,6 +607,7 @@ export function validateEditTimeline(project, options = {}) {
       reason: 'post-sanitize rebuild',
       preferVideo: options.preferVideo === true,
       minVideosFirst: options.minVideosFirst ?? 2,
+      devServer: options.devServer,
     });
   }
   return { rebuilt, staleCount: stale, staleRatio, clipCount: project.editTimeline.length };

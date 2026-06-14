@@ -196,6 +196,8 @@ const OFF_TOPIC_BLOCKLIST = [
   // Motorcycle / stunt wheelie lifestyle — not museum heist B-roll
   { pattern: /\b(?:motorcycle\s+wheelie|dirt\s+bike\s+wheelie|stunt\s+rider\s+wheelie|wheelie\s+on\s+motorcycle)\b/i, requires: /\b(?:motorcycle|stunt|motocross|biker)\b/i },
 
+  { pattern: /whitehouse\.gov|search-govpress|govpress\.gov|\/api\/search-govpress/i, requires: /\b(?:white\s+house|president|biden|trump|oval\s+office|washington\s+dc|us\s+politic|congress|capitol)\b/i },
+
   // Travel bucket-list / unrelated US city features for non-local topics
   { pattern: /\bbucket\s+list\s+boston\b|\bkate\s+weiser\b/i, requires: /\bboston\b|\bbucket\s+list\b/i },
 ];

@@ -14,7 +14,7 @@
  */
 
 import { spawnSync } from 'child_process';
-import { writeFileSync, unlinkSync, existsSync } from 'fs';
+import { writeFileSync, unlinkSync, existsSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -279,6 +279,44 @@ export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, t
   return result.status === 0;
 }
 
+function probeAudioDuration(filePath) {
+  if (!filePath || !existsSync(filePath)) return 0;
+  const probe = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath],
+    { encoding: 'utf8', timeout: 30_000 },
+  );
+  const d = parseFloat((probe.stdout || '').trim());
+  return Number.isFinite(d) && d > 0 ? d : 0;
+}
+
+/** Output codec flags matched to file extension (avoid AAC bitstream in .wav). */
+function concatOutputCodecArgs(outputFile) {
+  const ext = (outputFile.split('.').pop() || '').toLowerCase();
+  if (ext === 'wav') {
+    return ['-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2'];
+  }
+  return ['-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2'];
+}
+
+function runSimpleAudioConcat(listFile, outputFile) {
+  const codecArgs = concatOutputCodecArgs(outputFile);
+  const result = spawnSync('ffmpeg', [
+    '-y', '-f', 'concat', '-safe', '0',
+    '-i', listFile,
+    ...codecArgs,
+    '-af', 'aresample=48000:async=1:min_hard_comp=0.100000:first_pts=0',
+    outputFile,
+  ], { encoding: 'utf8', timeout: 180_000 });
+  return result.status === 0 && existsSync(outputFile) && statSync(outputFile).size > 500;
+}
+
+function expectedConcatDuration(audioFiles, { crossfadeDuration = 0, useCrossfade = false } = {}) {
+  const sum = audioFiles.reduce((s, f) => s + (f.duration || probeAudioDuration(f.file) || 0), 0);
+  if (!useCrossfade || audioFiles.length <= 1) return sum;
+  return Math.max(0, sum - crossfadeDuration * (audioFiles.length - 1));
+}
+
 /**
  * Concatenate multiple audio files into a single AAC file using ffmpeg concat.
  * Implements anti-banding crossfade transitions between segments to prevent
@@ -289,14 +327,19 @@ export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, t
  * - Applies 150ms fade-out/fade-in overlap between consecutive segments
  * - Normalizes all segments to consistent sample rate (48kHz) before concatenation
  *
+ * Loop mode uses simple concat (crossfade chains truncate badly with 8+ segments).
+ *
  * @param {Array<{file: string, duration: number}>} audioFiles  Audio segments to concatenate.
  * @param {string} outputFile  Path for the combined output file.
  * @param {object} [options]   Optional parameters.
  * @param {number} [options.crossfadeDuration=0.15] Crossfade duration in seconds.
+ * @param {boolean} [options.simpleConcat] Force simple concat demuxer (no crossfade).
  * @returns {Promise<boolean>} True if concatenation succeeded.
  */
 export async function concatenateAudio(audioFiles, outputFile, options = {}) {
   const { crossfadeDuration = 0.5 } = options;
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const useSimpleConcat = options.simpleConcat === true || loopMode || audioFiles.length > 6;
 
   if (audioFiles.length === 0) {
     console.warn('  ⚠ No audio files to concatenate');
@@ -304,98 +347,115 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
   }
 
   if (audioFiles.length === 1) {
-    // Single file: just convert format
+    const ext = (outputFile.split('.').pop() || '').toLowerCase();
+    if (ext === 'wav') {
+      const copy = spawnSync('ffmpeg', [
+        '-y', '-i', audioFiles[0].file,
+        '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2',
+        outputFile,
+      ], { encoding: 'utf8', timeout: 60_000 });
+      return copy.status === 0;
+    }
     return convertAudioFormat(audioFiles[0].file, outputFile);
   }
 
-  console.log(`  🔗 Concatenating ${audioFiles.length} audio segments with ${crossfadeDuration}s crossfades...`);
+  const expectedSec = expectedConcatDuration(audioFiles, { crossfadeDuration, useCrossfade: !useSimpleConcat });
+  const modeLabel = useSimpleConcat ? 'simple concat' : `${crossfadeDuration}s crossfades`;
+  console.log(`  🔗 Concatenating ${audioFiles.length} audio segments (${modeLabel}, target ~${expectedSec.toFixed(1)}s)...`);
 
-  // First, normalize all input files to consistent format
   const normalizedFiles = [];
+  const normExt = useSimpleConcat && outputFile.endsWith('.wav') ? 'wav' : 'aac';
   for (let i = 0; i < audioFiles.length; i++) {
-    const normalizedPath = join(tmpdir(), `autotube-norm-${Date.now()}-${i}.aac`);
-    const ok = convertAudioFormat(audioFiles[i].file, normalizedPath);
+    const normalizedPath = join(tmpdir(), `autotube-norm-${Date.now()}-${i}.${normExt}`);
+    const ok = normExt === 'wav'
+      ? spawnSync('ffmpeg', [
+        '-y', '-i', audioFiles[i].file,
+        '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2',
+        normalizedPath,
+      ], { encoding: 'utf8', timeout: 60_000 }).status === 0
+      : convertAudioFormat(audioFiles[i].file, normalizedPath);
     if (!ok) {
       console.warn(`  ⚠ Failed to normalize segment ${i}`);
-      // Clean up already normalized files
-      normalizedFiles.forEach(f => { try { unlinkSync(f); } catch {} });
+      normalizedFiles.forEach((f) => { try { unlinkSync(f); } catch {} });
       return false;
     }
     normalizedFiles.push(normalizedPath);
   }
 
-  // Build concat list file
   const listFile = join(tmpdir(), `autotube-audio-list-${Date.now()}.txt`);
-  const listContent = normalizedFiles.map(f => `file '${f}'`).join('\n');
+  const listContent = normalizedFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n');
   writeFileSync(listFile, listContent);
 
-  // Use concat demuxer with anti-banding crossfade filter chain
-  // The crossfade uses exponential curves to avoid quantization banding artifacts
-  const crossfadeMs = Math.round(crossfadeDuration * 1000);
-  
-  // For 2+ files, build complex filter with acrossfade
-  let filterComplex = '';
-  let lastOutput = '[0:a]';
-  
-  for (let i = 0; i < normalizedFiles.length; i++) {
-    if (i === 0) {
-      filterComplex += `[${i}:a]aresample=48000:async=1:first_pts=0[a${i}];`;
-    } else {
-      filterComplex += `[${i}:a]aresample=48000:async=1[a${i}];`;
+  const cleanup = () => {
+    try { unlinkSync(listFile); } catch {}
+    normalizedFiles.forEach((f) => { try { unlinkSync(f); } catch {} });
+  };
+
+  let success = false;
+
+  if (useSimpleConcat) {
+    success = runSimpleAudioConcat(listFile, outputFile);
+    if (success) {
+      console.log('  ✓ Audio concatenated (simple concat, loop-safe)');
     }
-  }
-  
-  // Chain acrossfade filters
-  if (normalizedFiles.length === 2) {
-    filterComplex += `[a0][a1]acrossfade=d=${crossfadeDuration}:c1=exp:c2=exp[out]`;
   } else {
-    // Multiple segments: chain acrossfade operations
-    filterComplex += `[a0][a1]acrossfade=d=${crossfadeDuration}:c1=exp:c2=exp[cross0];`;
-    for (let i = 2; i < normalizedFiles.length; i++) {
-      const prevIdx = i - 2;
-      const currIdx = i;
-      if (i === normalizedFiles.length - 1) {
-        filterComplex += `[cross${prevIdx}][a${currIdx}]acrossfade=d=${crossfadeDuration}:c1=exp:c2=exp[out]`;
+    let filterComplex = '';
+    for (let i = 0; i < normalizedFiles.length; i++) {
+      filterComplex += `[${i}:a]aresample=48000:async=1:first_pts=0[a${i}];`;
+    }
+
+    if (normalizedFiles.length === 2) {
+      filterComplex += `[a0][a1]acrossfade=d=${crossfadeDuration}:c1=exp:c2=exp[out]`;
+    } else {
+      filterComplex += `[a0][a1]acrossfade=d=${crossfadeDuration}:c1=exp:c2=exp[cross0];`;
+      for (let i = 2; i < normalizedFiles.length; i++) {
+        const prevIdx = i - 2;
+        if (i === normalizedFiles.length - 1) {
+          filterComplex += `[cross${prevIdx}][a${i}]acrossfade=d=${crossfadeDuration}:c1=exp:c2=exp[out]`;
+        } else {
+          filterComplex += `[cross${prevIdx}][a${i}]acrossfade=d=${crossfadeDuration}:c1=exp:c2=exp[cross${i - 1}];`;
+        }
+      }
+    }
+
+    const codecArgs = concatOutputCodecArgs(outputFile);
+    const result = spawnSync('ffmpeg', [
+      '-y',
+      ...normalizedFiles.flatMap((f) => ['-i', f]),
+      '-filter_complex', filterComplex,
+      '-map', '[out]',
+      ...codecArgs,
+      outputFile,
+    ], { encoding: 'utf8', timeout: 180_000 });
+
+    if (result.status === 0) {
+      const outDur = probeAudioDuration(outputFile);
+      if (expectedSec > 0 && outDur < expectedSec * 0.85) {
+        console.warn(`  ⚠ Crossfade output too short (${outDur.toFixed(1)}s vs ~${expectedSec.toFixed(1)}s) — retrying simple concat`);
+        success = false;
       } else {
-        filterComplex += `[cross${prevIdx}][a${currIdx}]acrossfade=d=${crossfadeDuration}:c1=exp:c2=exp[cross${i-1}];`;
+        console.log('  ✓ Audio concatenated with anti-banding crossfades');
+        success = true;
       }
     }
   }
 
-  const args = [
-    '-y',
-    ...normalizedFiles.flatMap((_, i) => ['-i', normalizedFiles[i]]),
-    '-filter_complex', filterComplex,
-    '-map', '[out]',
-    '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
-  ];
-  // native aac encoder only supports fltp sample format
-  // do not pass -sample_fmt s16 for aac
-  args.push(outputFile);
-
-  const result = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 120000 });
-
-  let success = false;
-  if (result.status !== 0) {
-    console.warn('  ⚠ Complex crossfade failed — falling back to simple concat:', result.stderr);
-    // Fallback: simple concatenation without crossfades
-    const fallbackResult = spawnSync('ffmpeg', [
-      '-y', '-f', 'concat', '-safe', '0',
-      '-i', listFile,
-      '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
-      '-af', 'aresample=48000:async=1:min_hard_comp=0.100000:first_pts=0',
-      outputFile,
-    ], { encoding: 'utf8', timeout: 60000 });
-    success = fallbackResult.status === 0;
-  } else {
-    console.log('  ✓ Audio concatenated with anti-banding crossfades');
-    success = true;
+  if (!success) {
+    console.warn('  ⚠ Using simple concat fallback');
+    success = runSimpleAudioConcat(listFile, outputFile);
   }
 
-  // Clean up temporary files
-  try { unlinkSync(listFile); } catch {}
-  normalizedFiles.forEach(f => { try { unlinkSync(f); } catch {} });
+  if (success && expectedSec > 0) {
+    const outDur = probeAudioDuration(outputFile);
+    if (outDur < expectedSec * 0.85) {
+      console.warn(`  ⚠ Concat output still short (${outDur.toFixed(1)}s vs ~${expectedSec.toFixed(1)}s expected)`);
+      success = false;
+    } else {
+      console.log(`  ✓ Mixed narration duration: ${outDur.toFixed(1)}s`);
+    }
+  }
 
+  cleanup();
   return success;
 }
 

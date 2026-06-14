@@ -794,7 +794,8 @@ function isJunkHarvestUrl(url) {
     u.includes('pin.it/') ||
     /gettyimages|shutterstock|alamy|istockphoto/i.test(u) ||
     /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/oar\d*\.jpg/i.test(u) ||
-    /watch\s+free\s+movies?\s+on\s+tiktok|free\s+movies?\s+on\s+tiktok/i.test(u)
+    /watch\s+free\s+movies?\s+on\s+tiktok|free\s+movies?\s+on\s+tiktok/i.test(u) ||
+    /whitehouse\.gov|search-govpress|govpress/i.test(u)
   );
 }
 

@@ -107,7 +107,37 @@ function prepareSegmentMedia(segMedia) {
   return orderAssetsVideoFirst(segMedia, 2);
 }
 
-function pickAssetAtTime(t, segMedia, intervalSec) {
+function assetKey(asset) {
+  return asset?.id || asset?.url || '';
+}
+
+/** Stable URL key for manifest exclusion (prefer embedded source page over proxy path). */
+function assetManifestKey(asset) {
+  const src = (asset?.sourceUrl || '').trim();
+  if (src && /^https?:\/\//i.test(src)) return src.split('?')[0].toLowerCase();
+  const url = asset?.url || '';
+  const match = url.match(/[?&]url=([^&]+)/i);
+  if (match) {
+    try {
+      return decodeURIComponent(match[1]).split('?')[0].toLowerCase();
+    } catch {
+      return match[1].split('?')[0].toLowerCase();
+    }
+  }
+  return url.split('?')[0].toLowerCase();
+}
+
+function pickAssetAvoidingRepeat(candidates, slot, lastManifestKey) {
+  if (!candidates.length) return null;
+  if (lastManifestKey && candidates.length > 1) {
+    const rotated = [...candidates.slice(slot % candidates.length), ...candidates.slice(0, slot % candidates.length)];
+    const alt = rotated.find((a) => assetManifestKey(a) !== lastManifestKey);
+    if (alt) return alt;
+  }
+  return candidates[slot % candidates.length];
+}
+
+function pickAssetAtTime(t, segMedia, intervalSec, lastManifestKey = null) {
   const pool = prepareSegmentMedia(segMedia);
   if (pool.length <= 1) return pool[0];
   if (intervalSec <= 0) return pool[0];
@@ -117,15 +147,15 @@ function pickAssetAtTime(t, segMedia, intervalSec) {
     const images = pool.filter((a) => !isVideoAsset(a));
     const slot = Math.floor(t / intervalSec);
     if (videos.length && slot < 2) {
-      return videos[slot % videos.length];
+      return pickAssetAvoidingRepeat(videos, slot, lastManifestKey) || videos[slot % videos.length];
     }
     const stillPool = videos.length > 2 ? [...videos.slice(2), ...images] : images.length ? images : pool;
     const stillSlot = Math.max(0, slot - Math.min(2, videos.length));
-    return stillPool[stillSlot % stillPool.length];
+    return pickAssetAvoidingRepeat(stillPool, stillSlot, lastManifestKey) || stillPool[stillSlot % stillPool.length];
   }
 
-  const idx = Math.floor(t / intervalSec) % pool.length;
-  return pool[idx];
+  const idx = Math.floor(t / intervalSec);
+  return pickAssetAvoidingRepeat(pool, idx, lastManifestKey) || pool[idx % pool.length];
 }
 
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
@@ -166,8 +196,9 @@ function buildClipSchedule(segment, segMedia, intervalSec, project, segmentStart
 
   const covered = clips.reduce((sum, c) => sum + c.durationSec, 0);
   let t = clips.length ? clips[clips.length - 1].endSec : 0;
+  let lastManifestKey = clips.length ? assetManifestKey(clips[clips.length - 1].asset) : null;
   while (t < targetDuration - 0.05) {
-    const asset = pickAssetAtTime(t, orderedMedia, intervalSec);
+    const asset = pickAssetAtTime(t, orderedMedia, intervalSec, lastManifestKey);
     // Cap clips in the hook zone to HOOK_MAX_HOLD_SEC regardless of the pool-widened interval.
     const absT = segmentStartSec + t;
     const effectiveInterval = absT < HOOK_ZONE_SEC ? Math.min(intervalSec, HOOK_MAX_HOLD_SEC) : intervalSec;
@@ -178,34 +209,32 @@ function buildClipSchedule(segment, segMedia, intervalSec, project, segmentStart
       endSec: clipEnd,
       durationSec: clipEnd - t,
     });
+    lastManifestKey = assetManifestKey(asset);
     t = clipEnd;
   }
 
   return assignVideoSourceOffsets(clips);
 }
 
-function assetKey(asset) {
-  return asset?.id || asset?.url || '';
-}
-
-/** Stable URL key for manifest exclusion (prefer embedded source page over proxy path). */
-function assetManifestKey(asset) {
-  const src = (asset?.sourceUrl || '').trim();
-  if (src && /^https?:\/\//i.test(src)) return src.split('?')[0].toLowerCase();
-  const url = asset?.url || '';
-  const match = url.match(/[?&]url=([^&]+)/i);
-  if (match) {
-    try {
-      return decodeURIComponent(match[1]).split('?')[0].toLowerCase();
-    } catch {
-      return match[1].split('?')[0].toLowerCase();
-    }
-  }
-  return url.split('?')[0].toLowerCase();
-}
-
 /** Advance per-asset seek position so video B-roll does not replay t=0 every cut. */
 function assignVideoSourceOffsets(clips) {
+  const nextOffset = new Map();
+  return clips.map((clip) => {
+    const key = assetKey(clip.asset);
+    const isVideo =
+      clip.asset?.type === 'video' || /\.(mp4|webm|mov)/i.test(clip.asset?.url || '');
+    if (!isVideo) {
+      return { ...clip, sourceStartSec: 0 };
+    }
+    let offset = nextOffset.get(key) || 0;
+    const maxSrc = Math.max(clip.asset?.duration || 0, 30);
+    if (offset + clip.durationSec > maxSrc - 0.15) offset = 0;
+    nextOffset.set(key, offset + clip.durationSec);
+    return { ...clip, sourceStartSec: offset };
+  });
+}
+
+async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
   const nextOffset = new Map();
   return clips.map((clip) => {
     const key = assetKey(clip.asset);
@@ -470,6 +499,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   let clipIndex = 0;
   let placeholderClipCount = 0;
   const placeholderUrls = [];
+  let lastRenderedManifestKey = null;
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
@@ -532,7 +562,17 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     clipIndex += 1;
 
     const tried = new Set();
-    const alternates = [asset, ...segMedia.filter((a) => assetKey(a) !== assetKey(asset))];
+    const baseKey = assetManifestKey(asset);
+    const alternates = [
+      asset,
+      ...segMedia.filter((a) => assetKey(a) !== assetKey(asset)),
+    ].sort((a, b) => {
+      const ka = assetManifestKey(a);
+      const kb = assetManifestKey(b);
+      const aRepeat = (ka && (ka === lastRenderedManifestKey || ka === baseKey)) ? 1 : 0;
+      const bRepeat = (kb && (kb === lastRenderedManifestKey || kb === baseKey)) ? 1 : 0;
+      return aRepeat - bRepeat;
+    });
     let ok = false;
     let usedPlaceholder = false;
     let lastResolved = asset;
@@ -599,6 +639,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     });
     clipPaths.push(clipOut);
     renderedDuration += durationSec;
+    lastRenderedManifestKey = assetManifestKey(lastResolved || asset);
     return true;
   }
 
@@ -609,7 +650,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   let fillerRound = 0;
   while (renderedDuration < targetDuration - 0.05 && segMedia.length && fillerRound < segMedia.length * 4) {
-    const asset = segMedia[fillerRound % segMedia.length];
+    const asset = pickAssetAtTime(renderedDuration, segMedia, interval, lastRenderedManifestKey);
     const absFillerStart = segmentStartSec + renderedDuration;
     const fillerInterval = absFillerStart < HOOK_ZONE_SEC ? Math.min(interval, HOOK_MAX_HOLD_SEC) : interval;
     const needSec = Math.min(fillerInterval, targetDuration - renderedDuration);
@@ -787,7 +828,9 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   } else if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
     const gap = audioDurationSec - videoDurationSec;
     const paddedVideo = join(workDir, 'merged-video-padded.mp4');
-    if (gap <= 12 && padVideoToDuration(mergedVideo, paddedVideo, audioDurationSec)) {
+    const loopModePad = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+    const maxAudioPadSec = loopModePad ? 45 : 12;
+    if (gap <= maxAudioPadSec && padVideoToDuration(mergedVideo, paddedVideo, audioDurationSec)) {
       videoForMux = paddedVideo;
       tpadSec = gap;
       muxDurationSec = audioDurationSec;

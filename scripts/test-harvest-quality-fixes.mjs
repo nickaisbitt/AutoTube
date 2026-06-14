@@ -1791,6 +1791,10 @@ console.log('\n── 54. Geographic mismatch harvest rejection ──');
     offTopicBlockReason('how to get access to live studio tiktok', louvreTopic) !== null,
   );
   assert(
+    'White House govpress blocked for Louvre heist topic',
+    offTopicBlockReason('https://www.whitehouse.gov/briefing-room/press-briefings/', louvreTopic) !== null,
+  );
+  assert(
     'extractStoryLocation returns Paris for Louvre heist',
     extractStoryLocation(louvreTopic)?.includes('Paris') === true,
   );

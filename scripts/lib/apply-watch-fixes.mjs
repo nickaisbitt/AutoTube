@@ -78,7 +78,7 @@ function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
       s.fixStrategy = 'interval';
       s.cutIntervalSec = Math.max(CUT_FLOOR, cuts - 0.25);
       s.useFfmpegAssembly = true;
-      s.harvestVideoFirst = true;
+      if (!s.preferImageAssembly) s.harvestVideoFirst = true;
       applied.push(`${reason} → strategy interval (cuts ${cuts}s→${s.cutIntervalSec}s)`);
       return true;
     }
@@ -96,7 +96,9 @@ function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
   s.fixStrategy = 'reharvest';
   s.reHarvestMedia = true;
   s.mediaOffset = (s.mediaOffset || 0) + 4;
-  s.harvestVideoFirst = true;
+  s.harvestVideoFirst = false;
+  s.preferImageAssembly = true;
+  s.useCuratedPool = true;
   s.minAssetsPerSegment = Math.min(
     LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
     Math.max(2, (s.minAssetsPerSegment || 4) + 1),
@@ -244,7 +246,9 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     } else {
       s.reHarvestMedia = true;
       s.mediaOffset = (s.mediaOffset || 0) + 2;
-      s.harvestVideoFirst = true;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
+      s.useCuratedPool = true;
       s.fixStrategy = 'reharvest';
       applied.push(`0b. Objective gate FAIL (${failed.join(', ')}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}`);
     }
@@ -259,7 +263,9 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     s.reHarvestMedia = true;
     s.harvestNonce = (s.harvestNonce || 0) + 1;
     s.mediaOffset = 0;
-    s.harvestVideoFirst = true;
+    s.harvestVideoFirst = false;
+    s.preferImageAssembly = true;
+    s.useCuratedPool = true;
     s.fixStrategy = 'reharvest';
     const beforePrune = (s.excludedUrls || []).length;
     s.excludedUrls = pruneExcludedUrlsForReharvest(s.excludedUrls || []);

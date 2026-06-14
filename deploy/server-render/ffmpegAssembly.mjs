@@ -35,6 +35,76 @@ function trimAudioToDuration(inputPath, outputPath, targetSec) {
 
 /** Extend video by cloning the last frame so narration is not truncated. */
 function padVideoToDuration(inputPath, outputPath, targetSec) {
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  if (loopMode) {
+    return padVideoSegmentedTail(inputPath, outputPath, targetSec);
+  }
+  return padVideoSingleTpad(inputPath, outputPath, targetSec);
+}
+
+/** Loop mode: append 1–1.25s tail chunks (hard cuts) instead of one long freeze frame. */
+function padVideoSegmentedTail(inputPath, outputPath, targetSec, holdSec = 1.15) {
+  const current = probeMediaDuration(inputPath);
+  const padSec = targetSec - current;
+  if (padSec <= 0.05) {
+    const copy = spawnSync('ffmpeg', ['-y', '-i', inputPath, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    return copy.status === 0 && existsSync(outputPath);
+  }
+
+  const workDir = dirname(outputPath);
+  const tailChunks = [];
+  let remaining = padSec;
+  let idx = 0;
+  const preset = 'ultrafast';
+  const offsets = [0.08, 0.25, 0.5, 0.9, 1.4, 2.0];
+
+  while (remaining > 0.05) {
+    const chunkDur = Math.min(holdSec, remaining);
+    const chunkOut = join(workDir, `tail-seg-${idx}.mp4`);
+    const seekBack = offsets[idx % offsets.length];
+    const r = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-sseof', `-${seekBack.toFixed(2)}`, '-i', inputPath,
+        '-vf', `tpad=stop_mode=clone:stop_duration=${Math.max(0, chunkDur - 0.04).toFixed(3)}`,
+        '-t', chunkDur.toFixed(3),
+        '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
+        '-an', chunkOut,
+      ],
+      { encoding: 'utf8', timeout: 120_000 },
+    );
+    if (r.status !== 0 || !existsSync(chunkOut) || statSync(chunkOut).size < 10_000) {
+      try { unlinkSync(chunkOut); } catch { /* ignore */ }
+      break;
+    }
+    tailChunks.push(chunkOut);
+    remaining -= chunkDur;
+    idx += 1;
+    if (idx > 40) break;
+  }
+
+  if (!tailChunks.length) {
+    return padVideoSingleTpad(inputPath, outputPath, targetSec);
+  }
+
+  const listFile = join(workDir, 'tail-pad-concat.txt');
+  writeFileSync(
+    listFile,
+    [inputPath, ...tailChunks].map((p) => `file '${resolve(p)}'`).join('\n'),
+  );
+  const concat = spawnSync(
+    'ffmpeg',
+    ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-an', outputPath],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  if (concat.status !== 0 || !existsSync(outputPath)) {
+    return padVideoSingleTpad(inputPath, outputPath, targetSec);
+  }
+  const dur = probeMediaDuration(outputPath);
+  return dur >= targetSec - 0.35;
+}
+
+function padVideoSingleTpad(inputPath, outputPath, targetSec) {
   const current = probeMediaDuration(inputPath);
   const padSec = targetSec - current;
   if (padSec <= 0.05) {
@@ -76,6 +146,55 @@ function padVideoToDuration(inputPath, outputPath, targetSec) {
   return false;
 }
 
+/** Fill duration gap by cycling through already-rendered tail clips (real cuts, not one freeze). */
+function extendVideoWithRenderedClips(inputPath, outputPath, targetSec, tailClipPaths, holdSec = 1.15) {
+  const current = probeMediaDuration(inputPath);
+  let gap = targetSec - current;
+  if (gap <= 0.05 || !tailClipPaths?.length) return false;
+
+  const workDir = dirname(outputPath);
+  const extras = [];
+  let idx = 0;
+  while (gap > 0.05 && idx < 48) {
+    const src = tailClipPaths[idx % tailClipPaths.length];
+    if (!existsSync(src)) {
+      idx += 1;
+      continue;
+    }
+    const dur = Math.min(holdSec, gap);
+    const out = join(workDir, `gap-fill-${idx}.mp4`);
+    const r = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-i', src,
+        '-t', dur.toFixed(3),
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+        '-an', out,
+      ],
+      { encoding: 'utf8', timeout: 90_000 },
+    );
+    if (r.status === 0 && existsSync(out) && statSync(out).size > 8000) {
+      extras.push(out);
+      gap -= dur;
+    }
+    idx += 1;
+  }
+  if (!extras.length) return false;
+
+  const listFile = join(workDir, 'gap-fill-concat.txt');
+  writeFileSync(
+    listFile,
+    [inputPath, ...extras].map((p) => `file '${resolve(p)}'`).join('\n'),
+  );
+  const concat = spawnSync(
+    'ffmpeg',
+    ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-an', outputPath],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  if (concat.status !== 0 || !existsSync(outputPath)) return false;
+  return probeMediaDuration(outputPath) >= targetSec - 0.35;
+}
+
 function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
@@ -103,8 +222,15 @@ function patternInterruptsEnabled() {
 }
 
 function harvestVideoFirstEnabled() {
+  if (process.env.AUTOTUBE_LOOP_IMAGE_FIRST === '1') return false;
   return process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === '1'
     || process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === 'true';
+}
+
+function imageFirstEnabled() {
+  return process.env.AUTOTUBE_LOOP_IMAGE_FIRST === '1'
+    || process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === '0'
+    || process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === 'false';
 }
 
 function isVideoAsset(asset) {
@@ -114,7 +240,18 @@ function isVideoAsset(asset) {
 }
 
 function prepareSegmentMedia(segMedia) {
-  if (!harvestVideoFirstEnabled() || !segMedia?.length) return segMedia;
+  if (!segMedia?.length) return segMedia;
+  if (imageFirstEnabled()) {
+    return [...segMedia].sort((a, b) => {
+      const av = isVideoAsset(a) ? 1 : 0;
+      const bv = isVideoAsset(b) ? 1 : 0;
+      if (av !== bv) return av - bv;
+      const ac = (a.source || '').includes('curated') ? 0 : 1;
+      const bc = (b.source || '').includes('curated') ? 0 : 1;
+      return ac - bc;
+    });
+  }
+  if (!harvestVideoFirstEnabled()) return segMedia;
   return orderAssetsVideoFirst(segMedia, 2);
 }
 
@@ -562,6 +699,11 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       asset,
       ...segMedia.filter((a) => assetKey(a) !== assetKey(asset)),
     ].sort((a, b) => {
+      if (imageFirstEnabled()) {
+        const av = isVideoAsset(a) ? 1 : 0;
+        const bv = isVideoAsset(b) ? 1 : 0;
+        if (av !== bv) return av - bv;
+      }
       const ka = assetManifestKey(a);
       const kb = assetManifestKey(b);
       const aRepeat = (ka && (ka === lastRenderedManifestKey || ka === baseKey)) ? 1 : 0;
@@ -720,6 +862,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     targetSec: segment.duration || 20,
     videoSec,
     renderedTimeline,
+    tailClipPaths: clipPaths.slice(-8),
   };
 }
 
@@ -738,6 +881,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const allPlaceholderUrls = [];
   const allRenderedTimeline = [];
   const preset = ffmpegPreset();
+  let lastTailClipPaths = [];
 
   const mediaPool = project.media || [];
   let cumulativeSegStartSec = 0;
@@ -768,6 +912,9 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     }
     if (result.renderedTimeline?.length) {
       allRenderedTimeline.push(...result.renderedTimeline);
+    }
+    if (result.tailClipPaths?.length) {
+      lastTailClipPaths = result.tailClipPaths;
     }
     perSegment.push({
       segmentId: seg.id,
@@ -827,7 +974,20 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     const paddedVideo = join(workDir, 'merged-video-padded.mp4');
     const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
     const maxPadSec = loopMode ? 45 : 12;
-    if (gap <= maxPadSec && padVideoToDuration(mergedVideo, paddedVideo, padTargetSec)) {
+    const holdSec = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.15') || 1.15;
+    let padded = false;
+    if (gap <= maxPadSec) {
+      if (lastTailClipPaths.length) {
+        padded = extendVideoWithRenderedClips(mergedVideo, paddedVideo, padTargetSec, lastTailClipPaths, holdSec);
+        if (padded) {
+          console.log(`  [ffmpeg] gap-filled with tail B-roll clips (${gap.toFixed(1)}s, ${holdSec}s cuts)`);
+        }
+      }
+      if (!padded && padVideoToDuration(mergedVideo, paddedVideo, padTargetSec)) {
+        padded = true;
+      }
+    }
+    if (padded) {
       videoForMux = paddedVideo;
       tpadSec = gap;
       videoDurationSec = probeMediaDuration(paddedVideo) || padTargetSec;
@@ -853,7 +1013,20 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     const paddedVideo = join(workDir, 'merged-video-padded.mp4');
     const loopModePad = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
     const maxAudioPadSec = loopModePad ? 45 : 12;
-    if (gap <= maxAudioPadSec && padVideoToDuration(mergedVideo, paddedVideo, audioDurationSec)) {
+    const holdSecPad = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.15') || 1.15;
+    let paddedAudio = false;
+    if (gap <= maxAudioPadSec) {
+      if (lastTailClipPaths.length) {
+        paddedAudio = extendVideoWithRenderedClips(mergedVideo, paddedVideo, audioDurationSec, lastTailClipPaths, holdSecPad);
+        if (paddedAudio) {
+          console.log(`  [ffmpeg] gap-filled with tail B-roll clips (${gap.toFixed(1)}s, keep full narration)`);
+        }
+      }
+      if (!paddedAudio && padVideoToDuration(mergedVideo, paddedVideo, audioDurationSec)) {
+        paddedAudio = true;
+      }
+    }
+    if (paddedAudio) {
       videoForMux = paddedVideo;
       tpadSec = gap;
       muxDurationSec = audioDurationSec;

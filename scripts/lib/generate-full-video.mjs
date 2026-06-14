@@ -1401,8 +1401,11 @@ export async function generateFullVideo(options) {
   if (fixState.reHarvestMedia) {
     fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
     fixState.reHarvestMedia = false;
+    fixState.useCuratedPool = true;
+    fixState.preferImageAssembly = true;
+    fixState.harvestVideoFirst = false;
     if (!options.quiet) {
-      console.log(`   🔄 Re-harvest requested — nonce ${fixState.harvestNonce}, offset ${fixState.mediaOffset || 0}`);
+      console.log(`   🔄 Re-harvest requested — nonce ${fixState.harvestNonce}, offset ${fixState.mediaOffset || 0}, curated pool ON`);
     }
   }
   const priorUrls = loadLastProjectUrls(process.cwd());
@@ -1901,10 +1904,21 @@ export async function generateFullVideo(options) {
         log(`   ⚠ Thin pool (${postSanitizeUnique}/${harvestBudget} URLs) — reset mediaOffset, nonce ${fixState.harvestNonce}`);
       }
       // YouTube proxy clips fail often — prefer reliable editorial stills for assembly.
-      if (postSanitizeUnique < Math.max(harvestBudget, 28) || fixState.fixStrategy === 'captions') {
+      if (
+        postSanitizeUnique < Math.max(harvestBudget, 28)
+        || fixState.fixStrategy === 'captions'
+        || fixState.fixStrategy === 'hard_cuts'
+        || fixState.preferImageAssembly
+      ) {
         fixState.harvestVideoFirst = false;
         fixState.preferImageAssembly = true;
         log(`   🖼 Image-first assembly (${postSanitizeUnique} URLs, strategy=${fixState.fixStrategy || 'default'})`);
+      }
+      if (postSanitizeUnique < harvestBudget || fixState.reHarvestMedia) {
+        ensureEditorialPool(project, fixState.minAssetsPerSegment || 4, {}, {
+          forceCurated: true,
+          cutIntervalSec: fixState.cutIntervalSec,
+        });
       }
       if (mediaReport.volumePass === false) {
         const failing = mediaReport.harvestQuality?.failing || [];

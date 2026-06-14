@@ -369,7 +369,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   const assPath = join('/tmp', `autotube-captions-${process.pid}.ass`);
   writeFileSync(assPath, assContent);
 
-  const tmpOut = videoPath.replace(/\.mp4$/, '-captioned.mp4');
+  const tmpOut = join('/tmp', `autotube-captioned-${process.pid}-${Date.now()}.mp4`);
   const assFilter = `ass=${assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")}`;
   const encodeArgs = ['-y', '-i', videoPath, '-vf', assFilter, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut];
   let r = spawnSync('ffmpeg', encodeArgs, { encoding: 'utf8', timeout: 900_000 });
@@ -404,8 +404,23 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
   const results = {};
   if (!isYouTubeExportMode(project)) return results;
 
+  const hook = overlayHookText(videoPath, project);
+  results.hook = hook;
+  if (hook.ok) {
+    console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}"`);
+  } else if (process.env.AUTOTUBE_LOOP_MODE === '1') {
+    console.error(`  [ffmpeg] hook overlay FAILED: ${hook.error}`);
+  }
+
   if (wordTimestampCache?.size) {
-    const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentStartTimes);
+    let caps = { ok: false, error: 'not attempted' };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentStartTimes);
+      if (caps.ok) break;
+      if (attempt < 3) {
+        console.log(`  [ffmpeg] caption burn retry ${attempt}/3…`);
+      }
+    }
     results.captions = caps;
     if (caps.ok) {
       console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);
@@ -422,15 +437,9 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
       }
     } else if (process.env.AUTOTUBE_LOOP_MODE === '1') {
       results.captionFail = caps.error || 'caption burn failed';
+      console.error(`  [ffmpeg] caption overlay FAILED: ${caps.error || 'unknown'}`);
     }
   }
 
-  const hook = overlayHookText(videoPath, project);
-  results.hook = hook;
-  if (hook.ok) {
-    console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}"`);
-  } else {
-    console.error(`  [ffmpeg] hook overlay FAILED: ${hook.error}`);
-  }
   return results;
 }

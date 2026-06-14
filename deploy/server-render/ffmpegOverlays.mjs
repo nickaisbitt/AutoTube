@@ -2,7 +2,7 @@
  * Post-mux overlays for ffmpeg assembly (hook text + karaoke captions).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
+import { existsSync, writeFileSync, unlinkSync, copyFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
 import { MIN_CAPTION_WORDS } from './assembly-system.mjs';
@@ -371,17 +371,17 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
 
   const tmpOut = join('/tmp', `autotube-captioned-${process.pid}-${Date.now()}.mp4`);
   const assFilter = `ass=${assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")}`;
-  const encodeArgs = ['-y', '-i', videoPath, '-vf', assFilter, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut];
+  const encodeArgs = ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', assFilter, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut];
   let r = spawnSync('ffmpeg', encodeArgs, { encoding: 'utf8', timeout: 900_000 });
-  if (r.status !== 0 || !existsSync(tmpOut)) {
+  if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
     r = spawnSync(
       'ffmpeg',
-      ['-y', '-i', videoPath, '-vf', `subtitles='${assPath.replace(/'/g, "'\\''")}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
+      ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', `subtitles='${assPath.replace(/'/g, "'\\''")}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
       { encoding: 'utf8', timeout: 900_000 },
     );
   }
-  if (r.status !== 0 || !existsSync(tmpOut)) {
-    return { ok: false, error: (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-8).join(' | ') };
+  if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
+    return { ok: false, error: (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-8).join(' | ') || `exit ${r.status}` };
   }
   copyFileSync(tmpOut, videoPath);
   try {

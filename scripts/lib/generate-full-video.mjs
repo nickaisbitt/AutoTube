@@ -3,7 +3,7 @@
  * Used by generate-full-video.mjs CLI and video-improvement-loop.mjs.
  */
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync, statSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync, statSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
@@ -1149,7 +1149,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
 
     const topicForFallback = project.topic || project.title || '';
     ensureEditorialPool(project, minPerSegment, report, {
-      forceCurated: options.useCuratedPool === true,
+      forceCurated: options.useCuratedPool === true || isCrimeNewsTopic(topicForFallback),
       cutIntervalSec: options.cutIntervalSec,
     });
 
@@ -1381,6 +1381,36 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   ).size;
   writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
   return report;
+}
+
+/** Burn captions after server-render when in-pipeline overlay pass failed or was skipped. */
+async function burnCaptionsPostRender(videoPath, outDir) {
+  if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
+  const narrDir = readdirSync(outDir)
+    .filter((d) => d.startsWith('narration-audio-'))
+    .sort()
+    .pop();
+  if (!narrDir) return { ok: false, error: 'no narration dir' };
+
+  const cache = new Map();
+  const starts = [];
+  let segIdx = 0;
+  let cumulative = 0;
+  for (let i = 0; i < 12; i++) {
+    const wf = join(outDir, narrDir, `narration-${i}.words.json`);
+    if (!existsSync(wf)) continue;
+    const parsed = JSON.parse(readFileSync(wf, 'utf8'));
+    const words = parsed.words || parsed;
+    if (!words?.length) continue;
+    cache.set(segIdx, words);
+    starts[segIdx] = cumulative;
+    cumulative += words[words.length - 1]?.end || 0;
+    segIdx += 1;
+  }
+  if (!cache.size) return { ok: false, error: 'no word timestamps' };
+
+  const { overlayKaraokeCaptions } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
+  return overlayKaraokeCaptions(videoPath, cache, starts);
 }
 
 /**
@@ -2051,6 +2081,25 @@ export async function generateFullVideo(options) {
     const gate = validateOutput(produced, 'Render output', { minBytes: MIN_RENDER_OUTPUT_BYTES });
     if (!gate.valid) {
       return { ok: false, error: gate.error, topic, outDir, renderRetried };
+    }
+
+    try {
+      const capResult = await burnCaptionsPostRender(produced, outDir);
+      if (capResult.ok) {
+        log(`   📝 Post-render captions: ${capResult.captionCount} lines burned`);
+        writeFileSync(
+          join(outDir, 'caption-stats.json'),
+          JSON.stringify({
+            captionCount: capResult.captionCount,
+            avgWordsPerLine: capResult.avgWordsPerLine ?? 0,
+            postRender: true,
+          }),
+        );
+      } else if (capResult.error && !existsSync(join(outDir, 'caption-stats.json'))) {
+        log(`   ⚠ Post-render caption burn: ${capResult.error}`);
+      }
+    } catch (capErr) {
+      log(`   ⚠ Post-render caption burn skipped: ${capErr.message}`);
     }
 
     const probe = spawnSync(

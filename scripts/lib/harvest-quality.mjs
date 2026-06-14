@@ -196,14 +196,20 @@ const OFF_TOPIC_BLOCKLIST = [
   // Motorcycle / stunt wheelie lifestyle — not museum heist B-roll
   { pattern: /\b(?:motorcycle\s+wheelie|dirt\s+bike\s+wheelie|stunt\s+rider\s+wheelie|wheelie\s+on\s+motorcycle)\b/i, requires: /\b(?:motorcycle|stunt|motocross|biker)\b/i },
 
-  // US political press briefings — not Paris museum heist B-roll
-  { pattern: /whitehouse\.gov|search-govpress|govpress\.gov|\/api\/search-govpress/i, requires: /\b(?:white\s+house|president|biden|trump|oval\s+office|washington\s+dc|us\s+politic|congress|capitol)\b/i },
+  // Robber-mask / dancer lifestyle Pexels — not museum heist B-roll
+  { pattern: /\b(?:robber[\s-]?mask|wearing[\s-]?robber|dancers?[\s-]?recording|putting[\s-]?money[\s-]?on[\s-]?the[\s-]?briefcase)\b/i, requires: /\b(?:robber|mask|dancer|dance|briefcase|money\s+stack)\b/i },
+
+  // Low-quality SEO / aggregator crime pages — not editorial footage
+  { pattern: /lawguide\.co\.ke|nexusjournal\.com\/wp-content|news\.zululion\.com|fwmedia\.fandomwire/i, requires: /\b__autotube_never__\b/i },
 
   // Wrong heist stories — Gardner Museum / Netflix doc, not Louvre TikTok heist
   { pattern: /\b(?:gardner\s+museum|isabella\s+stewart\s+gardner|netflix.*robbery|netflix.*heist|stolen\s+vermeer|empty\s+frames?\s+gardner)\b/i, requires: /\b(?:gardner|boston\s+museum|netflix\s+doc|vermeer)\b/i },
 
   // Entertainment / gossip verticals — not crime investigation B-roll
   { pattern: /usatoday\.com\/(?:story|videos?)\/(?:entertainment|celebrity|movies|tv)|okmagazine\.com|\/entertainment\/|celebrity\s+gossip|tabloid\s+headline/i, requires: /\b(?:celebrity|gossip|entertainment\s+news|reality\s+tv|red\s+carpet)\b/i },
+
+  // US political press briefings — not Paris museum heist B-roll
+  { pattern: /whitehouse\.gov|search-govpress|govpress\.gov|\/api\/search-govpress/i, requires: /\b(?:white\s+house|president|biden|trump|oval\s+office|washington\s+dc|us\s+politic|congress|capitol)\b/i },
 
   // Travel bucket-list / unrelated US city features for non-local topics
   { pattern: /\bbucket\s+list\s+boston\b|\bkate\s+weiser\b/i, requires: /\bboston\b|\bbucket\s+list\b/i },

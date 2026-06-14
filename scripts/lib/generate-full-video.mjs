@@ -1375,6 +1375,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   }
 
   writeFileSync(join(outDir, 'harvest-quality.json'), JSON.stringify(volume, null, 2));
+  report.after = project.media.length;
+  report.uniqueUrlCount = new Set(
+    (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+  ).size;
   writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
   return report;
 }
@@ -1896,11 +1900,11 @@ export async function generateFullVideo(options) {
         fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
         log(`   ⚠ Thin pool (${postSanitizeUnique}/${harvestBudget} URLs) — reset mediaOffset, nonce ${fixState.harvestNonce}`);
       }
-      // YouTube proxy clips fail often on thin pools — prefer reliable editorial stills for assembly.
-      if (postSanitizeUnique < Math.max(harvestBudget, 28)) {
+      // YouTube proxy clips fail often — prefer reliable editorial stills for assembly.
+      if (postSanitizeUnique < Math.max(harvestBudget, 28) || fixState.fixStrategy === 'captions') {
         fixState.harvestVideoFirst = false;
         fixState.preferImageAssembly = true;
-        log(`   🖼 Thin pool (${postSanitizeUnique} URLs) — image-first assembly (skip video proxy quota)`);
+        log(`   🖼 Image-first assembly (${postSanitizeUnique} URLs, strategy=${fixState.fixStrategy || 'default'})`);
       }
       if (mediaReport.volumePass === false) {
         const failing = mediaReport.harvestQuality?.failing || [];

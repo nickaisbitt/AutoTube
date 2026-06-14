@@ -90,11 +90,21 @@ export function accumulateExcludedUrls(fixState, project) {
       .filter((key) => key && !isOverBroadExcludeUrl(key)),
   );
   for (const m of project?.media || []) {
+    if (isEditorialHarvestKeep(m)) continue;
     const key = normalizeUrlKey(m.url, m.sourceUrl);
     if (key && !isOverBroadExcludeUrl(key)) prev.add(key);
   }
   fixState.excludedUrls = [...prev].slice(-400);
   return fixState;
+}
+
+/** Curated/editorial B-roll must stay in the harvest pool across loop retries. */
+function isEditorialHarvestKeep(asset) {
+  const src = `${asset?.source || ''}`.toLowerCase();
+  const hay = `${asset?.url || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+  if (src === 'curated-topic-pool' || src === 'crime-fallback-stock') return true;
+  if (/upload\.wikimedia\.org|images\.unsplash\.com\/photo-/.test(hay)) return true;
+  return false;
 }
 
 /**

@@ -363,18 +363,22 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
 
   if (captionCount === 0) return { ok: false, error: 'no word timestamps' };
 
-  const assPath = join(dirname(videoPath), 'captions-overlay.ass');
+  const assPath = join('/tmp', `autotube-captions-${process.pid}.ass`);
   writeFileSync(assPath, assContent);
 
   const tmpOut = videoPath.replace(/\.mp4$/, '-captioned.mp4');
-  const assEsc = assPath.replace(/'/g, "'\\''");
-  const r = spawnSync(
-    'ffmpeg',
-    ['-y', '-i', videoPath, '-vf', `ass='${assEsc}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
-    { encoding: 'utf8', timeout: 600_000 },
-  );
+  const assFilter = `ass=${assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")}`;
+  const encodeArgs = ['-y', '-i', videoPath, '-vf', assFilter, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut];
+  let r = spawnSync('ffmpeg', encodeArgs, { encoding: 'utf8', timeout: 900_000 });
   if (r.status !== 0 || !existsSync(tmpOut)) {
-    return { ok: false, error: (r.stderr || '').slice(-300) };
+    r = spawnSync(
+      'ffmpeg',
+      ['-y', '-i', videoPath, '-vf', `subtitles='${assPath.replace(/'/g, "'\\''")}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
+      { encoding: 'utf8', timeout: 900_000 },
+    );
+  }
+  if (r.status !== 0 || !existsSync(tmpOut)) {
+    return { ok: false, error: (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-8).join(' | ') };
   }
   copyFileSync(tmpOut, videoPath);
   try {

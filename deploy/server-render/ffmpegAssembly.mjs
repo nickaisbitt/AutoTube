@@ -41,28 +41,39 @@ function padVideoToDuration(inputPath, outputPath, targetSec) {
     const copy = spawnSync('ffmpeg', ['-y', '-i', inputPath, '-c', 'copy', outputPath], { encoding: 'utf8' });
     return copy.status === 0 && existsSync(outputPath);
   }
-  const r = spawnSync(
-    'ffmpeg',
-    [
-      '-y', '-i', inputPath,
-      '-vf', `tpad=stop_mode=clone:stop_duration=${padSec.toFixed(3)}`,
-      '-c:v', 'libx264', '-preset', ffmpegPreset(), '-pix_fmt', 'yuv420p',
-      '-an', outputPath,
-    ],
-    { encoding: 'utf8', timeout: 300_000 },
-  );
-  if (r.status !== 0 || !existsSync(outputPath)) return false;
-  const size = statSync(outputPath).size;
-  const dur = probeMediaDuration(outputPath);
-  if (size < 50_000 || dur < current + padSec * 0.5) {
-    try {
-      unlinkSync(outputPath);
-    } catch {
-      /* ignore */
+
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const timeoutMs = loopMode ? 600_000 : 300_000;
+  const presets = loopMode ? ['ultrafast', 'veryfast', ffmpegPreset()] : [ffmpegPreset(), 'ultrafast'];
+  const vfChains = [
+    `tpad=stop_mode=clone:stop_duration=${padSec.toFixed(3)}`,
+    `scale=1280:-2,tpad=stop_mode=clone:stop_duration=${padSec.toFixed(3)}`,
+  ];
+
+  for (const vf of vfChains) {
+    for (const preset of [...new Set(presets)]) {
+      const r = spawnSync(
+        'ffmpeg',
+        [
+          '-y', '-i', inputPath,
+          '-vf', vf,
+          '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
+          '-an', outputPath,
+        ],
+        { encoding: 'utf8', timeout: timeoutMs },
+      );
+      if (r.status !== 0 || !existsSync(outputPath)) continue;
+      const size = statSync(outputPath).size;
+      const dur = probeMediaDuration(outputPath);
+      if (size >= 50_000 && dur >= current + padSec * 0.5) return true;
+      try {
+        unlinkSync(outputPath);
+      } catch {
+        /* ignore */
+      }
     }
-    return false;
   }
-  return true;
+  return false;
 }
 
 function outputDimensions() {
@@ -823,13 +834,18 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       muxDurationSec = Math.max(padTargetSec, audioDurationSec || padTargetSec);
       console.log(`  [ffmpeg] padded video ${rawVideoSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (tpad ${gap.toFixed(1)}s, target ${padTargetSec.toFixed(1)}s)`);
     } else if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
-      console.log(`  [ffmpeg] video pad unavailable (gap ${gap.toFixed(1)}s) — trimming narration to ${videoDurationSec.toFixed(1)}s`);
-      const trimmedAudio = join(workDir, 'narration-trimmed.wav');
-      if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
-        audioForMux = trimmedAudio;
-        audioTrimmedSec = audioDurationSec - videoDurationSec;
-        muxDurationSec = videoDurationSec;
-        console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (video pad failed, gap ${gap.toFixed(1)}s)`);
+      if (loopMode) {
+        console.log(`  [ffmpeg] WARN loop mode: video pad failed (gap ${gap.toFixed(1)}s) — keeping full narration (${audioDurationSec.toFixed(1)}s)`);
+        muxDurationSec = audioDurationSec;
+      } else {
+        console.log(`  [ffmpeg] video pad unavailable (gap ${gap.toFixed(1)}s) — trimming narration to ${videoDurationSec.toFixed(1)}s`);
+        const trimmedAudio = join(workDir, 'narration-trimmed.wav');
+        if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
+          audioForMux = trimmedAudio;
+          audioTrimmedSec = audioDurationSec - videoDurationSec;
+          muxDurationSec = videoDurationSec;
+          console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (video pad failed, gap ${gap.toFixed(1)}s)`);
+        }
       }
     }
   } else if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
@@ -843,6 +859,9 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       muxDurationSec = audioDurationSec;
       videoDurationSec = probeMediaDuration(paddedVideo) || audioDurationSec;
       console.log(`  [ffmpeg] padded video ${rawVideoSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (tpad ${gap.toFixed(1)}s, keep full narration)`);
+    } else if (loopModePad) {
+      console.log(`  [ffmpeg] WARN loop mode: video pad failed (gap ${gap.toFixed(1)}s) — keeping full narration (${audioDurationSec.toFixed(1)}s)`);
+      muxDurationSec = audioDurationSec;
     } else {
       const trimmedAudio = join(workDir, 'narration-trimmed.wav');
       if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {

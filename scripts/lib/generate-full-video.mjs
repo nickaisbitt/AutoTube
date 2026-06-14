@@ -20,7 +20,7 @@ import { computeClipBudget, computeTimelineDiversityMetrics, shouldUseGlobalUrlD
 import { shouldUseModalRender, renderViaModal } from './modal-render.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import { STOCK_HEALTHCARE_IMAGES, STOCK_CRIME_NEWS_IMAGES } from './stock-media-urls.mjs';
-import { injectCuratedTopicPool } from './curated-topic-pools.mjs';
+import { injectCuratedTopicPool, matchCuratedPoolKey } from './curated-topic-pools.mjs';
 import {
   accumulateExcludedUrls,
   accumulateVisionRejectedUrls,
@@ -465,6 +465,28 @@ function segmentUniqueCount(project, segmentId) {
       .filter(Boolean),
   );
   return keys.size;
+}
+
+/** Inject curated + stock crime pool until global unique URL target is met. */
+function ensureEditorialPool(project, minPerSegment, report, options = {}) {
+  const topic = project.topic || project.title || '';
+  const poolKey = matchCuratedPoolKey(topic);
+  if (!poolKey && !options.forceCurated && !isCrimeNewsTopic(topic)) return 0;
+
+  const unique = new Set(
+    (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+  ).size;
+  const { requiredUniqueUrls } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
+  const target = Math.max(requiredUniqueUrls, 30);
+  if (unique >= target && !options.forceCurated) return 0;
+
+  const added = injectCrimeFallbackPool(project, minPerSegment, report, {
+    forceCurated: true,
+  });
+  if (added) {
+    report.curatedPoolTopUp = (report.curatedPoolTopUp || 0) + added;
+  }
+  return added;
 }
 
 /** Inject curated editorial crime/museum stock when live harvest pool is below clip budget. */
@@ -1126,16 +1148,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     report.afterTopUp = project.media.length;
 
     const topicForFallback = project.topic || project.title || '';
-    const uniqueAfterTopUp = new Set(
-      (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
-    ).size;
-    const { requiredUniqueUrls: budgetAfterTopUp } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
-    const needsCurated = uniqueAfterTopUp < budgetAfterTopUp;
-    if (needsCurated && (isCrimeNewsTopic(topicForFallback) || options.useCuratedPool)) {
-      injectCrimeFallbackPool(project, minPerSegment, report, {
-        forceCurated: options.useCuratedPool === true,
-      });
-    }
+    ensureEditorialPool(project, minPerSegment, report, {
+      forceCurated: options.useCuratedPool === true,
+      cutIntervalSec: options.cutIntervalSec,
+    });
 
     // Force-clear the stale browser-generated editTimeline so validateEditTimeline
     // always rebuilds a fresh timeline that includes top-up assets. Without this,
@@ -1195,6 +1211,9 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     if ((report.postVisionPhashDropped || []).length) {
       project.media = postVisionDedup.media;
       report.postVisionPhashCount = report.postVisionPhashDropped.length;
+      ensureEditorialPool(project, minPerSegment, report, {
+        cutIntervalSec: options.cutIntervalSec,
+      });
     }
   }
 
@@ -1334,8 +1353,23 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       report.rescueRoundAdded = rescueAdded;
 
       if (uniqueUrlsAfterRescue.size < minUnique) {
+        ensureEditorialPool(project, minPerSegment, report, {
+          cutIntervalSec: options.cutIntervalSec,
+          forceCurated: true,
+        });
+        const afterCurated = new Set(
+          (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+        );
+        report.uniqueUrlCount = afterCurated.size;
+        report.curatedRescueInjected = afterCurated.size - uniqueUrlsAfterRescue.size;
+      }
+
+      const finalUnique = new Set(
+        (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+      );
+      if (finalUnique.size < minUnique) {
         report.thinPoolAbort = true;
-        throw new Error(`Thin media pool (${uniqueUrlsAfterRescue.size} unique URLs < ${minUnique}) — reharvest required`);
+        throw new Error(`Thin media pool (${finalUnique.size} unique URLs < ${minUnique}) — reharvest required`);
       }
     }
   }
@@ -1854,10 +1888,19 @@ export async function generateFullVideo(options) {
         accumulateVisionRejectedUrls(fixState, mediaReport.visionRejectedUrls);
       }
       const { requiredUniqueUrls: harvestBudget } = computeClipBudget(project, fixState.cutIntervalSec ?? 1.25);
-      if ((mediaReport.uniqueUrlCount || 0) < harvestBudget) {
+      const postSanitizeUnique = mediaReport.uniqueUrlCount || new Set(
+        (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+      ).size;
+      if (postSanitizeUnique < harvestBudget) {
         fixState.mediaOffset = 0;
         fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
-        log(`   ⚠ Thin pool (${mediaReport.uniqueUrlCount}/${harvestBudget} URLs) — reset mediaOffset, nonce ${fixState.harvestNonce}`);
+        log(`   ⚠ Thin pool (${postSanitizeUnique}/${harvestBudget} URLs) — reset mediaOffset, nonce ${fixState.harvestNonce}`);
+      }
+      // YouTube proxy clips fail often on thin pools — prefer reliable editorial stills for assembly.
+      if (postSanitizeUnique < Math.max(harvestBudget, 28)) {
+        fixState.harvestVideoFirst = false;
+        fixState.preferImageAssembly = true;
+        log(`   🖼 Thin pool (${postSanitizeUnique} URLs) — image-first assembly (skip video proxy quota)`);
       }
       if (mediaReport.volumePass === false) {
         const failing = mediaReport.harvestQuality?.failing || [];
@@ -1876,7 +1919,7 @@ export async function generateFullVideo(options) {
     }
     const timelineReport = validateEditTimeline(project, {
       cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
-      preferVideo: fixState.harvestVideoFirst !== false,
+      preferVideo: fixState.harvestVideoFirst !== false && !fixState.preferImageAssembly,
       minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
       devServer,
     });

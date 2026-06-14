@@ -36,17 +36,17 @@ const isOrphanFragment = (word) => /^[a-z]{1,4},$/i.test(word) && !isPhraseEnd(w
  * - Must not start or end with a weak lead-in word.
  * - Must not have > 50% isBadSplit words.
  */
-function phraseIsValid(buf, { requireSentenceEnd = false } = {}) {
+function phraseIsValid(buf, { requirePunct = true } = {}) {
   if (buf.length < MIN_CAPTION_WORDS) return false;
   const endsWithPunct = isPhraseEnd(buf[buf.length - 1]);
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
-  const minWords = loopMode ? 6 : PREFERRED_CAPTION_WORDS;
-  if (loopMode || requireSentenceEnd) {
+  const minWords = loopMode ? 5 : PREFERRED_CAPTION_WORDS;
+  if (requirePunct && (loopMode || requirePunct)) {
     if (!endsWithPunct) return false;
     if (loopMode && buf.length < minWords) return false;
   }
   if (buf.length < minWords && !endsWithPunct) return false;
-  if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct) return false;
+  if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct && requirePunct) return false;
   if (isWeakLeadIn(buf[0])) return false;
   if (isWeakLeadIn(buf[buf.length - 1])) return false;
   if (buf.some((w) => isOrphanFragment(w))) return false;
@@ -249,6 +249,9 @@ function buildDialogueLines(allWords, cm) {
 
     if (phraseDone && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
+    } else if (loopMode && atMax && buffer.length >= 5 && !wouldSplitBad) {
+      // TTS word streams rarely carry punctuation — emit full phrases at maxWords.
+      flush();
     } else if (!loopMode && atMax && !nearPunctuation && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
     } else if (!loopMode && buffer.length >= cm.maxWords + 2) {
@@ -274,7 +277,7 @@ function buildDialogueLines(allWords, cm) {
   const filtered = dialogueLines.filter((line) => {
     const text = line.split(',,').pop() || '';
     const words = text.trim().split(/\s+/).filter(Boolean);
-    return words.length >= (loopMode ? 6 : MIN_CAPTION_WORDS);
+    return words.length >= (loopMode ? 5 : MIN_CAPTION_WORDS);
   });
 
   const wordCounts = filtered.map((line) => {

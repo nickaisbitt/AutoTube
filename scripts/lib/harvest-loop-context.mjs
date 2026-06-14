@@ -104,6 +104,7 @@ function isEditorialHarvestKeep(asset) {
   const hay = `${asset?.url || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
   if (src === 'curated-topic-pool' || src === 'crime-fallback-stock') return true;
   if (/upload\.wikimedia\.org|images\.unsplash\.com\/photo-/.test(hay)) return true;
+  if (/\/news\/|bbc\.co\.uk|nytimes\.com|reuters\.com|apnews\.com|abcnews\.go\.com|cbsnews|npr\.org|theguardian\.com|globalnews\.ca|inquirer\.net/.test(hay)) return true;
   return false;
 }
 

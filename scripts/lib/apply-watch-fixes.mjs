@@ -286,7 +286,8 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       s.reHarvestMedia = true;
       s.harvestNonce = (s.harvestNonce || 0) + 1;
       s.mediaOffset = 0;
-      s.harvestVideoFirst = true;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
       s.suppressGiphy = true;
       s.fixStrategy = 'reharvest';
       s.useCuratedPool = true;
@@ -295,7 +296,9 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       s.reHarvestMedia = true;
       s.harvestNonce = (s.harvestNonce || 0) + 1;
       s.mediaOffset = 0;
-      s.harvestVideoFirst = true;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
+      s.useCuratedPool = true;
       s.suppressGiphy = true;
       s.fixStrategy = 'reharvest';
       if (harvestProject?.media?.length) {
@@ -311,13 +314,17 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       s.ffmpegHardCuts = true;
       s.useFfmpegAssembly = true;
       s.patternInterrupts = true;
+      s.preferImageAssembly = true;
+      s.harvestVideoFirst = false;
       s.cutIntervalSec = Math.min(1.8, Math.max(1.2, s.cutIntervalSec ?? 1.4));
       applied.push(`0d. Assembly visualCohesion ${scores.visualCohesion}/100 → hard_cuts + interval ${s.cutIntervalSec}s`);
     } else {
       s.reHarvestMedia = true;
       s.harvestNonce = (s.harvestNonce || 0) + 1;
       s.mediaOffset = 0;
-      s.harvestVideoFirst = true;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
+      s.useCuratedPool = true;
       s.suppressGiphy = true;
       s.fixStrategy = 'reharvest';
       applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → reharvest nonce ${s.harvestNonce}, offset reset`);

@@ -2,8 +2,19 @@
  * Post-mux overlays for ffmpeg assembly (hook text + karaoke captions).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, writeFileSync, unlinkSync, copyFileSync, statSync } from 'node:fs';
+import { existsSync, writeFileSync, unlinkSync, renameSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+
+function probeVideoDuration(filePath) {
+  const r = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath],
+    { encoding: 'utf8', timeout: 30_000 },
+  );
+  if (r.status !== 0 || !r.stdout) return null;
+  const d = parseFloat(r.stdout.trim());
+  return Number.isFinite(d) && d > 1 ? d : null;
+}
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
 import { MIN_CAPTION_WORDS } from './assembly-system.mjs';
 
@@ -383,10 +394,20 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
     return { ok: false, error: (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-8).join(' | ') || `exit ${r.status}` };
   }
-  copyFileSync(tmpOut, videoPath);
+  const encodedDuration = probeVideoDuration(tmpOut);
+  if (!encodedDuration) {
+    try { unlinkSync(tmpOut); } catch { /* ignore */ }
+    return { ok: false, error: 'caption encode produced corrupt output (no moov/duration)' };
+  }
+  const tmpReplace = `${videoPath}.caption-tmp-${process.pid}.mp4`;
+  try {
+    renameSync(tmpOut, tmpReplace);
+    renameSync(tmpReplace, videoPath);
+  } catch {
+    return { ok: false, error: 'failed to replace video with captioned output' };
+  }
   try {
     unlinkSync(assPath);
-    unlinkSync(tmpOut);
   } catch {
     /* ignore */
   }

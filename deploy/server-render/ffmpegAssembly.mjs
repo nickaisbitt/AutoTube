@@ -316,9 +316,26 @@ function resolveTimelineAsset(entry, segMedia, mediaPool = []) {
   const byId =
     segMedia.find((m) => m.id === entry.assetId)
     || mediaPool.find((m) => m.id === entry.assetId);
-  if (byId) return byId;
-  const idx = Math.floor((entry.startSec || 0) / Math.max(entry.endSec - entry.startSec, 0.5)) % segMedia.length;
-  return segMedia[idx] || segMedia[0];
+  const base = byId || (() => {
+    const idx = Math.floor((entry.startSec || 0) / Math.max(entry.endSec - entry.startSec, 0.5)) % segMedia.length;
+    return segMedia[idx] || segMedia[0];
+  })();
+  return coerceImageFirstAsset(base, segMedia);
+}
+
+/** When image-first is on, never encode video clips — use still URL or next distinct image. */
+function coerceImageFirstAsset(asset, segMedia) {
+  if (!asset || !imageFirstEnabled() || !isVideoAsset(asset)) return asset;
+  const thumb = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '');
+  if (thumb && !isVideoAsset({ url: thumb })) {
+    return { ...asset, type: 'image', url: thumb, source: `${asset.source || 'Video'} still` };
+  }
+  const pool = prepareSegmentMedia(segMedia).filter((a) => !isVideoAsset(a));
+  return pool.find((a) => assetManifestKey(a) !== assetManifestKey(asset)) || pool[0] || asset;
+}
+
+function isImageLikeUrl(url) {
+  return /\.(jpe?g|png|webp|gif)(?:[?#]|$)/i.test(url || '');
 }
 
 function buildClipSchedule(segment, segMedia, intervalSec, project, segmentStartSec = 0) {
@@ -662,7 +679,13 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   }
 
   async function tryEncodeAsset(candidate, durationSec, label, hintOffset, interrupt, clipOut) {
-    const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(candidate, segMedia, devServer, cacheDir);
+    let workAsset = candidate;
+    if (imageFirstEnabled() && isVideoAsset(candidate)) {
+      workAsset = coerceImageFirstAsset(candidate, segMedia);
+      if (isVideoAsset(workAsset)) return { ok: false, resolvedAsset: workAsset, usedPlaceholder: false };
+    }
+
+    const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(workAsset, segMedia, devServer, cacheDir);
     if (!localSrc) return { ok: false, resolvedAsset, usedPlaceholder: false };
 
     const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
@@ -671,7 +694,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, isInterruptClip: interrupt,
       isHookClip: absTime < 4,
     });
-    if (!ok) {
+    if (!ok && !imageFirstEnabled()) {
       const thumb = resolvedAsset.thumbnailUrl;
       if (thumb) {
         const thumbAsset = { ...resolvedAsset, type: 'image', url: thumb };
@@ -695,9 +718,12 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
     const tried = new Set();
     const baseKey = assetManifestKey(asset);
+    const imagePool = imageFirstEnabled()
+      ? prepareSegmentMedia(segMedia).filter((a) => !isVideoAsset(a))
+      : null;
     const alternates = [
-      asset,
-      ...segMedia.filter((a) => assetKey(a) !== assetKey(asset)),
+      coerceImageFirstAsset(asset, segMedia),
+      ...(imagePool?.length ? imagePool : segMedia).filter((a) => assetKey(a) !== assetKey(asset)),
     ].sort((a, b) => {
       if (imageFirstEnabled()) {
         const av = isVideoAsset(a) ? 1 : 0;

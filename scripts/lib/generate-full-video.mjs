@@ -477,7 +477,7 @@ function ensureEditorialPool(project, minPerSegment, report, options = {}) {
     (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
   ).size;
   const { requiredUniqueUrls } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
-  const target = Math.max(requiredUniqueUrls, 30);
+  const target = Math.max(requiredUniqueUrls, 40);
   if (unique >= target && !options.forceCurated) return 0;
 
   const added = injectCrimeFallbackPool(project, minPerSegment, report, {
@@ -985,7 +985,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       continue;
     }
 
-    if (await tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode })) {
+    const imageFirst = options.preferImageAssembly === true || options.harvestVideoFirst === false;
+    if (!imageFirst && await tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode })) {
       continue;
     }
 
@@ -1909,6 +1910,7 @@ export async function generateFullVideo(options) {
         loopMode: true,
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
         harvestVideoFirst: fixState.harvestVideoFirst !== false,
+        preferImageAssembly: fixState.preferImageAssembly === true,
         minVideosPerSegment: fixState.minVideosPerSegment || 2,
         useCuratedPool: fixState.useCuratedPool === true,
         cutIntervalSec: fixState.cutIntervalSec ?? 1.4,
@@ -2084,8 +2086,15 @@ export async function generateFullVideo(options) {
     }
 
     try {
-      const capResult = await burnCaptionsPostRender(produced, outDir);
-      if (capResult.ok) {
+      const capStatsPath = join(outDir, 'caption-stats.json');
+      const pipelineCaptions = existsSync(capStatsPath)
+        ? JSON.parse(readFileSync(capStatsPath, 'utf8'))
+        : null;
+      const skipPostBurn = (pipelineCaptions?.captionCount || 0) > 0;
+      const capResult = skipPostBurn
+        ? { ok: true, captionCount: pipelineCaptions.captionCount, skipped: true }
+        : await burnCaptionsPostRender(produced, outDir);
+      if (capResult.ok && !capResult.skipped) {
         log(`   📝 Post-render captions: ${capResult.captionCount} lines burned`);
         writeFileSync(
           join(outDir, 'caption-stats.json'),
@@ -2095,11 +2104,28 @@ export async function generateFullVideo(options) {
             postRender: true,
           }),
         );
-      } else if (capResult.error && !existsSync(join(outDir, 'caption-stats.json'))) {
+      } else if (capResult.skipped) {
+        log(`   📝 Post-render captions: skipped (${pipelineCaptions.captionCount} lines already in pipeline)`);
+      } else if (capResult.error && !existsSync(capStatsPath)) {
         log(`   ⚠ Post-render caption burn: ${capResult.error}`);
       }
     } catch (capErr) {
       log(`   ⚠ Post-render caption burn skipped: ${capErr.message}`);
+    }
+
+    const postCapProbe = spawnSync(
+      'ffprobe',
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', produced],
+      { encoding: 'utf8' },
+    );
+    if (postCapProbe.status !== 0 || !postCapProbe.stdout?.trim()) {
+      return {
+        ok: false,
+        error: 'Render output corrupt after caption pass (ffprobe failed — moov missing?)',
+        topic,
+        outDir,
+        renderRetried,
+      };
     }
 
     const probe = spawnSync(

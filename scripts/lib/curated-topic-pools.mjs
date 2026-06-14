@@ -104,9 +104,37 @@ export function injectCuratedTopicPool(project, minPerSegment, report) {
     (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
   );
   let added = 0;
-  let poolIdx = 0;
   const segments = project.script || [];
+  if (!segments.length) return 0;
 
+  // Round-robin: spread every curated still across segments for montage diversity.
+  let poolIdx = 0;
+  const pending = pool.filter((item) => {
+    const key = normalizeUrlKey(item.url);
+    return key && !used.has(key);
+  });
+
+  while (poolIdx < pending.length) {
+    const seg = segments[poolIdx % segments.length];
+    const item = pending[poolIdx];
+    poolIdx += 1;
+    const key = normalizeUrlKey(item.url);
+    if (!key || used.has(key)) continue;
+    used.add(key);
+    project.media.push({
+      id: `curated-${poolIdx}-${seg.id.slice(0, 8)}`,
+      segmentId: seg.id,
+      type: 'image',
+      url: item.url,
+      thumbnailUrl: item.url,
+      alt: item.alt,
+      source: 'curated-topic-pool',
+      query: topic,
+    });
+    added += 1;
+  }
+
+  // Ensure each segment meets minPerSegment with any remaining unused pool items.
   for (const seg of segments) {
     let count = new Set(
       (project.media || [])
@@ -114,15 +142,13 @@ export function injectCuratedTopicPool(project, minPerSegment, report) {
         .map((a) => normalizeUrlKey(a.url, a.sourceUrl))
         .filter(Boolean),
     ).size;
-
-    while (count < minPerSegment && poolIdx < pool.length) {
-      const item = pool[poolIdx];
-      poolIdx += 1;
+    for (const item of pool) {
+      if (count >= minPerSegment) break;
       const key = normalizeUrlKey(item.url);
       if (!key || used.has(key)) continue;
       used.add(key);
       project.media.push({
-        id: `curated-${poolIdx}-${seg.id.slice(0, 8)}`,
+        id: `curated-fill-${count}-${seg.id.slice(0, 8)}`,
         segmentId: seg.id,
         type: 'image',
         url: item.url,
@@ -132,28 +158,6 @@ export function injectCuratedTopicPool(project, minPerSegment, report) {
         query: topic,
       });
       count += 1;
-      added += 1;
-    }
-  }
-
-  // Spread remaining pool across segments for global uniqueness budget.
-  for (const seg of segments) {
-    while (poolIdx < pool.length && added < pool.length) {
-      const item = pool[poolIdx];
-      poolIdx += 1;
-      const key = normalizeUrlKey(item.url);
-      if (!key || used.has(key)) continue;
-      used.add(key);
-      project.media.push({
-        id: `curated-global-${poolIdx}-${seg.id.slice(0, 8)}`,
-        segmentId: seg.id,
-        type: 'image',
-        url: item.url,
-        thumbnailUrl: item.url,
-        alt: item.alt,
-        source: 'curated-topic-pool',
-        query: topic,
-      });
       added += 1;
     }
   }

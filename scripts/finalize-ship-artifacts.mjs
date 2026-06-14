@@ -113,7 +113,12 @@ const minDurationSec = (() => {
   return 180;
 })();
 
-if (durationSec != null && durationSec < minDurationSec) {
+if (durationSec == null || !Number.isFinite(durationSec)) {
+  console.error(`❌ Cannot probe duration on ${best} (truncated/corrupt render — moov atom missing?)`);
+  process.exit(1);
+}
+
+if (durationSec < minDurationSec) {
   console.error(
     `❌ Duration ${durationSec.toFixed(1)}s < ${minDurationSec}s — run npm run render:fixture:full or set MIN_DURATION_SEC for loop/fixture runs`,
   );

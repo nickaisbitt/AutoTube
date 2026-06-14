@@ -483,6 +483,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   let placeholderClipCount = 0;
   const placeholderUrls = [];
   let lastRenderedManifestKey = null;
+  const renderedManifestKeys = [];
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
@@ -563,11 +564,21 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     for (const candidate of alternates) {
       const key = assetKey(candidate);
       if (key && tried.has(key)) continue;
+      const manifestK = assetManifestKey(candidate);
+      const hasUntried = alternates.some(
+        (a) => !tried.has(assetKey(a)) && assetManifestKey(a) !== lastRenderedManifestKey,
+      );
+      if (manifestK && manifestK === lastRenderedManifestKey && hasUntried) continue;
       if (key) tried.add(key);
 
       const result = await tryEncodeAsset(candidate, durationSec, label, hintOffset, interrupt, clipOut);
       lastResolved = result.resolvedAsset || candidate;
       if (result.ok) {
+        const resolvedKey = assetManifestKey(lastResolved);
+        if (resolvedKey && resolvedKey === lastRenderedManifestKey && hasUntried) {
+          ok = false;
+          continue;
+        }
         ok = true;
         if (candidate !== asset) {
           console.log(`  [ffmpeg] ${label}: alternate asset succeeded (${(candidate.sourceUrl || candidate.url || '').slice(0, 72)})`);
@@ -579,11 +590,18 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (!ok) {
       const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
       if (loopMode && clipPaths.length > 0) {
-        const lastClip = clipPaths[clipPaths.length - 1];
+        let cloneSrc = clipPaths[clipPaths.length - 1];
+        for (let ci = clipPaths.length - 1; ci >= 0; ci--) {
+          const mk = renderedManifestKeys[ci];
+          if (mk && mk !== lastRenderedManifestKey) {
+            cloneSrc = clipPaths[ci];
+            break;
+          }
+        }
         const clone = spawnSync(
           'ffmpeg',
           [
-            '-y', '-i', lastClip,
+            '-y', '-i', cloneSrc,
             '-t', String(durationSec),
             '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
             '-an', clipOut,
@@ -614,15 +632,21 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (!ok) {
       return false;
     }
+    const timelineAssetId = usedPlaceholder
+      ? `placeholder-clip-${clipIndex}`
+      : (lastResolved || asset).id;
     renderedTimeline.push({
       segmentId: segment.id,
-      assetId: (lastResolved || asset).id,
+      assetId: timelineAssetId,
       startSec: renderedDuration,
       endSec: renderedDuration + durationSec,
     });
     clipPaths.push(clipOut);
     renderedDuration += durationSec;
-    lastRenderedManifestKey = assetManifestKey(lastResolved || asset);
+    lastRenderedManifestKey = usedPlaceholder
+      ? `placeholder:${timelineAssetId}`
+      : assetManifestKey(lastResolved || asset);
+    renderedManifestKeys.push(lastRenderedManifestKey);
     return true;
   }
 

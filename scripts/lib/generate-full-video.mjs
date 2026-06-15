@@ -1980,6 +1980,25 @@ export async function generateFullVideo(options) {
       minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
       devServer,
     });
+    const { requiredUniqueUrls: preRenderBudget } = computeClipBudget(project, fixState.cutIntervalSec ?? 1.25);
+    const preRenderUnique = new Set(
+      (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+    ).size;
+    if (
+      fixState.preferImageAssembly
+      && preRenderUnique < preRenderBudget
+      && (fixState.cutIntervalSec ?? 1.25) < 1.0
+    ) {
+      fixState.cutIntervalSec = 1.15;
+      const rebuilt = validateEditTimeline(project, {
+        cutIntervalSec: fixState.cutIntervalSec,
+        preferVideo: false,
+        minVideosFirst: 0,
+        devServer,
+      });
+      log(`   📐 Widened cuts to ${fixState.cutIntervalSec}s (thin pool ${preRenderUnique}/${preRenderBudget} URLs)`);
+      Object.assign(timelineReport, rebuilt);
+    }
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }

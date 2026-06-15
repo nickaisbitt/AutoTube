@@ -1420,8 +1420,11 @@ async function burnOverlaysPostRender(videoPath, outDir, project) {
 
   const { applyFfmpegYoutubeOverlays } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
   const results = applyFfmpegYoutubeOverlays(videoPath, project, cache.size ? cache : null, starts);
-  const ok = (results.hook?.ok !== false || hookOk) && (results.captions?.ok !== false || capOk || !cache.size);
-  return { ok, results, postRender: true };
+  const hookBurned = hookOk || results.hook?.ok === true;
+  const capBurned = capOk || results.captions?.ok === true;
+  const needCaptions = cache.size > 0;
+  const ok = hookBurned && (!needCaptions || capBurned);
+  return { ok, results, postRender: true, hookBurned, capBurned, needCaptions };
 }
 
 /**
@@ -2154,6 +2157,20 @@ export async function generateFullVideo(options) {
         log(`   ⚠ Post-render overlays: ${overlayResult.error}`);
       } else if (overlayResult.results?.hook?.error || overlayResult.results?.captions?.error) {
         log(`   ⚠ Post-render overlays: ${overlayResult.results?.hook?.error || overlayResult.results?.captions?.error}`);
+      }
+      if (
+        process.env.AUTOTUBE_LOOP_MODE === '1'
+        && overlayResult.needCaptions
+        && !overlayResult.capBurned
+      ) {
+        return {
+          ok: false,
+          error: `Caption overlay failed — ${overlayResult.results?.captions?.error || 'no captions burned'}`,
+          topic,
+          outDir,
+          renderRetried,
+          fixState,
+        };
       }
     } catch (capErr) {
       log(`   ⚠ Post-render overlays skipped: ${capErr.message}`);

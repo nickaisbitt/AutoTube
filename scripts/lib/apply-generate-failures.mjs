@@ -48,6 +48,11 @@ export function applyGenerateFailureFixes(error, fixState, extra = {}) {
     applied.push(`G2. Harvest volume FAIL → reharvest nonce ${s.harvestNonce}, minAssets ${s.minAssetsPerSegment}`);
   }
 
+  if (/caption overlay failed|no captions burned/i.test(msg)) {
+    s.fixStrategy = 'captions';
+    applied.push('G5. Caption burn FAIL → captions strategy retry');
+  }
+
   if (/timeline short|fetch\/encode failed/i.test(msg)) {
     s.reHarvestMedia = true;
     s.harvestNonce = (s.harvestNonce || 0) + 1;

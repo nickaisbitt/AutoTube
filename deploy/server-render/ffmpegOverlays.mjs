@@ -346,7 +346,7 @@ function buildDialogueLines(allWords, cm) {
 
     if (phraseDone && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
-    } else if (loopMode && atMax && buffer.length >= 5 && !wouldSplitBad) {
+    } else if (loopMode && atMax && buffer.length >= 5 && phraseIsValid(buffer, { requirePunct: false }) && !wouldSplitBad) {
       // TTS word streams rarely carry punctuation — emit full phrases at maxWords.
       flush();
     } else if (!loopMode && atMax && !nearPunctuation && phraseIsValid(buffer) && !wouldSplitBad) {
@@ -363,8 +363,9 @@ function buildDialogueLines(allWords, cm) {
 
   // Loop mode: emit any remaining full phrase (≥5 words) even without TTS punctuation.
   if (loopMode) {
-    if (phraseIsValid(buffer)) flush();
-    else if (buffer.length >= 5 && !isWeakLeadIn(buffer[0]) && !isWeakLeadIn(buffer[buffer.length - 1])) flush();
+    if (phraseIsValid(buffer, { requirePunct: false })) flush();
+    else if (buffer.length >= 5 && !isWeakLeadIn(buffer[0]) && !isWeakLeadIn(buffer[buffer.length - 1])
+      && !buffer.some((w) => isOrphanFragment(w))) flush();
     else buffer = [];
   } else if (phraseIsValid(buffer)) {
     flush();

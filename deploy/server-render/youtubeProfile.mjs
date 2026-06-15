@@ -13,13 +13,13 @@ export function isYouTubeExportMode(project) {
 }
 
 export function captionMetrics(height, width) {
-  const basePx = Math.round(height * 0.078);
-  const currentPx = Math.round(height * 0.092);
-  const strokePx = Math.max(8, Math.round(height * 0.009));
-  const bottomPad = Math.round(height * 0.14);
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const basePx = Math.round(height * (loopMode ? 0.085 : 0.078));
+  const currentPx = Math.round(height * (loopMode ? 0.102 : 0.092));
+  const strokePx = Math.max(loopMode ? 10 : 8, Math.round(height * (loopMode ? 0.011 : 0.009)));
+  const bottomPad = Math.round(height * 0.14);
   // VidNo/EngageMedia: 4–6 words per phrase; loop uses longer phrases for better readability.
-  const maxWords = loopMode ? 8 : 6;
+  const maxWords = loopMode ? 7 : 6;
   return { basePx, currentPx, strokePx, bottomPad, maxWords, barWidth: width * 0.94 };
 }
 

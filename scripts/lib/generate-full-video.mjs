@@ -2061,6 +2061,42 @@ export async function generateFullVideo(options) {
       }
       fixState.excludedUrls = [...merged].slice(-400);
     }
+    if (preflight.needsTopUp) {
+      const minPerSeg = Math.max(3, fixState.minAssetsPerSegment || 6);
+      const topUpReport = {};
+      const curatedAdded = injectCuratedTopicPool(project, minPerSeg, topUpReport);
+      const editorialAdded = ensureEditorialPool(project, minPerSeg, topUpReport, {
+        cutIntervalSec: preflight.cutIntervalSec,
+        forceCurated: true,
+      });
+      const added = curatedAdded + editorialAdded;
+      if (added > 0) {
+        log(`   📦 Preflight top-up: +${added} curated/fetchable assets (pool ${preflight.fetchable}/${preflight.requiredUniqueUrls})`);
+        validateEditTimeline(project, {
+          cutIntervalSec: preflight.cutIntervalSec,
+          preferVideo: fixState.harvestVideoFirst !== false && !fixState.preferImageAssembly,
+          minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+          devServer,
+        });
+        const secondPreflight = await preflightTimelineMedia(project, {
+          devServer,
+          cutIntervalSec: preflight.cutIntervalSec,
+          preferVideo: fixState.harvestVideoFirst !== false && !fixState.preferImageAssembly,
+          minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+          log,
+        });
+        if (secondPreflight.widenedCut) {
+          fixState.cutIntervalSec = secondPreflight.cutIntervalSec;
+        }
+        if (secondPreflight.deadUrlKeys?.length) {
+          const merged = new Set((fixState.excludedUrls || []).map((u) => normalizeUrlKey(u) || u).filter(Boolean));
+          for (const key of secondPreflight.deadUrlKeys) {
+            if (key) merged.add(key);
+          }
+          fixState.excludedUrls = [...merged].slice(-400);
+        }
+      }
+    }
     writeFileSync(
       join(outDir, 'timeline-diversity.json'),
       JSON.stringify(

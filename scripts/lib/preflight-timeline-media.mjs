@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { ensureLocalAsset } from '../../deploy/server-render/ffmpegAssembly.mjs';
 import { validateEditTimeline, effectiveCutInterval } from './build-edit-timeline.mjs';
 import { computeClipBudget } from './assembly-system.mjs';
-import { normalizeUrlKey, isEditorialHarvestKeep } from './harvest-loop-context.mjs';
+import { normalizeUrlKey } from './harvest-loop-context.mjs';
 
 const PROBE_CONCURRENCY = 6;
 
@@ -62,7 +62,6 @@ export async function preflightTimelineMedia(project, options = {}) {
   const deadUrlKeys = [];
   for (const asset of media) {
     if (fetchableIds.has(asset.id)) continue;
-    if (isEditorialHarvestKeep(asset)) continue;
     removedIds.add(asset.id);
     const key = normalizeUrlKey(asset.url, asset.sourceUrl);
     if (key) deadUrlKeys.push(key);
@@ -111,9 +110,17 @@ export async function preflightTimelineMedia(project, options = {}) {
     log(`   📐 Preflight pool-aware cut ${nextCut}s (effective widen)`);
   }
 
+  const fetchableCount = (project.media || []).length;
+  const probedCount = toProbe.length;
+  const fetchableRatio = probedCount ? fetchableIds.size / probedCount : 1;
+
   return {
     removed: removedIds.size,
-    fetchable: (project.media || []).length,
+    fetchable: fetchableCount,
+    fetchableRatio,
+    probedCount,
+    requiredUniqueUrls: budget,
+    needsTopUp: fetchableCount < budget || fetchableRatio < 0.8,
     widenedCut,
     cutIntervalSec: nextCut,
     deadAssetIds: [...removedIds],

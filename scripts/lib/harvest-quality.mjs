@@ -119,6 +119,10 @@ const OFF_TOPIC_BLOCKLIST = [
 
   // Moving/lifestyle stock — noise for crime/news/heist topics
   { pattern: /\b(?:moving\s+box|cardboard\s+box|packing\s+box|selfie|couple\s+smil|new\s+home|housewarming)\b/i, requires: /\b(?:moving|relocat|real\s+estate|home\s+buy|lifestyle\s+vlog)\b/i },
+
+  // Travel-blog / fiction heist pages — not editorial news B-roll
+  { pattern: /myprivateparis\.com|memories-france\.travel|archyde\.com|hellomagazine\.com\/horizon/i, requires: /\b(?:travel|tour|vacation|blog|fiction|novel|arsene)\b/i },
+
   { pattern: /\b(?:yoga|workout\s+class|salon|spa\s+day|coffee\s+shop\s+lifestyle)\b/i, requires: /\b(?:fitness|wellness|yoga|lifestyle\s+blog)\b/i },
 
   // Talking-head lifestyle / dinner / vlog presenters — not news B-roll

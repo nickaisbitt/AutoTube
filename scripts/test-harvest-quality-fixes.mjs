@@ -1577,7 +1577,7 @@ console.log('\n── 45e. visual cohesion assembly strategy ──');
   const { fixState, applied } = applyFixesFromWatch(watch, { cutIntervalSec: 2.2 }, 'museum heist');
   assert('Visual cohesion strategy uses hard cuts', fixState.fixStrategy === 'hard_cuts');
   assert('Visual cohesion strategy stays image-first', fixState.preferImageAssembly === true && fixState.harvestVideoFirst === false);
-  assert('Visual cohesion strategy does not reharvest', fixState.reHarvestMedia !== true);
+  assert('Visual cohesion strategy triggers curated reharvest', fixState.reHarvestMedia === true && fixState.useCuratedPool === true);
   assert('Visual cohesion strategy clamps interval into 1.4-1.8s band', fixState.cutIntervalSec >= 1.4 && fixState.cutIntervalSec <= 1.8, String(fixState.cutIntervalSec));
   assert('Visual cohesion strategy logs assembly visual cohesion fix', applied.some((a) => a.includes('visualCohesion')), applied.join(' | '));
 }

@@ -285,18 +285,17 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
 
       if (weakest === 'visualCohesion') {
         s.fixStrategy = 'hard_cuts';
-        s.reHarvestMedia = false;
         s.ffmpegHardCuts = true;
         s.useFfmpegAssembly = true;
         s.patternInterrupts = true;
-        s.preferImageAssembly = true;
-        s.harvestVideoFirst = false;
+        activateImageFirstReharvest(s, { bumpNonce: true, resetOffset: false, suppressGiphy: true });
+        s.fixStrategy = 'hard_cuts';
         s.cutIntervalSec = Math.min(
           VISUAL_COHESION_MAX_CUT,
           Math.max(VISUAL_COHESION_MIN_CUT, s.cutIntervalSec ?? VISUAL_COHESION_MIN_CUT),
         );
         applied.push(
-          `0d. Assembly visualCohesion ${scores.visualCohesion}/100 → hard_cuts + interval ${s.cutIntervalSec}s + image-first assembly`,
+          `0d. Assembly visualCohesion ${scores.visualCohesion}/100 → curated reharvest + hard_cuts ${s.cutIntervalSec}s`,
         );
         break;
       }

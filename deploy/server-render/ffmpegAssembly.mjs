@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
 import { muxVideoWithAudio } from './audio.mjs';
 import { orderAssetsVideoFirst, effectiveCutInterval, HOOK_ZONE_SEC, HOOK_MAX_HOLD_SEC } from '../../scripts/lib/build-edit-timeline.mjs';
-import { computeTimelineDiversityMetrics } from '../../scripts/lib/assembly-system.mjs';
+import { computeTimelineDiversityMetrics, URL_SPACING_SEC } from '../../scripts/lib/assembly-system.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FPS = 24;
@@ -596,9 +596,9 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   const frames = Math.max(1, Math.round(durationSec * FPS));
   const loopPreset = isLoopMode() ? 'ultrafast' : preset;
 
-  // Loop mode: skip zoompan (OOM-prone) — scale/crop + light hook punch only.
+  // Loop mode: skip zoompan (OOM-prone) — unified eq + scale/crop for visual cohesion.
   if (isLoopMode() && !isVideo) {
-    let simpleVf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
+    let simpleVf = `eq=saturation=1.12:brightness=0.02,scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
     if (isHookClip && interrupts) {
       simpleVf = `eq=saturation=1.25:brightness=0.05,${simpleVf}`;
     } else if (clipIndex > 0) {
@@ -767,6 +767,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const placeholderUrls = [];
   let lastRenderedManifestKey = null;
   const renderedManifestKeys = [];
+  const urlLastUseSec = options.urlLastUseSec || new Map();
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
@@ -849,7 +850,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       ...globalMedia.filter((a) => assetKey(a) !== assetKey(asset)),
     ];
     const fetchableKeys = options.fetchableKeys;
-    const thinPool = loopMode && fetchableKeys?.size > 0 && fetchableKeys.size < schedule.length + 2;
+    const strictPool = fetchableKeys?.size >= 15;
+    const thinPool = loopMode && fetchableKeys?.size > 0 && !strictPool;
+    const absClipStart = segmentStartSec + renderedDuration;
     const alternates = (fetchableKeys?.size
       ? alternatesRaw.filter((a) => fetchableKeys.has(assetManifestKey(a)))
       : alternatesRaw
@@ -861,6 +864,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       }
       const ka = assetManifestKey(a);
       const kb = assetManifestKey(b);
+      const aSpacing = ka && urlLastUseSec.has(ka) && (absClipStart - urlLastUseSec.get(ka)) < URL_SPACING_SEC ? 1 : 0;
+      const bSpacing = kb && urlLastUseSec.has(kb) && (absClipStart - urlLastUseSec.get(kb)) < URL_SPACING_SEC ? 1 : 0;
+      if (aSpacing !== bSpacing) return aSpacing - bSpacing;
       const aRepeat = (ka && (ka === lastRenderedManifestKey || ka === baseKey)) ? 1 : 0;
       const bRepeat = (kb && (kb === lastRenderedManifestKey || kb === baseKey)) ? 1 : 0;
       if (aRepeat !== bRepeat) return aRepeat - bRepeat;
@@ -970,6 +976,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       ? `placeholder:${timelineAssetId}`
       : assetManifestKey(lastResolved || asset);
     renderedManifestKeys.push(lastRenderedManifestKey);
+    if (lastRenderedManifestKey && !usedPlaceholder) {
+      urlLastUseSec.set(lastRenderedManifestKey, segmentStartSec + renderedDuration);
+    }
     if (options.clipCarry) options.clipCarry.path = clipOut;
     return true;
   }
@@ -1068,6 +1077,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const warm = await warmMediaPoolCache(mediaPool, devServer, globalCacheDir);
   const fetchableKeys = warm.fetchableKeys || new Set();
   const clipCarry = { path: null };
+  const urlLastUseSec = new Map();
   let cumulativeSegStartSec = 0;
 
   for (let si = 0; si < (project.script || []).length; si++) {
@@ -1087,6 +1097,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       globalCacheDir,
       fetchableKeys,
       clipCarry,
+      urlLastUseSec,
     });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };

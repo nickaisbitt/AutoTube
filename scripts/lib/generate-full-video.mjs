@@ -5,6 +5,7 @@
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync, statSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
 import { validateRenderManifest, MIN_BYTES as LOOP_MIN_RENDER_BYTES } from './validate-loop-video.mjs';
@@ -16,7 +17,7 @@ import {
   hookOverrideMatchesTopic,
 } from './patch-project-for-loop.mjs';
 import { validateEditTimeline, effectiveCutInterval } from './build-edit-timeline.mjs';
-import { preflightTimelineMedia } from './preflight-timeline-media.mjs';
+import { preflightTimelineMedia, probeFetchableAssets } from './preflight-timeline-media.mjs';
 import { computeClipBudget, computeTimelineDiversityMetrics, shouldUseGlobalUrlDedup, TOP_UP_MAX_PASSES } from './assembly-system.mjs';
 import { shouldUseModalRender, renderViaModal } from './modal-render.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
@@ -2064,14 +2065,24 @@ export async function generateFullVideo(options) {
     if (preflight.needsTopUp) {
       const minPerSeg = Math.max(3, fixState.minAssetsPerSegment || 6);
       const topUpReport = {};
-      const curatedAdded = injectCuratedTopicPool(project, minPerSeg, topUpReport);
-      const editorialAdded = ensureEditorialPool(project, minPerSeg, topUpReport, {
+      const preflightCache = join(tmpdir(), `autotube-preflight-cache-${Date.now()}`);
+      mkdirSync(preflightCache, { recursive: true });
+      const beforeCount = (project.media || []).length;
+      injectCuratedTopicPool(project, minPerSeg, topUpReport);
+      ensureEditorialPool(project, minPerSeg, topUpReport, {
         cutIntervalSec: preflight.cutIntervalSec,
         forceCurated: true,
       });
-      const added = curatedAdded + editorialAdded;
-      if (added > 0) {
-        log(`   📦 Preflight top-up: +${added} curated/fetchable assets (pool ${preflight.fetchable}/${preflight.requiredUniqueUrls})`);
+      const injected = (project.media || []).slice(beforeCount);
+      if (injected.length) {
+        const fetchableInjected = await probeFetchableAssets(injected, devServer, preflightCache);
+        project.media = [
+          ...(project.media || []).filter((m, i) => i < beforeCount || fetchableInjected.has(m.id)),
+        ];
+      }
+      const added = (project.media || []).length - beforeCount + (topUpReport.curatedPoolInjected || 0);
+      if ((project.media || []).length > beforeCount) {
+        log(`   📦 Preflight top-up: +${(project.media || []).length - beforeCount} fetchable assets (pool ${preflight.fetchable}/${preflight.requiredUniqueUrls})`);
         validateEditTimeline(project, {
           cutIntervalSec: preflight.cutIntervalSec,
           preferVideo: fixState.harvestVideoFirst !== false && !fixState.preferImageAssembly,

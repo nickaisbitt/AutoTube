@@ -33,6 +33,10 @@ async function probeAssets(assets, devServer, cacheDir) {
   return fetchable;
 }
 
+export async function probeFetchableAssets(assets, devServer, cacheDir) {
+  return probeAssets(assets, devServer, cacheDir);
+}
+
 /**
  * Drop media that cannot be fetched; rebuild editTimeline from survivors.
  *

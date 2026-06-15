@@ -33,7 +33,7 @@ function probeVideoDuration(filePath, retries = 4) {
 const PREFERRED_CAPTION_WORDS = 4;
 
 /** Seconds before which words are skipped (hook zone — must clear hook drawtext burn-in). */
-const HOOK_END_SEC = 4.5;
+const HOOK_END_SEC = 6.0;
 
 const isPhraseEnd = (word) => {
   if (/[.!?;]$/.test(word) || /^[—–-]$/.test(word)) return true;

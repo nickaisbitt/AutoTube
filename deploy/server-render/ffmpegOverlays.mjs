@@ -2,10 +2,32 @@
  * Post-mux overlays for ffmpeg assembly (hook text + karaoke captions).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
+import { existsSync, writeFileSync, unlinkSync, renameSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
 import { MIN_CAPTION_WORDS } from './assembly-system.mjs';
+
+/** spawnSync kills ffmpeg when stderr progress exceeds the 1MB default maxBuffer. */
+const FFMPEG_SPAWN_OPTS = { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 };
+
+function probeVideoDuration(filePath, retries = 4) {
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    const r = spawnSync(
+      'ffprobe',
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath],
+      { encoding: 'utf8', timeout: 30_000 },
+    );
+    if (r.status === 0 && r.stdout) {
+      const d = parseFloat(r.stdout.trim());
+      if (Number.isFinite(d) && d > 1) return d;
+    }
+    if (attempt < retries - 1) {
+      spawnSync('sleep', ['0.15'], { encoding: 'utf8' });
+    }
+  }
+  return null;
+}
 
 /** Preferred minimum words per phrase, or phrase must end with punctuation. */
 const PREFERRED_CAPTION_WORDS = 4;
@@ -36,16 +58,25 @@ const isOrphanFragment = (word) => /^[a-z]{1,4},$/i.test(word) && !isPhraseEnd(w
  * - Must not start or end with a weak lead-in word.
  * - Must not have > 50% isBadSplit words.
  */
-function phraseIsValid(buf, { requireSentenceEnd = false } = {}) {
+function phraseIsValid(buf, { requirePunct = true } = {}) {
   if (buf.length < MIN_CAPTION_WORDS) return false;
   const endsWithPunct = isPhraseEnd(buf[buf.length - 1]);
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
-  const minWords = loopMode ? Math.max(PREFERRED_CAPTION_WORDS, 5) : PREFERRED_CAPTION_WORDS;
-  if (loopMode || requireSentenceEnd) {
+  const minWords = loopMode ? 5 : PREFERRED_CAPTION_WORDS;
+  if (loopMode) {
+    if (isWeakLeadIn(buf[0]) || isWeakLeadIn(buf[buf.length - 1])) return false;
+    if (buf.some((w) => isOrphanFragment(w))) return false;
+    const badCount = buf.filter((w) => isBadSplit(w)).length;
+    if (badCount / buf.length > 0.5) return false;
+    if (endsWithPunct && buf.length >= MIN_CAPTION_WORDS) return true;
+    if (buf.length >= minWords) return true;
+    return false;
+  }
+  if (requirePunct && requirePunct) {
     if (!endsWithPunct) return false;
   }
   if (buf.length < minWords && !endsWithPunct) return false;
-  if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct) return false;
+  if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct && requirePunct) return false;
   if (isWeakLeadIn(buf[0])) return false;
   if (isWeakLeadIn(buf[buf.length - 1])) return false;
   if (buf.some((w) => isOrphanFragment(w))) return false;
@@ -137,22 +168,27 @@ export function overlayHookText(videoPath, project, options = {}) {
   );
   const vf = filters.join(',');
 
-  const tmpOut = videoPath.replace(/\.mp4$/, '-hooked.mp4');
+  const tmpOut = join('/tmp', `autotube-hooked-${process.pid}-${Date.now()}.mp4`);
   const r = spawnSync(
     'ffmpeg',
-    ['-y', '-i', videoPath, '-vf', vf, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
-    { encoding: 'utf8', timeout: 300_000 },
+    ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', vf, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', tmpOut],
+    { ...FFMPEG_SPAWN_OPTS, timeout: 900_000 },
   );
-  if (r.status !== 0 || !existsSync(tmpOut)) {
-    const errMsg = (r.stderr || '').slice(-800);
-    console.error(`  [ffmpeg] hook overlay FAILED (status=${r.status}): ${errMsg}`);
+  if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
+    const errMsg = (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-6).join(' | ') || `exit ${r.status}`;
     return { ok: false, error: errMsg };
   }
-  copyFileSync(tmpOut, videoPath);
+  const encodedDuration = probeVideoDuration(tmpOut);
+  if (!encodedDuration) {
+    try { unlinkSync(tmpOut); } catch { /* ignore */ }
+    return { ok: false, error: 'hook encode produced corrupt output (no moov/duration)' };
+  }
+  const tmpReplace = `${videoPath}.hook-tmp-${process.pid}.mp4`;
   try {
-    unlinkSync(tmpOut);
+    renameSync(tmpOut, tmpReplace);
+    renameSync(tmpReplace, videoPath);
   } catch {
-    /* ignore */
+    return { ok: false, error: 'failed to replace video with hooked output' };
   }
   return { ok: true, hookText: hookText.trim() };
 }
@@ -196,6 +232,11 @@ function buildDialogueLines(allWords, cm) {
   // At a segment boundary: flush if buffer is phrase-length; discard carry if it ends
   // with a weak lead-in or bad-split token (don't pollute the next segment's phrase).
   const flushAtBoundary = () => {
+    if (loopMode) {
+      if (phraseIsValid(buffer)) flush();
+      else buffer = [];
+      return;
+    }
     if (buffer.length > 0) {
       const lastWord = buffer[buffer.length - 1];
       if (isWeakLeadIn(lastWord) || isBadSplit(lastWord)) {
@@ -243,6 +284,9 @@ function buildDialogueLines(allWords, cm) {
 
     if (phraseDone && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
+    } else if (loopMode && atMax && buffer.length >= 5 && !wouldSplitBad) {
+      // TTS word streams rarely carry punctuation — emit full phrases at maxWords.
+      flush();
     } else if (!loopMode && atMax && !nearPunctuation && phraseIsValid(buffer) && !wouldSplitBad) {
       flush();
     } else if (!loopMode && buffer.length >= cm.maxWords + 2) {
@@ -255,9 +299,10 @@ function buildDialogueLines(allWords, cm) {
     }
   }
 
-  // Loop mode: only burn full sentences (clause ends with punctuation).
+  // Loop mode: emit any remaining full phrase (≥5 words) even without TTS punctuation.
   if (loopMode) {
     if (phraseIsValid(buffer)) flush();
+    else if (buffer.length >= 5 && !isWeakLeadIn(buffer[0]) && !isWeakLeadIn(buffer[buffer.length - 1])) flush();
     else buffer = [];
   } else if (phraseIsValid(buffer)) {
     flush();
@@ -268,10 +313,18 @@ function buildDialogueLines(allWords, cm) {
   const filtered = dialogueLines.filter((line) => {
     const text = line.split(',,').pop() || '';
     const words = text.trim().split(/\s+/).filter(Boolean);
-    return words.length >= MIN_CAPTION_WORDS;
+    return words.length >= (loopMode ? 5 : MIN_CAPTION_WORDS);
   });
 
-  return { dialogueLines: filtered, captionCount: filtered.length };
+  const wordCounts = filtered.map((line) => {
+    const text = line.split(',,').pop() || '';
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  });
+  const avgWordsPerLine = wordCounts.length
+    ? wordCounts.reduce((a, b) => a + b, 0) / wordCounts.length
+    : 0;
+
+  return { dialogueLines: filtered, captionCount: filtered.length, avgWordsPerLine };
 }
 
 /**
@@ -311,7 +364,7 @@ export function buildCaptionAss(wordTimestampCache, segmentStartTimes = [], h = 
   }
   allWords.sort((a, b) => a.start - b.start);
 
-  const { dialogueLines } = buildDialogueLines(allWords, cm);
+  const { dialogueLines, avgWordsPerLine } = buildDialogueLines(allWords, cm);
   return [...header, ...dialogueLines].join('\n');
 }
 
@@ -337,31 +390,53 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
   const h = parseInt(hStr, 10) || 720;
 
   const assContent = buildCaptionAss(wordTimestampCache, segmentStartTimes, h, w);
-  const captionCount = (assContent.match(/^Dialogue:/mg) || []).length;
+  const dialogueLines = assContent.split('\n').filter((l) => l.startsWith('Dialogue:'));
+  const captionCount = dialogueLines.length;
+  const wordCounts = dialogueLines.map((line) => {
+    const text = line.split(',,').pop() || '';
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  });
+  const avgWordsPerLine = wordCounts.length
+    ? wordCounts.reduce((a, b) => a + b, 0) / wordCounts.length
+    : 0;
 
   if (captionCount === 0) return { ok: false, error: 'no word timestamps' };
 
-  const assPath = join(dirname(videoPath), 'captions-overlay.ass');
+  const assPath = join('/tmp', `autotube-captions-${process.pid}.ass`);
   writeFileSync(assPath, assContent);
 
-  const tmpOut = videoPath.replace(/\.mp4$/, '-captioned.mp4');
-  const assEsc = assPath.replace(/'/g, "'\\''");
-  const r = spawnSync(
-    'ffmpeg',
-    ['-y', '-i', videoPath, '-vf', `ass='${assEsc}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
-    { encoding: 'utf8', timeout: 600_000 },
-  );
-  if (r.status !== 0 || !existsSync(tmpOut)) {
-    return { ok: false, error: (r.stderr || '').slice(-300) };
+  const tmpOut = join('/tmp', `autotube-captioned-${process.pid}-${Date.now()}.mp4`);
+  const assFilter = `ass=${assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")}`;
+  const encodeArgs = ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', assFilter, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', tmpOut];
+  let r = spawnSync('ffmpeg', encodeArgs, { ...FFMPEG_SPAWN_OPTS, timeout: 900_000 });
+  if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
+    r = spawnSync(
+      'ffmpeg',
+      ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', `subtitles='${assPath.replace(/'/g, "'\\''")}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', tmpOut],
+      { ...FFMPEG_SPAWN_OPTS, timeout: 900_000 },
+    );
   }
-  copyFileSync(tmpOut, videoPath);
+  if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
+    return { ok: false, error: (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-8).join(' | ') || `exit ${r.status}` };
+  }
+  const encodedDuration = probeVideoDuration(tmpOut);
+  if (!encodedDuration) {
+    try { unlinkSync(tmpOut); } catch { /* ignore */ }
+    return { ok: false, error: 'caption encode produced corrupt output (no moov/duration)' };
+  }
+  const tmpReplace = `${videoPath}.caption-tmp-${process.pid}.mp4`;
+  try {
+    renameSync(tmpOut, tmpReplace);
+    renameSync(tmpReplace, videoPath);
+  } catch {
+    return { ok: false, error: 'failed to replace video with captioned output' };
+  }
   try {
     unlinkSync(assPath);
-    unlinkSync(tmpOut);
   } catch {
     /* ignore */
   }
-  return { ok: true, captionCount };
+  return { ok: true, captionCount, avgWordsPerLine };
 }
 
 /**
@@ -375,20 +450,42 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
   const results = {};
   if (!isYouTubeExportMode(project)) return results;
 
-  if (wordTimestampCache?.size) {
-    const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentStartTimes);
-    results.captions = caps;
-    if (caps.ok) {
-      console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);
-    }
-  }
-
   const hook = overlayHookText(videoPath, project);
   results.hook = hook;
   if (hook.ok) {
     console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}"`);
-  } else {
+  } else if (process.env.AUTOTUBE_LOOP_MODE === '1') {
     console.error(`  [ffmpeg] hook overlay FAILED: ${hook.error}`);
   }
+
+  if (wordTimestampCache?.size) {
+    let caps = { ok: false, error: 'not attempted' };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentStartTimes);
+      if (caps.ok) break;
+      if (attempt < 3) {
+        console.log(`  [ffmpeg] caption burn retry ${attempt}/3…`);
+      }
+    }
+    results.captions = caps;
+    if (caps.ok) {
+      console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);
+      try {
+        writeFileSync(
+          join(dirname(videoPath), 'caption-stats.json'),
+          JSON.stringify({
+            captionCount: caps.captionCount,
+            avgWordsPerLine: caps.avgWordsPerLine ?? 0,
+          }),
+        );
+      } catch {
+        /* ignore */
+      }
+    } else if (process.env.AUTOTUBE_LOOP_MODE === '1') {
+      results.captionFail = caps.error || 'caption burn failed';
+      console.error(`  [ffmpeg] caption overlay FAILED: ${caps.error || 'unknown'}`);
+    }
+  }
+
   return results;
 }

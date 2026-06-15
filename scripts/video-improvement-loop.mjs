@@ -152,6 +152,7 @@ async function main() {
     let videoPath = null;
     let scriptText = '';
     let renderEnv = null;
+    let thinHarvestFlag = false;
 
     if (!cfg.reviewOnly) {
       // autoSpawn: true — if Vite crashed mid-loop, attempt to restart it automatically
@@ -204,6 +205,7 @@ async function main() {
       }
       scriptText = gen.scriptText || '';
       renderEnv = gen.renderEnv || null;
+      thinHarvestFlag = gen.thinHarvest === true || fixState.thinHarvest === true;
 
       if (gen.ok && videoPath && existsSync(videoPath)) {
         const videoCheck = validateLoopVideo(videoPath);
@@ -218,6 +220,18 @@ async function main() {
         copyFileSync(videoPath, join(runDir, 'FINAL-VIDEO-final.mp4'));
         if (gen.projectPath && existsSync(gen.projectPath)) {
           copyFileSync(gen.projectPath, join(runDir, 'project.json'));
+        }
+        if (gen.outDir) {
+          const artifactPairs = [
+            ['media-sanitization.json', 'media-sanitization.json'],
+            ['harvest-quality.json', 'harvest-quality.json'],
+            ['timeline-diversity.json', 'timeline-diversity.json'],
+            ['caption-stats.json', 'caption-stats.json'],
+          ];
+          for (const [name, dest] of artifactPairs) {
+            const src = join(gen.outDir, name);
+            if (existsSync(src)) copyFileSync(src, join(runDir, dest));
+          }
         }
       } else {
         console.error(`\n❌ Generate failed: ${generateError}`);
@@ -277,6 +291,10 @@ async function main() {
         expected_hook_overlay: fixState.hookOverlay,
         api_key: resolveOpenRouterKey(),
       });
+      if (thinHarvestFlag) {
+        watch.thinHarvest = true;
+        fixState.thinHarvest = false;
+      }
     } catch (e) {
       console.error(`❌ Watch failed: ${e.message}`);
       appendJournal({
@@ -311,6 +329,15 @@ async function main() {
     const uploadReady = watch.uploadReady === true;
     const objectivePass = watch.objectiveGate?.pass === true;
     const scenePass = watch.sceneQa?.pass === true;
+    let uniqueUrlCount = null;
+    try {
+      const sanitization = join(runDir, 'media-sanitization.json');
+      if (existsSync(sanitization)) {
+        uniqueUrlCount = JSON.parse(readFileSync(sanitization, 'utf8')).uniqueUrlCount ?? null;
+      }
+    } catch {
+      /* optional */
+    }
     const scoreTargetMet =
       objectivePass &&
       renderTier === 'full' &&
@@ -392,6 +419,29 @@ async function main() {
       } catch {
         /* optional */
       }
+
+      if (typeof assemblyScore === 'number' && assemblyScore < 80) {
+        const prevUnique = fixState.lastUniqueUrlCount;
+        if (
+          prevUnique !== undefined
+          && uniqueUrlCount !== null
+          && uniqueUrlCount <= prevUnique
+        ) {
+          fixState.consecutiveAssemblyFails = (fixState.consecutiveAssemblyFails || 0) + 1;
+        } else {
+          fixState.consecutiveAssemblyFails = 1;
+        }
+        if (uniqueUrlCount !== null) fixState.lastUniqueUrlCount = uniqueUrlCount;
+        if ((fixState.consecutiveAssemblyFails || 0) >= 3) {
+          fixState.excludedUrls = [];
+          fixState.mediaOffset = 0;
+          fixState.consecutiveAssemblyFails = 0;
+          console.log('\n🔄 3 flat assembly fails — reset excludedUrls, mediaOffset=0 (vision rejects retained)');
+        }
+      } else if (uploadReady || (typeof assemblyScore === 'number' && assemblyScore >= 80)) {
+        fixState.consecutiveAssemblyFails = 0;
+      }
+
       const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(
         watch,
         fixState,
@@ -458,6 +508,13 @@ async function main() {
       youtubeScore,
       finalScore,
       assemblyScore,
+      assemblySubScores: watch.assemblySubScores || (watch.assemblyAudit ? {
+        topicRelevance: watch.assemblyAudit.topicRelevance,
+        captionCoherence: watch.assemblyAudit.captionCoherence,
+        visualCohesion: watch.assemblyAudit.visualCohesion,
+        repeatPenalty: watch.assemblyAudit.repeatPenalty,
+      } : null),
+      uniqueUrlCount,
       scoreTargetMet,
       objectivePass,
       objectiveScore: watch.objectiveQa?.score,

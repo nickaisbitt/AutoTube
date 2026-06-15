@@ -3,7 +3,7 @@
  * Used by generate-full-video.mjs CLI and video-improvement-loop.mjs.
  */
 import { chromium } from 'playwright';
-import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync, statSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync, statSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
@@ -16,12 +16,14 @@ import {
   hookOverrideMatchesTopic,
 } from './patch-project-for-loop.mjs';
 import { validateEditTimeline, effectiveCutInterval } from './build-edit-timeline.mjs';
-import { computeClipBudget, shouldUseGlobalUrlDedup, TOP_UP_MAX_PASSES } from './assembly-system.mjs';
+import { computeClipBudget, computeTimelineDiversityMetrics, shouldUseGlobalUrlDedup, TOP_UP_MAX_PASSES } from './assembly-system.mjs';
 import { shouldUseModalRender, renderViaModal } from './modal-render.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import { STOCK_HEALTHCARE_IMAGES, STOCK_CRIME_NEWS_IMAGES } from './stock-media-urls.mjs';
+import { injectCuratedTopicPool, matchCuratedPoolKey } from './curated-topic-pools.mjs';
 import {
   accumulateExcludedUrls,
+  accumulateVisionRejectedUrls,
   harvestContextFromFixState,
   harvestSessionStoragePayload,
   loadLastProjectUrls,
@@ -37,6 +39,7 @@ import {
   passesTopUpRelevanceGate,
   extractKeywords,
   countSegmentVideos,
+  countRealSegmentVideos,
   isVideoLikeAsset,
   isUnreliableVideoHost,
   isTrustedVideoHost,
@@ -44,6 +47,7 @@ import {
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
   dedupHarvestByUrl,
 } from './harvest-quality.mjs';
+import { filterAssetsByVision } from './harvest-vision.mjs';
 
 export { loopMediaTimeoutMs } from './harvest-quality.mjs';
 
@@ -223,10 +227,33 @@ async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = f
 
 function isDirectImageCandidate(url = '') {
   const u = (url || '').toLowerCase();
+  if (isOvpThumbUrl(u)) return false;
   return (
     /\.(jpg|jpeg|png|gif|webp)(?:[?#]|$)/i.test(u)
-    || /(?:th\d*\.bing\.net|upload\.wikimedia|images\.|pexels|pixabay|unsplash|gettyimages|alamy|shutterstock)/i.test(u)
+    || /(?:upload\.wikimedia|images\.|pexels|pixabay|unsplash)/i.test(u)
   );
+}
+
+/** Bing OVP/OIP preview thumbs — not full editorial images. */
+function isOvpThumbUrl(url = '') {
+  const u = (url || '').toLowerCase();
+  return (
+    /tse\d\.mm\.bing\.net\/th[/?]id=(?:ovp|oip)/i.test(u)
+    || /\/th\/id\/(?:ovp|oip)\./i.test(u)
+    || /th\?id=(?:ovp|oip)\./i.test(u)
+    || /th\.bing\.com\/th\/id\//i.test(u)
+    || /[_-]\d{2,3}x\d{2,3}(?:\.|\/|$)/i.test(u)
+    || /[?&]w=\d{1,3}(?:&|$)/i.test(u)
+  );
+}
+
+/** Prefer full-size Bing pgurl over tiny murl/thumbnail. */
+function resolveTopUpImageUrl(r = {}) {
+  const pg = r.sourceUrl || r.pgurl || '';
+  if (pg && isDirectImageCandidate(pg) && !isJunkHarvestUrl(pg)) return pg;
+  const primary = r.url || r.thumbnailUrl || '';
+  if (primary && isDirectImageCandidate(primary) && !isJunkHarvestUrl(primary)) return primary;
+  return '';
 }
 
 async function fetchImageSearchResults(devServer, endpoint, query) {
@@ -440,15 +467,40 @@ function segmentUniqueCount(project, segmentId) {
   return keys.size;
 }
 
-/** Inject curated editorial crime/museum stock when live harvest pool is below clip budget. */
-function injectCrimeFallbackPool(project, minPerSegment, report) {
+/** Inject curated + stock crime pool until global unique URL target is met. */
+function ensureEditorialPool(project, minPerSegment, report, options = {}) {
   const topic = project.topic || project.title || '';
-  if (!isCrimeNewsTopic(topic)) return 0;
+  const poolKey = matchCuratedPoolKey(topic);
+  if (!poolKey && !options.forceCurated && !isCrimeNewsTopic(topic)) return 0;
+
+  const unique = new Set(
+    (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+  ).size;
+  const { requiredUniqueUrls } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
+  const target = Math.max(requiredUniqueUrls, 40);
+  if (unique >= target && !options.forceCurated) return 0;
+
+  const added = injectCrimeFallbackPool(project, minPerSegment, report, {
+    forceCurated: true,
+  });
+  if (added) {
+    report.curatedPoolTopUp = (report.curatedPoolTopUp || 0) + added;
+  }
+  return added;
+}
+
+/** Inject curated editorial crime/museum stock when live harvest pool is below clip budget. */
+function injectCrimeFallbackPool(project, minPerSegment, report, { forceCurated = false } = {}) {
+  const topic = project.topic || project.title || '';
+  let added = 0;
+  if (forceCurated || isCrimeNewsTopic(topic)) {
+    added += injectCuratedTopicPool(project, minPerSegment, report);
+  }
+  if (!isCrimeNewsTopic(topic) && !forceCurated) return added;
 
   const used = new Set(
     (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
   );
-  let added = 0;
   let stockIdx = 0;
   const segments = project.script || [];
 
@@ -483,21 +535,22 @@ function injectCrimeFallbackPool(project, minPerSegment, report) {
 
 async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords, { relaxed = false } = {}) {
   if (isUnreliableVideoHost(`${r.url || ''} ${r.sourceUrl || ''}`)) return false;
-  const key = r.url.split('?')[0];
+  const imageUrl = resolveTopUpImageUrl(r);
+  if (!imageUrl) return false;
+  const key = imageUrl.split('?')[0];
   // Global URL dedup: reject if this URL already exists in ANY segment pool.
-  // Per-segment uniqueness is a subset of this check.
   const alreadyInProject = (project.media || []).some(
     (m) => (m.url || '').split('?')[0] === key,
   );
   if (alreadyInProject) return false;
 
-  const asset = { url: r.url, alt: r.alt || '', query: q, type: 'image' };
+  const asset = { url: imageUrl, alt: r.alt || '', query: q, type: 'image' };
   if (!relaxed && !passesTopUpRelevanceGate(asset, seg, topic, topicKeywords)) return false;
   if (relaxed) {
     const score = scoreAssetRelevance(asset, seg, topic, topicKeywords);
     if (score < 0.15) return false;
   }
-  if (!(await canFetch(r.url, { timeoutMs: 8000, minBytes: 512 }))) return false;
+  if (!(await canFetch(imageUrl, { timeoutMs: 8000, minBytes: 8192 }))) return false;
 
   const relevance = scoreAssetRelevance(asset, seg, topic, topicKeywords);
   const uniqueCount = segmentUniqueCount(project, seg.id);
@@ -505,7 +558,7 @@ async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topi
     id: `topup-${seg.id}-${uniqueCount}`,
     segmentId: seg.id,
     type: 'image',
-    url: r.url,
+    url: imageUrl,
     alt: r.alt || `${seg.title} ${topic}`,
     query: q,
     source: `${r.source || 'Search'} (volume top-up)`,
@@ -513,7 +566,7 @@ async function addImageTopUpCandidate(project, seg, r, q, endpoint, report, topi
     isFallback: false,
   });
   report.volumeTopUp = report.volumeTopUp || [];
-  report.volumeTopUp.push({ segmentId: seg.id, url: r.url, endpoint, relevance });
+  report.volumeTopUp.push({ segmentId: seg.id, url: imageUrl, endpoint, relevance });
   return true;
 }
 
@@ -653,51 +706,69 @@ async function rebalanceFailingSegments(project, devServer, minPerSegment, repor
   }
 }
 
+async function topUpSegmentImages(project, devServer, seg, minPerSegment, report, topic, topicKeywords) {
+  let uniqueCount = segmentUniqueCount(project, seg.id);
+
+  for (let round = 0; round < TOP_UP_IMAGE_ENDPOINTS.length && uniqueCount < minPerSegment; round += 1) {
+    const queries = round === 0
+      ? [...buildMetaphorTopUpQueries(seg, topic), buildTopUpQuery(seg, topic, round)]
+      : [buildTopUpQuery(seg, topic, round)];
+    for (const q of queries) {
+      if (uniqueCount >= minPerSegment) break;
+      const results = await fetchImageSearchResults(devServer, TOP_UP_IMAGE_ENDPOINTS[round], q);
+      const candidates = results
+        .map((r) => ({
+          url: resolveTopUpImageUrl(r),
+          alt: r.alt || r.title || seg.title,
+          source: r.source,
+          sourceUrl: r.sourceUrl,
+        }))
+        .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+
+      for (const r of candidates) {
+        if (await addImageTopUpCandidate(project, seg, r, q, TOP_UP_IMAGE_ENDPOINTS[round], report, topic, topicKeywords)) {
+          uniqueCount = segmentUniqueCount(project, seg.id);
+          if (uniqueCount >= minPerSegment) break;
+        }
+      }
+    }
+  }
+  return uniqueCount;
+}
+
 async function topUpHarvestVolume(project, devServer, minPerSegment, report, options = {}) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
   const topicKeywords = extractKeywords(topic, 12);
-  const harvestVideoFirst = options.harvestVideoFirst !== false;
+  let harvestVideoFirst = options.harvestVideoFirst !== false;
   const minVideosPerSegment = harvestVideoFirst ? Math.max(2, options.minVideosPerSegment || 2) : 0;
+
+  const totalRealVideos = (segments || []).reduce(
+    (sum, seg) => sum + countRealSegmentVideos(project.media, seg.id),
+    0,
+  );
+  if (isCrimeNewsTopic(topic) && totalRealVideos === 0) {
+    harvestVideoFirst = false;
+    report.videoFirstRelaxed = true;
+  }
 
   if (harvestVideoFirst && minVideosPerSegment > 0) {
     await ensureVideoQuotaPerSegment(project, devServer, report, topic, topicKeywords, minVideosPerSegment);
   }
 
-  for (const seg of segments) {
-    let uniqueCount = segmentUniqueCount(project, seg.id);
-
-    for (let round = 0; round < TOP_UP_IMAGE_ENDPOINTS.length && uniqueCount < minPerSegment; round += 1) {
-      const queries = round === 0
-        ? [...buildMetaphorTopUpQueries(seg, topic), buildTopUpQuery(seg, topic, round)]
-        : [buildTopUpQuery(seg, topic, round)];
-      for (const q of queries) {
-        if (uniqueCount >= minPerSegment) break;
-        const results = await fetchImageSearchResults(devServer, TOP_UP_IMAGE_ENDPOINTS[round], q);
-        const candidates = results
-          .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
-          .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
-
-        for (const r of candidates) {
-          if (await addImageTopUpCandidate(project, seg, r, q, TOP_UP_IMAGE_ENDPOINTS[round], report, topic, topicKeywords)) {
-            uniqueCount = segmentUniqueCount(project, seg.id);
-            if (uniqueCount >= minPerSegment) break;
-          }
-        }
-      }
-    }
-  }
+  await Promise.all(
+    segments.map((seg) => topUpSegmentImages(project, devServer, seg, minPerSegment, report, topic, topicKeywords)),
+  );
 
   if (harvestVideoFirst && minVideosPerSegment > 0) {
     await ensureVideoQuotaPerSegment(project, devServer, report, topic, topicKeywords, minVideosPerSegment);
   }
 
   // For crime/news topics, supplement with news/archive endpoints using action-first metaphor queries.
-  // These endpoints return press-photo thumbnails that image search engines often miss.
   if (isCrimeNewsTopic(topic)) {
-    for (const seg of segments) {
+    await Promise.all(segments.map(async (seg) => {
       let uniqueCount = segmentUniqueCount(project, seg.id);
-      if (uniqueCount >= minPerSegment) continue;
+      if (uniqueCount >= minPerSegment) return;
       const metaphorQueries = buildMetaphorTopUpQueries(seg, topic);
       for (const q of metaphorQueries) {
         if (uniqueCount >= minPerSegment) break;
@@ -705,7 +776,12 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
           if (uniqueCount >= minPerSegment) break;
           const results = await fetchImageSearchResults(devServer, endpoint, q);
           const candidates = results
-            .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source || endpoint }))
+            .map((r) => ({
+              url: resolveTopUpImageUrl(r),
+              alt: r.alt || r.title || seg.title,
+              source: r.source || endpoint,
+              sourceUrl: r.sourceUrl,
+            }))
             .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
           for (const r of candidates) {
             if (await addImageTopUpCandidate(project, seg, r, q, endpoint, report, topic, topicKeywords)) {
@@ -715,11 +791,11 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
           }
         }
       }
-    }
+    }));
   }
 
   await rebalanceFailingSegments(project, devServer, minPerSegment, report, topic, topicKeywords, {
-    minVideosPerSegment,
+    minVideosPerSegment: harvestVideoFirst ? minVideosPerSegment : 0,
     harvestVideoFirst,
   });
 }
@@ -728,22 +804,22 @@ function isJunkHarvestUrl(url) {
   const u = (url || '').toLowerCase();
   return (
     isUnreliableVideoHost(url) ||
+    isOvpThumbUrl(u) ||
     /tiktokcdn\.com|tiktokpng\.com|tiktokv\.com|muscdn\.com|byteoversea\.com/i.test(u) ||
     u.includes('gravatar.com/avatar') ||
     /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
     u.includes('/th/id/ovp.') ||
     u.includes('th?id=ovp.') ||
-    // Bing image-preview thumbs (OIP) — low-res search thumbnails, not full images
     /tse\d\.mm\.bing\.net\/th[/?]id=oip/i.test(u) ||
     u.includes('/th/id/oip.') ||
     u.includes('th?id=oip.') ||
-    // Pinterest pin-board aggregator — images are low-res reposts, not editorial B-roll
     u.includes('pinterest.com') ||
     u.includes('pinimg.com') ||
     u.includes('pin.it/') ||
     /gettyimages|shutterstock|alamy|istockphoto/i.test(u) ||
     /i\.ytimg\.com\/vi\/|\/maxresdefault\.|\/hqdefault\.|\/oar\d*\.jpg/i.test(u) ||
-    /watch\s+free\s+movies?\s+on\s+tiktok|free\s+movies?\s+on\s+tiktok/i.test(u)
+    /watch\s+free\s+movies?\s+on\s+tiktok|free\s+movies?\s+on\s+tiktok/i.test(u) ||
+    /whitehouse\.gov|search-govpress|govpress/i.test(u)
   );
 }
 
@@ -909,7 +985,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       continue;
     }
 
-    if (await tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode })) {
+    const imageFirst = options.preferImageAssembly === true || options.harvestVideoFirst === false;
+    if (!imageFirst && await tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode })) {
       continue;
     }
 
@@ -994,14 +1071,14 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const uniqueBeforePhash = new Set(
     relevance.media.map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
   ).size;
-  const skipPhashDedup = loopMode && uniqueBeforePhash < prePhashBudget.requiredUniqueUrls * 1.25;
-  const deduped = skipPhashDedup
-    ? { media: relevance.media, hashCount: 0 }
-    : dedupeMediaByPHash(relevance.media, {
-      devServer,
-      onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
-    });
-  if (skipPhashDedup) report.deferredPhashDedup = true;
+  const skipPhashDedup = false;
+  const thinPoolPhash = loopMode && uniqueBeforePhash < prePhashBudget.requiredUniqueUrls * 1.25;
+  const deduped = dedupeMediaByPHash(relevance.media, {
+    devServer,
+    maxDistance: thinPoolPhash ? 8 : 10,
+    onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
+  });
+  if (thinPoolPhash) report.thinPoolPhashTight = true;
   report.phashHashCount = deduped.hashCount;
 
   // URL-level cross-segment dedup: prevent the same shot appearing in multiple segment pools.
@@ -1072,18 +1149,73 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     report.afterTopUp = project.media.length;
 
     const topicForFallback = project.topic || project.title || '';
-    const uniqueAfterTopUp = new Set(
-      (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
-    ).size;
-    const { requiredUniqueUrls: budgetAfterTopUp } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
-    if (isCrimeNewsTopic(topicForFallback) && uniqueAfterTopUp < budgetAfterTopUp) {
-      injectCrimeFallbackPool(project, minPerSegment, report);
-    }
+    ensureEditorialPool(project, minPerSegment, report, {
+      forceCurated: options.useCuratedPool === true || isCrimeNewsTopic(topicForFallback),
+      cutIntervalSec: options.cutIntervalSec,
+    });
 
     // Force-clear the stale browser-generated editTimeline so validateEditTimeline
     // always rebuilds a fresh timeline that includes top-up assets. Without this,
     // top-up assets are silently ignored when the old timeline's stale-ratio is < 10%.
     project.editTimeline = [];
+
+    // Vision-screen harvested stills (browser vision is off in loop fast mode).
+    if (options.visionHarvest !== false) {
+      const apiKey = resolveOpenRouterKey();
+      if (apiKey) {
+        const vision = await filterAssetsByVision(project.media, project, { apiKey });
+        report.visionRejectedUrls = vision.rejectedUrls || [];
+        if (vision.dropped?.length) {
+          report.visionDropped = vision.dropped;
+          report.visionScanned = vision.scanned;
+          project.media = vision.media;
+          const uniqueAfterVision = new Set(
+            (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+          ).size;
+          const { requiredUniqueUrls: budgetAfterVision } = computeClipBudget(
+            project,
+            options.cutIntervalSec ?? 1.25,
+          );
+          if (uniqueAfterVision < budgetAfterVision) {
+            await topUpHarvestVolume(project, devServer, minPerSegment, report, {
+              harvestVideoFirst: options.harvestVideoFirst !== false,
+              minVideosPerSegment: options.minVideosPerSegment || 2,
+              visionTopUpPass: true,
+            });
+            const visionTopUpDedup = dedupHarvestByUrl(project.media);
+            if (visionTopUpDedup.dupCount) {
+              report.visionTopUpDupCount = visionTopUpDedup.dupCount;
+              project.media = visionTopUpDedup.media;
+            }
+          }
+        } else {
+          report.visionScanned = vision.scanned;
+          report.visionRejectedUrls = vision.rejectedUrls || [];
+        }
+      }
+    }
+
+    // Post-vision pHash dedup on full-res sources — catches same shot under different URLs.
+    const uniqueBeforePostVision = new Set(
+      (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+    ).size;
+    const { requiredUniqueUrls: budgetPostVision } = computeClipBudget(project, options.cutIntervalSec ?? 1.25);
+    const thinForPhash = uniqueBeforePostVision < Math.max(18, budgetPostVision);
+    const postVisionDedup = dedupeMediaByPHash(project.media, {
+      devServer,
+      maxDistance: thinForPhash ? 8 : 10,
+      onDrop: (item, reason) => report.postVisionPhashDropped = [
+        ...(report.postVisionPhashDropped || []),
+        { url: item.url, reason },
+      ],
+    });
+    if ((report.postVisionPhashDropped || []).length) {
+      project.media = postVisionDedup.media;
+      report.postVisionPhashCount = report.postVisionPhashDropped.length;
+      ensureEditorialPool(project, minPerSegment, report, {
+        cutIntervalSec: options.cutIntervalSec,
+      });
+    }
   }
 
   let volume = evaluateHarvestVolume(project, minPerSegment);
@@ -1222,15 +1354,71 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       report.rescueRoundAdded = rescueAdded;
 
       if (uniqueUrlsAfterRescue.size < minUnique) {
+        ensureEditorialPool(project, minPerSegment, report, {
+          cutIntervalSec: options.cutIntervalSec,
+          forceCurated: true,
+        });
+        const afterCurated = new Set(
+          (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+        );
+        report.uniqueUrlCount = afterCurated.size;
+        report.curatedRescueInjected = afterCurated.size - uniqueUrlsAfterRescue.size;
+      }
+
+      const finalUnique = new Set(
+        (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+      );
+      if (finalUnique.size < minUnique) {
         report.thinPoolAbort = true;
-        throw new Error(`Thin media pool (${uniqueUrlsAfterRescue.size} unique URLs < ${minUnique}) — reharvest required`);
+        throw new Error(`Thin media pool (${finalUnique.size} unique URLs < ${minUnique}) — reharvest required`);
       }
     }
   }
 
   writeFileSync(join(outDir, 'harvest-quality.json'), JSON.stringify(volume, null, 2));
+  report.after = project.media.length;
+  report.uniqueUrlCount = new Set(
+    (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+  ).size;
   writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
   return report;
+}
+
+/** Burn hook overlay after server-render when in-pipeline hook pass failed or was skipped. */
+async function burnHookPostRender(videoPath, project) {
+  if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
+  const { overlayHookText } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
+  return overlayHookText(videoPath, project);
+}
+
+/** Burn captions after server-render when in-pipeline overlay pass failed or was skipped. */
+async function burnCaptionsPostRender(videoPath, outDir) {
+  if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
+  const narrDir = readdirSync(outDir)
+    .filter((d) => d.startsWith('narration-audio-'))
+    .sort()
+    .pop();
+  if (!narrDir) return { ok: false, error: 'no narration dir' };
+
+  const cache = new Map();
+  const starts = [];
+  let segIdx = 0;
+  let cumulative = 0;
+  for (let i = 0; i < 12; i++) {
+    const wf = join(outDir, narrDir, `narration-${i}.words.json`);
+    if (!existsSync(wf)) continue;
+    const parsed = JSON.parse(readFileSync(wf, 'utf8'));
+    const words = parsed.words || parsed;
+    if (!words?.length) continue;
+    cache.set(segIdx, words);
+    starts[segIdx] = cumulative;
+    cumulative += words[words.length - 1]?.end || 0;
+    segIdx += 1;
+  }
+  if (!cache.size) return { ok: false, error: 'no word timestamps' };
+
+  const { overlayKaraokeCaptions } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
+  return overlayKaraokeCaptions(videoPath, cache, starts);
 }
 
 /**
@@ -1251,8 +1439,11 @@ export async function generateFullVideo(options) {
   if (fixState.reHarvestMedia) {
     fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
     fixState.reHarvestMedia = false;
+    fixState.useCuratedPool = true;
+    fixState.preferImageAssembly = true;
+    fixState.harvestVideoFirst = false;
     if (!options.quiet) {
-      console.log(`   🔄 Re-harvest requested — nonce ${fixState.harvestNonce}, offset ${fixState.mediaOffset || 0}`);
+      console.log(`   🔄 Re-harvest requested — nonce ${fixState.harvestNonce}, offset ${fixState.mediaOffset || 0}, curated pool ON`);
     }
   }
   const priorUrls = loadLastProjectUrls(process.cwd());
@@ -1657,21 +1848,18 @@ export async function generateFullVideo(options) {
         join(outDir, 'thin-harvest-pre-narration.json'),
         JSON.stringify({ volume, thin, loopMinAssets, emptySegments: emptySegments.map((s) => s.title) }, null, 2),
       );
+      const browserThinFlag = await page.evaluate(() => {
+        try {
+          return sessionStorage.getItem('autotube_thin_harvest') === 'true';
+        } catch {
+          return false;
+        }
+      });
+      if (browserThinFlag) fixState.thinHarvest = true;
       if (emptySegments.length > 0) {
         const names = emptySegments.map((s) => s.title).join('; ');
-        fixState.reHarvestMedia = true;
-        fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
-        await browser.close().catch(() => {});
-        browser = null;
-        return {
-          ok: false,
-          error: `Empty browser harvest — no assets for: ${names}`,
-          thinHarvest: true,
-          harvestQualityFail: true,
-          topic,
-          outDir,
-          fixState,
-        };
+        fixState.thinHarvest = true;
+        log(`   ⚠ Empty browser segments (${names}) — continuing to narration; server top-up will fill pool`);
       }
     }
 
@@ -1690,8 +1878,16 @@ export async function generateFullVideo(options) {
       return JSON.parse(raw).project ?? null;
     });
 
-    if (!project || !(project.media?.length > 0)) {
-      return { ok: false, error: 'No project with media after pipeline', topic, outDir };
+    if (!project) {
+      return { ok: false, error: 'No project after pipeline', topic, outDir };
+    }
+    if (!project.media?.length) {
+      if (realHarvest) {
+        project.media = [];
+        log('   ⚠ No browser media after pipeline — server top-up will build pool');
+      } else {
+        return { ok: false, error: 'No project with media after pipeline', topic, outDir };
+      }
     }
 
     await browser.close().catch(() => {});
@@ -1721,8 +1917,12 @@ export async function generateFullVideo(options) {
         loopMode: true,
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
         harvestVideoFirst: fixState.harvestVideoFirst !== false,
+        preferImageAssembly: fixState.preferImageAssembly === true,
         minVideosPerSegment: fixState.minVideosPerSegment || 2,
+        useCuratedPool: fixState.useCuratedPool === true,
+        cutIntervalSec: fixState.cutIntervalSec ?? 1.4,
       });
+      if (fixState.useCuratedPool) fixState.useCuratedPool = false;
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
       if (mediaReport.relevanceDropped?.length) {
         log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
@@ -1730,11 +1930,40 @@ export async function generateFullVideo(options) {
       if (mediaReport.phashDropped?.length) {
         log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
       }
+      if (mediaReport.visionRejectedUrls?.length) {
+        accumulateVisionRejectedUrls(fixState, mediaReport.visionRejectedUrls);
+      }
+      const { requiredUniqueUrls: harvestBudget } = computeClipBudget(project, fixState.cutIntervalSec ?? 1.25);
+      const postSanitizeUnique = mediaReport.uniqueUrlCount || new Set(
+        (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+      ).size;
+      if (postSanitizeUnique < harvestBudget) {
+        fixState.mediaOffset = 0;
+        fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
+        log(`   ⚠ Thin pool (${postSanitizeUnique}/${harvestBudget} URLs) — reset mediaOffset, nonce ${fixState.harvestNonce}`);
+      }
+      // YouTube proxy clips fail often — prefer reliable editorial stills for assembly.
+      if (
+        postSanitizeUnique < Math.max(harvestBudget, 28)
+        || fixState.fixStrategy === 'captions'
+        || fixState.fixStrategy === 'hard_cuts'
+        || fixState.preferImageAssembly
+      ) {
+        fixState.harvestVideoFirst = false;
+        fixState.preferImageAssembly = true;
+        log(`   🖼 Image-first assembly (${postSanitizeUnique} URLs, strategy=${fixState.fixStrategy || 'default'})`);
+      }
+      if (postSanitizeUnique < harvestBudget || fixState.reHarvestMedia) {
+        ensureEditorialPool(project, fixState.minAssetsPerSegment || 4, {}, {
+          forceCurated: true,
+          cutIntervalSec: fixState.cutIntervalSec,
+        });
+      }
       if (mediaReport.volumePass === false) {
         const failing = mediaReport.harvestQuality?.failing || [];
         const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
         fixState.reHarvestMedia = true;
-        fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+        fixState.mediaOffset = 0;
         return {
           ok: false,
           error: `Harvest volume gate FAIL — ${detail}`,
@@ -1747,12 +1976,40 @@ export async function generateFullVideo(options) {
     }
     const timelineReport = validateEditTimeline(project, {
       cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
-      preferVideo: fixState.harvestVideoFirst !== false,
+      preferVideo: fixState.harvestVideoFirst !== false && !fixState.preferImageAssembly,
       minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+      devServer,
     });
+    const { requiredUniqueUrls: preRenderBudget } = computeClipBudget(project, fixState.cutIntervalSec ?? 1.25);
+    const preRenderUnique = new Set(
+      (project.media || []).map((a) => normalizeUrlKey(a.url, a.sourceUrl)).filter(Boolean),
+    ).size;
+    if (
+      fixState.preferImageAssembly
+      && preRenderUnique < preRenderBudget
+      && (fixState.cutIntervalSec ?? 1.25) < 1.0
+    ) {
+      fixState.cutIntervalSec = 1.15;
+      const rebuilt = validateEditTimeline(project, {
+        cutIntervalSec: fixState.cutIntervalSec,
+        preferVideo: false,
+        minVideosFirst: 0,
+        devServer,
+      });
+      log(`   📐 Widened cuts to ${fixState.cutIntervalSec}s (thin pool ${preRenderUnique}/${preRenderBudget} URLs)`);
+      Object.assign(timelineReport, rebuilt);
+    }
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }
+    writeFileSync(
+      join(outDir, 'timeline-diversity.json'),
+      JSON.stringify(
+        computeTimelineDiversityMetrics(project.editTimeline || [], project.media || [], project.script || []),
+        null,
+        2,
+      ),
+    );
     accumulateExcludedUrls(fixState, project);
 
     try {
@@ -1854,6 +2111,61 @@ export async function generateFullVideo(options) {
       return { ok: false, error: gate.error, topic, outDir, renderRetried };
     }
 
+    try {
+      if (process.env.AUTOTUBE_LOOP_MODE === '1' || fixState.shockHook !== false) {
+        const hookResult = await burnHookPostRender(produced, {
+          exportSettings: { hookOverlay: fixState.hookOverlay, hookLine: fixState.hookLine },
+          hookLine: fixState.hookLine,
+        });
+        if (hookResult.ok) {
+          log(`   🪝 Post-render hook: "${(hookResult.hookText || '').slice(0, 48)}"`);
+        } else if (hookResult.error) {
+          log(`   ⚠ Post-render hook burn: ${hookResult.error}`);
+        }
+      }
+
+      const capStatsPath = join(outDir, 'caption-stats.json');
+      const pipelineCaptions = existsSync(capStatsPath)
+        ? JSON.parse(readFileSync(capStatsPath, 'utf8'))
+        : null;
+      const skipPostBurn = (pipelineCaptions?.captionCount || 0) > 0;
+      const capResult = skipPostBurn
+        ? { ok: true, captionCount: pipelineCaptions.captionCount, skipped: true }
+        : await burnCaptionsPostRender(produced, outDir);
+      if (capResult.ok && !capResult.skipped) {
+        log(`   📝 Post-render captions: ${capResult.captionCount} lines burned`);
+        writeFileSync(
+          join(outDir, 'caption-stats.json'),
+          JSON.stringify({
+            captionCount: capResult.captionCount,
+            avgWordsPerLine: capResult.avgWordsPerLine ?? 0,
+            postRender: true,
+          }),
+        );
+      } else if (capResult.skipped) {
+        log(`   📝 Post-render captions: skipped (${pipelineCaptions.captionCount} lines already in pipeline)`);
+      } else if (capResult.error && !existsSync(capStatsPath)) {
+        log(`   ⚠ Post-render caption burn: ${capResult.error}`);
+      }
+    } catch (capErr) {
+      log(`   ⚠ Post-render caption burn skipped: ${capErr.message}`);
+    }
+
+    const postCapProbe = spawnSync(
+      'ffprobe',
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', produced],
+      { encoding: 'utf8' },
+    );
+    if (postCapProbe.status !== 0 || !postCapProbe.stdout?.trim()) {
+      return {
+        ok: false,
+        error: 'Render output corrupt after caption pass (ffprobe failed — moov missing?)',
+        topic,
+        outDir,
+        renderRetried,
+      };
+    }
+
     const probe = spawnSync(
       'ffprobe',
       ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', produced],
@@ -1865,10 +2177,16 @@ export async function generateFullVideo(options) {
     if (!manifestGate.valid) {
       // Modal proxy manifest is rebuilt locally — spacing can diverge from remote encode.
       // Log and continue so contact-sheet assembly audit remains the ship gate.
+      const manifest = manifestGate.manifest || {};
+      const required = manifest.requiredUniqueUrls || 0;
+      const withinBudget = required === 0 || (manifest.uniqueUrlsUsed || 0) >= required * 0.9;
+      const adjacentFail = (manifest.adjacentRepeatCount || 0) > 0;
       const spacingOnlyProxy =
         usedModalRender
-        && manifestGate.manifest?.modalProxy === true
-        && /^diversity gate: \d+ URL spacing violation/.test(manifestGate.error || '');
+        && !adjacentFail
+        && withinBudget
+        && (manifest.uniqueUrlsUsed || 0) >= required
+        && /spacing violation/i.test(manifestGate.error || '');
       if (spacingOnlyProxy) {
         log(`   ⚠ Modal diversity proxy: ${manifestGate.error} (continuing — vision audit is ship gate)`);
       } else {
@@ -1925,6 +2243,7 @@ export async function generateFullVideo(options) {
       sizeMb: (gate.size / 1024 / 1024).toFixed(2),
       realHarvest,
       fixState,
+      thinHarvest: fixState.thinHarvest === true,
       renderEnv: renderSnapshot,
       harvestNonce: fixState.harvestNonce || 0,
       renderRetried,

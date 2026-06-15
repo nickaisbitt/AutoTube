@@ -31,7 +31,12 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
     env.AUTOTUBE_INTERRUPT_STRONG = '1';
   }
   if (fixState.useFfmpegAssembly !== false) env.AUTOTUBE_RENDER_MODE = 'ffmpeg';
-  if (fixState.harvestVideoFirst !== false) env.AUTOTUBE_HARVEST_VIDEO_FIRST = '1';
+  if (fixState.preferImageAssembly) {
+    env.AUTOTUBE_LOOP_IMAGE_FIRST = '1';
+    delete env.AUTOTUBE_HARVEST_VIDEO_FIRST;
+  } else if (fixState.harvestVideoFirst !== false) {
+    env.AUTOTUBE_HARVEST_VIDEO_FIRST = '1';
+  }
   if (fixState.brollPlacement !== false) env.AUTOTUBE_BROLL_PLACEMENT = '1';
   if (fixState.ffmpegHardCuts !== false) env.AUTOTUBE_FFMPEG_HARD_CUTS = '1';
   if (fixState.whisperAlign || renderTier === 'full') env.AUTOTUBE_WHISPER_ALIGN = '1';

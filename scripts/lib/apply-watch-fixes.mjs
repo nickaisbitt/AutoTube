@@ -11,7 +11,7 @@ import {
   countRealSegmentVideos,
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
 } from './harvest-quality.mjs';
-import { normalizeUrlKey, isOverBroadExcludeUrl, sanitizeExcludedUrls, pruneExcludedUrlsForReharvest } from './harvest-loop-context.mjs';
+import { normalizeUrlKey, isOverBroadExcludeUrl, sanitizeExcludedUrls, pruneExcludedUrlsForReharvest, accumulateVisionRejectedUrls, isEditorialHarvestKeep } from './harvest-loop-context.mjs';
 import { collectAssemblyExcludeUrls } from './harvest-quality.mjs';
 import {
   loadRenderManifest,
@@ -20,6 +20,20 @@ import {
 } from './run-objective-qa.mjs';
 
 const CUT_FLOOR = 0.5;
+
+function weakestAssemblySubScore(audit) {
+  const scores = {
+    repeatPenalty: typeof audit?.repeatPenalty === 'number' ? audit.repeatPenalty : 100,
+    topicRelevance: typeof audit?.topicRelevance === 'number' ? audit.topicRelevance : 100,
+    captionCoherence: typeof audit?.captionCoherence === 'number' ? audit.captionCoherence : 100,
+    visualCohesion: typeof audit?.visualCohesion === 'number' ? audit.visualCohesion : 100,
+  };
+  let weakest = 'repeatPenalty';
+  for (const [key, val] of Object.entries(scores)) {
+    if (val < scores[weakest]) weakest = key;
+  }
+  return { weakest, scores };
+}
 
 function targetScore100(untilScore = 91) {
   return untilScore > 10 ? untilScore : Math.round(untilScore * 10);
@@ -64,7 +78,7 @@ function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
       s.fixStrategy = 'interval';
       s.cutIntervalSec = Math.max(CUT_FLOOR, cuts - 0.25);
       s.useFfmpegAssembly = true;
-      s.harvestVideoFirst = true;
+      if (!s.preferImageAssembly) s.harvestVideoFirst = true;
       applied.push(`${reason} → strategy interval (cuts ${cuts}s→${s.cutIntervalSec}s)`);
       return true;
     }
@@ -82,7 +96,9 @@ function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
   s.fixStrategy = 'reharvest';
   s.reHarvestMedia = true;
   s.mediaOffset = (s.mediaOffset || 0) + 4;
-  s.harvestVideoFirst = true;
+  s.harvestVideoFirst = false;
+  s.preferImageAssembly = true;
+  s.useCuratedPool = true;
   s.minAssetsPerSegment = Math.min(
     LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
     Math.max(2, (s.minAssetsPerSegment || 4) + 1),
@@ -151,6 +167,8 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
   const untilScore = options.untilScore ?? 9.1;
   const applied = [];
   const s = { ...fixState };
+  let assemblyWidenedCuts = false;
+  let assemblyFixApplied = false;
 
   const hookFail = watch.hookScript?.pass === false || watch.hookVision?.hookPass === false;
   const pacing = retentionScore(watch, 'pacing', 100);
@@ -178,9 +196,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     if (failed.includes('placeholder_pct')) {
       s.reHarvestMedia = true;
       s.mediaOffset = (s.mediaOffset || 0) + 2;
-      s.harvestVideoFirst = true;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
+      s.useCuratedPool = true;
       s.suppressGiphy = true;
-      s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
+      s.minVideosPerSegment = 0;
       s.fixStrategy = 'reharvest';
       // Do not raise minAssets — top-up satisfies volume; higher mins starve browser harvest.
       s.minAssetsPerSegment = Math.min(
@@ -199,7 +219,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       const prev = new Set(sanitizeExcludedUrls(s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
       if (placeholderKeys.length) {
         for (const key of placeholderKeys) {
-          if (!isOverBroadExcludeUrl(key)) prev.add(key);
+          if (!isOverBroadExcludeUrl(key) && !isEditorialHarvestKeep(key)) prev.add(key);
         }
       } else {
           const deadUrls = collectDeadAssetUrls(harvestProject, deadSegmentIds);
@@ -221,14 +241,16 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
         ? `${placeholderKeys.length} placeholder URL(s) from render-manifest`
         : `${(s.excludedUrls || []).length} excluded URLs`;
       applied.push(
-        `0a. Placeholder gate FAIL (${pctNote}${segDetail ? `; dead segs: ${segDetail}` : ''}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, exclude dead URLs, video-first (${excludeNote})`,
+        `0a. Placeholder gate FAIL (${pctNote}${segDetail ? `; dead segs: ${segDetail}` : ''}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, image-first curated pool (${excludeNote})`,
       );
     } else if (failed.some((n) => n.startsWith('scene_'))) {
       escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`, { sceneFirst: true });
     } else {
       s.reHarvestMedia = true;
       s.mediaOffset = (s.mediaOffset || 0) + 2;
-      s.harvestVideoFirst = true;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
+      s.useCuratedPool = true;
       s.fixStrategy = 'reharvest';
       applied.push(`0b. Objective gate FAIL (${failed.join(', ')}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}`);
     }
@@ -242,42 +264,90 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
   if (watch.thinHarvest) {
     s.reHarvestMedia = true;
     s.harvestNonce = (s.harvestNonce || 0) + 1;
-    s.mediaOffset = (s.mediaOffset || 0) + 2;
-    s.harvestVideoFirst = true;
+    s.mediaOffset = 0;
+    s.harvestVideoFirst = false;
+    s.preferImageAssembly = true;
+    s.useCuratedPool = true;
     s.fixStrategy = 'reharvest';
     const beforePrune = (s.excludedUrls || []).length;
     s.excludedUrls = pruneExcludedUrlsForReharvest(s.excludedUrls || []);
     applied.push(
-      `0e. Thin harvest (empty browser) → pruned ${beforePrune} exclusions → ${s.excludedUrls.length} lifestyle-only, reharvest nonce ${s.harvestNonce}`,
+      `0e. Thin harvest (empty browser) → pruned ${beforePrune} exclusions → ${s.excludedUrls.length} lifestyle-only, reharvest nonce ${s.harvestNonce}, offset reset`,
     );
   }
 
   if (assemblyFail) {
-    s.reHarvestMedia = true;
-    s.harvestNonce = (s.harvestNonce || 0) + 1;
-    s.mediaOffset = (s.mediaOffset || 0) + 4;
-    s.harvestVideoFirst = true;
-    s.suppressGiphy = true;
-    s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
-    s.fixStrategy = 'reharvest';
+    const { weakest, scores } = weakestAssemblySubScore(watch.assemblyAudit);
+    assemblyFixApplied = true;
+    const harvestProject = project || loadLastProject();
+
+    if (weakest === 'captionCoherence') {
+      s.fixStrategy = 'captions';
+      applied.push(`0d. Assembly captionCoherence ${scores.captionCoherence}/100 → caption policy fix (no reharvest)`);
+    } else if (weakest === 'repeatPenalty') {
+      s.reHarvestMedia = true;
+      s.harvestNonce = (s.harvestNonce || 0) + 1;
+      s.mediaOffset = 0;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
+      s.suppressGiphy = true;
+      s.fixStrategy = 'reharvest';
+      s.useCuratedPool = true;
+      applied.push(`0d. Assembly repeatPenalty ${scores.repeatPenalty}/100 → curated pool + reharvest (cuts unchanged)`);
+    } else if (weakest === 'topicRelevance') {
+      s.reHarvestMedia = true;
+      s.harvestNonce = (s.harvestNonce || 0) + 1;
+      s.mediaOffset = 0;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
+      s.useCuratedPool = true;
+      s.suppressGiphy = true;
+      s.fixStrategy = 'reharvest';
+      if (harvestProject?.media?.length) {
+        const rejected = [...collectAssemblyExcludeUrls(harvestProject)];
+        accumulateVisionRejectedUrls(s, rejected);
+        s.excludedUrls = pruneExcludedUrlsForReharvest(s.excludedUrls || []);
+        applied.push(`0d. Assembly topicRelevance ${scores.topicRelevance}/100 → vision-targeted exclude ${rejected.length} URL(s), reharvest nonce ${s.harvestNonce}`);
+      } else {
+        applied.push(`0d. Assembly topicRelevance ${scores.topicRelevance}/100 → reharvest nonce ${s.harvestNonce}`);
+      }
+    } else if (weakest === 'visualCohesion') {
+      s.fixStrategy = 'hard_cuts';
+      s.ffmpegHardCuts = true;
+      s.useFfmpegAssembly = true;
+      s.patternInterrupts = true;
+      s.preferImageAssembly = true;
+      s.harvestVideoFirst = false;
+      s.cutIntervalSec = Math.min(1.8, Math.max(1.2, s.cutIntervalSec ?? 1.4));
+      applied.push(`0d. Assembly visualCohesion ${scores.visualCohesion}/100 → hard_cuts + interval ${s.cutIntervalSec}s`);
+    } else {
+      s.reHarvestMedia = true;
+      s.harvestNonce = (s.harvestNonce || 0) + 1;
+      s.mediaOffset = 0;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
+      s.useCuratedPool = true;
+      s.suppressGiphy = true;
+      s.fixStrategy = 'reharvest';
+      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → reharvest nonce ${s.harvestNonce}, offset reset`);
+    }
+
     const repeatMontage = (watch.assemblyAudit?.issues || []).some((i) => /repeat|identical|same\s+(shot|location|footage)|redundan/i.test(i));
-    if (repeatMontage) {
+    if (weakest === 'repeatPenalty' && repeatMontage) {
+      applied.push('0d2. Repeat montage — widen cuts skipped (pool growth strategy active)');
+    } else if (repeatMontage && weakest !== 'captionCoherence' && weakest !== 'visualCohesion') {
       s.cutIntervalSec = Math.min(2.5, Math.max(1.8, (s.cutIntervalSec ?? 0.5) + 0.6));
       s.useFastPacing = false;
-      applied.push(`0c. Assembly repeat montage → widen cuts to ${s.cutIntervalSec}s (thin asset pool)`);
+      assemblyWidenedCuts = true;
+      applied.push(`0c. Assembly repeat montage → widen cuts to ${s.cutIntervalSec}s`);
     }
-    const harvestProject = project || loadLastProject();
-    if (harvestProject?.media?.length) {
+
+    if (weakest !== 'topicRelevance' && weakest !== 'captionCoherence' && harvestProject?.media?.length) {
       const prev = new Set(sanitizeExcludedUrls(s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
       for (const key of collectAssemblyExcludeUrls(harvestProject)) {
         if (key && !isOverBroadExcludeUrl(key)) prev.add(key);
       }
-      // Prune to lifestyle-only entries (max 30) to prevent harvest pool starvation across iterations.
       s.excludedUrls = pruneExcludedUrlsForReharvest([...prev]);
-      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → exclude ${s.excludedUrls.length} off-topic URL(s), reharvest nonce ${s.harvestNonce}`);
-    } else {
-      const issues = (watch.assemblyAudit?.issues || []).slice(0, 2).join('; ');
-      applied.push(`0d. Assembly FAIL (${assemblyScore}/100) → reharvest nonce ${s.harvestNonce}: ${issues || 'off-topic/repeat montage'}`);
     }
   }
 
@@ -296,7 +366,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     || dupRuns >= 1
   );
 
-  if ((pacing <= 80 || longestHold >= 4) && !sceneFail && !assemblyRepeatIssue) {
+  if ((pacing <= 80 || longestHold >= 4) && !sceneFail && !assemblyRepeatIssue && !assemblyWidenedCuts) {
     s.useFastPacing = true;
     if ((s.cutIntervalSec ?? 1.25) > CUT_FLOOR) {
       const prev = s.cutIntervalSec ?? 1.25;

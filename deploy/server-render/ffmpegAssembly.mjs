@@ -594,6 +594,29 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   const hardCuts = hardCutsEnabled();
   const interrupts = patternInterruptsEnabled();
   const frames = Math.max(1, Math.round(durationSec * FPS));
+  const loopPreset = isLoopMode() ? 'ultrafast' : preset;
+
+  // Loop mode: skip zoompan (OOM-prone) — scale/crop + light hook punch only.
+  if (isLoopMode() && !isVideo) {
+    let simpleVf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
+    if (isHookClip && interrupts) {
+      simpleVf = `eq=saturation=1.25:brightness=0.05,${simpleVf}`;
+    } else if (clipIndex > 0) {
+      const fadeOut = Math.max(0.04, durationSec - 0.04);
+      simpleVf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${simpleVf}`;
+    }
+    const r = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-loop', '1', '-i', localSrc, '-t', String(durationSec),
+        '-vf', simpleVf, '-c:v', 'libx264', '-preset', loopPreset, '-pix_fmt', 'yuv420p',
+        '-r', String(FPS), '-an', clipOut,
+      ],
+      { encoding: 'utf8', timeout: 90_000 },
+    );
+    return r.status === 0 && existsSync(clipOut);
+  }
+
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
   if (isVideo && hardCuts && (isHookClip || clipIndex === 0)) {
     const strong = interruptStrong();

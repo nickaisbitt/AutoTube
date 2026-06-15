@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { ensureLocalAsset } from '../../deploy/server-render/ffmpegAssembly.mjs';
 import { validateEditTimeline, effectiveCutInterval } from './build-edit-timeline.mjs';
 import { computeClipBudget } from './assembly-system.mjs';
-import { normalizeUrlKey } from './harvest-loop-context.mjs';
+import { normalizeUrlKey, isEditorialHarvestKeep } from './harvest-loop-context.mjs';
 
 const PROBE_CONCURRENCY = 6;
 
@@ -61,11 +61,11 @@ export async function preflightTimelineMedia(project, options = {}) {
   const removedIds = new Set();
   const deadUrlKeys = [];
   for (const asset of media) {
-    if (!fetchableIds.has(asset.id)) {
-      removedIds.add(asset.id);
-      const key = normalizeUrlKey(asset.url, asset.sourceUrl);
-      if (key) deadUrlKeys.push(key);
-    }
+    if (fetchableIds.has(asset.id)) continue;
+    if (isEditorialHarvestKeep(asset)) continue;
+    removedIds.add(asset.id);
+    const key = normalizeUrlKey(asset.url, asset.sourceUrl);
+    if (key) deadUrlKeys.push(key);
   }
 
   if (removedIds.size) {

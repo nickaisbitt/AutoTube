@@ -2103,11 +2103,13 @@ export async function generateFullVideo(options) {
     }
 
     function runServerRender(attemptLabel = 'render') {
+      const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+      const renderTimeoutMs = loopMode ? 3_600_000 : 1_800_000;
       const render = spawnSync('node', ['server-render.mjs', mp4Out], {
         cwd: root,
         env: renderEnv,
         encoding: 'utf8',
-        timeout: 1_800_000,
+        timeout: renderTimeoutMs,
         stdio: ['inherit', 'pipe', 'pipe'],
       });
       const renderLogBody = `[${attemptLabel}]\n${render.stdout || ''}\n${render.stderr || ''}`;

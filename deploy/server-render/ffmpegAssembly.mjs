@@ -440,6 +440,15 @@ function cachePathForUrl(url, cacheDir, isVideo) {
   return join(cacheDir, `${hash}${ext}`);
 }
 
+function isValidImageBuffer(buf) {
+  if (!buf || buf.length < 12) return false;
+  const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
+  const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  const isWebp = buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP';
+  const isGif = buf.slice(0, 3).toString('ascii') === 'GIF';
+  return isJpeg || isPng || isWebp || isGif;
+}
+
 async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
   const timeoutMs = expectVideo || fetchUrl.includes('/api/download-clip') ? 120_000 : 45_000;
   const res = await fetch(fetchUrl, {
@@ -455,6 +464,13 @@ async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
     if (sig !== 'ftyp' && !buf.slice(0, 4).toString('hex').includes('1a45')) return null;
   }
   if (!expectVideo && /text\/html/i.test(contentType)) return null;
+  if (!expectVideo && buf.length > 12) {
+    const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    const isWebp = buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP';
+    const isGif = buf.slice(0, 3).toString('ascii') === 'GIF';
+    if (!isJpeg && !isPng && !isWebp && !isGif) return null;
+  }
   writeFileSync(cached, buf);
   return cached;
 }
@@ -497,8 +513,12 @@ export async function ensureLocalAsset(asset, devServer, cacheDir) {
   for (const fetchUrl of candidates) {
     if (!fetchUrl.startsWith('http')) continue;
     const cached = cachePathForUrl(fetchUrl, cacheDir, isVideo);
-    if (existsSync(cached) && readFileSync(cached).length > 500) {
-      return cached;
+    if (existsSync(cached)) {
+      const buf = readFileSync(cached);
+      if (buf.length > 500 && (isVideo || isValidImageBuffer(buf))) {
+        return cached;
+      }
+      try { unlinkSync(cached); } catch { /* stale cache */ }
     }
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -520,20 +540,28 @@ export async function warmMediaPoolCache(mediaPool, devServer, cacheDir, options
   const toWarm = imageFirstEnabled()
     ? unique.filter((a) => !isVideoAsset(a))
     : unique;
-  if (!toWarm.length) return { warmed: 0, failed: 0, total: 0 };
+  const fetchableKeys = new Set();
+  if (!toWarm.length) return { warmed: 0, failed: 0, total: 0, fetchableKeys };
 
   let warmed = 0;
   let failed = 0;
   for (let i = 0; i < toWarm.length; i += concurrency) {
     const batch = toWarm.slice(i, i + concurrency);
     const results = await Promise.all(
-      batch.map(async (asset) => (await ensureLocalAsset(asset, devServer, cacheDir) ? 'ok' : 'fail')),
+      batch.map(async (asset) => {
+        const path = await ensureLocalAsset(asset, devServer, cacheDir);
+        if (path) {
+          fetchableKeys.add(assetManifestKey(asset));
+          return 'ok';
+        }
+        return 'fail';
+      }),
     );
     warmed += results.filter((r) => r === 'ok').length;
     failed += results.filter((r) => r === 'fail').length;
   }
   console.log(`  [ffmpeg] cache warm: ${warmed}/${toWarm.length} assets ready (${failed} failed)`);
-  return { warmed, failed, total: toWarm.length };
+  return { warmed, failed, total: toWarm.length, fetchableKeys };
 }
 
 async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
@@ -792,11 +820,17 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
         ...prepareSegmentMedia(globalMedia).filter((a) => !isVideoAsset(a)),
       ])
       : null;
-    const alternates = [
+    const alternatesRaw = [
       coerceImageFirstAsset(asset, segMedia),
       ...(imagePool?.length ? imagePool : segMedia).filter((a) => assetKey(a) !== assetKey(asset)),
       ...globalMedia.filter((a) => assetKey(a) !== assetKey(asset)),
-    ].sort((a, b) => {
+    ];
+    const fetchableKeys = options.fetchableKeys;
+    const thinPool = loopMode && fetchableKeys?.size > 0 && fetchableKeys.size < schedule.length + 2;
+    const alternates = (fetchableKeys?.size
+      ? alternatesRaw.filter((a) => fetchableKeys.has(assetManifestKey(a)))
+      : alternatesRaw
+    ).sort((a, b) => {
       if (imageFirstEnabled()) {
         const av = isVideoAsset(a) ? 1 : 0;
         const bv = isVideoAsset(b) ? 1 : 0;
@@ -817,17 +851,17 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       const key = assetKey(candidate);
       if (key && tried.has(key)) continue;
       const manifestK = assetManifestKey(candidate);
-      const hasUntried = alternates.some(
+      const hasUntried = !thinPool && alternates.some(
         (a) => !tried.has(assetKey(a)) && assetManifestKey(a) !== lastRenderedManifestKey,
       );
-      if (manifestK && manifestK === lastRenderedManifestKey && hasUntried) continue;
+      if (!thinPool && manifestK && manifestK === lastRenderedManifestKey && hasUntried) continue;
       if (key) tried.add(key);
 
       const result = await tryEncodeAsset(candidate, durationSec, label, hintOffset, interrupt, clipOut);
       lastResolved = result.resolvedAsset || candidate;
       if (result.ok) {
         const resolvedKey = assetManifestKey(lastResolved);
-        if (resolvedKey && resolvedKey === lastRenderedManifestKey) {
+        if (!thinPool && resolvedKey && resolvedKey === lastRenderedManifestKey) {
           ok = false;
           continue;
         }
@@ -1002,7 +1036,8 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const mediaPool = project.media || [];
   const globalCacheDir = join(workDir, 'asset-cache');
   const devServer = options.devServer || 'http://localhost:5173';
-  await warmMediaPoolCache(mediaPool, devServer, globalCacheDir);
+  const warm = await warmMediaPoolCache(mediaPool, devServer, globalCacheDir);
+  const fetchableKeys = warm.fetchableKeys || new Set();
   let cumulativeSegStartSec = 0;
 
   for (let si = 0; si < (project.script || []).length; si++) {
@@ -1020,6 +1055,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       segmentStartSec: cumulativeSegStartSec,
       mediaPool,
       globalCacheDir,
+      fetchableKeys,
     });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };

@@ -1385,6 +1385,29 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   return report;
 }
 
+/** Parse server-render failure from logs when MP4 is missing. */
+function parseRenderFailureReason(outDir, fallback = 'No output MP4') {
+  const candidates = [
+    join(outDir, 'render.log'),
+    join(process.cwd(), 'test-recordings', 'latest-render.log'),
+  ];
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    try {
+      const body = readFileSync(path, 'utf8');
+      const timelineShort = body.match(/timeline short|Render failed: timeline short/i);
+      if (timelineShort) return 'timeline short';
+      const manifestFail = body.match(/diversity gate: ([^\n]+)/i);
+      if (manifestFail) return `Render manifest gate FAIL — diversity gate: ${manifestFail[1].trim()}`;
+      const renderFail = body.match(/Render failed: ([^\n]+)/i);
+      if (renderFail) return renderFail[1].trim();
+    } catch {
+      /* ignore */
+    }
+  }
+  return fallback;
+}
+
 /** Re-apply hook+captions in one pass when pipeline overlay failed. */
 async function burnOverlaysPostRender(videoPath, outDir, project) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
@@ -2125,7 +2148,7 @@ export async function generateFullVideo(options) {
 
       produced = resolveProducedOutput();
       if (!produced) {
-        return { ok: false, error: 'No output MP4', topic, outDir };
+        return { ok: false, error: parseRenderFailureReason(outDir), topic, outDir, fixState };
       }
 
       const producedSize = statSync(produced).size;
@@ -2138,7 +2161,7 @@ export async function generateFullVideo(options) {
         }
         produced = resolveProducedOutput();
         if (!produced) {
-          return { ok: false, error: 'No output MP4 after render retry', topic, outDir };
+          return { ok: false, error: parseRenderFailureReason(outDir, 'No output MP4 after render retry'), topic, outDir, fixState };
         }
       }
     }

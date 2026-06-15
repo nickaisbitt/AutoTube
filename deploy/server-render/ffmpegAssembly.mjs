@@ -815,8 +815,23 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     }
 
     if (!ok) {
+      for (const candidate of alternates) {
+        const key = assetKey(candidate);
+        if (key && tried.has(key)) continue;
+        if (key) tried.add(key);
+        const result = await tryEncodeAsset(candidate, durationSec, label, hintOffset, interrupt, clipOut);
+        lastResolved = result.resolvedAsset || candidate;
+        if (result.ok) {
+          ok = true;
+          console.log(`  [ffmpeg] ${label}: loop last-resort encode (${(candidate.sourceUrl || candidate.url || '').slice(0, 72)})`);
+          break;
+        }
+      }
+    }
+
+    if (!ok) {
       if (loopMode) {
-        console.log(`  [ffmpeg] ${label}: failed in loop mode (no clone/placeholder fallback)`);
+        console.log(`  [ffmpeg] ${label}: failed in loop mode (no encode succeeded, tried=${tried.size})`);
         return false;
       }
     }

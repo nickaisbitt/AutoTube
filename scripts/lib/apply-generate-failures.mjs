@@ -53,13 +53,14 @@ export function applyGenerateFailureFixes(error, fixState, extra = {}) {
     applied.push('G5. Caption burn FAIL → captions strategy retry');
   }
 
-  if (/timeline short|fetch\/encode failed/i.test(msg)) {
+  if (/timeline short|no output mp4/i.test(msg)) {
     s.reHarvestMedia = true;
     s.harvestNonce = (s.harvestNonce || 0) + 1;
-    clampCut(s, IMAGE_FIRST_CUT_FLOOR);
+    clampCut(s, Math.max(IMAGE_FIRST_CUT_FLOOR, 1.8));
     s.preferImageAssembly = true;
     s.harvestVideoFirst = false;
-    applied.push(`G3. Render encode FAIL → reharvest + image-first, cuts ≥${s.cutIntervalSec}s`);
+    s.useCuratedPool = true;
+    applied.push(`G3. Render encode FAIL → reharvest + widen cuts to ${s.cutIntervalSec}s, nonce ${s.harvestNonce}`);
   }
 
   const deadKeys = extra.deadUrlKeys || extra.preflightDeadIds || [];

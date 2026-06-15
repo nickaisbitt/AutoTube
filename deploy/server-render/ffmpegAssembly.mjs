@@ -14,6 +14,10 @@ import { computeTimelineDiversityMetrics } from '../../scripts/lib/assembly-syst
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FPS = 24;
 
+export function isLoopMode() {
+  return process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+}
+
 function probeMediaDuration(path) {
   const probe = spawnSync(
     'ffprobe',
@@ -35,7 +39,7 @@ function trimAudioToDuration(inputPath, outputPath, targetSec) {
 
 /** Extend video by cloning the last frame so narration is not truncated. */
 function padVideoToDuration(inputPath, outputPath, targetSec) {
-  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const loopMode = isLoopMode();
   if (loopMode) {
     return padVideoSegmentedTail(inputPath, outputPath, targetSec);
   }
@@ -197,7 +201,7 @@ function extendVideoWithRenderedClips(inputPath, outputPath, targetSec, tailClip
 
 function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
-  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const loopMode = isLoopMode();
   if (draft && loopMode) return { w: 1280, h: 720 };
   return draft ? { w: 960, h: 540 } : { w: 1920, h: 1080 };
 }
@@ -213,7 +217,7 @@ function hardCutsEnabled() {
   if (process.env.AUTOTUBE_FFMPEG_HARD_CUTS === '1' || process.env.AUTOTUBE_FFMPEG_HARD_CUTS === 'true') {
     return true;
   }
-  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const loopMode = isLoopMode();
   return loopMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
 }
 
@@ -339,6 +343,7 @@ function isImageLikeUrl(url) {
 }
 
 function buildClipSchedule(segment, segMedia, intervalSec, project, segmentStartSec = 0) {
+  const loopMode = isLoopMode();
   const targetDuration = segment.duration || 20;
   const orderedMedia = prepareSegmentMedia(segMedia);
   const timeline = (project?.editTimeline || []).filter((e) => e.segmentId === segment.id);
@@ -359,7 +364,10 @@ function buildClipSchedule(segment, segMedia, intervalSec, project, segmentStart
     }
   }
 
-  const covered = clips.reduce((sum, c) => sum + c.durationSec, 0);
+  if (loopMode) {
+    return assignVideoSourceOffsets(clips);
+  }
+
   let t = clips.length ? clips[clips.length - 1].endSec : 0;
   let lastManifestKey = clips.length ? assetManifestKey(clips[clips.length - 1].asset) : null;
   while (t < targetDuration - 0.05) {
@@ -619,6 +627,7 @@ function interruptStrong() {
 }
 
 async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
+  const loopMode = isLoopMode();
   const rawInterval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
   // Apply pool-aware widening so thin pools don't exhaust max-uses in the first segment,
   // leaving later segments with nothing but fallback cycling.
@@ -769,30 +778,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     }
 
     if (!ok) {
-      const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
-      if (loopMode && clipPaths.length > 0) {
-        let cloneSrc = clipPaths[clipPaths.length - 1];
-        for (let ci = clipPaths.length - 1; ci >= 0; ci--) {
-          const mk = renderedManifestKeys[ci];
-          if (mk && mk !== lastRenderedManifestKey) {
-            cloneSrc = clipPaths[ci];
-            break;
-          }
-        }
-        const clone = spawnSync(
-          'ffmpeg',
-          [
-            '-y', '-i', cloneSrc,
-            '-t', String(durationSec),
-            '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
-            '-an', clipOut,
-          ],
-          { encoding: 'utf8', timeout: 120_000 },
-        );
-        if (clone.status === 0 && existsSync(clipOut)) {
-          ok = true;
-          console.log(`  [ffmpeg] ${label}: cloned last good clip (loop mode, no placeholder)`);
-        }
+      if (loopMode) {
+        console.log(`  [ffmpeg] ${label}: failed in loop mode (no clone/placeholder fallback)`);
+        return false;
       }
     }
 
@@ -833,23 +821,31 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0);
+    const added = await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0);
+    if (loopMode && !added) {
+      return { ok: false, error: 'timeline short' };
+    }
   }
 
-  let fillerRound = 0;
-  while (renderedDuration < targetDuration - 0.05 && segMedia.length && fillerRound < segMedia.length * 4) {
-    const asset = pickAssetAtTime(renderedDuration, segMedia, interval, lastRenderedManifestKey);
-    const absFillerStart = segmentStartSec + renderedDuration;
-    const fillerInterval = absFillerStart < HOOK_ZONE_SEC ? Math.min(interval, HOOK_MAX_HOLD_SEC) : interval;
-    const needSec = Math.min(fillerInterval, targetDuration - renderedDuration);
-    if (needSec <= 0.05) break;
-    const added = await pushClip(asset, needSec, `filler ${fillerRound + 1} (+${needSec.toFixed(2)}s)`);
-    fillerRound += 1;
-    if (!added && fillerRound >= segMedia.length * 2) break;
+  if (!loopMode) {
+    let fillerRound = 0;
+    while (renderedDuration < targetDuration - 0.05 && segMedia.length && fillerRound < segMedia.length * 4) {
+      const asset = pickAssetAtTime(renderedDuration, segMedia, interval, lastRenderedManifestKey);
+      const absFillerStart = segmentStartSec + renderedDuration;
+      const fillerInterval = absFillerStart < HOOK_ZONE_SEC ? Math.min(interval, HOOK_MAX_HOLD_SEC) : interval;
+      const needSec = Math.min(fillerInterval, targetDuration - renderedDuration);
+      if (needSec <= 0.05) break;
+      const added = await pushClip(asset, needSec, `filler ${fillerRound + 1} (+${needSec.toFixed(2)}s)`);
+      fillerRound += 1;
+      if (!added && fillerRound >= segMedia.length * 2) break;
+    }
   }
 
   if (renderedDuration < targetDuration - 0.5) {
     console.log(`  [ffmpeg] segment short: ${renderedDuration.toFixed(1)}s / ${targetDuration.toFixed(1)}s target`);
+    if (loopMode) {
+      return { ok: false, error: 'timeline short' };
+    }
   }
 
   if (clipPaths.length === 0) {

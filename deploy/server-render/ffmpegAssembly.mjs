@@ -888,18 +888,23 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       }
     }
 
-    if (!ok && loopMode && clipPaths.length > 0) {
-      try {
-        const lastClip = clipPaths[clipPaths.length - 1];
-        if (existsSync(lastClip) && statSync(lastClip).size > 10_000) {
-          copyFileSync(lastClip, clipOut);
-          if (existsSync(clipOut) && statSync(clipOut).size > 10_000) {
-            ok = true;
-            console.log(`  [ffmpeg] ${label}: reusing prior clip (encode exhausted, tried=${tried.size})`);
+    if (!ok && loopMode) {
+      const carryClip = clipPaths.length > 0
+        ? clipPaths[clipPaths.length - 1]
+        : options.clipCarry?.path;
+      if (carryClip) {
+        try {
+          if (existsSync(carryClip) && statSync(carryClip).size > 10_000) {
+            copyFileSync(carryClip, clipOut);
+            if (existsSync(clipOut) && statSync(clipOut).size > 10_000) {
+              ok = true;
+              const fromSeg = clipPaths.length > 0 ? 'prior clip' : 'prior segment clip';
+              console.log(`  [ffmpeg] ${label}: reusing ${fromSeg} (encode exhausted, tried=${tried.size})`);
+            }
           }
+        } catch {
+          /* fall through to hard fail */
         }
-      } catch {
-        /* fall through to hard fail */
       }
     }
 
@@ -942,6 +947,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       ? `placeholder:${timelineAssetId}`
       : assetManifestKey(lastResolved || asset);
     renderedManifestKeys.push(lastRenderedManifestKey);
+    if (options.clipCarry) options.clipCarry.path = clipOut;
     return true;
   }
 
@@ -1038,6 +1044,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const devServer = options.devServer || 'http://localhost:5173';
   const warm = await warmMediaPoolCache(mediaPool, devServer, globalCacheDir);
   const fetchableKeys = warm.fetchableKeys || new Set();
+  const clipCarry = { path: null };
   let cumulativeSegStartSec = 0;
 
   for (let si = 0; si < (project.script || []).length; si++) {
@@ -1056,6 +1063,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       mediaPool,
       globalCacheDir,
       fetchableKeys,
+      clipCarry,
     });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };

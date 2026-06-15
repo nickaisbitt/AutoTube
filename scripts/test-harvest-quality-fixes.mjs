@@ -45,10 +45,12 @@ import {
   placeholderSegmentsFromManifest,
 } from './lib/run-objective-qa.mjs';
 import {
+  accumulateExcludedUrls,
   harvestContextFromFixState,
   harvestSessionStoragePayload,
   normalizeUrlKey,
   isOverBroadExcludeUrl,
+  pruneVisionRejectedForCrimeTopics,
   sanitizeExcludedUrls,
   pruneExcludedUrlsForReharvest,
 } from './lib/harvest-loop-context.mjs';
@@ -394,12 +396,76 @@ console.log('\n── 12b. harvest-loop-context harvestVideoFirst ──');
 
   const vidPayload = harvestSessionStoragePayload(harvestContextFromFixState({ minVideosPerSegment: 2 }));
   assert('minVideosPerSegment wired to sessionStorage', vidPayload.autotube_loop_min_videos === '2');
+
+  const rotatedPayload = harvestSessionStoragePayload(harvestContextFromFixState({ harvestNonce: 6 }));
+  assert('harvest nonce rotates modulo 4 in sessionStorage', rotatedPayload.autotube_loop_harvest_nonce === '2');
 }
 
 // ---------------------------------------------------------------------------
-// 12c. normalizeUrlKey — embedded source URL, skip bare proxy
+// 12c. accumulateExcludedUrls / crime-topic vision prune — keep editorial pool
 // ---------------------------------------------------------------------------
-console.log('\n── 12c. normalizeUrlKey ──');
+console.log('\n── 12c. harvest exclusions keep editorial pool ──');
+{
+  const fixState = {
+    excludedUrls: ['https://www.reuters.com/world/europe/louvre-heist-arrests-2026-06-01/'],
+  };
+  accumulateExcludedUrls(fixState, {
+    media: [
+      {
+        source: 'curated-topic-pool',
+        url: 'https://upload.wikimedia.org/wikipedia/commons/louvre-pyramid.jpg',
+      },
+      {
+        url: 'https://www.strategink.com/digital-heist-summit/banner.jpg',
+        sourceUrl: 'https://www.strategink.com/digital-heist-summit/banner.jpg',
+      },
+    ],
+  });
+  assert(
+    'accumulateExcludedUrls removes stored editorial excludes',
+    !(fixState.excludedUrls || []).some((u) => u.includes('reuters.com/world/europe/louvre-heist')),
+  );
+  assert(
+    'accumulateExcludedUrls skips curated/editorial media',
+    !(fixState.excludedUrls || []).some((u) => u.includes('wikimedia.org')),
+  );
+  assert(
+    'accumulateExcludedUrls keeps non-editorial exclusions',
+    (fixState.excludedUrls || []).some((u) => u.includes('strategink.com')),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 12d. pruneVisionRejectedForCrimeTopics — keep topical press, keep obvious noise rejected
+// ---------------------------------------------------------------------------
+console.log('\n── 12d. pruneVisionRejectedForCrimeTopics ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const pruned = pruneVisionRejectedForCrimeTopics([
+    'https://www.nytimes.com/2026/06/01/world/europe/louvre-heist-live-stream.html',
+    'https://www.reuters.com/world/europe/paris-louvre-heist-suspects-arrested-2026-06-01/',
+    'https://apnews.com/article/louvre-museum-heist-paris-arrests-1234567890',
+    'https://onestream.live/blog/how-to-go-live-on-tiktok/',
+    'https://example.com/escape-room-team-building.jpg',
+  ], topic);
+  assert('Crime-topic prune releases NYT press URL', !pruned.some((u) => u.includes('nytimes.com')));
+  assert('Crime-topic prune releases Reuters press URL', !pruned.some((u) => u.includes('reuters.com')));
+  assert('Crime-topic prune releases AP press URL', !pruned.some((u) => u.includes('apnews.com')));
+  assert('Crime-topic prune keeps TikTok guide rejected', pruned.some((u) => u.includes('onestream.live')));
+  assert('Crime-topic prune keeps escape-room noise rejected', pruned.some((u) => u.includes('escape-room')));
+
+  const ctx = harvestContextFromFixState({
+    excludedUrls: ['https://www.reuters.com/world/europe/louvre-heist-arrests-2026-06-01/'],
+    visionRejectedUrls: pruned,
+  }, topic);
+  assert('harvest context excludes obvious off-topic rejects', ctx.excludeUrls.some((u) => u.includes('onestream.live')));
+  assert('harvest context does not exclude Reuters press URL', !ctx.excludeUrls.some((u) => u.includes('reuters.com')));
+}
+
+// ---------------------------------------------------------------------------
+// 12e. normalizeUrlKey — embedded source URL, skip bare proxy
+// ---------------------------------------------------------------------------
+console.log('\n── 12e. normalizeUrlKey ──');
 {
   const proxy = 'http://localhost:5173/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fwatch%3Fv%3Dabc';
   assert('Extracts embedded YouTube URL', normalizeUrlKey(proxy).includes('youtube.com/watch'));
@@ -789,6 +855,7 @@ console.log('\n── 22. Placeholder FAIL excludes dead segment URLs ──');
     media: [
       { segmentId: 'seg-dead', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fwatch%3Fv%3Ddead1' },
       { segmentId: 'seg-dead', type: 'image', url: 'https://images.example.com/dead-thumb.jpg' },
+      { segmentId: 'seg-dead', type: 'image', url: 'https://www.reuters.com/world/europe/louvre-heist-arrests-2026-06-01/' },
       { segmentId: 'seg-ok', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fwatch%3Fv%3Dgood1' },
     ],
   };
@@ -811,6 +878,7 @@ console.log('\n── 22. Placeholder FAIL excludes dead segment URLs ──');
       && (fixState.excludedUrls || []).some((u) => u.includes('dead-thumb.jpg')),
     (fixState.excludedUrls || []).join(', '),
   );
+  assert('Dead segment editorial URL not excluded', !(fixState.excludedUrls || []).some((u) => u.includes('reuters.com/world/europe/louvre-heist')));
   assert('OK segment video URL not excluded', !(fixState.excludedUrls || []).some((u) => u.includes('youtube.com/watch?v=good1')));
   assert('Placeholder fix mentions dead segment breakdown', applied.some((a) => a.includes('dead segs: Dead seg:4/5')));
 }
@@ -868,6 +936,7 @@ console.log('\n── 19. placeholder gate manifest exclusion ──');
     placeholderUrls: [
       'https://www.tiktok.com/@user/video/dead1',
       'https://www.youtube.com/watch?v=good1',
+      'https://www.reuters.com/world/europe/louvre-heist-arrests-2026-06-01/',
     ],
     perSegment: [{ segmentId: 's1', title: 'Hook', clipCount: 5, placeholderClipCount: 2 }],
   }));
@@ -896,6 +965,7 @@ console.log('\n── 19. placeholder gate manifest exclusion ──');
   assert('Placeholder fail triggers reharvest', fixState.reHarvestMedia === true);
   assert('Excludes manifest placeholder URLs only', fixState.excludedUrls?.length === 2);
   assert('Does not exclude working YouTube URL', !fixState.excludedUrls?.includes('https://www.youtube.com/watch?v=good2'));
+  assert('Does not exclude editorial placeholder URL', !fixState.excludedUrls?.some((u) => u.includes('reuters.com/world/europe/louvre-heist')));
   assert('Applied message mentions placeholder URL(s)', applied.some((a) => a.includes('placeholder URL')));
   assert(
     'Placeholder fail does not raise minAssets above cap',

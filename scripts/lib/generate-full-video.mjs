@@ -1455,7 +1455,7 @@ export async function generateFullVideo(options) {
   ) {
     fixState.excludedUrls = priorUrls.map((u) => (u || '').split('?')[0]).slice(-200);
   }
-  const harvestCtx = harvestContextFromFixState(fixState);
+  const harvestCtx = harvestContextFromFixState(fixState, topic);
   const openRouterKey = resolveOpenRouterKey();
   const realHarvest = options.realHarvest === true || (options.realHarvest !== false && Boolean(openRouterKey));
 
@@ -1953,9 +1953,12 @@ export async function generateFullVideo(options) {
         fixState.preferImageAssembly = true;
         log(`   🖼 Image-first assembly (${postSanitizeUnique} URLs, strategy=${fixState.fixStrategy || 'default'})`);
       }
-      if (postSanitizeUnique < harvestBudget || fixState.reHarvestMedia) {
+      const shouldTopUpAfterSanitize = postSanitizeUnique < harvestBudget || fixState.reHarvestMedia;
+      const shouldForceCuratedAfterSanitize = fixState.reHarvestMedia
+        || (postSanitizeUnique < harvestBudget && isCrimeNewsTopic(topic));
+      if (shouldTopUpAfterSanitize) {
         ensureEditorialPool(project, fixState.minAssetsPerSegment || 4, {}, {
-          forceCurated: true,
+          forceCurated: shouldForceCuratedAfterSanitize,
           cutIntervalSec: fixState.cutIntervalSec,
         });
       }

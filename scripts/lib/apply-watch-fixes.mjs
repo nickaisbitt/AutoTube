@@ -216,20 +216,27 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       const deadSegmentIds = new Set(badSegments.map((seg) => seg.segmentId));
       const segDetail = badSegments.length ? formatPlaceholderSegmentDetail(badSegments) : '';
       if (harvestProject?.media?.length || placeholderKeys.length) {
-      const prev = new Set(sanitizeExcludedUrls(s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
-      if (placeholderKeys.length) {
-        for (const key of placeholderKeys) {
-          if (!isOverBroadExcludeUrl(key) && !isEditorialHarvestKeep(key)) prev.add(key);
-        }
-      } else {
+        const prev = new Set(
+          sanitizeExcludedUrls(s.excludedUrls || [])
+            .map((u) => normalizeUrlKey(u))
+            .filter((key) => key && !isEditorialHarvestKeep(key)),
+        );
+        if (placeholderKeys.length) {
+          for (const key of placeholderKeys) {
+            if (!isOverBroadExcludeUrl(key) && !isEditorialHarvestKeep(key)) prev.add(key);
+          }
+        } else {
           const deadUrls = collectDeadAssetUrls(harvestProject, deadSegmentIds);
           if (deadUrls.length) {
-            for (const key of deadUrls) prev.add(key);
+            for (const key of deadUrls) {
+              if (!isEditorialHarvestKeep(key)) prev.add(key);
+            }
           } else if (harvestProject?.media?.length) {
             for (const m of harvestProject.media) {
               if (m.type !== 'video' && !/\/api\/download-clip/i.test(m.url || '')) continue;
+              if (isEditorialHarvestKeep(m)) continue;
               const key = normalizeUrlKey(m.url, m.sourceUrl);
-              if (key) prev.add(key);
+              if (key && !isEditorialHarvestKeep(key)) prev.add(key);
             }
           }
         }

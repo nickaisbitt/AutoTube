@@ -461,11 +461,13 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
     if (existsSync(cached) && readFileSync(cached).length > 500) {
       return cached;
     }
-    try {
-      const path = await fetchToCache(fetchUrl, cached, { expectVideo: isVideo });
-      if (path) return path;
-    } catch {
-      /* try next candidate */
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const path = await fetchToCache(fetchUrl, cached, { expectVideo: isVideo });
+        if (path) return path;
+      } catch {
+        /* try next candidate */
+      }
     }
   }
   return null;

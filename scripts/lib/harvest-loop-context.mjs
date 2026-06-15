@@ -99,7 +99,14 @@ export function accumulateExcludedUrls(fixState, project) {
 }
 
 /** Curated/editorial B-roll must stay in the harvest pool across loop retries. */
-function isEditorialHarvestKeep(asset) {
+export function isEditorialHarvestKeep(assetOrUrl) {
+  if (typeof assetOrUrl === 'string') {
+    const hay = assetOrUrl.toLowerCase();
+    if (/upload\.wikimedia\.org|images\.unsplash\.com\/photo-/.test(hay)) return true;
+    if (/\/news\/|bbc\.co\.uk|nytimes\.com|reuters\.com|apnews\.com|abcnews\.go\.com|cbsnews|npr\.org|theguardian\.com|globalnews\.ca|inquirer\.net/.test(hay)) return true;
+    return false;
+  }
+  const asset = assetOrUrl;
   const src = `${asset?.source || ''}`.toLowerCase();
   const hay = `${asset?.url || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
   if (src === 'curated-topic-pool' || src === 'crime-fallback-stock') return true;

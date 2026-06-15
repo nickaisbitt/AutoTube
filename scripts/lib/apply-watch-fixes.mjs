@@ -11,7 +11,7 @@ import {
   countRealSegmentVideos,
   LOOP_MAX_MIN_ASSETS_PER_SEGMENT,
 } from './harvest-quality.mjs';
-import { normalizeUrlKey, isOverBroadExcludeUrl, sanitizeExcludedUrls, pruneExcludedUrlsForReharvest, accumulateVisionRejectedUrls } from './harvest-loop-context.mjs';
+import { normalizeUrlKey, isOverBroadExcludeUrl, sanitizeExcludedUrls, pruneExcludedUrlsForReharvest, accumulateVisionRejectedUrls, isEditorialHarvestKeep } from './harvest-loop-context.mjs';
 import { collectAssemblyExcludeUrls } from './harvest-quality.mjs';
 import {
   loadRenderManifest,
@@ -196,9 +196,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
     if (failed.includes('placeholder_pct')) {
       s.reHarvestMedia = true;
       s.mediaOffset = (s.mediaOffset || 0) + 2;
-      s.harvestVideoFirst = true;
+      s.harvestVideoFirst = false;
+      s.preferImageAssembly = true;
+      s.useCuratedPool = true;
       s.suppressGiphy = true;
-      s.minVideosPerSegment = Math.max(2, s.minVideosPerSegment || 2);
+      s.minVideosPerSegment = 0;
       s.fixStrategy = 'reharvest';
       // Do not raise minAssets — top-up satisfies volume; higher mins starve browser harvest.
       s.minAssetsPerSegment = Math.min(
@@ -217,7 +219,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
       const prev = new Set(sanitizeExcludedUrls(s.excludedUrls || []).map((u) => normalizeUrlKey(u)));
       if (placeholderKeys.length) {
         for (const key of placeholderKeys) {
-          if (!isOverBroadExcludeUrl(key)) prev.add(key);
+          if (!isOverBroadExcludeUrl(key) && !isEditorialHarvestKeep(key)) prev.add(key);
         }
       } else {
           const deadUrls = collectDeadAssetUrls(harvestProject, deadSegmentIds);
@@ -239,7 +241,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '', project = null,
         ? `${placeholderKeys.length} placeholder URL(s) from render-manifest`
         : `${(s.excludedUrls || []).length} excluded URLs`;
       applied.push(
-        `0a. Placeholder gate FAIL (${pctNote}${segDetail ? `; dead segs: ${segDetail}` : ''}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, exclude dead URLs, video-first (${excludeNote})`,
+        `0a. Placeholder gate FAIL (${pctNote}${segDetail ? `; dead segs: ${segDetail}` : ''}) → reharvest next nonce ${(s.harvestNonce || 0) + 1}, image-first curated pool (${excludeNote})`,
       );
     } else if (failed.some((n) => n.startsWith('scene_'))) {
       escalateFixStrategy(s, applied, `0b. Objective scene FAIL (${failed.join(', ')})`, { sceneFirst: true });

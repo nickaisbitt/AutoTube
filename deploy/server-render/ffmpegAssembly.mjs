@@ -3,16 +3,20 @@
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, statSync, copyFileSync } from 'node:fs';
 import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
 import { muxVideoWithAudio } from './audio.mjs';
 import { orderAssetsVideoFirst, effectiveCutInterval, HOOK_ZONE_SEC, HOOK_MAX_HOLD_SEC } from '../../scripts/lib/build-edit-timeline.mjs';
-import { computeTimelineDiversityMetrics } from '../../scripts/lib/assembly-system.mjs';
+import { computeTimelineDiversityMetrics, URL_SPACING_SEC } from '../../scripts/lib/assembly-system.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FPS = 24;
+
+export function isLoopMode() {
+  return process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+}
 
 function probeMediaDuration(path) {
   const probe = spawnSync(
@@ -35,7 +39,7 @@ function trimAudioToDuration(inputPath, outputPath, targetSec) {
 
 /** Extend video by cloning the last frame so narration is not truncated. */
 function padVideoToDuration(inputPath, outputPath, targetSec) {
-  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const loopMode = isLoopMode();
   if (loopMode) {
     return padVideoSegmentedTail(inputPath, outputPath, targetSec);
   }
@@ -197,7 +201,7 @@ function extendVideoWithRenderedClips(inputPath, outputPath, targetSec, tailClip
 
 function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
-  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const loopMode = isLoopMode();
   if (draft && loopMode) return { w: 1280, h: 720 };
   return draft ? { w: 960, h: 540 } : { w: 1920, h: 1080 };
 }
@@ -213,7 +217,7 @@ function hardCutsEnabled() {
   if (process.env.AUTOTUBE_FFMPEG_HARD_CUTS === '1' || process.env.AUTOTUBE_FFMPEG_HARD_CUTS === 'true') {
     return true;
   }
-  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const loopMode = isLoopMode();
   return loopMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
 }
 
@@ -273,6 +277,26 @@ function assetManifestKey(asset) {
     }
   }
   return url.split('?')[0].toLowerCase();
+}
+
+function uniqueAssetsByManifestKey(assets) {
+  const seen = new Set();
+  const out = [];
+  for (const asset of assets || []) {
+    const key = assetManifestKey(asset);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    out.push(asset);
+  }
+  return out;
+}
+
+function alternateAssetPriority(asset) {
+  const hay = `${asset?.url || ''} ${asset?.sourceUrl || ''} ${asset?.source || ''}`.toLowerCase();
+  if (/unsplash\.com|pexels\.com|pixabay/.test(hay)) return 4;
+  if (/lobbyobserver|digitalamit|topic-fallback/.test(hay)) return 3;
+  if (/wikimedia|reuters|apnews|nytimes|bbc|foxnews|cbsnews|euronews|globalnews/.test(hay)) return 0;
+  return 1;
 }
 
 function pickAssetAvoidingRepeat(candidates, slot, lastManifestKey) {
@@ -339,6 +363,7 @@ function isImageLikeUrl(url) {
 }
 
 function buildClipSchedule(segment, segMedia, intervalSec, project, segmentStartSec = 0) {
+  const loopMode = isLoopMode();
   const targetDuration = segment.duration || 20;
   const orderedMedia = prepareSegmentMedia(segMedia);
   const timeline = (project?.editTimeline || []).filter((e) => e.segmentId === segment.id);
@@ -359,7 +384,10 @@ function buildClipSchedule(segment, segMedia, intervalSec, project, segmentStart
     }
   }
 
-  const covered = clips.reduce((sum, c) => sum + c.durationSec, 0);
+  if (loopMode) {
+    return assignVideoSourceOffsets(clips);
+  }
+
   let t = clips.length ? clips[clips.length - 1].endSec : 0;
   let lastManifestKey = clips.length ? assetManifestKey(clips[clips.length - 1].asset) : null;
   while (t < targetDuration - 0.05) {
@@ -412,6 +440,15 @@ function cachePathForUrl(url, cacheDir, isVideo) {
   return join(cacheDir, `${hash}${ext}`);
 }
 
+function isValidImageBuffer(buf) {
+  if (!buf || buf.length < 12) return false;
+  const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
+  const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  const isWebp = buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP';
+  const isGif = buf.slice(0, 3).toString('ascii') === 'GIF';
+  return isJpeg || isPng || isWebp || isGif;
+}
+
 async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
   const timeoutMs = expectVideo || fetchUrl.includes('/api/download-clip') ? 120_000 : 45_000;
   const res = await fetch(fetchUrl, {
@@ -427,11 +464,18 @@ async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
     if (sig !== 'ftyp' && !buf.slice(0, 4).toString('hex').includes('1a45')) return null;
   }
   if (!expectVideo && /text\/html/i.test(contentType)) return null;
+  if (!expectVideo && buf.length > 12) {
+    const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    const isWebp = buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP';
+    const isGif = buf.slice(0, 3).toString('ascii') === 'GIF';
+    if (!isJpeg && !isPng && !isWebp && !isGif) return null;
+  }
   writeFileSync(cached, buf);
   return cached;
 }
 
-async function ensureLocalAsset(asset, devServer, cacheDir) {
+export async function ensureLocalAsset(asset, devServer, cacheDir) {
   mkdirSync(cacheDir, { recursive: true });
   const rawUrl = asset.url || '';
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(rawUrl);
@@ -440,26 +484,41 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
     return existsSync(abs) ? abs : null;
   }
 
+  const weservUrl = (url) => {
+    const stripped = url.replace(/^https?:\/\//i, '');
+    return `https://images.weserv.nl/?url=${encodeURIComponent(stripped)}&w=1280&h=720&fit=cover&output=jpg`;
+  };
+
   const candidates = [];
   if (rawUrl.startsWith('/api/')) {
     candidates.push(`${devServer}${rawUrl}`);
   } else if (rawUrl.startsWith('http')) {
+    if (!isVideo) {
+      candidates.push(rawUrl);
+      candidates.push(weservUrl(rawUrl));
+    }
     if (isVideo) {
       candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);
       candidates.push(rawUrl);
     }
     candidates.push(`${devServer}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`);
     if (!isVideo) {
-      candidates.push(`https://images.weserv.nl/?url=${encodeURIComponent(rawUrl)}&w=1280&h=720&fit=cover&output=jpg`);
+      candidates.push(weservUrl(rawUrl));
     }
-    candidates.push(rawUrl);
+    if (isVideo) {
+      candidates.push(rawUrl);
+    }
   }
 
   for (const fetchUrl of candidates) {
     if (!fetchUrl.startsWith('http')) continue;
     const cached = cachePathForUrl(fetchUrl, cacheDir, isVideo);
-    if (existsSync(cached) && readFileSync(cached).length > 500) {
-      return cached;
+    if (existsSync(cached)) {
+      const buf = readFileSync(cached);
+      if (buf.length > 500 && (isVideo || isValidImageBuffer(buf))) {
+        return cached;
+      }
+      try { unlinkSync(cached); } catch { /* stale cache */ }
     }
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -471,6 +530,38 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
     }
   }
   return null;
+}
+
+/** Pre-fetch unique media pool assets into a shared cache before segment encode. */
+export async function warmMediaPoolCache(mediaPool, devServer, cacheDir, options = {}) {
+  const concurrency = options.concurrency ?? 8;
+  mkdirSync(cacheDir, { recursive: true });
+  const unique = uniqueAssetsByManifestKey(mediaPool || []);
+  const toWarm = imageFirstEnabled()
+    ? unique.filter((a) => !isVideoAsset(a))
+    : unique;
+  const fetchableKeys = new Set();
+  if (!toWarm.length) return { warmed: 0, failed: 0, total: 0, fetchableKeys };
+
+  let warmed = 0;
+  let failed = 0;
+  for (let i = 0; i < toWarm.length; i += concurrency) {
+    const batch = toWarm.slice(i, i + concurrency);
+    const results = await Promise.all(
+      batch.map(async (asset) => {
+        const path = await ensureLocalAsset(asset, devServer, cacheDir);
+        if (path) {
+          fetchableKeys.add(assetManifestKey(asset));
+          return 'ok';
+        }
+        return 'fail';
+      }),
+    );
+    warmed += results.filter((r) => r === 'ok').length;
+    failed += results.filter((r) => r === 'fail').length;
+  }
+  console.log(`  [ffmpeg] cache warm: ${warmed}/${toWarm.length} assets ready (${failed} failed)`);
+  return { warmed, failed, total: toWarm.length, fetchableKeys };
 }
 
 async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
@@ -503,6 +594,29 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   const hardCuts = hardCutsEnabled();
   const interrupts = patternInterruptsEnabled();
   const frames = Math.max(1, Math.round(durationSec * FPS));
+  const loopPreset = isLoopMode() ? 'ultrafast' : preset;
+
+  // Loop mode: skip zoompan (OOM-prone) — unified eq + scale/crop for visual cohesion.
+  if (isLoopMode() && !isVideo) {
+    let simpleVf = `eq=saturation=1.12:brightness=0.02,scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
+    if (isHookClip && interrupts) {
+      simpleVf = `eq=saturation=1.25:brightness=0.05,${simpleVf}`;
+    } else if (clipIndex > 0) {
+      const fadeOut = Math.max(0.04, durationSec - 0.04);
+      simpleVf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${simpleVf}`;
+    }
+    const r = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-loop', '1', '-i', localSrc, '-t', String(durationSec),
+        '-vf', simpleVf, '-c:v', 'libx264', '-preset', loopPreset, '-pix_fmt', 'yuv420p',
+        '-r', String(FPS), '-an', clipOut,
+      ],
+      { encoding: 'utf8', timeout: 90_000 },
+    );
+    return r.status === 0 && existsSync(clipOut);
+  }
+
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
   if (isVideo && hardCuts && (isHookClip || clipIndex === 0)) {
     const strong = interruptStrong();
@@ -619,6 +733,7 @@ function interruptStrong() {
 }
 
 async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
+  const loopMode = isLoopMode();
   const rawInterval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
   // Apply pool-aware widening so thin pools don't exhaust max-uses in the first segment,
   // leaving later segments with nothing but fallback cycling.
@@ -631,8 +746,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
   const interruptsOn = patternInterruptsEnabled();
   const tmpDir = join(dirname(outputPath), `seg-${segment.id}-clips`);
-  const cacheDir = join(tmpDir, 'cache');
+  const cacheDir = options.globalCacheDir || join(tmpDir, 'cache');
   mkdirSync(tmpDir, { recursive: true });
+  mkdirSync(cacheDir, { recursive: true });
   for (const stale of ['concat.txt', ...Array.from({ length: 200 }, (_, i) => `clip-${String(i).padStart(3, '0')}.mp4`)]) {
     try {
       const p = join(tmpDir, stale);
@@ -651,6 +767,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const placeholderUrls = [];
   let lastRenderedManifestKey = null;
   const renderedManifestKeys = [];
+  const urlLastUseSec = options.urlLastUseSec || new Map();
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
@@ -720,13 +837,26 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
     const tried = new Set();
     const baseKey = assetManifestKey(asset);
+    const globalMedia = options.mediaPool || [];
     const imagePool = imageFirstEnabled()
-      ? prepareSegmentMedia(segMedia).filter((a) => !isVideoAsset(a))
+      ? uniqueAssetsByManifestKey([
+        ...prepareSegmentMedia(segMedia).filter((a) => !isVideoAsset(a)),
+        ...prepareSegmentMedia(globalMedia).filter((a) => !isVideoAsset(a)),
+      ])
       : null;
-    const alternates = [
+    const alternatesRaw = [
       coerceImageFirstAsset(asset, segMedia),
       ...(imagePool?.length ? imagePool : segMedia).filter((a) => assetKey(a) !== assetKey(asset)),
-    ].sort((a, b) => {
+      ...globalMedia.filter((a) => assetKey(a) !== assetKey(asset)),
+    ];
+    const fetchableKeys = options.fetchableKeys;
+    const strictPool = fetchableKeys?.size >= 15;
+    const thinPool = loopMode && fetchableKeys?.size > 0 && !strictPool;
+    const absClipStart = segmentStartSec + renderedDuration;
+    const alternates = (fetchableKeys?.size
+      ? alternatesRaw.filter((a) => fetchableKeys.has(assetManifestKey(a)))
+      : alternatesRaw
+    ).sort((a, b) => {
       if (imageFirstEnabled()) {
         const av = isVideoAsset(a) ? 1 : 0;
         const bv = isVideoAsset(b) ? 1 : 0;
@@ -734,9 +864,13 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       }
       const ka = assetManifestKey(a);
       const kb = assetManifestKey(b);
+      const aSpacing = ka && urlLastUseSec.has(ka) && (absClipStart - urlLastUseSec.get(ka)) < URL_SPACING_SEC ? 1 : 0;
+      const bSpacing = kb && urlLastUseSec.has(kb) && (absClipStart - urlLastUseSec.get(kb)) < URL_SPACING_SEC ? 1 : 0;
+      if (aSpacing !== bSpacing) return aSpacing - bSpacing;
       const aRepeat = (ka && (ka === lastRenderedManifestKey || ka === baseKey)) ? 1 : 0;
       const bRepeat = (kb && (kb === lastRenderedManifestKey || kb === baseKey)) ? 1 : 0;
-      return aRepeat - bRepeat;
+      if (aRepeat !== bRepeat) return aRepeat - bRepeat;
+      return alternateAssetPriority(a) - alternateAssetPriority(b);
     });
     let ok = false;
     let usedPlaceholder = false;
@@ -746,17 +880,17 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       const key = assetKey(candidate);
       if (key && tried.has(key)) continue;
       const manifestK = assetManifestKey(candidate);
-      const hasUntried = alternates.some(
+      const hasUntried = !thinPool && alternates.some(
         (a) => !tried.has(assetKey(a)) && assetManifestKey(a) !== lastRenderedManifestKey,
       );
-      if (manifestK && manifestK === lastRenderedManifestKey && hasUntried) continue;
+      if (!thinPool && manifestK && manifestK === lastRenderedManifestKey && hasUntried) continue;
       if (key) tried.add(key);
 
       const result = await tryEncodeAsset(candidate, durationSec, label, hintOffset, interrupt, clipOut);
       lastResolved = result.resolvedAsset || candidate;
       if (result.ok) {
         const resolvedKey = assetManifestKey(lastResolved);
-        if (resolvedKey && resolvedKey === lastRenderedManifestKey && hasUntried) {
+        if (!thinPool && resolvedKey && resolvedKey === lastRenderedManifestKey) {
           ok = false;
           continue;
         }
@@ -769,30 +903,44 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     }
 
     if (!ok) {
-      const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
-      if (loopMode && clipPaths.length > 0) {
-        let cloneSrc = clipPaths[clipPaths.length - 1];
-        for (let ci = clipPaths.length - 1; ci >= 0; ci--) {
-          const mk = renderedManifestKeys[ci];
-          if (mk && mk !== lastRenderedManifestKey) {
-            cloneSrc = clipPaths[ci];
-            break;
-          }
-        }
-        const clone = spawnSync(
-          'ffmpeg',
-          [
-            '-y', '-i', cloneSrc,
-            '-t', String(durationSec),
-            '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
-            '-an', clipOut,
-          ],
-          { encoding: 'utf8', timeout: 120_000 },
-        );
-        if (clone.status === 0 && existsSync(clipOut)) {
+      for (const candidate of alternates) {
+        const key = assetKey(candidate);
+        if (key && tried.has(key)) continue;
+        if (key) tried.add(key);
+        const result = await tryEncodeAsset(candidate, durationSec, label, hintOffset, interrupt, clipOut);
+        lastResolved = result.resolvedAsset || candidate;
+        if (result.ok) {
           ok = true;
-          console.log(`  [ffmpeg] ${label}: cloned last good clip (loop mode, no placeholder)`);
+          console.log(`  [ffmpeg] ${label}: loop last-resort encode (${(candidate.sourceUrl || candidate.url || '').slice(0, 72)})`);
+          break;
         }
+      }
+    }
+
+    if (!ok && loopMode) {
+      const carryClip = clipPaths.length > 0
+        ? clipPaths[clipPaths.length - 1]
+        : options.clipCarry?.path;
+      if (carryClip) {
+        try {
+          if (existsSync(carryClip) && statSync(carryClip).size > 10_000) {
+            copyFileSync(carryClip, clipOut);
+            if (existsSync(clipOut) && statSync(clipOut).size > 10_000) {
+              ok = true;
+              const fromSeg = clipPaths.length > 0 ? 'prior clip' : 'prior segment clip';
+              console.log(`  [ffmpeg] ${label}: reusing ${fromSeg} (encode exhausted, tried=${tried.size})`);
+            }
+          }
+        } catch {
+          /* fall through to hard fail */
+        }
+      }
+    }
+
+    if (!ok) {
+      if (loopMode) {
+        console.log(`  [ffmpeg] ${label}: failed in loop mode (no encode succeeded, tried=${tried.size})`);
+        return false;
       }
     }
 
@@ -828,28 +976,40 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       ? `placeholder:${timelineAssetId}`
       : assetManifestKey(lastResolved || asset);
     renderedManifestKeys.push(lastRenderedManifestKey);
+    if (lastRenderedManifestKey && !usedPlaceholder) {
+      urlLastUseSec.set(lastRenderedManifestKey, segmentStartSec + renderedDuration);
+    }
+    if (options.clipCarry) options.clipCarry.path = clipOut;
     return true;
   }
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0);
+    const added = await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0);
+    if (loopMode && !added) {
+      return { ok: false, error: 'timeline short' };
+    }
   }
 
-  let fillerRound = 0;
-  while (renderedDuration < targetDuration - 0.05 && segMedia.length && fillerRound < segMedia.length * 4) {
-    const asset = pickAssetAtTime(renderedDuration, segMedia, interval, lastRenderedManifestKey);
-    const absFillerStart = segmentStartSec + renderedDuration;
-    const fillerInterval = absFillerStart < HOOK_ZONE_SEC ? Math.min(interval, HOOK_MAX_HOLD_SEC) : interval;
-    const needSec = Math.min(fillerInterval, targetDuration - renderedDuration);
-    if (needSec <= 0.05) break;
-    const added = await pushClip(asset, needSec, `filler ${fillerRound + 1} (+${needSec.toFixed(2)}s)`);
-    fillerRound += 1;
-    if (!added && fillerRound >= segMedia.length * 2) break;
+  if (!loopMode) {
+    let fillerRound = 0;
+    while (renderedDuration < targetDuration - 0.05 && segMedia.length && fillerRound < segMedia.length * 4) {
+      const asset = pickAssetAtTime(renderedDuration, segMedia, interval, lastRenderedManifestKey);
+      const absFillerStart = segmentStartSec + renderedDuration;
+      const fillerInterval = absFillerStart < HOOK_ZONE_SEC ? Math.min(interval, HOOK_MAX_HOLD_SEC) : interval;
+      const needSec = Math.min(fillerInterval, targetDuration - renderedDuration);
+      if (needSec <= 0.05) break;
+      const added = await pushClip(asset, needSec, `filler ${fillerRound + 1} (+${needSec.toFixed(2)}s)`);
+      fillerRound += 1;
+      if (!added && fillerRound >= segMedia.length * 2) break;
+    }
   }
 
   if (renderedDuration < targetDuration - 0.5) {
     console.log(`  [ffmpeg] segment short: ${renderedDuration.toFixed(1)}s / ${targetDuration.toFixed(1)}s target`);
+    if (loopMode) {
+      return { ok: false, error: 'timeline short' };
+    }
   }
 
   if (clipPaths.length === 0) {
@@ -912,6 +1072,12 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   let lastTailClipPaths = [];
 
   const mediaPool = project.media || [];
+  const globalCacheDir = join(workDir, 'asset-cache');
+  const devServer = options.devServer || 'http://localhost:5173';
+  const warm = await warmMediaPoolCache(mediaPool, devServer, globalCacheDir);
+  const fetchableKeys = warm.fetchableKeys || new Set();
+  const clipCarry = { path: null };
+  const urlLastUseSec = new Map();
   let cumulativeSegStartSec = 0;
 
   for (let si = 0; si < (project.script || []).length; si++) {
@@ -927,6 +1093,11 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     const result = await renderSegmentClips(seg, segMedia, project, segOut, {
       ...options,
       segmentStartSec: cumulativeSegStartSec,
+      mediaPool,
+      globalCacheDir,
+      fetchableKeys,
+      clipCarry,
+      urlLastUseSec,
     });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };

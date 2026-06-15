@@ -3,16 +3,21 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isCrimeNewsTopic } from './harvest-quality.mjs';
 
 const DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investigation', 'report', 'leaked', 'official'];
+const CRIME_EDITORIAL_URL_RE = /\b(?:museum|heist|robbery|theft|crime|police|cctv|surveillance|louvre|paris|gallery|stolen|suspect|raid)\b/i;
 
 /**
  * @param {object} fixState
+ * @param {string} [topic]
  * @returns {{ harvestNonce: number, mediaOffset: number, excludeUrls: string[] }}
  */
-export function harvestContextFromFixState(fixState = {}) {
-  const visionRejected = Array.isArray(fixState.visionRejectedUrls) ? fixState.visionRejectedUrls : [];
-  const lifestyleExcluded = Array.isArray(fixState.excludedUrls) ? fixState.excludedUrls : [];
+export function harvestContextFromFixState(fixState = {}, topic = '') {
+  const topicText = topic || fixState.topic || fixState.title || '';
+  const visionRejected = pruneVisionRejectedForCrimeTopics(fixState.visionRejectedUrls || [], topicText);
+  const lifestyleExcluded = sanitizeExcludedUrls(fixState.excludedUrls || [])
+    .filter((url) => !isEditorialHarvestKeep(url));
   return {
     harvestNonce: fixState.harvestNonce || 0,
     mediaOffset: fixState.mediaOffset || 0,
@@ -33,9 +38,10 @@ export function harvestSessionStoragePayload(ctx) {
   // Cap the offset sent to the browser. Requesting page 5+ of results reliably
   // returns empty sets for most search APIs, which causes empty-segment aborts.
   const safeOffset = Math.min(ctx.mediaOffset || 0, 4);
-  // Cap nonce at 3 — diversity tokens beyond "take 3" produce nonsense queries
-  // like "museum heist investigation take 6" that return zero results.
-  const safeNonce = Math.min(ctx.harvestNonce || 0, 3);
+  // Keep the browser-side "take N" suffix on a stable 0..3 loop. The fix state
+  // may keep incrementing across retries, but modulo-4 rotation avoids a stale
+  // hard cap mismatch while still preventing "take 6" style zero-result queries.
+  const safeNonce = Math.max(0, ctx.harvestNonce || 0) % 4;
   const payload = {
     autotube_loop_harvest_nonce: String(safeNonce),
     autotube_loop_media_offset: String(safeOffset),
@@ -87,7 +93,7 @@ export function accumulateExcludedUrls(fixState, project) {
   const prev = new Set(
     (fixState.excludedUrls || [])
       .map((u) => normalizeUrlKey(u))
-      .filter((key) => key && !isOverBroadExcludeUrl(key)),
+      .filter((key) => key && !isOverBroadExcludeUrl(key) && !isEditorialHarvestKeep(key)),
   );
   for (const m of project?.media || []) {
     if (isEditorialHarvestKeep(m)) continue;
@@ -113,6 +119,24 @@ export function isEditorialHarvestKeep(assetOrUrl) {
   if (/upload\.wikimedia\.org|images\.unsplash\.com\/photo-/.test(hay)) return true;
   if (/\/news\/|bbc\.co\.uk|nytimes\.com|reuters\.com|apnews\.com|abcnews\.go\.com|cbsnews|npr\.org|theguardian\.com|globalnews\.ca|inquirer\.net/.test(hay)) return true;
   return false;
+}
+
+/**
+ * Crime/news topics frequently false-reject good press/editorial URLs during
+ * loop vision screening. Keep topical press in the pool, but still let obvious
+ * lifestyle/how-to noise stay excluded through the regular rejection path.
+ *
+ * @param {string[]} urls
+ * @param {string} topic
+ * @returns {string[]}
+ */
+export function pruneVisionRejectedForCrimeTopics(urls = [], topic = '') {
+  const cleaned = sanitizeExcludedUrls(urls);
+  if (!isCrimeNewsTopic(topic)) return cleaned;
+  return cleaned.filter((url) => {
+    if (!isEditorialHarvestKeep(url)) return true;
+    return !CRIME_EDITORIAL_URL_RE.test(url);
+  });
 }
 
 /**
@@ -192,7 +216,11 @@ export function normalizeUrlKey(url = '', sourceUrl = '') {
   const yt = youtubeWatchKey(url) || youtubeWatchKey(sourceUrl);
   if (yt) return yt;
   const embedded = extractEmbeddedSourceUrl(url);
-  if (embedded) return embedded.split('?')[0].toLowerCase();
+  if (embedded) {
+    const embeddedYoutube = youtubeWatchKey(embedded);
+    if (embeddedYoutube) return embeddedYoutube;
+    return embedded.split('?')[0].toLowerCase();
+  }
   const src = (sourceUrl || '').trim();
   if (src && /^https?:\/\//i.test(src)) return src.split('?')[0].toLowerCase();
   const bare = (url || '').split('?')[0].toLowerCase();

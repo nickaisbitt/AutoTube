@@ -76,6 +76,9 @@ export function loadFixState(loopDir) {
     if ((loaded.minAssetsPerSegment || 0) > LOOP_MAX_MIN_ASSETS_PER_SEGMENT) {
       loaded.minAssetsPerSegment = LOOP_MAX_MIN_ASSETS_PER_SEGMENT;
     }
+    if (loaded.preferImageAssembly === true) {
+      loaded.harvestVideoFirst = false;
+    }
     return loaded;
   } catch {
     return { ...DEFAULT_FIX_STATE };

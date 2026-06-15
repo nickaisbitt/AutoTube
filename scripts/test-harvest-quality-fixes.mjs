@@ -27,7 +27,7 @@ import {
 } from './lib/harvest-quality.mjs';
 import { isVisionFetchableUrl } from './lib/harvest-vision.mjs';
 import { resolveAssetHashSource } from './lib/perceptual-hash.mjs';
-import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
+import { applyFixesFromWatch, pickPrimaryFailure } from './lib/apply-watch-fixes.mjs';
 import { loadFixState } from './lib/loop-state.mjs';
 import { buildShockHookLine } from '../e2e/openRouterMock.mjs';
 import {
@@ -45,10 +45,12 @@ import {
   placeholderSegmentsFromManifest,
 } from './lib/run-objective-qa.mjs';
 import {
+  accumulateExcludedUrls,
   harvestContextFromFixState,
   harvestSessionStoragePayload,
   normalizeUrlKey,
   isOverBroadExcludeUrl,
+  pruneVisionRejectedForCrimeTopics,
   sanitizeExcludedUrls,
   pruneExcludedUrlsForReharvest,
 } from './lib/harvest-loop-context.mjs';
@@ -325,7 +327,7 @@ console.log('\n── 9. detectGiphyDominance ──');
 console.log('\n── 10. suppressGiphy on low visualVariety ──');
 {
   const watch = {
-    brutal: { report: { scores100: { visualVariety: 50, pacing: 70 } }, overall: 6 },
+    brutal: { report: { scores100: { visualVariety: 50, pacing: 95 } }, overall: 6 },
     repetition: { repeatPct: 0, duplicateRunCount: 0 },
     uploadReady: false,
     objectiveGate: { pass: false },
@@ -344,7 +346,7 @@ console.log('\n── 10. suppressGiphy on low visualVariety ──');
 console.log('\n── 11. forceRealStock escalation on Giphy-heavy ──');
 {
   const watch = {
-    brutal: { report: { scores: { visualVariety: 8, pacing: 8 } }, overall: 7 },
+    brutal: { report: { scores100: { visualVariety: 80, pacing: 95 } }, overall: 7 },
     repetition: { repeatPct: 0, duplicateRunCount: 0 },
     uploadReady: false,
     objectiveGate: { pass: false },
@@ -394,12 +396,76 @@ console.log('\n── 12b. harvest-loop-context harvestVideoFirst ──');
 
   const vidPayload = harvestSessionStoragePayload(harvestContextFromFixState({ minVideosPerSegment: 2 }));
   assert('minVideosPerSegment wired to sessionStorage', vidPayload.autotube_loop_min_videos === '2');
+
+  const rotatedPayload = harvestSessionStoragePayload(harvestContextFromFixState({ harvestNonce: 6 }));
+  assert('harvest nonce rotates modulo 4 in sessionStorage', rotatedPayload.autotube_loop_harvest_nonce === '2');
 }
 
 // ---------------------------------------------------------------------------
-// 12c. normalizeUrlKey — embedded source URL, skip bare proxy
+// 12c. accumulateExcludedUrls / crime-topic vision prune — keep editorial pool
 // ---------------------------------------------------------------------------
-console.log('\n── 12c. normalizeUrlKey ──');
+console.log('\n── 12c. harvest exclusions keep editorial pool ──');
+{
+  const fixState = {
+    excludedUrls: ['https://www.reuters.com/world/europe/louvre-heist-arrests-2026-06-01/'],
+  };
+  accumulateExcludedUrls(fixState, {
+    media: [
+      {
+        source: 'curated-topic-pool',
+        url: 'https://upload.wikimedia.org/wikipedia/commons/louvre-pyramid.jpg',
+      },
+      {
+        url: 'https://www.strategink.com/digital-heist-summit/banner.jpg',
+        sourceUrl: 'https://www.strategink.com/digital-heist-summit/banner.jpg',
+      },
+    ],
+  });
+  assert(
+    'accumulateExcludedUrls removes stored editorial excludes',
+    !(fixState.excludedUrls || []).some((u) => u.includes('reuters.com/world/europe/louvre-heist')),
+  );
+  assert(
+    'accumulateExcludedUrls skips curated/editorial media',
+    !(fixState.excludedUrls || []).some((u) => u.includes('wikimedia.org')),
+  );
+  assert(
+    'accumulateExcludedUrls keeps non-editorial exclusions',
+    (fixState.excludedUrls || []).some((u) => u.includes('strategink.com')),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 12d. pruneVisionRejectedForCrimeTopics — keep topical press, keep obvious noise rejected
+// ---------------------------------------------------------------------------
+console.log('\n── 12d. pruneVisionRejectedForCrimeTopics ──');
+{
+  const topic = 'The museum heist streamed live on TikTok';
+  const pruned = pruneVisionRejectedForCrimeTopics([
+    'https://www.nytimes.com/2026/06/01/world/europe/louvre-heist-live-stream.html',
+    'https://www.reuters.com/world/europe/paris-louvre-heist-suspects-arrested-2026-06-01/',
+    'https://apnews.com/article/louvre-museum-heist-paris-arrests-1234567890',
+    'https://onestream.live/blog/how-to-go-live-on-tiktok/',
+    'https://example.com/escape-room-team-building.jpg',
+  ], topic);
+  assert('Crime-topic prune releases NYT press URL', !pruned.some((u) => u.includes('nytimes.com')));
+  assert('Crime-topic prune releases Reuters press URL', !pruned.some((u) => u.includes('reuters.com')));
+  assert('Crime-topic prune releases AP press URL', !pruned.some((u) => u.includes('apnews.com')));
+  assert('Crime-topic prune keeps TikTok guide rejected', pruned.some((u) => u.includes('onestream.live')));
+  assert('Crime-topic prune keeps escape-room noise rejected', pruned.some((u) => u.includes('escape-room')));
+
+  const ctx = harvestContextFromFixState({
+    excludedUrls: ['https://www.reuters.com/world/europe/louvre-heist-arrests-2026-06-01/'],
+    visionRejectedUrls: pruned,
+  }, topic);
+  assert('harvest context excludes obvious off-topic rejects', ctx.excludeUrls.some((u) => u.includes('onestream.live')));
+  assert('harvest context does not exclude Reuters press URL', !ctx.excludeUrls.some((u) => u.includes('reuters.com')));
+}
+
+// ---------------------------------------------------------------------------
+// 12e. normalizeUrlKey — embedded source URL, skip bare proxy
+// ---------------------------------------------------------------------------
+console.log('\n── 12e. normalizeUrlKey ──');
 {
   const proxy = 'http://localhost:5173/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fwatch%3Fv%3Dabc';
   assert('Extracts embedded YouTube URL', normalizeUrlKey(proxy).includes('youtube.com/watch'));
@@ -524,13 +590,13 @@ console.log('\n── 17. untilScore parameterization ──');
 {
   const watch = {
     youtubeScore: 75,
-    brutal: { overall: 7.5, report: { scores100: { visualVariety: 70, pacing: 70 } } },
+    brutal: { overall: 7.5, report: { scores100: { visualVariety: 70, pacing: 95 } } },
     objectiveGate: { available: true, pass: true, checks: [] },
     hookScript: { pass: true },
     hookVision: { hookPass: true },
   };
   const { applied: below91 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 91 });
-  assert('Below 91 triggers reharvest fix', below91.some((a) => a.includes('below 91')));
+  assert('Below 91 triggers full-tier below-target fix', below91.some((a) => a.includes('below 91')));
 
   const { applied: below70 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 70 });
   assert('At 75 with untilScore=70 does not trigger below-target fix', !below70.some((a) => a.includes('below 70')));
@@ -620,7 +686,7 @@ console.log('\n── 20. Pacing plateau skip reharvest ──');
   assert('Pacing plateau skips reHarvestMedia', fixState.reHarvestMedia !== true);
   assert('Pacing plateau enables patternInterrupts', fixState.patternInterrupts === true);
   assert('Pacing plateau hits cut floor', fixState.cutIntervalSec === 0.5);
-  assert('Pacing plateau logs skip reharvest', applied.some((a) => a.includes('pacing plateau')));
+  assert('Pacing plateau logs retention-first pacing pass', applied.some((a) => a.includes('Full-tier score')));
   assert('Pacing plateau does not log repetition reharvest', !applied.some((a) => a.startsWith('3.')));
 }
 
@@ -789,6 +855,7 @@ console.log('\n── 22. Placeholder FAIL excludes dead segment URLs ──');
     media: [
       { segmentId: 'seg-dead', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fwatch%3Fv%3Ddead1' },
       { segmentId: 'seg-dead', type: 'image', url: 'https://images.example.com/dead-thumb.jpg' },
+      { segmentId: 'seg-dead', type: 'image', url: 'https://www.reuters.com/world/europe/louvre-heist-arrests-2026-06-01/' },
       { segmentId: 'seg-ok', type: 'video', url: '/api/download-clip?url=https%3A%2F%2Fyoutube.com%2Fwatch%3Fv%3Dgood1' },
     ],
   };
@@ -811,6 +878,7 @@ console.log('\n── 22. Placeholder FAIL excludes dead segment URLs ──');
       && (fixState.excludedUrls || []).some((u) => u.includes('dead-thumb.jpg')),
     (fixState.excludedUrls || []).join(', '),
   );
+  assert('Dead segment editorial URL not excluded', !(fixState.excludedUrls || []).some((u) => u.includes('reuters.com/world/europe/louvre-heist')));
   assert('OK segment video URL not excluded', !(fixState.excludedUrls || []).some((u) => u.includes('youtube.com/watch?v=good1')));
   assert('Placeholder fix mentions dead segment breakdown', applied.some((a) => a.includes('dead segs: Dead seg:4/5')));
 }
@@ -868,6 +936,7 @@ console.log('\n── 19. placeholder gate manifest exclusion ──');
     placeholderUrls: [
       'https://www.tiktok.com/@user/video/dead1',
       'https://www.youtube.com/watch?v=good1',
+      'https://www.reuters.com/world/europe/louvre-heist-arrests-2026-06-01/',
     ],
     perSegment: [{ segmentId: 's1', title: 'Hook', clipCount: 5, placeholderClipCount: 2 }],
   }));
@@ -896,6 +965,7 @@ console.log('\n── 19. placeholder gate manifest exclusion ──');
   assert('Placeholder fail triggers reharvest', fixState.reHarvestMedia === true);
   assert('Excludes manifest placeholder URLs only', fixState.excludedUrls?.length === 2);
   assert('Does not exclude working YouTube URL', !fixState.excludedUrls?.includes('https://www.youtube.com/watch?v=good2'));
+  assert('Does not exclude editorial placeholder URL', !fixState.excludedUrls?.some((u) => u.includes('reuters.com/world/europe/louvre-heist')));
   assert('Applied message mentions placeholder URL(s)', applied.some((a) => a.includes('placeholder URL')));
   assert(
     'Placeholder fail does not raise minAssets above cap',
@@ -1334,7 +1404,7 @@ console.log('\n── 45. thinHarvest prunes exclusion list ──');
   ];
   const watch = {
     thinHarvest: true,
-    brutal: { overall: 5, report: { scores: { visualVariety: 5, pacing: 5 } } },
+    brutal: { overall: 9.5, report: { scores100: { visualVariety: 95, pacing: 95 } } },
     repetition: { repeatPct: 0, duplicateRunCount: 0 },
     uploadReady: false,
     objectiveGate: { pass: true },
@@ -1355,6 +1425,161 @@ console.log('\n── 45. thinHarvest prunes exclusion list ──');
   assert('Thin harvest keeps strategink in exclusions',
     (fixState.excludedUrls || []).some((u) => u.includes('strategink')));
   assert('Thin harvest prune logged in applied fixes', applied.some((a) => a.includes('Thin harvest')));
+}
+
+// ---------------------------------------------------------------------------
+// 45b. pickPrimaryFailure — single priority ordering
+// ---------------------------------------------------------------------------
+console.log('\n── 45b. pickPrimaryFailure priority order ──');
+{
+  const placeholderFirst = pickPrimaryFailure({
+    assemblyAudit: { assemblyScore: 42 },
+    sceneQa: { available: true, pass: false, longestSceneSec: 8 },
+    hookScript: { pass: false },
+    objectiveGate: {
+      pass: false,
+      checks: [{ name: 'placeholder_pct', pass: false }],
+    },
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 30 } } },
+  });
+  assert('Placeholder outranks all other failures', placeholderFirst === 'placeholder', placeholderFirst);
+
+  const assemblyFirst = pickPrimaryFailure({
+    assemblyAudit: { assemblyScore: 60 },
+    sceneQa: { available: true, pass: false, longestSceneSec: 8 },
+    hookScript: { pass: false },
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 30 } } },
+  });
+  assert('Assembly outranks scene/hook/pacing/harvest', assemblyFirst === 'assembly', assemblyFirst);
+
+  const sceneFirst = pickPrimaryFailure({
+    sceneQa: { available: true, pass: false, longestSceneSec: 8 },
+    hookScript: { pass: false },
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 30 } } },
+  });
+  assert('Scene outranks hook/pacing/harvest', sceneFirst === 'scene', sceneFirst);
+
+  const hookFirst = pickPrimaryFailure({
+    hookScript: { pass: false },
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 30 } } },
+  });
+  assert('Hook outranks pacing/harvest', hookFirst === 'hook', hookFirst);
+
+  const pacingFirst = pickPrimaryFailure({
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 55 } } },
+    sceneQa: { available: true, pass: true, longestSceneSec: 2 },
+  });
+  assert('Pacing outranks thin-harvest fallback', pacingFirst === 'pacing', pacingFirst);
+
+  const harvestOnly = pickPrimaryFailure({
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 95 } } },
+    sceneQa: { available: true, pass: true, longestSceneSec: 2 },
+    hookScript: { pass: true },
+    hookVision: { hookPass: true },
+  });
+  assert('Thin harvest used only when higher-priority failures absent', harvestOnly === 'harvest', harvestOnly);
+}
+
+// ---------------------------------------------------------------------------
+// 45c. applyFixesFromWatch — placeholder strategy wins and stays coherent
+// ---------------------------------------------------------------------------
+console.log('\n── 45c. placeholder strategy coherence ──');
+{
+  const tmp = mkdtempSync(join(tmpdir(), 'autotube-primary-watch-'));
+  const videoDir = join(tmp, 'run');
+  const assemblyDir = join(videoDir, 'ffmpeg-assembly');
+  mkdirSync(assemblyDir, { recursive: true });
+  writeFileSync(join(videoDir, 'final.mp4'), '');
+  writeFileSync(join(assemblyDir, 'render-manifest.json'), JSON.stringify({
+    clipCount: 8,
+    placeholderClipCount: 3,
+    placeholderPct: 37.5,
+    placeholderUrls: [
+      'https://www.tiktok.com/@user/video/dead1',
+      'https://abcnews.go.com/International/louvre-heist',
+    ],
+    perSegment: [{ segmentId: 's1', title: 'Hook', clipCount: 4, placeholderClipCount: 3 }],
+  }));
+
+  const watch = {
+    assemblyAudit: { assemblyScore: 30, repeatPenalty: 20, visualCohesion: 25 },
+    sceneQa: { available: true, pass: false, longestSceneSec: 8 },
+    hookScript: { pass: false },
+    hookVision: { hookPass: false, fix: 'BREAKING opener' },
+    brutal: { report: { scores100: { pacing: 45, visualVariety: 40 } }, overall: 4.5 },
+    objectiveGate: {
+      pass: false,
+      checks: [{ name: 'placeholder_pct', pass: false }],
+    },
+    placeholderGate: { placeholderPct: 37.5 },
+    videoPath: join(videoDir, 'final.mp4'),
+    thinHarvest: true,
+  };
+  const project = {
+    media: [
+      { segmentId: 's1', type: 'video', url: '/api/download-clip?url=tiktok', sourceUrl: 'https://www.tiktok.com/@user/video/dead1' },
+      { segmentId: 's1', type: 'image', url: 'https://abcnews.go.com/International/louvre-heist', sourceUrl: 'https://abcnews.go.com/International/louvre-heist' },
+    ],
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, { cutIntervalSec: 0.75 }, 'museum heist', project, { videoPath: watch.videoPath });
+  assert('Primary placeholder strategy requests reharvest', fixState.reHarvestMedia === true);
+  assert('Primary placeholder strategy prefers image assembly', fixState.preferImageAssembly === true);
+  assert('Primary placeholder strategy disables video-first harvest', fixState.harvestVideoFirst === false);
+  assert('Primary placeholder strategy keeps cuts at or above 1.15s', fixState.cutIntervalSec >= 1.15, String(fixState.cutIntervalSec));
+  assert('Placeholder strategy excludes non-editorial placeholder URL', (fixState.excludedUrls || []).some((u) => u.includes('tiktok.com')));
+  assert('Placeholder strategy keeps editorial placeholder URL out of excludes', !(fixState.excludedUrls || []).some((u) => u.includes('abcnews.go.com')));
+  assert('Only placeholder strategy applied in one pass', applied.length === 1 && applied[0].includes('Placeholder gate FAIL'), applied.join(' | '));
+  rmSync(tmp, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// 45d. applyFixesFromWatch — scene strategy avoids reharvest unless thin
+// ---------------------------------------------------------------------------
+console.log('\n── 45d. scene strategy coherence ──');
+{
+  const watch = {
+    sceneQa: { available: true, pass: false, longestSceneSec: 7 },
+    hookScript: { pass: false },
+    brutal: { report: { scores100: { pacing: 52 } }, overall: 5.2 },
+    objectiveGate: { pass: true, checks: [] },
+    thinHarvest: false,
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, { cutIntervalSec: 1.1 }, 'museum heist');
+  assert('Scene strategy does not reharvest when pool is not thin', fixState.reHarvestMedia !== true);
+  assert('Scene strategy enables pattern interrupts', fixState.patternInterrupts === true);
+  assert('Scene strategy tightens only to the 1.0s floor', fixState.cutIntervalSec === 1.0, String(fixState.cutIntervalSec));
+  assert('Scene strategy does not also apply hook fix', !applied.some((a) => a.includes('Hook FAIL')), applied.join(' | '));
+}
+
+// ---------------------------------------------------------------------------
+// 45e. applyFixesFromWatch — visual cohesion uses hard cuts image-first pass
+// ---------------------------------------------------------------------------
+console.log('\n── 45e. visual cohesion assembly strategy ──');
+{
+  const watch = {
+    assemblyAudit: {
+      assemblyScore: 55,
+      repeatPenalty: 90,
+      topicRelevance: 88,
+      captionCoherence: 92,
+      visualCohesion: 40,
+      issues: ['Jumping between unrelated shot scales'],
+    },
+    brutal: { report: { scores100: { pacing: 90, visualVariety: 88 } }, overall: 8.8 },
+    objectiveGate: { pass: true, checks: [] },
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, { cutIntervalSec: 2.2 }, 'museum heist');
+  assert('Visual cohesion strategy uses hard cuts', fixState.fixStrategy === 'hard_cuts');
+  assert('Visual cohesion strategy stays image-first', fixState.preferImageAssembly === true && fixState.harvestVideoFirst === false);
+  assert('Visual cohesion strategy triggers curated reharvest', fixState.reHarvestMedia === true && fixState.useCuratedPool === true);
+  assert('Visual cohesion strategy clamps interval into 1.4-1.8s band', fixState.cutIntervalSec >= 1.4 && fixState.cutIntervalSec <= 1.8, String(fixState.cutIntervalSec));
+  assert('Visual cohesion strategy logs assembly visual cohesion fix', applied.some((a) => a.includes('visualCohesion')), applied.join(' | '));
 }
 
 // ---------------------------------------------------------------------------

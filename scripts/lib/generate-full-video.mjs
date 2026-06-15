@@ -4,7 +4,8 @@
  */
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync, statSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
 import { validateRenderManifest, MIN_BYTES as LOOP_MIN_RENDER_BYTES } from './validate-loop-video.mjs';
@@ -16,6 +17,7 @@ import {
   hookOverrideMatchesTopic,
 } from './patch-project-for-loop.mjs';
 import { validateEditTimeline, effectiveCutInterval } from './build-edit-timeline.mjs';
+import { preflightTimelineMedia, probeFetchableAssets } from './preflight-timeline-media.mjs';
 import { computeClipBudget, computeTimelineDiversityMetrics, shouldUseGlobalUrlDedup, TOP_UP_MAX_PASSES } from './assembly-system.mjs';
 import { shouldUseModalRender, renderViaModal } from './modal-render.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
@@ -1384,16 +1386,40 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   return report;
 }
 
-/** Burn hook overlay after server-render when in-pipeline hook pass failed or was skipped. */
-async function burnHookPostRender(videoPath, project) {
-  if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
-  const { overlayHookText } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
-  return overlayHookText(videoPath, project);
+/** Parse server-render failure from logs when MP4 is missing. */
+function parseRenderFailureReason(outDir, fallback = 'No output MP4') {
+  const candidates = [
+    join(outDir, 'render.log'),
+    join(process.cwd(), 'test-recordings', 'latest-render.log'),
+  ];
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    try {
+      const body = readFileSync(path, 'utf8');
+      const timelineShort = body.match(/timeline short|Render failed: timeline short/i);
+      if (timelineShort) return 'timeline short';
+      const manifestFail = body.match(/diversity gate: ([^\n]+)/i);
+      if (manifestFail) return `Render manifest gate FAIL — diversity gate: ${manifestFail[1].trim()}`;
+      const renderFail = body.match(/Render failed: ([^\n]+)/i);
+      if (renderFail) return renderFail[1].trim();
+    } catch {
+      /* ignore */
+    }
+  }
+  return fallback;
 }
 
-/** Burn captions after server-render when in-pipeline overlay pass failed or was skipped. */
-async function burnCaptionsPostRender(videoPath, outDir) {
+/** Re-apply hook+captions in one pass when pipeline overlay failed. */
+async function burnOverlaysPostRender(videoPath, outDir, project) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
+  const hookStatsPath = join(dirname(videoPath), 'hook-stats.json');
+  const capStatsPath = join(dirname(videoPath), 'caption-stats.json');
+  const hookOk = existsSync(hookStatsPath);
+  const capOk = existsSync(capStatsPath);
+  if (hookOk && capOk) {
+    return { ok: true, skipped: true, hookOk, capOk };
+  }
+
   const narrDir = readdirSync(outDir)
     .filter((d) => d.startsWith('narration-audio-'))
     .sort()
@@ -1415,10 +1441,14 @@ async function burnCaptionsPostRender(videoPath, outDir) {
     cumulative += words[words.length - 1]?.end || 0;
     segIdx += 1;
   }
-  if (!cache.size) return { ok: false, error: 'no word timestamps' };
 
-  const { overlayKaraokeCaptions } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
-  return overlayKaraokeCaptions(videoPath, cache, starts);
+  const { applyFfmpegYoutubeOverlays } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
+  const results = applyFfmpegYoutubeOverlays(videoPath, project, cache.size ? cache : null, starts);
+  const hookBurned = hookOk || results.hook?.ok === true;
+  const capBurned = capOk || results.captions?.ok === true;
+  const needCaptions = cache.size > 0;
+  const ok = hookBurned && (!needCaptions || capBurned);
+  return { ok, results, postRender: true, hookBurned, capBurned, needCaptions };
 }
 
 /**
@@ -1455,7 +1485,7 @@ export async function generateFullVideo(options) {
   ) {
     fixState.excludedUrls = priorUrls.map((u) => (u || '').split('?')[0]).slice(-200);
   }
-  const harvestCtx = harvestContextFromFixState(fixState);
+  const harvestCtx = harvestContextFromFixState(fixState, topic);
   const openRouterKey = resolveOpenRouterKey();
   const realHarvest = options.realHarvest === true || (options.realHarvest !== false && Boolean(openRouterKey));
 
@@ -1953,9 +1983,12 @@ export async function generateFullVideo(options) {
         fixState.preferImageAssembly = true;
         log(`   🖼 Image-first assembly (${postSanitizeUnique} URLs, strategy=${fixState.fixStrategy || 'default'})`);
       }
-      if (postSanitizeUnique < harvestBudget || fixState.reHarvestMedia) {
+      const shouldTopUpAfterSanitize = postSanitizeUnique < harvestBudget || fixState.reHarvestMedia;
+      const shouldForceCuratedAfterSanitize = fixState.reHarvestMedia
+        || (postSanitizeUnique < harvestBudget && isCrimeNewsTopic(topic));
+      if (shouldTopUpAfterSanitize) {
         ensureEditorialPool(project, fixState.minAssetsPerSegment || 4, {}, {
-          forceCurated: true,
+          forceCurated: shouldForceCuratedAfterSanitize,
           cutIntervalSec: fixState.cutIntervalSec,
         });
       }
@@ -2010,6 +2043,80 @@ export async function generateFullVideo(options) {
         2,
       ),
     );
+
+    const preflight = await preflightTimelineMedia(project, {
+      devServer,
+      cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+      preferVideo: fixState.harvestVideoFirst !== false && !fixState.preferImageAssembly,
+      minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+      log,
+    });
+    if (preflight.widenedCut) {
+      fixState.cutIntervalSec = preflight.cutIntervalSec;
+    }
+    if (preflight.removed > 0) {
+      fixState.preflightDeadIds = preflight.deadUrlKeys;
+      const merged = new Set((fixState.excludedUrls || []).map((u) => normalizeUrlKey(u) || u).filter(Boolean));
+      for (const key of preflight.deadUrlKeys || []) {
+        if (key) merged.add(key);
+      }
+      fixState.excludedUrls = [...merged].slice(-400);
+    }
+    if (preflight.needsTopUp) {
+      const minPerSeg = Math.max(3, fixState.minAssetsPerSegment || 6);
+      const topUpReport = {};
+      const preflightCache = join(tmpdir(), `autotube-preflight-cache-${Date.now()}`);
+      mkdirSync(preflightCache, { recursive: true });
+      const beforeCount = (project.media || []).length;
+      injectCuratedTopicPool(project, minPerSeg, topUpReport);
+      ensureEditorialPool(project, minPerSeg, topUpReport, {
+        cutIntervalSec: preflight.cutIntervalSec,
+        forceCurated: true,
+      });
+      const injected = (project.media || []).slice(beforeCount);
+      if (injected.length) {
+        const fetchableInjected = await probeFetchableAssets(injected, devServer, preflightCache);
+        project.media = [
+          ...(project.media || []).filter((m, i) => i < beforeCount || fetchableInjected.has(m.id)),
+        ];
+      }
+      const added = (project.media || []).length - beforeCount + (topUpReport.curatedPoolInjected || 0);
+      if ((project.media || []).length > beforeCount) {
+        log(`   📦 Preflight top-up: +${(project.media || []).length - beforeCount} fetchable assets (pool ${preflight.fetchable}/${preflight.requiredUniqueUrls})`);
+        validateEditTimeline(project, {
+          cutIntervalSec: preflight.cutIntervalSec,
+          preferVideo: fixState.harvestVideoFirst !== false && !fixState.preferImageAssembly,
+          minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+          devServer,
+        });
+        const secondPreflight = await preflightTimelineMedia(project, {
+          devServer,
+          cutIntervalSec: preflight.cutIntervalSec,
+          preferVideo: fixState.harvestVideoFirst !== false && !fixState.preferImageAssembly,
+          minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+          log,
+        });
+        if (secondPreflight.widenedCut) {
+          fixState.cutIntervalSec = secondPreflight.cutIntervalSec;
+        }
+        if (secondPreflight.deadUrlKeys?.length) {
+          const merged = new Set((fixState.excludedUrls || []).map((u) => normalizeUrlKey(u) || u).filter(Boolean));
+          for (const key of secondPreflight.deadUrlKeys) {
+            if (key) merged.add(key);
+          }
+          fixState.excludedUrls = [...merged].slice(-400);
+        }
+      }
+    }
+    writeFileSync(
+      join(outDir, 'timeline-diversity.json'),
+      JSON.stringify(
+        computeTimelineDiversityMetrics(project.editTimeline || [], project.media || [], project.script || []),
+        null,
+        2,
+      ),
+    );
+
     accumulateExcludedUrls(fixState, project);
 
     try {
@@ -2043,11 +2150,13 @@ export async function generateFullVideo(options) {
     }
 
     function runServerRender(attemptLabel = 'render') {
+      const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+      const renderTimeoutMs = loopMode ? 3_600_000 : 1_800_000;
       const render = spawnSync('node', ['server-render.mjs', mp4Out], {
         cwd: root,
         env: renderEnv,
         encoding: 'utf8',
-        timeout: 1_800_000,
+        timeout: renderTimeoutMs,
         stdio: ['inherit', 'pipe', 'pipe'],
       });
       const renderLogBody = `[${attemptLabel}]\n${render.stdout || ''}\n${render.stderr || ''}`;
@@ -2088,7 +2197,7 @@ export async function generateFullVideo(options) {
 
       produced = resolveProducedOutput();
       if (!produced) {
-        return { ok: false, error: 'No output MP4', topic, outDir };
+        return { ok: false, error: parseRenderFailureReason(outDir), topic, outDir, fixState };
       }
 
       const producedSize = statSync(produced).size;
@@ -2101,7 +2210,7 @@ export async function generateFullVideo(options) {
         }
         produced = resolveProducedOutput();
         if (!produced) {
-          return { ok: false, error: 'No output MP4 after render retry', topic, outDir };
+          return { ok: false, error: parseRenderFailureReason(outDir, 'No output MP4 after render retry'), topic, outDir, fixState };
         }
       }
     }
@@ -2112,43 +2221,36 @@ export async function generateFullVideo(options) {
     }
 
     try {
-      if (process.env.AUTOTUBE_LOOP_MODE === '1' || fixState.shockHook !== false) {
-        const hookResult = await burnHookPostRender(produced, {
-          exportSettings: { hookOverlay: fixState.hookOverlay, hookLine: fixState.hookLine },
-          hookLine: fixState.hookLine,
-        });
-        if (hookResult.ok) {
-          log(`   🪝 Post-render hook: "${(hookResult.hookText || '').slice(0, 48)}"`);
-        } else if (hookResult.error) {
-          log(`   ⚠ Post-render hook burn: ${hookResult.error}`);
-        }
+      const overlayProject = {
+        exportSettings: { hookOverlay: fixState.hookOverlay, hookLine: fixState.hookLine },
+        hookLine: fixState.hookLine,
+      };
+      const overlayResult = await burnOverlaysPostRender(produced, outDir, overlayProject);
+      if (overlayResult.skipped) {
+        log('   📝 Overlays: pipeline single-pass OK (hook + captions)');
+      } else if (overlayResult.ok) {
+        log('   📝 Post-render overlays: single-pass hook+captions burned');
+      } else if (overlayResult.error) {
+        log(`   ⚠ Post-render overlays: ${overlayResult.error}`);
+      } else if (overlayResult.results?.hook?.error || overlayResult.results?.captions?.error) {
+        log(`   ⚠ Post-render overlays: ${overlayResult.results?.hook?.error || overlayResult.results?.captions?.error}`);
       }
-
-      const capStatsPath = join(outDir, 'caption-stats.json');
-      const pipelineCaptions = existsSync(capStatsPath)
-        ? JSON.parse(readFileSync(capStatsPath, 'utf8'))
-        : null;
-      const skipPostBurn = (pipelineCaptions?.captionCount || 0) > 0;
-      const capResult = skipPostBurn
-        ? { ok: true, captionCount: pipelineCaptions.captionCount, skipped: true }
-        : await burnCaptionsPostRender(produced, outDir);
-      if (capResult.ok && !capResult.skipped) {
-        log(`   📝 Post-render captions: ${capResult.captionCount} lines burned`);
-        writeFileSync(
-          join(outDir, 'caption-stats.json'),
-          JSON.stringify({
-            captionCount: capResult.captionCount,
-            avgWordsPerLine: capResult.avgWordsPerLine ?? 0,
-            postRender: true,
-          }),
-        );
-      } else if (capResult.skipped) {
-        log(`   📝 Post-render captions: skipped (${pipelineCaptions.captionCount} lines already in pipeline)`);
-      } else if (capResult.error && !existsSync(capStatsPath)) {
-        log(`   ⚠ Post-render caption burn: ${capResult.error}`);
+      if (
+        process.env.AUTOTUBE_LOOP_MODE === '1'
+        && overlayResult.needCaptions
+        && !overlayResult.capBurned
+      ) {
+        return {
+          ok: false,
+          error: `Caption overlay failed — ${overlayResult.results?.captions?.error || 'no captions burned'}`,
+          topic,
+          outDir,
+          renderRetried,
+          fixState,
+        };
       }
     } catch (capErr) {
-      log(`   ⚠ Post-render caption burn skipped: ${capErr.message}`);
+      log(`   ⚠ Post-render overlays skipped: ${capErr.message}`);
     }
 
     const postCapProbe = spawnSync(
@@ -2198,6 +2300,8 @@ export async function generateFullVideo(options) {
           projectPath,
           renderRetried,
           manifestGate,
+          fixState,
+          preflightDeadIds: fixState.preflightDeadIds,
         };
       }
     }

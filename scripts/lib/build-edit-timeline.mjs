@@ -610,5 +610,23 @@ export function validateEditTimeline(project, options = {}) {
       devServer: options.devServer,
     });
   }
+  // Loop mode: timeline must cover each segment duration (ffmpeg encodes timeline-only).
+  if (process.env.AUTOTUBE_LOOP_MODE === '1' && project.editTimeline?.length) {
+    for (const seg of project.script || []) {
+      const segClips = project.editTimeline.filter((e) => e.segmentId === seg.id);
+      const covered = segClips.reduce((sum, e) => sum + ((e.endSec ?? 0) - (e.startSec ?? 0)), 0);
+      const need = seg.duration || 0;
+      if (need > 0 && covered < need - 0.5) {
+        project.editTimeline = buildEditTimeline(project, {
+          cutIntervalSec: options.cutIntervalSec ?? 1.25,
+          reason: 'timeline coverage repair',
+          preferVideo: options.preferVideo === true,
+          minVideosFirst: options.minVideosFirst ?? 0,
+          devServer: options.devServer,
+        });
+        break;
+      }
+    }
+  }
   return { rebuilt, staleCount: stale, staleRatio, clipCount: project.editTimeline.length };
 }

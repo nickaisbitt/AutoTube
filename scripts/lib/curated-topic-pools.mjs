@@ -53,6 +53,10 @@ export const CURATED_MUSEUM_HEIST_IMAGES = [
   { url: 'https://images.unsplash.com/photo-1521791136064-7986c2920216?auto=format&w=1920&q=85', alt: 'Hand holding smartphone recording video' },
   { url: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&w=1920&q=85', alt: 'Digital technology network global' },
   { url: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&w=1920&q=85', alt: 'Crowd of people gathering event' },
+  { url: 'https://globalnews.ca/wp-content/uploads/2025/10/CP175199254.jpg?quality=85&strip=all', alt: 'Louvre heist Paris police investigation' },
+  { url: 'https://a57.foxnews.com/static.foxnews.com/foxnews.com/content/uploads/2025/10/1200/675/louvre-museum-heist.jpg', alt: 'Louvre museum heist crime scene' },
+  { url: 'https://a57.foxnews.com/static.foxnews.com/foxnews.com/content/uploads/2025/10/1200/675/louvre-ladder.jpg', alt: 'Louvre heist ladder entry point' },
+  { url: 'https://cloudfront-us-east-2.images.arcpublishing.com/reuters/b7jxdt7djfihzml6uq6jqjgj6a.jpg', alt: 'Reuters Louvre Paris crime scene' },
 ];
 
 const POOL_BY_KEY = {

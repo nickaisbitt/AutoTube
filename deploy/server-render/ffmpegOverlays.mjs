@@ -174,33 +174,72 @@ function probeVideoDimensions(videoPath) {
   return { w: parseInt(wStr, 10) || 1280, h: parseInt(hStr, 10) || 720 };
 }
 
+function waitForStableVideo(videoPath, { minBytes = 80_000, attempts = 25 } = {}) {
+  let lastSize = -1;
+  for (let i = 0; i < attempts; i += 1) {
+    if (!existsSync(videoPath)) {
+      spawnSync('sleep', ['0.2'], { encoding: 'utf8' });
+      continue;
+    }
+    const size = statSync(videoPath).size;
+    if (size >= minBytes && size === lastSize && probeVideoDuration(videoPath)) {
+      return true;
+    }
+    lastSize = size;
+    spawnSync('sleep', ['0.2'], { encoding: 'utf8' });
+  }
+  return existsSync(videoPath) && statSync(videoPath).size >= minBytes && probeVideoDuration(videoPath);
+}
+
 /** One ffmpeg pass: hook drawtext + ASS captions (avoids chained re-encode corruption). */
-function encodeVideoWithOverlayFilters(videoPath, vfChain) {
-  const tmpOut = join('/tmp', `autotube-overlay-${process.pid}-${Date.now()}.mp4`);
-  const r = spawnSync(
-    'ffmpeg',
-    ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', vfChain, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', tmpOut],
-    { ...FFMPEG_SPAWN_OPTS, timeout: 900_000 },
-  );
-  if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
-    return {
-      ok: false,
-      error: (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-6).join(' | ') || `exit ${r.status}`,
-    };
+function encodeVideoWithOverlayFilters(videoPath, vfChain, { retries = 3 } = {}) {
+  if (!waitForStableVideo(videoPath)) {
+    return { ok: false, error: 'input video not stable/readable before overlay encode' };
   }
-  const encodedDuration = probeVideoDuration(tmpOut);
-  if (!encodedDuration) {
-    try { unlinkSync(tmpOut); } catch { /* ignore */ }
-    return { ok: false, error: 'overlay encode produced corrupt output (no moov/duration)' };
+
+  let lastError = 'overlay encode failed';
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    const tmpOut = join('/tmp', `autotube-overlay-${process.pid}-${Date.now()}-${attempt}.mp4`);
+    const r = spawnSync(
+      'ffmpeg',
+      ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', vfChain, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', tmpOut],
+      { ...FFMPEG_SPAWN_OPTS, timeout: 900_000 },
+    );
+    if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
+      const detail = (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-6).join(' | ');
+      lastError = detail || `exit ${r.status}${r.signal ? ` signal ${r.signal}` : ''}`;
+      if (r.status === null && attempt < retries) {
+        spawnSync('sleep', ['1'], { encoding: 'utf8' });
+        continue;
+      }
+      try { if (existsSync(tmpOut)) unlinkSync(tmpOut); } catch { /* ignore */ }
+      if (attempt < retries) {
+        spawnSync('sleep', ['1'], { encoding: 'utf8' });
+        continue;
+      }
+      return { ok: false, error: lastError };
+    }
+    const encodedDuration = probeVideoDuration(tmpOut);
+    if (!encodedDuration) {
+      try { unlinkSync(tmpOut); } catch { /* ignore */ }
+      lastError = 'overlay encode produced corrupt output (no moov/duration)';
+      if (attempt < retries) {
+        spawnSync('sleep', ['1'], { encoding: 'utf8' });
+        continue;
+      }
+      return { ok: false, error: lastError };
+    }
+    const tmpReplace = `${videoPath}.overlay-tmp-${process.pid}.mp4`;
+    try {
+      renameSync(tmpOut, tmpReplace);
+      renameSync(tmpReplace, videoPath);
+      return { ok: true };
+    } catch (err) {
+      try { if (existsSync(tmpOut)) unlinkSync(tmpOut); } catch { /* ignore */ }
+      return { ok: false, error: `failed to replace video with overlay output: ${err.message}` };
+    }
   }
-  const tmpReplace = `${videoPath}.overlay-tmp-${process.pid}.mp4`;
-  try {
-    renameSync(tmpOut, tmpReplace);
-    renameSync(tmpReplace, videoPath);
-  } catch {
-    return { ok: false, error: 'failed to replace video with overlay output' };
-  }
-  return { ok: true };
+  return { ok: false, error: lastError };
 }
 
 
@@ -468,6 +507,15 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
   }
 
   let encoded = encodeVideoWithOverlayFilters(videoPath, vfParts.join(','));
+  if (!encoded.ok && assPath && hook?.vf) {
+    const hookOnly = encodeVideoWithOverlayFilters(videoPath, hook.vf);
+    if (hookOnly.ok) {
+      const subFilter = `ass=${assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")}`;
+      encoded = encodeVideoWithOverlayFilters(videoPath, subFilter);
+    } else {
+      encoded = hookOnly;
+    }
+  }
   if (!encoded.ok && assPath) {
     const subFilter = `subtitles='${assPath.replace(/'/g, "'\\''")}'`;
     const fallbackParts = hook?.vf ? [hook.vf, subFilter] : [subFilter];

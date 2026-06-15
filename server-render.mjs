@@ -3295,6 +3295,7 @@ async function runFfmpegAssemblyRender(project) {
     throw new Error(ffResult.error || 'ffmpeg assembly render failed');
   }
   log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments, ${ffResult.manifest?.clipCount ?? '?'} clips, tpad ${ffResult.manifest?.tpadSec ?? 0}s)`);
+  await new Promise((r) => setTimeout(r, 800));
   try {
     const { applyFfmpegYoutubeOverlays } = await import('./server-render/ffmpegOverlays.mjs');
     const overlayResults = applyFfmpegYoutubeOverlays(OUTPUT_FILE, project, wordTimestampCache, captionSegmentStartTimes);
@@ -3303,6 +3304,13 @@ async function runFfmpegAssemblyRender(project) {
     }
     if (overlayResults.captions?.ok === false && overlayResults.captions?.error) {
       log('warn', `  ⚠ Caption overlay skipped: ${overlayResults.captions.error}`);
+    }
+    const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+    const needCaptions = wordTimestampCache.size > 0;
+    const captionsOk = overlayResults.captions?.ok !== false || !needCaptions;
+    const hookOk = overlayResults.hook?.ok !== false;
+    if (loopMode && (!hookOk || !captionsOk)) {
+      log('warn', '  ⚠ Loop overlay incomplete — generate-full-video post-render will retry');
     }
   } catch (err) {
     log('warn', `  ⚠ YouTube overlays skipped: ${err.message}`);

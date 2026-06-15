@@ -291,6 +291,14 @@ function uniqueAssetsByManifestKey(assets) {
   return out;
 }
 
+function alternateAssetPriority(asset) {
+  const hay = `${asset?.url || ''} ${asset?.sourceUrl || ''} ${asset?.source || ''}`.toLowerCase();
+  if (/unsplash\.com|pexels\.com|pixabay/.test(hay)) return 4;
+  if (/lobbyobserver|digitalamit|topic-fallback/.test(hay)) return 3;
+  if (/wikimedia|reuters|apnews|nytimes|bbc|foxnews|cbsnews|euronews|globalnews/.test(hay)) return 0;
+  return 1;
+}
+
 function pickAssetAvoidingRepeat(candidates, slot, lastManifestKey) {
   if (!candidates.length) return null;
   if (lastManifestKey && candidates.length > 1) {
@@ -773,7 +781,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       const kb = assetManifestKey(b);
       const aRepeat = (ka && (ka === lastRenderedManifestKey || ka === baseKey)) ? 1 : 0;
       const bRepeat = (kb && (kb === lastRenderedManifestKey || kb === baseKey)) ? 1 : 0;
-      return aRepeat - bRepeat;
+      if (aRepeat !== bRepeat) return aRepeat - bRepeat;
+      return alternateAssetPriority(a) - alternateAssetPriority(b);
     });
     let ok = false;
     let usedPlaceholder = false;

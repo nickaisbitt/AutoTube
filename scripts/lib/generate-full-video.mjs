@@ -2032,6 +2032,11 @@ export async function generateFullVideo(options) {
     }
     if (preflight.removed > 0) {
       fixState.preflightDeadIds = preflight.deadUrlKeys;
+      const merged = new Set((fixState.excludedUrls || []).map((u) => normalizeUrlKey(u) || u).filter(Boolean));
+      for (const key of preflight.deadUrlKeys || []) {
+        if (key) merged.add(key);
+      }
+      fixState.excludedUrls = [...merged].slice(-400);
     }
     writeFileSync(
       join(outDir, 'timeline-diversity.json'),

@@ -16,6 +16,7 @@ import {
   hookOverrideMatchesTopic,
 } from './patch-project-for-loop.mjs';
 import { validateEditTimeline, effectiveCutInterval } from './build-edit-timeline.mjs';
+import { preflightTimelineMedia } from './preflight-timeline-media.mjs';
 import { computeClipBudget, computeTimelineDiversityMetrics, shouldUseGlobalUrlDedup, TOP_UP_MAX_PASSES } from './assembly-system.mjs';
 import { shouldUseModalRender, renderViaModal } from './modal-render.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
@@ -2015,6 +2016,29 @@ export async function generateFullVideo(options) {
         2,
       ),
     );
+
+    const preflight = await preflightTimelineMedia(project, {
+      devServer,
+      cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+      preferVideo: fixState.harvestVideoFirst !== false && !fixState.preferImageAssembly,
+      minVideosFirst: fixState.renderTier === 'full' ? 3 : (fixState.minVideosPerSegment || 2),
+      log,
+    });
+    if (preflight.widenedCut) {
+      fixState.cutIntervalSec = preflight.cutIntervalSec;
+    }
+    if (preflight.removed > 0) {
+      fixState.preflightDeadIds = preflight.deadUrlKeys;
+    }
+    writeFileSync(
+      join(outDir, 'timeline-diversity.json'),
+      JSON.stringify(
+        computeTimelineDiversityMetrics(project.editTimeline || [], project.media || [], project.script || []),
+        null,
+        2,
+      ),
+    );
+
     accumulateExcludedUrls(fixState, project);
 
     try {
@@ -2182,6 +2206,8 @@ export async function generateFullVideo(options) {
           projectPath,
           renderRetried,
           manifestGate,
+          fixState,
+          preflightDeadIds: fixState.preflightDeadIds,
         };
       }
     }

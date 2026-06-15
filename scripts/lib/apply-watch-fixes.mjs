@@ -27,7 +27,7 @@ import {
 
 const CUT_FLOOR = 0.5;
 const LOOP_SCENE_CUT_FLOOR = 1.0;
-const IMAGE_FIRST_CUT_FLOOR = 1.15;
+export const IMAGE_FIRST_CUT_FLOOR = 1.15;
 const VISUAL_COHESION_MIN_CUT = 1.4;
 const VISUAL_COHESION_MAX_CUT = 1.8;
 

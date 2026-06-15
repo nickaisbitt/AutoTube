@@ -15,6 +15,7 @@ import { pickRandomTopic } from './lib/random-topics.mjs';
 import { watchVideo, resolveVideoPath, targetScore100 } from '../powers/video-watcher/src/analyze.mjs';
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
+import { applyGenerateFailureFixes } from './lib/apply-generate-failures.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
 import { pruneExcludedUrlsForReharvest } from './lib/harvest-loop-context.mjs';
 
@@ -235,6 +236,14 @@ async function main() {
         }
       } else {
         console.error(`\n❌ Generate failed: ${generateError}`);
+        const genFix = applyGenerateFailureFixes(generateError, fixState, {
+          manifestGate: gen?.manifestGate,
+          preflightDeadIds: gen?.preflightDeadIds || gen?.fixState?.preflightDeadIds,
+        });
+        if (genFix.applied.length) {
+          fixState = genFix.fixState;
+          console.log(`   🔧 Generate fixes: ${genFix.applied.join('; ')}`);
+        }
         const generateFailureCount = (fixState.generateFailureCount || 0) + 1;
         fixState.generateFailureCount = generateFailureCount;
         const maxGenerateFailuresPerTopic = fixState.maxGenerateFailuresPerTopic || 2;

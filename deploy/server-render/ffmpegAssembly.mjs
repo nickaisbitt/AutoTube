@@ -279,6 +279,18 @@ function assetManifestKey(asset) {
   return url.split('?')[0].toLowerCase();
 }
 
+function uniqueAssetsByManifestKey(assets) {
+  const seen = new Set();
+  const out = [];
+  for (const asset of assets || []) {
+    const key = assetManifestKey(asset);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    out.push(asset);
+  }
+  return out;
+}
+
 function pickAssetAvoidingRepeat(candidates, slot, lastManifestKey) {
   if (!candidates.length) return null;
   if (lastManifestKey && candidates.length > 1) {
@@ -439,7 +451,7 @@ async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
   return cached;
 }
 
-async function ensureLocalAsset(asset, devServer, cacheDir) {
+export async function ensureLocalAsset(asset, devServer, cacheDir) {
   mkdirSync(cacheDir, { recursive: true });
   const rawUrl = asset.url || '';
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(rawUrl);
@@ -448,19 +460,30 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
     return existsSync(abs) ? abs : null;
   }
 
+  const weservUrl = (url) => {
+    const stripped = url.replace(/^https?:\/\//i, '');
+    return `https://images.weserv.nl/?url=${encodeURIComponent(stripped)}&w=1280&h=720&fit=cover&output=jpg`;
+  };
+
   const candidates = [];
   if (rawUrl.startsWith('/api/')) {
     candidates.push(`${devServer}${rawUrl}`);
   } else if (rawUrl.startsWith('http')) {
+    if (!isVideo) {
+      candidates.push(rawUrl);
+      candidates.push(weservUrl(rawUrl));
+    }
     if (isVideo) {
       candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);
       candidates.push(rawUrl);
     }
     candidates.push(`${devServer}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`);
     if (!isVideo) {
-      candidates.push(`https://images.weserv.nl/?url=${encodeURIComponent(rawUrl)}&w=1280&h=720&fit=cover&output=jpg`);
+      candidates.push(weservUrl(rawUrl));
     }
-    candidates.push(rawUrl);
+    if (isVideo) {
+      candidates.push(rawUrl);
+    }
   }
 
   for (const fetchUrl of candidates) {
@@ -729,12 +752,17 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
     const tried = new Set();
     const baseKey = assetManifestKey(asset);
+    const globalMedia = options.mediaPool || [];
     const imagePool = imageFirstEnabled()
-      ? prepareSegmentMedia(segMedia).filter((a) => !isVideoAsset(a))
+      ? uniqueAssetsByManifestKey([
+        ...prepareSegmentMedia(segMedia).filter((a) => !isVideoAsset(a)),
+        ...prepareSegmentMedia(globalMedia).filter((a) => !isVideoAsset(a)),
+      ])
       : null;
     const alternates = [
       coerceImageFirstAsset(asset, segMedia),
       ...(imagePool?.length ? imagePool : segMedia).filter((a) => assetKey(a) !== assetKey(asset)),
+      ...globalMedia.filter((a) => assetKey(a) !== assetKey(asset)),
     ].sort((a, b) => {
       if (imageFirstEnabled()) {
         const av = isVideoAsset(a) ? 1 : 0;
@@ -765,7 +793,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       lastResolved = result.resolvedAsset || candidate;
       if (result.ok) {
         const resolvedKey = assetManifestKey(lastResolved);
-        if (resolvedKey && resolvedKey === lastRenderedManifestKey && hasUntried) {
+        if (resolvedKey && resolvedKey === lastRenderedManifestKey) {
           ok = false;
           continue;
         }
@@ -923,6 +951,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     const result = await renderSegmentClips(seg, segMedia, project, segOut, {
       ...options,
       segmentStartSec: cumulativeSegStartSec,
+      mediaPool,
     });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };

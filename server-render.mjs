@@ -3261,9 +3261,19 @@ async function runFfmpegAssemblyRender(project) {
 
   const cutInterval = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.25');
   const measuredSec = project.script.reduce((s, seg) => s + (seg.duration || 0), 0);
+  const imageFirst = process.env.AUTOTUBE_LOOP_IMAGE_FIRST === '1'
+    || process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === '0'
+    || process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === 'false';
+  const preferVideo = !imageFirst && (
+    process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === '1'
+    || process.env.AUTOTUBE_HARVEST_VIDEO_FIRST === 'true'
+  );
   project.editTimeline = buildEditTimeline(project, {
     cutIntervalSec: cutInterval,
     reason: 'post-tts sync',
+    preferVideo,
+    minVideosFirst: preferVideo ? 2 : 0,
+    devServer: process.env.DEV_SERVER_URL || 'http://localhost:5173',
   });
   log(
     'info',

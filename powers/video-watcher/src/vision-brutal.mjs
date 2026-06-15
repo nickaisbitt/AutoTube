@@ -233,7 +233,8 @@ export async function runHookVisionReview(videoPath, apiKey, options = {}) {
     frames,
     extraText,
   });
-  if (expected && !parsed.onScreenText?.trim() && /^BREAKING:/i.test(expected)) {
+  if (expected && !parsed.onScreenText?.trim() && /^BREAKING:/i.test(expected)
+    && process.env.AUTOTUBE_LOOP_MODE !== '1') {
     parsed.onScreenText = expected;
     parsed.hookPass = true;
     parsed.hookScore = Math.max(clampScore(parsed.hookScore, 82), 82);

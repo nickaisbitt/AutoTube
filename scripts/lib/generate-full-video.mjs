@@ -4,7 +4,7 @@
  */
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync, existsSync, copyFileSync, readdirSync, unlinkSync, statSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
 import { validateRenderManifest, MIN_BYTES as LOOP_MIN_RENDER_BYTES } from './validate-loop-video.mjs';
@@ -1384,16 +1384,17 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   return report;
 }
 
-/** Burn hook overlay after server-render when in-pipeline hook pass failed or was skipped. */
-async function burnHookPostRender(videoPath, project) {
+/** Re-apply hook+captions in one pass when pipeline overlay failed. */
+async function burnOverlaysPostRender(videoPath, outDir, project) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
-  const { overlayHookText } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
-  return overlayHookText(videoPath, project);
-}
+  const hookStatsPath = join(dirname(videoPath), 'hook-stats.json');
+  const capStatsPath = join(dirname(videoPath), 'caption-stats.json');
+  const hookOk = existsSync(hookStatsPath);
+  const capOk = existsSync(capStatsPath);
+  if (hookOk && capOk) {
+    return { ok: true, skipped: true, hookOk, capOk };
+  }
 
-/** Burn captions after server-render when in-pipeline overlay pass failed or was skipped. */
-async function burnCaptionsPostRender(videoPath, outDir) {
-  if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
   const narrDir = readdirSync(outDir)
     .filter((d) => d.startsWith('narration-audio-'))
     .sort()
@@ -1415,10 +1416,11 @@ async function burnCaptionsPostRender(videoPath, outDir) {
     cumulative += words[words.length - 1]?.end || 0;
     segIdx += 1;
   }
-  if (!cache.size) return { ok: false, error: 'no word timestamps' };
 
-  const { overlayKaraokeCaptions } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
-  return overlayKaraokeCaptions(videoPath, cache, starts);
+  const { applyFfmpegYoutubeOverlays } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
+  const results = applyFfmpegYoutubeOverlays(videoPath, project, cache.size ? cache : null, starts);
+  const ok = (results.hook?.ok !== false || hookOk) && (results.captions?.ok !== false || capOk || !cache.size);
+  return { ok, results, postRender: true };
 }
 
 /**
@@ -2115,43 +2117,22 @@ export async function generateFullVideo(options) {
     }
 
     try {
-      if (process.env.AUTOTUBE_LOOP_MODE === '1' || fixState.shockHook !== false) {
-        const hookResult = await burnHookPostRender(produced, {
-          exportSettings: { hookOverlay: fixState.hookOverlay, hookLine: fixState.hookLine },
-          hookLine: fixState.hookLine,
-        });
-        if (hookResult.ok) {
-          log(`   🪝 Post-render hook: "${(hookResult.hookText || '').slice(0, 48)}"`);
-        } else if (hookResult.error) {
-          log(`   ⚠ Post-render hook burn: ${hookResult.error}`);
-        }
-      }
-
-      const capStatsPath = join(outDir, 'caption-stats.json');
-      const pipelineCaptions = existsSync(capStatsPath)
-        ? JSON.parse(readFileSync(capStatsPath, 'utf8'))
-        : null;
-      const skipPostBurn = (pipelineCaptions?.captionCount || 0) > 0;
-      const capResult = skipPostBurn
-        ? { ok: true, captionCount: pipelineCaptions.captionCount, skipped: true }
-        : await burnCaptionsPostRender(produced, outDir);
-      if (capResult.ok && !capResult.skipped) {
-        log(`   📝 Post-render captions: ${capResult.captionCount} lines burned`);
-        writeFileSync(
-          join(outDir, 'caption-stats.json'),
-          JSON.stringify({
-            captionCount: capResult.captionCount,
-            avgWordsPerLine: capResult.avgWordsPerLine ?? 0,
-            postRender: true,
-          }),
-        );
-      } else if (capResult.skipped) {
-        log(`   📝 Post-render captions: skipped (${pipelineCaptions.captionCount} lines already in pipeline)`);
-      } else if (capResult.error && !existsSync(capStatsPath)) {
-        log(`   ⚠ Post-render caption burn: ${capResult.error}`);
+      const overlayProject = {
+        exportSettings: { hookOverlay: fixState.hookOverlay, hookLine: fixState.hookLine },
+        hookLine: fixState.hookLine,
+      };
+      const overlayResult = await burnOverlaysPostRender(produced, outDir, overlayProject);
+      if (overlayResult.skipped) {
+        log('   📝 Overlays: pipeline single-pass OK (hook + captions)');
+      } else if (overlayResult.ok) {
+        log('   📝 Post-render overlays: single-pass hook+captions burned');
+      } else if (overlayResult.error) {
+        log(`   ⚠ Post-render overlays: ${overlayResult.error}`);
+      } else if (overlayResult.results?.hook?.error || overlayResult.results?.captions?.error) {
+        log(`   ⚠ Post-render overlays: ${overlayResult.results?.hook?.error || overlayResult.results?.captions?.error}`);
       }
     } catch (capErr) {
-      log(`   ⚠ Post-render caption burn skipped: ${capErr.message}`);
+      log(`   ⚠ Post-render overlays skipped: ${capErr.message}`);
     }
 
     const postCapProbe = spawnSync(

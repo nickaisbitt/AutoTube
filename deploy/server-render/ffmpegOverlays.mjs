@@ -5,18 +5,29 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync, unlinkSync, renameSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
-function probeVideoDuration(filePath) {
-  const r = spawnSync(
-    'ffprobe',
-    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath],
-    { encoding: 'utf8', timeout: 30_000 },
-  );
-  if (r.status !== 0 || !r.stdout) return null;
-  const d = parseFloat(r.stdout.trim());
-  return Number.isFinite(d) && d > 1 ? d : null;
-}
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
 import { MIN_CAPTION_WORDS } from './assembly-system.mjs';
+
+/** spawnSync kills ffmpeg when stderr progress exceeds the 1MB default maxBuffer. */
+const FFMPEG_SPAWN_OPTS = { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 };
+
+function probeVideoDuration(filePath, retries = 4) {
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    const r = spawnSync(
+      'ffprobe',
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath],
+      { encoding: 'utf8', timeout: 30_000 },
+    );
+    if (r.status === 0 && r.stdout) {
+      const d = parseFloat(r.stdout.trim());
+      if (Number.isFinite(d) && d > 1) return d;
+    }
+    if (attempt < retries - 1) {
+      spawnSync('sleep', ['0.15'], { encoding: 'utf8' });
+    }
+  }
+  return null;
+}
 
 /** Preferred minimum words per phrase, or phrase must end with punctuation. */
 const PREFERRED_CAPTION_WORDS = 4;
@@ -52,9 +63,17 @@ function phraseIsValid(buf, { requirePunct = true } = {}) {
   const endsWithPunct = isPhraseEnd(buf[buf.length - 1]);
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
   const minWords = loopMode ? 5 : PREFERRED_CAPTION_WORDS;
-  if (requirePunct && (loopMode || requirePunct)) {
+  if (loopMode) {
+    if (isWeakLeadIn(buf[0]) || isWeakLeadIn(buf[buf.length - 1])) return false;
+    if (buf.some((w) => isOrphanFragment(w))) return false;
+    const badCount = buf.filter((w) => isBadSplit(w)).length;
+    if (badCount / buf.length > 0.5) return false;
+    if (endsWithPunct && buf.length >= MIN_CAPTION_WORDS) return true;
+    if (buf.length >= minWords) return true;
+    return false;
+  }
+  if (requirePunct && requirePunct) {
     if (!endsWithPunct) return false;
-    if (loopMode && buf.length < minWords) return false;
   }
   if (buf.length < minWords && !endsWithPunct) return false;
   if (buf.length < PREFERRED_CAPTION_WORDS && !endsWithPunct && requirePunct) return false;
@@ -149,22 +168,27 @@ export function overlayHookText(videoPath, project, options = {}) {
   );
   const vf = filters.join(',');
 
-  const tmpOut = videoPath.replace(/\.mp4$/, '-hooked.mp4');
+  const tmpOut = join('/tmp', `autotube-hooked-${process.pid}-${Date.now()}.mp4`);
   const r = spawnSync(
     'ffmpeg',
-    ['-y', '-i', videoPath, '-vf', vf, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
-    { encoding: 'utf8', timeout: 300_000 },
+    ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', vf, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', tmpOut],
+    { ...FFMPEG_SPAWN_OPTS, timeout: 900_000 },
   );
-  if (r.status !== 0 || !existsSync(tmpOut)) {
-    const errMsg = (r.stderr || '').slice(-800);
-    console.error(`  [ffmpeg] hook overlay FAILED (status=${r.status}): ${errMsg}`);
+  if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
+    const errMsg = (r.stderr || '').replace(/\r/g, '').split('\n').filter((l) => l && !/^frame=/.test(l)).slice(-6).join(' | ') || `exit ${r.status}`;
     return { ok: false, error: errMsg };
   }
-  copyFileSync(tmpOut, videoPath);
+  const encodedDuration = probeVideoDuration(tmpOut);
+  if (!encodedDuration) {
+    try { unlinkSync(tmpOut); } catch { /* ignore */ }
+    return { ok: false, error: 'hook encode produced corrupt output (no moov/duration)' };
+  }
+  const tmpReplace = `${videoPath}.hook-tmp-${process.pid}.mp4`;
   try {
-    unlinkSync(tmpOut);
+    renameSync(tmpOut, tmpReplace);
+    renameSync(tmpReplace, videoPath);
   } catch {
-    /* ignore */
+    return { ok: false, error: 'failed to replace video with hooked output' };
   }
   return { ok: true, hookText: hookText.trim() };
 }
@@ -275,9 +299,10 @@ function buildDialogueLines(allWords, cm) {
     }
   }
 
-  // Loop mode: only burn full sentences (clause ends with punctuation).
+  // Loop mode: emit any remaining full phrase (≥5 words) even without TTS punctuation.
   if (loopMode) {
     if (phraseIsValid(buffer)) flush();
+    else if (buffer.length >= 5 && !isWeakLeadIn(buffer[0]) && !isWeakLeadIn(buffer[buffer.length - 1])) flush();
     else buffer = [];
   } else if (phraseIsValid(buffer)) {
     flush();
@@ -382,13 +407,13 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, segmentSta
 
   const tmpOut = join('/tmp', `autotube-captioned-${process.pid}-${Date.now()}.mp4`);
   const assFilter = `ass=${assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''")}`;
-  const encodeArgs = ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', assFilter, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut];
-  let r = spawnSync('ffmpeg', encodeArgs, { encoding: 'utf8', timeout: 900_000 });
+  const encodeArgs = ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', assFilter, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', tmpOut];
+  let r = spawnSync('ffmpeg', encodeArgs, { ...FFMPEG_SPAWN_OPTS, timeout: 900_000 });
   if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {
     r = spawnSync(
       'ffmpeg',
-      ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', `subtitles='${assPath.replace(/'/g, "'\\''")}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
-      { encoding: 'utf8', timeout: 900_000 },
+      ['-hide_banner', '-nostats', '-loglevel', 'error', '-y', '-i', videoPath, '-vf', `subtitles='${assPath.replace(/'/g, "'\\''")}'`, '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', tmpOut],
+      { ...FFMPEG_SPAWN_OPTS, timeout: 900_000 },
     );
   }
   if (!existsSync(tmpOut) || statSync(tmpOut).size < 80_000) {

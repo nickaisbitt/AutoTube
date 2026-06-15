@@ -1384,6 +1384,13 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   return report;
 }
 
+/** Burn hook overlay after server-render when in-pipeline hook pass failed or was skipped. */
+async function burnHookPostRender(videoPath, project) {
+  if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
+  const { overlayHookText } = await import('../../deploy/server-render/ffmpegOverlays.mjs');
+  return overlayHookText(videoPath, project);
+}
+
 /** Burn captions after server-render when in-pipeline overlay pass failed or was skipped. */
 async function burnCaptionsPostRender(videoPath, outDir) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
@@ -2086,6 +2093,18 @@ export async function generateFullVideo(options) {
     }
 
     try {
+      if (process.env.AUTOTUBE_LOOP_MODE === '1' || fixState.shockHook !== false) {
+        const hookResult = await burnHookPostRender(produced, {
+          exportSettings: { hookOverlay: fixState.hookOverlay, hookLine: fixState.hookLine },
+          hookLine: fixState.hookLine,
+        });
+        if (hookResult.ok) {
+          log(`   🪝 Post-render hook: "${(hookResult.hookText || '').slice(0, 48)}"`);
+        } else if (hookResult.error) {
+          log(`   ⚠ Post-render hook burn: ${hookResult.error}`);
+        }
+      }
+
       const capStatsPath = join(outDir, 'caption-stats.json');
       const pipelineCaptions = existsSync(capStatsPath)
         ? JSON.parse(readFileSync(capStatsPath, 'utf8'))

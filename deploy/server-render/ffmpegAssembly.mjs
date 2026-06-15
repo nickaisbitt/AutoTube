@@ -3,7 +3,7 @@
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, statSync, copyFileSync } from 'node:fs';
 import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
@@ -512,6 +512,30 @@ export async function ensureLocalAsset(asset, devServer, cacheDir) {
   return null;
 }
 
+/** Pre-fetch unique media pool assets into a shared cache before segment encode. */
+export async function warmMediaPoolCache(mediaPool, devServer, cacheDir, options = {}) {
+  const concurrency = options.concurrency ?? 8;
+  mkdirSync(cacheDir, { recursive: true });
+  const unique = uniqueAssetsByManifestKey(mediaPool || []);
+  const toWarm = imageFirstEnabled()
+    ? unique.filter((a) => !isVideoAsset(a))
+    : unique;
+  if (!toWarm.length) return { warmed: 0, failed: 0, total: 0 };
+
+  let warmed = 0;
+  let failed = 0;
+  for (let i = 0; i < toWarm.length; i += concurrency) {
+    const batch = toWarm.slice(i, i + concurrency);
+    const results = await Promise.all(
+      batch.map(async (asset) => (await ensureLocalAsset(asset, devServer, cacheDir) ? 'ok' : 'fail')),
+    );
+    warmed += results.filter((r) => r === 'ok').length;
+    failed += results.filter((r) => r === 'fail').length;
+  }
+  console.log(`  [ffmpeg] cache warm: ${warmed}/${toWarm.length} assets ready (${failed} failed)`);
+  return { warmed, failed, total: toWarm.length };
+}
+
 async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
   let localSrc = await ensureLocalAsset(asset, devServer, cacheDir);
   if (localSrc) return { localSrc, asset };
@@ -671,8 +695,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
   const interruptsOn = patternInterruptsEnabled();
   const tmpDir = join(dirname(outputPath), `seg-${segment.id}-clips`);
-  const cacheDir = join(tmpDir, 'cache');
+  const cacheDir = options.globalCacheDir || join(tmpDir, 'cache');
   mkdirSync(tmpDir, { recursive: true });
+  mkdirSync(cacheDir, { recursive: true });
   for (const stale of ['concat.txt', ...Array.from({ length: 200 }, (_, i) => `clip-${String(i).padStart(3, '0')}.mp4`)]) {
     try {
       const p = join(tmpDir, stale);
@@ -829,6 +854,21 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       }
     }
 
+    if (!ok && loopMode && clipPaths.length > 0) {
+      try {
+        const lastClip = clipPaths[clipPaths.length - 1];
+        if (existsSync(lastClip) && statSync(lastClip).size > 10_000) {
+          copyFileSync(lastClip, clipOut);
+          if (existsSync(clipOut) && statSync(clipOut).size > 10_000) {
+            ok = true;
+            console.log(`  [ffmpeg] ${label}: reusing prior clip (encode exhausted, tried=${tried.size})`);
+          }
+        }
+      } catch {
+        /* fall through to hard fail */
+      }
+    }
+
     if (!ok) {
       if (loopMode) {
         console.log(`  [ffmpeg] ${label}: failed in loop mode (no encode succeeded, tried=${tried.size})`);
@@ -960,6 +1000,9 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   let lastTailClipPaths = [];
 
   const mediaPool = project.media || [];
+  const globalCacheDir = join(workDir, 'asset-cache');
+  const devServer = options.devServer || 'http://localhost:5173';
+  await warmMediaPoolCache(mediaPool, devServer, globalCacheDir);
   let cumulativeSegStartSec = 0;
 
   for (let si = 0; si < (project.script || []).length; si++) {
@@ -976,6 +1019,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       ...options,
       segmentStartSec: cumulativeSegStartSec,
       mediaPool,
+      globalCacheDir,
     });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };

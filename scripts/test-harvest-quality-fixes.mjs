@@ -27,7 +27,7 @@ import {
 } from './lib/harvest-quality.mjs';
 import { isVisionFetchableUrl } from './lib/harvest-vision.mjs';
 import { resolveAssetHashSource } from './lib/perceptual-hash.mjs';
-import { applyFixesFromWatch } from './lib/apply-watch-fixes.mjs';
+import { applyFixesFromWatch, pickPrimaryFailure } from './lib/apply-watch-fixes.mjs';
 import { loadFixState } from './lib/loop-state.mjs';
 import { buildShockHookLine } from '../e2e/openRouterMock.mjs';
 import {
@@ -327,7 +327,7 @@ console.log('\n── 9. detectGiphyDominance ──');
 console.log('\n── 10. suppressGiphy on low visualVariety ──');
 {
   const watch = {
-    brutal: { report: { scores100: { visualVariety: 50, pacing: 70 } }, overall: 6 },
+    brutal: { report: { scores100: { visualVariety: 50, pacing: 95 } }, overall: 6 },
     repetition: { repeatPct: 0, duplicateRunCount: 0 },
     uploadReady: false,
     objectiveGate: { pass: false },
@@ -346,7 +346,7 @@ console.log('\n── 10. suppressGiphy on low visualVariety ──');
 console.log('\n── 11. forceRealStock escalation on Giphy-heavy ──');
 {
   const watch = {
-    brutal: { report: { scores: { visualVariety: 8, pacing: 8 } }, overall: 7 },
+    brutal: { report: { scores100: { visualVariety: 80, pacing: 95 } }, overall: 7 },
     repetition: { repeatPct: 0, duplicateRunCount: 0 },
     uploadReady: false,
     objectiveGate: { pass: false },
@@ -590,13 +590,13 @@ console.log('\n── 17. untilScore parameterization ──');
 {
   const watch = {
     youtubeScore: 75,
-    brutal: { overall: 7.5, report: { scores100: { visualVariety: 70, pacing: 70 } } },
+    brutal: { overall: 7.5, report: { scores100: { visualVariety: 70, pacing: 95 } } },
     objectiveGate: { available: true, pass: true, checks: [] },
     hookScript: { pass: true },
     hookVision: { hookPass: true },
   };
   const { applied: below91 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 91 });
-  assert('Below 91 triggers reharvest fix', below91.some((a) => a.includes('below 91')));
+  assert('Below 91 triggers full-tier below-target fix', below91.some((a) => a.includes('below 91')));
 
   const { applied: below70 } = applyFixesFromWatch(watch, { renderTier: 'full' }, 'topic', null, { untilScore: 70 });
   assert('At 75 with untilScore=70 does not trigger below-target fix', !below70.some((a) => a.includes('below 70')));
@@ -686,7 +686,7 @@ console.log('\n── 20. Pacing plateau skip reharvest ──');
   assert('Pacing plateau skips reHarvestMedia', fixState.reHarvestMedia !== true);
   assert('Pacing plateau enables patternInterrupts', fixState.patternInterrupts === true);
   assert('Pacing plateau hits cut floor', fixState.cutIntervalSec === 0.5);
-  assert('Pacing plateau logs skip reharvest', applied.some((a) => a.includes('pacing plateau')));
+  assert('Pacing plateau logs retention-first pacing pass', applied.some((a) => a.includes('Full-tier score')));
   assert('Pacing plateau does not log repetition reharvest', !applied.some((a) => a.startsWith('3.')));
 }
 
@@ -1404,7 +1404,7 @@ console.log('\n── 45. thinHarvest prunes exclusion list ──');
   ];
   const watch = {
     thinHarvest: true,
-    brutal: { overall: 5, report: { scores: { visualVariety: 5, pacing: 5 } } },
+    brutal: { overall: 9.5, report: { scores100: { visualVariety: 95, pacing: 95 } } },
     repetition: { repeatPct: 0, duplicateRunCount: 0 },
     uploadReady: false,
     objectiveGate: { pass: true },
@@ -1425,6 +1425,161 @@ console.log('\n── 45. thinHarvest prunes exclusion list ──');
   assert('Thin harvest keeps strategink in exclusions',
     (fixState.excludedUrls || []).some((u) => u.includes('strategink')));
   assert('Thin harvest prune logged in applied fixes', applied.some((a) => a.includes('Thin harvest')));
+}
+
+// ---------------------------------------------------------------------------
+// 45b. pickPrimaryFailure — single priority ordering
+// ---------------------------------------------------------------------------
+console.log('\n── 45b. pickPrimaryFailure priority order ──');
+{
+  const placeholderFirst = pickPrimaryFailure({
+    assemblyAudit: { assemblyScore: 42 },
+    sceneQa: { available: true, pass: false, longestSceneSec: 8 },
+    hookScript: { pass: false },
+    objectiveGate: {
+      pass: false,
+      checks: [{ name: 'placeholder_pct', pass: false }],
+    },
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 30 } } },
+  });
+  assert('Placeholder outranks all other failures', placeholderFirst === 'placeholder', placeholderFirst);
+
+  const assemblyFirst = pickPrimaryFailure({
+    assemblyAudit: { assemblyScore: 60 },
+    sceneQa: { available: true, pass: false, longestSceneSec: 8 },
+    hookScript: { pass: false },
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 30 } } },
+  });
+  assert('Assembly outranks scene/hook/pacing/harvest', assemblyFirst === 'assembly', assemblyFirst);
+
+  const sceneFirst = pickPrimaryFailure({
+    sceneQa: { available: true, pass: false, longestSceneSec: 8 },
+    hookScript: { pass: false },
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 30 } } },
+  });
+  assert('Scene outranks hook/pacing/harvest', sceneFirst === 'scene', sceneFirst);
+
+  const hookFirst = pickPrimaryFailure({
+    hookScript: { pass: false },
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 30 } } },
+  });
+  assert('Hook outranks pacing/harvest', hookFirst === 'hook', hookFirst);
+
+  const pacingFirst = pickPrimaryFailure({
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 55 } } },
+    sceneQa: { available: true, pass: true, longestSceneSec: 2 },
+  });
+  assert('Pacing outranks thin-harvest fallback', pacingFirst === 'pacing', pacingFirst);
+
+  const harvestOnly = pickPrimaryFailure({
+    thinHarvest: true,
+    brutal: { report: { scores100: { pacing: 95 } } },
+    sceneQa: { available: true, pass: true, longestSceneSec: 2 },
+    hookScript: { pass: true },
+    hookVision: { hookPass: true },
+  });
+  assert('Thin harvest used only when higher-priority failures absent', harvestOnly === 'harvest', harvestOnly);
+}
+
+// ---------------------------------------------------------------------------
+// 45c. applyFixesFromWatch — placeholder strategy wins and stays coherent
+// ---------------------------------------------------------------------------
+console.log('\n── 45c. placeholder strategy coherence ──');
+{
+  const tmp = mkdtempSync(join(tmpdir(), 'autotube-primary-watch-'));
+  const videoDir = join(tmp, 'run');
+  const assemblyDir = join(videoDir, 'ffmpeg-assembly');
+  mkdirSync(assemblyDir, { recursive: true });
+  writeFileSync(join(videoDir, 'final.mp4'), '');
+  writeFileSync(join(assemblyDir, 'render-manifest.json'), JSON.stringify({
+    clipCount: 8,
+    placeholderClipCount: 3,
+    placeholderPct: 37.5,
+    placeholderUrls: [
+      'https://www.tiktok.com/@user/video/dead1',
+      'https://abcnews.go.com/International/louvre-heist',
+    ],
+    perSegment: [{ segmentId: 's1', title: 'Hook', clipCount: 4, placeholderClipCount: 3 }],
+  }));
+
+  const watch = {
+    assemblyAudit: { assemblyScore: 30, repeatPenalty: 20, visualCohesion: 25 },
+    sceneQa: { available: true, pass: false, longestSceneSec: 8 },
+    hookScript: { pass: false },
+    hookVision: { hookPass: false, fix: 'BREAKING opener' },
+    brutal: { report: { scores100: { pacing: 45, visualVariety: 40 } }, overall: 4.5 },
+    objectiveGate: {
+      pass: false,
+      checks: [{ name: 'placeholder_pct', pass: false }],
+    },
+    placeholderGate: { placeholderPct: 37.5 },
+    videoPath: join(videoDir, 'final.mp4'),
+    thinHarvest: true,
+  };
+  const project = {
+    media: [
+      { segmentId: 's1', type: 'video', url: '/api/download-clip?url=tiktok', sourceUrl: 'https://www.tiktok.com/@user/video/dead1' },
+      { segmentId: 's1', type: 'image', url: 'https://abcnews.go.com/International/louvre-heist', sourceUrl: 'https://abcnews.go.com/International/louvre-heist' },
+    ],
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, { cutIntervalSec: 0.75 }, 'museum heist', project, { videoPath: watch.videoPath });
+  assert('Primary placeholder strategy requests reharvest', fixState.reHarvestMedia === true);
+  assert('Primary placeholder strategy prefers image assembly', fixState.preferImageAssembly === true);
+  assert('Primary placeholder strategy disables video-first harvest', fixState.harvestVideoFirst === false);
+  assert('Primary placeholder strategy keeps cuts at or above 1.15s', fixState.cutIntervalSec >= 1.15, String(fixState.cutIntervalSec));
+  assert('Placeholder strategy excludes non-editorial placeholder URL', (fixState.excludedUrls || []).some((u) => u.includes('tiktok.com')));
+  assert('Placeholder strategy keeps editorial placeholder URL out of excludes', !(fixState.excludedUrls || []).some((u) => u.includes('abcnews.go.com')));
+  assert('Only placeholder strategy applied in one pass', applied.length === 1 && applied[0].includes('Placeholder gate FAIL'), applied.join(' | '));
+  rmSync(tmp, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// 45d. applyFixesFromWatch — scene strategy avoids reharvest unless thin
+// ---------------------------------------------------------------------------
+console.log('\n── 45d. scene strategy coherence ──');
+{
+  const watch = {
+    sceneQa: { available: true, pass: false, longestSceneSec: 7 },
+    hookScript: { pass: false },
+    brutal: { report: { scores100: { pacing: 52 } }, overall: 5.2 },
+    objectiveGate: { pass: true, checks: [] },
+    thinHarvest: false,
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, { cutIntervalSec: 1.1 }, 'museum heist');
+  assert('Scene strategy does not reharvest when pool is not thin', fixState.reHarvestMedia !== true);
+  assert('Scene strategy enables pattern interrupts', fixState.patternInterrupts === true);
+  assert('Scene strategy tightens only to the 1.0s floor', fixState.cutIntervalSec === 1.0, String(fixState.cutIntervalSec));
+  assert('Scene strategy does not also apply hook fix', !applied.some((a) => a.includes('Hook FAIL')), applied.join(' | '));
+}
+
+// ---------------------------------------------------------------------------
+// 45e. applyFixesFromWatch — visual cohesion uses hard cuts image-first pass
+// ---------------------------------------------------------------------------
+console.log('\n── 45e. visual cohesion assembly strategy ──');
+{
+  const watch = {
+    assemblyAudit: {
+      assemblyScore: 55,
+      repeatPenalty: 90,
+      topicRelevance: 88,
+      captionCoherence: 92,
+      visualCohesion: 40,
+      issues: ['Jumping between unrelated shot scales'],
+    },
+    brutal: { report: { scores100: { pacing: 90, visualVariety: 88 } }, overall: 8.8 },
+    objectiveGate: { pass: true, checks: [] },
+  };
+  const { fixState, applied } = applyFixesFromWatch(watch, { cutIntervalSec: 2.2 }, 'museum heist');
+  assert('Visual cohesion strategy uses hard cuts', fixState.fixStrategy === 'hard_cuts');
+  assert('Visual cohesion strategy stays image-first', fixState.preferImageAssembly === true && fixState.harvestVideoFirst === false);
+  assert('Visual cohesion strategy does not reharvest', fixState.reHarvestMedia !== true);
+  assert('Visual cohesion strategy clamps interval into 1.4-1.8s band', fixState.cutIntervalSec >= 1.4 && fixState.cutIntervalSec <= 1.8, String(fixState.cutIntervalSec));
+  assert('Visual cohesion strategy logs assembly visual cohesion fix', applied.some((a) => a.includes('visualCohesion')), applied.join(' | '));
 }
 
 // ---------------------------------------------------------------------------

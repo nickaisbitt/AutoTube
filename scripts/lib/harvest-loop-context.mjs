@@ -216,7 +216,11 @@ export function normalizeUrlKey(url = '', sourceUrl = '') {
   const yt = youtubeWatchKey(url) || youtubeWatchKey(sourceUrl);
   if (yt) return yt;
   const embedded = extractEmbeddedSourceUrl(url);
-  if (embedded) return embedded.split('?')[0].toLowerCase();
+  if (embedded) {
+    const embeddedYoutube = youtubeWatchKey(embedded);
+    if (embeddedYoutube) return embeddedYoutube;
+    return embedded.split('?')[0].toLowerCase();
+  }
   const src = (sourceUrl || '').trim();
   if (src && /^https?:\/\//i.test(src)) return src.split('?')[0].toLowerCase();
   const bare = (url || '').split('?')[0].toLowerCase();

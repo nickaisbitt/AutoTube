@@ -39,8 +39,9 @@ else
   echo "WARN: server-render/ not found at repo root or deploy/"
 fi
 
-# Sync server-render.mjs
-cp "$ROOT/server-render.mjs" "$DEPLOY_DIR/"
+# Keep deploy copy in sync for legacy paths; production API uses root monolith.
+# Canonical file must also be present at repo root for Docker COPY.
+node "$ROOT/scripts/sync-server-render-deploy.mjs"
 
 # Sync monitoring.ts (only src file the server imports)
 mkdir -p "$DEPLOY_DIR/src/services"

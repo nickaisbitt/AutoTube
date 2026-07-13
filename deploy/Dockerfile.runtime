@@ -22,6 +22,8 @@ COPY dist ./dist
 COPY src ./src
 COPY server ./server
 COPY server.mjs ./
+# Canonical render monolith (API spawns this via server-render/index.mjs)
+COPY server-render.mjs ./
 COPY deploy ./deploy
 RUN node deploy/bootstrap-server-render.mjs
 

@@ -16,6 +16,7 @@ COPY src ./src
 COPY public ./public
 COPY server ./server
 COPY server.mjs ./
+COPY server-render.mjs ./
 
 ENV NODE_OPTIONS=--max-old-space-size=3072
 # Skip prune/reinstall — registry deploy pulls the image; dev deps in node_modules are acceptable
@@ -39,6 +40,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server ./server
 COPY --from=builder /app/server.mjs ./
+COPY --from=builder /app/server-render.mjs ./
 COPY --from=builder /app/deploy ./deploy
 RUN node deploy/bootstrap-server-render.mjs
 

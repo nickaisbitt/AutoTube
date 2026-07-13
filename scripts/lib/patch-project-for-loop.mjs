@@ -102,16 +102,24 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
 }
 
 const DATE_OPENER_RE =
-  /^(On\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|On\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|In\s+\d{4}|As\s+of\s+\w+\s+\d{4})/i;
+  /^(On\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|On\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|In\s+(?:late\s+|early\s+|mid-?)?\d{4}|As\s+of\s+\w+\s+\d{4})/i;
 
 /** Replace weak date/year openers with the shock hook line. */
 export function rewriteIntroOpener(project, hookLine) {
   if (!project?.script?.length || !hookLine?.trim()) return project;
   const intro = project.script[0];
   const narration = intro.narration || '';
-  const rest = narration.replace(/^[^.!?]+[.!?]\s*/, '');
-  if (DATE_OPENER_RE.test(narration.trim()) || /^in \d{4}/i.test(narration.trim())) {
-    intro.narration = `${hookLine.trim()} ${rest}`.trim();
+  const rest = narration.replace(/^[^.!?]+[.!?]\s*/, '').trim();
+  const first = (narration.split(/(?<=[.!?])\s+/)[0] || narration).trim();
+  const weak =
+    DATE_OPENER_RE.test(narration.trim())
+    || /^in\s+(?:late\s+|early\s+|mid-?)?\d{4}/i.test(first)
+    || /^(in this video|today we|let me explain|welcome)\b/i.test(first)
+    || /^in late\s+\d{4}/i.test(first);
+  // Always force shock opener in loop mode when hook provided — vision bar demands stakes first
+  intro.narration = rest ? `${hookLine.trim()} ${rest}`.trim() : hookLine.trim();
+  if (weak) {
+    /* already rewritten above */
   }
   return project;
 }

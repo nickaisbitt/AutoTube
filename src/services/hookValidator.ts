@@ -85,7 +85,7 @@ const COUNTERINTUITIVE_PATTERNS = [
 /** Filler openers — matches powers/video-watcher auditHookFromScript */
 const WEAK_OPENER_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   {
-    re: /^in\s+(19|20)\d{2}\b/i,
+    re: /^in\s+(?:late\s+|early\s+|mid-?)?(19|20)\d{2}\b/i,
     reason: 'Script opens with a year ("In 2024…") — weak for YouTube hook',
   },
   {

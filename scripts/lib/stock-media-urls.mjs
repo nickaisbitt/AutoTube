@@ -144,6 +144,14 @@ export const STOCK_MEDIA_POOL = [
  */
 export const STOCK_VIDEO_POOL = [
   {
+    url: 'https://archive.org/download/youtube-m3eWX-c6_r4/m3eWX-c6_r4.mp4',
+    alt: 'Tornado news footage',
+  },
+  {
+    url: 'https://archive.org/download/wvual-APRIL_15TH_TORNADO_ANNIVERSARY/APRIL_15TH_TORNADO_ANNIVERSARY.mp4',
+    alt: 'Tornado anniversary coverage',
+  },
+  {
     url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     alt: 'Nature motion clip',
   },

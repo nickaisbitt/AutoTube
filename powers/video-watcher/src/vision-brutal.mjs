@@ -122,7 +122,7 @@ export async function runHookVisionReview(videoPath, apiKey) {
 export function auditHookFromScript(scriptText) {
   const snippet = (scriptText || '').trim().slice(0, 200);
   const firstSentence = snippet.split(/(?<=[.!?])\s+/)[0] || snippet;
-  const yearOpen = /^in\s+(19|20)\d{2}/i.test(firstSentence.trim());
+  const yearOpen = /^in\s+(?:late\s+|early\s+|mid-?)?(19|20)\d{2}/i.test(firstSentence.trim());
   const weakOpen = /^(in this video|today we|let me explain|welcome)/i.test(firstSentence.trim());
   return {
     pass: !yearOpen && !weakOpen,

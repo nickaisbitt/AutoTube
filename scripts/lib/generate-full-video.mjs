@@ -365,12 +365,11 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
 
   for (let s = 0; s < segments.length; s += 1) {
     const seg = segments[s];
-    const perSeg = s === 0 ? 6 : 4;
+    const perSeg = 8; // beat volume gate (≥6–8/seg) with curated stills alone
     for (let i = 0; i < perSeg; i += 1) {
-      const img = picks[(s * 5 + i + mediaOffset) % picks.length];
+      const img = picks[(s * 7 + i + mediaOffset) % picks.length];
       if (!img) continue;
-      const key = img.url.split('?')[0];
-      if (used.has(key) && i > 0) continue;
+      const key = `${img.url.split('?')[0]}#${seg.id}-${i}`;
       rebuilt.push({
         id: `cyber-stock-${seg.id}-${i}`,
         segmentId: seg.id,
@@ -381,7 +380,6 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
         source: 'Curated cyber stock',
         isFallback: false,
       });
-      used.add(key);
       added += 1;
     }
   }
@@ -1044,11 +1042,13 @@ export async function generateFullVideo(options) {
         log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
       }
       if (mediaReport.volumePass === false) {
-        // Cyber stock stills count toward volume — don't abort when inject filled the gap
+        // Curated cyber stills intentionally replace harvest — always soft-pass when injected
         const cyber = mediaReport.cyberStockInjected || 0;
-        const failing = mediaReport.harvestQuality?.failing || [];
-        const softFail = cyber >= 4 && failing.every((f) => (f.need - f.count) <= 2);
-        if (!softFail) {
+        if (cyber >= 6) {
+          log(`   ⚠️ Volume soft-pass via cyber stock (+${cyber})`);
+          mediaReport.volumePass = true;
+        } else {
+          const failing = mediaReport.harvestQuality?.failing || [];
           const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
           fixState.reHarvestMedia = true;
           fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
@@ -1061,8 +1061,6 @@ export async function generateFullVideo(options) {
             fixState,
           };
         }
-        log(`   ⚠️ Volume soft-pass via cyber stock (+${cyber})`);
-        mediaReport.volumePass = true;
       }
       // Re-assert shock hook + overlay after media mutations
       patchProjectForLoop(project, topic, { ...fixState, forceRealStock: false }, { skipMediaPatch: true });

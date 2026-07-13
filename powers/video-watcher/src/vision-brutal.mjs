@@ -68,8 +68,9 @@ const BRUTAL_SYSTEM = [
 
 const HOOK_SYSTEM = [
   'You judge ONLY the first 3 seconds of a YouTube video (frames at 0s, 1s, 2s, 3s).',
-  'FAIL if: starts with "In 2024", context-setting, tiny text, static single stock shot, no shock/curiosity.',
-  'PASS if: immediate stakes, number, danger, or pattern interrupt.',
+  'FAIL if: starts with "In 2024" / "In January 2025", context-setting, tiny text, static single stock shot, no shock/curiosity.',
+  'PASS if: immediate stakes, number, danger, or pattern interrupt — and large readable on-screen hook text is visible.',
+  'Read any large centered overlay text into onScreenText (do not leave it empty when text is clearly burned in).',
   'Return ONLY JSON:',
   '{ "hookPass": false, "onScreenText": "...", "scrollPastIn3s": true, "fix": "one concrete rewrite for line 1" }',
 ].join('\n');
@@ -122,13 +123,20 @@ export async function runHookVisionReview(videoPath, apiKey) {
 export function auditHookFromScript(scriptText) {
   const snippet = (scriptText || '').trim().slice(0, 200);
   const firstSentence = snippet.split(/(?<=[.!?])\s+/)[0] || snippet;
-  const yearOpen = /^in\s+(?:late\s+|early\s+|mid-?)?(19|20)\d{2}/i.test(firstSentence.trim());
-  const weakOpen = /^(in this video|today we|let me explain|welcome)/i.test(firstSentence.trim());
+  const first = firstSentence.trim();
+  const yearOpen = /^in\s+(?:late\s+|early\s+|mid-?)?(19|20)\d{2}/i.test(first);
+  const monthYearOpen =
+    /^in\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+(19|20)\d{2}/i.test(
+      first,
+    );
+  const dateOpen = /^(on\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|as\s+of\s+\w+\s+\d{4})/i.test(first);
+  const weakOpen = /^(in this video|today we|let me explain|welcome)/i.test(first);
+  const bad = yearOpen || monthYearOpen || dateOpen || weakOpen;
   return {
-    pass: !yearOpen && !weakOpen,
+    pass: !bad,
     firstSentence: firstSentence.slice(0, 140),
-    issue: yearOpen
-      ? 'Script opens with a year ("In 2024…") — weak for YouTube hook'
+    issue: yearOpen || monthYearOpen || dateOpen
+      ? 'Script opens with a date/year ("In January 2025…") — weak for YouTube hook'
       : weakOpen
         ? 'Script opens with filler, not stakes'
         : null,

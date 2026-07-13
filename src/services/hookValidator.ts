@@ -89,6 +89,14 @@ const WEAK_OPENER_PATTERNS: Array<{ re: RegExp; reason: string }> = [
     reason: 'Script opens with a year ("In 2024…") — weak for YouTube hook',
   },
   {
+    re: /^in\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+(19|20)\d{2}\b/i,
+    reason: 'Script opens with a month+year ("In January 2025…") — weak for YouTube hook',
+  },
+  {
+    re: /^(on\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|as\s+of\s+\w+\s+\d{4})\b/i,
+    reason: 'Script opens with a date ("On March 12, 2024…") — weak for YouTube hook',
+  },
+  {
     re: /^(in this video|today we|let me explain|welcome)\b/i,
     reason: 'Script opens with filler, not stakes',
   },

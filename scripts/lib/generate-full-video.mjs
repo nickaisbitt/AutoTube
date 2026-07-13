@@ -11,7 +11,15 @@ import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openR
 import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
-import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, STOCK_VIDEO_POOL, pickStockImages, pickStockVideos } from './stock-media-urls.mjs';
+import {
+  STOCK_HEALTHCARE_IMAGES,
+  STOCK_MEDIA_POOL,
+  STOCK_VIDEO_POOL,
+  pickStockImages,
+  pickStockVideos,
+  isJunkDemoVideoUrl,
+  topicalStockVideos,
+} from './stock-media-urls.mjs';
 import {
   accumulateExcludedUrls,
   harvestContextFromFixState,
@@ -288,27 +296,86 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
   }
 }
 
+function isSeriousNewsTopic(topicBlob = '') {
+  return /bank|hack|stolen|identity|tornado|disaster|death|war|ransom|voice\s*clone|fraud|scam|warning|kill|phish|cyber|breach/i.test(
+    topicBlob || '',
+  );
+}
+
+/** Drop demo/cartoon/broken proxy clips so top-up can inject topical motion. */
+function stripJunkDemoVideos(project, report) {
+  if (!project?.media?.length) return;
+  const kept = [];
+  for (const asset of project.media) {
+    if (asset.type !== 'video') {
+      kept.push(asset);
+      continue;
+    }
+    const url = asset.url || '';
+    const junk =
+      isJunkDemoVideoUrl(url)
+      || (/\/api\/download-clip/i.test(url) && /youtube\.com|youtu\.be/i.test(url));
+    if (junk) {
+      report.junkVideoDropped = report.junkVideoDropped || [];
+      report.junkVideoDropped.push({ url, reason: 'demo/off-topic/broken proxy clip' });
+      const thumb = asset.thumbnailUrl;
+      if (thumb && !isJunkHarvestUrl(thumb) && isImageLikeUrl(thumb)) {
+        kept.push({
+          ...asset,
+          type: 'image',
+          url: thumb,
+          source: `${asset.source || 'Video'} still`,
+          isFallback: false,
+        });
+      }
+      continue;
+    }
+    kept.push(asset);
+  }
+  project.media = kept;
+}
+
 /**
- * Inject direct-mp4 motion clips when harvest yielded zero/few videos.
- * YouTube yt-dlp often fails in locked-down envs; archive/sample mp4s still give motion.
+ * Inject direct-mp4 motion clips when harvest yielded zero/few usable videos.
+ * Prefer archive.org topical clips; skip cartoon/sample fillers for serious news topics
+ * (off-topic bunny/flower clips tank brutal visualVariety scores).
  */
 function topUpVideoBroll(project, report, mediaOffset = 0) {
   const segments = project.script || [];
   if (!segments.length) return;
-  const videoCount = (project.media || []).filter((a) => a.type === 'video').length;
-  const minVideos = Math.min(segments.length * 2, 6);
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
+  const seriousTopic = isSeriousNewsTopic(topicBlob);
+
+  stripJunkDemoVideos(project, report);
+
+  let pool = STOCK_VIDEO_POOL;
+  if (seriousTopic) {
+    pool = topicalStockVideos(topicBlob, STOCK_VIDEO_POOL);
+    if (!pool.length) {
+      report.videoTopUpSkipped = 'serious-topic-no-archive-clips';
+      return;
+    }
+  }
+
+  const usableVideos = (project.media || []).filter(
+    (a) => a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
+  );
+  const videoCount = usableVideos.length;
+  const minVideos = Math.min(segments.length * 2, seriousTopic ? 5 : 6);
   if (videoCount >= minVideos) return;
 
   const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
   let need = minVideos - videoCount;
-  const pool = pickStockVideos(need + segments.length, mediaOffset, STOCK_VIDEO_POOL);
+  const picks = pickStockVideos(need + segments.length, mediaOffset, pool);
   let vi = 0;
   for (const seg of segments) {
     if (need <= 0) break;
-    const segVideos = (project.media || []).filter((a) => a.segmentId === seg.id && a.type === 'video').length;
-    const want = Math.max(0, 2 - segVideos);
-    for (let i = 0; i < want && need > 0 && vi < pool.length; i += 1, vi += 1) {
-      const clip = pool[vi];
+    const segVideos = (project.media || []).filter(
+      (a) => a.segmentId === seg.id && a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
+    ).length;
+    const want = Math.max(0, (seriousTopic ? 2 : 2) - segVideos);
+    for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1, vi += 1) {
+      const clip = picks[vi];
       const key = clip.url.split('?')[0];
       if (used.has(key)) continue;
       project.media.push({
@@ -906,6 +973,9 @@ export async function generateFullVideo(options) {
       if (mediaReport.videoTopUp?.length) {
         log(`   🎬 Video top-up: +${mediaReport.videoTopUp.length} motion clips`);
       }
+      if (mediaReport.junkVideoDropped?.length) {
+        log(`   🗑️ Junk demo videos dropped: ${mediaReport.junkVideoDropped.length}`);
+      }
       if (mediaReport.relevanceDropped?.length) {
         log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
       }
@@ -926,6 +996,8 @@ export async function generateFullVideo(options) {
           fixState,
         };
       }
+      // Re-assert shock hook + overlay after media mutations
+      patchProjectForLoop(project, topic, { ...fixState, forceRealStock: false }, { skipMediaPatch: true });
     }
     const timelineReport = validateEditTimeline(project, { cutIntervalSec: fixState.cutIntervalSec ?? 1.25 });
     if (timelineReport.rebuilt) {

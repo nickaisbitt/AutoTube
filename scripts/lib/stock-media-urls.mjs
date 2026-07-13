@@ -141,53 +141,137 @@ export const STOCK_MEDIA_POOL = [
 /**
  * Direct-download public-domain / archive video clips (mp4).
  * Used when YouTube yt-dlp is unavailable so ffmpeg assembly still gets motion B-roll.
+ * Prefer archive.org for serious topics — sample/demo clips tank brutal visualVariety.
  */
 export const STOCK_VIDEO_POOL = [
   {
-    url: 'https://archive.org/download/youtube-m3eWX-c6_r4/m3eWX-c6_r4.mp4',
-    alt: 'Tornado news footage',
+    url: 'https://archive.org/download/yt_dFkLfTrGmVg/dFkLfTrGmVg.ia.mp4',
+    alt: 'FEMA fraud and scam awareness',
+    tags: ['scam', 'fraud', 'bank', 'identity', 'cyber'],
+  },
+  {
+    url: 'https://archive.org/download/on-1z-1h-ud-ed-u/ON1z1hUdEdU.mp4',
+    alt: 'Scam awareness fake authentication',
+    tags: ['scam', 'fraud', 'bank', 'identity', 'voice', 'hack'],
+  },
+  {
+    url: 'https://archive.org/download/yt_BxBdhLtNuxM/BxBdhLtNuxM.mp4',
+    alt: 'FEMA weather storm family safety app',
+    tags: ['tornado', 'storm', 'warning', 'disaster', 'hurricane'],
+  },
+  {
+    url: 'https://archive.org/download/yt_JSJrLCLBo6g/JSJrLCLBo6g.ia.mp4',
+    alt: 'Hurricane Laura FEMA assistance PSA',
+    tags: ['hurricane', 'disaster', 'storm', 'warning'],
+  },
+  {
+    url: 'https://archive.org/download/yt_R3gWuxhKuJI/R3gWuxhKuJI.ia.mp4',
+    alt: 'FEMA front lines storm recovery',
+    tags: ['disaster', 'storm', 'tornado', 'hurricane'],
+  },
+  {
+    url: 'https://archive.org/download/yt_9eEth99C9_M/9eEth99C9_M.mp4',
+    alt: 'Civic center storm restoration',
+    tags: ['disaster', 'storm', 'tornado'],
+  },
+  {
+    url: 'https://archive.org/download/yt_TL59CSiLnAg/TL59CSiLnAg.mp4',
+    alt: 'Community recovery after disaster',
+    tags: ['disaster', 'storm', 'tornado'],
+  },
+  {
+    url: 'https://archive.org/download/yt_Bf7xCce5kic/Bf7xCce5kic.mp4',
+    alt: 'FEMA public outreach',
+    tags: ['disaster', 'warning', 'scam', 'fraud'],
   },
   {
     url: 'https://archive.org/download/wvual-APRIL_15TH_TORNADO_ANNIVERSARY/APRIL_15TH_TORNADO_ANNIVERSARY.mp4',
     alt: 'Tornado anniversary coverage',
+    tags: ['tornado', 'storm', 'warning', 'disaster'],
+  },
+  {
+    url: 'https://archive.org/download/youtube-m3eWX-c6_r4/m3eWX-c6_r4.mp4',
+    alt: 'News motion footage',
+    tags: ['news', 'tornado', 'storm'],
   },
   {
     url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     alt: 'Nature motion clip',
+    tags: ['sample', 'filler'],
   },
   {
     url: 'https://www.w3schools.com/html/mov_bbb.mp4',
     alt: 'Character motion clip',
+    tags: ['sample', 'filler'],
   },
   {
     url: 'https://media.w3.org/2010/05/sintel/trailer.mp4',
     alt: 'Cinematic trailer motion',
+    tags: ['sample', 'filler'],
   },
   {
     url: 'https://download.samplelib.com/mp4/sample-5s.mp4',
     alt: 'Urban motion sample',
+    tags: ['sample', 'filler'],
   },
   {
     url: 'https://download.samplelib.com/mp4/sample-10s.mp4',
     alt: 'Street motion sample',
+    tags: ['sample', 'filler'],
   },
   {
     url: 'https://download.samplelib.com/mp4/sample-15s.mp4',
     alt: 'City motion sample',
+    tags: ['sample', 'filler'],
   },
   {
     url: 'https://download.samplelib.com/mp4/sample-20s.mp4',
     alt: 'Lifestyle motion sample',
+    tags: ['sample', 'filler'],
   },
   {
     url: 'https://download.samplelib.com/mp4/sample-30s.mp4',
     alt: 'Long motion sample',
+    tags: ['sample', 'filler'],
   },
   {
     url: 'https://filesamples.com/samples/video/mp4/sample_640x360.mp4',
     alt: 'Documentary-style sample',
+    tags: ['sample', 'filler'],
   },
 ];
+
+/** Demo / cartoon / CDN sample hosts that tank brutal visualVariety on news topics. */
+export const JUNK_VIDEO_HOST_RE =
+  /(?:w3schools\.com|media\.w3\.org|samplelib\.com|filesamples\.com|interactive-examples\.mdn|commondatastorage\.googleapis\.com\/gtv-videos|googlevideo\.com\/videoplayback|forbigger|sintel|big.?buck.?bunny|flower\.mp4)/i;
+
+export function isJunkDemoVideoUrl(url = '') {
+  return JUNK_VIDEO_HOST_RE.test(url || '');
+}
+
+/** Archive.org (and similar) clips suitable for serious news / scam topics. */
+export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
+  const archive = pool.filter((v) => /archive\.org/i.test(v.url) && !(v.tags || []).includes('filler'));
+  if (!archive.length) return [];
+  const blob = (topicBlob || '').toLowerCase();
+  const keys = [];
+  if (/bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password/i.test(blob)) {
+    keys.push('scam', 'fraud', 'bank', 'identity', 'cyber', 'hack', 'voice');
+  }
+  if (/tornado|hurricane|flood|wildfire|earthquake|storm|disaster|warning|fema/i.test(blob)) {
+    keys.push('tornado', 'storm', 'warning', 'disaster', 'hurricane');
+  }
+  if (!keys.length) return archive;
+  const scored = archive
+    .map((v) => {
+      const tags = v.tags || [];
+      const hit = keys.reduce((n, k) => n + (tags.includes(k) ? 1 : 0), 0);
+      return { v, hit };
+    })
+    .sort((a, b) => b.hit - a.hit);
+  const matched = scored.filter((s) => s.hit > 0).map((s) => s.v);
+  return matched.length ? matched : archive;
+}
 
 /** Pick unique stock URLs rotating by offset (for top-up / mock diversity). */
 export function pickStockImages(count, offset = 0, pool = STOCK_MEDIA_POOL) {

@@ -53,15 +53,16 @@ export function overlayHookText(videoPath, project, options = {}) {
   const words = hookText.trim().toUpperCase().split(/\s+/).filter(Boolean).slice(0, 6);
   const line1 = words.slice(0, 4).join(' ');
   const line2 = words.slice(4, 6).join(' ');
-  const fontSize = Math.min(hookFontPx(h), Math.round(h * 0.075));
-  const durationSec = options.durationSec ?? 3.2;
-  const border = Math.max(4, Math.round(fontSize * 0.06));
+  // Larger + yellow fill so hook OCR / vision reliably sees on-screen text in 0–3s
+  const fontSize = Math.min(Math.max(hookFontPx(h), Math.round(h * 0.095)), Math.round(h * 0.11));
+  const durationSec = options.durationSec ?? 3.5;
+  const border = Math.max(5, Math.round(fontSize * 0.08));
   const filters = [
-    `drawtext=text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=white:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.28:enable='between(t\\,0\\,${durationSec})'`,
+    `drawtext=text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.26:enable='between(t\\,0\\,${durationSec})'`,
   ];
   if (line2) {
     filters.push(
-      `drawtext=text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=white:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
+      `drawtext=text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
     );
   }
   const vf = filters.join(',');

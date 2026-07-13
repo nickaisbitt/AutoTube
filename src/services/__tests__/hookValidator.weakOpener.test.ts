@@ -19,6 +19,12 @@ function intro(narration: string): ScriptSegment {
 }
 
 describe('hasWeakHookOpener', () => {
+  it('flags month+year openers like In January 2025', () => {
+    const r = hasWeakHookOpener('In January 2025, banks warned that AI voice clones emptied accounts.');
+    expect(r.weak).toBe(true);
+    expect(r.reason).toMatch(/month|year|January/i);
+  });
+
   it('flags year openers like Video Watcher', () => {
     const r = hasWeakHookOpener('In 2024, ransomware hit 40% of hospitals.');
     expect(r.weak).toBe(true);

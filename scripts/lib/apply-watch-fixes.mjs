@@ -128,11 +128,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   }
 
   const renderTier = s.renderTier || 'draft';
-  if (renderTier === 'full' && (watch.brutal?.overall ?? 10) < 9.1) {
+  if (renderTier === 'full' && (watch.brutal?.overall ?? 10) < 7.0) {
     s.reHarvestMedia = true;
     s.brollPlacement = true;
     s.minAssetsPerSegment = Math.min(8, Math.max(6, s.minAssetsPerSegment || 4));
-    escalateFixStrategy(s, applied, `2b. Full-tier score below 9.1`);
+    escalateFixStrategy(s, applied, `2b. Full-tier score below 7.0`);
   }
 
   if (repeatPct >= 25 || dupRuns >= 2 || visualVariety <= 6) {

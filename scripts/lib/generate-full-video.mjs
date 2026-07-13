@@ -348,14 +348,38 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
   const segments = project.script || [];
   if (!segments.length) return;
   const introId = segments[0].id;
+  const picks = pickStockImages(STOCK_CYBER_IMAGES.length, mediaOffset % STOCK_CYBER_IMAGES.length, STOCK_CYBER_IMAGES);
+  const cyberUrls = new Set(STOCK_CYBER_IMAGES.map((i) => i.url.split('?')[0]));
+
+  // Drop non-cyber stills from intro so hook frames are phone/security first
+  const kept = [];
+  let introNonCyber = 0;
+  for (const asset of project.media || []) {
+    if (asset.segmentId === introId && asset.type === 'image') {
+      const key = (asset.url || '').split('?')[0];
+      if (!cyberUrls.has(key)) {
+        introNonCyber += 1;
+        if (introNonCyber <= 2) {
+          // keep at most 2 harvest stills for variety
+          kept.push(asset);
+        } else {
+          report.cyberStockReplaced = (report.cyberStockReplaced || 0) + 1;
+        }
+        continue;
+      }
+    }
+    kept.push(asset);
+  }
+  project.media = kept;
+
   const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
-  const picks = pickStockImages(6, mediaOffset, STOCK_CYBER_IMAGES);
   let added = 0;
-  for (let i = 0; i < picks.length; i += 1) {
+  const introAssets = [];
+  for (let i = 0; i < picks.length && added < 5; i += 1) {
     const img = picks[i];
     const key = img.url.split('?')[0];
     if (used.has(key)) continue;
-    project.media.unshift({
+    introAssets.push({
       id: `cyber-stock-${introId}-${i}`,
       segmentId: introId,
       type: 'image',
@@ -367,9 +391,9 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
     });
     used.add(key);
     added += 1;
-    if (added >= 4) break;
   }
-  // Also seed remaining segments with 1–2 cyber stills each
+  project.media = [...introAssets, ...project.media];
+
   for (let s = 1; s < segments.length; s += 1) {
     const seg = segments[s];
     const img = picks[(s + mediaOffset) % picks.length];

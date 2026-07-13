@@ -293,13 +293,14 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
   const archive = pool.filter((v) => /archive\.org/i.test(v.url) && !(v.tags || []).includes('filler'));
   if (!archive.length) return [];
   const blob = (topicBlob || '').toLowerCase();
+  const cyberKeys = ['scam', 'fraud', 'bank', 'identity', 'cyber', 'hack', 'voice'];
+  const disasterKeys = ['tornado', 'storm', 'warning', 'disaster', 'hurricane'];
+  const isCyber =
+    /bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password/i.test(blob);
+  const isDisaster = /tornado|hurricane|flood|wildfire|earthquake|storm|disaster|warning|fema/i.test(blob);
   const keys = [];
-  if (/bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password/i.test(blob)) {
-    keys.push('scam', 'fraud', 'bank', 'identity', 'cyber', 'hack', 'voice');
-  }
-  if (/tornado|hurricane|flood|wildfire|earthquake|storm|disaster|warning|fema/i.test(blob)) {
-    keys.push('tornado', 'storm', 'warning', 'disaster', 'hurricane');
-  }
+  if (isCyber) keys.push(...cyberKeys);
+  if (isDisaster) keys.push(...disasterKeys);
   if (!keys.length) return archive;
   const scored = archive
     .map((v) => {
@@ -308,8 +309,12 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
       return { v, hit };
     })
     .sort((a, b) => b.hit - a.hit);
-  // Prefer tag matches, then remaining archive clips for cut variety
   const matched = scored.filter((s) => s.hit > 0).map((s) => s.v);
+  // Cyber-only topics must not fall back to tornado/disaster B-roll (offsets wrap there)
+  if (isCyber && !isDisaster) {
+    const cyberOnly = matched.filter((v) => (v.tags || []).some((t) => cyberKeys.includes(t)));
+    return cyberOnly.length ? cyberOnly : matched;
+  }
   const rest = scored.filter((s) => s.hit === 0).map((s) => s.v);
   return matched.length ? [...matched, ...rest] : archive;
 }

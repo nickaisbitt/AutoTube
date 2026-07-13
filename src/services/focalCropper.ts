@@ -41,7 +41,7 @@ export const ASPECT_RATIO_MAX = 1.9;
 /** Target aspect ratio for cropping. */
 export const TARGET_ASPECT_RATIO = 16 / 9;
 
-const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_ENDPOINT = '/api/llm';
 const VISION_MODEL = 'rekaai/reka-edge';
 const FOCAL_TIMEOUT_MS = 5_000;
 const FOCAL_MAX_RETRIES = 1;

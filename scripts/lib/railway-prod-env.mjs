@@ -69,19 +69,20 @@ export function buildProdRailwayVars(local = readEnvLocal()) {
   };
   if (openRouter) {
     vars.OPENROUTER_API_KEY = openRouter;
-    vars.VITE_OPENROUTER_KEY = openRouter;
+    // Do not mirror into VITE_* — secrets stay server-side; UI uses /api/llm.
   }
-  if (local.VITE_SERPER_KEY?.trim()) vars.VITE_SERPER_KEY = local.VITE_SERPER_KEY.trim();
+  const apiKey = local.AUTOTUBE_API_KEY?.trim();
+  if (apiKey) vars.AUTOTUBE_API_KEY = apiKey;
+  if (local.VITE_SERPER_KEY?.trim()) vars.SERPER_API_KEY = local.VITE_SERPER_KEY.trim();
+  if (local.SERPER_API_KEY?.trim()) vars.SERPER_API_KEY = local.SERPER_API_KEY.trim();
   if (local.KOKORO_SERVER_URL?.trim()) vars.KOKORO_SERVER_URL = local.KOKORO_SERVER_URL.trim();
   const pexels = local.PEXELS_API_KEY?.trim() || local.VITE_PEXELS_KEY?.trim();
   const pixabay = local.PIXABAY_API_KEY?.trim() || local.VITE_PIXABAY_KEY?.trim();
   if (pexels) {
     vars.PEXELS_API_KEY = pexels;
-    vars.VITE_PEXELS_KEY = pexels;
   }
   if (pixabay) {
     vars.PIXABAY_API_KEY = pixabay;
-    vars.VITE_PIXABAY_KEY = pixabay;
   }
   return vars;
 }

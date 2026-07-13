@@ -9,7 +9,7 @@ import { assignPurposeTag, computePacingScore } from '../renderingShared';
 import { sanitiseTopic, parseSegmentsFromContent, validateSegment } from './parsing';
 import { DEFAULT_SCRIPT_MODEL } from './scriptGenerator';
 
-const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_ENDPOINT = '/api/llm';
 
 // ---------------------------------------------------------------------------
 // Promise-payoff validation helper (Requirement 9)

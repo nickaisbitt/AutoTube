@@ -7,6 +7,7 @@
  */
 
 import type {
+import { apiFetch } from '../../utils/apiClient';
   VideoProject,
   TopicConfig,
   ScriptSegment,
@@ -380,7 +381,7 @@ export async function executeSourceMedia(
   // before this function returns. The server render reads the project from
   // /tmp and must see the full media list, not the script-only version.
   try {
-    await fetch(`/api/save-project?id=${encodeURIComponent(updatedProject.id)}`, {
+    await apiFetch(`/api/save-project?id=${encodeURIComponent(updatedProject.id)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedProject),

@@ -8,7 +8,7 @@ import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { sanitiseTopic, parseSegmentsFromContent, injectTransitionIfMissing } from './parsing';
 import { fetchWikiContext, fetchTopicContext } from './topicContext';
 
-const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_ENDPOINT = '/api/llm';
 
 // Default model — can be overridden via AppConfig in the future.
 export const DEFAULT_SCRIPT_MODEL = 'openai/gpt-5.4-nano';

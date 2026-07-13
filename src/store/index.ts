@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect } from 'react';
 import type {
+import { apiFetch } from '../utils/apiClient';
   PipelineStep,
   StepStatus,
   VideoProject,
@@ -560,7 +561,7 @@ export function useVideoProject() {
   // Persist project to /tmp/autotube-project-{id}.json via dev-server endpoint
   useEffect(() => {
     if (!project) return;
-    fetch(`/api/save-project?id=${encodeURIComponent(project.id)}`, {
+    apiFetch(`/api/save-project?id=${encodeURIComponent(project.id)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(project),

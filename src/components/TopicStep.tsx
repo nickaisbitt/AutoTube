@@ -45,7 +45,7 @@ async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
   });
 
   const response = await fetchWithTimeout(
-    'https://openrouter.ai/api/v1/chat/completions',
+    '/api/llm',
     {
       method: 'POST',
       headers: {

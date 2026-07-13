@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { AppConfig } from '../../types';
 import {
   hasEncryptedConfig,
@@ -10,11 +10,13 @@ import {
   persistEncryptedConfig,
   decryptConfig,
 } from '../../utils/secureStorage';
+import { setAutotubeApiKey } from '../../utils/apiClient';
 import { logger } from '../../services/logger';
 
 /** Default app config — used for fresh state and merging with stored config. */
 export const DEFAULT_APP_CONFIG: AppConfig = {
   openRouterKey: import.meta.env.VITE_OPENROUTER_KEY || '',
+  autotubeApiKey: import.meta.env.VITE_AUTOTUBE_API_KEY || '',
   sourceType: 'stock',
   pexelsKey: import.meta.env.VITE_PEXELS_KEY || '',
   pixabayKey: import.meta.env.VITE_PIXABAY_KEY || '',
@@ -42,6 +44,10 @@ export function useConfigSlice(): ConfigSliceState & ConfigSliceActions {
     return { ...DEFAULT_APP_CONFIG };
   });
 
+  useEffect(() => {
+    setAutotubeApiKey(appConfig.autotubeApiKey || '');
+  }, [appConfig.autotubeApiKey]);
+
   const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
     const session = loadConfigFromSession();
     return session !== null;
@@ -51,6 +57,7 @@ export function useConfigSlice(): ConfigSliceState & ConfigSliceActions {
 
   const setAppConfig = useCallback(async (config: AppConfig, pin?: string) => {
     setAppConfigInternal(config);
+    setAutotubeApiKey(config.autotubeApiKey || '');
     saveConfigToSession(config);
     setIsUnlocked(true);
     setPinError(null);
@@ -71,7 +78,9 @@ export function useConfigSlice(): ConfigSliceState & ConfigSliceActions {
     }
     try {
       const config = await decryptConfig(blob, pin);
-      setAppConfigInternal({ ...DEFAULT_APP_CONFIG, ...config });
+      const merged = { ...DEFAULT_APP_CONFIG, ...config };
+      setAppConfigInternal(merged);
+      setAutotubeApiKey(merged.autotubeApiKey || '');
       saveConfigToSession(config);
       setIsUnlocked(true);
       setPinError(null);
@@ -87,6 +96,7 @@ export function useConfigSlice(): ConfigSliceState & ConfigSliceActions {
     clearEncryptedConfig();
     clearSessionConfig();
     setAppConfigInternal({ ...DEFAULT_APP_CONFIG });
+    setAutotubeApiKey(DEFAULT_APP_CONFIG.autotubeApiKey || '');
     setHasEncryptedKeys(false);
     setIsUnlocked(false);
     setPinError(null);

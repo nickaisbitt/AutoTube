@@ -6,6 +6,8 @@
  * tts.ts, and llmVisualDirector.ts with a single configurable function.
  */
 
+import { apiHeaders } from './apiClient';
+
 export interface FetchWithTimeoutOptions {
   /** Per-attempt timeout in milliseconds. Default: 30000 */
   timeoutMs?: number;
@@ -96,8 +98,16 @@ export async function fetchWithTimeout(
     }
 
     try {
+      const isApi =
+        typeof url === 'string' &&
+        (url.startsWith('/api/') || url.includes('/api/'));
+      const headers = isApi
+        ? apiHeaders(options.headers)
+        : options.headers;
+
       const response = await fetch(url, {
         ...options,
+        headers,
         signal: attemptController.signal,
       });
 

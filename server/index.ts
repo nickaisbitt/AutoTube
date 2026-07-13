@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { cors } from "./middleware/cors.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { rateLimitMiddleware } from "./middleware/rateLimiter.js";
+import { apiAuthMiddleware } from "./middleware/apiAuth.js";
 import { handleProxyImage } from "./routes/proxyImage.js";
 import { handleRenderVideo } from "./routes/renderVideo.js";
 import { handleServerRender } from "./routes/serverRender.js";
@@ -17,6 +18,7 @@ import { handleStaticMap } from "./routes/staticMap.js";
 import { handlePressRelease } from "./routes/pressRelease.js";
 import { handleNotify } from "./routes/notify.js";
 import { handleQualityCheck } from "./routes/qualityCheck.js";
+import { handleLlmProxy } from "./routes/llmProxy.js";
 import { handleHealth } from "./routes/health.js";
 import { handleDocs } from "./routes/docs.js";
 import { handleErrors } from "./routes/errors.js";
@@ -83,6 +85,11 @@ export function apiMiddleware(
     return;
   }
 
+  // API key gate (health remains public)
+  if (apiAuthMiddleware(req, res)) {
+    return;
+  }
+
   // Debug: log all /api/ requests (only in dev or when DEBUG_API is set)
   if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_API) {
     console.log(`[API] ${req.method} ${req.url}`);
@@ -97,6 +104,8 @@ export function apiMiddleware(
         await handleDocs(req, res);
       } else if (req.url!.startsWith("/api/errors")) {
         await handleErrors(req, res);
+      } else if (req.url!.startsWith("/api/llm")) {
+        await handleLlmProxy(req, res);
       } else if (req.url!.startsWith("/api/proxy-image")) {
         await handleProxyImage(req, res);
       } else if (req.url!.startsWith("/api/proxy-page")) {

@@ -7,7 +7,7 @@ import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { sanitiseTopic } from './parsing';
 import { DEFAULT_SCRIPT_MODEL } from './scriptGenerator';
 
-const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_ENDPOINT = '/api/llm';
 
 /**
  * Generates 3-5 hashtags following the pattern:

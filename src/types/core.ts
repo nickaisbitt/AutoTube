@@ -20,6 +20,8 @@ export interface SystemLog {
 
 export interface AppConfig {
   openRouterKey: string;
+  /** Shared key for privileged /api/* calls (matches server AUTOTUBE_API_KEY). */
+  autotubeApiKey?: string;
   sourceType: 'stock' | 'raw';
   flickrKey?: string;
   pexelsKey?: string;

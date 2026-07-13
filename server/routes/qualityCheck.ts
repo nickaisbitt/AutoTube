@@ -65,13 +65,13 @@ export async function handleQualityCheck(
     return;
   }
 
-  // SECURITY: Strictly verify resolved path resides inside PROJECT_ROOT
+  // SECURITY: Only allow files under test-recordings/
   const resolvedPath = resolve(videoPath);
-  const resolvedRoot = resolve(PROJECT_ROOT);
-  if (!resolvedPath.startsWith(resolvedRoot + "/")) {
+  const recordingsRoot = resolve(join(PROJECT_ROOT, "test-recordings"));
+  if (!resolvedPath.startsWith(recordingsRoot + "/")) {
     res.statusCode = 403;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ error: "Access denied: file must reside inside the project directory" }));
+    res.end(JSON.stringify({ error: "Access denied: file must reside inside test-recordings/" }));
     return;
   }
 
@@ -123,7 +123,7 @@ export async function handleQualityCheck(
   sendEvent({ type: "progress", message: "Starting quality check...", pct: 0 });
 
   // Spawn Python quality check script
-  const args = [CHECK_SCRIPT, videoPath, "--json"];
+  const args = [CHECK_SCRIPT, resolvedPath, "--json"];
   if (includeVision && apiKey) {
     args.push("--api-key", apiKey);
     args.push("--model", "google/gemini-2.0-flash-001");
@@ -134,7 +134,7 @@ export async function handleQualityCheck(
   const child = spawn("python3", args, {
     cwd: PROJECT_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env },
+    env: { ...process.env, OPENROUTER_API_KEY: apiKey || "" },
   });
 
   let stdout = "";

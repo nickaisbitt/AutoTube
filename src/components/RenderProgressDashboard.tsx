@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiFetch } from '../utils/apiClient';
 
 interface RenderProgress {
   currentFrame: number;
@@ -20,7 +21,7 @@ export default function RenderProgressDashboard() {
     // Poll render progress every second
     const interval = setInterval(async () => {
       try {
-        const res = await fetch('/api/render-progress');
+        const res = await apiFetch('/api/render-progress');
         if (res.ok) {
           const data = await res.json();
           setProgress(data);

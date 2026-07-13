@@ -138,6 +138,53 @@ export const STOCK_MEDIA_POOL = [
   },
 ];
 
+/**
+ * Direct-download public-domain / archive video clips (mp4).
+ * Used when YouTube yt-dlp is unavailable so ffmpeg assembly still gets motion B-roll.
+ */
+export const STOCK_VIDEO_POOL = [
+  {
+    url: 'https://archive.org/download/youtube-m3eWX-c6_r4/m3eWX-c6_r4.mp4',
+    alt: 'Tornado footage archive',
+  },
+  {
+    url: 'https://archive.org/download/wvual-APRIL_15TH_TORNADO_ANNIVERSARY/APRIL_15TH_TORNADO_ANNIVERSARY.mp4',
+    alt: 'Tornado anniversary news',
+  },
+  {
+    url: 'https://archive.org/download/Big_Buck_Bunny_1080p_surround_SFX/big_buck_bunny_1080p_surround.mp4',
+    alt: 'Sample motion footage',
+  },
+  {
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    alt: 'Sample action clip',
+  },
+  {
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+    alt: 'Sample escape clip',
+  },
+  {
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+    alt: 'Sample fun motion',
+  },
+  {
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+    alt: 'Sample joyride motion',
+  },
+  {
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
+    alt: 'Sample meltdown motion',
+  },
+  {
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+    alt: 'Sample cinematic motion',
+  },
+  {
+    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    alt: 'Sample industrial motion',
+  },
+];
+
 /** Pick unique stock URLs rotating by offset (for top-up / mock diversity). */
 export function pickStockImages(count, offset = 0, pool = STOCK_MEDIA_POOL) {
   const out = [];
@@ -147,4 +194,8 @@ export function pickStockImages(count, offset = 0, pool = STOCK_MEDIA_POOL) {
     out.push(pool[(offset + i) % n]);
   }
   return out;
+}
+
+export function pickStockVideos(count, offset = 0, pool = STOCK_VIDEO_POOL) {
+  return pickStockImages(count, offset, pool);
 }

@@ -50,9 +50,9 @@ export function overlayHookText(videoPath, project, options = {}) {
   );
   const [wStr, hStr] = (probe.stdout || '1280,720').trim().split(',');
   const h = parseInt(hStr, 10) || 720;
-  const words = hookText.trim().toUpperCase().split(/\s+/).filter(Boolean);
+  const words = hookText.trim().toUpperCase().split(/\s+/).filter(Boolean).slice(0, 6);
   const line1 = words.slice(0, 4).join(' ');
-  const line2 = words.slice(4, 8).join(' ');
+  const line2 = words.slice(4, 6).join(' ');
   const fontSize = Math.min(hookFontPx(h), Math.round(h * 0.075));
   const durationSec = options.durationSec ?? 3.2;
   const border = Math.max(4, Math.round(fontSize * 0.06));

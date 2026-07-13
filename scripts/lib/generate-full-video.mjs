@@ -11,7 +11,7 @@ import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openR
 import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
-import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './stock-media-urls.mjs';
+import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, STOCK_VIDEO_POOL, pickStockImages, pickStockVideos } from './stock-media-urls.mjs';
 import {
   accumulateExcludedUrls,
   harvestContextFromFixState,
@@ -288,6 +288,48 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
   }
 }
 
+/**
+ * Inject direct-mp4 motion clips when harvest yielded zero/few videos.
+ * YouTube yt-dlp often fails in locked-down envs; archive/sample mp4s still give motion.
+ */
+function topUpVideoBroll(project, report, mediaOffset = 0) {
+  const segments = project.script || [];
+  if (!segments.length) return;
+  const videoCount = (project.media || []).filter((a) => a.type === 'video').length;
+  const minVideos = Math.min(segments.length * 2, 6);
+  if (videoCount >= minVideos) return;
+
+  const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+  let need = minVideos - videoCount;
+  const pool = pickStockVideos(need + segments.length, mediaOffset, STOCK_VIDEO_POOL);
+  let vi = 0;
+  for (const seg of segments) {
+    if (need <= 0) break;
+    const segVideos = (project.media || []).filter((a) => a.segmentId === seg.id && a.type === 'video').length;
+    const want = Math.max(0, 2 - segVideos);
+    for (let i = 0; i < want && need > 0 && vi < pool.length; i += 1, vi += 1) {
+      const clip = pool[vi];
+      const key = clip.url.split('?')[0];
+      if (used.has(key)) continue;
+      project.media.push({
+        id: `stock-video-${seg.id}-${i}`,
+        segmentId: seg.id,
+        type: 'video',
+        url: clip.url,
+        alt: clip.alt || seg.title,
+        query: `stock-video ${seg.title}`,
+        source: 'Stock video pool',
+        duration: 8,
+        isFallback: false,
+      });
+      used.add(key);
+      need -= 1;
+      report.videoTopUp = report.videoTopUp || [];
+      report.videoTopUp.push({ segmentId: seg.id, url: clip.url });
+    }
+  }
+}
+
 function isJunkHarvestUrl(url) {
   const u = (url || '').toLowerCase();
   return (
@@ -352,7 +394,14 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
 
   for (const asset of project.media) {
-    if (isJunkHarvestUrl(asset.url) || isJunkHarvestUrl(asset.thumbnailUrl)) {
+    // For videos, only junk-check the clip URL — thumbnails are often youtube/ovp
+    // placeholders and must not kill an otherwise usable /api/download-clip asset.
+    if (asset.type === 'video') {
+      if (isJunkHarvestUrl(asset.url) && !isProxiedClipUrl(asset.url) && !asset.url?.includes('youtube.com') && !asset.url?.includes('youtu.be') && !asset.url?.includes('vimeo.com')) {
+        report.dropped.push({ url: asset.url, reason: 'junk URL (avatar/video-thumb placeholder)' });
+        continue;
+      }
+    } else if (isJunkHarvestUrl(asset.url) || isJunkHarvestUrl(asset.thumbnailUrl)) {
       report.dropped.push({ url: asset.url, reason: 'junk URL (avatar/video-thumb placeholder)' });
       continue;
     }
@@ -470,6 +519,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
 
   if (loopMode) {
     await topUpHarvestVolume(project, devServer, minPerSegment, report);
+    topUpVideoBroll(project, report, options.mediaOffset || 0);
     report.afterTopUp = project.media.length;
   }
 
@@ -850,8 +900,12 @@ export async function generateFullVideo(options) {
       const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, {
         loopMode: true,
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
+        mediaOffset: fixState.mediaOffset || 0,
       });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
+      if (mediaReport.videoTopUp?.length) {
+        log(`   🎬 Video top-up: +${mediaReport.videoTopUp.length} motion clips`);
+      }
       if (mediaReport.relevanceDropped?.length) {
         log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
       }

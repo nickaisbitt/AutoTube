@@ -55,40 +55,50 @@ export function extractOverlayFromVisionFix(visionFix) {
 
 /** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
 export function buildShortHookOverlay(topic, hookLine, options = {}) {
+  const maxWords = 6;
+
+  const clampWords = (text) => {
+    const words = (text || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9\s:$%]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+    return words.slice(0, maxWords).join(' ');
+  };
+
   const preferred = options.preferredOverlay?.trim();
   if (preferred && !isInstructionOverlay(preferred)) {
-    return preferred.toUpperCase();
+    return clampWords(preferred);
   }
 
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
-  if (fromVision) return fromVision;
+  if (fromVision) return clampWords(fromVision);
 
-  const headline = (topic || '')
-    .replace(/^How\s+/i, '')
-    .replace(/^The\s+/i, '')
-    .replace(/\?$/,'')
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length > 1)
-    .slice(0, 8)
-    .join(' ')
-    .toUpperCase() || topicKeywords(topic).join(' ').toUpperCase() || 'CRISIS EXPOSED';
-  const core = headline;
+  const keywords = topicKeywords(topic);
   const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
 
+  // Prefer short stakes phrases over dumping the full topic title on screen
+  if (/tornado|hurricane|flood|wildfire|earthquake/i.test(t)) {
+    return clampWords('THIS WARNING CAME TOO LATE');
+  }
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
-    return `EXPOSED: ${core}`;
+    return clampWords(`EXPOSED: ${keywords.slice(0, 3).join(' ')}`);
   }
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
-    return `EMERGENCY: ${core}`;
+    return clampWords('EMERGENCY: THEY HID THE RISK');
   }
-  if (/evict|tenant|landlord|lawsuit|fine|hack|stolen|breach/i.test(t)) {
-    return `URGENT: ${core}`;
+  if (/hack|stolen|breach|password|identity|bank/i.test(t)) {
+    return clampWords('YOUR DATA IS ALREADY GONE');
   }
   if (/fire|attack|blackout|disaster|death|kill|crash|bomb/i.test(t)) {
-    return `BREAKING: ${core}`;
+    return clampWords(`BREAKING: ${keywords.slice(0, 3).join(' ')}`);
   }
-  return `URGENT: ${core}`;
+  if (/ticket|bot|scalp|concert|fan/i.test(t)) {
+    return clampWords('BOTS STOLE YOUR TICKETS');
+  }
+
+  const core = keywords.slice(0, 4).join(' ') || 'CRISIS EXPOSED';
+  return clampWords(`URGENT: ${core}`);
 }
 
 const DATE_OPENER_RE =
@@ -248,10 +258,10 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     };
   }
 
-  if (!options.skipMediaPatch && fixState.forceRealStock !== false && project.media?.length) {
+  if (!options.skipMediaPatch && fixState.forceRealStock === true && project.media?.length) {
     const offset = fixState.mediaOffset || 0;
     project.media = project.media.map((m, i) => {
-      const stock = STOCK_HEALTHCARE_IMAGES[(i + offset) % STOCK_HEALTHCARE_IMAGES.length];
+      const stock = STOCK_MEDIA_POOL[(i + offset) % STOCK_MEDIA_POOL.length];
       return {
         ...m,
         url: stock.url,

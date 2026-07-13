@@ -451,8 +451,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    if (i > 0 && patternInterruptsEnabled() && (i % 2 === 0)) {
-      const flashSec = 0.06;
+    if (i > 0 && patternInterruptsEnabled()) {
+      const flashSec = 0.05;
       const flashOut = join(tmpDir, `flash-${String(clipIndex).padStart(3, '0')}.mp4`);
       if (encodeFlashClip(flashOut, flashSec, { w, h, preset })) {
         clipPaths.push(flashOut);

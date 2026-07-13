@@ -40,15 +40,17 @@ export function buildEditTimeline(project, options = {}) {
 
     const videos = assets.filter((a) => a.type === 'video');
     const images = assets.filter((a) => a.type !== 'video');
-    // Video-first rotation: V-V-I when videos exist (brutal pacing wants motion)
+    const isIntro = seg.type === 'intro' || seg === (project.script || [])[0];
+    // Intro = motion only when videos exist. Body = almost all video (V-V-V-I).
     const ordered = preferVideo && videos.length
       ? (() => {
+          if (isIntro) return uniqueAssetsByUrl(videos);
           const out = [];
           let vi = 0;
           let ii = 0;
-          const total = Math.max(assets.length, 6);
+          const total = Math.max(assets.length, 8);
           for (let k = 0; k < total; k += 1) {
-            if (k % 3 !== 2 && videos.length) {
+            if (k % 4 !== 3 && videos.length) {
               out.push(videos[vi % videos.length]);
               vi += 1;
             } else if (images.length) {
@@ -64,7 +66,7 @@ export function buildEditTimeline(project, options = {}) {
       : assets;
 
     const duration = seg.duration || 20;
-    const interval = seg.type === 'intro' ? Math.min(cut, 1.0) : cut;
+    const interval = isIntro ? Math.min(cut, 0.9) : cut;
     let t = 0;
     let ai = 0;
     let lastAssetId = null;

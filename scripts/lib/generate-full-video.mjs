@@ -347,22 +347,34 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
   }
   const segments = project.script || [];
   if (!segments.length) return;
-  const pool = [...STOCK_CYBER_IMAGES, ...STOCK_MEDIA_POOL.filter((i) => !STOCK_CYBER_IMAGES.some((c) => c.url === i.url))];
-  const picks = pickStockImages(pool.length, mediaOffset % pool.length, pool);
-  const rebuilt = [];
-  let added = 0;
 
   // Keep Mixkit / archive / Pexels motion; drop junk harvest images
+  const rebuilt = [];
   for (const asset of project.media || []) {
     if (asset.type === 'video' && !isJunkDemoVideoUrl(asset.url || '')) {
       rebuilt.push(asset);
     }
   }
+  const stockMotion = rebuilt.filter((a) =>
+    /pexels|pixabay|mixkit|archive\.org/i.test(`${a.url} ${a.source || ''}`),
+  ).length;
+  // When stock APIs delivered real motion, skip stills entirely (vision reads stills as slow/generic)
+  const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
+  if (hasStockKeys && stockMotion >= Math.max(6, segments.length * 2)) {
+    project.media = rebuilt;
+    report.cyberStockSkipped = `motion-ok (${stockMotion} stock videos)`;
+    return;
+  }
+
+  const pool = [...STOCK_CYBER_IMAGES, ...STOCK_MEDIA_POOL.filter((i) => !STOCK_CYBER_IMAGES.some((c) => c.url === i.url))];
+  const picks = pickStockImages(pool.length, mediaOffset % pool.length, pool);
+  let added = 0;
 
   for (let s = 0; s < segments.length; s += 1) {
     const seg = segments[s];
-    // Keep stills sparse so Pexels/Pixabay motion dominates the cut list
-    const perSeg = 2;
+    // Never put stills on the intro/hook — motion only in first seconds
+    if (seg.type === 'intro' || s === 0) continue;
+    const perSeg = 1;
     for (let i = 0; i < perSeg; i += 1) {
       const img = picks[(s * 7 + i + mediaOffset) % picks.length];
       if (!img) continue;
@@ -487,18 +499,21 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
   const liveClips = [];
   const queries = [
     project.topic || project.title || '',
-    cyberTopic ? 'person using smartphone banking' : '',
-    cyberTopic ? 'hacker computer keyboard cyber' : '',
-    cyberTopic ? 'credit card payment phone' : '',
+    cyberTopic ? 'shocked person looking at phone' : '',
+    cyberTopic ? 'online banking laptop smartphone' : '',
+    cyberTopic ? 'credit card payment phone close up' : '',
+    cyberTopic ? 'person talking on phone worried' : '',
+    cyberTopic ? 'hacker typing computer dark room' : '',
+    cyberTopic ? 'microphone voice recording studio' : '',
     /tornado|storm|disaster/i.test(topicBlob) ? 'tornado storm damage news' : '',
   ].filter(Boolean);
 
-  for (const q of queries.slice(0, 4)) {
-    const fromPexels = await fetchPexelsVideos(q, 6);
-    const fromPixabay = await fetchPixabayVideos(q, 6);
+  for (const q of queries.slice(0, 6)) {
+    const fromPexels = await fetchPexelsVideos(q, 10);
+    const fromPixabay = await fetchPixabayVideos(q, 10);
     const fromArchive = devServer ? await fetchArchiveVideoResults(devServer, q) : [];
     for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
-      if (liveClips.length >= 24) break;
+      if (liveClips.length >= 40) break;
       if (liveClips.some((c) => c.url === clip.url)) continue;
       liveClips.push(clip);
     }
@@ -533,20 +548,25 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
   const videoCount = usableVideos.length;
   // Motion-first: when stock API keys exist, require real stock motion (not thin harvest proxies)
   const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
-  const minVideos = Math.min(segments.length * 2, 6);
-  const stockNeed = hasStockKeys ? Math.max(0, Math.min(segments.length * 2, 6) - stockApiVideos.length) : 0;
+  const minVideos = hasStockKeys
+    ? Math.max(12, segments.length * 4)
+    : Math.min(segments.length * 2, 6);
+  const stockNeed = hasStockKeys
+    ? Math.max(0, Math.max(12, segments.length * 4) - stockApiVideos.length)
+    : 0;
   if (videoCount >= minVideos && stockNeed <= 0) return;
 
   const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
   let need = Math.max(minVideos - videoCount, stockNeed);
-  const picks = pickStockVideos(need + segments.length * 2, mediaOffset, pool);
+  const picks = pickStockVideos(need + segments.length * 4, mediaOffset, pool);
   let vi = 0;
   for (const seg of segments) {
     if (need <= 0) break;
     const segVideos = (project.media || []).filter(
       (a) => a.segmentId === seg.id && a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
     ).length;
-    const want = Math.max(0, 2 - segVideos);
+    const perSegTarget = hasStockKeys ? (seg.type === 'intro' || seg === segments[0] ? 5 : 4) : 2;
+    const want = Math.max(0, perSegTarget - segVideos);
     for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1, vi += 1) {
       const clip = picks[vi];
       const key = clip.url.split('?')[0];

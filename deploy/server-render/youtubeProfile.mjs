@@ -3,11 +3,17 @@
  */
 
 export function isYouTubeExportMode(project) {
+  if (process.env.AUTOTUBE_YOUTUBE_MODE === '0' || process.env.AUTOTUBE_YOUTUBE_MODE === 'false') {
+    return false;
+  }
   if (process.env.AUTOTUBE_YOUTUBE_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === 'true') {
     return true;
   }
   const es = project?.exportSettings;
+  if (es?.youtubeMode === false) return false;
   if (es?.youtubeMode === true || es?.format === 'youtube') return true;
+  // Product default: YouTube-ready captions / hook / CTA / voice-first mix
+  if (es && es.youtubeMode === undefined) return true;
   const style = (project?.style || '').toLowerCase();
   return style === 'youtube_viral' || style === 'mr_beast' || style === 'business_insider';
 }

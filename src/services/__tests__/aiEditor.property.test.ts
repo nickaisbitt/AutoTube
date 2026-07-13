@@ -567,34 +567,30 @@ describe('Feature: ai-editor-layer, Property 7: No-Narration Duration Preservati
 
 describe('Feature: ai-editor-layer, Property 11: Caption Window Size Matches Word Count Range', () => {
   /**
-   * **Validates: Requirements 7.2, 7.3**
+   * **Validates: Requirements 7.2, 7.3 (YouTube-ready update)**
    *
-   * For createDefaultEditPlan:
-   * - Segments with >100 narration words → wordsPerWindow in [8, 12]
-   * - Segments with ≤50 narration words → wordsPerWindow in [4, 8]
+   * For createDefaultEditPlan: wordsPerWindow is always 4 (Hormozi-style cap).
    */
-  it('segments with >100 narration words have wordsPerWindow in [8, 12]', () => {
+  it('all segments use wordsPerWindow === 4 regardless of narration length', () => {
     fc.assert(
       fc.property(arbProjectWithControlledNarration(101, 150), (project) => {
         const plan = createDefaultEditPlan(project);
 
         for (const entry of plan.segments) {
-          expect(entry.captionSettings.wordsPerWindow).toBeGreaterThanOrEqual(8);
-          expect(entry.captionSettings.wordsPerWindow).toBeLessThanOrEqual(12);
+          expect(entry.captionSettings.wordsPerWindow).toBe(4);
         }
       }),
       { numRuns: 100 },
     );
   });
 
-  it('segments with ≤50 narration words have wordsPerWindow in [4, 8]', () => {
+  it('short-narration segments also use wordsPerWindow === 4', () => {
     fc.assert(
       fc.property(arbProjectWithControlledNarration(1, 50), (project) => {
         const plan = createDefaultEditPlan(project);
 
         for (const entry of plan.segments) {
-          expect(entry.captionSettings.wordsPerWindow).toBeGreaterThanOrEqual(4);
-          expect(entry.captionSettings.wordsPerWindow).toBeLessThanOrEqual(8);
+          expect(entry.captionSettings.wordsPerWindow).toBe(4);
         }
       }),
       { numRuns: 100 },

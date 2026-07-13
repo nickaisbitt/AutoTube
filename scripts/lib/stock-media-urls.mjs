@@ -269,8 +269,10 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
       return { v, hit };
     })
     .sort((a, b) => b.hit - a.hit);
+  // Prefer tag matches, then remaining archive clips for cut variety
   const matched = scored.filter((s) => s.hit > 0).map((s) => s.v);
-  return matched.length ? matched : archive;
+  const rest = scored.filter((s) => s.hit === 0).map((s) => s.v);
+  return matched.length ? [...matched, ...rest] : archive;
 }
 
 /** Pick unique stock URLs rotating by offset (for top-up / mock diversity). */

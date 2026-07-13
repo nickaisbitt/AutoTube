@@ -4,7 +4,7 @@
  *
  * Gate: if review fails, apply fixes to pipeline state and re-run BEFORE picking a new topic.
  */
-import { mkdirSync, writeFileSync, appendFileSync, existsSync, copyFileSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, appendFileSync, existsSync, copyFileSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { generateFullVideo, checkDevServer, resolveOpenRouterKey } from './lib/generate-full-video.mjs';
@@ -86,7 +86,46 @@ async function main() {
   const cfg = parseArgs(process.argv.slice(2));
   mkdirSync(LOOP_DIR, { recursive: true });
 
+  const lockPath = join(LOOP_DIR, 'LOOP.lock');
+  if (existsSync(lockPath)) {
+    const prev = readFileSync(lockPath, 'utf8').trim();
+    const prevPid = parseInt(prev, 10);
+    let alive = false;
+    if (Number.isFinite(prevPid)) {
+      try {
+        process.kill(prevPid, 0);
+        alive = true;
+      } catch {
+        alive = false;
+      }
+    }
+    if (alive) {
+      console.error(`❌ Another improvement loop is running (pid ${prevPid}). Kill it or delete ${lockPath}`);
+      process.exit(2);
+    }
+  }
+  writeFileSync(lockPath, String(process.pid));
+  const clearLock = () => {
+    try {
+      if (existsSync(lockPath) && readFileSync(lockPath, 'utf8').trim() === String(process.pid)) {
+        unlinkSync(lockPath);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on('exit', clearLock);
+  process.on('SIGINT', () => {
+    clearLock();
+    process.exit(130);
+  });
+  process.on('SIGTERM', () => {
+    clearLock();
+    process.exit(143);
+  });
+
   if (!cfg.reviewOnly && !(await runLoopPreflight())) {
+    clearLock();
     process.exit(1);
   }
 
@@ -243,6 +282,17 @@ async function main() {
 
     console.log(`\n👁 Video Watcher review (tier=${renderTier})...\n`);
     let watch;
+    const projectPathForWatch = join(runDir, 'project.json');
+    const hookOverlayHint = (() => {
+      try {
+        if (existsSync(projectPathForWatch)) {
+          return JSON.parse(readFileSync(projectPathForWatch, 'utf8')).exportSettings?.hookOverlay || '';
+        }
+      } catch {
+        /* ignore */
+      }
+      return fixState.hookOverlay || '';
+    })();
     try {
       watch = await watchVideo({
         video_path: videoPath,
@@ -250,6 +300,8 @@ async function main() {
         skip_vision: cfg.skipVision || skipBrutalOnDraft || cfg.objectiveOnly,
         script_text: scriptText,
         render_tier: renderTier,
+        project_path: existsSync(projectPathForWatch) ? projectPathForWatch : undefined,
+        hook_overlay: hookOverlayHint,
       });
     } catch (e) {
       console.error(`❌ Watch failed: ${e.message}`);

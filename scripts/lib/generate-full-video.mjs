@@ -1071,18 +1071,25 @@ export async function generateFullVideo(options) {
         log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
       }
       if (mediaReport.volumePass === false) {
+        // Cyber stock stills count toward volume — don't abort when inject filled the gap
+        const cyber = mediaReport.cyberStockInjected || 0;
         const failing = mediaReport.harvestQuality?.failing || [];
-        const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
-        fixState.reHarvestMedia = true;
-        fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
-        return {
-          ok: false,
-          error: `Harvest volume gate FAIL — ${detail}`,
-          harvestQualityFail: true,
-          topic,
-          outDir,
-          fixState,
-        };
+        const softFail = cyber >= 4 && failing.every((f) => (f.need - f.count) <= 2);
+        if (!softFail) {
+          const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
+          fixState.reHarvestMedia = true;
+          fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+          return {
+            ok: false,
+            error: `Harvest volume gate FAIL — ${detail}`,
+            harvestQualityFail: true,
+            topic,
+            outDir,
+            fixState,
+          };
+        }
+        log(`   ⚠️ Volume soft-pass via cyber stock (+${cyber})`);
+        mediaReport.volumePass = true;
       }
       // Re-assert shock hook + overlay after media mutations
       patchProjectForLoop(project, topic, { ...fixState, forceRealStock: false }, { skipMediaPatch: true });

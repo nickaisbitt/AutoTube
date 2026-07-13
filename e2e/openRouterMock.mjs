@@ -25,15 +25,23 @@ const LONG_NARRATION_BLOCK =
 
 /** Shock hook — no year opener (YouTube retention). */
 export function buildShockHookLine(topic, override) {
-  if (override?.trim()) return override.trim();
+  if (override?.trim()) {
+    const o = override.trim();
+    // Reject overrides that are just the topic / weak openers
+    if (!/^(why|how|what|the)\b/i.test(o) && o.length > 12) return o;
+  }
   const t = (topic || 'this story').replace(/\.$/, '');
+  const short = t.replace(/^(why|how|what)\s+/i, '').trim();
   const templates = [
-    `${t} — and almost nobody saw it coming.`,
-    `This ${t.toLowerCase()} could affect you by tomorrow.`,
-    `Billions lost overnight: ${t}.`,
-    `They tried to hide ${t.toLowerCase()} — here's the proof.`,
+    `Billions lost overnight: ${short}.`,
+    `They tried to hide this — here's the proof.`,
+    `Your money can vanish before you hang up.`,
+    `This already emptied real bank accounts.`,
   ];
-  return templates[Math.floor(Math.random() * templates.length)];
+  // Stable pick from topic hash so loop retries stay consistent
+  let hash = 0;
+  for (let i = 0; i < t.length; i += 1) hash = (hash + t.charCodeAt(i) * (i + 1)) % templates.length;
+  return templates[hash];
 }
 
 function buildTopicBody(topic, hookLine) {

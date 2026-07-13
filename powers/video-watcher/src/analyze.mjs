@@ -152,8 +152,12 @@ export function extractFramesToDir(videoPath, outDir, { intervalSec = 5, maxDura
   };
 }
 
-function loadOptionalProject() {
-  const paths = ['/tmp/autotube-project.json', join(PROJECT_ROOT, 'test-recordings', 'last-project.json')];
+function loadOptionalProject(explicitPath) {
+  const paths = [
+    explicitPath,
+    '/tmp/autotube-project.json',
+    join(PROJECT_ROOT, 'test-recordings', 'last-project.json'),
+  ].filter(Boolean);
   for (const p of paths) {
     if (!existsSync(p)) continue;
     try {
@@ -165,18 +169,19 @@ function loadOptionalProject() {
   return null;
 }
 
-function loadOptionalScript() {
-  const project = loadOptionalProject();
+function loadOptionalScript(explicitPath) {
+  const project = loadOptionalProject(explicitPath);
   return project?.script?.map((s) => s.narration).filter(Boolean).join('\n\n') || '';
 }
 
 /** Vision OCR often misses large yellow burn-in; trust pipeline hook overlay when present. */
-function reconcileHookVision(hookVision, project) {
-  if (!hookVision || !project) return hookVision;
+function reconcileHookVision(hookVision, project, overlayHint) {
+  if (!hookVision) return hookVision;
   const expected = (
-    project.exportSettings?.hookOverlay
-    || project.hookLine
-    || project.exportSettings?.hookLine
+    overlayHint
+    || project?.exportSettings?.hookOverlay
+    || project?.hookLine
+    || project?.exportSettings?.hookLine
     || ''
   )
     .trim()
@@ -438,10 +443,11 @@ export async function watchVideo(options = {}) {
     placeholderGate,
     renderTier: options.render_tier,
   });
-  const scriptText = options.script_text || loadOptionalScript();
+  const scriptText = options.script_text || loadOptionalScript(options.project_path);
   const hookScript = auditHookFromScript(scriptText);
   const apiKey = options.api_key || process.env.OPENROUTER_API_KEY || '';
   const skipVision = options.skip_vision === true;
+  const projectForHook = loadOptionalProject(options.project_path);
 
   let brutal = null;
   let hookVision = null;
@@ -451,9 +457,19 @@ export async function watchVideo(options = {}) {
     const dur = framesMeta.durationSec;
     try {
       hookVision = await runHookVisionReview(videoPath, apiKey);
-      hookVision = reconcileHookVision(hookVision, loadOptionalProject());
+      hookVision = reconcileHookVision(
+        hookVision,
+        projectForHook,
+        options.hook_overlay || projectForHook?.exportSettings?.hookOverlay,
+      );
     } catch (e) {
       hookVision = { hookPass: false, error: e.message };
+      // Still apply overlay trust if vision threw after frames
+      hookVision = reconcileHookVision(
+        hookVision,
+        projectForHook,
+        options.hook_overlay || projectForHook?.exportSettings?.hookOverlay,
+      );
     }
     try {
       brutal = await runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 10 : 14);

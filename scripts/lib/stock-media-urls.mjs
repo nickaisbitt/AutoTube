@@ -144,44 +144,40 @@ export const STOCK_MEDIA_POOL = [
  */
 export const STOCK_VIDEO_POOL = [
   {
-    url: 'https://archive.org/download/youtube-m3eWX-c6_r4/m3eWX-c6_r4.mp4',
-    alt: 'Tornado footage archive',
+    url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+    alt: 'Nature motion clip',
   },
   {
-    url: 'https://archive.org/download/wvual-APRIL_15TH_TORNADO_ANNIVERSARY/APRIL_15TH_TORNADO_ANNIVERSARY.mp4',
-    alt: 'Tornado anniversary news',
+    url: 'https://www.w3schools.com/html/mov_bbb.mp4',
+    alt: 'Character motion clip',
   },
   {
-    url: 'https://archive.org/download/Big_Buck_Bunny_1080p_surround_SFX/big_buck_bunny_1080p_surround.mp4',
-    alt: 'Sample motion footage',
+    url: 'https://media.w3.org/2010/05/sintel/trailer.mp4',
+    alt: 'Cinematic trailer motion',
   },
   {
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    alt: 'Sample action clip',
+    url: 'https://download.samplelib.com/mp4/sample-5s.mp4',
+    alt: 'Urban motion sample',
   },
   {
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-    alt: 'Sample escape clip',
+    url: 'https://download.samplelib.com/mp4/sample-10s.mp4',
+    alt: 'Street motion sample',
   },
   {
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-    alt: 'Sample fun motion',
+    url: 'https://download.samplelib.com/mp4/sample-15s.mp4',
+    alt: 'City motion sample',
   },
   {
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-    alt: 'Sample joyride motion',
+    url: 'https://download.samplelib.com/mp4/sample-20s.mp4',
+    alt: 'Lifestyle motion sample',
   },
   {
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-    alt: 'Sample meltdown motion',
+    url: 'https://download.samplelib.com/mp4/sample-30s.mp4',
+    alt: 'Long motion sample',
   },
   {
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-    alt: 'Sample cinematic motion',
-  },
-  {
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-    alt: 'Sample industrial motion',
+    url: 'https://filesamples.com/samples/video/mp4/sample_640x360.mp4',
+    alt: 'Documentary-style sample',
   },
 ];
 

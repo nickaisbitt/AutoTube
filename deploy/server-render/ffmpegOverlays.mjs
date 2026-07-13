@@ -87,10 +87,12 @@ export function overlayHookText(videoPath, project, options = {}) {
 
 /**
  * Burn word-timed captions (YouTube-style, max 4 words per line).
+ * VTT word times are segment-relative — offset by script segment durations or stacked.
  * @param {string} videoPath
  * @param {Map<number, Array<{ word: string, start: number, end: number }>>} wordTimestampCache
+ * @param {{ project?: object }} [options]
  */
-export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
+export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = {}) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
 
   const probe = spawnSync(
@@ -116,7 +118,6 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    // Alignment 2 = bottom-center; keep size modest so captions don't dominate B-roll
     `Style: Default,Arial Bold,${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,${cm.strokePx},0,2,60,60,${cm.bottomPad},1`,
     '',
     '[Events]',
@@ -128,23 +129,55 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache) {
   let buffer = [];
   let bufferStart = 0;
   let bufferEnd = 0;
+  let lastCaptionEnd = 0;
 
   const flush = () => {
     if (!buffer.length) return;
+    // Exclusive windows — never stack every segment's captions into a wall of text
+    const start = Math.max(bufferStart, lastCaptionEnd);
+    const end = Math.max(start + 0.35, Math.min(bufferEnd, start + 2.0));
+    if (end <= start) {
+      buffer = [];
+      return;
+    }
     const text = escapeAss(buffer.join(' ').toUpperCase());
-    lines.push(`Dialogue: 0,${formatAssTime(bufferStart)},${formatAssTime(bufferEnd)},Default,,0,0,0,,${text}`);
+    lines.push(`Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${text}`);
+    lastCaptionEnd = end;
     idx += 1;
     buffer = [];
   };
 
+  const script = options.project?.script || [];
+  const segOffsetFor = (segKey) => {
+    const n = Number(segKey);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    let off = 0;
+    for (let i = 0; i < n && i < script.length; i += 1) {
+      off += Number(script[i]?.duration) || 0;
+    }
+    // Fallback when durations missing: stack by prior segment word ends
+    if (off <= 0 && n > 0) {
+      for (let i = 0; i < n; i += 1) {
+        const prev = wordTimestampCache.get(i) || [];
+        const maxEnd = prev.reduce((m, w) => Math.max(m, Number(w.end) || 0), 0);
+        off += maxEnd;
+      }
+    }
+    return off;
+  };
+
   const hookEndSec = 3.2;
-  for (const [, words] of wordTimestampCache) {
+  const entries = [...wordTimestampCache.entries()].sort((a, b) => Number(a[0]) - Number(b[0]));
+  for (const [segKey, words] of entries) {
+    const segOffset = segOffsetFor(segKey);
     for (const w of words) {
-      if (w.end <= hookEndSec) continue;
-      const start = Math.max(w.start, hookEndSec);
+      const absStart = (Number(w.start) || 0) + segOffset;
+      const absEnd = (Number(w.end) || absStart + 0.3) + segOffset;
+      if (absEnd <= hookEndSec) continue;
+      const start = Math.max(absStart, hookEndSec);
       if (!buffer.length) bufferStart = start;
       buffer.push(w.word);
-      bufferEnd = w.end;
+      bufferEnd = Math.max(absEnd, start + 0.3);
       if (buffer.length >= cm.maxWords) flush();
     }
     flush();
@@ -187,7 +220,7 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
     || project?.exportSettings?.karaokeCaptions === false;
 
   if (wordTimestampCache?.size && !karaokeOff) {
-    const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache);
+    const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, { project });
     results.captions = caps;
     if (caps.ok) {
       console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);

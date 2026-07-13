@@ -309,29 +309,10 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
   }
 
   console.log(
-    crossfadeDuration > 0
+    crossfadeDuration > 0.05
       ? `  🔗 Concatenating ${audioFiles.length} audio segments with ${crossfadeDuration}s crossfades...`
-      : `  🔗 Concatenating ${audioFiles.length} audio segments (simple concat, no crossfade)...`,
+      : `  🔗 Concatenating ${audioFiles.length} audio segments (WAV normalize + concat)...`,
   );
-
-  // First, normalize all input files to consistent format
-  const normalizedFiles = [];
-  for (let i = 0; i < audioFiles.length; i++) {
-    const normalizedPath = join(tmpdir(), `autotube-norm-${Date.now()}-${i}.aac`);
-    const ok = convertAudioFormat(audioFiles[i].file, normalizedPath);
-    if (!ok) {
-      console.warn(`  ⚠ Failed to normalize segment ${i}`);
-      // Clean up already normalized files
-      normalizedFiles.forEach(f => { try { unlinkSync(f); } catch {} });
-      return false;
-    }
-    normalizedFiles.push(normalizedPath);
-  }
-
-  // Build concat list file
-  const listFile = join(tmpdir(), `autotube-audio-list-${Date.now()}.txt`);
-  const listContent = normalizedFiles.map(f => `file '${f}'`).join('\n');
-  writeFileSync(listFile, listContent);
 
   // Zero/near-zero crossfade: normalize to PCM WAV then concat demuxer.
   // AAC concat demuxer over mixed edge-tts (mp3/24k) + silence pads produced
@@ -348,8 +329,6 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
       if (wavOk.status !== 0 || !existsSync(wavPath)) {
         console.warn(`  ⚠ Failed to normalize segment ${i} to WAV`);
         wavFiles.forEach(f => { try { unlinkSync(f); } catch {} });
-        normalizedFiles.forEach(f => { try { unlinkSync(f); } catch {} });
-        try { unlinkSync(listFile); } catch {}
         return false;
       }
       wavFiles.push(wavPath);
@@ -370,8 +349,6 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
       try { unlinkSync(concatOut); } catch {}
     }
     wavFiles.forEach(f => { try { unlinkSync(f); } catch {} });
-    normalizedFiles.forEach(f => { try { unlinkSync(f); } catch {} });
-    try { unlinkSync(listFile); } catch {}
     try { unlinkSync(wavList); } catch {}
     if (success && existsSync(outputFile)) {
       console.log('  ✓ Audio concatenated (WAV normalize + concat)');
@@ -380,6 +357,25 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
     console.warn('  ⚠ Simple concat failed:', (simple.stderr || '').slice(0, 240));
     return false;
   }
+
+  // First, normalize all input files to consistent format (crossfade path)
+  const normalizedFiles = [];
+  for (let i = 0; i < audioFiles.length; i++) {
+    const normalizedPath = join(tmpdir(), `autotube-norm-${Date.now()}-${i}.aac`);
+    const ok = convertAudioFormat(audioFiles[i].file, normalizedPath);
+    if (!ok) {
+      console.warn(`  ⚠ Failed to normalize segment ${i}`);
+      // Clean up already normalized files
+      normalizedFiles.forEach(f => { try { unlinkSync(f); } catch {} });
+      return false;
+    }
+    normalizedFiles.push(normalizedPath);
+  }
+
+  // Build concat list file
+  const listFile = join(tmpdir(), `autotube-audio-list-${Date.now()}.txt`);
+  const listContent = normalizedFiles.map(f => `file '${f}'`).join('\n');
+  writeFileSync(listFile, listContent);
 
   // Use concat demuxer with anti-banding crossfade filter chain
   // The crossfade uses exponential curves to avoid quantization banding artifacts

@@ -361,7 +361,8 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
 
   for (let s = 0; s < segments.length; s += 1) {
     const seg = segments[s];
-    const perSeg = 6;
+    // Keep stills sparse so Pexels/Pixabay motion dominates the cut list
+    const perSeg = 2;
     for (let i = 0; i < perSeg; i += 1) {
       const img = picks[(s * 7 + i + mediaOffset) % picks.length];
       if (!img) continue;
@@ -378,11 +379,10 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
       added += 1;
     }
   }
-  // Intro-first: curated stills at front so hook frames aren't random PSA frames
-  const introId = segments[0].id;
-  const introStills = rebuilt.filter((a) => a.segmentId === introId && a.type === 'image').slice(0, 3);
-  const rest = rebuilt.filter((a) => !(a.segmentId === introId && a.type === 'image' && introStills.includes(a)));
-  project.media = [...introStills, ...rest];
+  // Videos first in media array so timeline / assembly prefers motion
+  const videos = rebuilt.filter((a) => a.type === 'video');
+  const stills = rebuilt.filter((a) => a.type !== 'video');
+  project.media = [...videos, ...stills];
   if (added) {
     report.cyberStockInjected = added;
   }

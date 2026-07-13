@@ -92,7 +92,9 @@ function hardCutsEnabled() {
     return true;
   }
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
-  return loopMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
+  const youtubeMode = process.env.AUTOTUBE_YOUTUBE_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === 'true';
+  // YouTube / ffmpeg assembly: hard cuts by default for retention pacing
+  return loopMode || youtubeMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
 }
 
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {

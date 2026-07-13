@@ -290,7 +290,7 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
 
 async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}) {
   const loopMode = options.loopMode === true;
-  const minPerSegment = Math.max(3, options.minAssetsPerSegment || 6);
+  const minPerSegment = Math.max(2, options.minAssetsPerSegment || 6);
   const report = {
     before: project.media?.length || 0,
     after: 0,

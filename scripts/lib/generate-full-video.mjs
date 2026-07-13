@@ -488,7 +488,7 @@ async function fetchPixabayVideos(query, perPage = 8) {
 function isJunkStockClip(clip = {}) {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
   return (
-    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|surgery|surgical|hospital|operating room|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|cartoon|animation|minecraft|fortnite|gameplay/i.test(
+    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|surgery|surgical|hospital|operating room|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|cartoon|animation|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop/i.test(
       blob,
     )
   );
@@ -499,13 +499,15 @@ function stockMotionQueries(topicBlob, cyberTopic) {
   if (cyberTopic) {
     return [
       'shocked person looking at phone',
-      'online banking smartphone close up',
       'credit card payment laptop',
       'worried person phone call',
       'hacker typing computer dark',
       'microphone voice recording',
-      'mobile banking app hands',
-      'identity theft security concept',
+      'server room data center',
+      'fingerprint biometric unlock',
+      'bank building exterior city',
+      'lock padlock security close up',
+      'news anchor studio desk',
     ];
   }
   if (/tornado|storm|disaster/i.test(topicBlob)) {

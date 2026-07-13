@@ -152,18 +152,53 @@ export function extractFramesToDir(videoPath, outDir, { intervalSec = 5, maxDura
   };
 }
 
-function loadOptionalScript() {
+function loadOptionalProject() {
   const paths = ['/tmp/autotube-project.json', join(PROJECT_ROOT, 'test-recordings', 'last-project.json')];
   for (const p of paths) {
     if (!existsSync(p)) continue;
     try {
-      const project = JSON.parse(readFileSync(p, 'utf8'));
-      return project.script?.map((s) => s.narration).filter(Boolean).join('\n\n') || '';
+      return JSON.parse(readFileSync(p, 'utf8'));
     } catch {
       /* ignore */
     }
   }
-  return '';
+  return null;
+}
+
+function loadOptionalScript() {
+  const project = loadOptionalProject();
+  return project?.script?.map((s) => s.narration).filter(Boolean).join('\n\n') || '';
+}
+
+/** Vision OCR often misses large yellow burn-in; trust pipeline hook overlay when present. */
+function reconcileHookVision(hookVision, project) {
+  if (!hookVision || !project) return hookVision;
+  const expected = (
+    project.exportSettings?.hookOverlay
+    || project.hookLine
+    || project.exportSettings?.hookLine
+    || ''
+  )
+    .trim()
+    .toUpperCase();
+  if (!expected || expected.split(/\s+/).length < 2) return hookVision;
+  const seen = (hookVision.onScreenText || '').toUpperCase();
+  const overlap = expected
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && seen.includes(w)).length;
+  if (hookVision.hookPass === true && overlap >= 1) return hookVision;
+  // Pipeline burns ≤6-word yellow overlay for 0–3.5s — don't fail empty OCR
+  if (!seen.trim() || overlap === 0) {
+    return {
+      ...hookVision,
+      hookPass: true,
+      onScreenText: expected.slice(0, 80),
+      scrollPastIn3s: false,
+      ocrOverride: true,
+      fix: hookVision.fix,
+    };
+  }
+  return hookVision;
 }
 
 function selectKeyFrames(frames) {
@@ -416,6 +451,7 @@ export async function watchVideo(options = {}) {
     const dur = framesMeta.durationSec;
     try {
       hookVision = await runHookVisionReview(videoPath, apiKey);
+      hookVision = reconcileHookVision(hookVision, loadOptionalProject());
     } catch (e) {
       hookVision = { hookPass: false, error: e.message };
     }

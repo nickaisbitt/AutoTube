@@ -15,6 +15,7 @@ import {
   STOCK_HEALTHCARE_IMAGES,
   STOCK_MEDIA_POOL,
   STOCK_VIDEO_POOL,
+  STOCK_CYBER_IMAGES,
   pickStockImages,
   pickStockVideos,
   isJunkDemoVideoUrl,
@@ -336,6 +337,64 @@ function stripJunkDemoVideos(project, report) {
 }
 
 /**
+ * Prefetch curated human/phone/security stills into the intro so hook frames
+ * aren't random gardening/website screenshots from thin harvest.
+ */
+function injectCyberStockStills(project, report, mediaOffset = 0) {
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
+  if (!/bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password|ai/i.test(topicBlob)) {
+    return;
+  }
+  const segments = project.script || [];
+  if (!segments.length) return;
+  const introId = segments[0].id;
+  const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+  const picks = pickStockImages(6, mediaOffset, STOCK_CYBER_IMAGES);
+  let added = 0;
+  for (let i = 0; i < picks.length; i += 1) {
+    const img = picks[i];
+    const key = img.url.split('?')[0];
+    if (used.has(key)) continue;
+    project.media.unshift({
+      id: `cyber-stock-${introId}-${i}`,
+      segmentId: introId,
+      type: 'image',
+      url: img.url,
+      alt: img.alt,
+      query: `cyber-stock ${segments[0].title || ''}`,
+      source: 'Curated cyber stock',
+      isFallback: false,
+    });
+    used.add(key);
+    added += 1;
+    if (added >= 4) break;
+  }
+  // Also seed remaining segments with 1–2 cyber stills each
+  for (let s = 1; s < segments.length; s += 1) {
+    const seg = segments[s];
+    const img = picks[(s + mediaOffset) % picks.length];
+    if (!img) continue;
+    const key = img.url.split('?')[0];
+    if (used.has(key)) continue;
+    project.media.push({
+      id: `cyber-stock-${seg.id}-0`,
+      segmentId: seg.id,
+      type: 'image',
+      url: img.url,
+      alt: img.alt,
+      query: `cyber-stock ${seg.title || ''}`,
+      source: 'Curated cyber stock',
+      isFallback: false,
+    });
+    used.add(key);
+    added += 1;
+  }
+  if (added) {
+    report.cyberStockInjected = added;
+  }
+}
+
+/**
  * Inject direct-mp4 motion clips when harvest yielded zero/few usable videos.
  * Prefer archive.org topical clips; skip cartoon/sample fillers for serious news topics
  * (off-topic bunny/flower clips tank brutal visualVariety scores).
@@ -361,7 +420,8 @@ function topUpVideoBroll(project, report, mediaOffset = 0) {
     (a) => a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
   );
   const videoCount = usableVideos.length;
-  const minVideos = Math.min(segments.length * 2, seriousTopic ? 5 : 6);
+  // Cyber topics: prefer curated stills + 1–2 motion clips (PSA dumps tank brutal scores)
+  const minVideos = Math.min(segments.length * 2, seriousTopic ? 2 : 6);
   if (videoCount >= minVideos) return;
 
   const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
@@ -373,7 +433,7 @@ function topUpVideoBroll(project, report, mediaOffset = 0) {
     const segVideos = (project.media || []).filter(
       (a) => a.segmentId === seg.id && a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
     ).length;
-    const want = Math.max(0, (seriousTopic ? 2 : 2) - segVideos);
+    const want = Math.max(0, (seriousTopic ? 1 : 2) - segVideos);
     for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1, vi += 1) {
       const clip = picks[vi];
       const key = clip.url.split('?')[0];
@@ -587,6 +647,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   if (loopMode) {
     await topUpHarvestVolume(project, devServer, minPerSegment, report);
     topUpVideoBroll(project, report, options.mediaOffset || 0);
+    injectCyberStockStills(project, report, options.mediaOffset || 0);
     report.afterTopUp = project.media.length;
   }
 
@@ -975,6 +1036,9 @@ export async function generateFullVideo(options) {
       }
       if (mediaReport.junkVideoDropped?.length) {
         log(`   🗑️ Junk demo videos dropped: ${mediaReport.junkVideoDropped.length}`);
+      }
+      if (mediaReport.cyberStockInjected) {
+        log(`   🛡️ Cyber stock stills: +${mediaReport.cyberStockInjected}`);
       }
       if (mediaReport.relevanceDropped?.length) {
         log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);

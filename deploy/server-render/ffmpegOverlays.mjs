@@ -176,12 +176,20 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
   const results = {};
   if (!isYouTubeExportMode(project)) return results;
 
-  if (wordTimestampCache?.size) {
+  const karaokeOff =
+    process.env.AUTOTUBE_KARAOKE_CAPTIONS === '0'
+    || process.env.AUTOTUBE_KARAOKE_CAPTIONS === 'false'
+    || project?.exportSettings?.karaokeCaptions === false;
+
+  if (wordTimestampCache?.size && !karaokeOff) {
     const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache);
     results.captions = caps;
     if (caps.ok) {
       console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);
     }
+  } else if (karaokeOff) {
+    console.log('  [ffmpeg] karaoke captions skipped (hook-only overlay mode)');
+    results.captions = { ok: true, skipped: true };
   }
 
   const hook = overlayHookText(videoPath, project);

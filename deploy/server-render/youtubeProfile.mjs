@@ -19,11 +19,12 @@ export function isYouTubeExportMode(project) {
 }
 
 export function captionMetrics(height, width) {
-  const basePx = Math.round(height * 0.078);
-  const currentPx = Math.round(height * 0.092);
-  const strokePx = Math.max(8, Math.round(height * 0.009));
-  const bottomPad = Math.round(height * 0.14);
-  return { basePx, currentPx, strokePx, bottomPad, maxWords: 4, barWidth: width * 0.94 };
+  // Keep captions punchy but not frame-dominating (brutal captionReadability tanks when too big)
+  const basePx = Math.round(height * 0.055);
+  const currentPx = Math.round(height * 0.062);
+  const strokePx = Math.max(5, Math.round(height * 0.006));
+  const bottomPad = Math.round(height * 0.12);
+  return { basePx, currentPx, strokePx, bottomPad, maxWords: 4, barWidth: width * 0.92 };
 }
 
 export function hookFontPx(height) {

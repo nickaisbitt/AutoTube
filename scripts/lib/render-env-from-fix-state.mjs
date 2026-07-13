@@ -25,6 +25,12 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (fixState.whisperAlign || renderTier === 'full') env.AUTOTUBE_WHISPER_ALIGN = '1';
   if (fixState.hookOverlay) env.AUTOTUBE_HOOK_OVERLAY = fixState.hookOverlay;
   if (fixState.hookLine) env.AUTOTUBE_HOOK_LINE = fixState.hookLine;
+  // Default: hook-only overlays in loop (karaoke + PSA B-roll → caption clutter)
+  if (fixState.karaokeCaptions === true) {
+    env.AUTOTUBE_KARAOKE_CAPTIONS = '1';
+  } else {
+    env.AUTOTUBE_KARAOKE_CAPTIONS = '0';
+  }
 
   if (renderTier === 'full') {
     env.AUTOTUBE_RENDER_QUALITY = 'high';

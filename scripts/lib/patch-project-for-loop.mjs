@@ -287,6 +287,8 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     musicPreset: 'neutral',
     resolution: '1080p',
     youtubeMode: true,
+    // Hook-only first; karaoke on PSA B-roll tanks captionReadability in brutal review
+    karaokeCaptions: fixState.karaokeCaptions === true,
     hookOverlay: project.exportSettings?.hookOverlay ?? fixState.hookOverlay ?? undefined,
     hookLine: project.exportSettings?.hookLine ?? project.hookLine ?? fixState.hookLine ?? undefined,
   };

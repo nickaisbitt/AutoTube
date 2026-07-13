@@ -347,72 +347,45 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
   }
   const segments = project.script || [];
   if (!segments.length) return;
-  const introId = segments[0].id;
-  const picks = pickStockImages(STOCK_CYBER_IMAGES.length, mediaOffset % STOCK_CYBER_IMAGES.length, STOCK_CYBER_IMAGES);
-  const cyberUrls = new Set(STOCK_CYBER_IMAGES.map((i) => i.url.split('?')[0]));
-
-  // Drop non-cyber stills from intro so hook frames are phone/security first
-  const kept = [];
-  let introNonCyber = 0;
-  for (const asset of project.media || []) {
-    if (asset.segmentId === introId && asset.type === 'image') {
-      const key = (asset.url || '').split('?')[0];
-      if (!cyberUrls.has(key)) {
-        introNonCyber += 1;
-        if (introNonCyber <= 2) {
-          // keep at most 2 harvest stills for variety
-          kept.push(asset);
-        } else {
-          report.cyberStockReplaced = (report.cyberStockReplaced || 0) + 1;
-        }
-        continue;
-      }
-    }
-    kept.push(asset);
-  }
-  project.media = kept;
-
-  const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+  const pool = [...STOCK_CYBER_IMAGES, ...STOCK_MEDIA_POOL.filter((i) => !STOCK_CYBER_IMAGES.some((c) => c.url === i.url))];
+  const picks = pickStockImages(pool.length, mediaOffset % pool.length, pool);
+  const used = new Set();
+  const rebuilt = [];
   let added = 0;
-  const introAssets = [];
-  for (let i = 0; i < picks.length && added < 5; i += 1) {
-    const img = picks[i];
-    const key = img.url.split('?')[0];
-    if (used.has(key)) continue;
-    introAssets.push({
-      id: `cyber-stock-${introId}-${i}`,
-      segmentId: introId,
-      type: 'image',
-      url: img.url,
-      alt: img.alt,
-      query: `cyber-stock ${segments[0].title || ''}`,
-      source: 'Curated cyber stock',
-      isFallback: false,
-    });
-    used.add(key);
-    added += 1;
-  }
-  project.media = [...introAssets, ...project.media];
 
-  for (let s = 1; s < segments.length; s += 1) {
-    const seg = segments[s];
-    const img = picks[(s + mediaOffset) % picks.length];
-    if (!img) continue;
-    const key = img.url.split('?')[0];
-    if (used.has(key)) continue;
-    project.media.push({
-      id: `cyber-stock-${seg.id}-0`,
-      segmentId: seg.id,
-      type: 'image',
-      url: img.url,
-      alt: img.alt,
-      query: `cyber-stock ${seg.title || ''}`,
-      source: 'Curated cyber stock',
-      isFallback: false,
-    });
-    used.add(key);
-    added += 1;
+  // Replace ALL non-archive images with curated stills; keep archive.org motion
+  for (const asset of project.media || []) {
+    if (asset.type === 'video' && /archive\.org/i.test(asset.url || '')) {
+      rebuilt.push(asset);
+      used.add((asset.url || '').split('?')[0]);
+      continue;
+    }
+    // drop harvest images / junk videos — replaced below per segment
   }
+
+  for (let s = 0; s < segments.length; s += 1) {
+    const seg = segments[s];
+    const perSeg = s === 0 ? 6 : 4;
+    for (let i = 0; i < perSeg; i += 1) {
+      const img = picks[(s * 5 + i + mediaOffset) % picks.length];
+      if (!img) continue;
+      const key = img.url.split('?')[0];
+      if (used.has(key) && i > 0) continue;
+      rebuilt.push({
+        id: `cyber-stock-${seg.id}-${i}`,
+        segmentId: seg.id,
+        type: 'image',
+        url: img.url,
+        alt: img.alt,
+        query: `cyber-stock ${seg.title || ''}`,
+        source: 'Curated cyber stock',
+        isFallback: false,
+      });
+      used.add(key);
+      added += 1;
+    }
+  }
+  project.media = rebuilt;
   if (added) {
     report.cyberStockInjected = added;
   }

@@ -87,8 +87,10 @@ async function main() {
   mkdirSync(LOOP_DIR, { recursive: true });
 
   const lockPath = join(LOOP_DIR, 'LOOP.lock');
-  if (existsSync(lockPath)) {
-    const prev = readFileSync(lockPath, 'utf8').trim();
+  try {
+    writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
+  } catch {
+    const prev = existsSync(lockPath) ? readFileSync(lockPath, 'utf8').trim() : '';
     const prevPid = parseInt(prev, 10);
     let alive = false;
     if (Number.isFinite(prevPid)) {
@@ -103,8 +105,8 @@ async function main() {
       console.error(`❌ Another improvement loop is running (pid ${prevPid}). Kill it or delete ${lockPath}`);
       process.exit(2);
     }
+    writeFileSync(lockPath, String(process.pid));
   }
-  writeFileSync(lockPath, String(process.pid));
   const clearLock = () => {
     try {
       if (existsSync(lockPath) && readFileSync(lockPath, 'utf8').trim() === String(process.pid)) {

@@ -408,6 +408,68 @@ async function fetchArchiveVideoResults(devServer, query) {
   }
 }
 
+/** Direct Pexels Videos API (no UI harvest required). */
+async function fetchPexelsVideos(query, perPage = 8) {
+  const key = resolvePexelsKey();
+  if (!key) return [];
+  try {
+    const url = `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${perPage}&size=medium`;
+    const res = await fetch(url, { headers: { Authorization: key } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const out = [];
+    for (const video of data.videos || []) {
+      if (!video?.video_files?.length) continue;
+      if (video.height > video.width) continue;
+      if ((video.duration || 0) > 45) continue;
+      const hd =
+        video.video_files
+          .filter((f) => (f.width || 0) >= 1280)
+          .sort((a, b) => (b.width || 0) - (a.width || 0))[0]
+        || video.video_files.sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+      if (!hd?.link) continue;
+      out.push({
+        url: hd.link,
+        alt: `Pexels: ${query}`,
+        source: 'Pexels Videos',
+        thumbnailUrl: video.image,
+        duration: video.duration,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** Direct Pixabay Videos API. */
+async function fetchPixabayVideos(query, perPage = 8) {
+  const key = resolvePixabayKey();
+  if (!key) return [];
+  try {
+    const url = `https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(query)}&per_page=${perPage}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const out = [];
+    for (const hit of data.hits || []) {
+      const videos = hit.videos || {};
+      const pick = videos.large || videos.medium || videos.small;
+      if (!pick?.url) continue;
+      out.push({
+        url: pick.url,
+        alt: hit.tags || `Pixabay: ${query}`,
+        source: 'Pixabay Videos',
+        thumbnailUrl: hit.userImageURL || undefined,
+        duration: hit.duration,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
  * No Pexels/Pixabay keys required.
@@ -422,24 +484,27 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
   stripJunkDemoVideos(project, report);
 
   const liveClips = [];
-  if (devServer) {
-    const queries = [
-      project.topic || project.title || '',
-      cyberTopic ? 'phishing bank scam voice' : '',
-      cyberTopic ? 'identity theft fraud' : '',
-      /tornado|storm|disaster/i.test(topicBlob) ? 'tornado storm damage news' : '',
-    ].filter(Boolean);
-    for (const q of queries.slice(0, 3)) {
-      const found = await fetchArchiveVideoResults(devServer, q);
-      for (const clip of found) {
-        if (liveClips.length >= 12) break;
-        if (liveClips.some((c) => c.url === clip.url)) continue;
-        // Skip huge archive dumps (>80MB probe later); keep candidate list
-        liveClips.push(clip);
-      }
+  const queries = [
+    project.topic || project.title || '',
+    cyberTopic ? 'person using smartphone banking' : '',
+    cyberTopic ? 'hacker computer keyboard cyber' : '',
+    cyberTopic ? 'credit card payment phone' : '',
+    /tornado|storm|disaster/i.test(topicBlob) ? 'tornado storm damage news' : '',
+  ].filter(Boolean);
+
+  for (const q of queries.slice(0, 4)) {
+    const fromPexels = await fetchPexelsVideos(q, 6);
+    const fromPixabay = await fetchPixabayVideos(q, 6);
+    const fromArchive = devServer ? await fetchArchiveVideoResults(devServer, q) : [];
+    for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
+      if (liveClips.length >= 24) break;
+      if (liveClips.some((c) => c.url === clip.url)) continue;
+      liveClips.push(clip);
     }
-    report.archiveLiveFetched = liveClips.length;
   }
+  report.archiveLiveFetched = liveClips.filter((c) => /Archive/i.test(c.source || '')).length;
+  report.pexelsFetched = liveClips.filter((c) => /Pexels/i.test(c.source || '')).length;
+  report.pixabayFetched = liveClips.filter((c) => /Pixabay/i.test(c.source || '')).length;
 
   let pool = [
     ...liveClips,
@@ -463,13 +528,16 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
   const usableVideos = (project.media || []).filter(
     (a) => a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
   );
+  const stockApiVideos = usableVideos.filter((a) => /pexels|pixabay|mixkit|archive\.org/i.test(`${a.url} ${a.source || ''}`));
   const videoCount = usableVideos.length;
-  // Motion-first: aim for ≥2 clips per segment (brutal pacing/visualVariety)
-  const minVideos = Math.min(segments.length * 2, cyberTopic || seriousTopic ? 6 : 6);
-  if (videoCount >= minVideos) return;
+  // Motion-first: when stock API keys exist, require real stock motion (not thin harvest proxies)
+  const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
+  const minVideos = Math.min(segments.length * 2, 6);
+  const stockNeed = hasStockKeys ? Math.max(0, Math.min(segments.length * 2, 6) - stockApiVideos.length) : 0;
+  if (videoCount >= minVideos && stockNeed <= 0) return;
 
   const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
-  let need = minVideos - videoCount;
+  let need = Math.max(minVideos - videoCount, stockNeed);
   const picks = pickStockVideos(need + segments.length * 2, mediaOffset, pool);
   let vi = 0;
   for (const seg of segments) {
@@ -1084,6 +1152,11 @@ export async function generateFullVideo(options) {
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
       if (mediaReport.videoTopUp?.length) {
         log(`   🎬 Video top-up: +${mediaReport.videoTopUp.length} motion clips`);
+      }
+      if (mediaReport.pexelsFetched || mediaReport.pixabayFetched || mediaReport.archiveLiveFetched) {
+        log(
+          `   📡 Live motion sources: pexels=${mediaReport.pexelsFetched || 0} pixabay=${mediaReport.pixabayFetched || 0} archive=${mediaReport.archiveLiveFetched || 0}`,
+        );
       }
       if (mediaReport.junkVideoDropped?.length) {
         log(`   🗑️ Junk demo videos dropped: ${mediaReport.junkVideoDropped.length}`);

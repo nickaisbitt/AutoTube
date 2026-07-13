@@ -77,7 +77,8 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
 
   if (sceneFail) {
     s.useFastPacing = true;
-    s.patternInterrupts = true;
+    // Prefer faster cuts over solid-color flash interrupts (vision samples flash frames)
+    s.patternInterrupts = false;
     escalateFixStrategy(s, applied, `0. Scene hold FAIL (longest ${longestHold.toFixed(1)}s)`, { sceneFirst: true });
   }
 

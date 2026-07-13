@@ -243,20 +243,28 @@ export const STOCK_CYBER_IMAGES = [
     alt: 'Smartphone in hands close up',
   },
   {
-    url: 'https://images.unsplash.com/photo-1614064641938-3bcee50cba1e?auto=format&w=1920&q=85',
-    alt: 'Padlock security concept',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1633265486064-086b219458ec?auto=format&w=1920&q=85',
-    alt: 'Fingerprint biometric security',
+    url: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&w=1920&q=85',
+    alt: 'Retail checkout payment',
   },
   {
     url: 'https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&w=1920&q=85',
     alt: 'Online shopping credit card',
   },
   {
+    url: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&w=1920&q=85',
+    alt: 'Person typing on laptop',
+  },
+  {
     url: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&w=1920&q=85',
     alt: 'Cybersecurity and technology',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1633265486064-086b219458ec?auto=format&w=1920&q=85',
+    alt: 'Fingerprint biometric security',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1614064641938-3bcee50cba1e?auto=format&w=1920&q=85',
+    alt: 'Padlock security concept',
   },
   {
     url: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&w=1920&q=85',
@@ -265,14 +273,6 @@ export const STOCK_CYBER_IMAGES = [
   {
     url: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&w=1920&q=85',
     alt: 'Digital code matrix screen',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&w=1920&q=85',
-    alt: 'Person typing on laptop',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&w=1920&q=85',
-    alt: 'Retail checkout payment',
   },
   {
     url: 'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?auto=format&w=1920&q=85',

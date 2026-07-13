@@ -16,6 +16,7 @@ import {
   STOCK_MEDIA_POOL,
   STOCK_VIDEO_POOL,
   STOCK_CYBER_IMAGES,
+  MIXKIT_VIDEO_POOL,
   pickStockImages,
   pickStockVideos,
   isJunkDemoVideoUrl,
@@ -337,8 +338,7 @@ function stripJunkDemoVideos(project, report) {
 }
 
 /**
- * Prefetch curated human/phone/security stills into the intro so hook frames
- * aren't random gardening/website screenshots from thin harvest.
+ * Prefetch curated human/phone/security stills; keep usable motion clips.
  */
 function injectCyberStockStills(project, report, mediaOffset = 0) {
   const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
@@ -349,27 +349,22 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
   if (!segments.length) return;
   const pool = [...STOCK_CYBER_IMAGES, ...STOCK_MEDIA_POOL.filter((i) => !STOCK_CYBER_IMAGES.some((c) => c.url === i.url))];
   const picks = pickStockImages(pool.length, mediaOffset % pool.length, pool);
-  const used = new Set();
   const rebuilt = [];
   let added = 0;
 
-  // Replace ALL non-archive images with curated stills; keep archive.org motion
+  // Keep Mixkit / archive / Pexels motion; drop junk harvest images
   for (const asset of project.media || []) {
-    if (asset.type === 'video' && /archive\.org/i.test(asset.url || '')) {
+    if (asset.type === 'video' && !isJunkDemoVideoUrl(asset.url || '')) {
       rebuilt.push(asset);
-      used.add((asset.url || '').split('?')[0]);
-      continue;
     }
-    // drop harvest images / junk videos — replaced below per segment
   }
 
   for (let s = 0; s < segments.length; s += 1) {
     const seg = segments[s];
-    const perSeg = 8; // beat volume gate (≥6–8/seg) with curated stills alone
+    const perSeg = 6;
     for (let i = 0; i < perSeg; i += 1) {
       const img = picks[(s * 7 + i + mediaOffset) % picks.length];
       if (!img) continue;
-      const key = `${img.url.split('?')[0]}#${seg.id}-${i}`;
       rebuilt.push({
         id: `cyber-stock-${seg.id}-${i}`,
         segmentId: seg.id,
@@ -383,56 +378,117 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
       added += 1;
     }
   }
-  project.media = rebuilt;
+  // Intro-first: curated stills at front so hook frames aren't random PSA frames
+  const introId = segments[0].id;
+  const introStills = rebuilt.filter((a) => a.segmentId === introId && a.type === 'image').slice(0, 3);
+  const rest = rebuilt.filter((a) => !(a.segmentId === introId && a.type === 'image' && introStills.includes(a)));
+  project.media = [...introStills, ...rest];
   if (added) {
     report.cyberStockInjected = added;
   }
 }
 
+async function fetchArchiveVideoResults(devServer, query) {
+  try {
+    const headers = {};
+    const apiKey = resolveAutotubeApiKey();
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    const res = await fetch(`${devServer}/api/search-archive?q=${encodeURIComponent(query)}`, { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || [])
+      .map((r) => ({
+        url: r.url,
+        alt: r.title || r.alt || query,
+        source: 'Archive.org live',
+      }))
+      .filter((r) => r.url && /\.mp4(?:[?#]|$)/i.test(r.url));
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Inject direct-mp4 motion clips when harvest yielded zero/few usable videos.
- * Prefer archive.org topical clips; skip cartoon/sample fillers for serious news topics
- * (off-topic bunny/flower clips tank brutal visualVariety scores).
+ * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
+ * No Pexels/Pixabay keys required.
  */
-function topUpVideoBroll(project, report, mediaOffset = 0) {
+async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '') {
   const segments = project.script || [];
   if (!segments.length) return;
   const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
   const seriousTopic = isSeriousNewsTopic(topicBlob);
+  const cyberTopic = /bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password|ai/i.test(topicBlob);
 
   stripJunkDemoVideos(project, report);
 
-  let pool = STOCK_VIDEO_POOL;
-  if (seriousTopic) {
-    pool = topicalStockVideos(topicBlob, STOCK_VIDEO_POOL);
-    if (!pool.length) {
-      report.videoTopUpSkipped = 'serious-topic-no-archive-clips';
-      return;
+  const liveClips = [];
+  if (devServer) {
+    const queries = [
+      project.topic || project.title || '',
+      cyberTopic ? 'phishing bank scam voice' : '',
+      cyberTopic ? 'identity theft fraud' : '',
+      /tornado|storm|disaster/i.test(topicBlob) ? 'tornado storm damage news' : '',
+    ].filter(Boolean);
+    for (const q of queries.slice(0, 3)) {
+      const found = await fetchArchiveVideoResults(devServer, q);
+      for (const clip of found) {
+        if (liveClips.length >= 12) break;
+        if (liveClips.some((c) => c.url === clip.url)) continue;
+        // Skip huge archive dumps (>80MB probe later); keep candidate list
+        liveClips.push(clip);
+      }
     }
+    report.archiveLiveFetched = liveClips.length;
+  }
+
+  let pool = [
+    ...liveClips,
+    ...(cyberTopic ? MIXKIT_VIDEO_POOL : []),
+    ...(seriousTopic ? topicalStockVideos(topicBlob, STOCK_VIDEO_POOL) : STOCK_VIDEO_POOL.filter((v) => !(v.tags || []).includes('filler'))),
+  ];
+  // Dedupe pool by URL
+  const seenPool = new Set();
+  pool = pool.filter((v) => {
+    const key = (v.url || '').split('?')[0];
+    if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key)) return false;
+    seenPool.add(key);
+    return true;
+  });
+
+  if (!pool.length) {
+    report.videoTopUpSkipped = 'no-motion-pool';
+    return;
   }
 
   const usableVideos = (project.media || []).filter(
     (a) => a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
   );
   const videoCount = usableVideos.length;
-  // Cyber topics: prefer curated stills + 1–2 motion clips (PSA dumps tank brutal scores)
-  const minVideos = Math.min(segments.length * 2, seriousTopic ? 2 : 6);
+  // Motion-first: aim for ≥2 clips per segment (brutal pacing/visualVariety)
+  const minVideos = Math.min(segments.length * 2, cyberTopic || seriousTopic ? 6 : 6);
   if (videoCount >= minVideos) return;
 
   const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
   let need = minVideos - videoCount;
-  const picks = pickStockVideos(need + segments.length, mediaOffset, pool);
+  const picks = pickStockVideos(need + segments.length * 2, mediaOffset, pool);
   let vi = 0;
   for (const seg of segments) {
     if (need <= 0) break;
     const segVideos = (project.media || []).filter(
       (a) => a.segmentId === seg.id && a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
     ).length;
-    const want = Math.max(0, (seriousTopic ? 1 : 2) - segVideos);
+    const want = Math.max(0, 2 - segVideos);
     for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1, vi += 1) {
       const clip = picks[vi];
       const key = clip.url.split('?')[0];
       if (used.has(key)) continue;
+      // Quick probe so we don't queue dead archive links
+      const ok = await canFetch(clip.url, { timeoutMs: 10000, minBytes: 2048, expectVideo: true });
+      if (!ok) {
+        report.videoTopUpFailed = report.videoTopUpFailed || [];
+        report.videoTopUpFailed.push({ url: clip.url, reason: 'probe failed' });
+        continue;
+      }
       project.media.push({
         id: `stock-video-${seg.id}-${i}`,
         segmentId: seg.id,
@@ -440,14 +496,14 @@ function topUpVideoBroll(project, report, mediaOffset = 0) {
         url: clip.url,
         alt: clip.alt || seg.title,
         query: `stock-video ${seg.title}`,
-        source: 'Stock video pool',
+        source: clip.source || 'Stock video pool',
         duration: 8,
         isFallback: false,
       });
       used.add(key);
       need -= 1;
       report.videoTopUp = report.videoTopUp || [];
-      report.videoTopUp.push({ segmentId: seg.id, url: clip.url });
+      report.videoTopUp.push({ segmentId: seg.id, url: clip.url, source: clip.source || 'pool' });
     }
   }
 }
@@ -641,7 +697,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
 
   if (loopMode) {
     await topUpHarvestVolume(project, devServer, minPerSegment, report);
-    topUpVideoBroll(project, report, options.mediaOffset || 0);
+    await topUpVideoBroll(project, report, options.mediaOffset || 0, devServer);
     injectCyberStockStills(project, report, options.mediaOffset || 0);
     report.afterTopUp = project.media.length;
   }

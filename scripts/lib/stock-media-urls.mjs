@@ -139,6 +139,21 @@ export const STOCK_MEDIA_POOL = [
 ];
 
 /**
+ * Free Mixkit stock motion (no API key). Prefer human/phone/tech for cyber topics.
+ * URLs verified as direct 720p MP4s: https://assets.mixkit.co/videos/{id}/{id}-720.mp4
+ */
+export const MIXKIT_VIDEO_POOL = [
+  { url: 'https://assets.mixkit.co/videos/4274/4274-720.mp4', alt: 'Woman using smartphone in cafe', tags: ['phone', 'cyber', 'bank', 'human'] },
+  { url: 'https://assets.mixkit.co/videos/4518/4518-720.mp4', alt: 'Hands working on laptop', tags: ['laptop', 'cyber', 'hack', 'human'] },
+  { url: 'https://assets.mixkit.co/videos/4060/4060-720.mp4', alt: 'Business motion clip', tags: ['business', 'bank', 'office'] },
+  { url: 'https://assets.mixkit.co/videos/3249/3249-720.mp4', alt: 'Lifestyle motion clip', tags: ['human', 'lifestyle'] },
+  { url: 'https://assets.mixkit.co/videos/5065/5065-720.mp4', alt: 'Urban motion clip', tags: ['city', 'street'] },
+  { url: 'https://assets.mixkit.co/videos/10052/10052-720.mp4', alt: 'People motion clip', tags: ['human', 'people'] },
+  { url: 'https://assets.mixkit.co/videos/34566/34566-720.mp4', alt: 'Tech lifestyle motion', tags: ['tech', 'cyber'] },
+  { url: 'https://assets.mixkit.co/videos/47028/47028-720.mp4', alt: 'Friends outdoor motion', tags: ['human', 'people'] },
+];
+
+/**
  * Direct-download public-domain / archive video clips (mp4).
  * Used when YouTube yt-dlp is unavailable so ffmpeg assembly still gets motion B-roll.
  * Prefer archive.org for serious topics — sample/demo clips tank brutal visualVariety.
@@ -189,6 +204,7 @@ export const STOCK_VIDEO_POOL = [
     alt: 'News motion footage',
     tags: ['news', 'tornado', 'storm'],
   },
+  ...MIXKIT_VIDEO_POOL,
   {
     url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     alt: 'Nature motion clip',

@@ -316,6 +316,7 @@ function stripJunkDemoVideos(project, report) {
     const url = asset.url || '';
     const junk =
       isJunkDemoVideoUrl(url)
+      || isJunkStockClip(asset)
       || (/\/api\/download-clip/i.test(url) && /youtube\.com|youtu\.be/i.test(url));
     if (junk) {
       report.junkVideoDropped = report.junkVideoDropped || [];
@@ -360,8 +361,8 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
   ).length;
   const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
   const motionOk = hasStockKeys && stockMotion >= Math.max(6, segments.length * 2);
-  const pool = [...STOCK_CYBER_IMAGES, ...STOCK_MEDIA_POOL.filter((i) => !STOCK_CYBER_IMAGES.some((c) => c.url === i.url))];
-  const picks = pickStockImages(pool.length, mediaOffset % pool.length, pool);
+  const pool = [...STOCK_CYBER_IMAGES];
+  const picks = pickStockImages(pool.length, mediaOffset % Math.max(pool.length, 1), pool);
   let added = 0;
 
   for (let s = 0; s < segments.length; s += 1) {
@@ -483,6 +484,42 @@ async function fetchPixabayVideos(query, perPage = 8) {
   }
 }
 
+/** Pixabay/Pexels often match topic words literally (piggy bank, wash hands, rotate phone). */
+function isJunkStockClip(clip = {}) {
+  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
+  return (
+    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|surgery|surgical|hospital|operating room|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|cartoon|animation|minecraft|fortnite|gameplay/i.test(
+      blob,
+    )
+  );
+}
+
+function stockMotionQueries(topicBlob, cyberTopic) {
+  // Never send the full long topic sentence to Pixabay — it matches random tokens.
+  if (cyberTopic) {
+    return [
+      'shocked person looking at phone',
+      'online banking smartphone close up',
+      'credit card payment laptop',
+      'worried person phone call',
+      'hacker typing computer dark',
+      'microphone voice recording',
+      'mobile banking app hands',
+      'identity theft security concept',
+    ];
+  }
+  if (/tornado|storm|disaster/i.test(topicBlob)) {
+    return ['tornado storm damage news', 'severe weather radar', 'emergency news footage'];
+  }
+  const words = String(topicBlob || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 3)
+    .slice(0, 4);
+  return words.length ? [words.join(' '), ...words.slice(0, 2)] : ['people using technology'];
+}
+
 /**
  * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
  * No Pexels/Pixabay keys required.
@@ -497,16 +534,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
   stripJunkDemoVideos(project, report);
 
   const liveClips = [];
-  const queries = [
-    project.topic || project.title || '',
-    cyberTopic ? 'shocked person looking at phone' : '',
-    cyberTopic ? 'online banking laptop smartphone' : '',
-    cyberTopic ? 'credit card payment phone close up' : '',
-    cyberTopic ? 'person talking on phone worried' : '',
-    cyberTopic ? 'hacker typing computer dark room' : '',
-    cyberTopic ? 'microphone voice recording studio' : '',
-    /tornado|storm|disaster/i.test(topicBlob) ? 'tornado storm damage news' : '',
-  ].filter(Boolean);
+  const queries = stockMotionQueries(topicBlob, cyberTopic);
 
   for (const q of queries.slice(0, 6)) {
     const fromPexels = await fetchPexelsVideos(q, 10);
@@ -514,6 +542,10 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
     const fromArchive = devServer ? await fetchArchiveVideoResults(devServer, q) : [];
     for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
       if (liveClips.length >= 40) break;
+      if (isJunkStockClip(clip)) {
+        report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+        continue;
+      }
       if (liveClips.some((c) => c.url === clip.url)) continue;
       liveClips.push(clip);
     }
@@ -527,11 +559,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
     ...(cyberTopic ? MIXKIT_VIDEO_POOL : []),
     ...(seriousTopic ? topicalStockVideos(topicBlob, STOCK_VIDEO_POOL) : STOCK_VIDEO_POOL.filter((v) => !(v.tags || []).includes('filler'))),
   ];
-  // Dedupe pool by URL
+  // Dedupe pool by URL + drop junk tags
   const seenPool = new Set();
   pool = pool.filter((v) => {
     const key = (v.url || '').split('?')[0];
-    if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key)) return false;
+    if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key) || isJunkStockClip(v)) return false;
     seenPool.add(key);
     return true;
   });
@@ -1182,8 +1214,14 @@ export async function generateFullVideo(options) {
       if (mediaReport.junkVideoDropped?.length) {
         log(`   🗑️ Junk demo videos dropped: ${mediaReport.junkVideoDropped.length}`);
       }
+      if (mediaReport.junkStockSkipped) {
+        log(`   🚫 Junk stock skipped: ${mediaReport.junkStockSkipped}`);
+      }
       if (mediaReport.cyberStockInjected) {
         log(`   🛡️ Cyber stock stills: +${mediaReport.cyberStockInjected}`);
+      }
+      if (mediaReport.cyberStockSkipped) {
+        log(`   🎬 Cyber stills: ${mediaReport.cyberStockSkipped}`);
       }
       if (mediaReport.cyberStockSkipped) {
         log(`   🎬 Cyber stills: ${mediaReport.cyberStockSkipped}`);

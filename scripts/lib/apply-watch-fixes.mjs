@@ -4,7 +4,7 @@
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
 
-const CUT_FLOOR = 0.5;
+const CUT_FLOOR = 0.85;
 
 /**
  * Escalate fix strategy when interval cuts alone are not working.

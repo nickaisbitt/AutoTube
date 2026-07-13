@@ -98,7 +98,7 @@ export async function buildBrollPlacementPlan(
   ].join('\n');
 
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetch('/api/llm', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,

@@ -39,16 +39,9 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
   const { confirm, dialog: confirmDialog } = useConfirmDialog('new-video-reset');
 
   const {
-    isPlaying,
-    currentTime,
     currentSegmentIndex,
-    isMuted,
-    isNarrating,
     totalDuration,
-    handlePlayPause,
-    handleResetPlayback,
     jumpToTime,
-    setIsMuted,
     setCurrentTime,
     setIsPlaying,
     formatTime,
@@ -221,28 +214,18 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
       {/* Video Player */}
       <VideoPlayer
         project={project}
-        isPlaying={isPlaying}
-        currentTime={currentTime}
-        currentSegmentIndex={currentSegmentIndex}
-        totalDuration={totalDuration}
-        isMuted={isMuted}
-        isNarrating={isNarrating}
         previewMode={previewMode}
-        onPlayPause={handlePlayPause}
-        onResetPlayback={handleResetPlayback}
-        onJumpToTime={jumpToTime}
-        onMuteToggle={() => setIsMuted(prev => !prev)}
-        formatTime={formatTime}
         videoRef={videoRef}
         onTimeUpdate={setCurrentTime}
         onVideoEnded={() => setIsPlaying(false)}
       />
 
-      {/* Video Quality Check */}
+      {/* Video Quality Check — allow blob URLs from browser canvas renders */}
       <QualityCheck
         videoUrl={
           project.exportSettings?.serverVideoUrl
-          ?? (project.thumbnail?.startsWith('blob:') ? null : project.thumbnail ?? null)
+          ?? project.thumbnail
+          ?? null
         }
       />
 

@@ -132,6 +132,30 @@ export async function handleServerRender(
     env: { ...process.env, ...envVars, DEV_SERVER_URL: devServerUrl, REMOTION_SERVE_URL: useRemotion ? devServerUrl : undefined },
   });
 
+  // Wall-clock timeout for hung TTS/ffmpeg (default 20 minutes)
+  const RENDER_TIMEOUT_MS = Number(process.env.AUTOTUBE_SERVER_RENDER_TIMEOUT_MS || 1_200_000);
+  const renderTimeout = setTimeout(() => {
+    if (!child.killed) {
+      try {
+        sendEvent({
+          type: "error",
+          message: `server-render timed out after ${Math.round(RENDER_TIMEOUT_MS / 1000)}s`,
+        });
+      } catch {
+        /* connection may be closed */
+      }
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!child.killed) child.kill("SIGKILL");
+      }, 10_000);
+      try {
+        res.end();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, RENDER_TIMEOUT_MS);
+
   let stderr = "";
   child.stdout.on("data", (data: Buffer) => {
     const line = data.toString().trim();
@@ -152,6 +176,7 @@ export async function handleServerRender(
 
   child.on("close", (code: number) => {
     clearInterval(heartbeat);
+    clearTimeout(renderTimeout);
     if (code !== 0) {
       sendEvent({
         type: "error",
@@ -223,6 +248,7 @@ export async function handleServerRender(
   // Handle client disconnect
   req.on("close", () => {
     clearInterval(heartbeat);
+    clearTimeout(renderTimeout);
     if (!child.killed) child.kill("SIGTERM");
   });
 }

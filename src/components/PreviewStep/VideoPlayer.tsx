@@ -4,20 +4,10 @@ import StoryboardView from '../StoryboardView';
 
 export type PreviewMode = 'rendered' | 'storyboard';
 
+/** Props actually used by the native <video> / storyboard preview. */
 export interface VideoPlayerProps {
   project: VideoProject;
-  isPlaying: boolean;
-  currentTime: number;
-  currentSegmentIndex: number;
-  totalDuration: number;
-  isMuted: boolean;
-  isNarrating: boolean;
   previewMode: PreviewMode;
-  onPlayPause: () => void;
-  onResetPlayback: () => void;
-  onJumpToTime: (time: number) => void;
-  onMuteToggle: () => void;
-  formatTime: (seconds: number) => string;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   onTimeUpdate: (time: number) => void;
   onVideoEnded: () => void;
@@ -25,29 +15,7 @@ export interface VideoPlayerProps {
 
 export default function VideoPlayer({
   project,
-  // @ts-ignore - unused variable
-  isPlaying,
-  // @ts-ignore - unused variable
-  currentTime,
-  // @ts-ignore - unused variable
-  currentSegmentIndex,
-  // @ts-ignore - unused variable
-  totalDuration,
-  // @ts-ignore - unused variable
-  isMuted,
-  // @ts-ignore - unused variable
-  isNarrating,
   previewMode,
-  // @ts-ignore - unused variable
-  onPlayPause,
-  // @ts-ignore - unused variable
-  onResetPlayback,
-  // @ts-ignore - unused variable
-  onJumpToTime,
-  // @ts-ignore - unused variable
-  onMuteToggle,
-  // @ts-ignore - unused variable
-  formatTime,
   videoRef,
   onTimeUpdate,
   onVideoEnded,
@@ -66,7 +34,6 @@ export default function VideoPlayer({
         <div className="relative aspect-video bg-surface-950">
           {project.thumbnail ? (
             <>
-              {/* Loading overlay */}
               {isLoading && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-surface-950">
                   <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2 border-surface-600 border-t-brand-500" />
@@ -74,11 +41,9 @@ export default function VideoPlayer({
                 </div>
               )}
 
-              {/* Error overlay */}
               {hasError && !isLoading && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-surface-950">
-                  <p className="mb-3 text-2xl">⚠️</p>
-                  <p className="text-sm font-mono text-surface-400">Failed to load video. Try re-rendering.</p>
+                  <p className="mb-3 text-sm font-mono text-surface-400">Failed to load video. Try re-rendering.</p>
                 </div>
               )}
 

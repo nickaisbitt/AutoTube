@@ -53,3 +53,14 @@ Or push `master` after connecting repo once in Railway UI.
 ## Worker vs AutoTube project
 
 `cursor-worker` injects `RAILWAY_PROJECT_ID` for **cursor-self-hosted-worker**. Deploy scripts target **AutoTube-Deploy** by name via CLI — that is correct and unrelated to the worker’s project id.
+
+## AutoTube app secrets (production service)
+
+| Variable | Role |
+|----------|------|
+| **`OPENROUTER_API_KEY`** | Server-only LLM key (`/api/llm`). Do **not** set `VITE_OPENROUTER_KEY` on Railway for production images. |
+| **`AUTOTUBE_API_KEY`** | Required in `NODE_ENV=production`. Clients send the same value as `X-API-Key` (Settings → AutoTube API Key). `/api/health` stays public. |
+| **`SERPER_API_KEY`** | Optional server image search |
+| **`PEXELS_API_KEY` / `PIXABAY_API_KEY`** | Optional stock media (server-side) |
+
+Generate a long random `AUTOTUBE_API_KEY`, set it on Railway, and enter the same value in the AutoTube Settings modal (or `VITE_AUTOTUBE_API_KEY` for local `.env.local` only).

@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { apiFetch } from '../utils/apiClient';
+import { useVideoProject } from '../store/StoreContext';
 
 interface RenderProgress {
   currentFrame: number;
@@ -6,42 +8,54 @@ interface RenderProgress {
   fps: string;
   etaSeconds: number;
   memoryMB: string;
-  status: 'idle' | 'rendering' | 'encoding' | 'complete' | 'failed';
+  status: 'idle' | 'rendering' | 'encoding' | 'complete' | 'error' | 'failed';
   segmentIndex?: number;
   segmentTitle?: string;
   errorMessage?: string;
 }
 
 export default function RenderProgressDashboard() {
+  const { stepStatuses } = useVideoProject();
+  const assemblyBusy = stepStatuses.assembly === 'processing';
   const [progress, setProgress] = useState<RenderProgress | null>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const activeRef = useRef(false);
 
   useEffect(() => {
-    // Poll render progress every second
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch('/api/render-progress');
-        if (res.ok) {
-          const data = await res.json();
-          setProgress(data);
-          
-          // Auto-show when rendering starts
-          if (data.status === 'rendering' || data.status === 'encoding') {
-            setIsVisible(true);
-          }
-        }
-      } catch (err) {
-        // Silently fail - endpoint may not be available
-      }
-    }, 1000);
+    let interval: ReturnType<typeof setInterval> | undefined;
 
-    return () => clearInterval(interval);
-  }, []);
+    const poll = async () => {
+      try {
+        const res = await apiFetch('/api/render-progress');
+        if (!res.ok) return;
+        const data = (await res.json()) as RenderProgress;
+        setProgress(data);
+        const busy =
+          data.status === 'rendering' ||
+          data.status === 'encoding' ||
+          assemblyBusy;
+        activeRef.current = busy;
+        if (busy) setIsVisible(true);
+      } catch {
+        /* endpoint may be unavailable */
+      }
+    };
+
+    // Only poll while assembly is processing or after we have seen an active render
+    if (assemblyBusy || activeRef.current || isVisible) {
+      void poll();
+      interval = setInterval(poll, 1000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [assemblyBusy, isVisible]);
 
   if (!progress || !isVisible) return null;
 
-  const percentComplete = progress.totalFrames > 0 
-    ? Math.round((progress.currentFrame / progress.totalFrames) * 100) 
+  const percentComplete = progress.totalFrames > 0
+    ? Math.round((progress.currentFrame / progress.totalFrames) * 100)
     : 0;
 
   const formatTime = (seconds: number) => {
@@ -56,41 +70,27 @@ export default function RenderProgressDashboard() {
       case 'rendering': return 'text-brand-400';
       case 'encoding': return 'text-accent-400';
       case 'complete': return 'text-emerald-400';
-      case 'failed': return 'text-red-400';
+      case 'failed':
+      case 'error': return 'text-red-400';
       default: return 'text-surface-400';
-    }
-  };
-
-  const getStatusIcon = () => {
-    switch (progress.status) {
-      case 'rendering': return '🎬';
-      case 'encoding': return '⚙️';
-      case 'complete': return '✅';
-      case 'failed': return '❌';
-      default: return '⏸️';
     }
   };
 
   return (
     <div className="fixed bottom-4 right-4 z-50 w-96 bg-surface-900 border-2 border-brand-500 shadow-hard">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 bg-surface-800 border-b border-surface-700">
-        <div className="flex items-center gap-2">
-          <span className="text-lg">{getStatusIcon()}</span>
-          <h3 className="font-bold text-surface-100">Render Progress</h3>
-        </div>
+        <h3 className="font-bold text-surface-100 font-mono text-sm">Render Progress</h3>
         <button
+          type="button"
           onClick={() => setIsVisible(false)}
-          className="text-surface-400 hover:text-surface-200 transition-colors"
+          className="text-surface-400 hover:text-surface-200"
           aria-label="Close dashboard"
         >
           ✕
         </button>
       </div>
 
-      {/* Content */}
       <div className="p-4 space-y-3">
-        {/* Status */}
         <div className="flex items-center justify-between">
           <span className="text-surface-400 text-sm">Status:</span>
           <span className={`font-semibold ${getStatusColor()}`}>
@@ -98,7 +98,6 @@ export default function RenderProgressDashboard() {
           </span>
         </div>
 
-        {/* Current Segment */}
         {progress.segmentTitle && (
           <div className="space-y-1">
             <span className="text-surface-400 text-sm">Current Segment:</span>
@@ -109,7 +108,6 @@ export default function RenderProgressDashboard() {
           </div>
         )}
 
-        {/* Progress Bar */}
         <div className="space-y-1">
           <div className="flex justify-between text-sm">
             <span className="text-surface-400">Progress</span>
@@ -119,7 +117,7 @@ export default function RenderProgressDashboard() {
           </div>
           <div className="relative h-3 bg-surface-700 overflow-hidden">
             <div
-              className="absolute left-0 top-0 h-full bg-gradient-to-r from-brand-500 to-accent-500 transition-all duration-300"
+              className="absolute left-0 top-0 h-full bg-brand-500"
               style={{ width: `${percentComplete}%` }}
             />
           </div>
@@ -128,27 +126,21 @@ export default function RenderProgressDashboard() {
           </div>
         </div>
 
-        {/* Metrics Grid */}
         <div className="grid grid-cols-2 gap-2">
-          <div className="bg-surface-800 p-2 rounded">
+          <div className="bg-surface-800 p-2">
             <div className="text-xs text-surface-400">FPS</div>
             <div className="text-lg font-mono text-surface-200">{progress.fps}</div>
           </div>
-          <div className="bg-surface-800 p-2 rounded">
+          <div className="bg-surface-800 p-2">
             <div className="text-xs text-surface-400">ETA</div>
             <div className="text-lg font-mono text-surface-200">
               {formatTime(progress.etaSeconds)}
             </div>
           </div>
-          <div className="bg-surface-800 p-2 rounded col-span-2">
-            <div className="text-xs text-surface-400">Memory Usage</div>
-            <div className="text-lg font-mono text-surface-200">{progress.memoryMB} MB</div>
-          </div>
         </div>
 
-        {/* Error Message */}
         {progress.errorMessage && (
-          <div className="bg-red-900/20 border border-red-500 p-2 rounded">
+          <div className="bg-red-900/20 border border-red-500 p-2">
             <p className="text-red-400 text-sm">{progress.errorMessage}</p>
           </div>
         )}

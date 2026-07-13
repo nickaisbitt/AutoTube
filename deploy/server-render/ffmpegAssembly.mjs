@@ -42,6 +42,48 @@ function ffmpegPreset() {
   return process.env.AUTOTUBE_FFMPEG_PRESET || (process.env.AUTOTUBE_RENDER_QUALITY === 'draft' ? 'ultrafast' : 'fast');
 }
 
+function escapeConcatPath(p) {
+  return resolve(p).replace(/'/g, "'\\''");
+}
+
+/** Concat demuxer with -c copy, then re-encode fallback on codec mismatch. */
+function concatVideos(inputs, outputPath, listFile) {
+  writeFileSync(
+    listFile,
+    inputs.map((p) => `file '${escapeConcatPath(p)}'`).join('\n'),
+  );
+  const copy = spawnSync(
+    'ffmpeg',
+    ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-an', outputPath],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  if (copy.status === 0 && existsSync(outputPath)) {
+    return { ok: true, reencoded: false };
+  }
+  console.warn('  [ffmpeg] concat -c copy failed; retrying with re-encode');
+  try {
+    if (existsSync(outputPath)) unlinkSync(outputPath);
+  } catch {
+    /* ignore */
+  }
+  const reencode = spawnSync(
+    'ffmpeg',
+    [
+      '-y', '-f', 'concat', '-safe', '0', '-i', listFile,
+      '-c:v', 'libx264', '-preset', ffmpegPreset(), '-pix_fmt', 'yuv420p', '-an',
+      outputPath,
+    ],
+    { encoding: 'utf8', timeout: 600_000 },
+  );
+  if (reencode.status !== 0 || !existsSync(outputPath)) {
+    return {
+      ok: false,
+      error: (reencode.stderr || copy.stderr || '').slice(-400) || 'concat failed',
+    };
+  }
+  return { ok: true, reencoded: true };
+}
+
 function hardCutsEnabled() {
   if (process.env.AUTOTUBE_FFMPEG_HARD_CUTS === '0' || process.env.AUTOTUBE_FFMPEG_HARD_CUTS === 'false') {
     return false;
@@ -399,26 +441,12 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   }
 
   const listFile = join(tmpDir, 'concat.txt');
-  writeFileSync(listFile, clipPaths.map((p) => `file '${resolve(p)}'`).join('\n'));
-  const r = spawnSync(
-    'ffmpeg',
-    [
-      '-y',
-      '-f',
-      'concat',
-      '-safe',
-      '0',
-      '-i',
-      listFile,
-      '-c',
-      'copy',
-      '-an',
-      outputPath,
-    ],
-    { encoding: 'utf8', timeout: 300_000 },
-  );
-  if (r.status !== 0 || !existsSync(outputPath)) {
-    return { ok: false, error: r.stderr?.slice(-300) || 'segment concat failed' };
+  const concat = concatVideos(clipPaths, outputPath, listFile);
+  if (!concat.ok) {
+    return { ok: false, error: concat.error || 'segment concat failed' };
+  }
+  if (concat.reencoded) {
+    console.log('  [ffmpeg] segment concat used re-encode fallback');
   }
 
   const videoSec = probeMediaDuration(outputPath);
@@ -483,26 +511,12 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
 
   const mergedVideo = join(workDir, 'merged-video.mp4');
   const listFile = join(workDir, 'segments.txt');
-  writeFileSync(listFile, segmentOutputs.map((p) => `file '${resolve(p)}'`).join('\n'));
-  const merge = spawnSync(
-    'ffmpeg',
-    [
-      '-y',
-      '-f',
-      'concat',
-      '-safe',
-      '0',
-      '-i',
-      listFile,
-      '-c',
-      'copy',
-      '-an',
-      mergedVideo,
-    ],
-    { encoding: 'utf8', timeout: 300_000 },
-  );
-  if (merge.status !== 0 || !existsSync(mergedVideo)) {
-    return { ok: false, error: 'segment merge failed' };
+  const merge = concatVideos(segmentOutputs, mergedVideo, listFile);
+  if (!merge.ok) {
+    return { ok: false, error: merge.error || 'segment merge failed' };
+  }
+  if (merge.reencoded) {
+    console.log('  [ffmpeg] segment merge used re-encode fallback');
   }
 
   const videoDurationSec = probeMediaDuration(mergedVideo) || 60;

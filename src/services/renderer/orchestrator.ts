@@ -11,6 +11,7 @@ import type { ShotPlan, TextCardEntry } from './editingRhythm';
 import { preload } from './preload';
 import { cleanupRenderResources, getSupportedMimeType, tryServerRender } from './encoding';
 import type { RenderResult } from './encoding';
+import { apiFetch } from '../../utils/apiClient';
 
 export interface RenderOptions {
   width?: number;
@@ -320,7 +321,7 @@ export async function renderVideoToBlob(
 
   // Try server-side ffmpeg assembly first (dev mode)
   try {
-    const res = await fetch('/api/render-video', {
+    const res = await apiFetch('/api/render-video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ frames: capturedFrames, fps: frameSampleRate, format: requestedFormat }),

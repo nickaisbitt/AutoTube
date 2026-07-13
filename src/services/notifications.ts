@@ -1,4 +1,5 @@
 import { safeSetItem } from '../utils/storage';
+import { apiFetch } from '../utils/apiClient';
 
 export type NotificationType = 'render-complete' | 'render-failed';
 export type NotificationMethod = 'browser' | 'email' | 'webhook';
@@ -73,7 +74,7 @@ async function sendEmailNotification(type: NotificationType, data: NotificationD
     throw new Error('Email notifications are not configured. Add an email address in notification settings.');
   }
 
-  const response = await fetch('/api/notify', {
+  const response = await apiFetch('/api/notify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

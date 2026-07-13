@@ -1,5 +1,6 @@
 import type { VideoProject } from '../../types';
 import { logger } from '../logger';
+import { apiFetch } from '../../utils/apiClient';
 
 export interface RenderResult {
   url: string;
@@ -75,7 +76,7 @@ export async function tryServerRender(
     const saveTimeout = new AbortController();
     const saveTimer = setTimeout(() => saveTimeout.abort(), 10_000);
     const saveSignal = signal ? AbortSignal.any([signal, saveTimeout.signal]) : saveTimeout.signal;
-    const saveRes = await fetch(
+    const saveRes = await apiFetch(
       `/api/save-project?id=${encodeURIComponent(project.id)}`,
       {
         method: 'POST',
@@ -106,7 +107,7 @@ export async function tryServerRender(
     const combinedSignal = serverTimeout.signal;
 
     // Start the server-side render via SSE — send project data in request body
-    const res = await fetch('/api/server-render', {
+    const res = await apiFetch('/api/server-render', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectPath }),

@@ -23,6 +23,7 @@ interface AIEditStepProps {
   onRunAIEdit: () => void;
   onSkipAIEdit: () => void;
   onNext: () => void;
+  onCancel?: () => void;
 }
 
 export default function AIEditStep({
@@ -33,6 +34,7 @@ export default function AIEditStep({
   onRunAIEdit,
   onSkipAIEdit,
   onNext,
+  onCancel,
 }: AIEditStepProps) {
   const editPlan = project?.editPlan ?? null;
 
@@ -88,6 +90,16 @@ export default function AIEditStep({
               {message || 'Initializing AI editor...'}
             </p>
           </div>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="border-2 border-surface-600 px-4 py-2 text-xs font-mono uppercase text-surface-300 hover:border-red-500 hover:text-red-400"
+              data-testid="cancel-ai-edit-button"
+            >
+              Cancel
+            </button>
+          )}
           <div className="space-y-2">
             <div className="h-2 overflow-hidden bg-surface-800">
               <div

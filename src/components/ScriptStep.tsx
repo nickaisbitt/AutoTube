@@ -33,9 +33,10 @@ interface ScriptStepProps {
   onNext: () => void;
   onUpdateNarration?: (segmentId: string, text: string) => void;
   onRegenerate?: () => void;
+  onCancel?: () => void;
 }
 
-export default function ScriptStep({ project, status, progress, message, onNext, onUpdateNarration, onRegenerate }: ScriptStepProps) {
+export default function ScriptStep({ project, status, progress, message, onNext, onUpdateNarration, onRegenerate, onCancel }: ScriptStepProps) {
   const [expandedSegment, setExpandedSegment] = useState<string | null>(null);
   const [editingSegment, setEditingSegment] = useState<string | null>(null);
   const [editTexts, setEditTexts] = useState<Record<string, string>>({});
@@ -105,6 +106,16 @@ export default function ScriptStep({ project, status, progress, message, onNext,
           >
             {SCRIPT_STATUS_MESSAGES[statusMessageIndex]}
           </p>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="mt-2 border-2 border-surface-600 px-4 py-2 text-xs font-mono uppercase text-surface-300 hover:border-red-500 hover:text-red-400"
+              data-testid="cancel-script-button"
+            >
+              Cancel
+            </button>
+          )}
           <div className="grid grid-cols-3 gap-3 pt-4">
             {['Researching', 'Structuring', 'Writing'].map((step, i) => (
               <div

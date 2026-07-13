@@ -12,6 +12,8 @@ interface SettingsModalProps {
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { appConfig: config, setAppConfig } = useVideoProject();
   const [orVal, setOrVal] = useState(config.openRouterKey);
+  const [autotubeKeyVal, setAutotubeKeyVal] = useState(config.autotubeApiKey || '');
+  const [pinVal, setPinVal] = useState('');
   const [sourceTypeVal, setSourceTypeVal] = useState(config.sourceType);
   const [flickrVal, setFlickrVal] = useState(config.flickrKey || '');
   const [pexelsVal, setPexelsVal] = useState(config.pexelsKey || '');
@@ -29,6 +31,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   useEffect(() => {
     if (isOpen) {
       setOrVal(config.openRouterKey);
+      setAutotubeKeyVal(config.autotubeApiKey || '');
       setSourceTypeVal(config.sourceType);
       setFlickrVal(config.flickrKey || '');
       setPexelsVal(config.pexelsKey || '');
@@ -102,12 +105,13 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     e.preventDefault();
     setAppConfig({
       openRouterKey: orVal.trim(),
+      autotubeApiKey: autotubeKeyVal.trim(),
       sourceType: sourceTypeVal,
       flickrKey: flickrVal.trim(),
       pexelsKey: pexelsVal.trim(),
       pixabayKey: pixabayVal.trim(),
       ttsVoice: config.ttsVoice,
-    });
+    }, pinVal.trim().length >= 4 ? pinVal.trim() : undefined);
     onClose();
   };
 
@@ -176,6 +180,37 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <p className="text-[10px] font-mono text-surface-500">
                   Powers script generation (GPT-5.4-nano), visual planning, AI editing, blind review, and image quality checks (GPT-5.4-mini). ~$0.10/M tokens.
                 </p>
+              </div>
+              <div className="space-y-2 pt-2 border-t border-surface-800">
+                <label htmlFor="autotubeApiKey" className="text-[11px] font-mono font-medium text-surface-400">
+                  AutoTube API Key (server AUTOTUBE_API_KEY)
+                </label>
+                <input
+                  id="autotubeApiKey"
+                  name="autotubeApiKey"
+                  type="password"
+                  value={autotubeKeyVal}
+                  onChange={(e) => setAutotubeKeyVal(e.target.value)}
+                  placeholder="Required in production for /api/*"
+                  className="w-full border-2 border-surface-700 bg-surface-800 px-3 py-2 text-xs font-mono text-white placeholder-surface-600 focus:border-brand-500 focus:outline-none"
+                />
+                <p className="text-[10px] font-mono text-surface-500">
+                  Must match the server AUTOTUBE_API_KEY. Sent as X-API-Key on privileged API calls.
+                </p>
+              </div>
+              <div className="space-y-2 pt-2 border-t border-surface-800">
+                <label htmlFor="encryptPin" className="text-[11px] font-mono font-medium text-surface-400">
+                  Encrypt keys with PIN (optional, min 4 chars)
+                </label>
+                <input
+                  id="encryptPin"
+                  name="encryptPin"
+                  type="password"
+                  value={pinVal}
+                  onChange={(e) => setPinVal(e.target.value)}
+                  placeholder="Leave blank for session-only storage"
+                  className="w-full border-2 border-surface-700 bg-surface-800 px-3 py-2 text-xs font-mono text-white placeholder-surface-600 focus:border-brand-500 focus:outline-none"
+                />
               </div>
             </div>
 

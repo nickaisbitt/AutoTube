@@ -1,9 +1,11 @@
 # Build on ubuntu-amd64 host, package via Dockerfile.runtime, push to GHCR.
-# Triggers on push to master (canonical deploy path) or manual dispatch.
+# Triggers after CI lint/unit succeeds on master push, or manual dispatch.
 name: GHCR image
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [master]
   workflow_dispatch:
 
@@ -13,12 +15,19 @@ permissions:
 
 jobs:
   build-push:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
       PUPPETEER_SKIP_DOWNLOAD: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -39,6 +48,11 @@ jobs:
 
       - name: Bootstrap server-render
         run: node deploy/bootstrap-server-render.mjs
+
+      - name: Sync + verify canonical server-render.mjs
+        run: |
+          node scripts/sync-server-render-deploy.mjs
+          node scripts/sync-server-render-deploy.mjs --check
 
       - name: Vite build
         timeout-minutes: 5
@@ -75,8 +89,8 @@ jobs:
           file: deploy/Dockerfile.runtime
           push: true
           build-args: |
-            GIT_COMMIT=${{ github.sha }}
-            DEPLOY_IMAGE=ghcr.io/nickaisbitt/autotube:${{ github.sha }}
+            GIT_COMMIT=${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+            DEPLOY_IMAGE=ghcr.io/nickaisbitt/autotube:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           tags: |
-            ghcr.io/nickaisbitt/autotube:${{ github.sha }}
+            ghcr.io/nickaisbitt/autotube:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
             ghcr.io/nickaisbitt/autotube:latest

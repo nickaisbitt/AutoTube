@@ -6,7 +6,8 @@ services:
     volumes:
       - ./public/audio:/app/public/audio
     environment:
-      - VITE_OPENROUTER_KEY=${VITE_OPENROUTER_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - AUTOTUBE_API_KEY=${AUTOTUBE_API_KEY}
       - KOKORO_SERVER_URL=http://tts:5000
     depends_on:
       tts:
@@ -17,7 +18,7 @@ services:
         limits:
           memory: 2G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5173/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5173/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

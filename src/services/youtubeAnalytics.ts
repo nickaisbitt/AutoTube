@@ -406,7 +406,7 @@ export async function analyzeCommentSentiment(
       response_format: { type: 'json_object' },
     });
 
-    const res = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+    const res = await fetchWithTimeout('/api/llm', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${llmApiKey}`,

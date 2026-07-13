@@ -75,7 +75,10 @@ export async function handleDownloadClip(
 ): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
   const videoUrl = url.searchParams.get("url");
-  const duration = parseInt(url.searchParams.get("duration") || "10", 10);
+  const rawDuration = parseInt(url.searchParams.get("duration") || "10", 10);
+  const duration = Number.isFinite(rawDuration)
+    ? Math.min(120, Math.max(1, rawDuration))
+    : 10;
 
   if (!videoUrl) {
     res.statusCode = 400;

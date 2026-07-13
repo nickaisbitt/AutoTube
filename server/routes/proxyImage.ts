@@ -111,11 +111,8 @@ export async function handleProxyImage(
       return;
     }
     
-    // Set headers
+    // Set headers (CORS handled by api middleware — no wildcard override)
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
     res.setHeader("Cache-Control", "public, max-age=86400");
     
     const buffer = Buffer.from(await imgRes.arrayBuffer());

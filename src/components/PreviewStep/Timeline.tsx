@@ -1,4 +1,5 @@
 import type { VideoProject } from '../../types';
+import { segmentDurationForProject } from './usePlayback';
 
 export interface TimelineProps {
   project: VideoProject;
@@ -27,8 +28,12 @@ export default function Timeline({
           return (
             <button
               key={segment.id}
+              type="button"
               onClick={() => {
-                const elapsed = project.script.slice(0, index).reduce((sum, item) => sum + item.duration, 0);
+                let elapsed = 0;
+                for (let i = 0; i < index; i++) {
+                  elapsed += segmentDurationForProject(project, i);
+                }
                 onJumpToTime(elapsed);
               }}
               className={`relative h-12 min-w-[70px] flex-1 overflow-hidden border-2 text-left ${

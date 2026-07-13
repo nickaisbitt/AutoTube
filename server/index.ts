@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { cors } from "./middleware/cors.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { rateLimitMiddleware } from "./middleware/rateLimiter.js";
+import { apiAuthMiddleware } from "./middleware/apiAuth.js";
 import { handleProxyImage } from "./routes/proxyImage.js";
 import { handleRenderVideo } from "./routes/renderVideo.js";
 import { handleServerRender } from "./routes/serverRender.js";
@@ -17,6 +18,7 @@ import { handleStaticMap } from "./routes/staticMap.js";
 import { handlePressRelease } from "./routes/pressRelease.js";
 import { handleNotify } from "./routes/notify.js";
 import { handleQualityCheck } from "./routes/qualityCheck.js";
+import { handleLlmProxy } from "./routes/llmProxy.js";
 import { handleHealth } from "./routes/health.js";
 import { handleDocs } from "./routes/docs.js";
 import { handleErrors } from "./routes/errors.js";
@@ -78,8 +80,20 @@ export function apiMiddleware(
   // Apply CORS headers for all API routes
   cors(req, res, () => {});
 
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+
   // Rate limiting applied to all API routes — check return value and return early if handled
   if (rateLimitMiddleware(req, res, () => {})) {
+    return;
+  }
+
+  // API key gate (health remains public)
+  if (apiAuthMiddleware(req, res)) {
     return;
   }
 
@@ -97,6 +111,8 @@ export function apiMiddleware(
         await handleDocs(req, res);
       } else if (req.url!.startsWith("/api/errors")) {
         await handleErrors(req, res);
+      } else if (req.url!.startsWith("/api/llm")) {
+        await handleLlmProxy(req, res);
       } else if (req.url!.startsWith("/api/proxy-image")) {
         await handleProxyImage(req, res);
       } else if (req.url!.startsWith("/api/proxy-page")) {

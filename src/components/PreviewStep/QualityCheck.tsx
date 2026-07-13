@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { ShieldCheck, AlertTriangle, CheckCircle, Info, Eye, Volume2, Sun, Loader2 } from 'lucide-react';
+import { apiFetch } from '../../utils/apiClient';
 
 export interface QualityReport {
   score: number;
@@ -87,7 +88,7 @@ export default function QualityCheck({ videoUrl, existingReport }: QualityCheckP
     setReport(null);
 
     try {
-      const res = await fetch('/api/quality-check', {
+      const res = await apiFetch('/api/quality-check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ videoUrl, includeVision: withVision }),

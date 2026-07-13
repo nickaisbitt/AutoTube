@@ -208,7 +208,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetchWithTimeout('/api/llm', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,

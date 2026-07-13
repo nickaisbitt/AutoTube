@@ -1,6 +1,6 @@
 # AutoTube — Master ship plan (numbered)
 
-Last updated: 2026-06-03. Deploy model: **git push `master` → Railway autodeploy** (no GitHub Actions deploy).
+Last updated: 2026-07-13. Deploy model: **git push `master` → CI lint/unit → GHCR image → Railway registry pull**.
 
 ---
 
@@ -8,14 +8,15 @@ Last updated: 2026-06-03. Deploy model: **git push `master` → Railway autodepl
 
 | # | Step | Who |
 |---|------|-----|
-| A1 | **Connect GitHub to Railway** (one-time) — see **A1b** (CLI) or dashboard **Connect Repo** | You / agent |
-| A2 | **branch** = `master`, **root directory** = empty / `.` (repo root, not `deploy/`) | Set in A1b |
-| A3 | Railway reads **`railway.toml`** + **`nixpacks.toml`** at repo root | Automatic |
-| A4 | **`git push origin master`** | You / agent |
-| A5 | Railway builds (`npm run build`, edge-tts, native deps) and starts `npx tsx server.mjs` | Automatic |
-| A6 | Verify | `curl https://autotube-production.up.railway.app/api/health` |
+| A1 | Push to `master` | You / agent |
+| A2 | GitHub Actions **CI** runs lint + unit tests | Automatic |
+| A3 | On CI success, **GHCR image** workflow builds `ghcr.io/nickaisbitt/autotube:<sha>` | Automatic |
+| A4 | Railway pulls the image (`npm run deploy:railway:registry:pull` or deploy workflow) | You / agent / GHA |
+| A5 | Container starts `npx tsx server.mjs`; health at `/api/health` | Automatic |
 
-**No GitHub Actions** for deploy. Workflows are **manual-only** (optional CI).
+**Canonical path is GHCR + registry pull**, not Railpack snapshot from git (Railpack remains a fallback). See `railway.toml` `startCommand` and `deploy/Dockerfile.runtime`.
+
+Required production vars: `OPENROUTER_API_KEY`, `AUTOTUBE_API_KEY`, `TRUST_PROXY=true`, `ALLOWED_ORIGINS`. Do **not** bake provider secrets into `VITE_*` for production images.
 
 ### A1b. Connect repo via CLI (backend — no dashboard)
 

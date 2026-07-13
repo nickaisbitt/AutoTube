@@ -36,12 +36,20 @@ export function isFreshUptime(uptime, startUptime) {
 export function prodLooksLive({ health, latestDeploy, localSha }) {
   if (health?.error || health?.status !== 'ok') return false;
   if (latestDeploy?.status !== 'SUCCESS') return false;
-  if ((health.uptime ?? 0) > 86_400) return false;
+
+  // Prefer explicit deploy provenance over uptime heuristics (long-lived
+  // healthy GHCR pods can exceed 24h and still be on the correct SHA).
   if (health.deploy?.gitCommit && localSha) {
     return shaMatches(health.deploy.gitCommit, localSha);
+  }
+  if (health.deploy?.deployImage && localSha) {
+    return shaMatches(String(health.deploy.deployImage).split(':').pop() || '', localSha);
   }
   if (latestDeploy?.meta?.image && localSha) {
     return deployMatchesLocal(latestDeploy, localSha);
   }
+
+  // No provenance available — only then treat >24h uptime as stale.
+  if ((health.uptime ?? 0) > 86_400) return false;
   return (health.uptime ?? 0) < 86_400;
 }

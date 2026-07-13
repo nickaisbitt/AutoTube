@@ -12,6 +12,7 @@ import type {
   VideoProject,
   TopicConfig,
 } from '../types';
+import { apiFetch } from '../utils/apiClient';
 import { useProjectSlice } from './slices/projectSlice';
 import { usePipelineSlice, PIPELINE_STEPS } from './slices/pipelineSlice';
 import { useConfigSlice } from './slices/configSlice';
@@ -560,7 +561,7 @@ export function useVideoProject() {
   // Persist project to /tmp/autotube-project-{id}.json via dev-server endpoint
   useEffect(() => {
     if (!project) return;
-    fetch(`/api/save-project?id=${encodeURIComponent(project.id)}`, {
+    apiFetch(`/api/save-project?id=${encodeURIComponent(project.id)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(project),

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "fs";
+import { existsSync } from "fs";
 
 const PROJECT_PATH_RE = /^\/tmp\/autotube-project(-[a-zA-Z0-9-_]+)?\.json$/;
 
@@ -19,7 +19,8 @@ export function projectPathFromId(projectId: string): string {
 
 /**
  * Resolve the on-disk project JSON path for server-render.
- * Prefers an explicit path from save-project, then projectId, then legacy fallbacks.
+ * Requires an explicit projectPath (allowlisted) or projectId — never
+ * auto-picks the newest /tmp file (cross-session leak / race).
  */
 export function resolveSavedProjectPath(body: Record<string, unknown>): string | null {
   const projectPath =
@@ -34,15 +35,5 @@ export function resolveSavedProjectPath(body: Record<string, unknown>): string |
     if (existsSync(idPath)) return idPath;
   }
 
-  if (existsSync("/tmp/autotube-project.json")) {
-    return "/tmp/autotube-project.json";
-  }
-
-  const tmpFiles = readdirSync("/tmp")
-    .filter((f) => f.startsWith("autotube-project") && f.endsWith(".json"))
-    .map((f) => `/tmp/${f}`);
-  if (tmpFiles.length === 0) return null;
-
-  tmpFiles.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-  return tmpFiles[0];
+  return null;
 }

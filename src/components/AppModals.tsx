@@ -2,6 +2,7 @@ import { useVideoProject } from '../store/StoreContext';
 import OnboardingModal from './OnboardingModal';
 import SettingsModal from './SettingsModal';
 import ExportModal from './ExportModal';
+import PinUnlockModal from './PinUnlockModal';
 
 export default function AppModals({
   isSettingsOpen,
@@ -18,7 +19,7 @@ export default function AppModals({
   setIsExportOpen: (v: boolean) => void;
   showOnboarding: boolean;
   setShowOnboarding: (v: boolean) => void;
-  handleExport: (quality: 'draft' | 'standard' | 'high', format: 'webm' | 'mp4', resolution?: '720p' | '1080p' | '4K') => Promise<void>;
+  handleExport: (quality: 'draft' | 'standard' | 'high', format: 'webm' | 'mp4', resolution?: '720p' | '1080p' | '4K' | '2.39:1') => Promise<void> | void;
 }) {
   const { project } = useVideoProject();
 
@@ -29,6 +30,7 @@ export default function AppModals({
 
   return (
     <>
+      <PinUnlockModal />
       <OnboardingModal
         isOpen={showOnboarding}
         onComplete={handleOnboardingComplete}

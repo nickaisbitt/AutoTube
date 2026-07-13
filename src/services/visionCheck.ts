@@ -29,7 +29,7 @@ export interface VisionCheckResult {
 // Prompt Builder
 // ---------------------------------------------------------------------------
 
-const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_ENDPOINT = '/api/llm';
 const VISION_MODEL = 'openai/gpt-5.4-mini';
 const VISION_TIMEOUT_MS = 20_000;
 const VISION_MAX_RETRIES = 2;

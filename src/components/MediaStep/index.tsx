@@ -23,6 +23,7 @@ interface MediaStepProps {
   onNext: () => void;
   onReplace: (assetId: string) => Promise<void> | void;
   onRetry: () => Promise<void> | void;
+  onCancel?: () => void;
 }
 
 export default function MediaStep({
@@ -33,6 +34,7 @@ export default function MediaStep({
   onNext,
   onReplace,
   onRetry,
+  onCancel,
 }: MediaStepProps) {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [statusMessageIndex, setStatusMessageIndex] = useState(0);
@@ -63,6 +65,7 @@ export default function MediaStep({
         progress={progress}
         message={message}
         statusMessageIndex={statusMessageIndex}
+        onCancel={onCancel}
       />
     );
   }

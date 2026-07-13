@@ -580,6 +580,110 @@ paths:
                     type: string
                     example: Image proxy failed
 
+  /api/llm:
+    post:
+      summary: OpenRouter chat completions proxy
+      description: |
+        Proxies OpenAI-compatible chat completions to OpenRouter.
+        Uses server OPENROUTER_API_KEY when set; otherwise BYOK via Authorization Bearer.
+        Requires AUTOTUBE_API_KEY in production (X-API-Key or Bearer matching the Autotube key).
+      operationId: postLlm
+      tags:
+        - LLM
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Upstream OpenRouter response
+        "401":
+          description: Missing or invalid Autotube API key
+        "503":
+          description: No OpenRouter key configured
+
+  /api/proxy-page:
+    get:
+      summary: HTML page proxy
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+      responses:
+        "200":
+          description: Proxied HTML
+        "403":
+          description: URL blocked by SSRF checks
+
+  /api/deep-harvest:
+    get:
+      summary: Deep harvest image scrape
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Harvested image results
+
+  /api/quality-check:
+    post:
+      summary: Run video quality analysis
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                videoPath:
+                  type: string
+                videoUrl:
+                  type: string
+                includeVision:
+                  type: boolean
+      responses:
+        "200":
+          description: SSE quality progress/result
+
+  /api/render-progress:
+    get:
+      summary: Current render progress
+      responses:
+        "200":
+          description: Progress JSON
+    post:
+      summary: Update render progress (whitelisted fields)
+      responses:
+        "200":
+          description: Updated
+
+  /api/notify:
+    post:
+      summary: Notification stub
+      description: Always returns 501 Not Implemented
+      responses:
+        "501":
+          description: Not implemented
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Must match server AUTOTUBE_API_KEY in production
+
 tags:
   - name: System
     description: Health and monitoring endpoints
@@ -591,3 +695,5 @@ tags:
     description: Image and video search endpoints
   - name: Media
     description: Image proxy and clip download endpoints
+  - name: LLM
+    description: Server-side OpenRouter proxy

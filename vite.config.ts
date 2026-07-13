@@ -53,14 +53,7 @@ export default defineConfig({
     "import.meta.env.VITE_STOCK_AS_SECONDARY": JSON.stringify(
       process.env.AUTOTUBE_STOCK_AS_SECONDARY ?? '1',
     ),
-    "import.meta.env.VITE_OPENROUTER_KEY": JSON.stringify(
-      process.env.OPENROUTER_API_KEY || process.env.VITE_OPENROUTER_KEY || '',
-    ),
-    "import.meta.env.VITE_PEXELS_KEY": JSON.stringify(
-      process.env.PEXELS_API_KEY || process.env.VITE_PEXELS_KEY || '',
-    ),
-    "import.meta.env.VITE_PIXABAY_KEY": JSON.stringify(
-      process.env.PIXABAY_API_KEY || process.env.VITE_PIXABAY_KEY || '',
-    ),
+    // Do NOT inject OpenRouter / Pexels / Pixabay secrets into the client bundle.
+    // Use server env (OPENROUTER_API_KEY, etc.) + /api/llm proxy, or BYOK via Settings.
   },
 });

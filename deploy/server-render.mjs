@@ -50,6 +50,20 @@ import {
   tokenizeCaptionWords,
   assetCutIntervalSec,
 } from './server-render/youtubeProfile.mjs';
+import { renderViaFfmpegAssembly } from './server-render/ffmpegAssembly.mjs';
+import { buildEditTimeline } from './scripts/lib/build-edit-timeline.mjs';
+
+let sharpModule = null;
+async function getSharp() {
+  if (sharpModule !== null) return sharpModule;
+  try {
+    const mod = await import('sharp');
+    sharpModule = mod.default;
+  } catch {
+    sharpModule = false;
+  }
+  return sharpModule;
+}
 
 // ── Word timestamp cache for karaoke subtitle sync ─────────────────────────
 // Populated from edge-tts VTT files before rendering begins.
@@ -466,7 +480,7 @@ function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec = 4) {
  *
  * Requirement 4.7
  */
-function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narrationText, projectTopic) {
+function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narrationText, projectTopic, assetIndex = 0) {
   const palettes = {
     intro:      { bg: ['#0a0a1a', '#1a0a2e', '#0a1a2e'], accent: '#e74c3c', glow: '#ff6b6b' },
     section:    { bg: ['#0a0a1a', '#0a1a2e', '#0a2a3e'], accent: '#3498db', glow: '#5dade2' },
@@ -495,12 +509,14 @@ function drawProceduralFallbackWithText(ctx, w, h, topicText, segType, narration
   }
 
   const p = palettes[segType] || palettes.section;
+  const accentPalette = ['#e74c3c', '#3498db', '#f39c12', '#2ecc71', '#9b59b6', '#1abc9c', '#e67e22'];
+  p.accent = accentPalette[assetIndex % accentPalette.length];
 
   // Richer multi-stop gradient background
   const grad = ctx.createLinearGradient(0, 0, w, h);
-  grad.addColorStop(0, p.bg[0]);
-  grad.addColorStop(0.5, p.bg[1]);
-  grad.addColorStop(1, p.bg[2]);
+  grad.addColorStop(0, p.bg[assetIndex % p.bg.length]);
+  grad.addColorStop(0.5, p.bg[(assetIndex + 1) % p.bg.length]);
+  grad.addColorStop(1, p.bg[(assetIndex + 2) % p.bg.length]);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
 
@@ -983,13 +999,23 @@ async function decodeFetchedImage(buf, contentType, contentLength, originalUrl) 
     throw new Error('Corrupted or unsupported image format');
   }
 
+  let decodeBuf = buf;
   if (!isCanvasSupportedFormat(detectedFormat)) {
-    console.warn(`  ⚠ [fetchImage] Format '${detectedFormat}' has limited canvas support, attempting load...`);
+    const sharp = await getSharp();
+    if (sharp && (detectedFormat === 'webp' || detectedFormat === 'avif' || detectedFormat === 'unknown')) {
+      try {
+        decodeBuf = await sharp(buf).jpeg({ quality: 90 }).toBuffer();
+      } catch {
+        console.warn(`  ⚠ [fetchImage] sharp transcode failed for ${detectedFormat}`);
+      }
+    } else {
+      console.warn(`  ⚠ [fetchImage] Format '${detectedFormat}' has limited canvas support, attempting load...`);
+    }
   }
 
   let img;
   try {
-    img = await loadImage(buf);
+    img = await loadImage(decodeBuf);
   } catch (loadErr) {
     throw new Error(`Failed to decode image (${detectedFormat}): ${loadErr.message}`);
   }
@@ -1186,9 +1212,11 @@ function drawProceduralBackground(ctx, seg, progress, skipParticles = false, seg
   const segmentColors = ['#3a4a7e', '#3a5a8e', '#2a5a7e', '#3a6a8f', '#4a3b89'];
   const bgColor = segmentColors[segmentIndex % segmentColors.length];
 
-  // Draft mode: solid colour fill — skip gradient and particle overhead
+  // Draft mode: solid colour fill — vary by segment + progress so holds don't hash identical
   if (DRAFT_MODE) {
-    ctx.fillStyle = p.bg[1];
+    const draftColors = ['#1a2a4e', '#2a1a3e', '#1a3a2e', '#3a2a1e', '#2a3a4e', '#1e3a4a', '#3a1e2a'];
+    const idx = (segmentIndex * 3 + Math.floor(progress * 8)) % draftColors.length;
+    ctx.fillStyle = draftColors[idx];
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     return;
   }
@@ -2509,7 +2537,9 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   const activeImg = isFallbackAsset ? null : img;
 
   // ── Determine if a scene layout should handle background + text rendering ──
-  const sceneLayout = seg.sceneLayout || null;
+  // Loop mode forces full-bleed Ken Burns so asset cut intervals actually apply.
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
+  const sceneLayout = loopMode ? null : (seg.sceneLayout || null);
   const layoutFn = sceneLayout ? (SCENE_LAYOUT_DISPATCH[sceneLayout] || null) : null;
 
   // Draw bright background when image is available, or procedural bg when not
@@ -2523,7 +2553,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   } else if (activeImg && YOUTUBE_MODE) {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  } else if (!DRAFT_MODE) {
+  } else if (!DRAFT_MODE || loopMode) {
     drawProceduralBackground(ctx, seg, progress, false, segmentIndex);
   }
 
@@ -3162,6 +3192,112 @@ async function concatenateAudio(audioFiles, outputFile) {
   return concatAudio(audioFiles, outputFile);
 }
 
+/** FFmpeg assembly path: TTS + clip concat (skips canvas preload / frame loop). */
+async function runFfmpegAssemblyRender(project) {
+  log('info', '\n🎬 FFmpeg assembly mode — skipping canvas preload and frame loop');
+
+  const audioDir = join(dirname(OUTPUT_FILE), `narration-audio-${Date.now()}`);
+  mkdirSync(audioDir, { recursive: true, mode: 0o700 });
+  const cfAccountId = process.env.CF_ACCOUNT_ID || '';
+  const cfApiToken = process.env.CF_API_TOKEN || '';
+  const edgeVoice = project.exportSettings?.edgeTtsVoice || 'en-US-GuyNeural';
+
+  stepMetrics.startStep('narration');
+  let audioFiles = [];
+  const TTS_MAX_RETRIES = 3;
+  const TTS_RETRY_DELAY_MS = 2000;
+  for (let ttsAttempt = 1; ttsAttempt <= TTS_MAX_RETRIES; ttsAttempt++) {
+    try {
+      audioFiles = await generateNarration(project.script, audioDir, { cfAccountId, cfApiToken, edgeVoice });
+      if (audioFiles.length > 0) break;
+    } catch (err) {
+      log('info', `  ⚠ Narration attempt ${ttsAttempt}/${TTS_MAX_RETRIES} failed: ${err.message}`);
+      if (ttsAttempt < TTS_MAX_RETRIES) {
+        log('info', `  ⏳ Retrying narration in ${TTS_RETRY_DELAY_MS / 1000}s...`);
+        await new Promise((r) => setTimeout(r, TTS_RETRY_DELAY_MS));
+      }
+    }
+  }
+
+  wordTimestampCache.clear();
+  let narrationSegIdx = 0;
+  for (const af of audioFiles) {
+    if (af.subtitleFile && existsSync(af.subtitleFile)) {
+      const words = parseVttWordTimestamps(af.subtitleFile);
+      if (words.length > 0) {
+        wordTimestampCache.set(narrationSegIdx, words);
+        log('info', `  📝 Loaded ${words.length} word timestamps for segment ${narrationSegIdx + 1}`);
+      }
+      narrationSegIdx++;
+    }
+  }
+
+  let totalNarrationDuration = 0;
+  let narrationValid = true;
+  for (let ni = 0; ni < audioFiles.length; ni++) {
+    const af = audioFiles[ni];
+    const gate = validateOutput(af.file, `Narration segment ${ni}`);
+    if (!gate.valid) {
+      console.warn(`  ⚠ ${gate.error}`);
+      narrationValid = false;
+    } else {
+      totalNarrationDuration += af.duration || 0;
+    }
+  }
+  if (narrationValid) {
+    log('info', `  ✅ Narration quality gate passed (${audioFiles.length} segments, ${totalNarrationDuration.toFixed(1)}s total)`);
+  } else {
+    log('info', '  ⚠ Narration quality gate: some segments may be missing');
+  }
+  stepMetrics.endStep('narration', { segmentCount: audioFiles.length, narrationDuration: totalNarrationDuration });
+
+  const cutInterval = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.25');
+  const measuredSec = project.script.reduce((s, seg) => s + (seg.duration || 0), 0);
+  project.editTimeline = buildEditTimeline(project, {
+    cutIntervalSec: cutInterval,
+    reason: 'post-tts sync',
+  });
+  log(
+    'info',
+    `  📐 Rebuilt editTimeline: ${project.editTimeline.length} clips across ${project.script.length} segments (${measuredSec.toFixed(1)}s measured narration)`,
+  );
+
+  const mixedAudio = join(audioDir, 'narration-mix.wav');
+  try {
+    await concatenateAudio(audioFiles, mixedAudio);
+  } catch (err) {
+    log('warn', `  ⚠ Audio concat for ffmpeg assembly: ${err.message}`);
+  }
+  const ffResult = await renderViaFfmpegAssembly(project, OUTPUT_FILE, {
+    devServer: process.env.DEV_SERVER_URL || 'http://localhost:5173',
+    cutIntervalSec: cutInterval,
+    mixedAudioPath: existsSync(mixedAudio) ? mixedAudio : null,
+  });
+  if (!ffResult.ok) {
+    throw new Error(ffResult.error || 'ffmpeg assembly render failed');
+  }
+  log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments, ${ffResult.manifest?.clipCount ?? '?'} clips, tpad ${ffResult.manifest?.tpadSec ?? 0}s)`);
+  try {
+    const { applyFfmpegYoutubeOverlays } = await import('./server-render/ffmpegOverlays.mjs');
+    const overlayResults = applyFfmpegYoutubeOverlays(OUTPUT_FILE, project, wordTimestampCache);
+    if (overlayResults.hook?.ok === false && overlayResults.hook?.error) {
+      log('warn', `  ⚠ Hook overlay skipped: ${overlayResults.hook.error}`);
+    }
+    if (overlayResults.captions?.ok === false && overlayResults.captions?.error) {
+      log('warn', `  ⚠ Caption overlay skipped: ${overlayResults.captions.error}`);
+    }
+  } catch (err) {
+    log('warn', `  ⚠ YouTube overlays skipped: ${err.message}`);
+  }
+  const finalMp4 = OUTPUT_FILE.replace('.mp4', '-final.mp4');
+  if (existsSync(OUTPUT_FILE)) {
+    copyFileSync(OUTPUT_FILE, finalMp4);
+    const videoGate = validateOutput(finalMp4, 'FFmpeg assembly output');
+    if (!videoGate.valid) throw new Error(videoGate.error);
+    log('info', `  ✓ FFmpeg assembly output: ${finalMp4}`);
+  }
+}
+
 // ── Main render ────────────────────────────────────────────────────────────
 async function render() {
   let ffmpeg;
@@ -3267,7 +3403,9 @@ async function render() {
     project.exportSettings.youtubeMode = true;
   }
 
-  const quality = project.exportSettings?.quality || (YOUTUBE_MODE ? 'highest' : 'medium');
+  const quality = process.env.AUTOTUBE_RENDER_QUALITY?.trim()
+    || project.exportSettings?.quality
+    || (YOUTUBE_MODE ? 'highest' : 'medium');
   DRAFT_MODE = quality === 'draft';
   const outputWidth = WIDTH;
   const outputHeight = HEIGHT;
@@ -3285,6 +3423,7 @@ async function render() {
     showDataOverlay: process.env.AUTOTUBE_DATA_OVERLAY === '1',
     showKineticText: process.env.AUTOTUBE_KINETIC_TEXT === '1',
     useFastPacing: process.env.AUTOTUBE_FAST_PACING === '1',
+    patternInterrupts: process.env.AUTOTUBE_PATTERN_INTERRUPTS === '1' || process.env.AUTOTUBE_LOOP_MODE === '1',
   };
 
   // Initialize global state for advanced rendering features (Tasks 58, 79, 80)
@@ -3342,6 +3481,11 @@ async function render() {
   validateDiskSpace(project, OUTPUT_FILE);
 
   mkdirSync(OUTPUT_DIR, { recursive: true, mode: 0o700 });
+
+  if (process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg') {
+    await runFfmpegAssemblyRender(project);
+    return;
+  }
 
   // Pre-load all images concurrently with concurrency limit (skip video clips — they're fetched per-frame)
   // Requirements 1.3, 1.4: preload all images before any frame rendering begins
@@ -3716,18 +3860,27 @@ async function render() {
     '-i', 'pipe:0',
   ];
 
+  const baseBitrate = Math.max(6_000_000, Number(project?.exportSettings?.videoBitsPerSecond || resPreset?.videoBitsPerSecond || 12_000_000));
+  const qualityMultiplier = quality === 'highest' ? 1.6 : quality === 'high' ? 1.35 : 1;
+  const targetVideoBitrate = String(Math.round(baseBitrate * qualityMultiplier));
+  const targetMaxRate = String(Math.round(Number(targetVideoBitrate) * 1.35));
+  const targetBufferSize = String(Math.round(Number(targetVideoBitrate) * 2));
+
   if (useGpu && hwEncoder === 'h264_videotoolbox') {
-    ffmpegArgs.push('-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-b:v', '12M');
+    ffmpegArgs.push('-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize);
   } else if (useGpu && hwEncoder === 'h264_nvenc') {
-    ffmpegArgs.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-rc', 'vbr', '-cq', '18', '-b:v', '12M');
+    ffmpegArgs.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-rc', 'vbr', '-cq', '18', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize);
   } else if (useGpu && hwEncoder === 'h264_vaapi') {
     ffmpegArgs.push('-vaapi_device', '/dev/dri/renderD128', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi');
   } else {
     const codec = project?.exportSettings?.codec === 'av1' ? 'libsvtav1' : project?.exportSettings?.codec === 'hevc' ? 'libx265' : 'libx264';
     const crfValue = project?.exportSettings?.codec === 'av1' ? 30 : project?.exportSettings?.codec === 'hevc' ? 20 : (YOUTUBE_MODE ? 14 : 16);
     const extraCodecArgs = project?.exportSettings?.codec === 'hevc' ? ['-tag:v', 'hvc1'] : [];
+    const x264Preset = DRAFT_MODE
+      ? (process.env.AUTOTUBE_FFMPEG_PRESET || 'ultrafast')
+      : 'slow';
 
-    if (quality === 'highest' && !DRAFT_MODE) {
+    if ((quality === 'high' || quality === 'highest') && !DRAFT_MODE) {
       // Two-pass encoding: render to temp file, then two-pass encode
       const tempRenderFile = join(tmpdir(), `autotube-temp-render-${Date.now()}.mp4`);
       const tempRenderArgs = [
@@ -3753,7 +3906,7 @@ async function render() {
       ffmpegArgs.length = 0;
       ffmpegArgs.push(...tempRenderArgs);
     } else {
-      ffmpegArgs.push('-c:v', codec, '-preset', 'slow', '-crf', String(crfValue), '-bf', '3', '-tune', 'film', ...extraCodecArgs);
+      ffmpegArgs.push('-c:v', codec, '-preset', x264Preset, '-crf', String(crfValue), '-bf', '3', '-tune', 'film', ...extraCodecArgs);
     }
   }
 
@@ -3761,7 +3914,7 @@ async function render() {
   const hdrArgs = project?.exportSettings?.hdr ? ['-color_primaries', 'bt2020', '-color_trc', 'smpte2084', '-colorspace', 'bt2020nc'] : [];
   ffmpegArgs.push(...hdrArgs);
 
-  if (DRAFT_MODE) {
+  if (DRAFT_MODE && process.env.AUTOTUBE_DRAFT_NO_UPSCALE !== '1') {
     ffmpegArgs.push('-vf', `scale=${outputWidth}:${outputHeight}:flags=lanczos`);
   }
 
@@ -3811,6 +3964,10 @@ async function render() {
     try {
       return ffmpeg.stdin.write(buffer);
     } catch (err) {
+      if (err && (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED')) {
+        ffmpegExited = true;
+        return 'dead';
+      }
       return 'dead';
     }
   }
@@ -4001,7 +4158,9 @@ async function render() {
   const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round((YOUTUBE_MODE ? 3.2 : 0.3) * FPS));
   const COLD_OPEN_BEAT_FRAMES = Math.max(1, Math.round(0.5 * FPS)); // ~5 beats in 2.5s
   const explicitHook = project.hookLine || project.exportSettings?.hookLine;
-  const hookText = explicitHook
+  const hookOverlay = project.exportSettings?.hookOverlay;
+  const hookText = hookOverlay
+    || explicitHook
     || (coldOpenSeg?.narration
       ? (YOUTUBE_MODE ? buildRetentionHook(coldOpenSeg.narration) : (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60))
       : 'Watch this!');
@@ -4311,6 +4470,9 @@ async function render() {
         ? Math.min(1.5, pacingScore >= 4 ? 1.0 : 1.5)
         : Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
 
+    if (ytCut != null) {
+      log('info', `  B-roll cut interval: ${assetAlternationInterval}s (${segMedia.length} assets)`);
+    }
 
     for (let f = 0; f < numFrames; f++) {
       // Use computeActiveAssetIndex for multi-asset alternation (Requirement 4.4)
@@ -4370,7 +4532,7 @@ async function render() {
         }
         // Requirement 4.7: procedural background fallback when asset fails to load
         if (!img && asset) {
-          drawProceduralFallbackWithText(ctx, WIDTH, HEIGHT, seg.title, seg.type);
+          drawProceduralFallbackWithText(ctx, WIDTH, HEIGHT, seg.title, seg.type, seg.narration, project.topic || project.title, mi);
         }
       }
 
@@ -4379,6 +4541,9 @@ async function render() {
       // Step 10: Detect media asset change within segment and trigger zoom-out transition
       if (mi !== prevMi && prevMi >= 0) {
         zoomTransitionCounter = 3; // Start 3-frame zoom-out transition
+        if (renderFlags.patternInterrupts && process.env.AUTOTUBE_LOOP_MODE === '1') {
+          drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.35);
+        }
       }
       prevMi = mi;
 
@@ -4546,7 +4711,8 @@ async function render() {
   ffmpeg.stdin.end();
 
   // Safety: Add timeout to prevent infinite hangs during encoding
-  const ENCODING_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max for encoding
+  const ENCODING_TIMEOUT_MS = Number(process.env.AUTOTUBE_ENCODING_TIMEOUT_MS)
+    || Math.max(5 * 60 * 1000, Math.ceil(totalSec * 3) * 1000);
   log('info', `\n⏳ Encoding video (timeout: ${ENCODING_TIMEOUT_MS / 1000}s)...`);
 
   let encodeFailed = false;
@@ -4623,8 +4789,8 @@ async function render() {
   // Task 129: Clear checkpoint on successful completion
   renderStateManager.markComplete();
 
-  // Two-pass encoding post-processing: re-encode temp render with two-pass for highest quality
-  if (quality === 'highest' && !DRAFT_MODE && twoPassState.tempFile && existsSync(twoPassState.tempFile)) {
+  // Two-pass encoding post-processing: re-encode temp render with two-pass for high/highest quality
+  if ((quality === 'high' || quality === 'highest') && !DRAFT_MODE && twoPassState.tempFile && existsSync(twoPassState.tempFile)) {
     log('info', `\n🎬 Two-pass encoding for highest quality...`);
     const tempFile = twoPassState.tempFile;
     const passLog = join(tmpdir(), `autotube-twopass-${Date.now()}.log`);
@@ -4635,7 +4801,7 @@ async function render() {
     // Pass 1: analyze
     const pass1Args = [
       '-y', '-i', tempFile,
-      '-c:v', codec, '-preset', 'slow', '-b:v', '12M', '-pass', '1',
+      '-c:v', codec, '-preset', 'slow', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize, '-pass', '1',
       '-passlogfile', passLog,
       ...extraArgs,
       '-an', '-f', 'null', process.platform === 'win32' ? 'NUL' : '/dev/null',
@@ -4647,7 +4813,7 @@ async function render() {
       // Pass 2: encode with analysis data
       const pass2Args = [
         '-y', '-i', tempFile,
-        '-c:v', codec, '-preset', 'slow', '-b:v', '12M', '-pass', '2',
+        '-c:v', codec, '-preset', 'slow', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize, '-pass', '2',
         '-passlogfile', passLog,
         ...extraArgs,
         '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
@@ -4939,8 +5105,11 @@ async function render() {
     const downloadName = `autotube-${safeTitle}.mp4`;
     const homeDir = homedir() || tmpdir();
     try {
-      copyFileSync(finalMp4File, `${homeDir}/Downloads/${downloadName}`);
-      log('info', `📁 Copied to ~/Downloads/${downloadName}`);
+      const downloadsDir = join(homeDir, 'Downloads');
+      if (!existsSync(downloadsDir)) mkdirSync(downloadsDir, { recursive: true });
+      const destination = join(downloadsDir, downloadName);
+      copyFileSync(finalMp4File, destination);
+      log('info', `📁 Copied to ${destination}`);
     } catch (copyErr) {
       console.warn(`  ⚠ Could not copy video to downloads folder: ${copyErr.message}`);
     }

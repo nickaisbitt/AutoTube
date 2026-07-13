@@ -15,6 +15,7 @@ import type {
   SegmentVisualPlan,
   AppConfig,
 } from '../../types';
+import { apiFetch } from '../../utils/apiClient';
 import { hasSpeechSupport, loadSpeechVoices, pickPreferredVoice, stopSpeaking } from '../../utils/speech';
 import {
   sourceSegmentMedia,
@@ -380,7 +381,7 @@ export async function executeSourceMedia(
   // before this function returns. The server render reads the project from
   // /tmp and must see the full media list, not the script-only version.
   try {
-    await fetch(`/api/save-project?id=${encodeURIComponent(updatedProject.id)}`, {
+    await apiFetch(`/api/save-project?id=${encodeURIComponent(updatedProject.id)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedProject),
@@ -1206,6 +1207,25 @@ function evaluateMediaPhase(
 ): void {
   const media = project.media;
   if (!media || media.length === 0) return;
+
+  // Placeholder / low-quality volume gate (aligned with loop MAX_PLACEHOLDER_PCT ≈ 10%)
+  const placeholderCount = media.filter(
+    (a) =>
+      a.isFallback ||
+      (typeof a.url === 'string' && /placeholder|picsum|via\.placeholder/i.test(a.url)),
+  ).length;
+  const placeholderPct = (placeholderCount / media.length) * 100;
+  if (placeholderPct > 10) {
+    warnings.push({
+      dimension: 'media_volume',
+      message: `Placeholder/fallback assets are ${placeholderPct.toFixed(0)}% of media (max 10%)`,
+      severity: 'critical',
+    });
+    recommendations.push({
+      action: 'reharvest_media',
+      reason: 'Too many placeholder assets — re-run media sourcing before export',
+    });
+  }
 
   // Check thumbnail quality via media quality factors
   const thumbnailAssets = media.filter((a) => a.qualityFactors);

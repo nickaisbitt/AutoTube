@@ -7,7 +7,7 @@ import { withRetry } from '../../utils/withRetry';
 import { logger } from '../logger';
 import { trackOpenRouterCost } from '../costTracker';
 
-const DEFAULT_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const DEFAULT_ENDPOINT = '/api/llm';
 const DEFAULT_MODEL = 'openai/gpt-5.4-nano';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 3;

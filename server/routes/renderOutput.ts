@@ -1,28 +1,25 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { createReadStream, existsSync, statSync } from "fs";
+import { createReadStream, existsSync, lstatSync, realpathSync, statSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-// Project root is two levels up from server/routes/
 const PROJECT_ROOT = join(__dirname, "..", "..");
-const RESOLVED_PROJECT_ROOT = resolve(PROJECT_ROOT);
+const RECORDINGS_DIR = resolve(join(PROJECT_ROOT, "test-recordings"));
 
 /**
  * GET /api/render-output/:format/*
- * Serve rendered output files from test-recordings/ securely and efficiently.
+ * Serve rendered output files from test-recordings/ only.
  */
 export async function handleRenderOutput(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  // URL format: /api/render-output/{format}/{relative-path}
   const urlPath = decodeURIComponent(
     req.url!.replace("/api/render-output/", ""),
   );
 
-  // Security: check null byte injection and traversal attempts
   if (urlPath.includes("\0") || urlPath.includes("..")) {
     res.statusCode = 400;
     res.setHeader("Content-Type", "application/json");
@@ -30,9 +27,8 @@ export async function handleRenderOutput(
     return;
   }
 
-  const format = urlPath.split("/")[0]; // "mp4" or "webm"
-  
-  // Whitelist allowed formats
+  const format = urlPath.split("/")[0];
+
   if (!["mp4", "webm"].includes(format)) {
     res.statusCode = 400;
     res.setHeader("Content-Type", "application/json");
@@ -41,11 +37,40 @@ export async function handleRenderOutput(
   }
 
   const relativePath = urlPath.split("/").slice(1).join("/");
-  const filePath = join(PROJECT_ROOT, relativePath);
+  // Allow paths that already include test-recordings/ or are bare filenames under it
+  const underRecordings = relativePath.startsWith("test-recordings/")
+    ? relativePath.slice("test-recordings/".length)
+    : relativePath;
+
+  if (!underRecordings || underRecordings.includes("..")) {
+    res.statusCode = 400;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Invalid path format" }));
+    return;
+  }
+
+  const filePath = join(RECORDINGS_DIR, underRecordings);
   const resolvedPath = resolve(filePath);
 
-  // Security: ensure the resolved path stays within the project directory
-  if (!resolvedPath.startsWith(RESOLVED_PROJECT_ROOT + "/") || !existsSync(resolvedPath)) {
+  if (!resolvedPath.startsWith(RECORDINGS_DIR + "/") || !existsSync(resolvedPath)) {
+    res.statusCode = 404;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "File not found" }));
+    return;
+  }
+
+  try {
+    const st = lstatSync(resolvedPath);
+    if (st.isSymbolicLink()) {
+      const real = realpathSync(resolvedPath);
+      if (!real.startsWith(RECORDINGS_DIR + "/")) {
+        res.statusCode = 403;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Symlink escape denied" }));
+        return;
+      }
+    }
+  } catch {
     res.statusCode = 404;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ error: "File not found" }));
@@ -56,7 +81,6 @@ export async function handleRenderOutput(
   const stat = statSync(resolvedPath);
 
   res.setHeader("Content-Type", mimeType);
-
   res.setHeader("Content-Length", stat.size);
   res.setHeader("Cache-Control", "public, max-age=86400");
 

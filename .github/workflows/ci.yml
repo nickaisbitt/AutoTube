@@ -1,8 +1,12 @@
-# Manual-only CI — does NOT run on push (saves GitHub Actions minutes).
-# Production deploy: push to master → Railway GitHub autodeploy (see docs/SHIP_PLAN_MASTER.md).
-name: CI (manual)
+# Lint/unit on every master push; e2e remains manual to save CI minutes.
+# GHCR image build (ghcr-image.yml) should only ship after this passes.
+name: CI
 
 on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -15,10 +19,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: node scripts/sync-server-render-deploy.mjs --check
       - run: npm run lint
       - run: npm run test:unit
 
   e2e-smoke-and-real-pass-fixture:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: lint-and-test
     steps:

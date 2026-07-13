@@ -17,9 +17,10 @@ interface ProcessingViewProps {
   progress: number;
   message: string;
   statusMessageIndex: number;
+  onCancel?: () => void;
 }
 
-export default function ProcessingView({ progress, message, statusMessageIndex }: ProcessingViewProps) {
+export default function ProcessingView({ progress, message, statusMessageIndex, onCancel }: ProcessingViewProps) {
   return (
     <div className="flex h-full items-center justify-center px-6">
       <div className="w-full max-w-xl space-y-6 text-center">
@@ -59,6 +60,16 @@ export default function ProcessingView({ progress, message, statusMessageIndex }
           </div>
           <p className="text-xs font-mono text-surface-500">{progress}% complete</p>
         </div>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="border-2 border-surface-600 px-4 py-2 text-xs font-mono uppercase text-surface-300 hover:border-red-500 hover:text-red-400"
+            data-testid="cancel-media-button"
+          >
+            Cancel
+          </button>
+        )}
 
         <p
           data-testid="rotating-status"

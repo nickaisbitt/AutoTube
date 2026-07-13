@@ -27,9 +27,10 @@ interface NarrationStepProps {
   onGenerateNarration: () => void;
   onNext: () => void;
   appConfig?: AppConfig;
+  onCancel?: () => void;
 }
 
-export default function NarrationStep({ project, status, progress, message, onGenerateNarration, onNext }: NarrationStepProps) {
+export default function NarrationStep({ project, status, progress, message, onGenerateNarration, onNext, onCancel }: NarrationStepProps) {
   const [playingClip, setPlayingClip] = useState<string | null>(null);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [voiceCount, setVoiceCount] = useState(0);
@@ -151,6 +152,16 @@ export default function NarrationStep({ project, status, progress, message, onGe
             <h3 className="text-xl font-bold text-white uppercase tracking-wider">Preparing Narration</h3>
             <p className="mt-2 text-sm font-mono text-surface-400">{message || 'Initializing browser speech synthesis...'}</p>
           </div>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="border-2 border-surface-600 px-4 py-2 text-xs font-mono uppercase text-surface-300 hover:border-red-500 hover:text-red-400"
+              data-testid="cancel-narration-button"
+            >
+              Cancel
+            </button>
+          )}
           <div className="space-y-2">
             <div className="h-2 overflow-hidden bg-surface-800">
               <div

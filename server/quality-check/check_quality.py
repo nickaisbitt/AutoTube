@@ -287,6 +287,14 @@ def main():
     parser.add_argument('--json', action='store_true', help='Output JSON only')
     args = parser.parse_args()
 
+    if not args.api_key:
+        args.api_key = (
+            os.environ.get('OPENROUTER_API_KEY')
+            or os.environ.get('OPENROUTER_KEY')
+            or os.environ.get('VITE_OPENROUTER_KEY')
+            or ''
+        )
+
     if not os.path.exists(args.video_path):
         print(f"Error: Video file not found: {args.video_path}", file=sys.stderr)
         sys.exit(1)

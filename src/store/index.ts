@@ -7,12 +7,12 @@
 
 import { useCallback, useEffect } from 'react';
 import type {
-import { apiFetch } from '../utils/apiClient';
   PipelineStep,
   StepStatus,
   VideoProject,
   TopicConfig,
 } from '../types';
+import { apiFetch } from '../utils/apiClient';
 import { useProjectSlice } from './slices/projectSlice';
 import { usePipelineSlice, PIPELINE_STEPS } from './slices/pipelineSlice';
 import { useConfigSlice } from './slices/configSlice';

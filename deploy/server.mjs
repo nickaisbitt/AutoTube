@@ -1,6 +1,6 @@
 import { createServer } from "http";
 import { readFileSync, existsSync, statSync } from "fs";
-import { join, extname } from "path";
+import { join, extname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { apiMiddleware } from "./server/index.ts";
 
@@ -32,6 +32,14 @@ const MIME_TYPES = {
 function serveStatic(req, res) {
   let filePath = join(DIST_DIR, req.url === "/" ? "index.html" : req.url);
 
+  const resolved = resolve(filePath);
+  if (!resolved.startsWith(resolve(DIST_DIR) + "/")) {
+    res.statusCode = 403;
+    res.setHeader("Content-Type", "text/plain");
+    res.end("Forbidden");
+    return;
+  }
+
   if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
     filePath = join(DIST_DIR, "index.html");
   }
@@ -40,24 +48,26 @@ function serveStatic(req, res) {
   const contentType = MIME_TYPES[ext] || "application/octet-stream";
 
   try {
-    const data = readFileSync(filePath);
-    res.writeHead(200, { "Content-Type": contentType });
-    res.end(data);
-    return true;
+    const content = readFileSync(filePath);
+    res.setHeader("Content-Type", contentType);
+    res.end(content);
   } catch {
-    return false;
+    res.statusCode = 404;
+    res.end("Not Found");
   }
 }
 
 const server = createServer((req, res) => {
-  apiMiddleware(req, res, () => {
-    if (!res.writableEnded) {
-      serveStatic(req, res);
-    }
-  });
+  if (req.url?.startsWith("/api/")) {
+    apiMiddleware(req, res, () => {
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: "Not found" }));
+    });
+    return;
+  }
+  serveStatic(req, res);
 });
 
 server.listen(PORT, () => {
-  console.log(`AutoTube production server running on port ${PORT}`);
-  console.log(`Static files from: ${DIST_DIR}`);
+  console.log(`AutoTube production server listening on :${PORT}`);
 });

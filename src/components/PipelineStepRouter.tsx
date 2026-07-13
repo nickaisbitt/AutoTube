@@ -45,6 +45,7 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
     assembleVideo,
     generateFullVideo,
     cancelRender,
+    cancelCurrentOperation,
     retryAssemble,
     resetProject,
     updateNarrationText,
@@ -147,6 +148,7 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
             onNext={handleSourceMedia}
             onUpdateNarration={updateNarrationText}
             onRegenerate={() => generateScript(topicConfig)}
+            onCancel={cancelCurrentOperation}
           />
         </StepErrorBoundary>
       );
@@ -161,6 +163,7 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
             onNext={handleGenerateNarration}
             onReplace={handleReplaceMedia}
             onRetry={handleSourceMedia}
+            onCancel={cancelCurrentOperation}
           />
         </StepErrorBoundary>
       );
@@ -175,6 +178,7 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
             onGenerateNarration={handleGenerateNarration}
             onNext={handleRunAIEdit}
             appConfig={appConfig}
+            onCancel={cancelCurrentOperation}
           />
         </StepErrorBoundary>
       );
@@ -189,6 +193,7 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
             onRunAIEdit={handleRunAIEdit}
             onSkipAIEdit={handleSkipAIEdit}
             onNext={handleAssembleVideo}
+            onCancel={cancelCurrentOperation}
           />
         </StepErrorBoundary>
       );

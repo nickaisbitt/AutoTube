@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import type { IncomingMessage, ServerResponse } from "http";
 import { apiAuthMiddleware } from "../middleware/apiAuth.js";
 import { resolveSavedProjectPath } from "../utils/projectPaths.js";

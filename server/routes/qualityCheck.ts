@@ -122,10 +122,9 @@ export async function handleQualityCheck(
 
   sendEvent({ type: "progress", message: "Starting quality check...", pct: 0 });
 
-  // Spawn Python quality check script
+  // Spawn Python quality check script — pass key via env only (not argv)
   const args = [CHECK_SCRIPT, resolvedPath, "--json"];
   if (includeVision && apiKey) {
-    args.push("--api-key", apiKey);
     args.push("--model", "google/gemini-2.0-flash-001");
   } else {
     args.push("--skip-vision");
@@ -134,7 +133,11 @@ export async function handleQualityCheck(
   const child = spawn("python3", args, {
     cwd: PROJECT_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, OPENROUTER_API_KEY: apiKey || "" },
+    env: {
+      ...process.env,
+      OPENROUTER_API_KEY: apiKey || "",
+      OPENROUTER_KEY: apiKey || "",
+    },
   });
 
   let stdout = "";

@@ -7,7 +7,6 @@
  */
 
 import type {
-import { apiFetch } from '../../utils/apiClient';
   VideoProject,
   TopicConfig,
   ScriptSegment,
@@ -16,6 +15,7 @@ import { apiFetch } from '../../utils/apiClient';
   SegmentVisualPlan,
   AppConfig,
 } from '../../types';
+import { apiFetch } from '../../utils/apiClient';
 import { hasSpeechSupport, loadSpeechVoices, pickPreferredVoice, stopSpeaking } from '../../utils/speech';
 import {
   sourceSegmentMedia,

@@ -80,6 +80,13 @@ export function apiMiddleware(
   // Apply CORS headers for all API routes
   cors(req, res, () => {});
 
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+
   // Rate limiting applied to all API routes — check return value and return early if handled
   if (rateLimitMiddleware(req, res, () => {})) {
     return;

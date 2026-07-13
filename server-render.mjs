@@ -3401,6 +3401,17 @@ async function render() {
     if (!project.exportSettings) project.exportSettings = {};
     project.exportSettings.quality = 'highest';
     project.exportSettings.youtubeMode = true;
+    // Product default: ffmpeg hard-cut assembly (same path as improvement loop)
+    if (!process.env.AUTOTUBE_RENDER_MODE) {
+      process.env.AUTOTUBE_RENDER_MODE = 'ffmpeg';
+      log('info', '  YouTube default render mode: ffmpeg assembly');
+    }
+    if (!process.env.AUTOTUBE_CUT_INTERVAL_SEC) {
+      process.env.AUTOTUBE_CUT_INTERVAL_SEC = '1.0';
+    }
+    if (!process.env.AUTOTUBE_FFMPEG_HARD_CUTS) {
+      process.env.AUTOTUBE_FFMPEG_HARD_CUTS = '1';
+    }
   }
 
   const quality = process.env.AUTOTUBE_RENDER_QUALITY?.trim()

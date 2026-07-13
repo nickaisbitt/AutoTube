@@ -34,8 +34,8 @@ export function hookFontPx(height) {
 export function assetCutIntervalSec(project) {
   if (!isYouTubeExportMode(project)) return null;
   const raw = process.env.AUTOTUBE_CUT_INTERVAL_SEC;
-  const parsed = raw ? parseFloat(raw) : 1.25;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.25;
+  const parsed = raw ? parseFloat(raw) : 1.0;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.0;
 }
 
 /**

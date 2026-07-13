@@ -308,7 +308,11 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
     return convertAudioFormat(audioFiles[0].file, outputFile);
   }
 
-  console.log(`  🔗 Concatenating ${audioFiles.length} audio segments with ${crossfadeDuration}s crossfades...`);
+  console.log(
+    crossfadeDuration > 0
+      ? `  🔗 Concatenating ${audioFiles.length} audio segments with ${crossfadeDuration}s crossfades...`
+      : `  🔗 Concatenating ${audioFiles.length} audio segments (simple concat, no crossfade)...`,
+  );
 
   // First, normalize all input files to consistent format
   const normalizedFiles = [];
@@ -328,6 +332,26 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
   const listFile = join(tmpdir(), `autotube-audio-list-${Date.now()}.txt`);
   const listContent = normalizedFiles.map(f => `file '${f}'`).join('\n');
   writeFileSync(listFile, listContent);
+
+  // Zero/near-zero crossfade: concat demuxer only (acrossfade over silence pads
+  // collapses mixes to near-silent ~2s streams on ffmpeg assembly path).
+  if (!(crossfadeDuration > 0.05)) {
+    const simple = spawnSync('ffmpeg', [
+      '-y', '-f', 'concat', '-safe', '0',
+      '-i', listFile,
+      '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
+      '-af', 'aresample=48000:async=1:min_hard_comp=0.100000:first_pts=0',
+      outputFile,
+    ], { encoding: 'utf8', timeout: 120000 });
+    normalizedFiles.forEach(f => { try { unlinkSync(f); } catch {} });
+    try { unlinkSync(listFile); } catch {}
+    if (simple.status === 0 && existsSync(outputFile)) {
+      console.log('  ✓ Audio concatenated (simple concat)');
+      return true;
+    }
+    console.warn('  ⚠ Simple concat failed:', (simple.stderr || '').slice(0, 200));
+    return false;
+  }
 
   // Use concat demuxer with anti-banding crossfade filter chain
   // The crossfade uses exponential curves to avoid quantization banding artifacts

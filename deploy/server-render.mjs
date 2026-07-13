@@ -3264,7 +3264,9 @@ async function runFfmpegAssemblyRender(project) {
 
   const mixedAudio = join(audioDir, 'narration-mix.wav');
   try {
-    await concatenateAudio(audioFiles, mixedAudio);
+    // Simple concat — acrossfade over silence pads was producing near-silent mixes
+    const { concatenateAudio: concatAudio } = await import('./server-render/audio.mjs');
+    await concatAudio(audioFiles, mixedAudio, { crossfadeDuration: 0 });
   } catch (err) {
     log('warn', `  ⚠ Audio concat for ffmpeg assembly: ${err.message}`);
   }

@@ -11,7 +11,7 @@ import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openR
 import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
-import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
+import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './stock-media-urls.mjs';
 import {
   accumulateExcludedUrls,
   harvestContextFromFixState,
@@ -29,6 +29,14 @@ export function resolveOpenRouterKey() {
     process.env.OPENROUTER_API_KEY ||
     process.env.VITE_OPENROUTER_KEY ||
     process.env.OPENROUTER_KEY ||
+    ''
+  ).trim();
+}
+
+export function resolveAutotubeApiKey() {
+  return (
+    process.env.AUTOTUBE_API_KEY ||
+    process.env.VITE_AUTOTUBE_API_KEY ||
     ''
   ).trim();
 }
@@ -179,7 +187,10 @@ function isDirectImageCandidate(url = '') {
 
 async function fetchImageSearchResults(devServer, endpoint, query) {
   try {
-    const res = await fetch(`${devServer}${endpoint}?q=${encodeURIComponent(query)}`);
+    const headers = {};
+    const apiKey = resolveAutotubeApiKey();
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    const res = await fetch(`${devServer}${endpoint}?q=${encodeURIComponent(query)}`, { headers });
     if (!res.ok) return [];
     const data = await res.json();
     return data.results || [];
@@ -200,6 +211,8 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
     '/api/search-duckduckgo-images',
     '/api/search-hybrid',
     '/api/search-unsplash',
+    '/api/search-nasa',
+    '/api/search-archive',
   ];
 
   for (const seg of segments) {
@@ -243,6 +256,34 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
         report.volumeTopUpMiss = report.volumeTopUpMiss || [];
         report.volumeTopUpMiss.push({ segmentId: seg.id, count: uniqueCount, need: minPerSegment });
       }
+    }
+
+    // Last-resort: rotate curated Unsplash pool so volume gate can pass without Pexels.
+    if (uniqueCount < minPerSegment) {
+      const offset = (report.stockTopUpOffset || 0) + uniqueCount;
+      const need = minPerSegment - uniqueCount;
+      const stock = pickStockImages(need + 4, offset, STOCK_MEDIA_POOL);
+      for (const img of stock) {
+        if (uniqueCount >= minPerSegment) break;
+        const key = img.url.split('?')[0];
+        if (usedGlobal.has(key)) continue;
+        project.media.push({
+          id: `stock-topup-${seg.id}-${uniqueCount}`,
+          segmentId: seg.id,
+          type: 'image',
+          url: img.url,
+          alt: img.alt || `${seg.title} ${topic}`,
+          query: `stock-pool ${seg.title}`,
+          source: 'Stock pool (volume top-up)',
+          duration: 5,
+          isFallback: false,
+        });
+        usedGlobal.add(key);
+        uniqueCount += 1;
+        report.volumeTopUp = report.volumeTopUp || [];
+        report.volumeTopUp.push({ segmentId: seg.id, url: img.url, endpoint: 'stock-pool' });
+      }
+      report.stockTopUpOffset = offset + need;
     }
   }
 }
@@ -529,14 +570,16 @@ export async function generateFullVideo(options) {
   const pixabayKey = resolvePixabayKey();
 
   const harvestStorage = harvestSessionStoragePayload(harvestCtx);
+  const autotubeApiKey = resolveAutotubeApiKey();
   await browserContext.addInitScript(
-    ({ key, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
+    ({ key, autotubeKey, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
       localStorage.setItem('autotube_onboarding_seen', 'true');
       localStorage.removeItem('autotube_project');
       sessionStorage.setItem(
         'autotube_config_session',
         JSON.stringify({
           openRouterKey: key,
+          autotubeApiKey: autotubeKey || '',
           sourceType: rawFirst ? 'raw' : 'stock',
           pexelsKey: pexels,
           pixabayKey: pixabay,
@@ -554,6 +597,7 @@ export async function generateFullVideo(options) {
     },
     {
       key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline',
+      autotubeKey: autotubeApiKey,
       minAssets: loopMinAssets,
       pexels: pexelsKey,
       pixabay: pixabayKey,

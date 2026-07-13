@@ -97,6 +97,36 @@ function hardCutsEnabled() {
   return loopMode || youtubeMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
 }
 
+function patternInterruptsEnabled() {
+  if (process.env.AUTOTUBE_PATTERN_INTERRUPTS === '0' || process.env.AUTOTUBE_PATTERN_INTERRUPTS === 'false') {
+    return false;
+  }
+  if (process.env.AUTOTUBE_PATTERN_INTERRUPTS === '1' || process.env.AUTOTUBE_PATTERN_INTERRUPTS === 'true') {
+    return true;
+  }
+  return (
+    process.env.AUTOTUBE_YOUTUBE_MODE === '1'
+    || process.env.AUTOTUBE_YOUTUBE_MODE === 'true'
+    || process.env.AUTOTUBE_LOOP_MODE === '1'
+    || process.env.AUTOTUBE_LOOP_MODE === 'true'
+  );
+}
+
+/** Short white flash cut for retention pattern interrupts (canvas path equivalent). */
+function encodeFlashClip(clipOut, durationSec, { w, h, preset }) {
+  const frames = Math.max(1, Math.round(durationSec * FPS));
+  const r = spawnSync(
+    'ffmpeg',
+    [
+      '-y', '-f', 'lavfi', '-i', `color=c=white:s=${w}x${h}:d=${durationSec}:r=${FPS}`,
+      '-frames:v', String(frames),
+      '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p', '-an', clipOut,
+    ],
+    { encoding: 'utf8', timeout: 60_000 },
+  );
+  return r.status === 0 && existsSync(clipOut);
+}
+
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
   if (assetCount <= 1) return 0;
   if (intervalSec <= 0) return 0;
@@ -421,6 +451,15 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
+    if (i > 0 && patternInterruptsEnabled() && (i % 2 === 0)) {
+      const flashSec = 0.06;
+      const flashOut = join(tmpDir, `flash-${String(clipIndex).padStart(3, '0')}.mp4`);
+      if (encodeFlashClip(flashOut, flashSec, { w, h, preset })) {
+        clipPaths.push(flashOut);
+        renderedDuration += flashSec;
+        clipIndex += 1;
+      }
+    }
     await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0);
   }
 

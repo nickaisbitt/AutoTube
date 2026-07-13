@@ -1,7 +1,7 @@
 /**
  * Patch generated project before server-render (loop fixes).
  */
-import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
+import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './stock-media-urls.mjs';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
@@ -280,7 +280,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
  * Mock search API results — real Unsplash (not picsum).
  */
 export function stockSearchResults(topic, count = 8) {
-  return STOCK_HEALTHCARE_IMAGES.slice(0, count).map((img, i) => ({
+  return pickStockImages(count, 0, STOCK_MEDIA_POOL).map((img, i) => ({
     url: img.url,
     image: img.url,
     thumbnailUrl: img.url.replace('w=1920', 'w=400'),

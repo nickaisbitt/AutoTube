@@ -306,10 +306,14 @@ export function isJunkDemoVideoUrl(url = '') {
 
 /** Archive.org (and similar) clips suitable for serious news / scam topics. */
 export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
-  const archive = pool.filter((v) => /archive\.org/i.test(v.url) && !(v.tags || []).includes('filler'));
-  if (!archive.length) return [];
+  const usable = pool.filter(
+    (v) =>
+      !(v.tags || []).includes('filler')
+      && (/archive\.org/i.test(v.url) || /mixkit\.co/i.test(v.url)),
+  );
+  if (!usable.length) return [];
   const blob = (topicBlob || '').toLowerCase();
-  const cyberKeys = ['scam', 'fraud', 'bank', 'identity', 'cyber', 'hack', 'voice'];
+  const cyberKeys = ['scam', 'fraud', 'bank', 'identity', 'cyber', 'hack', 'voice', 'phone', 'laptop', 'human'];
   const disasterKeys = ['tornado', 'storm', 'warning', 'disaster', 'hurricane'];
   const isCyber =
     /bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password/i.test(blob);
@@ -317,8 +321,8 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
   const keys = [];
   if (isCyber) keys.push(...cyberKeys);
   if (isDisaster) keys.push(...disasterKeys);
-  if (!keys.length) return archive;
-  const scored = archive
+  if (!keys.length) return usable;
+  const scored = usable
     .map((v) => {
       const tags = v.tags || [];
       const hit = keys.reduce((n, k) => n + (tags.includes(k) ? 1 : 0), 0);
@@ -326,13 +330,12 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
     })
     .sort((a, b) => b.hit - a.hit);
   const matched = scored.filter((s) => s.hit > 0).map((s) => s.v);
-  // Cyber-only topics must not fall back to tornado/disaster B-roll (offsets wrap there)
   if (isCyber && !isDisaster) {
     const cyberOnly = matched.filter((v) => (v.tags || []).some((t) => cyberKeys.includes(t)));
-    return cyberOnly.length ? cyberOnly : matched;
+    return cyberOnly.length ? cyberOnly : matched.length ? matched : usable.filter((v) => /mixkit\.co/i.test(v.url));
   }
   const rest = scored.filter((s) => s.hit === 0).map((s) => s.v);
-  return matched.length ? [...matched, ...rest] : archive;
+  return matched.length ? [...matched, ...rest] : usable;
 }
 
 /** Pick unique stock URLs rotating by offset (for top-up / mock diversity). */

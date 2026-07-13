@@ -420,16 +420,17 @@ async function fetchPexelsVideos(query, perPage = 8) {
     const out = [];
     for (const video of data.videos || []) {
       if (!video?.video_files?.length) continue;
-      if (video.height > video.width) continue;
       if ((video.duration || 0) > 45) continue;
-      const hd =
+      const landscape =
         video.video_files
-          .filter((f) => (f.width || 0) >= 1280)
+          .filter((f) => (f.width || 0) >= 1280 && (f.width || 0) >= (f.height || 0))
           .sort((a, b) => (b.width || 0) - (a.width || 0))[0]
-        || video.video_files.sort((a, b) => (b.width || 0) - (a.width || 0))[0];
-      if (!hd?.link) continue;
+        || video.video_files
+          .filter((f) => (f.width || 0) >= (f.height || 0))
+          .sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+      if (!landscape?.link) continue;
       out.push({
-        url: hd.link,
+        url: landscape.link,
         alt: `Pexels: ${query}`,
         source: 'Pexels Videos',
         thumbnailUrl: video.image,

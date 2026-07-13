@@ -87,8 +87,8 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return clampWords('EMERGENCY: THEY HID THE RISK');
   }
-  if (/hack|stolen|breach|password|identity|bank/i.test(t)) {
-    return clampWords('YOUR DATA IS ALREADY GONE');
+  if (/hack|stolen|breach|password|identity|bank|voice\s*clone|fraud|scam/i.test(t)) {
+    return clampWords('YOUR BANK ACCOUNT IS EMPTY');
   }
   if (/fire|attack|blackout|disaster|death|kill|crash|bomb/i.test(t)) {
     return clampWords(`BREAKING: ${keywords.slice(0, 3).join(' ')}`);

@@ -4,11 +4,11 @@
 
 import { waitForDomain } from './domainRateLimit';
 
-let _puppeteer: typeof import("puppeteer-extra") | null = null;
+let _puppeteer: any = null;
 async function getPuppeteer() {
   if (!_puppeteer) {
     try {
-      const puppeteer = (await import("puppeteer-extra")).default;
+      const puppeteer = (await import("puppeteer-extra")).default as any;
       const { default: StealthPlugin } = await import("puppeteer-extra-plugin-stealth");
       puppeteer.use(StealthPlugin());
       _puppeteer = puppeteer;
@@ -766,7 +766,7 @@ export async function fetchFlickrImages(query: string): Promise<WebImageResult[]
   let match: RegExpExecArray | null;
 
   while ((match = cdnRegex.exec(html)) !== null) {
-    const [, server, id, secret, sizeSuffix] = match;
+    const [, server, id, secret] = match;
     if (seenIds.has(id)) continue;
     seenIds.add(id);
 

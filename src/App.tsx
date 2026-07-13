@@ -27,7 +27,7 @@ function AppContent() {
     }
   }, [loadProject, appConfig.openRouterKey]);
 
-  const handleExport = useCallback(async (quality: 'draft' | 'standard' | 'high', format: 'webm' | 'mp4', resolution?: '720p' | '1080p' | '4K') => {
+  const handleExport = useCallback(async (quality: 'draft' | 'standard' | 'high', format: 'webm' | 'mp4', resolution?: '720p' | '1080p' | '4K' | '2.39:1') => {
     if (!project) return;
 
     const block = getExportBlockStatus(project);
@@ -37,10 +37,12 @@ function AppContent() {
     }
     
     const clonedProject = structuredClone(project);
+    const exportResolution =
+      !resolution || resolution === '2.39:1' ? '1080p' : resolution;
     clonedProject.exportSettings = {
       quality,
       format,
-      resolution: resolution || '1080p',
+      resolution: exportResolution,
       width: 0,
       height: 0,
       mimeType: format === 'mp4' ? 'video/mp4' : 'video/webm',

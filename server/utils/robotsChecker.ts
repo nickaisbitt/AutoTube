@@ -14,7 +14,6 @@ export async function isAllowed(domain: string, path: string = '/'): Promise<boo
       return true;
     }
     const text = await res.text();
-    const userAgent = /User-agent:\s*\*/i;
     const disallow = /Disallow:\s*(.+)/gi;
     const isBlocked = text.split('\n').some(line => {
       const disallowMatch = disallow.exec(line);

@@ -3,34 +3,8 @@ import type { SourceProvider, SourceProviderConfig } from './types';
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { logger } from '../logger';
 
-interface ArchiveSearchDoc {
-  identifier: string;
-  title?: string;
-  description?: string;
-}
 
-interface ArchiveSearchResponse {
-  response: {
-    docs: ArchiveSearchDoc[];
-  };
-}
 
-interface ArchiveFile {
-  name: string;
-  format?: string;
-  size?: string;
-  height?: string;
-  width?: string;
-}
-
-interface ArchiveMetadata {
-  metadata: {
-    identifier: string;
-    title?: string;
-    description?: string;
-  };
-  files: ArchiveFile[];
-}
 
 export class ArchiveOrgProvider implements SourceProvider {
   readonly name = 'Archive.org';

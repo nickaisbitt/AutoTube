@@ -1,8 +1,10 @@
 # Build on ubuntu-amd64 host, package via Dockerfile.runtime, push to GHCR.
-# Triggers after CI lint/unit succeeds on master push, or manual dispatch.
+# Triggers on master push (after checkout) and after successful CI, or manual dispatch.
 name: GHCR image
 
 on:
+  push:
+    branches: [master]
   workflow_run:
     workflows: ["CI"]
     types: [completed]
@@ -17,6 +19,7 @@ jobs:
   build-push:
     if: >
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push')

@@ -14,7 +14,7 @@ export function isPrivateIP(ip: string): boolean {
   if (net.isIPv4(ip)) {
     const parts = ip.split(".").map(Number);
     if (parts.length !== 4) return true; // Malformed IPv4, treat as private/unsafe
-    const [p0, p1, p2, p3] = parts;
+    const [p0, p1] = parts;
     
     // 127.0.0.0/8 (Loopback)
     if (p0 === 127) return true;

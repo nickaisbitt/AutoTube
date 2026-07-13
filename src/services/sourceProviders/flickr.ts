@@ -60,7 +60,7 @@ export class FlickrProvider implements SourceProvider {
   readonly name = 'Flickr';
   readonly requiresKey = false; // Bypassed with elite scraping fallback
 
-  isAvailable(config: SourceProviderConfig): boolean {
+  isAvailable(_config: SourceProviderConfig): boolean {
     return true; // Always available now
   }
 

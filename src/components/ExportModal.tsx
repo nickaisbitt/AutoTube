@@ -16,6 +16,7 @@ const RESOLUTION_LABELS: Record<ResolutionKey, string> = {
   '720p': 'HD',
   '1080p': 'Full HD',
   '4K': 'Ultra HD',
+  '2.39:1': 'Cinematic',
 };
 
 export default function ExportModal({ isOpen, onClose, project, onExport }: ExportModalProps) {

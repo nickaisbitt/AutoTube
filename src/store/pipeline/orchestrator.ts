@@ -1024,7 +1024,7 @@ export interface QualityGateWarning {
 
 export interface QualityGateRecommendation {
   /** What action to take. */
-  action: 'regenerate_thumbnail' | 'rewrite_hook' | 'add_arc_bridge' | 'simplify_language' | 'add_sources' | 'diversify_visuals';
+  action: 'regenerate_thumbnail' | 'rewrite_hook' | 'add_arc_bridge' | 'simplify_language' | 'add_sources' | 'diversify_visuals' | 'reharvest_media';
   /** Human-readable explanation. */
   reason: string;
   /** Which segment(s) are affected, if applicable. */

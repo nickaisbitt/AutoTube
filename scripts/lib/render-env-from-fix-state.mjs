@@ -70,5 +70,7 @@ export function renderEnvJournalSnapshot(fixState = {}) {
     harvestVideoFirst: fixState.harvestVideoFirst !== false,
     patternInterrupts: fixState.patternInterrupts === true,
     karaokeCaptions: fixState.karaokeCaptions !== false,
+    preferBrightBroll: fixState.preferBrightBroll === true,
+    faceSeekBroll: fixState.faceSeekBroll === true,
   };
 }

@@ -69,10 +69,22 @@ function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<str
 }
 
 const LOOP_DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investigation', 'report', 'leaked', 'official'];
+const LOOP_CYBER_DIVERSITY_TOKENS = [
+  'cybersecurity',
+  'data breach',
+  'news footage',
+  'investigation',
+  'hospital records',
+  'security camera',
+  'official report',
+];
 
 function diversifyLoopQuery(query: string, ctx: { offset: number; nonce: number }): string {
   if (ctx.offset === 0 && ctx.nonce === 0) return query;
-  const token = LOOP_DIVERSITY_TOKENS[ctx.offset % LOOP_DIVERSITY_TOKENS.length];
+  const q = query.toLowerCase();
+  const cyberish = /hack|breach|ransom|cyber|hospital|patient|bank|fraud|scam|password|identity|leak|records?/.test(q);
+  const tokens = cyberish ? LOOP_CYBER_DIVERSITY_TOKENS : LOOP_DIVERSITY_TOKENS;
+  const token = tokens[ctx.offset % tokens.length];
   const variant = ctx.nonce > 0 ? ` take ${ctx.nonce}` : '';
   return `${query} ${token}${variant}`.trim();
 }
@@ -634,6 +646,13 @@ export function scoreCandidate(
   const entertainmentKeywords = ['celebrity', 'traitor', 'winner', 'crowned', 'reality tv', 'love island', 'big brother'];
   if (entertainmentKeywords.some(kw => meta.includes(kw)) && !c.query.toLowerCase().includes('celebrity')) {
     score -= 250;
+  }
+
+  // 8b. Off-brand visuals (puppets/cartoons/insects) — tank serious news B-roll
+  const offBrand =
+    /\b(puppet|muppet|marionette|claymation|cartoon|anime|minecraft|fortnite|gameplay|macro insect|beetle|insect|bug macro|stop motion)\b/i;
+  if (offBrand.test(meta) && !offBrand.test(c.query)) {
+    score -= 400;
   }
 
   // 9. Picsum Penalty — generic random photos should NEVER outrank real DDG/Wikimedia results

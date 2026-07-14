@@ -111,7 +111,9 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     return clampWords('THIS WARNING CAME TOO LATE');
   }
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
-    return clampWords(`EXPOSED: ${keywords.slice(0, 3).join(' ')}`);
+    // Short + no colon — long "EXPOSED: HOSPITAL HACK EXPOSED" was edge-clipped by drawtext
+    const kw = keywords.filter((k) => !/^expos/i.test(k)).slice(0, 2).join(' ');
+    return clampWords(kw ? `${kw} EXPOSED` : 'EXPOSED');
   }
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return clampWords('EMERGENCY: THEY HID THE RISK');

@@ -9,6 +9,7 @@ import type {
 } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { logger } from './logger';
+import { DEFAULT_LLM_MODEL } from './llm/defaultModels';
 
 // ── Pan direction presets for Ken Burns variety ──────────────────────────────
 // Cycle through these to ensure consecutive assets get distinct motion.
@@ -694,8 +695,6 @@ Analyze this project and return the EditPlan JSON.`;
 
 // ── OpenRouter configuration ────────────────────────────────────────────────
 const OPENROUTER_ENDPOINT = '/api/llm';
-import { DEFAULT_LLM_MODEL } from './llm/defaultModels';
-
 const DEFAULT_EDIT_MODEL = DEFAULT_LLM_MODEL;
 
 /**

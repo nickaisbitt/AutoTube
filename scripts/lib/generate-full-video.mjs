@@ -32,6 +32,7 @@ import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-e
 import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
+  isOffBrandVisual,
 } from './harvest-quality.mjs';
 
 export function resolveOpenRouterKey() {
@@ -307,6 +308,7 @@ function isSeriousNewsTopic(topicBlob = '') {
 /** Drop demo/cartoon/broken proxy clips so top-up can inject topical motion. */
 function stripJunkDemoVideos(project, report) {
   if (!project?.media?.length) return;
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
   const kept = [];
   for (const asset of project.media) {
     if (asset.type !== 'video') {
@@ -316,7 +318,8 @@ function stripJunkDemoVideos(project, report) {
     const url = asset.url || '';
     const junk =
       isJunkDemoVideoUrl(url)
-      || isJunkStockClip(asset)
+      || isJunkStockClip(asset, topicBlob)
+      || isOffBrandVisual(`${asset.alt || ''} ${url} ${asset.query || ''}`, topicBlob)
       || (/\/api\/download-clip/i.test(url) && /youtube\.com|youtu\.be/i.test(url));
     if (junk) {
       report.junkVideoDropped = report.junkVideoDropped || [];
@@ -343,7 +346,11 @@ function stripJunkDemoVideos(project, report) {
  */
 function injectCyberStockStills(project, report, mediaOffset = 0) {
   const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
-  if (!/bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password|ai/i.test(topicBlob)) {
+  if (
+    !/bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password|ai|hospital|patient|healthcare|records?/i.test(
+      topicBlob,
+    )
+  ) {
     return;
   }
   const segments = project.script || [];
@@ -488,20 +495,40 @@ async function fetchPixabayVideos(query, perPage = 8) {
 
 /** Pixabay/Pexels often match topic words literally (piggy bank, wash hands, rotate phone). */
 /** Prefer phone/bank/security motion for cyber topics — deny lifestyle pets/nature filler. */
-function isCyberRelevantClip(clip = {}) {
-  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
-  return /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|office|business|worried|shock|texting/.test(
-    blob,
+function isHealthcareTopic(topicBlob) {
+  return /hospital|healthcare|patient|medical|hipaa|ehr|clinic|nurse|doctor|records?\b/i.test(
+    String(topicBlob || ''),
   );
 }
 
-function isJunkStockClip(clip = {}) {
+function isCyberRelevantClip(clip = {}, topicBlob = '') {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
-  return (
-    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|surgery|surgical|hospital|operating room|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|cartoon|animation|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro insect|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
+  const topical =
+    /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|office|business|worried|shock|texting|ransom|leak|breach|records?/.test(
       blob,
-    )
-  );
+    );
+  if (topical) return true;
+  // Hospital corridor / patient records is on-topic for healthcare cyber — not lifestyle junk
+  if (isHealthcareTopic(topicBlob) && /hospital|patient|clinic|nurse|doctor|medical|corridor|ward/.test(blob)) {
+    return true;
+  }
+  return false;
+}
+
+function isJunkStockClip(clip = {}, topicBlob = '') {
+  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
+  if (isOffBrandVisual(blob, topicBlob)) return true;
+  const lifestyleJunk =
+    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
+      blob,
+    );
+  if (lifestyleJunk) return true;
+  // Surgical OR / hygiene hospital stills are junk UNLESS the topic is healthcare cyber
+  if (/surgery|surgical|operating room/.test(blob) && !isHealthcareTopic(topicBlob)) return true;
+  if (/hospital/.test(blob) && !isHealthcareTopic(topicBlob) && !/hack|breach|ransom|data|cyber|records?/.test(blob)) {
+    return true;
+  }
+  return false;
 }
 
 function isHousingTopic(topicBlob) {
@@ -530,6 +557,24 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'court documents paperwork close up',
     ];
     return faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+  }
+  if (isHealthcareTopic(topicBlob) && cyberTopic) {
+    const faces = [
+      'worried patient looking at phone',
+      'stressed nurse looking at computer',
+      'doctor shocked at laptop screen',
+      'family worried hospital waiting room',
+      'person reading medical bill phone',
+    ];
+    const topical = [
+      'hospital corridor empty hallway',
+      'medical records laptop paperwork',
+      'hospital computer workstation',
+      'server room data center racks',
+      'hands typing medical keyboard',
+      'hospital exterior building night',
+    ];
+    return faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
   }
   if (cyberTopic) {
     const faces = [
@@ -579,7 +624,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   // Bare "AI" matched landlord topics and flooded intros with podcast-mic stock
   const cyberTopic =
     !housingTopic &&
-    /bank|hack|stolen|identity|ransom|voice.?clone|fraud|scam|phish|cyber|password|data.?breach/i.test(topicBlob);
+    (/bank|hack|stolen|identity|ransom|voice.?clone|fraud|scam|phish|cyber|password|data.?breach/i.test(topicBlob)
+      || (isHealthcareTopic(topicBlob) && /hack|breach|ransom|leak|records?|data|cyber/i.test(topicBlob)));
 
   stripJunkDemoVideos(project, report);
 
@@ -597,11 +643,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     let addedForQuery = 0;
     for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
       if (liveClips.length >= 40 || addedForQuery >= 3) break;
-      if (isJunkStockClip(clip)) {
+      if (isJunkStockClip(clip, topicBlob)) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
-      if (cyberTopic && !isCyberRelevantClip(clip) && !/Pexels/i.test(clip.source || '')) {
+      if (cyberTopic && !isCyberRelevantClip(clip, topicBlob) && !/Pexels/i.test(clip.source || '')) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
@@ -624,7 +670,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const seenPool = new Set();
   pool = pool.filter((v) => {
     const key = (v.url || '').split('?')[0];
-    if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key) || isJunkStockClip(v)) return false;
+    if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key) || isJunkStockClip(v, topicBlob)) return false;
     seenPool.add(key);
     return true;
   });
@@ -929,6 +975,11 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       faceSeek: options.faceSeek === true,
     });
     injectCyberStockStills(project, report, options.mediaOffset || 0);
+    // Top-up can reintroduce off-brand / off-topic clips — gate again
+    stripJunkDemoVideos(project, report);
+    const afterTopUp = filterAssetsByRelevance(project.media || [], project, { minScore: 0.2 });
+    report.relevanceDroppedAfterTopUp = afterTopUp.dropped;
+    project.media = afterTopUp.media;
     report.afterTopUp = project.media.length;
   }
 

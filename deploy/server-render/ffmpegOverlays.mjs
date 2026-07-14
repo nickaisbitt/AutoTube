@@ -39,6 +39,52 @@ function isInstructionHookText(text) {
     || /\bshock hook\b/i.test(t);
 }
 
+/**
+ * Fit hook words into ≤2 lines that stay inside ~90% of frame width.
+ * Prevents edge-clipping EXPOSED → EXPOSE / XPOSED when Impact-scale text is too wide.
+ * @param {string[]} words
+ * @param {number} videoW
+ * @param {number} videoH
+ */
+export function layoutHookLines(words, videoW, videoH) {
+  const tokens = (words || []).map((w) => String(w || '').trim()).filter(Boolean).slice(0, 6);
+  if (!tokens.length) return { lines: [], fontSize: hookFontPx(videoH) };
+
+  const maxLineW = Math.max(320, videoW * 0.9);
+  // Impact-ish glyph width estimate (drawtext has no measure API here)
+  const estWidth = (line, size) => String(line).length * size * 0.62;
+
+  const pack = (size) => {
+    const lines = [];
+    let cur = [];
+    for (const w of tokens) {
+      const next = [...cur, w].join(' ');
+      if (cur.length && estWidth(next, size) > maxLineW) {
+        lines.push(cur.join(' '));
+        cur = [w];
+      } else {
+        cur.push(w);
+      }
+    }
+    if (cur.length) lines.push(cur.join(' '));
+    // Prefer 2 short lines over one overlong line when we still overflow
+    if (lines.length === 1 && tokens.length >= 3 && estWidth(lines[0], size) > maxLineW) {
+      const mid = Math.ceil(tokens.length / 2);
+      return [tokens.slice(0, mid).join(' '), tokens.slice(mid).join(' ')].filter(Boolean);
+    }
+    return lines.slice(0, 2);
+  };
+
+  let fontSize = Math.min(Math.max(hookFontPx(videoH), Math.round(videoH * 0.095)), Math.round(videoH * 0.11));
+  const minSize = Math.round(videoH * 0.055);
+  let lines = pack(fontSize);
+  while (lines.some((l) => estWidth(l, fontSize) > maxLineW) && fontSize > minSize) {
+    fontSize -= 4;
+    lines = pack(fontSize);
+  }
+  return { lines, fontSize };
+}
+
 export function overlayHookText(videoPath, project, options = {}) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
 
@@ -57,16 +103,22 @@ export function overlayHookText(videoPath, project, options = {}) {
 
   const probe = spawnSync(
     'ffprobe',
-    ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=height,width', '-of', 'csv=p=0', videoPath],
+    ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', videoPath],
     { encoding: 'utf8' },
   );
   const [wStr, hStr] = (probe.stdout || '1280,720').trim().split(',');
+  const w = parseInt(wStr, 10) || 1280;
   const h = parseInt(hStr, 10) || 720;
-  const words = hookText.trim().toUpperCase().split(/\s+/).filter(Boolean).slice(0, 6);
-  const line1 = words.slice(0, 4).join(' ');
-  const line2 = words.slice(4, 6).join(' ');
-  // Larger + yellow fill so hook OCR / vision reliably sees on-screen text in 0–3s
-  const fontSize = Math.min(Math.max(hookFontPx(h), Math.round(h * 0.095)), Math.round(h * 0.11));
+  const words = hookText
+    .trim()
+    .toUpperCase()
+    .replace(/:/g, ' ') // avoid ffmpeg drawtext option-separator footguns
+    .split(/\s+/)
+    .filter(Boolean);
+  const { lines, fontSize } = layoutHookLines(words, w, h);
+  const line1 = lines[0] || '';
+  const line2 = lines[1] || '';
+  if (!line1) return { ok: false, error: 'no hook text' };
   const durationSec = options.durationSec ?? 3.5;
   const border = Math.max(5, Math.round(fontSize * 0.08));
   const filters = [

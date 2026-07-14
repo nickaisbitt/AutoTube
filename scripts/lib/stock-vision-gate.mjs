@@ -7,16 +7,17 @@ import { openRouterMessageText } from './openRouterMessageText.mjs';
 const OFF_BRAND_VISION_PROMPT = [
   'You judge ONE stock photo/video thumbnail for a serious news YouTube channel.',
   'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
-  'reject=true if: insect/beetle/bug macro, puppet/muppet, cartoon/anime character, Minecraft/Fortnite gameplay, sci-fi HUD overlay.',
-  'reject=false for real people, offices, hospitals, documents, phones, city exteriors.',
+  'reject=true if: insect/beetle/bug macro, puppet/muppet, cartoon/anime character, Minecraft/Fortnite gameplay, sci-fi HUD overlay, blurry/out-of-focus filler, overexposed/washed-out clip, staged reenactment with actors, produce/vegetable crate, empty blurry hospital bed only, generic corporate handshake/office skyline.',
+  'reject=false for real people with readable faces, documents, phones, topical locations with human context.',
 ].join(' ');
 
-function visionPromptForTopic(topicBlob = '') {
+/** @param {string} topicBlob */
+export function visionPromptForTopic(topicBlob = '') {
   if (/\bnursing\s*home|elder\s*abuse|care\s*home\b/i.test(topicBlob)) {
     return [
       'You judge ONE stock thumbnail for a nursing-home abuse / CCTV investigation video.',
       'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
-      'reject=true if: generic corporate office, architectural scale model, glass skyline, conference room, beetle/insect, puppet, cartoon, HUD overlay, produce/vegetable crate, grocery stock, empty blurry hospital bed only.',
+      'reject=true if: generic corporate office, architectural scale model, glass skyline, conference room, beetle/insect, puppet, cartoon, HUD overlay, produce/vegetable crate, grocery stock, empty blurry hospital bed only, blurry/defocused filler, overexposed/washed-out clip, staged reenactment actors.',
       'reject=false for: CCTV/surveillance, care-home hallway, elderly patient, caregiver, family visit, wheelchair corridor.',
     ].join(' ');
   }
@@ -24,8 +25,16 @@ function visionPromptForTopic(topicBlob = '') {
     return [
       'You judge ONE stock thumbnail for a veterans benefits / identity-theft / data-broker investigation video.',
       'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
-      'reject=true if: bank OTP keypad/SMS scam props, call-center headset farm, voice-clone studio mic, nursing-home CCTV hallway, beetle/insect, puppet, cartoon, sci-fi HUD, crypto trading screens.',
+      'reject=true if: bank OTP keypad/SMS scam props, call-center headset farm, voice-clone studio mic, nursing-home CCTV hallway, beetle/insect, puppet, cartoon, sci-fi HUD, crypto trading screens, blurry filler, overexposed clip, staged reenactment, produce crate, empty hospital bed only.',
       'reject=false for: veteran/military, VA/government office, benefits paperwork, SSN/credit report docs, identity theft victim on phone, dark-web/data-broker laptop (no HUD), worried family.',
+    ].join(' ');
+  }
+  if (/hospital|healthcare|patient|hipaa|medical.*(hack|breach|leak|records)/i.test(topicBlob)) {
+    return [
+      'You judge ONE stock thumbnail for a hospital / patient-records cyber breach investigation video.',
+      'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
+      'reject=true if: bank OTP keypad, voice-clone studio mic, nursing-home abuse CCTV only, surgical OR close-up, beetle/insect, puppet, cartoon, sci-fi HUD, blurry/defocused filler, overexposed clip, staged reenactment, produce crate, empty hospital bed only.',
+      'reject=false for: hospital corridor with people, medical records laptop, nurse at workstation, server room racks, patient waiting room worried, HIPAA paperwork.',
     ].join(' ');
   }
   return OFF_BRAND_VISION_PROMPT;

@@ -2,7 +2,7 @@
  * Single source of truth for B-roll edit timelines (loop + ffmpeg assembly).
  * Always use post-TTS segment.duration when building for render.
  */
-import { scoreAssetRelevance, isOffBrandVisual } from './harvest-quality.mjs';
+import { scoreAssetRelevance, isOffBrandVisual, isGenericStockJunk } from './harvest-quality.mjs';
 
 /**
  * @param {object} project
@@ -61,10 +61,11 @@ export function buildEditTimeline(project, options = {}) {
     const scoreAsset = (a) => {
       const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
       if (isOffBrandVisual(blob, topicBlob)) return -8;
+      if (isGenericStockJunk(blob, topicBlob)) return -6;
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -5;
       if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
       const preferBright = process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
-      if (preferBright && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy)\b/i.test(blob)) {
+      if (preferBright && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|overexposed|blown.?out|washed.?out)\b/i.test(blob)) {
         return -4;
       }
       // Intro + outro: topic relevance first so office/arch models lose to care/CCTV clips

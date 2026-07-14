@@ -44,6 +44,109 @@ describe('off-brand visual harvest gate', () => {
   });
 });
 
+describe('generic stock junk harvest gate', () => {
+  const nursingTopic = 'The nursing home cameras that recorded abuse for years';
+
+  it('rejects blurry, overexposed, staged reenactment, produce, and empty hospital bed filler', async () => {
+    const {
+      isGenericStockJunk,
+      genericStockJunkReason,
+      BLURRY_LOW_QUALITY_RE,
+      OVEREXPOSED_STOCK_RE,
+      STAGED_REENACT_RE,
+      PRODUCE_GROCERY_JUNK_RE,
+      EMPTY_HOSPITAL_BED_RE,
+    } = await import('../../../scripts/lib/harvest-quality.mjs');
+
+    expect(BLURRY_LOW_QUALITY_RE.test('blurry out of focus hallway')).toBe(true);
+    expect(OVEREXPOSED_STOCK_RE.test('overexposed washed out window')).toBe(true);
+    expect(STAGED_REENACT_RE.test('staged reenactment hospital scene')).toBe(true);
+    expect(PRODUCE_GROCERY_JUNK_RE.test('vegetable crate farmers market')).toBe(true);
+    expect(EMPTY_HOSPITAL_BED_RE.test('empty hospital bed close up')).toBe(true);
+
+    expect(isGenericStockJunk('blurry generic stock hallway', nursingTopic)).toBe(true);
+    expect(isGenericStockJunk('overexposed washed out office', nursingTopic)).toBe(true);
+    expect(isGenericStockJunk('staged reenactment caregiver scene', nursingTopic)).toBe(true);
+    expect(isGenericStockJunk('produce crate grocery stock', nursingTopic)).toBe(true);
+    expect(isGenericStockJunk('empty hospital bed blurry bed', nursingTopic)).toBe(true);
+    expect(genericStockJunkReason('architectural model conference room', nursingTopic)).toMatch(
+      /nursing|corporate/i,
+    );
+
+    expect(isGenericStockJunk('worried family visiting nursing home', nursingTopic)).toBe(false);
+    expect(isGenericStockJunk('security camera cctv hallway nursing home', nursingTopic)).toBe(false);
+  });
+
+  it('drops junk stock in filterAssetsByRelevance for nursing topics', async () => {
+    const { filterAssetsByRelevance } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const project = {
+      topic: nursingTopic,
+      script: [{ id: 's1', title: 'Cameras', narration: 'cameras recorded nursing home abuse' }],
+      media: [],
+    };
+    const media = [
+      {
+        id: 'produce',
+        segmentId: 's1',
+        type: 'video',
+        url: 'https://example.com/produce.mp4',
+        alt: 'vegetable crate farmers market produce',
+        query: 'produce stock',
+      },
+      {
+        id: 'bed',
+        segmentId: 's1',
+        type: 'video',
+        url: 'https://example.com/bed.mp4',
+        alt: 'empty hospital bed blurry bed',
+        query: 'hospital bed',
+      },
+      {
+        id: 'cctv',
+        segmentId: 's1',
+        type: 'video',
+        url: 'https://example.com/cctv.mp4',
+        alt: 'security camera cctv hallway nursing home',
+        query: 'security camera cctv hallway',
+      },
+    ];
+    const { media: kept, dropped } = filterAssetsByRelevance(media, project, { minScore: 0.2 });
+    expect(dropped.some((d: { url?: string }) => d.url?.includes('produce'))).toBe(true);
+    expect(dropped.some((d: { reason?: string }) => /produce|hospital bed|blurry/i.test(d.reason || ''))).toBe(
+      true,
+    );
+    expect(kept.some((a: { id: string }) => a.id === 'cctv')).toBe(true);
+    expect(kept.some((a: { id: string }) => a.id === 'produce')).toBe(false);
+    expect(kept.some((a: { id: string }) => a.id === 'bed')).toBe(false);
+  });
+});
+
+describe('isJunkStockClip + faceSeek relevance', () => {
+  it('isJunkStockClip rejects generic filler patterns', async () => {
+    const { isJunkStockClip } = await import('../../../scripts/lib/generate-full-video.mjs');
+    const topic = 'The nursing home cameras that recorded abuse for years';
+    expect(isJunkStockClip({ alt: 'blurry generic stock footage' }, topic)).toBe(true);
+    expect(isJunkStockClip({ alt: 'overexposed washed out clip' }, topic, { preferBright: true })).toBe(
+      true,
+    );
+    expect(isJunkStockClip({ alt: 'staged reenactment scene actors' }, topic)).toBe(true);
+    expect(isJunkStockClip({ alt: 'produce crate grocery aisle' }, topic)).toBe(true);
+    expect(isJunkStockClip({ alt: 'security camera cctv nursing home' }, topic)).toBe(false);
+  });
+
+  it('stockMotionQueries include anti-staged documentary anchors when faceSeek on', async () => {
+    const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
+    const q = stockMotionQueries('bank fraud otp scam', true, { preferBright: true, faceSeek: true });
+    expect(q.some((x) => /documentary|real footage|not actors/i.test(x))).toBe(true);
+  });
+
+  it('visionPromptForTopic mentions blurry/staged/overexposed junk on nursing topics', async () => {
+    const { visionPromptForTopic } = await import('../../../scripts/lib/stock-vision-gate.mjs');
+    const prompt = visionPromptForTopic('The nursing home cameras that recorded abuse for years');
+    expect(prompt).toMatch(/blurry|overexposed|staged reenactment|produce/i);
+  });
+});
+
 describe('hook overlay layout + templates', () => {
   it('builds short expose overlays without EXPOSED: colon spam', async () => {
     const { buildShortHookOverlay } = await import('../../../scripts/lib/patch-project-for-loop.mjs');

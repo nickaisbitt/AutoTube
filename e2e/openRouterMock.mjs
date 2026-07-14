@@ -62,6 +62,9 @@ export function buildShockHookLine(topic, override) {
   if (/landlord|tenant|evict|rent/.test(tl)) {
     return 'AI already filed your eviction — before you knew.';
   }
+  if (/insurance|car\s*crash|fake\s*crash|crash\s*video/.test(tl)) {
+    return 'That car crash was staged for the insurance payout.';
+  }
   if (/bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl)) {
     return 'This already emptied real bank accounts.';
   }

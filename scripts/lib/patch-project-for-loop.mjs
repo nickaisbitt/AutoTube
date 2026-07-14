@@ -119,6 +119,10 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/landlord|tenant|evict|rent/i.test(t)) {
     return clampWords('THEY EVICTED YOU WITH AI');
   }
+  // Insurance before generic "scam" (otherwise bank hook lands on crash fraud videos)
+  if (/insurance|car\s*crash|fake\s*crash|crash\s*video/i.test(t)) {
+    return clampWords('FAKE CRASH SCAM EXPOSED');
+  }
   if (/hack|stolen|breach|password|identity|bank|voice\s*clone|fraud|scam/i.test(t)) {
     return clampWords('YOUR BANK ACCOUNT IS EMPTY');
   }

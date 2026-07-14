@@ -37,7 +37,6 @@ import {
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
 import {
-  isHealthcareCyberTopic,
   isHealthcareTopic,
   isHousingTopic,
   isNursingHomeTopic,

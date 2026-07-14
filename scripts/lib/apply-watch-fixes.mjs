@@ -121,10 +121,13 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
 
   if ((pacing <= 8 || longestHold >= 4) && !sceneFail) {
     s.useFastPacing = true;
+    s.patternInterrupts = true;
     if ((s.cutIntervalSec ?? 1.25) > CUT_FLOOR) {
       const prev = s.cutIntervalSec ?? 1.25;
       s.cutIntervalSec = Math.max(CUT_FLOOR, prev - 0.15);
-      applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s`);
+      applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s + zoom-punch interrupts`);
+    } else {
+      applied.push('2. Pacing FAIL → zoom-punch pattern interrupts ON');
     }
   }
 

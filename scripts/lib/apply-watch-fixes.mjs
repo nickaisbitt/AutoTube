@@ -5,6 +5,7 @@
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
 import { buildImpactBeatsForTopic } from './impactBeatsByTopic.mjs';
+import { isNursingHomeTopic } from './topic-family.mjs';
 
 /** Keep hook/overlay aligned to the current topic (prevents bank→landlord leakage). */
 function syncTopicHook(s, topic, visionFix) {
@@ -123,7 +124,13 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
 
   if (objectiveFail) {
     const failed = (watch.objectiveGate?.checks || []).filter((c) => !c.pass).map((c) => c.name);
-    if (failed.includes('placeholder_pct')) {
+    const sceneBodyOk = watch.sceneQa?.bodyPass === true;
+    const draftTier = (watch.objectiveGate?.tier || watch.renderTier || s.renderTier) === 'draft';
+    if (failed.includes('placeholder_pct') && draftTier && sceneBodyOk) {
+      // Soft: don't burn a harvest cycle on draft placeholder alone when scenes already cut
+      s.mediaOffset = (s.mediaOffset || 0) + 1;
+      applied.push('0a. Placeholder FAIL on draft (scene body OK) → soft bump offset, keep promote path');
+    } else if (failed.includes('placeholder_pct')) {
       s.reHarvestMedia = true;
       s.mediaOffset = (s.mediaOffset || 0) + 2;
       s.harvestVideoFirst = true;
@@ -169,7 +176,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   // Pacing: only shorten cuts when scene QA fails; if scenes already pass, diversify + interrupts
   if (pacing != null && pacing <= 5) {
     s.patternInterrupts = true;
-    s.impactBeatIntervalSec = 5;
+    s.impactBeatIntervalSec = isNursingHomeTopic(topic) ? 3.5 : 4;
     if (sceneFail || longestHold >= 3) {
       if ((s.cutIntervalSec ?? 1.25) > CUT_FLOOR) {
         const prev = s.cutIntervalSec ?? 1.25;
@@ -188,6 +195,10 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
       s.patternInterrupts = true;
       applied.push('2. Pacing low → zoom-punch pattern interrupts ON');
     }
+  } else if (pacing != null && pacing <= 7) {
+    // Mid pacing (common on nursing) — denser cards without thrashing cut interval
+    s.patternInterrupts = true;
+    s.impactBeatIntervalSec = Math.min(s.impactBeatIntervalSec || 5, isNursingHomeTopic(topic) ? 3.5 : 4);
   }
 
   const renderTier = s.renderTier || 'draft';

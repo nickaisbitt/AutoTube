@@ -400,7 +400,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const devServer = options.devServer || 'http://localhost:5173';
   let renderedDuration = 0;
   let clipIndex = 0;
-  let placeholderClipCount = 0;
+  // Only grain fillers count as placeholders — clip reuse is real B-roll with zoom.
+  let grainPlaceholderCount = 0;
+  let reuseClipCount = 0;
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
@@ -425,8 +427,12 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     let ok = false;
     if (!localSrc) {
       console.log(`  [ffmpeg] ${label}: reuse/placeholder — asset fetch failed`);
-      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, clipPaths[clipPaths.length - 1]);
-      if (ok) placeholderClipCount += 1;
+      const reusePath = clipPaths[clipPaths.length - 1] || null;
+      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, reusePath);
+      if (ok) {
+        if (reusePath) reuseClipCount += 1;
+        else grainPlaceholderCount += 1;
+      }
     } else {
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
       ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
@@ -447,8 +453,12 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       }
       if (!ok) {
         console.log(`  [ffmpeg] ${label}: encode failed — reuse/placeholder`);
-        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, clipPaths[clipPaths.length - 1]);
-        if (ok) placeholderClipCount += 1;
+        const reusePath = clipPaths[clipPaths.length - 1] || null;
+        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, reusePath);
+        if (ok) {
+          if (reusePath) reuseClipCount += 1;
+          else grainPlaceholderCount += 1;
+        }
       }
     }
     if (!ok) {
@@ -461,8 +471,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    // Punch opener + every other clip — gpt-5.4-mini dunks static first frames
-    const zoomPunch = patternInterruptsEnabled() && (i === 0 || i % 2 === 0);
+    // Dense zoom-punch in opener (first 3 clips) + every other clip after
+    const zoomPunch =
+      patternInterruptsEnabled() && (i < 3 || i % 2 === 0);
     await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0, { zoomPunch });
   }
 
@@ -497,7 +508,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   return {
     ok: true,
     clipCount: clipPaths.length,
-    placeholderClipCount,
+    placeholderClipCount: grainPlaceholderCount,
+    reuseClipCount,
     scheduleCount: schedule.length,
     intervalSec: interval,
     targetSec: segment.duration || 20,

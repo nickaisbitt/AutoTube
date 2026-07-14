@@ -319,7 +319,8 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
       hookLine: hook,
       hookOverlay,
       impactBeats: buildImpactBeatsForTopic(topic),
-      impactBeatIntervalSec: 5,
+      impactBeatIntervalSec: fixState.impactBeatIntervalSec
+        ?? (/nursing\s*home|elder\s*abuse|care\s*home/i.test(topic) ? 3.5 : 4),
     };
   }
 

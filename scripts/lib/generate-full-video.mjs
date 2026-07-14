@@ -1372,16 +1372,79 @@ export async function generateFullVideo(options) {
   try {
   // networkidle hangs when dev server is serving long harvest API streams
     await gotoDevServer();
-    if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 3000 }).catch(() => false)) {
-      await page.getByTestId('onboarding-skip').click();
+    // Force-dismiss onboarding before any clicks (modal is z-[200] and can reappear)
+    await page.evaluate(() => {
+      localStorage.setItem('autotube_onboarding_seen', 'true');
+    }).catch(() => {});
+    if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 2000 }).catch(() => false)) {
+      await page.getByTestId('onboarding-skip').click().catch(() => {});
     }
 
     await page.getByTestId('topic-input').fill(topic);
     await page.getByTestId('duration-select').selectOption('3').catch(() => {});
     await page.getByTestId('generate-script-only').click();
     log('⏳ Script (live OpenRouter — fast loop mode)...');
+
+    const sourceMediaBtn = () =>
+      page.getByTestId('source-media-next').or(page.getByRole('button', { name: /Source Media/i }));
+
+    const waitForScriptReady = async (timeoutMs) => {
+      const deadline = Date.now() + timeoutMs;
+      let lastDump = 0;
+      while (Date.now() < deadline) {
+        if (await sourceMediaBtn().isVisible({ timeout: 2_000 }).catch(() => false)) return true;
+        const state = await page.evaluate(() => {
+          let scriptLen = 0;
+          let status = '';
+          try {
+            const raw = localStorage.getItem('autotube_project');
+            if (raw) {
+              const p = JSON.parse(raw);
+              scriptLen = Array.isArray(p?.script) ? p.script.length : 0;
+              status = p?.status || '';
+            }
+          } catch {
+            /* ignore */
+          }
+          const body = document.body?.innerText?.slice(0, 800) || '';
+          return { scriptLen, status, body };
+        }).catch(() => ({ scriptLen: 0, status: '', body: '' }));
+
+        if (state.scriptLen > 0 && /complete|ready/i.test(state.status || '')) {
+          // Project ready but button not yet painted — brief settle
+          await page.waitForTimeout(1500);
+          if (await sourceMediaBtn().isVisible({ timeout: 5_000 }).catch(() => false)) return true;
+        }
+        if (/Script generation failed|OpenRouter|API key required|error/i.test(state.body)) {
+          throw new Error(`Script UI error: ${state.body.slice(0, 200)}`);
+        }
+        if (Date.now() - lastDump > 60_000) {
+          lastDump = Date.now();
+          log(`   …still waiting for Source Media (${Math.round((deadline - Date.now()) / 1000)}s left, scriptLen=${state.scriptLen})`);
+        }
+        await page.waitForTimeout(3_000);
+      }
+      return false;
+    };
+
     try {
-      await page.getByRole('button', { name: /Source Media/i }).waitFor({ state: 'visible', timeout: scriptTimeoutMs });
+      let ready = await waitForScriptReady(scriptTimeoutMs);
+      if (!ready) {
+        // One recovery: dismiss onboarding, reload, refill, regenerate
+        log('⚠ Script wait timed out — reloading once and retrying…');
+        await page.evaluate(() => localStorage.setItem('autotube_onboarding_seen', 'true')).catch(() => {});
+        await gotoDevServer();
+        if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 2000 }).catch(() => false)) {
+          await page.getByTestId('onboarding-skip').click().catch(() => {});
+        }
+        await page.getByTestId('topic-input').fill(topic);
+        await page.getByTestId('duration-select').selectOption('3').catch(() => {});
+        await page.getByTestId('generate-script-only').click();
+        ready = await waitForScriptReady(Math.min(120_000, scriptTimeoutMs));
+      }
+      if (!ready) {
+        throw new Error('locator.waitFor: Timeout waiting for Source Media after reload');
+      }
     } catch (err) {
       writeFileSync(join(outDir, 'browser-events.json'), JSON.stringify(browserEvents, null, 2));
       const uiState = await page.evaluate(() => ({
@@ -1395,7 +1458,9 @@ export async function generateFullVideo(options) {
       throw err;
     }
 
-    await page.getByRole('button', { name: /Source Media Assets/i }).click();
+    await sourceMediaBtn().click({ timeout: 30_000 }).catch(async () => {
+      await sourceMediaBtn().click({ force: true, timeout: 30_000 });
+    });
     log(`⏳ Media (${realHarvest ? 'live harvest' : 'mock harvest'})...`);
 
     const mediaDeadline = Date.now() + mediaTimeoutMs;

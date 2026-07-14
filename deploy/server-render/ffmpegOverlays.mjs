@@ -121,16 +121,42 @@ export function overlayHookText(videoPath, project, options = {}) {
   const line1 = lines[0] || '';
   const line2 = lines[1] || '';
   if (!line1) return { ok: false, error: 'no hook text' };
-  const durationSec = options.durationSec ?? 3.5;
+  // Hook window ≤3s (watcher audits 0–3s). Rotate to an early impact beat after 1.5s
+  // so nursing videos don't hold one static string across similar B-roll shots.
+  const durationSec = options.durationSec ?? 3.0;
+  const phaseSplit = Math.min(1.5, durationSec * 0.5);
   const border = Math.max(5, Math.round(fontSize * 0.08));
   const filters = [
-    `drawtext=text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.26:enable='between(t\\,0\\,${durationSec})'`,
+    `drawtext=text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.26:enable='between(t\\,0\\,${phaseSplit})'`,
   ];
   if (line2) {
     filters.push(
-      `drawtext=text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
+      `drawtext=text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${phaseSplit})'`,
     );
   }
+
+  const topic = String(project?.topic || project?.title || '');
+  const earlyBeats = (Array.isArray(project?.exportSettings?.impactBeats)
+    ? project.exportSettings.impactBeats
+    : buildImpactBeatsForTopic(topic))
+    .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
+    .filter((t) => t && t !== hookText.trim().toUpperCase());
+  const rotateText = earlyBeats[0] || '';
+  if (rotateText && phaseSplit < durationSec - 0.05) {
+    const { lines: rotLines, fontSize: rotSize } = layoutHookLines(rotateText.split(/\s+/), w, h);
+    const rotBorder = Math.max(5, Math.round(rotSize * 0.08));
+    if (rotLines[0]) {
+      filters.push(
+        `drawtext=text='${escapeDrawtext(rotLines[0])}':fontsize=${rotSize}:fontcolor=yellow:borderw=${rotBorder}:bordercolor=black:x=(w-text_w)/2:y=h*0.26:enable='between(t\\,${phaseSplit}\\,${durationSec})'`,
+      );
+    }
+    if (rotLines[1]) {
+      filters.push(
+        `drawtext=text='${escapeDrawtext(rotLines[1])}':fontsize=${rotSize}:fontcolor=yellow:borderw=${rotBorder}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,${phaseSplit}\\,${durationSec})'`,
+      );
+    }
+  }
+
   const vf = filters.join(',');
 
   const tmpOut = videoPath.replace(/\.mp4$/, '-hooked.mp4');
@@ -343,12 +369,14 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   // Prefer unique cards across the timeline — repetition tanks captionReadability
   const uniqueBeats = [...new Set(beats)];
 
+  const hookEndSec = Number(options.hookEndSec ?? 3) || 3;
   const interval = Math.max(
-    4,
-    Number(project?.exportSettings?.impactBeatIntervalSec || options.intervalSec || 5) || 5,
+    3.5,
+    Number(project?.exportSettings?.impactBeatIntervalSec || options.intervalSec || 4) || 4,
   );
+  // Start right after hook window — avoid 3–5s dead zone of static / empty text
   const times = [];
-  for (let t = 5; t < duration - 2; t += interval) times.push(t);
+  for (let t = hookEndSec; t < duration - 2; t += interval) times.push(t);
   if (!times.length) return { ok: false, error: 'no beat times' };
 
   const hProbe = spawnSync(
@@ -361,10 +389,12 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   const border = Math.max(5, Math.round(fontSize * 0.09));
   const yFracs = [0.36, 0.44, 0.52];
   const filters = [];
+  // Skip beat 0 when hook window already rotated into the first impact card (~1.5–3s)
+  const beatOffset = hookEndSec <= 3.5 ? 1 : 0;
   for (let i = 0; i < times.length; i += 1) {
-    const text = escapeDrawtext(uniqueBeats[i % uniqueBeats.length]);
+    const text = escapeDrawtext(uniqueBeats[(i + beatOffset) % uniqueBeats.length]);
     const start = times[i];
-    const end = Math.min(duration - 0.05, start + 1.7);
+    const end = Math.min(duration - 0.05, start + 1.4);
     const y = `h*${yFracs[i % yFracs.length]}`;
     filters.push(
       `drawtext=text='${text}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=${y}:enable='between(t\\,${start}\\,${end})'`,

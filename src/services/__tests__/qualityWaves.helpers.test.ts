@@ -114,4 +114,22 @@ describe('quality waves 2–5 helpers', () => {
     expect(isBrutalHardFail(true, { success: false, error: 'boom' })).toBe(true);
     expect(isBrutalHardFail(true, { success: true, report: { scores: { overall: 7 } } })).toBe(false);
   });
+
+  it('draft soft-passes mild placeholder_pct when scene body ok', async () => {
+    const { evaluateObjectiveGate } = await import('../../../scripts/lib/run-objective-qa.mjs');
+    const gate = evaluateObjectiveGate({
+      renderTier: 'draft',
+      sceneQa: { available: true, hookPass: true, bodyPass: true, longestHookSec: 1, longestSceneSec: 1.5 },
+      clipCountGate: { available: true, pass: true, clipCount: 40, minClips: 20 },
+      placeholderGate: {
+        available: true,
+        pass: false,
+        placeholderPct: 15,
+        maxPlaceholderPct: 10,
+      },
+      objectiveQa: { silencePass: true, silenceFirst60Sec: 0 },
+    });
+    expect(gate.pass).toBe(true);
+    expect(gate.checks.find((c) => c.name === 'placeholder_pct')?.pass).toBe(true);
+  });
 });

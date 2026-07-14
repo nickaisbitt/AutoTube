@@ -76,6 +76,7 @@ export async function handleLlmProxy(
         "X-Title": "AutoTube AI Generator",
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000),
     });
 
     const text = await upstream.text();
@@ -83,11 +84,12 @@ export async function handleLlmProxy(
     res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/json");
     res.end(text);
   } catch (err) {
-    res.statusCode = 502;
+    const timedOut = err instanceof Error && (err.name === "TimeoutError" || /aborted|timeout/i.test(err.message));
+    res.statusCode = timedOut ? 504 : 502;
     res.setHeader("Content-Type", "application/json");
     res.end(
       JSON.stringify({
-        error: "OpenRouter proxy failed",
+        error: timedOut ? "OpenRouter proxy timed out" : "OpenRouter proxy failed",
         details: err instanceof Error ? err.message : String(err),
       }),
     );

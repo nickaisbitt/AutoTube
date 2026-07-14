@@ -29,7 +29,7 @@ export function captionMetrics(height, width) {
 }
 
 export function hookFontPx(height) {
-  return Math.round(height * 0.09);
+  return Math.round(height * 0.11);
 }
 
 /** Max seconds before switching B-roll within a segment (YouTube retention). */

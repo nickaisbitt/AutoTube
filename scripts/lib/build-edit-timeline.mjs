@@ -34,23 +34,39 @@ export function buildEditTimeline(project, options = {}) {
   for (const seg of project.script || []) {
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
     if (!assets.length) {
-      assets = globalPool.map((m) => ({ ...m, segmentId: seg.id }));
+      // Borrow from global pool but prefer face/CTA motion over random intro leftovers
+      assets = uniqueAssetsByUrl(
+        [...globalPool]
+          .sort((a, b) => {
+            const score = (x) => {
+              const blob = `${x.query || ''} ${x.alt || ''}`.toLowerCase();
+              if (/puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -5;
+              if (/face|person|worried|hospital|records?|laptop|verify/i.test(blob)) return 2;
+              return x.type === 'video' ? 1 : 0;
+            };
+            return score(b) - score(a);
+          })
+          .map((m) => ({ ...m, segmentId: seg.id })),
+      );
     }
     if (!assets.length) continue;
 
     const videos = assets.filter((a) => a.type === 'video');
     const images = assets.filter((a) => a.type !== 'video');
-    const isIntro = seg.type === 'intro' || seg === (project.script || [])[0];
+    const script = project.script || [];
+    const isIntro = seg.type === 'intro' || seg === script[0];
+    const isOutro = seg.type === 'outro' || seg === script[script.length - 1];
     const scoreAsset = (a) => {
       const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
-      if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind/i.test(blob)) return -2;
+      if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up/i.test(blob)) return 2;
+      if (isOutro && /checklist|subscribe|relieved|direct.?camera|hospital|records?|laptop|verify|call/i.test(blob)) return 3;
       return 0;
     };
-    // Intro = motion only when videos exist. Body = almost all video (V-V-V-I).
+    // Intro/outro = motion only when videos exist. Body = almost all video (V-V-V-I).
     const ordered = preferVideo && videos.length
       ? (() => {
-          if (isIntro) {
+          if (isIntro || isOutro) {
             return uniqueAssetsByUrl(
               [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a)),
             );

@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
+import { buildImpactBeatsForTopic } from '../../scripts/lib/impactBeatsByTopic.mjs';
 
 function escapeDrawtext(text) {
   return String(text || '')
@@ -325,72 +326,20 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   const duration = parseFloat(probe.stdout || '0') || 0;
   if (duration < 12) return { ok: false, error: 'too short' };
 
-  const topic = String(project?.topic || project?.title || '').toLowerCase();
-  let defaults = [
-    'STAY WITH ME',
-    'THIS IS REAL',
-    'WATCH CLOSELY',
-    'HERE IS PROOF',
-    'DO THIS NOW',
-    'SHARE THIS',
-    'DONT SKIP',
-    'ONE MORE FACT',
-    'REMEMBER THIS',
-    'ACT TODAY',
-    'TELL SOMEONE',
-    'SAVE THIS',
-  ];
-  if (/landlord|tenant|evict|rent/.test(topic)) {
-    defaults = [
-      'LEASE DENIED',
-      'EVICTED BY AI',
-      'YOUR FILE FLAGGED',
-      'RENT SCORE DOWN',
-      'NOTICE FILED',
-      'NO HEARING',
-      'CREDIT HIT',
-      'AUTO SKIPPED',
-      'BLACKLIST RISK',
-      'TIMER STARTED',
-      'APPEAL DENIED',
-      'LOCK CHANGED',
-    ];
-  } else if (/bank|fraud|scam|voice.?clone|hack|identity|password/.test(topic)) {
-    defaults = [
-      'VOICE CLONE SCAM',
-      'THEY DRAINED IT',
-      'CALL THEM BACK',
-      'VERIFY FIRST',
-      'STOP THE TRANSFER',
-      'NOT YOUR MOM',
-      'FAKE NUMBER',
-      'OTP STOLEN',
-      'WIRE HIJACKED',
-      'ACCOUNT FROZEN',
-      'HANG UP NOW',
-      'CALLBACK TRAP',
-    ];
-  } else if (/ticket|bot|scalp|concert|fan/.test(topic)) {
-    defaults = [
-      'BOTS GOT IN',
-      'SOLD OUT INSTANTLY',
-      'FAKE QUEUE',
-      'SCALPERS WIN',
-      'NO TICKETS LEFT',
-      'REFRESH TOO LATE',
-      'CAPTCHA FAILED',
-      'RESALE MARKUP',
-      'SEAT GONE',
-      'PRE SALE RIGGED',
-      'CART EXPIRED',
-      'DYNAMIC PRICE',
-    ];
-  }
+  const topic = String(project?.topic || project?.title || '');
+  const defaults = buildImpactBeatsForTopic(topic);
 
   const custom = Array.isArray(project?.exportSettings?.impactBeats)
     ? project.exportSettings.impactBeats
     : [];
-  const beats = (custom.length ? custom : defaults)
+  // Prefer project beats only when they look on-topic; else regenerate from topic
+  const customBlob = custom.join(' ').toLowerCase();
+  const topicHint = topic.toLowerCase().split(/\s+/).filter((w) => w.length > 4).slice(0, 3);
+  const customOnTopic = custom.length > 0 && (
+    topicHint.some((w) => customBlob.includes(w))
+    || /hospital|patient|lease|evict|ticket|bot|warning|evacuat|otp|wire|voice/i.test(customBlob)
+  );
+  const beats = (customOnTopic ? custom : defaults)
     .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
     .filter(Boolean);
   // Prefer unique cards across the timeline — repetition tanks captionReadability

@@ -3,6 +3,7 @@ import { logger } from './logger';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { extractJson } from '../utils/extractJson';
 import { sanitiseTopic } from './llm/index';
+import { topicFamilyQueries } from './topicFamilyQueries';
 
 // Default model — matches the script generator for consistency.
 export const DEFAULT_VISUAL_MODEL = 'xiaomi/mimo-v2.5';
@@ -127,6 +128,8 @@ export function validateVisualPlan(raw: unknown, fallbackTopic: string): LlmVisu
   }
 
   const queries = combinedQueries.length > 0 ? combinedQueries : [fallbackTopic];
+  const family = topicFamilyQueries(fallbackTopic, 3);
+  const mergedQueries = [...new Set([...queries, ...family])];
 
   // Extract classification if present and valid
   const validClassifications: ScriptLineClassification[] = ['personal', 'institutional', 'geopolitical', 'practical'];
@@ -135,7 +138,7 @@ export function validateVisualPlan(raw: unknown, fallbackTopic: string): LlmVisu
     ? (rawClassification as ScriptLineClassification)
     : undefined;
 
-  const plan: LlmVisualPlan = { intent, queries, visualConcept, shots };
+  const plan: LlmVisualPlan = { intent, queries: mergedQueries, visualConcept, shots };
   if (classification) {
     plan.classification = classification;
   }
@@ -189,6 +192,11 @@ CRITICAL:
    - "geopolitical": Nation-state actors, global infrastructure, international conflict → use WIDE-CONTEXT visuals (maps, infrastructure, satellite imagery, government buildings, military)
    - "practical": Advice, protection steps, actionable tips → use CLEAR/INSTRUCTIONAL visuals (checklists, UI screenshots, step-by-step, clean graphics)
 6. Your shot choices MUST match the classification scale. Personal segments need intimate shots. Geopolitical segments need wide-context shots. When the story shifts scope, the visual language must shift too.
+7. TOPIC FAMILY ANCHORS — prefer these searchable scenes when they fit the narration (never use cartoon/puppet/insect filler):
+   - Hospital / patient / healthcare cyber: hospital corridor, medical records laptop, nurse at workstation, server room, waiting-room worry
+   - Bank / scam / voice clone: shocked face on phone, banking app hands, wire transfer laptop, bank exterior
+   - Landlord / eviction: eviction notice paper, apartment exterior, packing boxes, couple reading letter
+   - NEVER: beetles, puppets, gaming footage, fashion runway, podcast-mic studio as the primary shot for cyber/news topics
 
 Return JSON:
 {
@@ -227,7 +235,11 @@ Return JSON:
 
     if (!response.ok) {
       logger.warn('VisualDirector', `AI Plan request failed (${response.status}), using fallback`);
-      return { intent: 'Fallback visual', queries: [fallbackTopic], visualConcept: 'Neutral documentary' };
+      return {
+        intent: 'Fallback visual',
+        queries: topicFamilyQueries(fallbackTopic, 4),
+        visualConcept: 'Neutral documentary',
+      };
     }
 
     const data = await response.json();
@@ -235,13 +247,21 @@ Return JSON:
 
     if (typeof rawContent !== 'string' || !rawContent.trim()) {
       logger.warn('VisualDirector', 'AI Plan returned no content, using fallback');
-      return { intent: 'Fallback visual', queries: [fallbackTopic], visualConcept: 'Neutral documentary' };
+      return {
+        intent: 'Fallback visual',
+        queries: topicFamilyQueries(fallbackTopic, 4),
+        visualConcept: 'Neutral documentary',
+      };
     }
 
     const parsed = extractJson(rawContent);
     if (parsed === null) {
       logger.warn('VisualDirector', 'JSON extraction failed for AI Plan, using fallback');
-      return { intent: 'Fallback visual', queries: [fallbackTopic], visualConcept: 'Neutral documentary' };
+      return {
+        intent: 'Fallback visual',
+        queries: topicFamilyQueries(fallbackTopic, 4),
+        visualConcept: 'Neutral documentary',
+      };
     }
 
     const plan = validateVisualPlan(parsed, fallbackTopic);
@@ -249,6 +269,10 @@ Return JSON:
     return plan;
   } catch (error) {
     logger.error('VisualDirector', 'Exception during AI Plan generation', error);
-    return { intent: 'Fallback visual', queries: [fallbackTopic, segmentText.slice(0, 30)], visualConcept: 'Neutral documentary' };
+    return {
+      intent: 'Fallback visual',
+      queries: [...topicFamilyQueries(fallbackTopic, 3), segmentText.slice(0, 30)],
+      visualConcept: 'Neutral documentary',
+    };
   }
 }

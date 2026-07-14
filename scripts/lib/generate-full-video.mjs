@@ -538,6 +538,10 @@ function isHousingTopic(topicBlob) {
 function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   // Never send the full long topic sentence to Pixabay — it matches random tokens.
   const faceFirst = options.faceSeek === true;
+  const preferBright = options.preferBright === true;
+  const brightBoost = preferBright
+    ? ['bright office daylight people', 'sunny window light phone call', 'well lit hospital corridor day']
+    : [];
   // Housing + "AI" must NOT pull podcast-mic / cyber B-roll (kills hook score)
   if (isHousingTopic(topicBlob)) {
     const faces = [
@@ -556,7 +560,8 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'landlord house door knock',
       'court documents paperwork close up',
     ];
-    return faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...base];
   }
   if (isHealthcareTopic(topicBlob) && cyberTopic) {
     const faces = [
@@ -630,7 +635,10 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   stripJunkDemoVideos(project, report);
 
   const liveClips = [];
-  const queries = stockMotionQueries(topicBlob, cyberTopic, { faceSeek: options.faceSeek === true });
+  const queries = stockMotionQueries(topicBlob, cyberTopic, {
+    faceSeek: options.faceSeek === true,
+    preferBright: options.preferBright === true,
+  });
 
   for (const q of queries.slice(0, 8)) {
     const fromPexels = await fetchPexelsVideos(q, 8);
@@ -973,6 +981,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
     await topUpVideoBroll(project, report, options.mediaOffset || 0, devServer, {
       faceSeek: options.faceSeek === true,
+      preferBright: options.preferBright === true,
     });
     injectCyberStockStills(project, report, options.mediaOffset || 0);
     // Top-up can reintroduce off-brand / off-topic clips — gate again
@@ -1362,6 +1371,7 @@ export async function generateFullVideo(options) {
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
         mediaOffset: fixState.mediaOffset || 0,
         faceSeek: fixState.faceSeekBroll === true || fixState.harvestVideoFirst !== false,
+        preferBright: fixState.preferBrightBroll === true,
       });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
       if (mediaReport.videoTopUp?.length) {

@@ -650,9 +650,22 @@ export function scoreCandidate(
 
   // 8b. Off-brand visuals (puppets/cartoons/insects) — tank serious news B-roll
   const offBrand =
-    /\b(puppet|muppet|marionette|claymation|cartoon|anime|minecraft|fortnite|gameplay|macro insect|beetle|insect|bug macro|stop motion)\b/i;
+    /\b(puppet|muppet|marionette|sock\s*puppet|claymation|stop[\s-]?motion|cartoon|anime|animated\s+character|minecraft|fortnite|gameplay|macro\s*insect|beetle|insect|bug\s+macro|larva|caterpillar|spider\s+macro|hud\s+graphic|sci[\s-]?fi\s+hud)\b/i;
   if (offBrand.test(meta) && !offBrand.test(c.query)) {
     score -= 400;
+  }
+
+  // 8c. Prefer bright B-roll when loop flagged muddy/dark frames
+  const preferBright =
+    typeof sessionStorage !== 'undefined'
+    && sessionStorage.getItem('autotube_loop_prefer_bright') === 'true';
+  if (preferBright) {
+    if (/\b(night|dark|silhouette|low.?light|underexposed|dimly|shadowy|black background)\b/i.test(meta)) {
+      score -= 180;
+    }
+    if (/\b(daylight|sunny|bright|well.?lit|office daylight|window light)\b/i.test(meta)) {
+      score += 80;
+    }
   }
 
   // 9. Picsum Penalty — generic random photos should NEVER outrank real DDG/Wikimedia results

@@ -4,6 +4,7 @@
  */
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
+import { buildImpactBeatsForTopic } from './impactBeatsByTopic.mjs';
 
 /** Keep hook/overlay aligned to the current topic (prevents bank→landlord leakage). */
 function syncTopicHook(s, topic, visionFix) {
@@ -13,6 +14,7 @@ function syncTopicHook(s, topic, visionFix) {
     preferredOverlay: s.hookOverlay,
     visionFix,
   });
+  s.impactBeats = buildImpactBeatsForTopic(topic);
 }
 
 const CUT_FLOOR = 0.85;

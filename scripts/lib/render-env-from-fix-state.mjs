@@ -24,6 +24,8 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (fixState.whisperAlign || renderTier === 'full') env.AUTOTUBE_WHISPER_ALIGN = '1';
   if (fixState.hookOverlay) env.AUTOTUBE_HOOK_OVERLAY = fixState.hookOverlay;
   if (fixState.hookLine) env.AUTOTUBE_HOOK_LINE = fixState.hookLine;
+  if (fixState.preferBrightBroll) env.AUTOTUBE_PREFER_BRIGHT_BROLL = '1';
+  if (fixState.faceSeekBroll) env.AUTOTUBE_FACE_SEEK_BROLL = '1';
 
   // Solid-color flash frames get sampled by vision and tank pacing/variety scores
   if (fixState.patternInterrupts === true) {

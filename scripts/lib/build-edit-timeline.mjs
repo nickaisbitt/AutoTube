@@ -41,10 +41,20 @@ export function buildEditTimeline(project, options = {}) {
     const videos = assets.filter((a) => a.type === 'video');
     const images = assets.filter((a) => a.type !== 'video');
     const isIntro = seg.type === 'intro' || seg === (project.script || [])[0];
+    const scoreAsset = (a) => {
+      const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
+      if (/microphone|podcast|recording studio|asmr/i.test(blob)) return -2;
+      if (/face|person|people|couple|worried|shocked|reaction|tenant|family/i.test(blob)) return 2;
+      return 0;
+    };
     // Intro = motion only when videos exist. Body = almost all video (V-V-V-I).
     const ordered = preferVideo && videos.length
       ? (() => {
-          if (isIntro) return uniqueAssetsByUrl(videos);
+          if (isIntro) {
+            return uniqueAssetsByUrl(
+              [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a)),
+            );
+          }
           const out = [];
           let vi = 0;
           let ii = 0;

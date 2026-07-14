@@ -504,9 +504,33 @@ function isJunkStockClip(clip = {}) {
   );
 }
 
+function isHousingTopic(topicBlob) {
+  return /landlord|tenant|evict|rent|lease|apartment|housing|foreclos/i.test(String(topicBlob || ''));
+}
+
 function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   // Never send the full long topic sentence to Pixabay — it matches random tokens.
   const faceFirst = options.faceSeek === true;
+  // Housing + "AI" must NOT pull podcast-mic / cyber B-roll (kills hook score)
+  if (isHousingTopic(topicBlob)) {
+    const faces = [
+      'worried couple reading letter home',
+      'stressed family apartment interior',
+      'person holding eviction notice paper',
+      'tenant packing boxes apartment',
+      'shocked face close up phone',
+      'couple arguing bills kitchen table',
+    ];
+    const topical = [
+      'apartment building exterior city',
+      'for rent sign house porch',
+      'keys lock apartment door',
+      'moving boxes hallway apartment',
+      'landlord house door knock',
+      'court documents paperwork close up',
+    ];
+    return faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+  }
   if (cyberTopic) {
     const faces = [
       'shocked person looking at phone',
@@ -516,13 +540,14 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'man reaction shock close up',
       'elderly person phone call worried',
     ];
+    // Mic/podcast studio only as late filler — never faces-first opener material
     const topical = [
       'credit card payment laptop hands',
-      'microphone voice recording studio',
       'hacker typing computer dark',
       'fingerprint biometric unlock',
       'bank building exterior city',
       'lock padlock security close up',
+      'smartphone banking app hands',
     ];
     return faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
   }
@@ -550,7 +575,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   if (!segments.length) return;
   const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
   const seriousTopic = isSeriousNewsTopic(topicBlob);
-  const cyberTopic = /bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password|ai/i.test(topicBlob);
+  const housingTopic = isHousingTopic(topicBlob);
+  // Bare "AI" matched landlord topics and flooded intros with podcast-mic stock
+  const cyberTopic =
+    !housingTopic &&
+    /bank|hack|stolen|identity|ransom|voice.?clone|fraud|scam|phish|cyber|password|data.?breach/i.test(topicBlob);
 
   stripJunkDemoVideos(project, report);
 
@@ -645,19 +674,35 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
 
   const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
   let need = Math.max(minVideos - videoCount, stockNeed);
-  const picks = pickStockVideos(need + segments.length * 4, mediaOffset, pool);
+  const faceScore = (clip) => {
+    const blob = `${clip.query || ''} ${clip.alt || ''}`.toLowerCase();
+    if (/microphone|podcast|recording studio|asmr|rode/i.test(blob)) return -2;
+    if (/face|person|people|couple|worried|shocked|reaction|crying|tenant|family|evict/i.test(blob)) return 2;
+    if (/apartment|rent|keys|notice|letter|packing|boxes/i.test(blob)) return 1;
+    return 0;
+  };
+  const picks = pickStockVideos(need + segments.length * 4, mediaOffset, pool)
+    .slice()
+    .sort((a, b) => faceScore(b) - faceScore(a));
   let vi = 0;
   for (const seg of segments) {
     if (need <= 0) break;
     const segVideos = (project.media || []).filter(
       (a) => a.segmentId === seg.id && a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
     ).length;
-    const perSegTarget = hasStockKeys ? (seg.type === 'intro' || seg === segments[0] ? 5 : 4) : 2;
+    const isIntro = seg.type === 'intro' || seg === segments[0];
+    const perSegTarget = hasStockKeys ? (isIntro ? 5 : 4) : 2;
     const want = Math.max(0, perSegTarget - segVideos);
+    // Intro: burn the highest faceScore picks first
+    if (isIntro) {
+      picks.sort((a, b) => faceScore(b) - faceScore(a));
+      vi = 0;
+    }
     for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1, vi += 1) {
       const clip = picks[vi];
       const key = clip.url.split('?')[0];
       if (used.has(key)) continue;
+      if (isIntro && faceScore(clip) < 0) continue;
       // Quick probe so we don't queue dead archive links
       const ok = await canFetch(clip.url, { timeoutMs: 10000, minBytes: 2048, expectVideo: true });
       if (!ok) {

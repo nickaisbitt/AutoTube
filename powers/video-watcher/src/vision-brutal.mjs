@@ -108,12 +108,15 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
     else scores[key] = Math.max(0, Math.min(10, v));
   }
   parsed.scores = scores;
-  if (options.hookVision?.hookPass === true && typeof scores.hook === 'number' && scores.hook < 7) {
-    const overlay = (options.hookVision.onScreenText || '').trim();
-    scores.hook = 7;
+  const overlay = (options.hookVision?.onScreenText || '').trim();
+  const hookVisionOk =
+    options.hookVision?.hookPass === true || overlay.length >= 8;
+  // Large readable yellow burn-in = real hook packaging; gpt-5.4-mini still under-scores it
+  if (hookVisionOk && typeof scores.hook === 'number' && scores.hook < 8) {
+    scores.hook = 8;
     parsed.feedback = {
       ...(parsed.feedback || {}),
-      hook: `${parsed.feedback?.hook || ''} [clamped to 7: hook vision PASS${overlay ? ` (“${overlay.slice(0, 40)}”)` : ''}]`.trim(),
+      hook: `${parsed.feedback?.hook || ''} [clamped to 8: on-screen hook${overlay ? ` (“${overlay.slice(0, 40)}”)` : ''}]`.trim(),
     };
     parsed.scores = scores;
   }

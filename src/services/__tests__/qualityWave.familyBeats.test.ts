@@ -37,6 +37,13 @@ describe('topic family + impact beats', () => {
     expect(beats.join(' ')).not.toMatch(/OTP STOLEN|VOICE CLONE/i);
   });
 
+  it('housing impact beats avoid AUTO SKIPPED overlay glitch text', async () => {
+    const { buildImpactBeatsForTopic } = await import('../../../scripts/lib/impactBeatsByTopic.mjs');
+    const beats = buildImpactBeatsForTopic('How landlords use AI to evict tenants faster');
+    expect(beats.join(' ')).toMatch(/EVICT|LEASE|RENT/i);
+    expect(beats.join(' ')).not.toMatch(/AUTO SKIPPED/i);
+  });
+
   it('builds nursing impact beats instead of hospital breach cards', async () => {
     const { buildImpactBeatsForTopic } = await import('../../../scripts/lib/impactBeatsByTopic.mjs');
     const { impactBeatsMatchTopic } = await import('../../../scripts/lib/topic-family.mjs');
@@ -185,6 +192,30 @@ describe('topic family + impact beats', () => {
     const ids = new Set(intro.map((e) => e.assetId));
     expect(intro.length).toBeGreaterThan(1);
     expect(ids.size).toBeGreaterThan(1);
+  });
+
+  it('edit timeline avoids reusing the same clip URL across body cuts when alternatives exist', async () => {
+    const { buildEditTimeline } = await import('../../../scripts/lib/build-edit-timeline.mjs');
+    const project = {
+      topic: 'How landlords use AI to evict tenants faster',
+      script: [
+        { id: 's1', type: 'intro', duration: 3, narration: 'landlords use AI to evict tenants' },
+        { id: 's2', type: 'body', duration: 12, narration: 'eviction notices filed automatically' },
+      ],
+      media: [
+        { id: 'a1', segmentId: 's2', type: 'video', url: 'https://x/one.mp4', alt: 'eviction notice paper hands' },
+        { id: 'a2', segmentId: 's2', type: 'video', url: 'https://x/two.mp4', alt: 'worried couple apartment kitchen' },
+        { id: 'a3', segmentId: 's2', type: 'video', url: 'https://x/three.mp4', alt: 'apartment building exterior city' },
+        { id: 'a4', segmentId: 's2', type: 'video', url: 'https://x/four.mp4', alt: 'court documents paperwork close up' },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1 });
+    const body = tl.filter((e) => e.segmentId === 's2');
+    const urls = body.map((e) => project.media.find((m) => m.id === e.assetId)?.url);
+    const unique = new Set(urls.filter(Boolean));
+    expect(body.length).toBeGreaterThan(2);
+    expect(unique.size).toBeGreaterThanOrEqual(3);
+    expect(unique.size).toBeLessThanOrEqual(project.media.length);
   });
 
   describe('diamond heist / fake airport family', () => {

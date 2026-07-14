@@ -1,7 +1,7 @@
 /**
  * Harvest quality gates: topic/segment relevance + per-segment volume.
  */
-import { isHeistTopic, isNursingHomeTopic } from './topic-family.mjs';
+import { isHeistTopic, isHousingTopic, isNursingHomeTopic } from './topic-family.mjs';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
@@ -64,6 +64,14 @@ export const EMPTY_HOSPITAL_BED_RE =
 export const GENERIC_CORPORATE_FILLER_RE =
   /\b(corporate handshake|team meeting smiling|empty office|business people walking|stock footage loop|generic corporate|open plan office|glass building skyline|architecture model|architectural model|scale model|conference room|office meeting|skyline timelapse)\b/i;
 
+/** Overused eviction/housing B-roll loops (boxes/stressed tenant without narrative anchor). */
+export const HOUSING_STOCK_LOOP_RE =
+  /\b(moving boxes|packing boxes|cardboard boxes|tenant moving boxes|boxes hallway|stress(ed)? (woman|man|person) apartment|for rent sign only|empty apartment room)\b/i;
+
+/** Street-barber / random lifestyle clips that read as off-topic on investigation topics. */
+export const RANDOM_LIFESTYLE_FILLER_RE =
+  /\b(street barber|barber shop|haircut street|musician busking|concert crowd phone|stadium crowd|food truck|coffee shop latte)\b/i;
+
 /**
  * @param {string} haystack
  * @param {string} contextText
@@ -103,6 +111,15 @@ export function genericStockJunkReason(haystack, contextText = '') {
   }
   if (GENERIC_CORPORATE_FILLER_RE.test(h) && !/\b(office|corporate|business|company|startup)\b/i.test(ctx)) {
     return 'generic corporate/architecture filler';
+  }
+  if (isHousingTopic(ctx) && HOUSING_STOCK_LOOP_RE.test(h) && !/\b(eviction notice|court|lease|landlord|tenant|letter|keys)\b/i.test(h)) {
+    return 'generic housing/moving-box loop stock';
+  }
+  if (
+    RANDOM_LIFESTYLE_FILLER_RE.test(h)
+    && !/\b(concert|ticket|scalp|music festival|barber)\b/i.test(ctx)
+  ) {
+    return 'random lifestyle filler';
   }
   return null;
 }

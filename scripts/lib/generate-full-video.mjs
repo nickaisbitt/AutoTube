@@ -644,7 +644,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   const antiHud = nursing
     ? ['documentary care home footage people', 'real surveillance hallway footage', 'authentic news interview elderly care']
     : housing
-      ? ['real apartment building exterior footage', 'documentary tenant moving boxes']
+      ? ['real apartment building exterior footage', 'documentary eviction notice tenant worried']
       : veterans
         ? ['real veteran portrait worried', 'documentary government office paperwork']
         : healthcareCyber
@@ -664,9 +664,10 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'apartment building exterior city',
       'for rent sign house porch',
       'keys lock apartment door',
-      'moving boxes hallway apartment',
+      'eviction notice paper hands close up',
       'landlord house door knock',
       'court documents paperwork close up',
+      'worried tenant reading letter kitchen',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return [...brightBoost, ...antiHud, ...base];

@@ -24,7 +24,7 @@ export function buildImpactBeatsForTopic(topic) {
       'NOTICE FILED',
       'NO HEARING',
       'CREDIT HIT',
-      'AUTO SKIPPED',
+      'HEARING DENIED',
       'BLACKLIST RISK',
       'TIMER STARTED',
       'APPEAL DENIED',

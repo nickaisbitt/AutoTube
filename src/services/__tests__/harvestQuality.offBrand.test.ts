@@ -42,6 +42,44 @@ describe('off-brand visual harvest gate', () => {
     expect(kept.some((a: { id: string }) => a.id === 'a2')).toBe(true);
     expect(kept.some((a: { id: string }) => a.id === 'a1')).toBe(false);
   });
+
+  it('rejects generic housing moving-box loops for landlord topics', async () => {
+    const { filterAssetsByRelevance, isGenericStockJunk } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const topic = 'How landlords use AI to evict tenants faster';
+    expect(isGenericStockJunk('moving boxes hallway apartment', topic)).toBe(true);
+    const project = {
+      topic,
+      script: [{ id: 's1', title: 'Eviction', narration: 'landlords use AI to evict tenants faster' }],
+      media: [],
+    };
+    const { media: kept, dropped } = filterAssetsByRelevance(
+      [
+        {
+          id: 'boxes',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://example.com/boxes.mp4',
+          alt: 'moving boxes hallway apartment',
+          query: 'tenant moving boxes',
+        },
+        {
+          id: 'notice',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://example.com/notice.mp4',
+          alt: 'person holding eviction notice paper',
+          query: 'eviction notice paper hands',
+        },
+      ],
+      project,
+      { minScore: 0.2 },
+    );
+    expect(dropped.some((d: { id?: string; url?: string }) => d.url?.includes('boxes'))).toBe(true);
+    expect(kept.some((a: { id: string }) => a.id === 'notice')).toBe(true);
+    expect(kept.some((a: { id: string }) => a.id === 'boxes')).toBe(false);
+  });
 });
 
 describe('generic stock junk harvest gate', () => {

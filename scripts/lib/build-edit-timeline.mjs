@@ -3,6 +3,7 @@
  * Always use post-TTS segment.duration when building for render.
  */
 import { scoreAssetRelevance, isOffBrandVisual, isGenericStockJunk } from './harvest-quality.mjs';
+import { isHousingTopic } from './topic-family.mjs';
 
 /**
  * @param {object} project
@@ -31,6 +32,8 @@ export function buildEditTimeline(project, options = {}) {
   const preferVideo = options.preferVideo !== false;
   const entries = [];
   const globalPool = uniqueAssetsByUrl(project.media || []);
+  const usedUrlsGlobally = new Set();
+  const topicIsHousing = isHousingTopic(project.topic || '');
 
   for (const seg of project.script || []) {
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
@@ -55,7 +58,9 @@ export function buildEditTimeline(project, options = {}) {
     const videos = assets.filter((a) => a.type === 'video');
     const images = assets.filter((a) => a.type !== 'video');
     const script = project.script || [];
-    const isIntro = seg.type === 'intro' || seg === script[0];
+    const isIntro =
+      seg.type === 'intro'
+      || (seg === script[0] && seg.type !== 'body' && seg.type !== 'outro' && seg.type !== 'section');
     const isOutro = seg.type === 'outro' || seg === script[script.length - 1];
     const topicBlob = `${project.topic || ''} ${seg.narration || ''} ${seg.title || ''}`;
     const scoreAsset = (a) => {
@@ -63,6 +68,7 @@ export function buildEditTimeline(project, options = {}) {
       if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (isGenericStockJunk(blob, topicBlob)) return -6;
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -5;
+      if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
       if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
       const preferBright = process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
       if (preferBright && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|overexposed|blown.?out|washed.?out)\b/i.test(blob)) {
@@ -72,6 +78,7 @@ export function buildEditTimeline(project, options = {}) {
       if (isIntro || isOutro) {
         const rel = scoreAssetRelevance(a, seg, project.topic || '');
         let score = rel < 0.15 ? -4 : Math.round(rel * 5);
+        if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court/i.test(blob)) score += 3;
         if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 3;
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up/i.test(blob)) score += 1;
         if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;
@@ -79,6 +86,7 @@ export function buildEditTimeline(project, options = {}) {
         return score;
       }
       if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3;
+      if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2;
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up/i.test(blob)) return 2;
       return 0;
     };
@@ -106,16 +114,27 @@ export function buildEditTimeline(project, options = {}) {
           let vi = 0;
           let ii = 0;
           const total = Math.max(assets.length, 8);
+          const pickVideo = () => {
+            const ranked = [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a));
+            for (let j = 0; j < ranked.length; j++) {
+              const candidate = ranked[(vi + j) % ranked.length];
+              const key = urlKey(candidate);
+              if (key && usedUrlsGlobally.has(key)) continue;
+              vi += 1;
+              return candidate;
+            }
+            const fallback = videos[vi % videos.length];
+            vi += 1;
+            return fallback;
+          };
           for (let k = 0; k < total; k += 1) {
             if (k % 4 !== 3 && videos.length) {
-              out.push(videos[vi % videos.length]);
-              vi += 1;
+              out.push(pickVideo());
             } else if (images.length) {
               out.push(images[ii % images.length]);
               ii += 1;
             } else if (videos.length) {
-              out.push(videos[vi % videos.length]);
-              vi += 1;
+              out.push(pickVideo());
             }
           }
           return uniqueAssetsByUrl(out.length ? out : assets);
@@ -128,11 +147,16 @@ export function buildEditTimeline(project, options = {}) {
     let ai = 0;
     let lastAssetId = null;
     let lastUrl = null;
-    while (t < duration - 0.05) {
+      while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
-      let asset = ordered[ai % ordered.length];
-      let attempts = 0;
       const pickFrom = (pool) => {
+        for (let j = 0; j < pool.length; j++) {
+          const candidate = pool[(ai + j) % pool.length];
+          const key = urlKey(candidate);
+          if (candidate.id === lastAssetId || (key && key === lastUrl)) continue;
+          if (key && usedUrlsGlobally.has(key)) continue;
+          return candidate;
+        }
         for (let j = 0; j < pool.length; j++) {
           const candidate = pool[(ai + j) % pool.length];
           const key = urlKey(candidate);
@@ -141,6 +165,9 @@ export function buildEditTimeline(project, options = {}) {
         }
         return pool[ai % pool.length];
       };
+
+      let asset = pickFrom(ordered);
+      let attempts = 0;
 
       while (
         attempts < Math.max(ordered.length, globalPool.length) &&
@@ -163,6 +190,7 @@ export function buildEditTimeline(project, options = {}) {
       });
       lastAssetId = asset.id;
       lastUrl = urlKey(asset) || null;
+      if (lastUrl && !isIntro) usedUrlsGlobally.add(lastUrl);
       t = end;
       ai += 1;
     }

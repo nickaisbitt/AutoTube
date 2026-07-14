@@ -24,6 +24,7 @@ describe('score-honesty', () => {
       ),
     ).toBe(false);
     expect(hasCriticalQualityIssues([], 'Viewers will scroll past in 3 seconds')).toBe(true);
+    expect(hasCriticalQualityIssues(['AUTO SKIPPED frame on screen'], '')).toBe(true);
 
     const brutal = {
       report: {

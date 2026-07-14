@@ -13,6 +13,9 @@ const CRITICAL_ISSUE_RE =
 const SCROLL_PAST_CRITICAL_RE =
   /\b(?:would|will|likely|viewer[s]?\s+will)\s+scroll\s*past\b|\bscroll[- ]past:\s*yes\b|\bscrolls?\s+past\s+(?:in|within|after)\b/i;
 
+/** On-screen overlay glitches that read as broken UI, not intentional copy. */
+const OVERLAY_GLITCH_RE = /\bauto\s+skipped\b/i;
+
 /**
  * @param {string[]} [topIssues]
  * @param {string} [verdict]
@@ -20,6 +23,7 @@ const SCROLL_PAST_CRITICAL_RE =
 export function hasCriticalQualityIssues(topIssues = [], verdict = '') {
   const blob = [...(topIssues || []), verdict || ''].join(' ');
   if (CRITICAL_ISSUE_RE.test(blob)) return true;
+  if (OVERLAY_GLITCH_RE.test(blob)) return true;
   // Strip negations so "would not scroll past" is not treated as critical
   const scrollBlob = blob.replace(/\b(?:would|will|do|does|did)\s+not\s+scroll\s*past\b/gi, ' ');
   return SCROLL_PAST_CRITICAL_RE.test(scrollBlob);

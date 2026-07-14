@@ -30,7 +30,7 @@ async function callOpenRouterVision({ apiKey, systemPrompt, frames, extraText })
       'X-Title': 'AutoTube Video Watcher',
     },
     body: JSON.stringify({
-      model: process.env.OPENROUTER_VISION_MODEL || 'openai/gpt-4o-mini',
+      model: process.env.OPENROUTER_VISION_MODEL || process.env.OPENROUTER_MODEL || 'openai/gpt-4o',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content },

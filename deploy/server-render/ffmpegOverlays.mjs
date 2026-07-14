@@ -269,13 +269,58 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
     'HERE IS PROOF',
     'DO THIS NOW',
     'SHARE THIS',
+    'DONT SKIP',
+    'ONE MORE FACT',
+    'REMEMBER THIS',
+    'ACT TODAY',
+    'TELL SOMEONE',
+    'SAVE THIS',
   ];
   if (/landlord|tenant|evict|rent/.test(topic)) {
-    defaults = ['LEASE DENIED', 'EVICTED BY AI', 'YOUR FILE FLAGGED', 'RENT SCORE DOWN', 'NOTICE FILED', 'NO HEARING'];
+    defaults = [
+      'LEASE DENIED',
+      'EVICTED BY AI',
+      'YOUR FILE FLAGGED',
+      'RENT SCORE DOWN',
+      'NOTICE FILED',
+      'NO HEARING',
+      'CREDIT HIT',
+      'AUTO SKIPPED',
+      'BLACKLIST RISK',
+      'TIMER STARTED',
+      'APPEAL DENIED',
+      'LOCK CHANGED',
+    ];
   } else if (/bank|fraud|scam|voice.?clone|hack|identity|password/.test(topic)) {
-    defaults = ['VOICE CLONE SCAM', 'THEY DRAINED IT', 'CALL THEM BACK', 'VERIFY FIRST', 'STOP THE TRANSFER', 'NOT YOUR MOM'];
+    defaults = [
+      'VOICE CLONE SCAM',
+      'THEY DRAINED IT',
+      'CALL THEM BACK',
+      'VERIFY FIRST',
+      'STOP THE TRANSFER',
+      'NOT YOUR MOM',
+      'FAKE NUMBER',
+      'OTP STOLEN',
+      'WIRE HIJACKED',
+      'ACCOUNT FROZEN',
+      'HANG UP NOW',
+      'CALLBACK TRAP',
+    ];
   } else if (/ticket|bot|scalp|concert|fan/.test(topic)) {
-    defaults = ['BOTS GOT IN', 'SOLD OUT INSTANTLY', 'FAKE QUEUE', 'SCALPERS WIN', 'NO TICKETS LEFT', 'REFRESH TOO LATE'];
+    defaults = [
+      'BOTS GOT IN',
+      'SOLD OUT INSTANTLY',
+      'FAKE QUEUE',
+      'SCALPERS WIN',
+      'NO TICKETS LEFT',
+      'REFRESH TOO LATE',
+      'CAPTCHA FAILED',
+      'RESALE MARKUP',
+      'SEAT GONE',
+      'PRE SALE RIGGED',
+      'CART EXPIRED',
+      'DYNAMIC PRICE',
+    ];
   }
 
   const custom = Array.isArray(project?.exportSettings?.impactBeats)
@@ -284,6 +329,8 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   const beats = (custom.length ? custom : defaults)
     .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
     .filter(Boolean);
+  // Prefer unique cards across the timeline — repetition tanks captionReadability
+  const uniqueBeats = [...new Set(beats)];
 
   const interval = Math.max(
     4,
@@ -299,15 +346,17 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
     { encoding: 'utf8' },
   );
   const h = parseInt((hProbe.stdout || '1080').trim(), 10) || 1080;
-  const fontSize = Math.round(h * 0.08);
-  const border = Math.max(4, Math.round(fontSize * 0.08));
+  const fontSize = Math.round(h * 0.095);
+  const border = Math.max(5, Math.round(fontSize * 0.09));
+  const yFracs = [0.36, 0.44, 0.52];
   const filters = [];
   for (let i = 0; i < times.length; i += 1) {
-    const text = escapeDrawtext(beats[i % beats.length]);
+    const text = escapeDrawtext(uniqueBeats[i % uniqueBeats.length]);
     const start = times[i];
-    const end = Math.min(duration - 0.05, start + 2.4);
+    const end = Math.min(duration - 0.05, start + 1.7);
+    const y = `h*${yFracs[i % yFracs.length]}`;
     filters.push(
-      `drawtext=text='${text}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.42:enable='between(t\\,${start}\\,${end})'`,
+      `drawtext=text='${text}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=${y}:enable='between(t\\,${start}\\,${end})'`,
     );
   }
   const tmpOut = videoPath.replace(/\.mp4$/, '-beats.mp4');

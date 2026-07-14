@@ -16,7 +16,7 @@ function visionPromptForTopic(topicBlob = '') {
     return [
       'You judge ONE stock thumbnail for a nursing-home abuse / CCTV investigation video.',
       'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
-      'reject=true if: generic corporate office, architectural scale model, glass skyline, conference room, beetle/insect, puppet, cartoon, HUD overlay.',
+      'reject=true if: generic corporate office, architectural scale model, glass skyline, conference room, beetle/insect, puppet, cartoon, HUD overlay, produce/vegetable crate, grocery stock, empty blurry hospital bed only.',
       'reject=false for: CCTV/surveillance, care-home hallway, elderly patient, caregiver, family visit, wheelchair corridor.',
     ].join(' ');
   }

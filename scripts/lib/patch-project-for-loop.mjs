@@ -23,7 +23,11 @@ function topicKeywords(topic) {
 }
 
 function isInstructionOverlay(text) {
-  return /^(replace|start with|use|change|fix|try)\b/i.test((text || '').trim());
+  const t = (text || '').trim();
+  return /^(replace|rewrite|start with|use|change|fix|try|make|update|swap)\b/i.test(t)
+    || /\brewrite\s+line\b/i.test(t)
+    || /\bas:\s*$/i.test(t)
+    || /^(line\s*1|first\s+line)\b/i.test(t);
 }
 
 /** Pull the suggested hook text from watcher "Replace X with Y" fixes. */
@@ -31,14 +35,22 @@ export function extractOverlayFromVisionFix(visionFix) {
   if (!visionFix?.trim()) return null;
   let text = visionFix.trim();
 
-  const quoted = text.match(/\bwith\s+['"]([^'"]+)['"]/i);
-  if (quoted) text = quoted[1].trim();
+  // Prefer the actual suggested hook in quotes or after like:/as:
+  const quotedAny = text.match(/['"]([^'"]{8,})['"]/);
+  const likeClause = text.match(/\blike[:\s]+['"]?([^'"\n.]{8,})['"]?/i);
+  const asColon = text.match(/\b(?:rewrite\s+line\s*\d*\s*)?as[:\s]+['"]?(.+?)['"]?\s*$/i);
+  if (quotedAny) text = quotedAny[1].trim();
+  else if (likeClause) text = likeClause[1].trim();
+  else if (asColon) text = asColon[1].trim();
   else {
+    const withQuoted = text.match(/\bwith\s+['"]([^'"]+)['"]/i);
     const bare = text.match(/\bwith\s+(.+)$/i);
-    if (bare) text = bare[1].trim();
+    if (withQuoted) text = withQuoted[1].trim();
+    else if (bare) text = bare[1].trim();
     else {
       text = text
         .replace(/^Replace\s+.+?\s+with\s+/i, '')
+        .replace(/^Rewrite\s+line\s*\d*\s*as[:\s]+/i, '')
         .replace(/^Start with[^:]*:\s*/i, '')
         .replace(/^Reveal[^:]*:\s*/i, '')
         .replace(/['"]/g, '')
@@ -47,7 +59,18 @@ export function extractOverlayFromVisionFix(visionFix) {
   }
 
   text = text.split(/[—–]/)[0].split(/[.!?]/)[0].trim();
+  // Strip leftover instruction crumbs like "REWRITE LINE 1 AS" / "a concrete shock hook like"
+  text = text
+    .replace(/\brewrite\s+line\s*\d*\s*as\b[:\s]*/gi, '')
+    .replace(/\breplace\s+the\s+first\s+line\s+with\b[:\s]*/gi, '')
+    .replace(/^a\s+concrete\s+shock\s+hook\s+like\b[:\s]*/gi, '')
+    .replace(/^a\s+shock\s+hook\s+like\b[:\s]*/gi, '')
+    .trim();
   if (text.length < 5 || isInstructionOverlay(text)) return null;
+  // Reject meta phrasing that still isn't a viewer-facing hook
+  if (/\b(shock hook|concrete|rewrite|replace|templated?)\b/i.test(text) && text.split(/\s+/).length <= 6) {
+    return null;
+  }
 
   const words = text.split(/\s+/).filter(Boolean);
   return words.slice(0, 8).join(' ').toUpperCase();

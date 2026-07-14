@@ -5,6 +5,7 @@
 import type { MediaCandidate } from './media';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { repairTruncatedJson } from '../utils/jsonRepair';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 import {
   GENERIC_HOOK_PHRASES,
@@ -275,8 +276,8 @@ export async function scoreImageQuality(
     }
 
     const data = await response.json();
-    const content: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
+    const content = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!content) {
       logger.warn('QualityScorer', 'API returned empty content');
       return null;
     }

@@ -1,5 +1,6 @@
 import type { QualityReport, VideoProject } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 
 // ── Frame Extraction ──
@@ -357,8 +358,8 @@ export async function callBlindReviewAPI(
     }
 
     const data = await response.json();
-    const content: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
+    const content = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!content) {
       logger.warn('BlindReview', 'API returned empty content in response');
       return null;
     }

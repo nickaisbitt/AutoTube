@@ -89,9 +89,27 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     return words.slice(0, maxWords).join(' ');
   };
 
+  const keywords = topicKeywords(topic);
+  const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
+
+  // Family short stakes FIRST — preferred overlays often dump the full topic title
+  // (e.g. "URGENT NURSING HOME CAMERAS RECORDED") and get edge-clipped.
+  if (/tornado|hurricane|flood|wildfire|earthquake/i.test(t)) {
+    return clampWords('THIS WARNING CAME TOO LATE');
+  }
+  if (/nursing\s*home|elder\s*abuse|care\s*home/i.test(t)) {
+    return clampWords('CAMERAS CAUGHT THE ABUSE');
+  }
+  if (/veteran|va\s+benefits|benefits\s+data|dark\s*web/i.test(t)) {
+    return clampWords('BENEFITS DATA FOR SALE');
+  }
+  if (/landlord|tenant|evict|rent/i.test(t)) {
+    return clampWords('THEY EVICTED YOU WITH AI');
+  }
+
   const preferred = options.preferredOverlay?.trim();
   if (preferred && !isInstructionOverlay(preferred)) {
-    const keys = topicKeywords(topic).map((k) => k.toLowerCase());
+    const keys = keywords.map((k) => k.toLowerCase());
     const prefLower = preferred.toLowerCase();
     const overlapsTopic = keys.some((k) => k.length > 3 && prefLower.includes(k.toLowerCase()));
     // Stale overlays from a previous topic (e.g. bank hook on landlord video) must not stick
@@ -103,19 +121,6 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
   if (fromVision) return clampWords(fromVision);
 
-  const keywords = topicKeywords(topic);
-  const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
-
-  // Prefer short stakes phrases over dumping the full topic title on screen
-  if (/tornado|hurricane|flood|wildfire|earthquake/i.test(t)) {
-    return clampWords('THIS WARNING CAME TOO LATE');
-  }
-  if (/nursing\s*home|elder\s*abuse|care\s*home/i.test(t)) {
-    return clampWords('CAMERAS CAUGHT THE ABUSE');
-  }
-  if (/veteran|va\s+benefits|benefits\s+data|dark\s*web/i.test(t)) {
-    return clampWords('BENEFITS DATA FOR SALE');
-  }
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
     // Short + no colon — long "EXPOSED: HOSPITAL HACK EXPOSED" was edge-clipped by drawtext
     const kw = keywords.filter((k) => !/^expos/i.test(k)).slice(0, 2).join(' ');
@@ -123,9 +128,6 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   }
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return clampWords('EMERGENCY: THEY HID THE RISK');
-  }
-  if (/landlord|tenant|evict|rent/i.test(t)) {
-    return clampWords('THEY EVICTED YOU WITH AI');
   }
   // Insurance before generic "scam" (otherwise bank hook lands on crash fraud videos)
   if (/insurance|car\s*crash|fake\s*crash|crash\s*video/i.test(t)) {

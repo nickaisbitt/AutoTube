@@ -36,6 +36,12 @@ import {
   isOffBrandVisual,
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
+import {
+  isHealthcareCyberTopic,
+  isHealthcareTopic,
+  isHousingTopic,
+  isNursingHomeTopic,
+} from './topic-family.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -497,20 +503,19 @@ async function fetchPixabayVideos(query, perPage = 8) {
 
 /** Pixabay/Pexels often match topic words literally (piggy bank, wash hands, rotate phone). */
 /** Prefer phone/bank/security motion for cyber topics — deny lifestyle pets/nature filler. */
-function isHealthcareTopic(topicBlob) {
-  return /hospital|healthcare|patient|medical|hipaa|ehr|clinic|nurse|doctor|records?\b/i.test(
-    String(topicBlob || ''),
-  );
-}
-
 function isCyberRelevantClip(clip = {}, topicBlob = '') {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
-  const topical =
-    /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|office|business|worried|shock|texting|ransom|leak|breach|records?/.test(
+  if (isNursingHomeTopic(topicBlob)) {
+    return /nursing|elder|care\s*home|cctv|camera|surveillance|caregiver|wheelchair|hallway|corridor|abuse|family|visit/.test(
       blob,
     );
+  }
+  const topical =
+    /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|worried|shock|texting|ransom|leak|breach|records?/.test(
+      blob,
+    );
+  // Bare office/business/architecture alone is NOT enough for cyber relevance
   if (topical) return true;
-  // Hospital corridor / patient records is on-topic for healthcare cyber — not lifestyle junk
   if (isHealthcareTopic(topicBlob) && /hospital|patient|clinic|nurse|doctor|medical|corridor|ward/.test(blob)) {
     return true;
   }
@@ -525,27 +530,40 @@ function isJunkStockClip(clip = {}, topicBlob = '') {
       blob,
     );
   if (lifestyleJunk) return true;
+  // Architectural model / office mockups are junk for nursing abuse topics
+  if (
+    isNursingHomeTopic(topicBlob)
+    && /architectural model|architecture model|scale model|office meeting|conference room|skyline|glass building/.test(blob)
+  ) {
+    return true;
+  }
   // Surgical OR / hygiene hospital stills are junk UNLESS the topic is healthcare cyber
   if (/surgery|surgical|operating room/.test(blob) && !isHealthcareTopic(topicBlob)) return true;
-  if (/hospital/.test(blob) && !isHealthcareTopic(topicBlob) && !/hack|breach|ransom|data|cyber|records?/.test(blob)) {
+  if (
+    /hospital/.test(blob)
+    && !isHealthcareTopic(topicBlob)
+    && !isNursingHomeTopic(topicBlob)
+    && !/hack|breach|ransom|data|cyber|records?/.test(blob)
+  ) {
     return true;
   }
   return false;
-}
-
-function isHousingTopic(topicBlob) {
-  return /landlord|tenant|evict|rent|lease|apartment|housing|foreclos/i.test(String(topicBlob || ''));
 }
 
 function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   // Never send the full long topic sentence to Pixabay — it matches random tokens.
   const faceFirst = options.faceSeek === true;
   const preferBright = options.preferBright === true;
+  const nursing = isNursingHomeTopic(topicBlob);
   const brightBoost = preferBright
-    ? ['bright office daylight people', 'sunny window light phone call', 'well lit hospital corridor day']
+    ? nursing
+      ? ['bright care home corridor day', 'well lit nursing home hallway', 'daylight elderly care room']
+      : ['bright office daylight people', 'sunny window light phone call', 'well lit hospital corridor day']
     : [];
   // Anti-HUD: prefer real people/places; HUD/interface junk is filtered downstream
-  const antiHud = ['real footage people office', 'documentary handheld camera people'];
+  const antiHud = nursing
+    ? ['documentary care home footage people', 'real surveillance hallway footage']
+    : ['real footage people office', 'documentary handheld camera people'];
   // Housing + "AI" must NOT pull podcast-mic / cyber B-roll (kills hook score)
   if (isHousingTopic(topicBlob)) {
     const faces = [
@@ -563,6 +581,25 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'moving boxes hallway apartment',
       'landlord house door knock',
       'court documents paperwork close up',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
+  // Nursing abuse / CCTV — never hospital-breach stock
+  if (nursing) {
+    const faces = [
+      'worried family elderly care visit',
+      'shocked caregiver face close up',
+      'elderly person care home room',
+      'family looking at security footage',
+    ];
+    const topical = [
+      'security camera cctv hallway corridor',
+      'nursing home corridor wheelchair',
+      'surveillance monitor security footage',
+      'care worker elderly patient room',
+      'elderly care facility hallway',
+      'cctv camera ceiling close up',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return [...brightBoost, ...antiHud, ...base];
@@ -623,8 +660,8 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   return [...brightBoost, ...antiHud, ...withFaces];
 }
 
-/** Exported for unit tests (bright / anti-HUD query proof). */
-export { stockMotionQueries };
+/** Exported for unit tests (bright / anti-HUD / nursing query proof). */
+export { stockMotionQueries, isNursingHomeTopic, isHealthcareTopic };
 
 /**
  * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
@@ -639,6 +676,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   // Bare "AI" matched landlord topics and flooded intros with podcast-mic stock
   const cyberTopic =
     !housingTopic &&
+    !isNursingHomeTopic(topicBlob) &&
     (/bank|hack|stolen|identity|ransom|voice.?clone|fraud|scam|phish|cyber|password|data.?breach/i.test(topicBlob)
       || (isHealthcareTopic(topicBlob) && /hack|breach|ransom|leak|records?|data|cyber/i.test(topicBlob)));
 
@@ -665,7 +703,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
-      if (cyberTopic && !isCyberRelevantClip(clip, topicBlob) && !/Pexels/i.test(clip.source || '')) {
+      if (
+        (cyberTopic || isNursingHomeTopic(topicBlob))
+        && !isCyberRelevantClip(clip, topicBlob)
+        && !/Pexels/i.test(clip.source || '')
+      ) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
@@ -753,6 +795,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const faceScore = (clip) => {
     const blob = `${clip.query || ''} ${clip.alt || ''}`.toLowerCase();
     if (/microphone|podcast|recording studio|asmr|rode/i.test(blob)) return -2;
+    if (/architectural model|architecture model|scale model|conference room|skyline/i.test(blob)) return -2;
+    if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) return 3;
     if (/face|person|people|couple|worried|shocked|reaction|crying|tenant|family|evict/i.test(blob)) return 2;
     if (/apartment|rent|keys|notice|letter|packing|boxes/i.test(blob)) return 1;
     return 0;

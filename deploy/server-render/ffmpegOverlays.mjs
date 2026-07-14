@@ -6,6 +6,7 @@ import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
 import { buildImpactBeatsForTopic } from '../../scripts/lib/impactBeatsByTopic.mjs';
+import { impactBeatsMatchTopic } from '../../scripts/lib/topic-family.mjs';
 
 function escapeDrawtext(text) {
   return String(text || '')
@@ -332,13 +333,8 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   const custom = Array.isArray(project?.exportSettings?.impactBeats)
     ? project.exportSettings.impactBeats
     : [];
-  // Prefer project beats only when they look on-topic; else regenerate from topic
-  const customBlob = custom.join(' ').toLowerCase();
-  const topicHint = topic.toLowerCase().split(/\s+/).filter((w) => w.length > 4).slice(0, 3);
-  const customOnTopic = custom.length > 0 && (
-    topicHint.some((w) => customBlob.includes(w))
-    || /hospital|patient|lease|evict|ticket|bot|warning|evacuat|otp|wire|voice/i.test(customBlob)
-  );
+  // Prefer project beats only when they match the topic family (hospital cards must not stick on nursing)
+  const customOnTopic = impactBeatsMatchTopic(custom, topic);
   const beats = (customOnTopic ? custom : defaults)
     .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
     .filter(Boolean);

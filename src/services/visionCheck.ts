@@ -5,6 +5,7 @@
 import type { MediaCandidate } from './media';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { extractJson } from '../utils/extractJson';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 
 // ---------------------------------------------------------------------------
@@ -179,8 +180,8 @@ export async function checkCandidateVision(
     }
 
     const data = await response.json();
-    const content: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
+    const content = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!content) {
       logger.warn('VisionCheck', 'API returned empty content in response');
       return null;
     }

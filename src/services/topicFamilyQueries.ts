@@ -4,25 +4,36 @@
 
 /**
  * @param {string} topic
- * @returns {'healthcare_cyber'|'bank_scam'|'landlord'|'tickets'|'disaster'|'generic'}
+ * @returns {'nursing_abuse'|'healthcare_cyber'|'bank_scam'|'landlord'|'tickets'|'disaster'|'generic'}
  */
-export function resolveTopicFamily(topic) {
+export function resolveTopicFamily(topic: string): string {
   const t = String(topic || '').toLowerCase();
   if (/landlord|tenant|evict|rent|lease|apartment|housing/.test(t)) return 'landlord';
-  if (/hospital|healthcare|patient|hipaa|medical|clinic|nursing\s*home/.test(t)
-    && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?|camera|abuse|broker/.test(t)) {
+  // Nursing abuse / CCTV before healthcare cyber (nursing+camera used to resolve as hospital breach)
+  if (/nursing\s*home|elder\s*abuse|care\s*home/.test(t)) return 'nursing_abuse';
+  if (
+    /hospital|healthcare|patient|hipaa|medical|clinic|records?\b/.test(t)
+    && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?\b|broker/.test(t)
+  ) {
     return 'healthcare_cyber';
   }
   if (/veteran|benefits|dark\s*web|data\s*broker|ssn|va\s+benefits/.test(t)) return 'bank_scam';
   if (/bank|fraud|scam|voice.?clone|hack|identity|password|phish|leak|breach|cyber/.test(t)) return 'bank_scam';
   if (/ticket|bot|scalp|concert|fan/.test(t)) return 'tickets';
-  if (/nursing\s*home|elder|abuse|camera/.test(t) && /abuse|camera|recorded|neglect/.test(t)) return 'healthcare_cyber';
   if (/nuclear|radiation|meltdown|tornado|hurricane|flood|wildfire|disaster/.test(t)) return 'disaster';
   return 'generic';
 }
 
 /** @type {Record<string, string[]>} */
-export const TOPIC_FAMILY_QUERIES = {
+export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
+  nursing_abuse: [
+    'security camera cctv hallway corridor',
+    'nursing home elderly care facility',
+    'caregiver helping elderly patient room',
+    'worried family visiting nursing home',
+    'surveillance monitor security footage',
+    'elderly patient bed care home',
+  ],
   healthcare_cyber: [
     'hospital corridor empty hallway',
     'medical records laptop paperwork',
@@ -74,7 +85,7 @@ export const TOPIC_FAMILY_QUERIES = {
  * @param {number} [n]
  * @returns {string[]}
  */
-export function topicFamilyQueries(topic, n = 4) {
+export function topicFamilyQueries(topic: string, n = 4): string[] {
   const family = resolveTopicFamily(topic);
   return (TOPIC_FAMILY_QUERIES[family] || TOPIC_FAMILY_QUERIES.generic).slice(0, n);
 }

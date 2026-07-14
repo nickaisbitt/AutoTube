@@ -4,6 +4,7 @@
 
 import { extractJson } from '../utils/extractJson';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 
 // ---------------------------------------------------------------------------
@@ -217,8 +218,8 @@ export async function detectFocalPoint(
     }
 
     const data = await response.json();
-    const content: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
+    const content = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!content) {
       logger.warn('FocalCropper', 'API returned empty content');
       return null;
     }

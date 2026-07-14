@@ -64,6 +64,13 @@ describe('quality waves 2–5 helpers', () => {
     expect(q.some((x) => /real footage people office/i.test(x))).toBe(true);
   });
 
+  it('nursing preferBright uses care-home boost not office', async () => {
+    const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
+    const q = stockMotionQueries('nursing home cameras abuse', false, { preferBright: true });
+    expect(q.some((x) => /care home|nursing home hallway|elderly care/i.test(x))).toBe(true);
+    expect(q.every((x) => !/bright office daylight/i.test(x))).toBe(true);
+  });
+
   it('openRouterMessageText falls back to reasoning', async () => {
     const { openRouterMessageText } = await import('../../utils/openRouterMessageText');
     expect(openRouterMessageText({ content: '', reasoning: '{"ok":true}' })).toBe('{"ok":true}');

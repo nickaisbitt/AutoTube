@@ -2,6 +2,7 @@
  * Shared topic → mid-video impact beat cards (≤3 words each).
  * Used by loop patch + ffmpeg overlays — keep one source of truth.
  */
+import { isHealthcareCyberTopic, isNursingHomeTopic } from './topic-family.mjs';
 
 /** @param {string} topic */
 export function buildImpactBeatsForTopic(topic) {
@@ -24,9 +25,26 @@ export function buildImpactBeatsForTopic(topic) {
     ];
   }
 
-  // Healthcare cyber before generic bank/hack (hospital topics used to get bank OTP cards)
-  if (/hospital|healthcare|patient|hipaa|medical|clinic|records?|nursing\s*home/.test(tl)
-    && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?|camera|abuse|broker/.test(tl)) {
+  // Nursing abuse / CCTV BEFORE healthcare cyber (nursing + camera/abuse used to match hospital cards)
+  if (isNursingHomeTopic(tl)) {
+    return [
+      'CAMERAS ROLLING',
+      'STAFF CAUGHT',
+      'ABUSE ON TAPE',
+      'COVER UP',
+      'FAMILY IGNORED',
+      'SHIFT AFTER SHIFT',
+      'NO SUPERVISION',
+      'LOCKED DOORS',
+      'REPORT BURIED',
+      'CALL FOR HELP',
+      'WATCH THE TAPE',
+      'PROTECT THEM',
+    ];
+  }
+
+  // Healthcare cyber — hospital/patient records breach (not nursing-home abuse)
+  if (isHealthcareCyberTopic(tl)) {
     return [
       'RECORDS LEAKED',
       'PATIENT DATA OUT',
@@ -58,23 +76,6 @@ export function buildImpactBeatsForTopic(topic) {
       'BROKER LIST',
       'LOCK IT DOWN',
       'CHECK YOUR FILE',
-    ];
-  }
-
-  if (/nursing\s*home|elder\s*abuse|care\s*home/.test(tl)) {
-    return [
-      'CAMERAS ROLLING',
-      'STAFF CAUGHT',
-      'ABUSE ON TAPE',
-      'COVER UP',
-      'FAMILY IGNORED',
-      'SHIFT AFTER SHIFT',
-      'NO SUPERVISION',
-      'LOCKED DOORS',
-      'REPORT BURIED',
-      'CALL FOR HELP',
-      'WATCH THE TAPE',
-      'PROTECT THEM',
     ];
   }
 

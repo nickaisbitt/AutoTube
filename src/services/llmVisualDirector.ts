@@ -2,6 +2,7 @@ import { TopicContext } from '../types';
 import { logger } from './logger';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { extractJson } from '../utils/extractJson';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { sanitiseTopic } from './llm/index';
 import { topicFamilyQueries } from './topicFamilyQueries';
 
@@ -243,9 +244,9 @@ Return JSON:
     }
 
     const data = await response.json();
-    const rawContent: unknown = data?.choices?.[0]?.message?.content;
+    const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
 
-    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+    if (!rawContent) {
       logger.warn('VisualDirector', 'AI Plan returned no content, using fallback');
       return {
         intent: 'Fallback visual',

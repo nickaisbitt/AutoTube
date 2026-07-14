@@ -61,24 +61,28 @@ export function buildEditTimeline(project, options = {}) {
     const scoreAsset = (a) => {
       const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
       if (isOffBrandVisual(blob, topicBlob)) return -8;
+      if (/architectural model|architecture model|scale model|conference room/i.test(blob)) return -5;
       if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
-      if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up/i.test(blob)) return 2;
-      if (isOutro && /checklist|subscribe|relieved|direct.?camera|hospital|records?|laptop|verify|call/i.test(blob)) return 3;
-      // Outro topic lock: prefer assets that match topic/narration keywords
-      if (isOutro) {
+      // Intro + outro: topic relevance first so office/arch models lose to care/CCTV clips
+      if (isIntro || isOutro) {
         const rel = scoreAssetRelevance(a, seg, project.topic || '');
-        if (rel < 0.2) return -4;
-        return Math.round(rel * 4);
+        let score = rel < 0.15 ? -4 : Math.round(rel * 5);
+        if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 3;
+        if (/face|person|people|couple|worried|shocked|reaction|family|close.?up/i.test(blob)) score += 1;
+        if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;
+        return score;
       }
+      if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3;
+      if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up/i.test(blob)) return 2;
       return 0;
     };
     // Intro/outro = motion only when videos exist. Body = almost all video (V-V-V-I).
     const ordered = preferVideo && videos.length
       ? (() => {
           if (isIntro || isOutro) {
-            return uniqueAssetsByUrl(
-              [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a)),
-            );
+            const ranked = [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a));
+            const usable = ranked.filter((a) => scoreAsset(a) >= 0);
+            return uniqueAssetsByUrl(usable.length ? usable : ranked.slice(0, 1));
           }
           const out = [];
           let vi = 0;
@@ -124,11 +128,12 @@ export function buildEditTimeline(project, options = {}) {
         attempts < Math.max(ordered.length, globalPool.length) &&
         (asset.id === lastAssetId || (urlKey(asset) && urlKey(asset) === lastUrl))
       ) {
-        asset = pickFrom(ordered.length > 1 ? ordered : globalPool);
+        // Intro/outro: stay in ordered (topic-locked) — never pull beetle/still from global pool
+        asset = pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool);
         ai += 1;
         attempts += 1;
       }
-      if (urlKey(asset) === lastUrl && globalPool.length > 1) {
+      if (!isIntro && !isOutro && urlKey(asset) === lastUrl && globalPool.length > 1) {
         asset = pickFrom(globalPool);
       }
       entries.push({

@@ -34,6 +34,7 @@ function parseArgs(argv) {
     watchMode: 'quick',
     exportReview: true,
     mockHarvest: false,
+    keepGoing: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -47,6 +48,7 @@ function parseArgs(argv) {
     else if (a === '--watch-full') cfg.watchMode = 'full';
     else if (a === '--no-export') cfg.exportReview = false;
     else if (a === '--mock-harvest') cfg.mockHarvest = true;
+    else if (a === '--keep-going') cfg.keepGoing = true;
   }
   return cfg;
 }
@@ -493,12 +495,22 @@ async function main() {
       runDir,
     });
 
-    if (scoreTargetMet) {
+    if (scoreTargetMet && !cfg.keepGoing) {
       break;
+    }
+    if (scoreTargetMet && cfg.keepGoing) {
+      console.log(`\n🎯 Score ${brutalScore}/10 ≥ ${cfg.untilScore} — keep-going: next topic`);
+      currentTopic = null;
+      fixState.pendingTopic = null;
+      fixState.topicRetryCount = 0;
+      fixState.generateFailureCount = 0;
+      delete fixState.hookLine;
+      delete fixState.hookOverlay;
+      saveFixState(LOOP_DIR, fixState);
     }
 
     // Only stop on uploadReady when not chasing a higher until-score bar
-    if (cfg.untilPass && uploadReady && !chasingHigherScore) {
+    if (cfg.untilPass && uploadReady && !chasingHigherScore && !cfg.keepGoing) {
       console.log('\n🎉 Upload-ready — stopping loop.');
       break;
     }

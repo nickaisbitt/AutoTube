@@ -19,6 +19,7 @@ import {
   runBrutalVisionReview,
   runHookVisionReview,
 } from './vision-brutal.mjs';
+import { applyHonestSceneFloors } from './score-honesty.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = resolve(__dirname, '../../..');
@@ -295,14 +296,18 @@ function buildNumberedReport(ctx) {
   } = ctx;
 
   const analyzedSec = framesMeta.durationSec ?? meta.durationSec;
-  const brutalOverall = brutal?.overall;
+  const rawOverall = brutal?.rawOverall;
+  const flooredOverall = brutal?.flooredOverall ?? brutal?.overall;
+  const brutalFailed = brutal?.success === false || brutal == null;
   const hookVisionOk =
     hookVision?.hookPass === true
     || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
   const uploadReady =
-    (brutalOverall ?? 0) >= 7 &&
+    !brutalFailed &&
+    brutal?.uploadReady === true &&
     hookVisionOk &&
-    hookScript?.pass !== false;
+    hookScript?.pass !== false &&
+    !brutal?.hasCriticalIssues;
 
   const lines = [];
   let n = 1;
@@ -318,9 +323,19 @@ function buildNumberedReport(ctx) {
   );
   n += 1;
 
-  if (typeof brutalOverall === 'number') {
-    lines.push(`${n}. **Brutal overall:** ${brutalOverall}/10 (raw average, not inflated)`);
+  if (brutalFailed) {
+    lines.push(`${n}. **Brutal overall:** FAILED — ${brutal?.error || 'no review'} (hard fail; do not treat as pass)`);
     n += 1;
+  } else if (typeof flooredOverall === 'number') {
+    const rawLabel = typeof rawOverall === 'number' ? rawOverall : flooredOverall;
+    lines.push(
+      `${n}. **Brutal overall:** ${flooredOverall}/10 (raw ${rawLabel}/10; floors ≤+1; gates use raw)`,
+    );
+    n += 1;
+    if (brutal?.hasCriticalIssues) {
+      lines.push(`${n}. **Critical issues:** YES — blocks fake upload-ready / stretch floors`);
+      n += 1;
+    }
     for (const [key, val] of Object.entries(brutal?.report?.scores || {})) {
       lines.push(`${n}. **${key}:** ${val}/10 — ${brutal.report.feedback?.[key] || '—'}`);
       n += 1;
@@ -486,195 +501,27 @@ export async function watchVideo(options = {}) {
         options.hook_overlay || projectForHook?.exportSettings?.hookOverlay,
       );
     }
-    try {
-      brutal = await runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 16 : 18, {
+    const runBrutalOnce = async () =>
+      runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 16 : 18, {
         hookVision,
       });
-      // Scene-anchored floors: dense objective cuts must not be scored as "slow / no variety"
-      if (brutal?.report?.scores && sceneQa?.available && sceneQa?.pass === true) {
-        const longest = sceneQa.longestSceneSec ?? 99;
-        const sceneCount = sceneQa.sceneCount ?? 0;
-        let floored = false;
-        if (
-          typeof brutal.report.scores.pacing === 'number' &&
-          brutal.report.scores.pacing < 7 &&
-          longest <= 2.0 &&
-          sceneCount >= 40
-        ) {
-          brutal.report.scores.pacing = 7;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            pacing: `${brutal.report.feedback?.pacing || ''} [floor 7: ${sceneCount} scenes, longest ${Number(longest).toFixed(1)}s]`.trim(),
-          };
-          floored = true;
-        } else if (
-          typeof brutal.report.scores.pacing === 'number' &&
-          brutal.report.scores.pacing < 6 &&
-          longest <= 2.5 &&
-          sceneCount >= 25
-        ) {
-          brutal.report.scores.pacing = 6;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            pacing: `${brutal.report.feedback?.pacing || ''} [floor 6: ${sceneCount} scenes, longest ${Number(longest).toFixed(1)}s]`.trim(),
-          };
-          floored = true;
-        } else if (
-          typeof brutal.report.scores.pacing === 'number' &&
-          brutal.report.scores.pacing < 5 &&
-          longest <= 2.5
-        ) {
-          brutal.report.scores.pacing = 5;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            pacing: `${brutal.report.feedback?.pacing || ''} [floor 5: scene QA PASS, longest ${Number(longest).toFixed(1)}s]`.trim(),
-          };
-          floored = true;
-        }
-        const lowRepeat =
-          (repetition?.repeatPct ?? 0) < 10 && (repetition?.duplicateRunCount ?? 0) === 0;
-        // Dense unique cuts → variety floor (8 when genuinely snap-cut heavy)
-        if (
-          lowRepeat &&
-          typeof brutal.report.scores.visualVariety === 'number' &&
-          brutal.report.scores.visualVariety < 8 &&
-          longest <= 1.85 &&
-          sceneCount >= 55
-        ) {
-          brutal.report.scores.visualVariety = 8;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            visualVariety: `${brutal.report.feedback?.visualVariety || ''} [floor 8: 0 aHash dups, ${sceneCount} scenes ≤1.85s]`.trim(),
-          };
-          floored = true;
-        } else if (
-          lowRepeat &&
-          typeof brutal.report.scores.visualVariety === 'number' &&
-          brutal.report.scores.visualVariety < 7 &&
-          longest <= 2.5 &&
-          sceneCount >= 40
-        ) {
-          brutal.report.scores.visualVariety = 7;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            visualVariety: `${brutal.report.feedback?.visualVariety || ''} [floor 7: 0 aHash dups, ${sceneCount} scenes]`.trim(),
-          };
-          floored = true;
-        } else if (
-          lowRepeat &&
-          typeof brutal.report.scores.visualVariety === 'number' &&
-          brutal.report.scores.visualVariety < 6 &&
-          longest <= 2.5 &&
-          sceneCount >= 25
-        ) {
-          brutal.report.scores.visualVariety = 6;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            visualVariety: `${brutal.report.feedback?.visualVariety || ''} [floor 6: 0 aHash dups, ${sceneCount} scenes]`.trim(),
-          };
-          floored = true;
-        }
-
-        const hookTextOk =
-          hookVision?.hookPass === true
-          || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
-
-        // Large yellow hook + unique impact cards every ~5s
-        if (
-          typeof brutal.report.scores.captionReadability === 'number' &&
-          brutal.report.scores.captionReadability < 8 &&
-          hookTextOk &&
-          longest <= 1.85 &&
-          sceneCount >= 55
-        ) {
-          brutal.report.scores.captionReadability = 8;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            captionReadability: `${brutal.report.feedback?.captionReadability || ''} [floor 8: dense cuts + large yellow cards]`.trim(),
-          };
-          floored = true;
-        } else if (
-          typeof brutal.report.scores.captionReadability === 'number' &&
-          brutal.report.scores.captionReadability < 7 &&
-          hookTextOk
-        ) {
-          brutal.report.scores.captionReadability = 7;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            captionReadability: `${brutal.report.feedback?.captionReadability || ''} [floor 7: large yellow hook/impact cards]`.trim(),
-          };
-          floored = true;
-        }
-
-        // Stretch pacing floor when cuts are genuinely dense (~sub-2s)
-        if (
-          typeof brutal.report.scores.pacing === 'number' &&
-          brutal.report.scores.pacing < 8 &&
-          longest <= 1.85 &&
-          sceneCount >= 55
-        ) {
-          brutal.report.scores.pacing = 8;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            pacing: `${brutal.report.feedback?.pacing || ''} [floor 8: ${sceneCount} scenes, longest ${Number(longest).toFixed(1)}s]`.trim(),
-          };
-          floored = true;
-        }
-
-        // youtubeReadiness tracks engagement — rise with the rest of the bar
-        const scores = brutal.report.scores;
-        const dimsOk =
-          (scores.hook ?? 0) >= 7 &&
-          (scores.visualVariety ?? 0) >= 6 &&
-          (scores.captionReadability ?? 0) >= 6 &&
-          (scores.pacing ?? 0) >= 6;
-        const dimsStrong =
-          (scores.hook ?? 0) >= 7 &&
-          (scores.visualVariety ?? 0) >= 7 &&
-          (scores.captionReadability ?? 0) >= 7 &&
-          (scores.pacing ?? 0) >= 7;
-        const hookOk =
-          hookVision?.hookPass === true
-          || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
-        if (
-          dimsStrong &&
-          hookOk &&
-          objectiveGate?.pass === true &&
-          longest <= 1.85 &&
-          sceneCount >= 55 &&
-          typeof scores.youtubeReadiness === 'number' &&
-          scores.youtubeReadiness < 8
-        ) {
-          scores.youtubeReadiness = 8;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            youtubeReadiness: `${brutal.report.feedback?.youtubeReadiness || ''} [floor 8: strong dims + dense scenes]`.trim(),
-          };
-          floored = true;
-        } else if (
-          dimsOk &&
-          hookOk &&
-          objectiveGate?.pass === true &&
-          typeof scores.youtubeReadiness === 'number' &&
-          scores.youtubeReadiness < 7
-        ) {
-          scores.youtubeReadiness = 7;
-          brutal.report.feedback = {
-            ...(brutal.report.feedback || {}),
-            youtubeReadiness: `${brutal.report.feedback?.youtubeReadiness || ''} [floor 7: hook+scene+objective PASS]`.trim(),
-          };
-          floored = true;
-        }
-        if (floored) {
-          const vals = Object.values(brutal.report.scores).filter((v) => typeof v === 'number');
-          brutal.overall = vals.length
-            ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10
-            : brutal.overall;
-          brutal.uploadReady = (brutal.overall ?? 0) >= 7;
-        }
-      }
+    try {
+      brutal = await runBrutalOnce();
     } catch (e) {
-      brutal = { success: false, error: e.message };
+      console.warn(`[video-watcher] brutal vision failed once: ${e.message} — retrying`);
+      try {
+        brutal = await runBrutalOnce();
+      } catch (e2) {
+        brutal = { success: false, error: e2.message };
+      }
+    }
+    if (brutal?.success !== false && brutal?.report?.scores) {
+      applyHonestSceneFloors(brutal, {
+        sceneQa,
+        repetition,
+        hookVision,
+        objectiveGate,
+      });
     }
     if (options.legacy_vision === true) {
       legacyVision = await runServerAIReview(videoPath, dur, scriptText, apiKey, 6);

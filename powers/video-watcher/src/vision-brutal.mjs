@@ -3,6 +3,11 @@
  */
 import { readFileSync } from 'node:fs';
 import { extractFrames } from '../../../deploy/server-render/aiReviewer.mjs';
+import {
+  applyCappedFloor,
+  averageScore,
+  hasCriticalQualityIssues,
+} from './score-honesty.mjs';
 
 function parseJSONResponse(raw) {
   let cleaned = raw.trim();
@@ -36,6 +41,9 @@ async function callOpenRouterVision({ apiKey, systemPrompt, frames, extraText })
         { role: 'system', content: systemPrompt },
         { role: 'user', content },
       ],
+      temperature: 0.15,
+      max_tokens: 4096,
+      response_format: { type: 'json_object' },
     }),
   });
 
@@ -45,9 +53,24 @@ async function callOpenRouterVision({ apiKey, systemPrompt, frames, extraText })
   }
 
   const data = await response.json();
-  const text = data?.choices?.[0]?.message?.content;
+  const message = data?.choices?.[0]?.message;
+  const text = messageText(message);
   if (!text) throw new Error('Empty vision response');
   return parseJSONResponse(text);
+}
+
+/** Prefer message.content; fall back to reasoning (mimo / reasoning models). */
+function messageText(message) {
+  if (!message || typeof message !== 'object') return '';
+  if (typeof message.content === 'string' && message.content.trim()) return message.content;
+  if (typeof message.reasoning === 'string' && message.reasoning.trim()) return message.reasoning;
+  if (Array.isArray(message.content)) {
+    return message.content
+      .map((part) => (typeof part === 'string' ? part : part?.text || ''))
+      .join('')
+      .trim();
+  }
+  return '';
 }
 
 const BRUTAL_SYSTEM = [
@@ -108,28 +131,38 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
     else scores[key] = Math.max(0, Math.min(10, v));
   }
   parsed.scores = scores;
+  const modelRawScores = { ...scores };
+  const modelRawOverall = averageScore(modelRawScores);
   const overlay = (options.hookVision?.onScreenText || '').trim();
   const hookVisionOk =
     options.hookVision?.hookPass === true || overlay.length >= 8;
-  // Large readable yellow burn-in = real hook packaging; some vision models still under-score it
-  if (hookVisionOk && typeof scores.hook === 'number' && scores.hook < 8) {
-    scores.hook = 8;
-    parsed.feedback = {
-      ...(parsed.feedback || {}),
-      hook: `${parsed.feedback?.hook || ''} [clamped to 8: on-screen hook${overlay ? ` (“${overlay.slice(0, 40)}”)` : ''}]`.trim(),
-    };
+  // Large readable yellow burn-in may bump hook, but never more than +1 over model raw
+  if (hookVisionOk && typeof scores.hook === 'number') {
+    const feedback = { ...(parsed.feedback || {}) };
+    applyCappedFloor(
+      scores,
+      feedback,
+      'hook',
+      8,
+      `on-screen hook${overlay ? ` (“${overlay.slice(0, 40)}”)` : ''}`,
+    );
+    parsed.feedback = feedback;
     parsed.scores = scores;
   }
 
-  const vals = Object.values(scores).filter((v) => typeof v === 'number');
-  const overall = vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : 0;
+  const overall = averageScore(scores) ?? 0;
+  const critical = hasCriticalQualityIssues(parsed.topIssues, parsed.verdict);
 
   return {
     success: true,
     mode: 'brutal',
     overall,
-    // LLM often leaves uploadReady:false even at 7+ — overall after floors is the bar
-    uploadReady: overall >= 7,
+    rawOverall: modelRawOverall ?? overall,
+    flooredOverall: overall,
+    rawScores: modelRawScores,
+    hasCriticalIssues: critical,
+    // Honest bar: model raw ≥7 and no critical topIssues (floors applied later in analyze)
+    uploadReady: (modelRawOverall ?? overall) >= 7 && !critical,
     report: parsed,
     frameCount: frames.length,
     retentionSampling: true,

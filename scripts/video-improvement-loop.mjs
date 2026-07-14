@@ -13,6 +13,7 @@ import { ensureRailwayApiTokenEnv } from './lib/railway-token.mjs';
 import { runLoopPreflight, waitForDevServer } from './loop-preflight.mjs';
 import { pickRandomTopic } from './lib/random-topics.mjs';
 import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
+import { scoreForTargetGate } from '../powers/video-watcher/src/score-honesty.mjs';
 import { loadFixState, saveFixState } from './lib/loop-state.mjs';
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
@@ -334,18 +335,71 @@ async function main() {
       });
     }
 
-    const brutalScore = watch.brutal?.overall ?? 0;
+    const brutalFailed = watch.brutal?.success === false || !watch.brutal?.report?.scores;
+    const gateScore = scoreForTargetGate(watch.brutal, cfg.untilScore);
+    const brutalScore = typeof gateScore === 'number' ? gateScore : null;
     const brutalDims = watch.brutal?.report?.scores || null;
-    const uploadReady = watch.uploadReady === true;
+    // Null/failed brutal is never upload-ready
+    const uploadReady = !brutalFailed && watch.uploadReady === true;
     const objectivePass = watch.objectiveGate?.pass === true;
     const scenePass = watch.sceneQa?.pass === true;
     const scoreTargetMet =
+      !brutalFailed &&
       objectivePass &&
       renderTier === 'full' &&
+      typeof brutalScore === 'number' &&
       Number.isFinite(brutalScore) &&
       brutalScore >= cfg.untilScore;
     let nextStep = 'new random topic';
     let fixesApplied = [];
+
+    if (brutalFailed) {
+      console.log(`\n❌ BRUTAL VISION HARD FAIL — ${watch.brutal?.error || 'missing scores'} (forcing reharvest)`);
+      fixState.reHarvestMedia = true;
+      fixState.faceSeekBroll = true;
+      fixState.harvestVideoFirst = true;
+      fixState.fixStrategy = 'reharvest';
+      fixState.mediaOffset = (fixState.mediaOffset || 0) + 4;
+      if (fixState.topicRetryCount < fixState.maxRetriesPerTopic) {
+        fixState.topicRetryCount += 1;
+        fixState.pendingTopic = currentTopic;
+        nextStep = `RETRY same topic after brutal fail (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`;
+      } else {
+        nextStep = 'new random topic (brutal fail exhausted retries)';
+        fixState.pendingTopic = null;
+        fixState.topicRetryCount = 0;
+      }
+      saveFixState(LOOP_DIR, fixState);
+      const scoreLabel = brutalScore ?? 'null';
+      appendJournal({
+        iteration,
+        retry: isRetry,
+        topic,
+        at: new Date().toISOString(),
+        generateOk,
+        videoPath,
+        uploadReady: false,
+        brutalScore: scoreLabel,
+        brutalFailed: true,
+        brutalError: watch.brutal?.error || 'missing scores',
+        objectivePass,
+        objectiveScore: watch.objectiveQa?.score,
+        scenePass,
+        longestSceneSec: watch.sceneQa?.longestSceneSec,
+        renderTier,
+        fixStrategy: fixState.fixStrategy,
+        harvestNonce: fixState.harvestNonce,
+        ffmpegHardCuts: fixState.ffmpegHardCuts,
+        renderEnv,
+        hookPass: watch.hookVision?.hookPass,
+        fixesApplied: ['brutal hard fail → reharvest'],
+        nextStep,
+        reportPath: watch.reportPath,
+        runDir,
+      });
+      if (cfg.delaySec > 0) await sleep(cfg.delaySec * 1000);
+      continue;
+    }
 
     const sceneBodyOk = !watch.sceneQa?.available || watch.sceneQa?.bodyPass === true;
     if (objectivePass && sceneBodyOk && renderTier === 'draft') {
@@ -406,7 +460,9 @@ async function main() {
 
     // Chasing until-score (e.g. 8) must not stop just because uploadReady fires at ≥7
     const chasingHigherScore =
-      Number.isFinite(cfg.untilScore) && brutalScore < cfg.untilScore;
+      Number.isFinite(cfg.untilScore) &&
+      typeof brutalScore === 'number' &&
+      brutalScore < cfg.untilScore;
 
     if (!uploadReady || chasingHigherScore) {
       const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState, currentTopic || topic);
@@ -478,6 +534,9 @@ async function main() {
       uploadReady,
       brutalScore,
       brutalDims,
+      rawOverall: watch.brutal?.rawOverall,
+      flooredOverall: watch.brutal?.flooredOverall,
+      hasCriticalIssues: watch.brutal?.hasCriticalIssues,
       scoreTargetMet,
       objectivePass,
       objectiveScore: watch.objectiveQa?.score,

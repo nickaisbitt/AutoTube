@@ -36,6 +36,8 @@ import {
 } from '../../services/llm/index';
 import { generateTitleVariants } from '../../services/llm/titleGenerator';
 import { assignSceneLayouts, scheduleRetentionBeats } from '../../services/renderingShared';
+import { hasWeakHookOpener, validateHook } from '../../services/hookValidator';
+import { HOOK_STAKES_KEYWORDS } from '../../services/videoQualityChecklist';
 import { QUALITY_PRESETS, renderVideoToBlob } from '../../services/renderer';
 import type { RenderResult } from '../../services/renderer/encoding';
 import { trackVideoGeneration } from '../../services/analytics';
@@ -770,7 +772,7 @@ export async function executeAssembleVideo(
         isStreaming: isServerRender,
         serverVideoUrl: isServerRender ? url : projectToRender.exportSettings?.serverVideoUrl,
         hookLine: projectToRender.hookLine ?? projectToRender.exportSettings?.hookLine,
-        youtubeMode: projectToRender.exportSettings?.youtubeMode,
+        youtubeMode: projectToRender.exportSettings?.youtubeMode !== false,
       },
     };
 
@@ -1129,35 +1131,46 @@ function evaluateScriptPhase(
   const script = project.script;
   if (!script || script.length === 0) return;
 
-  // Check hook quality: first segment should open with personal stakes
+  // Check hook quality: ban year/filler/generic openers; require pattern + stakes
   const intro = script.find((s) => s.type === 'intro') || script[0];
   if (intro) {
-    const narration = intro.narration.toLowerCase();
-    const genericPhrases = [
-      'in today\'s video', 'welcome back', 'hey guys',
-      'what\'s up', 'in this video', 'let me tell you',
-    ];
-    const isGenericHook = genericPhrases.some((p) => narration.includes(p));
-    if (isGenericHook) {
+    const narration = intro.narration || '';
+    const weak = hasWeakHookOpener(narration);
+    if (weak.weak) {
       warnings.push({
         dimension: 'hook',
-        message: 'Opening uses generic YouTube phrasing instead of personal-stakes hook',
+        message: weak.reason ?? 'Opening uses weak/generic YouTube phrasing',
         severity: 'critical',
       });
       recommendations.push({
         action: 'rewrite_hook',
-        reason: 'Hook scores below threshold — replace generic opening with concrete personal risk',
+        reason: 'Hook opener fails Video Watcher / checklist bans — rewrite with concrete personal risk',
         affectedSegments: [intro.id],
       });
     }
 
-    // Check for concrete risk indicators in hook
-    const riskIndicators = ['money', 'files', 'identity', 'account', 'password', 'bank', 'stolen', 'hacked', 'lost', 'locked'];
-    const hasConcreteRisk = riskIndicators.some((r) => narration.includes(r));
+    const hookResult = validateHook(intro);
+    if (!weak.weak && !hookResult.hasHook) {
+      warnings.push({
+        dimension: 'hook',
+        message: 'Opening lacks a detectable hook pattern (stat, question, personal stakes, or twist)',
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'rewrite_hook',
+        reason: 'Hook scores below threshold — open with stakes, a number, or a provocative question',
+        affectedSegments: [intro.id],
+      });
+    }
+
+    const lower = narration.toLowerCase();
+    const hasConcreteRisk =
+      HOOK_STAKES_KEYWORDS.some((r) => lower.includes(r)) ||
+      /\b(you|your|you're|you've)\b/i.test(narration);
     if (!hasConcreteRisk) {
       warnings.push({
         dimension: 'hook',
-        message: 'Hook lacks concrete personal risk — add money, identity, or account stakes in the first 15 seconds',
+        message: 'Hook lacks concrete personal risk — add money, identity, account stakes, or direct you/your language in the first 15 seconds',
         severity: 'critical',
       });
       recommendations.push({
@@ -1209,11 +1222,16 @@ function evaluateMediaPhase(
   if (!media || media.length === 0) return;
 
   // Placeholder / low-quality volume gate (aligned with loop MAX_PLACEHOLDER_PCT ≈ 10%)
-  const placeholderCount = media.filter(
-    (a) =>
-      a.isFallback ||
-      (typeof a.url === 'string' && /placeholder|picsum|via\.placeholder/i.test(a.url)),
-  ).length;
+  const PLACEHOLDER_URL_RE =
+    /placeholder|picsum|via\.placeholder|placehold\.|dummyimage|lorempixel|example\.com|localhost|\/fixtures?\/|mock[-_/]?media|blob:mock/i;
+  const placeholderCount = media.filter((a) => {
+    if (a.isFallback) return true;
+    const source = (a.source || '').toLowerCase();
+    if (source === 'mock' || source === 'fixture' || source === 'placeholder') return true;
+    const url = typeof a.url === 'string' ? a.url : '';
+    const thumb = typeof a.thumbnailUrl === 'string' ? a.thumbnailUrl : '';
+    return PLACEHOLDER_URL_RE.test(url) || PLACEHOLDER_URL_RE.test(thumb);
+  }).length;
   const placeholderPct = (placeholderCount / media.length) * 100;
   if (placeholderPct > 10) {
     warnings.push({

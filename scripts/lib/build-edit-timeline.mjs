@@ -27,25 +27,79 @@ function uniqueAssetsByUrl(assets) {
 export function buildEditTimeline(project, options = {}) {
   const cut = options.cutIntervalSec ?? 1.25;
   const reason = options.reason ?? 'heuristic placement';
+  const preferVideo = options.preferVideo !== false;
   const entries = [];
   const globalPool = uniqueAssetsByUrl(project.media || []);
 
   for (const seg of project.script || []) {
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
     if (!assets.length) {
-      assets = globalPool.map((m) => ({ ...m, segmentId: seg.id }));
+      // Borrow from global pool but prefer face/CTA motion over random intro leftovers
+      assets = uniqueAssetsByUrl(
+        [...globalPool]
+          .sort((a, b) => {
+            const score = (x) => {
+              const blob = `${x.query || ''} ${x.alt || ''}`.toLowerCase();
+              if (/puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -5;
+              if (/face|person|worried|hospital|records?|laptop|verify/i.test(blob)) return 2;
+              return x.type === 'video' ? 1 : 0;
+            };
+            return score(b) - score(a);
+          })
+          .map((m) => ({ ...m, segmentId: seg.id })),
+      );
     }
     if (!assets.length) continue;
 
+    const videos = assets.filter((a) => a.type === 'video');
+    const images = assets.filter((a) => a.type !== 'video');
+    const script = project.script || [];
+    const isIntro = seg.type === 'intro' || seg === script[0];
+    const isOutro = seg.type === 'outro' || seg === script[script.length - 1];
+    const scoreAsset = (a) => {
+      const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
+      if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
+      if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up/i.test(blob)) return 2;
+      if (isOutro && /checklist|subscribe|relieved|direct.?camera|hospital|records?|laptop|verify|call/i.test(blob)) return 3;
+      return 0;
+    };
+    // Intro/outro = motion only when videos exist. Body = almost all video (V-V-V-I).
+    const ordered = preferVideo && videos.length
+      ? (() => {
+          if (isIntro || isOutro) {
+            return uniqueAssetsByUrl(
+              [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a)),
+            );
+          }
+          const out = [];
+          let vi = 0;
+          let ii = 0;
+          const total = Math.max(assets.length, 8);
+          for (let k = 0; k < total; k += 1) {
+            if (k % 4 !== 3 && videos.length) {
+              out.push(videos[vi % videos.length]);
+              vi += 1;
+            } else if (images.length) {
+              out.push(images[ii % images.length]);
+              ii += 1;
+            } else if (videos.length) {
+              out.push(videos[vi % videos.length]);
+              vi += 1;
+            }
+          }
+          return uniqueAssetsByUrl(out.length ? out : assets);
+        })()
+      : assets;
+
     const duration = seg.duration || 20;
-    const interval = seg.type === 'intro' ? Math.min(cut, 3) : cut;
+    const interval = isIntro ? Math.min(cut, 0.9) : cut;
     let t = 0;
     let ai = 0;
     let lastAssetId = null;
     let lastUrl = null;
     while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
-      let asset = assets[ai % assets.length];
+      let asset = ordered[ai % ordered.length];
       let attempts = 0;
       const pickFrom = (pool) => {
         for (let j = 0; j < pool.length; j++) {
@@ -58,10 +112,10 @@ export function buildEditTimeline(project, options = {}) {
       };
 
       while (
-        attempts < Math.max(assets.length, globalPool.length) &&
+        attempts < Math.max(ordered.length, globalPool.length) &&
         (asset.id === lastAssetId || (urlKey(asset) && urlKey(asset) === lastUrl))
       ) {
-        asset = pickFrom(assets.length > 1 ? assets : globalPool);
+        asset = pickFrom(ordered.length > 1 ? ordered : globalPool);
         ai += 1;
         attempts += 1;
       }

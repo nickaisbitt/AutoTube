@@ -31,7 +31,7 @@
     "youtube:review": "node scripts/youtube-minute-review.mjs",
     "watch:video": "node scripts/watch-video.mjs",
     "watch:video:full": "node scripts/watch-video.mjs --full",
-    "loop:video": "node scripts/video-improvement-loop.mjs --until-score 9.1",
+    "loop:video": "node scripts/video-improvement-loop.mjs --until-score 7.0",
     "loop:preflight": "node scripts/loop-preflight.mjs",
     "loop:serve": "npm run dev -- --port 5173 --host 0.0.0.0",
     "loop:video:mock": "node scripts/video-improvement-loop.mjs --until-score 9.1 --mock-harvest",

@@ -47,6 +47,10 @@ function AppContent() {
       height: 0,
       mimeType: format === 'mp4' ? 'video/mp4' : 'video/webm',
       fileName: `${project.title || 'video'}.${format}`,
+      // YouTube-ready defaults: Hormozi captions, cold-open hook, CTA, voice-first mix
+      youtubeMode: project.exportSettings?.youtubeMode !== false,
+      backgroundMusic: project.exportSettings?.backgroundMusic,
+      hookLine: project.hookLine ?? project.exportSettings?.hookLine,
     };
     
     await assembleVideo({ quality, format }, clonedProject);

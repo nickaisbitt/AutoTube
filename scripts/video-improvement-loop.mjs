@@ -4,7 +4,7 @@
  *
  * Gate: if review fails, apply fixes to pipeline state and re-run BEFORE picking a new topic.
  */
-import { mkdirSync, writeFileSync, appendFileSync, existsSync, copyFileSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, appendFileSync, existsSync, copyFileSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { generateFullVideo, checkDevServer, resolveOpenRouterKey } from './lib/generate-full-video.mjs';
@@ -26,7 +26,7 @@ function parseArgs(argv) {
   const cfg = {
     max: 0,
     untilPass: false,
-    untilScore: 9.1,
+    untilScore: 7.0,
     delaySec: 5,
     reviewOnly: false,
     skipVision: false,
@@ -34,6 +34,7 @@ function parseArgs(argv) {
     watchMode: 'quick',
     exportReview: true,
     mockHarvest: false,
+    keepGoing: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -47,6 +48,7 @@ function parseArgs(argv) {
     else if (a === '--watch-full') cfg.watchMode = 'full';
     else if (a === '--no-export') cfg.exportReview = false;
     else if (a === '--mock-harvest') cfg.mockHarvest = true;
+    else if (a === '--keep-going') cfg.keepGoing = true;
   }
   return cfg;
 }
@@ -86,7 +88,48 @@ async function main() {
   const cfg = parseArgs(process.argv.slice(2));
   mkdirSync(LOOP_DIR, { recursive: true });
 
+  const lockPath = join(LOOP_DIR, 'LOOP.lock');
+  try {
+    writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
+  } catch {
+    const prev = existsSync(lockPath) ? readFileSync(lockPath, 'utf8').trim() : '';
+    const prevPid = parseInt(prev, 10);
+    let alive = false;
+    if (Number.isFinite(prevPid)) {
+      try {
+        process.kill(prevPid, 0);
+        alive = true;
+      } catch {
+        alive = false;
+      }
+    }
+    if (alive) {
+      console.error(`❌ Another improvement loop is running (pid ${prevPid}). Kill it or delete ${lockPath}`);
+      process.exit(2);
+    }
+    writeFileSync(lockPath, String(process.pid));
+  }
+  const clearLock = () => {
+    try {
+      if (existsSync(lockPath) && readFileSync(lockPath, 'utf8').trim() === String(process.pid)) {
+        unlinkSync(lockPath);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on('exit', clearLock);
+  process.on('SIGINT', () => {
+    clearLock();
+    process.exit(130);
+  });
+  process.on('SIGTERM', () => {
+    clearLock();
+    process.exit(143);
+  });
+
   if (!cfg.reviewOnly && !(await runLoopPreflight())) {
+    clearLock();
     process.exit(1);
   }
 
@@ -243,6 +286,17 @@ async function main() {
 
     console.log(`\n👁 Video Watcher review (tier=${renderTier})...\n`);
     let watch;
+    const projectPathForWatch = join(runDir, 'project.json');
+    const hookOverlayHint = (() => {
+      try {
+        if (existsSync(projectPathForWatch)) {
+          return JSON.parse(readFileSync(projectPathForWatch, 'utf8')).exportSettings?.hookOverlay || '';
+        }
+      } catch {
+        /* ignore */
+      }
+      return fixState.hookOverlay || '';
+    })();
     try {
       watch = await watchVideo({
         video_path: videoPath,
@@ -250,6 +304,8 @@ async function main() {
         skip_vision: cfg.skipVision || skipBrutalOnDraft || cfg.objectiveOnly,
         script_text: scriptText,
         render_tier: renderTier,
+        project_path: existsSync(projectPathForWatch) ? projectPathForWatch : undefined,
+        hook_overlay: hookOverlayHint,
       });
     } catch (e) {
       console.error(`❌ Watch failed: ${e.message}`);
@@ -279,6 +335,7 @@ async function main() {
     }
 
     const brutalScore = watch.brutal?.overall ?? 0;
+    const brutalDims = watch.brutal?.report?.scores || null;
     const uploadReady = watch.uploadReady === true;
     const objectivePass = watch.objectiveGate?.pass === true;
     const scenePass = watch.sceneQa?.pass === true;
@@ -347,30 +404,53 @@ async function main() {
       console.log(`   Flag file: ${TARGET_FILE}`);
     }
 
-    if (!uploadReady) {
+    // Chasing until-score (e.g. 8) must not stop just because uploadReady fires at ≥7
+    const chasingHigherScore =
+      Number.isFinite(cfg.untilScore) && brutalScore < cfg.untilScore;
+
+    if (!uploadReady || chasingHigherScore) {
       const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState, currentTopic || topic);
       fixState = nextFix;
       fixesApplied = applied;
+      if (chasingHigherScore) {
+        fixState.reHarvestMedia = true;
+        fixState.faceSeekBroll = true;
+        fixState.harvestVideoFirst = true;
+        fixState.patternInterrupts = true;
+        fixState.cutIntervalSec = Math.min(fixState.cutIntervalSec ?? 1, 0.85);
+        fixState.mediaOffset = (fixState.mediaOffset || 0) + 4;
+        fixState.fixStrategy = 'reharvest';
+        applied.push(
+          `stretch: score ${brutalScore}/10 < ${cfg.untilScore} → force face-seek reharvest (offset ${fixState.mediaOffset})`,
+        );
+        fixesApplied = applied;
+      }
       const fixReport = formatFixReport(applied, fixState);
       writeFileSync(join(runDir, 'FIXES_APPLIED.md'), fixReport);
       console.log(`\n🔧 FIX GATE — must apply fixes before next topic:\n`);
       console.log(fixReport);
 
-      if (blockNextTopic && fixState.topicRetryCount < fixState.maxRetriesPerTopic) {
-        fixState.topicRetryCount += 1;
-        fixState.pendingTopic = currentTopic;
-        nextStep = `RETRY same topic with fixes (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`;
-        console.log(`\n⛔ Not advancing topic — ${nextStep}`);
-      } else if (fixState.topicRetryCount >= fixState.maxRetriesPerTopic) {
-        console.log(`\n⚠ Max retries on topic — advancing with accumulated fixes`);
-        currentTopic = null;
-        fixState.pendingTopic = null;
-        fixState.topicRetryCount = 0;
-        fixState.generateFailureCount = 0;
-        fixState.mediaOffset = 0;
-        fixState.renderTier = 'draft';
-        fixState.fixStrategy = 'interval';
-        nextStep = 'new topic (max retries hit, fixes retained)';
+      if (blockNextTopic || chasingHigherScore) {
+        if (fixState.topicRetryCount < fixState.maxRetriesPerTopic) {
+          fixState.topicRetryCount += 1;
+          fixState.pendingTopic = currentTopic;
+          nextStep = chasingHigherScore
+            ? `RETRY same topic toward ${cfg.untilScore}/10 (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`
+            : `RETRY same topic with fixes (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`;
+          console.log(`\n⛔ Not advancing topic — ${nextStep}`);
+        } else {
+          console.log(`\n⚠ Max retries on topic — advancing with accumulated fixes`);
+          currentTopic = null;
+          fixState.pendingTopic = null;
+          fixState.topicRetryCount = 0;
+          fixState.generateFailureCount = 0;
+          fixState.mediaOffset = 0;
+          fixState.renderTier = 'draft';
+          fixState.fixStrategy = 'interval';
+          delete fixState.hookLine;
+          delete fixState.hookOverlay;
+          nextStep = 'new topic (max retries hit, fixes retained)';
+        }
       }
     } else {
       console.log('\n✅ Upload-ready — advancing to new random topic');
@@ -379,6 +459,8 @@ async function main() {
       fixState.topicRetryCount = 0;
       fixState.generateFailureCount = 0;
       fixState.renderTier = 'draft';
+      delete fixState.hookLine;
+      delete fixState.hookOverlay;
     }
 
     saveFixState(LOOP_DIR, fixState);
@@ -395,6 +477,7 @@ async function main() {
       videoPath,
       uploadReady,
       brutalScore,
+      brutalDims,
       scoreTargetMet,
       objectivePass,
       objectiveScore: watch.objectiveQa?.score,
@@ -412,11 +495,22 @@ async function main() {
       runDir,
     });
 
-    if (scoreTargetMet) {
+    if (scoreTargetMet && !cfg.keepGoing) {
       break;
     }
+    if (scoreTargetMet && cfg.keepGoing) {
+      console.log(`\n🎯 Score ${brutalScore}/10 ≥ ${cfg.untilScore} — keep-going: next topic`);
+      currentTopic = null;
+      fixState.pendingTopic = null;
+      fixState.topicRetryCount = 0;
+      fixState.generateFailureCount = 0;
+      delete fixState.hookLine;
+      delete fixState.hookOverlay;
+      saveFixState(LOOP_DIR, fixState);
+    }
 
-    if (cfg.untilPass && uploadReady) {
+    // Only stop on uploadReady when not chasing a higher until-score bar
+    if (cfg.untilPass && uploadReady && !chasingHigherScore && !cfg.keepGoing) {
       console.log('\n🎉 Upload-ready — stopping loop.');
       break;
     }

@@ -92,7 +92,39 @@ function hardCutsEnabled() {
     return true;
   }
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
-  return loopMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
+  const youtubeMode = process.env.AUTOTUBE_YOUTUBE_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === 'true';
+  // YouTube / ffmpeg assembly: hard cuts by default for retention pacing
+  return loopMode || youtubeMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
+}
+
+function patternInterruptsEnabled() {
+  if (process.env.AUTOTUBE_PATTERN_INTERRUPTS === '0' || process.env.AUTOTUBE_PATTERN_INTERRUPTS === 'false') {
+    return false;
+  }
+  if (process.env.AUTOTUBE_PATTERN_INTERRUPTS === '1' || process.env.AUTOTUBE_PATTERN_INTERRUPTS === 'true') {
+    return true;
+  }
+  return (
+    process.env.AUTOTUBE_YOUTUBE_MODE === '1'
+    || process.env.AUTOTUBE_YOUTUBE_MODE === 'true'
+    || process.env.AUTOTUBE_LOOP_MODE === '1'
+    || process.env.AUTOTUBE_LOOP_MODE === 'true'
+  );
+}
+
+/** Short white flash cut for retention pattern interrupts (canvas path equivalent). */
+function encodeFlashClip(clipOut, durationSec, { w, h, preset }) {
+  const frames = Math.max(1, Math.round(durationSec * FPS));
+  const r = spawnSync(
+    'ffmpeg',
+    [
+      '-y', '-f', 'lavfi', '-i', `color=c=white:s=${w}x${h}:d=${durationSec}:r=${FPS}`,
+      '-frames:v', String(frames),
+      '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p', '-an', clipOut,
+    ],
+    { encoding: 'utf8', timeout: 60_000 },
+  );
+  return r.status === 0 && existsSync(clipOut);
 }
 
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
@@ -254,12 +286,15 @@ async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
   return { localSrc: null, asset };
 }
 
-function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0 }) {
+function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0, zoomPunch = false }) {
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
   const hardCuts = hardCutsEnabled();
   const frames = Math.max(1, Math.round(durationSec * FPS));
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
-  if (!isVideo && hardCuts) {
+  if (zoomPunch && frames > 2) {
+    // Visible pattern interrupt without blank flash frames (vision samples those as dead air)
+    vf = `scale=${Math.round(w * 1.25)}:${Math.round(h * 1.25)},zoompan=z='1.25-0.25*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`;
+  } else if (!isVideo && hardCuts) {
     const drift = 0.08 + (clipIndex % 5) * 0.02;
     vf = `zoompan=z='min(zoom+${drift.toFixed(3)},1.12)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   } else if (hardCuts && clipIndex > 0) {
@@ -309,24 +344,31 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   return r.status === 0 && existsSync(clipOut);
 }
 
-const PLACEHOLDER_COLORS = ['0x1a1a2e', '0x16213e', '0x0f3460', '0x533483', '0xe94560', '0x2d4059', '0xea5455'];
-
-function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }) {
-  const color = PLACEHOLDER_COLORS[clipIdx % PLACEHOLDER_COLORS.length];
+/** Last-resort filler — animated grain, never flat purple/blue cards (vision calls those dead air). */
+function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, reusePath = null) {
+  if (reusePath && existsSync(reusePath)) {
+    const frames = Math.max(1, Math.round(durationSec * FPS));
+    const rReuse = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-i', reusePath, '-t', String(durationSec),
+        '-vf', `scale=${Math.round(w * 1.15)}:${Math.round(h * 1.15)},zoompan=z='1.15-0.15*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`,
+        '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p', '-an', clipOut,
+      ],
+      { encoding: 'utf8', timeout: 120_000 },
+    );
+    if (rReuse.status === 0 && existsSync(clipOut)) return true;
+  }
   const r = spawnSync(
     'ffmpeg',
     [
       '-y',
-      '-f',
-      'lavfi',
-      '-i',
-      `color=c=${color}:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
-      '-c:v',
-      'libx264',
-      '-preset',
-      preset,
-      '-pix_fmt',
-      'yuv420p',
+      '-f', 'lavfi',
+      '-i', `color=c=0x111111:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
+      '-vf', `noise=alls=18:allf=t+u,eq=brightness=-0.05:saturation=0.4`,
+      '-c:v', 'libx264',
+      '-preset', preset,
+      '-pix_fmt', 'yuv420p',
       '-an',
       clipOut,
     ],
@@ -376,19 +418,19 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     return offset;
   }
 
-  async function pushClip(asset, durationSec, label, hintOffset = 0) {
+  async function pushClip(asset, durationSec, label, hintOffset = 0, { zoomPunch = false } = {}) {
     const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
     clipIndex += 1;
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
     let ok = false;
     if (!localSrc) {
-      console.log(`  [ffmpeg] ${label}: placeholder — asset fetch failed`);
-      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
+      console.log(`  [ffmpeg] ${label}: reuse/placeholder — asset fetch failed`);
+      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, clipPaths[clipPaths.length - 1]);
       if (ok) placeholderClipCount += 1;
     } else {
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
       ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
-        w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1,
+        w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, zoomPunch,
       });
       if (!ok) {
         const thumb = resolvedAsset.thumbnailUrl;
@@ -397,15 +439,15 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
           const thumbLocal = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
           if (thumbLocal) {
             ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
-              w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1,
+              w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1, zoomPunch,
             });
             if (ok) console.log(`  [ffmpeg] ${label}: video → thumbnail still`);
           }
         }
       }
       if (!ok) {
-        console.log(`  [ffmpeg] ${label}: encode failed — using placeholder`);
-        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
+        console.log(`  [ffmpeg] ${label}: encode failed — reuse/placeholder`);
+        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, clipPaths[clipPaths.length - 1]);
         if (ok) placeholderClipCount += 1;
       }
     }
@@ -419,7 +461,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0);
+    // Punch opener + every other clip — gpt-5.4-mini dunks static first frames
+    const zoomPunch = patternInterruptsEnabled() && (i === 0 || i % 2 === 0);
+    await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0, { zoomPunch });
   }
 
   let fillerRound = 0;

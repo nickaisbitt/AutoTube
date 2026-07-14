@@ -5,6 +5,12 @@
  * previously imported from the monolithic src/services/llm.ts.
  */
 
+export {
+  DEFAULT_LLM_MODEL,
+  DEFAULT_VISION_MODEL,
+  QUALITY_CHECK_JUDGES,
+} from './defaultModels';
+
 // Script generation
 export { generateAIScript, generateHookVariants, DEFAULT_SCRIPT_MODEL, validateScriptSpecificity, buildSpecificityFixPrompt } from './scriptGenerator';
 export type { HookVariant } from './scriptGenerator';

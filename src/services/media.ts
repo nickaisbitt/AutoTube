@@ -69,10 +69,22 @@ function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<str
 }
 
 const LOOP_DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investigation', 'report', 'leaked', 'official'];
+const LOOP_CYBER_DIVERSITY_TOKENS = [
+  'cybersecurity',
+  'data breach',
+  'news footage',
+  'investigation',
+  'hospital records',
+  'security camera',
+  'official report',
+];
 
 function diversifyLoopQuery(query: string, ctx: { offset: number; nonce: number }): string {
   if (ctx.offset === 0 && ctx.nonce === 0) return query;
-  const token = LOOP_DIVERSITY_TOKENS[ctx.offset % LOOP_DIVERSITY_TOKENS.length];
+  const q = query.toLowerCase();
+  const cyberish = /hack|breach|ransom|cyber|hospital|patient|bank|fraud|scam|password|identity|leak|records?/.test(q);
+  const tokens = cyberish ? LOOP_CYBER_DIVERSITY_TOKENS : LOOP_DIVERSITY_TOKENS;
+  const token = tokens[ctx.offset % tokens.length];
   const variant = ctx.nonce > 0 ? ` take ${ctx.nonce}` : '';
   return `${query} ${token}${variant}`.trim();
 }
@@ -634,6 +646,26 @@ export function scoreCandidate(
   const entertainmentKeywords = ['celebrity', 'traitor', 'winner', 'crowned', 'reality tv', 'love island', 'big brother'];
   if (entertainmentKeywords.some(kw => meta.includes(kw)) && !c.query.toLowerCase().includes('celebrity')) {
     score -= 250;
+  }
+
+  // 8b. Off-brand visuals (puppets/cartoons/insects) — tank serious news B-roll
+  const offBrand =
+    /\b(puppet|muppet|marionette|sock\s*puppet|claymation|stop[\s-]?motion|cartoon|anime|animated\s+character|minecraft|fortnite|gameplay|macro\s*insect|beetle|dung\s*beetle|insect|bug\s+macro|larva|caterpillar|spider\s+macro|wildlife\s+macro|hud\s+graphic|sci[\s-]?fi\s+hud)\b/i;
+  if (offBrand.test(meta) && !offBrand.test(c.query)) {
+    score -= 400;
+  }
+
+  // 8c. Prefer bright B-roll when loop flagged muddy/dark frames
+  const preferBright =
+    typeof sessionStorage !== 'undefined'
+    && sessionStorage.getItem('autotube_loop_prefer_bright') === 'true';
+  if (preferBright) {
+    if (/\b(night|dark|silhouette|low.?light|underexposed|dimly|shadowy|black background)\b/i.test(meta)) {
+      score -= 180;
+    }
+    if (/\b(daylight|sunny|bright|well.?lit|office daylight|window light)\b/i.test(meta)) {
+      score += 80;
+    }
   }
 
   // 9. Picsum Penalty — generic random photos should NEVER outrank real DDG/Wikimedia results

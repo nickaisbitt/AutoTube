@@ -38,7 +38,7 @@ const MOCK_SCRIPT = {
 function openRouterBody(model) {
   return JSON.stringify({
     id: 'mock',
-    model: model || 'openai/gpt-5.4-nano',
+    model: model || 'xiaomi/mimo-v2.5',
     choices: [{ message: { role: 'assistant', content: JSON.stringify(MOCK_SCRIPT) } }],
   });
 }

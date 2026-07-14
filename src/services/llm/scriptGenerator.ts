@@ -7,11 +7,12 @@ import { logger } from '../logger';
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { sanitiseTopic, parseSegmentsFromContent, injectTransitionIfMissing } from './parsing';
 import { fetchWikiContext, fetchTopicContext } from './topicContext';
+import { DEFAULT_LLM_MODEL } from './defaultModels';
 
 const OPENROUTER_ENDPOINT = '/api/llm';
 
 // Default model — can be overridden via AppConfig in the future.
-export const DEFAULT_SCRIPT_MODEL = 'openai/gpt-5.4-nano';
+export const DEFAULT_SCRIPT_MODEL = DEFAULT_LLM_MODEL;
 
 /**
  * Generates a full video script using OpenRouter.

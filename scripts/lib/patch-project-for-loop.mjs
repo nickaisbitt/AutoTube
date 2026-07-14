@@ -1,8 +1,8 @@
 /**
  * Patch generated project before server-render (loop fixes).
  */
-import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
-import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
+import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './stock-media-urls.mjs';
+import { buildImpactBeatsForTopic, buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
 
@@ -23,7 +23,11 @@ function topicKeywords(topic) {
 }
 
 function isInstructionOverlay(text) {
-  return /^(replace|start with|use|change|fix|try)\b/i.test((text || '').trim());
+  const t = (text || '').trim();
+  return /^(replace|rewrite|start with|use|change|fix|try|make|update|swap)\b/i.test(t)
+    || /\brewrite\s+line\b/i.test(t)
+    || /\bas:\s*$/i.test(t)
+    || /^(line\s*1|first\s+line)\b/i.test(t);
 }
 
 /** Pull the suggested hook text from watcher "Replace X with Y" fixes. */
@@ -31,14 +35,22 @@ export function extractOverlayFromVisionFix(visionFix) {
   if (!visionFix?.trim()) return null;
   let text = visionFix.trim();
 
-  const quoted = text.match(/\bwith\s+['"]([^'"]+)['"]/i);
-  if (quoted) text = quoted[1].trim();
+  // Prefer the actual suggested hook in quotes or after like:/as:
+  const quotedAny = text.match(/['"]([^'"]{8,})['"]/);
+  const likeClause = text.match(/\blike[:\s]+['"]?([^'"\n.]{8,})['"]?/i);
+  const asColon = text.match(/\b(?:rewrite\s+line\s*\d*\s*)?as[:\s]+['"]?(.+?)['"]?\s*$/i);
+  if (quotedAny) text = quotedAny[1].trim();
+  else if (likeClause) text = likeClause[1].trim();
+  else if (asColon) text = asColon[1].trim();
   else {
+    const withQuoted = text.match(/\bwith\s+['"]([^'"]+)['"]/i);
     const bare = text.match(/\bwith\s+(.+)$/i);
-    if (bare) text = bare[1].trim();
+    if (withQuoted) text = withQuoted[1].trim();
+    else if (bare) text = bare[1].trim();
     else {
       text = text
         .replace(/^Replace\s+.+?\s+with\s+/i, '')
+        .replace(/^Rewrite\s+line\s*\d*\s*as[:\s]+/i, '')
         .replace(/^Start with[^:]*:\s*/i, '')
         .replace(/^Reveal[^:]*:\s*/i, '')
         .replace(/['"]/g, '')
@@ -47,7 +59,18 @@ export function extractOverlayFromVisionFix(visionFix) {
   }
 
   text = text.split(/[—–]/)[0].split(/[.!?]/)[0].trim();
+  // Strip leftover instruction crumbs like "REWRITE LINE 1 AS" / "a concrete shock hook like"
+  text = text
+    .replace(/\brewrite\s+line\s*\d*\s*as\b[:\s]*/gi, '')
+    .replace(/\breplace\s+the\s+first\s+line\s+with\b[:\s]*/gi, '')
+    .replace(/^a\s+concrete\s+shock\s+hook\s+like\b[:\s]*/gi, '')
+    .replace(/^a\s+shock\s+hook\s+like\b[:\s]*/gi, '')
+    .trim();
   if (text.length < 5 || isInstructionOverlay(text)) return null;
+  // Reject meta phrasing that still isn't a viewer-facing hook
+  if (/\b(shock hook|concrete|rewrite|replace|templated?)\b/i.test(text) && text.split(/\s+/).length <= 6) {
+    return null;
+  }
 
   const words = text.split(/\s+/).filter(Boolean);
   return words.slice(0, 8).join(' ').toUpperCase();
@@ -55,53 +78,95 @@ export function extractOverlayFromVisionFix(visionFix) {
 
 /** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
 export function buildShortHookOverlay(topic, hookLine, options = {}) {
+  const maxWords = 6;
+
+  const clampWords = (text) => {
+    const words = (text || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9\s:$%]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+    return words.slice(0, maxWords).join(' ');
+  };
+
   const preferred = options.preferredOverlay?.trim();
   if (preferred && !isInstructionOverlay(preferred)) {
-    return preferred.toUpperCase();
+    const keys = topicKeywords(topic).map((k) => k.toLowerCase());
+    const prefLower = preferred.toLowerCase();
+    const overlapsTopic = keys.some((k) => k.length > 3 && prefLower.includes(k.toLowerCase()));
+    // Stale overlays from a previous topic (e.g. bank hook on landlord video) must not stick
+    if (overlapsTopic || options.forcePreferred === true) {
+      return clampWords(preferred);
+    }
   }
 
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
-  if (fromVision) return fromVision;
+  if (fromVision) return clampWords(fromVision);
 
-  const headline = (topic || '')
-    .replace(/^How\s+/i, '')
-    .replace(/^The\s+/i, '')
-    .replace(/\?$/,'')
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length > 1)
-    .slice(0, 8)
-    .join(' ')
-    .toUpperCase() || topicKeywords(topic).join(' ').toUpperCase() || 'CRISIS EXPOSED';
-  const core = headline;
+  const keywords = topicKeywords(topic);
   const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
 
+  // Prefer short stakes phrases over dumping the full topic title on screen
+  if (/tornado|hurricane|flood|wildfire|earthquake/i.test(t)) {
+    return clampWords('THIS WARNING CAME TOO LATE');
+  }
+  if (/nursing\s*home|elder\s*abuse|care\s*home/i.test(t)) {
+    return clampWords('CAMERAS CAUGHT THE ABUSE');
+  }
+  if (/veteran|va\s+benefits|benefits\s+data|dark\s*web/i.test(t)) {
+    return clampWords('BENEFITS DATA FOR SALE');
+  }
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
-    return `EXPOSED: ${core}`;
+    // Short + no colon — long "EXPOSED: HOSPITAL HACK EXPOSED" was edge-clipped by drawtext
+    const kw = keywords.filter((k) => !/^expos/i.test(k)).slice(0, 2).join(' ');
+    return clampWords(kw ? `${kw} EXPOSED` : 'EXPOSED');
   }
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
-    return `EMERGENCY: ${core}`;
+    return clampWords('EMERGENCY: THEY HID THE RISK');
   }
-  if (/evict|tenant|landlord|lawsuit|fine|hack|stolen|breach/i.test(t)) {
-    return `URGENT: ${core}`;
+  if (/landlord|tenant|evict|rent/i.test(t)) {
+    return clampWords('THEY EVICTED YOU WITH AI');
+  }
+  // Insurance before generic "scam" (otherwise bank hook lands on crash fraud videos)
+  if (/insurance|car\s*crash|fake\s*crash|crash\s*video/i.test(t)) {
+    return clampWords('FAKE CRASH SCAM EXPOSED');
+  }
+  if (/hospital|patient|healthcare|hipaa/i.test(t) && /hack|breach|leak|records?|data/i.test(t)) {
+    return clampWords('PATIENT RECORDS EXPOSED');
+  }
+  if (/hack|stolen|breach|password|identity|bank|voice\s*clone|fraud|scam/i.test(t)) {
+    return clampWords('YOUR BANK ACCOUNT IS EMPTY');
   }
   if (/fire|attack|blackout|disaster|death|kill|crash|bomb/i.test(t)) {
-    return `BREAKING: ${core}`;
+    return clampWords(`BREAKING: ${keywords.slice(0, 3).join(' ')}`);
   }
-  return `URGENT: ${core}`;
+  if (/ticket|bot|scalp|concert|fan/i.test(t)) {
+    return clampWords('BOTS STOLE YOUR TICKETS');
+  }
+
+  const core = keywords.slice(0, 4).join(' ') || 'CRISIS EXPOSED';
+  return clampWords(`URGENT: ${core}`);
 }
 
 const DATE_OPENER_RE =
-  /^(On\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|On\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|In\s+\d{4}|As\s+of\s+\w+\s+\d{4})/i;
+  /^(On\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|On\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|In\s+(?:late\s+|early\s+|mid-?)?\d{4}|In\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}|As\s+of\s+\w+\s+\d{4})/i;
 
 /** Replace weak date/year openers with the shock hook line. */
 export function rewriteIntroOpener(project, hookLine) {
   if (!project?.script?.length || !hookLine?.trim()) return project;
   const intro = project.script[0];
   const narration = intro.narration || '';
-  const rest = narration.replace(/^[^.!?]+[.!?]\s*/, '');
-  if (DATE_OPENER_RE.test(narration.trim()) || /^in \d{4}/i.test(narration.trim())) {
-    intro.narration = `${hookLine.trim()} ${rest}`.trim();
+  const rest = narration.replace(/^[^.!?]+[.!?]\s*/, '').trim();
+  const first = (narration.split(/(?<=[.!?])\s+/)[0] || narration).trim();
+  const weak =
+    DATE_OPENER_RE.test(narration.trim())
+    || /^in\s+(?:late\s+|early\s+|mid-?)?\d{4}/i.test(first)
+    || /^(in this video|today we|let me explain|welcome)\b/i.test(first)
+    || /^in late\s+\d{4}/i.test(first);
+  // Always force shock opener in loop mode when hook provided — vision bar demands stakes first
+  intro.narration = rest ? `${hookLine.trim()} ${rest}`.trim() : hookLine.trim();
+  if (weak) {
+    /* already rewritten above */
   }
   return project;
 }
@@ -234,6 +299,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   }
 
   if (fixState.shockHook !== false && project.script?.length) {
+    // Always topic-match — rejects stale bank hooks left in FIX_STATE from prior topics
     const hook = buildShockHookLine(topic, fixState.hookLine);
     const hookOverlay = buildShortHookOverlay(topic, hook, {
       preferredOverlay: fixState.hookOverlay,
@@ -245,13 +311,15 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
       ...(project.exportSettings || {}),
       hookLine: hook,
       hookOverlay,
+      impactBeats: buildImpactBeatsForTopic(topic),
+      impactBeatIntervalSec: 5,
     };
   }
 
-  if (!options.skipMediaPatch && fixState.forceRealStock !== false && project.media?.length) {
+  if (!options.skipMediaPatch && fixState.forceRealStock === true && project.media?.length) {
     const offset = fixState.mediaOffset || 0;
     project.media = project.media.map((m, i) => {
-      const stock = STOCK_HEALTHCARE_IMAGES[(i + offset) % STOCK_HEALTHCARE_IMAGES.length];
+      const stock = STOCK_MEDIA_POOL[(i + offset) % STOCK_MEDIA_POOL.length];
       return {
         ...m,
         url: stock.url,
@@ -269,6 +337,8 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     musicPreset: 'neutral',
     resolution: '1080p',
     youtubeMode: true,
+  // Karaoke on by default in loop (reduced caption size in youtubeProfile)
+  karaokeCaptions: fixState.karaokeCaptions !== false,
     hookOverlay: project.exportSettings?.hookOverlay ?? fixState.hookOverlay ?? undefined,
     hookLine: project.exportSettings?.hookLine ?? project.hookLine ?? fixState.hookLine ?? undefined,
   };
@@ -280,7 +350,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
  * Mock search API results — real Unsplash (not picsum).
  */
 export function stockSearchResults(topic, count = 8) {
-  return STOCK_HEALTHCARE_IMAGES.slice(0, count).map((img, i) => ({
+  return pickStockImages(count, 0, STOCK_MEDIA_POOL).map((img, i) => ({
     url: img.url,
     image: img.url,
     thumbnailUrl: img.url.replace('w=1920', 'w=400'),

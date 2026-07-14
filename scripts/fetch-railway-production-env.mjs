@@ -35,6 +35,10 @@ const PULL_KEYS = [
   'OPENROUTER_KEY',
   'VITE_SERPER_KEY',
   'KOKORO_SERVER_URL',
+  'PEXELS_API_KEY',
+  'VITE_PEXELS_KEY',
+  'PIXABAY_API_KEY',
+  'VITE_PIXABAY_KEY',
 ];
 
 async function getServiceVariables(token, serviceId) {

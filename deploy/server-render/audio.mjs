@@ -308,9 +308,57 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
     return convertAudioFormat(audioFiles[0].file, outputFile);
   }
 
-  console.log(`  🔗 Concatenating ${audioFiles.length} audio segments with ${crossfadeDuration}s crossfades...`);
+  console.log(
+    crossfadeDuration > 0.05
+      ? `  🔗 Concatenating ${audioFiles.length} audio segments with ${crossfadeDuration}s crossfades...`
+      : `  🔗 Concatenating ${audioFiles.length} audio segments (WAV normalize + concat)...`,
+  );
 
-  // First, normalize all input files to consistent format
+  // Zero/near-zero crossfade: normalize to PCM WAV then concat demuxer.
+  // AAC concat demuxer over mixed edge-tts (mp3/24k) + silence pads produced
+  // near-silent / corrupt mixes; WAV concat after 48k stereo normalize is reliable.
+  if (!(crossfadeDuration > 0.05)) {
+    const wavFiles = [];
+    for (let i = 0; i < audioFiles.length; i++) {
+      const wavPath = join(tmpdir(), `autotube-concat-wav-${Date.now()}-${i}.wav`);
+      const wavOk = spawnSync('ffmpeg', [
+        '-y', '-i', audioFiles[i].file,
+        '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le',
+        wavPath,
+      ], { encoding: 'utf8', timeout: 60_000 });
+      if (wavOk.status !== 0 || !existsSync(wavPath)) {
+        console.warn(`  ⚠ Failed to normalize segment ${i} to WAV`);
+        wavFiles.forEach(f => { try { unlinkSync(f); } catch {} });
+        return false;
+      }
+      wavFiles.push(wavPath);
+    }
+    const wavList = join(tmpdir(), `autotube-wav-list-${Date.now()}.txt`);
+    writeFileSync(wavList, wavFiles.map(f => `file '${f}'`).join('\n'));
+    const outIsWav = /\.wav$/i.test(outputFile);
+    const concatOut = outIsWav ? outputFile : join(tmpdir(), `autotube-concat-${Date.now()}.wav`);
+    const simple = spawnSync('ffmpeg', [
+      '-y', '-f', 'concat', '-safe', '0',
+      '-i', wavList,
+      '-c:a', 'pcm_s16le',
+      concatOut,
+    ], { encoding: 'utf8', timeout: 120000 });
+    let success = simple.status === 0 && existsSync(concatOut);
+    if (success && !outIsWav) {
+      success = convertAudioFormat(concatOut, outputFile);
+      try { unlinkSync(concatOut); } catch {}
+    }
+    wavFiles.forEach(f => { try { unlinkSync(f); } catch {} });
+    try { unlinkSync(wavList); } catch {}
+    if (success && existsSync(outputFile)) {
+      console.log('  ✓ Audio concatenated (WAV normalize + concat)');
+      return true;
+    }
+    console.warn('  ⚠ Simple concat failed:', (simple.stderr || '').slice(0, 240));
+    return false;
+  }
+
+  // First, normalize all input files to consistent format (crossfade path)
   const normalizedFiles = [];
   for (let i = 0; i < audioFiles.length; i++) {
     const normalizedPath = join(tmpdir(), `autotube-norm-${Date.now()}-${i}.aac`);

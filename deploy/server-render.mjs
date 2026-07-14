@@ -3264,7 +3264,9 @@ async function runFfmpegAssemblyRender(project) {
 
   const mixedAudio = join(audioDir, 'narration-mix.wav');
   try {
-    await concatenateAudio(audioFiles, mixedAudio);
+    // Simple concat — acrossfade over silence pads was producing near-silent mixes
+    const { concatenateAudio: concatAudio } = await import('./server-render/audio.mjs');
+    await concatAudio(audioFiles, mixedAudio, { crossfadeDuration: 0 });
   } catch (err) {
     log('warn', `  ⚠ Audio concat for ffmpeg assembly: ${err.message}`);
   }
@@ -3401,6 +3403,17 @@ async function render() {
     if (!project.exportSettings) project.exportSettings = {};
     project.exportSettings.quality = 'highest';
     project.exportSettings.youtubeMode = true;
+    // Product default: ffmpeg hard-cut assembly (same path as improvement loop)
+    if (!process.env.AUTOTUBE_RENDER_MODE) {
+      process.env.AUTOTUBE_RENDER_MODE = 'ffmpeg';
+      log('info', '  YouTube default render mode: ffmpeg assembly');
+    }
+    if (!process.env.AUTOTUBE_CUT_INTERVAL_SEC) {
+      process.env.AUTOTUBE_CUT_INTERVAL_SEC = '1.0';
+    }
+    if (!process.env.AUTOTUBE_FFMPEG_HARD_CUTS) {
+      process.env.AUTOTUBE_FFMPEG_HARD_CUTS = '1';
+    }
   }
 
   const quality = process.env.AUTOTUBE_RENDER_QUALITY?.trim()
@@ -3418,12 +3431,18 @@ async function render() {
   // Validate TTS providers before starting render (fail fast if none available)
   validateTTSConfiguration();
 
-  // Initialize rendering flags (can be modified by AI post-review enrichment pass)
+  // Initialize rendering flags (can be modified by AI post-review enrichment pass).
+  // YouTube mode defaults: fast pacing + pattern interrupts (watcher pacing/repetition bar).
+  const envOn = (k) => process.env[k] === '1' || process.env[k] === 'true';
+  const envOff = (k) => process.env[k] === '0' || process.env[k] === 'false';
   const renderFlags = {
-    showDataOverlay: process.env.AUTOTUBE_DATA_OVERLAY === '1',
-    showKineticText: process.env.AUTOTUBE_KINETIC_TEXT === '1',
-    useFastPacing: process.env.AUTOTUBE_FAST_PACING === '1',
-    patternInterrupts: process.env.AUTOTUBE_PATTERN_INTERRUPTS === '1' || process.env.AUTOTUBE_LOOP_MODE === '1',
+    showDataOverlay: envOn('AUTOTUBE_DATA_OVERLAY'),
+    showKineticText: envOn('AUTOTUBE_KINETIC_TEXT'),
+    useFastPacing: envOn('AUTOTUBE_FAST_PACING') || (YOUTUBE_MODE && !envOff('AUTOTUBE_FAST_PACING')),
+    patternInterrupts:
+      envOn('AUTOTUBE_PATTERN_INTERRUPTS')
+      || envOn('AUTOTUBE_LOOP_MODE')
+      || (YOUTUBE_MODE && !envOff('AUTOTUBE_PATTERN_INTERRUPTS')),
   };
 
   // Initialize global state for advanced rendering features (Tasks 58, 79, 80)
@@ -4541,7 +4560,7 @@ async function render() {
       // Step 10: Detect media asset change within segment and trigger zoom-out transition
       if (mi !== prevMi && prevMi >= 0) {
         zoomTransitionCounter = 3; // Start 3-frame zoom-out transition
-        if (renderFlags.patternInterrupts && process.env.AUTOTUBE_LOOP_MODE === '1') {
+        if (renderFlags.patternInterrupts && (process.env.AUTOTUBE_LOOP_MODE === '1' || YOUTUBE_MODE)) {
           drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.35);
         }
       }

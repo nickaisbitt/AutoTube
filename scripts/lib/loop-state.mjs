@@ -22,19 +22,21 @@ export const DEFAULT_FIX_STATE = {
   fixStrategy: 'interval',
   ffmpegHardCuts: true,
   topicRetryCount: 0,
-  maxRetriesPerTopic: 4,
+  maxRetriesPerTopic: 3,
   pendingTopic: null,
   iteration: 0,
   appliedFixes: [],
   minAssetsPerSegment: 4,
   maxGenerateFailuresPerTopic: 2,
   reHarvestMedia: false,
-  patternInterrupts: false,
+  patternInterrupts: true,
   useFfmpegAssembly: true,
   renderTier: 'draft',
   harvestVideoFirst: true,
   whisperAlign: false,
   brollPlacement: true,
+  faceSeekBroll: true,
+  karaokeCaptions: false,
 };
 
 /**

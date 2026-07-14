@@ -6,9 +6,10 @@ import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { withRetry } from '../../utils/withRetry';
 import { logger } from '../logger';
 import { trackOpenRouterCost } from '../costTracker';
+import { DEFAULT_LLM_MODEL } from './defaultModels';
 
 const DEFAULT_ENDPOINT = '/api/llm';
-const DEFAULT_MODEL = 'openai/gpt-5.4-nano';
+const DEFAULT_MODEL = DEFAULT_LLM_MODEL;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 3;
 

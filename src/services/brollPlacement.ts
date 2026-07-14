@@ -107,7 +107,7 @@ export async function buildBrollPlacementPlan(
         'X-Title': 'AutoTube B-roll Placement',
       },
       body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini',
+        model: process.env.OPENROUTER_MODEL || 'xiaomi/mimo-v2.5',
         messages: [
           { role: 'system', content: system },
           {

@@ -55,7 +55,7 @@ async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
         'X-Title': 'AutoTube AI Generator',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-5.4-nano',
+        model: 'xiaomi/mimo-v2.5',
         messages: [
           {
             role: 'system',

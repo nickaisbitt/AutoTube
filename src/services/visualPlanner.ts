@@ -8,6 +8,7 @@ import {
 import { generateAIPlan } from './llmVisualDirector';
 import { logger } from './logger';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { topicFamilyQueries } from './topicFamilyQueries';
 
 // ---------------------------------------------------------------------------
 // Weak Hook Detection (Requirement 7.1, 7.2)
@@ -478,6 +479,11 @@ export function generateQueries(beat: NarrativeBeat, entities: string[], ctx: To
   const cleanedTitle = segmentTitle
     ? segmentTitle.replace(/^(the|a|an)\s+/i, '').trim()
     : '';
+
+  // === STRATEGY 0: Topic-family anchors (healthcare/bank/landlord) ===
+  for (const q of topicFamilyQueries(ctx.topic || topicTitle, 4)) {
+    if (!queries.includes(q)) queries.push(q);
+  }
 
   // === STRATEGY 1: Core entity queries (bread & butter) ===
   if (cleanedTitle) queries.push(cleanedTitle);

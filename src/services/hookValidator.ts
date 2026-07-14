@@ -5,10 +5,13 @@
  * Detects hook patterns, enforces word count constraints, and generates
  * template-based hooks when no LLM is available.
  *
+ * Aligned with Video Watcher auditHookFromScript + videoQualityChecklist GENERIC_HOOK_PHRASES.
+ *
  * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5
  */
 
 import type { ScriptSegment } from '../types';
+import { GENERIC_HOOK_PHRASES } from './videoQualityChecklist';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,7 +24,7 @@ export type HookPattern =
   | 'counterintuitive_claim';
 
 export interface HookValidationResult {
-  /** Whether a valid hook pattern was detected */
+  /** Whether a valid hook pattern was detected (and opener is not weak/filler) */
   hasHook: boolean;
   /** The detected hook pattern, or null if none found */
   pattern: HookPattern | null;
@@ -31,6 +34,10 @@ export interface HookValidationResult {
   wordCount: number;
   /** Whether word count is within the 40–60 target range */
   isWithinTarget: boolean;
+  /** True when opener matches year/filler/generic bans (watcher + checklist) */
+  weakOpener: boolean;
+  /** Human-readable reason when weakOpener is true */
+  weakOpenerReason: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,6 +49,9 @@ export const MIN_WORD_COUNT = 40;
 
 /** Maximum word count for intro segments */
 export const MAX_WORD_COUNT = 60;
+
+/** On-screen hook overlay max words (shock hook line) */
+export const MAX_HOOK_OVERLAY_WORDS = 8;
 
 /** Patterns indicating a surprising statistic (numbers, percentages, dollar amounts) */
 const STATISTIC_PATTERNS = [
@@ -71,6 +81,69 @@ const COUNTERINTUITIVE_PATTERNS = [
   /\bunexpectedly\b/i,
   /\bironic(ally)?\b/i,
 ];
+
+/** Filler openers — matches powers/video-watcher auditHookFromScript */
+const WEAK_OPENER_PATTERNS: Array<{ re: RegExp; reason: string }> = [
+  {
+    re: /^in\s+(?:late\s+|early\s+|mid-?)?(19|20)\d{2}\b/i,
+    reason: 'Script opens with a year ("In 2024…") — weak for YouTube hook',
+  },
+  {
+    re: /^in\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+(19|20)\d{2}\b/i,
+    reason: 'Script opens with a month+year ("In January 2025…") — weak for YouTube hook',
+  },
+  {
+    re: /^(on\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|as\s+of\s+\w+\s+\d{4})\b/i,
+    reason: 'Script opens with a date ("On March 12, 2024…") — weak for YouTube hook',
+  },
+  {
+    re: /^(in this video|today we|let me explain|welcome)\b/i,
+    reason: 'Script opens with filler, not stakes',
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Weak opener / overlay helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns whether the narration opens with a banned year/filler/generic phrase.
+ * Matches Video Watcher script audit + GENERIC_HOOK_PHRASES checklist.
+ */
+export function hasWeakHookOpener(text: string): { weak: boolean; reason: string | null } {
+  const trimmed = (text || '').trim();
+  if (!trimmed) {
+    return { weak: true, reason: 'No opening narration found' };
+  }
+
+  const firstSentence = trimmed.split(/(?<=[.!?])\s+/)[0] || trimmed;
+  for (const { re, reason } of WEAK_OPENER_PATTERNS) {
+    if (re.test(firstSentence.trim())) {
+      return { weak: true, reason };
+    }
+  }
+
+  const lower = trimmed.toLowerCase();
+  const match = GENERIC_HOOK_PHRASES.find((p) => lower.includes(p));
+  if (match) {
+    return {
+      weak: true,
+      reason: `Opening uses generic phrase "${match}" — rewrite with personal-stakes hook`,
+    };
+  }
+
+  return { weak: false, reason: null };
+}
+
+/**
+ * Truncates a spoken hook to a short on-screen overlay (≤ {@link MAX_HOOK_OVERLAY_WORDS} words).
+ */
+export function buildShortHookOverlay(text: string, maxWords = MAX_HOOK_OVERLAY_WORDS): string {
+  const words = (text || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 'Watch this.';
+  if (words.length <= maxWords) return words.join(' ');
+  return words.slice(0, maxWords).join(' ');
+}
 
 // ---------------------------------------------------------------------------
 // Hook Pattern Detection
@@ -137,15 +210,18 @@ export function validateHook(introSegment: ScriptSegment): HookValidationResult 
   const wordCount = countWords(narration);
   const isWithinTarget = wordCount >= MIN_WORD_COUNT && wordCount <= MAX_WORD_COUNT;
 
-  const pattern = detectHookPattern(narration);
+  const weak = hasWeakHookOpener(narration);
+  const pattern = weak.weak ? null : detectHookPattern(narration);
   const hookText = pattern ? getFirstNSentences(narration, 2) : '';
 
   return {
-    hasHook: pattern !== null,
+    hasHook: pattern !== null && !weak.weak,
     pattern,
     hookText,
     wordCount,
     isWithinTarget,
+    weakOpener: weak.weak,
+    weakOpenerReason: weak.reason,
   };
 }
 

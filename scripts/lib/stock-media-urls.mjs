@@ -37,8 +37,45 @@ export const STOCK_HEALTHCARE_IMAGES = [
   },
 ];
 
+/** Heist / airport / jewel theft stills for volume top-up when live search is thin. */
+export const STOCK_HEIST_IMAGES = [
+  {
+    url: 'https://images.unsplash.com/photo-1436491865332-7a61a109cc05?auto=format&w=1920&q=85',
+    alt: 'Airport runway plane takeoff',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1542296332-1d966a8168e4?auto=format&w=1920&q=85',
+    alt: 'Airport terminal travelers security',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce3b9?auto=format&w=1920&q=85',
+    alt: 'Diamond jewelry close up',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1610375461246-896cb7f6f847?auto=format&w=1920&q=85',
+    alt: 'Bank vault safe security door',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&w=1920&q=85',
+    alt: 'Security guard surveillance monitor',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&w=1920&q=85',
+    alt: 'Cargo warehouse logistics',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?auto=format&w=1920&q=85',
+    alt: 'Jewelry store display diamonds',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&w=1920&q=85',
+    alt: 'Investigation news documentary',
+  },
+];
+
 /** Broader pool for variety / top-up when live search is thin. */
 export const STOCK_MEDIA_POOL = [
+  ...STOCK_HEIST_IMAGES,
   ...STOCK_HEALTHCARE_IMAGES,
   {
     url: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&w=1920&q=85',
@@ -315,12 +352,16 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
   const blob = (topicBlob || '').toLowerCase();
   const cyberKeys = ['scam', 'fraud', 'bank', 'identity', 'cyber', 'hack', 'voice', 'phone', 'laptop', 'human'];
   const disasterKeys = ['tornado', 'storm', 'warning', 'disaster', 'hurricane'];
+  const heistKeys = ['news', 'human', 'city', 'street', 'tech'];
   const isCyber =
     /bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password/i.test(blob);
   const isDisaster = /tornado|hurricane|flood|wildfire|earthquake|storm|disaster|warning|fema/i.test(blob);
+  const isHeist =
+    /\b(heist|diamond|jewel|jewelry|vault|airport|museum|robbery|antwerp|smuggl)\b/i.test(blob);
   const keys = [];
   if (isCyber) keys.push(...cyberKeys);
   if (isDisaster) keys.push(...disasterKeys);
+  if (isHeist) keys.push(...heistKeys);
   if (!keys.length) return usable;
   const scored = usable
     .map((v) => {

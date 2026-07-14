@@ -4,13 +4,23 @@
 
 /**
  * @param {string} topic
- * @returns {'nursing_abuse'|'healthcare_cyber'|'bank_scam'|'landlord'|'tickets'|'disaster'|'generic'}
+ * @returns {'nursing_abuse'|'healthcare_cyber'|'heist_fraud'|'veterans_benefits'|'bank_scam'|'landlord'|'tickets'|'disaster'|'generic'}
  */
 export function resolveTopicFamily(topic: string): string {
   const t = String(topic || '').toLowerCase();
   if (/landlord|tenant|evict|rent|lease|apartment|housing/.test(t)) return 'landlord';
   // Nursing abuse / CCTV before healthcare cyber (nursing+camera used to resolve as hospital breach)
   if (/nursing\s*home|elder\s*abuse|care\s*home/.test(t)) return 'nursing_abuse';
+  // Jewel / vault heists and fake-airport fraud — before generic bank OTP visuals
+  if (
+    /\b(heist|jewel\s*thief|diamond\s*thief|vault\s*raid|antwerp|notarbartolo)\b/.test(t)
+    || (/\bdiamond/.test(t) && /\b(heist|theft|stolen|robbery|smuggl)/.test(t))
+    || (/\bfake\b/.test(t) && /\bairport\b/.test(t))
+    || (/\bairport\b/.test(t) && /\b(fraud|scam|fake|counterfeit|shell)\b/.test(t))
+    || (/\bmuseum\b/.test(t) && /\b(heist|theft|stolen|robbery)\b/.test(t))
+  ) {
+    return 'heist_fraud';
+  }
   if (
     /hospital|healthcare|patient|hipaa|medical|clinic|records?\b/.test(t)
     && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?\b|broker/.test(t)
@@ -24,7 +34,12 @@ export function resolveTopicFamily(topic: string): string {
   ) {
     return 'veterans_benefits';
   }
-  if (/bank|fraud|scam|voice.?clone|hack|identity|password|phish|leak|breach|cyber/.test(t)) return 'bank_scam';
+  if (
+    /bank|fraud|scam|voice.?clone|otp|phish|wire\s*transfer|callback\s*scam/.test(t)
+    || (/hack|identity|password|leak|breach|cyber|ransom/.test(t) && !/hospital|patient|healthcare|hipaa|medical|clinic/.test(t))
+  ) {
+    return 'bank_scam';
+  }
   if (/ticket|bot|scalp|concert|fan/.test(t)) return 'tickets';
   if (/nuclear|radiation|meltdown|tornado|hurricane|flood|wildfire|disaster/.test(t)) return 'disaster';
   return 'generic';
@@ -55,6 +70,16 @@ export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
     'military dog tags close up',
     'shocked person reading letter documents',
     'identity theft paperwork hands',
+  ],
+  heist_fraud: [
+    'airport runway cargo plane exterior',
+    'airport terminal security checkpoint',
+    'diamond jewelry close up macro',
+    'bank vault safe door security',
+    'security guard surveillance monitor',
+    'cargo warehouse logistics forklift',
+    'jewelry store display diamonds',
+    'investigation news documentary footage',
   ],
   bank_scam: [
     'shocked person looking at phone bank',

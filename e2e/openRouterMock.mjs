@@ -24,7 +24,7 @@ const LONG_NARRATION_BLOCK =
   'Hospitals paid billions after hackers exploited one weakness — and your medical records were already in the blast radius. Your identity, credit lines, and family safety depend on understanding how clinics adopt automation, where data leaks happen, and which guardrails regulators enforce across Epic, UnitedHealth, Mayo Clinic, and regional providers nationwide.';
 
 /** True when an override clashes with the topic (e.g. bank hook on landlord video). */
-function hookClashesWithTopic(topic, hook) {
+export function hookClashesWithTopic(topic, hook) {
   const tl = String(topic || '').toLowerCase();
   const ol = String(hook || '').toLowerCase();
   if (!tl || !ol) return false;
@@ -73,6 +73,13 @@ export function buildShockHookLine(topic, override) {
   }
   if (/insurance|car\s*crash|fake\s*crash|crash\s*video/.test(tl)) {
     return 'That car crash was staged for the insurance payout.';
+  }
+  if (
+    /\b(heist|diamond|jewel|vault|antwerp|notarbartolo)\b/.test(tl)
+    || (/\bfake\b/.test(tl) && /\bairport\b/.test(tl))
+    || (/\bmuseum\b/.test(tl) && /\b(heist|theft|stolen|robbery)\b/.test(tl))
+  ) {
+    return 'The runway was fake — the diamonds were already gone.';
   }
   if (/hospital|patient|healthcare|hipaa/.test(tl) && /hack|breach|leak|records?|data|cyber/.test(tl)) {
     return 'Your medical chart was already in the breach dump.';

@@ -36,6 +36,37 @@ export function isHealthcareCyberTopic(topic) {
   );
 }
 
+/** Bank OTP / voice-clone scam — excludes nursing, veterans, hospital breach, landlord, heist. */
+export function isBankScamTopic(topic) {
+  const t = String(topic || '').toLowerCase();
+  if (
+    isNursingHomeTopic(t)
+    || isVeteransBenefitsTopic(t)
+    || isHealthcareCyberTopic(t)
+    || isHousingTopic(t)
+    || isHeistTopic(t)
+  ) {
+    return false;
+  }
+  return /bank|fraud|scam|voice.?clone|otp|phish|wire\s*transfer|callback\s*scam/.test(t)
+    || (/hack|identity|password|leak|breach|cyber|ransom/.test(t) && !/hospital|patient|healthcare|hipaa|medical|clinic/.test(t));
+}
+
+/**
+ * Diamond / jewel heist, fake-airport fraud, vault theft — not bank OTP or nursing.
+ * @param {string} topic
+ */
+export function isHeistTopic(topic) {
+  const t = String(topic || '').toLowerCase();
+  return (
+    /\b(heist|jewel\s*thief|diamond\s*thief|vault\s*raid|antwerp|notarbartolo)\b/.test(t)
+    || (/\bdiamond/.test(t) && /\b(heist|theft|stolen|robbery|smuggl)/.test(t))
+    || (/\bfake\b/.test(t) && /\bairport\b/.test(t))
+    || (/\bairport\b/.test(t) && /\b(fraud|scam|fake|counterfeit|shell)\b/.test(t))
+    || (/\bmuseum\b/.test(t) && /\b(heist|theft|stolen|robbery)\b/.test(t))
+  );
+}
+
 /**
  * Broad healthcare (hospital/medical) — excludes pure nursing-home abuse topics.
  * @param {string} topic
@@ -68,14 +99,20 @@ export function impactBeatsMatchTopic(beats, topic) {
   if (isHousingTopic(t)) {
     return /lease|evict|rent|credit|blacklist|appeal|lock changed/.test(blob);
   }
-  if (/veteran|va\s+benefits|benefits\s+data|dark\s*web|data\s*broker|ssn|social\s*security/.test(t)) {
+  if (isVeteransBenefitsTopic(t)) {
     return (
       /benefit|broker|ssn|va\b|dark web|credit|identity|file|freeze/.test(blob)
       && !/otp|wire|voice clone|lease|evict|hospital breach|charts stolen/.test(blob)
     );
   }
-  if (/bank|fraud|scam|voice.?clone|hack|identity|password|leak|breach|cyber|ransom/.test(t)) {
+  if (isBankScamTopic(t)) {
     return /otp|wire|voice|scam|transfer|callback|account|password/.test(blob);
+  }
+  if (isHeistTopic(t)) {
+    return (
+      /vault|diamond|jewel|heist|airport|runway|security|guard|safe|cargo|stolen|fake/.test(blob)
+      && !/otp|wire|voice clone|lease|evict|hospital breach|charts stolen|nursing|abuse/.test(blob)
+    );
   }
   // Generic: any overlap with long topic tokens
   const hints = t.split(/\s+/).filter((w) => w.length > 4).slice(0, 4);

@@ -186,4 +186,35 @@ describe('topic family + impact beats', () => {
     expect(intro.length).toBeGreaterThan(1);
     expect(ids.size).toBeGreaterThan(1);
   });
+
+  describe('diamond heist / fake airport family', () => {
+    const topic = 'The diamond heist that used a fake airport';
+
+    it('resolves heist_fraud family and airport/jewel query anchors', async () => {
+      const { resolveTopicFamily, topicFamilyQueries } = await import('../topicFamilyQueries');
+      expect(resolveTopicFamily(topic)).toBe('heist_fraud');
+      const qs = topicFamilyQueries(topic, 4);
+      expect(qs.some((q) => /airport|diamond|vault|security|jewel/i.test(q))).toBe(true);
+      expect(qs.every((q) => !/bank building|hacker typing|credit card payment|otp/i.test(q))).toBe(true);
+    });
+
+    it('builds heist impact beats instead of bank OTP cards', async () => {
+      const { buildImpactBeatsForTopic } = await import('../../../scripts/lib/impactBeatsByTopic.mjs');
+      const { impactBeatsMatchTopic } = await import('../../../scripts/lib/topic-family.mjs');
+      const beats = buildImpactBeatsForTopic(topic);
+      expect(beats.join(' ')).toMatch(/FAKE AIRPORT|VAULT|DIAMOND|HEIST/i);
+      expect(beats.join(' ')).not.toMatch(/OTP STOLEN|VOICE CLONE/i);
+      expect(impactBeatsMatchTopic(beats, topic)).toBe(true);
+      expect(impactBeatsMatchTopic(['OTP STOLEN', 'WIRE HIJACKED'], topic)).toBe(false);
+    });
+
+    it('heist stock queries prefer airport/vault over bank OTP', async () => {
+      const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
+      const q = stockMotionQueries(topic, false, { faceSeek: true, preferBright: true });
+      expect(q.some((x) => /airport|diamond|vault|jewel|cargo|security/i.test(x))).toBe(true);
+      expect(q.every((x) => !/bank building|hacker typing|credit card payment|smartphone banking/i.test(x))).toBe(
+        true,
+      );
+    });
+  });
 });

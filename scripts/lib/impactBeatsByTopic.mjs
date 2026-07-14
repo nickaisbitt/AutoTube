@@ -2,13 +2,20 @@
  * Shared topic → mid-video impact beat cards (≤3 words each).
  * Used by loop patch + ffmpeg overlays — keep one source of truth.
  */
-import { isHealthcareCyberTopic, isNursingHomeTopic } from './topic-family.mjs';
+import {
+  isBankScamTopic,
+  isHealthcareCyberTopic,
+  isHeistTopic,
+  isHousingTopic,
+  isNursingHomeTopic,
+  isVeteransBenefitsTopic,
+} from './topic-family.mjs';
 
 /** @param {string} topic */
 export function buildImpactBeatsForTopic(topic) {
   const tl = String(topic || '').toLowerCase();
 
-  if (/landlord|tenant|evict|rent/.test(tl)) {
+  if (isHousingTopic(tl)) {
     return [
       'LEASE DENIED',
       'EVICTED BY AI',
@@ -62,10 +69,7 @@ export function buildImpactBeatsForTopic(topic) {
   }
 
   // Veterans / benefits / dark-web data brokers (before generic bank)
-  if (
-    /veteran|va\s+benefits|va\s+records|dark\s*web|data\s*broker|ssn|social\s*security/.test(tl)
-    || (/benefits/.test(tl) && /veteran|va\b|dark\s*web|broker|ssn/.test(tl))
-  ) {
+  if (isVeteransBenefitsTopic(tl)) {
     return [
       'DATA BROKERED',
       'BENEFITS EXPOSED',
@@ -82,7 +86,7 @@ export function buildImpactBeatsForTopic(topic) {
     ];
   }
 
-  if (/bank|fraud|scam|voice.?clone|hack|identity|password|leak|breach|cyber|ransom/.test(tl)) {
+  if (isBankScamTopic(tl)) {
     return [
       'VOICE CLONE SCAM',
       'THEY DRAINED IT',
@@ -96,6 +100,23 @@ export function buildImpactBeatsForTopic(topic) {
       'ACCOUNT FROZEN',
       'HANG UP NOW',
       'CALLBACK TRAP',
+    ];
+  }
+
+  if (isHeistTopic(tl)) {
+    return [
+      'FAKE AIRPORT',
+      'VAULT BREACHED',
+      'DIAMONDS GONE',
+      'SECURITY BLIND',
+      'INSIDE JOB',
+      'CARGO SWITCH',
+      'RUNWAY SCAM',
+      'JEWELS VANISH',
+      'GUARDS FOOLED',
+      'STAGE SET',
+      'HEIST EXPOSED',
+      'LOCK IT DOWN',
     ];
   }
 

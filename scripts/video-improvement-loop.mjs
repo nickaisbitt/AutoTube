@@ -450,6 +450,7 @@ async function main() {
       videoPath,
       uploadReady,
       brutalScore,
+      brutalDims,
       scoreTargetMet,
       objectivePass,
       objectiveScore: watch.objectiveQa?.score,

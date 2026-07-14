@@ -485,10 +485,18 @@ async function fetchPixabayVideos(query, perPage = 8) {
 }
 
 /** Pixabay/Pexels often match topic words literally (piggy bank, wash hands, rotate phone). */
+/** Prefer phone/bank/security motion for cyber topics — deny lifestyle pets/nature filler. */
+function isCyberRelevantClip(clip = {}) {
+  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
+  return /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|office|business|worried|shock|texting/.test(
+    blob,
+  );
+}
+
 function isJunkStockClip(clip = {}) {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
   return (
-    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|surgery|surgical|hospital|operating room|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|cartoon|animation|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight/i.test(
+    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|surgery|surgical|hospital|operating room|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|cartoon|animation|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair/.test(
       blob,
     )
   );
@@ -539,17 +547,27 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
   const queries = stockMotionQueries(topicBlob, cyberTopic);
 
   for (const q of queries.slice(0, 6)) {
-    const fromPexels = await fetchPexelsVideos(q, 10);
-    const fromPixabay = await fetchPixabayVideos(q, 10);
-    const fromArchive = devServer ? await fetchArchiveVideoResults(devServer, q) : [];
+    const fromPexels = await fetchPexelsVideos(q, 8);
+    const fromPixabay = await fetchPixabayVideos(q, 8);
+    // Skip noisy archive.org for cyber topics when stock API keys exist
+    const fromArchive =
+      !cyberTopic || !(resolvePexelsKey() || resolvePixabayKey())
+        ? (devServer ? await fetchArchiveVideoResults(devServer, q) : [])
+        : [];
+    let addedForQuery = 0;
     for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
-      if (liveClips.length >= 40) break;
+      if (liveClips.length >= 40 || addedForQuery >= 4) break;
       if (isJunkStockClip(clip)) {
+        report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+        continue;
+      }
+      if (cyberTopic && !isCyberRelevantClip(clip) && !/Pexels/i.test(clip.source || '')) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
       if (liveClips.some((c) => c.url === clip.url)) continue;
       liveClips.push(clip);
+      addedForQuery += 1;
     }
   }
   report.archiveLiveFetched = liveClips.filter((c) => /Archive/i.test(c.source || '')).length;

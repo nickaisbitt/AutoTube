@@ -9,7 +9,7 @@
     "check:server-render": "node scripts/sync-server-render-deploy.mjs --check",
     "dev": "vite",
     "build": "vite build",
-    "build:railway": "NODE_OPTIONS=--max-old-space-size=3072 vite build && rm -rf node_modules && npm ci --omit=dev && node deploy/bootstrap-server-render.mjs && (command -v pip3 >/dev/null && pip3 install --break-system-packages 'edge-tts==7.0.2' || true) && node deploy/railway-shrink-runtime.mjs",
+    "build:railway": "NODE_OPTIONS=--max-old-space-size=3072 vite build && rm -rf node_modules && npm ci --omit=dev && node deploy/bootstrap-server-render.mjs && (command -v pip3 >/dev/null && pip3 install --break-system-packages 'edge-tts==7.0.2' scenedetect faster-whisper || true) && node deploy/railway-shrink-runtime.mjs",
     "preview": "vite preview",
     "test": "playwright test",
     "test:app": "playwright test tests/app.spec.ts",

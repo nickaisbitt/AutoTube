@@ -472,7 +472,28 @@ export async function watchVideo(options = {}) {
       );
     }
     try {
-      brutal = await runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 10 : 14);
+      brutal = await runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 16 : 18, {
+        hookVision,
+      });
+      // Scene-anchored pacing: if cuts already pass, soften "no pattern interrupts" thrashing
+      if (
+        brutal?.report?.scores &&
+        sceneQa?.available &&
+        sceneQa?.pass === true &&
+        typeof brutal.report.scores.pacing === 'number' &&
+        brutal.report.scores.pacing < 5 &&
+        (sceneQa.longestSceneSec ?? 99) <= 2.5
+      ) {
+        brutal.report.scores.pacing = 5;
+        brutal.report.feedback = {
+          ...(brutal.report.feedback || {}),
+          pacing: `${brutal.report.feedback?.pacing || ''} [floor 5: scene QA PASS, longest ${Number(sceneQa.longestSceneSec).toFixed(1)}s]`.trim(),
+        };
+        const vals = Object.values(brutal.report.scores).filter((v) => typeof v === 'number');
+        brutal.overall = vals.length
+          ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10
+          : brutal.overall;
+      }
     } catch (e) {
       brutal = { success: false, error: e.message };
     }

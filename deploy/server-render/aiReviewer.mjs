@@ -21,11 +21,49 @@ function computeFrameTimestamps(durationSec, targetFrames = 8) {
 }
 
 /**
- * Extracts keyframes from the video at specific timestamps using ffmpeg.
- * Returns an array of base64 data URIs.
+ * Retention-aware timestamps: always include hook 0–3s, dense first 30s, sparse remainder.
+ * Fixes brutal vision scoring hook/pacing without ever seeing the opener.
  */
-export function extractFrames(videoPath, durationSec, targetFrames = 8) {
-  const timestamps = computeFrameTimestamps(durationSec, targetFrames);
+export function computeRetentionFrameTimestamps(durationSec, options = {}) {
+  if (durationSec <= 0) return [];
+  const maxFrames = Math.max(8, Math.min(24, options.maxFrames ?? 18));
+  const seen = new Set();
+  const out = [];
+  const push = (t) => {
+    const sec = Math.max(0, Math.min(durationSec - 0.05, Number(t)));
+    if (!Number.isFinite(sec)) return;
+    const key = sec.toFixed(2);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(sec);
+  };
+
+  for (const t of [0, 1, 2, 3]) {
+    if (t < durationSec) push(t);
+  }
+
+  const denseEnd = Math.min(durationSec, 30);
+  for (let t = 4; t < denseEnd; t += 2) push(t);
+
+  for (let t = 32; t < durationSec; t += 5) push(t);
+  if (durationSec > 4) push(Math.max(0, durationSec - 0.5));
+
+  out.sort((a, b) => a - b);
+  if (out.length <= maxFrames) return out;
+
+  const hook = out.filter((t) => t <= 3.05);
+  const rest = out.filter((t) => t > 3.05);
+  const keepRest = Math.max(0, maxFrames - hook.length);
+  if (rest.length <= keepRest) return out.slice(0, maxFrames);
+  const picked = [];
+  for (let i = 0; i < keepRest; i += 1) {
+    const idx = Math.round((i / Math.max(keepRest - 1, 1)) * (rest.length - 1));
+    picked.push(rest[idx]);
+  }
+  return [...hook, ...[...new Set(picked)]].sort((a, b) => a - b).slice(0, maxFrames);
+}
+
+function extractFramesAtTimestamps(videoPath, timestamps) {
   const frames = [];
   const tempDir = join(tmpdir(), `autotube-frames-${Date.now()}`);
   mkdirSync(tempDir, { recursive: true });
@@ -34,17 +72,15 @@ export function extractFrames(videoPath, durationSec, targetFrames = 8) {
     for (let i = 0; i < timestamps.length; i++) {
       const ts = timestamps[i];
       const outPath = join(tempDir, `frame-${i}.jpg`);
-      
-      // Spawn ffmpeg to extract a single frame
       const result = spawnSync('ffmpeg', [
         '-y',
         '-ss', String(ts),
         '-i', videoPath,
         '-vf', 'eq=brightness=0.12:contrast=1.08',
         '-frames:v', '1',
-        '-q:v', '2', // High quality scale
+        '-q:v', '2',
         '-f', 'image2',
-        outPath
+        outPath,
       ], { timeout: 15000 });
 
       if (result.status === 0 && existsSync(outPath)) {
@@ -62,6 +98,21 @@ export function extractFrames(videoPath, durationSec, targetFrames = 8) {
   }
 
   return frames;
+}
+
+/**
+ * Extracts keyframes from the video at specific timestamps using ffmpeg.
+ * Returns an array of base64 data URIs.
+ * @param {string} videoPath
+ * @param {number} durationSec
+ * @param {number} [targetFrames]
+ * @param {{ retention?: boolean }} [options]
+ */
+export function extractFrames(videoPath, durationSec, targetFrames = 8, options = {}) {
+  const timestamps = options.retention
+    ? computeRetentionFrameTimestamps(durationSec, { maxFrames: Math.max(targetFrames, 14) })
+    : computeFrameTimestamps(durationSec, targetFrames);
+  return extractFramesAtTimestamps(videoPath, timestamps);
 }
 
 /**

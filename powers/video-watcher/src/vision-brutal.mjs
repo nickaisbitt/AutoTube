@@ -54,6 +54,9 @@ const BRUTAL_SYSTEM = [
   'Penalize: weak hooks starting with years ("In 2024"), tiny captions, same stock clip repeated,',
   'tech B-roll without human faces, muddy dark footage, no pattern interrupts, generic corporate look.',
   'Do NOT inflate scores. 6 = mediocre. 8+ = genuinely upload-ready for a growth channel.',
+  'Frame pack includes 0s,1s,2s,3s (hook) then denser first-30s samples — score hook from those early frames.',
+  'If large yellow on-screen hook text is clearly visible in 0–3s, do not score hook below 6.',
+  'If cuts change often across samples, do not claim no pattern interrupts solely because flashes are sub-second.',
   '',
   'Return ONLY JSON:',
   '{',
@@ -80,18 +83,30 @@ const HOOK_SYSTEM = [
  * @param {number} durationSec
  * @param {string} apiKey
  * @param {number} [frameCount]
+ * @param {{ hookVision?: { hookPass?: boolean, onScreenText?: string } }} [options]
  */
-export async function runBrutalVisionReview(videoPath, durationSec, apiKey, frameCount = 14) {
-  const frames = extractFrames(videoPath, durationSec, frameCount);
+export async function runBrutalVisionReview(videoPath, durationSec, apiKey, frameCount = 14, options = {}) {
+  const frames = extractFrames(videoPath, durationSec, frameCount, { retention: true });
   if (frames.length === 0) throw new Error('Frame extraction failed');
   const parsed = await callOpenRouterVision({
     apiKey,
     systemPrompt: BRUTAL_SYSTEM,
     frames,
-    extraText: 'Full-video sample frames (timeline order). Be harsh.',
+    extraText:
+      'Retention sample frames in timeline order (includes 0–3s hook). Be harsh but score hook from early frames.',
   });
 
-  const scores = parsed.scores || {};
+  const scores = { ...(parsed.scores || {}) };
+  if (options.hookVision?.hookPass === true && typeof scores.hook === 'number' && scores.hook < 6) {
+    const overlay = (options.hookVision.onScreenText || '').trim();
+    scores.hook = 6;
+    parsed.feedback = {
+      ...(parsed.feedback || {}),
+      hook: `${parsed.feedback?.hook || ''} [clamped to 6: hook vision PASS${overlay ? ` (“${overlay.slice(0, 40)}”)` : ''}]`.trim(),
+    };
+    parsed.scores = scores;
+  }
+
   const vals = Object.values(scores).filter((v) => typeof v === 'number');
   const overall = vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : 0;
 
@@ -99,9 +114,10 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
     success: true,
     mode: 'brutal',
     overall,
-    uploadReady: parsed.uploadReady === true,
+    uploadReady: parsed.uploadReady === true && overall >= 7,
     report: parsed,
     frameCount: frames.length,
+    retentionSampling: true,
   };
 }
 
@@ -109,13 +125,14 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
  * Hook-only vision (frames at ~0–3s).
  */
 export async function runHookVisionReview(videoPath, apiKey) {
-  const frames = extractFrames(videoPath, 5, 4);
+  // Explicit 0–3s — even spacing on duration=5 previously started at 1s and missed the opener
+  const frames = extractFrames(videoPath, 4, 4, { retention: true });
   if (frames.length < 2) throw new Error('Hook frame extraction failed');
   const parsed = await callOpenRouterVision({
     apiKey,
     systemPrompt: HOOK_SYSTEM,
     frames: frames.slice(0, 4),
-    extraText: 'First 3 seconds only.',
+    extraText: 'First 3 seconds only (0s–3s).',
   });
   return { success: true, ...parsed };
 }

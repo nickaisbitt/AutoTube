@@ -504,24 +504,30 @@ function isJunkStockClip(clip = {}) {
   );
 }
 
-function stockMotionQueries(topicBlob, cyberTopic) {
+function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   // Never send the full long topic sentence to Pixabay — it matches random tokens.
+  const faceFirst = options.faceSeek === true;
   if (cyberTopic) {
-    return [
+    const faces = [
       'shocked person looking at phone',
-      'credit card payment laptop',
-      'worried person phone call',
+      'worried couple looking at phone',
+      'person on phone call scared face',
+      'woman crying looking at phone',
+      'man reaction shock close up',
+      'elderly person phone call worried',
+    ];
+    const topical = [
+      'credit card payment laptop hands',
+      'microphone voice recording studio',
       'hacker typing computer dark',
-      'microphone voice recording',
-      'server room data center',
       'fingerprint biometric unlock',
       'bank building exterior city',
       'lock padlock security close up',
-      'news anchor studio desk',
     ];
+    return faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
   }
   if (/tornado|storm|disaster/i.test(topicBlob)) {
-    return ['tornado storm damage news', 'severe weather radar', 'emergency news footage'];
+    return ['tornado storm damage news', 'severe weather radar', 'emergency news footage', 'people sheltering storm'];
   }
   const words = String(topicBlob || '')
     .toLowerCase()
@@ -529,14 +535,17 @@ function stockMotionQueries(topicBlob, cyberTopic) {
     .split(/\s+/)
     .filter((w) => w.length > 3)
     .slice(0, 4);
-  return words.length ? [words.join(' '), ...words.slice(0, 2)] : ['people using technology'];
+  const base = words.length ? [words.join(' '), ...words.slice(0, 2)] : ['people using technology'];
+  return faceFirst
+    ? ['person reacting to news phone', 'shocked face close up', ...base]
+    : base;
 }
 
 /**
  * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
  * No Pexels/Pixabay keys required.
  */
-async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '') {
+async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '', options = {}) {
   const segments = project.script || [];
   if (!segments.length) return;
   const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
@@ -546,9 +555,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
   stripJunkDemoVideos(project, report);
 
   const liveClips = [];
-  const queries = stockMotionQueries(topicBlob, cyberTopic);
+  const queries = stockMotionQueries(topicBlob, cyberTopic, { faceSeek: options.faceSeek === true });
 
-  for (const q of queries.slice(0, 6)) {
+  for (const q of queries.slice(0, 8)) {
     const fromPexels = await fetchPexelsVideos(q, 8);
     const fromPixabay = await fetchPixabayVideos(q, 8);
     // Skip noisy archive.org for cyber topics when stock API keys exist
@@ -558,7 +567,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
         : [];
     let addedForQuery = 0;
     for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
-      if (liveClips.length >= 40 || addedForQuery >= 4) break;
+      if (liveClips.length >= 40 || addedForQuery >= 3) break;
       if (isJunkStockClip(clip)) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
@@ -568,13 +577,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
         continue;
       }
       if (liveClips.some((c) => c.url === clip.url)) continue;
-      liveClips.push(clip);
+      liveClips.push({ ...clip, query: q });
       addedForQuery += 1;
     }
   }
   report.archiveLiveFetched = liveClips.filter((c) => /Archive/i.test(c.source || '')).length;
   report.pexelsFetched = liveClips.filter((c) => /Pexels/i.test(c.source || '')).length;
   report.pixabayFetched = liveClips.filter((c) => /Pixabay/i.test(c.source || '')).length;
+  if (options.faceSeek) report.faceSeekQueries = queries.slice(0, 6);
 
   let pool = [
     ...liveClips,
@@ -589,6 +599,29 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '')
     seenPool.add(key);
     return true;
   });
+  // Round-robin by query so one phone shot doesn't dominate
+  const byQuery = new Map();
+  for (const clip of pool) {
+    const q = clip.query || clip.source || 'pool';
+    if (!byQuery.has(q)) byQuery.set(q, []);
+    byQuery.get(q).push(clip);
+  }
+  const interleaved = [];
+  const buckets = [...byQuery.values()];
+  let bi = 0;
+  while (interleaved.length < pool.length) {
+    let progressed = false;
+    for (let b = 0; b < buckets.length; b += 1) {
+      const bucket = buckets[(bi + b) % buckets.length];
+      if (bucket.length) {
+        interleaved.push(bucket.shift());
+        progressed = true;
+      }
+    }
+    bi += 1;
+    if (!progressed) break;
+  }
+  pool = interleaved.length ? interleaved : pool;
 
   if (!pool.length) {
     report.videoTopUpSkipped = 'no-motion-pool';
@@ -839,8 +872,17 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   report.after = project.media.length;
 
   if (loopMode) {
-    await topUpHarvestVolume(project, devServer, minPerSegment, report);
-    await topUpVideoBroll(project, report, options.mediaOffset || 0, devServer);
+    const videoRich =
+      (project.media || []).filter((a) => a.type === 'video').length >=
+      Math.max(6, (project.script || []).length * 2);
+    if (!videoRich) {
+      await topUpHarvestVolume(project, devServer, minPerSegment, report);
+    } else {
+      report.imageVolumeSkipped = 'motion-rich';
+    }
+    await topUpVideoBroll(project, report, options.mediaOffset || 0, devServer, {
+      faceSeek: options.faceSeek === true,
+    });
     injectCyberStockStills(project, report, options.mediaOffset || 0);
     report.afterTopUp = project.media.length;
   }
@@ -1223,6 +1265,7 @@ export async function generateFullVideo(options) {
         loopMode: true,
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
         mediaOffset: fixState.mediaOffset || 0,
+        faceSeek: fixState.faceSeekBroll === true || fixState.harvestVideoFirst !== false,
       });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
       if (mediaReport.videoTopUp?.length) {

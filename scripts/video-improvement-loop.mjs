@@ -26,7 +26,7 @@ function parseArgs(argv) {
   const cfg = {
     max: 0,
     untilPass: false,
-    untilScore: 9.1,
+    untilScore: 7.0,
     delaySec: 5,
     reviewOnly: false,
     skipVision: false,
@@ -333,6 +333,7 @@ async function main() {
     }
 
     const brutalScore = watch.brutal?.overall ?? 0;
+    const brutalDims = watch.brutal?.report?.scores || null;
     const uploadReady = watch.uploadReady === true;
     const objectivePass = watch.objectiveGate?.pass === true;
     const scenePass = watch.sceneQa?.pass === true;

@@ -454,8 +454,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    // Zoom-punch every ~3 clips for visible pacing energy
-    const zoomPunch = patternInterruptsEnabled() && i > 0 && i % 3 === 0;
+    // Zoom-punch every other clip for visible pacing energy in mid-video samples
+    const zoomPunch = patternInterruptsEnabled() && i > 0 && i % 2 === 0;
     await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0, { zoomPunch });
   }
 

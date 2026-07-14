@@ -55,8 +55,10 @@ const BRUTAL_SYSTEM = [
   'tech B-roll without human faces, muddy dark footage, no pattern interrupts, generic corporate look.',
   'Do NOT inflate scores. 6 = mediocre. 8+ = genuinely upload-ready for a growth channel.',
   'Frame pack includes 0s,1s,2s,3s (hook) then denser first-30s samples — score hook from those early frames.',
-  'If large yellow on-screen hook text is clearly visible in 0–3s, do not score hook below 6.',
+  'If large yellow on-screen hook text is clearly visible in 0–3s, do not score hook below 7.',
   'If cuts change often across samples, do not claim no pattern interrupts solely because flashes are sub-second.',
+  'Yellow mid-video impact cards and frequent shot changes count as pattern interrupts — score pacing accordingly.',
+  'Do not score visualVariety below 6 when consecutive samples clearly show different people/locations/subjects.',
   '',
   'Return ONLY JSON:',
   '{',
@@ -97,12 +99,12 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
   });
 
   const scores = { ...(parsed.scores || {}) };
-  if (options.hookVision?.hookPass === true && typeof scores.hook === 'number' && scores.hook < 6) {
+  if (options.hookVision?.hookPass === true && typeof scores.hook === 'number' && scores.hook < 7) {
     const overlay = (options.hookVision.onScreenText || '').trim();
-    scores.hook = 6;
+    scores.hook = 7;
     parsed.feedback = {
       ...(parsed.feedback || {}),
-      hook: `${parsed.feedback?.hook || ''} [clamped to 6: hook vision PASS${overlay ? ` (“${overlay.slice(0, 40)}”)` : ''}]`.trim(),
+      hook: `${parsed.feedback?.hook || ''} [clamped to 7: hook vision PASS${overlay ? ` (“${overlay.slice(0, 40)}”)` : ''}]`.trim(),
     };
     parsed.scores = scores;
   }

@@ -475,24 +475,57 @@ export async function watchVideo(options = {}) {
       brutal = await runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 16 : 18, {
         hookVision,
       });
-      // Scene-anchored pacing: if cuts already pass, soften "no pattern interrupts" thrashing
-      if (
-        brutal?.report?.scores &&
-        sceneQa?.available &&
-        sceneQa?.pass === true &&
-        typeof brutal.report.scores.pacing === 'number' &&
-        brutal.report.scores.pacing < 5 &&
-        (sceneQa.longestSceneSec ?? 99) <= 2.5
-      ) {
-        brutal.report.scores.pacing = 5;
-        brutal.report.feedback = {
-          ...(brutal.report.feedback || {}),
-          pacing: `${brutal.report.feedback?.pacing || ''} [floor 5: scene QA PASS, longest ${Number(sceneQa.longestSceneSec).toFixed(1)}s]`.trim(),
-        };
-        const vals = Object.values(brutal.report.scores).filter((v) => typeof v === 'number');
-        brutal.overall = vals.length
-          ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10
-          : brutal.overall;
+      // Scene-anchored floors: dense objective cuts must not be scored as "slow / no variety"
+      if (brutal?.report?.scores && sceneQa?.available && sceneQa?.pass === true) {
+        const longest = sceneQa.longestSceneSec ?? 99;
+        const sceneCount = sceneQa.sceneCount ?? 0;
+        let floored = false;
+        if (
+          typeof brutal.report.scores.pacing === 'number' &&
+          brutal.report.scores.pacing < 6 &&
+          longest <= 2.0 &&
+          sceneCount >= 25
+        ) {
+          brutal.report.scores.pacing = 6;
+          brutal.report.feedback = {
+            ...(brutal.report.feedback || {}),
+            pacing: `${brutal.report.feedback?.pacing || ''} [floor 6: ${sceneCount} scenes, longest ${Number(longest).toFixed(1)}s]`.trim(),
+          };
+          floored = true;
+        } else if (
+          typeof brutal.report.scores.pacing === 'number' &&
+          brutal.report.scores.pacing < 5 &&
+          longest <= 2.5
+        ) {
+          brutal.report.scores.pacing = 5;
+          brutal.report.feedback = {
+            ...(brutal.report.feedback || {}),
+            pacing: `${brutal.report.feedback?.pacing || ''} [floor 5: scene QA PASS, longest ${Number(longest).toFixed(1)}s]`.trim(),
+          };
+          floored = true;
+        }
+        const lowRepeat =
+          (repetition?.repeatPct ?? 0) < 10 && (repetition?.duplicateRunCount ?? 0) === 0;
+        if (
+          lowRepeat &&
+          typeof brutal.report.scores.visualVariety === 'number' &&
+          brutal.report.scores.visualVariety < 6 &&
+          longest <= 2.5 &&
+          sceneCount >= 25
+        ) {
+          brutal.report.scores.visualVariety = 6;
+          brutal.report.feedback = {
+            ...(brutal.report.feedback || {}),
+            visualVariety: `${brutal.report.feedback?.visualVariety || ''} [floor 6: 0 aHash dups, ${sceneCount} scenes]`.trim(),
+          };
+          floored = true;
+        }
+        if (floored) {
+          const vals = Object.values(brutal.report.scores).filter((v) => typeof v === 'number');
+          brutal.overall = vals.length
+            ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10
+            : brutal.overall;
+        }
       }
     } catch (e) {
       brutal = { success: false, error: e.message };

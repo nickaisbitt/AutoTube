@@ -23,14 +23,58 @@
 const LONG_NARRATION_BLOCK =
   'Hospitals paid billions after hackers exploited one weakness — and your medical records were already in the blast radius. Your identity, credit lines, and family safety depend on understanding how clinics adopt automation, where data leaks happen, and which guardrails regulators enforce across Epic, UnitedHealth, Mayo Clinic, and regional providers nationwide.';
 
-/** Shock hook — no year opener (YouTube retention). */
+/** True when an override clashes with the topic (e.g. bank hook on landlord video). */
+function hookClashesWithTopic(topic, hook) {
+  const tl = String(topic || '').toLowerCase();
+  const ol = String(hook || '').toLowerCase();
+  if (!tl || !ol) return false;
+  const topicLandlord = /landlord|tenant|evict|rent/.test(tl);
+  const topicBank = /bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl);
+  const topicTicket = /ticket|bot|scalp|concert|fan/.test(tl);
+  const hookBank = /bank account|drained|voice clone|transfer|emptied real bank/.test(ol);
+  const hookLandlord = /evict|landlord|tenant|rent|lease/.test(ol);
+  const hookTicket = /ticket|bot|scalp|concert/.test(ol);
+  if (topicLandlord && hookBank && !hookLandlord) return true;
+  if (topicBank && hookLandlord && !hookBank) return true;
+  if (topicTicket && (hookBank || hookLandlord) && !hookTicket) return true;
+  if (!topicBank && hookBank && (topicLandlord || topicTicket)) return true;
+  return false;
+}
+
+/** Topic-matched shock hook — no year opener (YouTube retention). */
 export function buildShockHookLine(topic, override) {
+  const t = (topic || 'this story').replace(/\.$/, '');
+  const tl = t.toLowerCase();
+
   if (override?.trim()) {
     const o = override.trim();
-    // Reject overrides that are just the topic / weak openers
-    if (!/^(why|how|what|the)\b/i.test(o) && o.length > 12) return o;
+    // Reject weak openers and cross-topic leftovers (bank line on landlord topic)
+    if (
+      !hookClashesWithTopic(t, o)
+      && !/^(why|how|what|the)\b/i.test(o)
+      && o.length > 12
+    ) {
+      return o;
+    }
   }
-  const t = (topic || 'this story').replace(/\.$/, '');
+
+  // Topic-specific openers beat generic hash templates (hash once picked bank for landlords)
+  if (/landlord|tenant|evict|rent/.test(tl)) {
+    return 'AI already filed your eviction — before you knew.';
+  }
+  if (/bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl)) {
+    return 'This already emptied real bank accounts.';
+  }
+  if (/ticket|bot|scalp|concert|fan/.test(tl)) {
+    return 'Bots bought every ticket before you could click.';
+  }
+  if (/nuclear|radiation|meltdown|plant/.test(tl)) {
+    return 'They hid the radiation risk until it was too late.';
+  }
+  if (/tornado|hurricane|flood|wildfire|earthquake/.test(tl)) {
+    return 'The warning came after people were already trapped.';
+  }
+
   const short = t.replace(/^(why|how|what)\s+/i, '').trim();
   const templates = [
     `Billions lost overnight: ${short}.`,
@@ -42,6 +86,24 @@ export function buildShockHookLine(topic, override) {
   let hash = 0;
   for (let i = 0; i < t.length; i += 1) hash = (hash + t.charCodeAt(i) * (i + 1)) % templates.length;
   return templates[hash];
+}
+
+/** ≤3-word mid-video impact cards matched to topic (not bank defaults on every video). */
+export function buildImpactBeatsForTopic(topic) {
+  const tl = String(topic || '').toLowerCase();
+  if (/landlord|tenant|evict|rent/.test(tl)) {
+    return ['LEASE DENIED', 'EVICTED BY AI', 'YOUR FILE FLAGGED', 'RENT SCORE DOWN', 'NOTICE FILED', 'NO HEARING'];
+  }
+  if (/bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl)) {
+    return ['VOICE CLONE SCAM', 'THEY DRAINED IT', 'CALL THEM BACK', 'VERIFY FIRST', 'STOP THE TRANSFER', 'NOT YOUR MOM'];
+  }
+  if (/ticket|bot|scalp|concert|fan/.test(tl)) {
+    return ['BOTS GOT IN', 'SOLD OUT INSTANTLY', 'FAKE QUEUE', 'SCALPERS WIN', 'NO TICKETS LEFT', 'REFRESH TOO LATE'];
+  }
+  if (/nuclear|radiation|meltdown|plant|tornado|hurricane|flood|wildfire/.test(tl)) {
+    return ['WARNING LATE', 'THEY HID IT', 'TOO LATE NOW', 'EVACUATE NOW', 'COVER UP', 'RISK DENIED'];
+  }
+  return ['STAY WITH ME', 'THIS IS REAL', 'WATCH CLOSELY', 'HERE IS PROOF', 'DO THIS NOW', 'SHARE THIS'];
 }
 
 function buildTopicBody(topic, hookLine) {

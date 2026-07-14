@@ -248,7 +248,8 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
 }
 
 /**
- * Burn ≤3-word yellow impact cards every ~8s after the hook window.
+ * Burn ≤3-word yellow impact cards every ~5s after the hook window.
+ * Topic-matched beats (exportSettings.impactBeats) beat bank-scam defaults.
  */
 export function overlayImpactBeats(videoPath, project, options = {}) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
@@ -260,14 +261,23 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   const duration = parseFloat(probe.stdout || '0') || 0;
   if (duration < 12) return { ok: false, error: 'too short' };
 
-  const defaults = [
-    'VOICE CLONE SCAM',
-    'THEY DRAINED IT',
-    'CALL THEM BACK',
-    'VERIFY FIRST',
-    'STOP THE TRANSFER',
-    'NOT YOUR MOM',
+  const topic = String(project?.topic || project?.title || '').toLowerCase();
+  let defaults = [
+    'STAY WITH ME',
+    'THIS IS REAL',
+    'WATCH CLOSELY',
+    'HERE IS PROOF',
+    'DO THIS NOW',
+    'SHARE THIS',
   ];
+  if (/landlord|tenant|evict|rent/.test(topic)) {
+    defaults = ['LEASE DENIED', 'EVICTED BY AI', 'YOUR FILE FLAGGED', 'RENT SCORE DOWN', 'NOTICE FILED', 'NO HEARING'];
+  } else if (/bank|fraud|scam|voice.?clone|hack|identity|password/.test(topic)) {
+    defaults = ['VOICE CLONE SCAM', 'THEY DRAINED IT', 'CALL THEM BACK', 'VERIFY FIRST', 'STOP THE TRANSFER', 'NOT YOUR MOM'];
+  } else if (/ticket|bot|scalp|concert|fan/.test(topic)) {
+    defaults = ['BOTS GOT IN', 'SOLD OUT INSTANTLY', 'FAKE QUEUE', 'SCALPERS WIN', 'NO TICKETS LEFT', 'REFRESH TOO LATE'];
+  }
+
   const custom = Array.isArray(project?.exportSettings?.impactBeats)
     ? project.exportSettings.impactBeats
     : [];
@@ -275,8 +285,12 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
     .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
     .filter(Boolean);
 
+  const interval = Math.max(
+    4,
+    Number(project?.exportSettings?.impactBeatIntervalSec || options.intervalSec || 5) || 5,
+  );
   const times = [];
-  for (let t = 8; t < duration - 2; t += 8) times.push(t);
+  for (let t = 5; t < duration - 2; t += interval) times.push(t);
   if (!times.length) return { ok: false, error: 'no beat times' };
 
   const hProbe = spawnSync(
@@ -285,13 +299,13 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
     { encoding: 'utf8' },
   );
   const h = parseInt((hProbe.stdout || '1080').trim(), 10) || 1080;
-  const fontSize = Math.round(h * 0.07);
+  const fontSize = Math.round(h * 0.08);
   const border = Math.max(4, Math.round(fontSize * 0.08));
   const filters = [];
   for (let i = 0; i < times.length; i += 1) {
     const text = escapeDrawtext(beats[i % beats.length]);
     const start = times[i];
-    const end = Math.min(duration - 0.05, start + 2.0);
+    const end = Math.min(duration - 0.05, start + 2.4);
     filters.push(
       `drawtext=text='${text}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.42:enable='between(t\\,${start}\\,${end})'`,
     );

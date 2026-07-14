@@ -2,7 +2,7 @@
  * Patch generated project before server-render (loop fixes).
  */
 import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './stock-media-urls.mjs';
-import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
+import { buildImpactBeatsForTopic, buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
 
@@ -68,7 +68,13 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
 
   const preferred = options.preferredOverlay?.trim();
   if (preferred && !isInstructionOverlay(preferred)) {
-    return clampWords(preferred);
+    const keys = topicKeywords(topic).map((k) => k.toLowerCase());
+    const prefLower = preferred.toLowerCase();
+    const overlapsTopic = keys.some((k) => k.length > 3 && prefLower.includes(k.toLowerCase()));
+    // Stale overlays from a previous topic (e.g. bank hook on landlord video) must not stick
+    if (overlapsTopic || options.forcePreferred === true) {
+      return clampWords(preferred);
+    }
   }
 
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
@@ -86,6 +92,9 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   }
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return clampWords('EMERGENCY: THEY HID THE RISK');
+  }
+  if (/landlord|tenant|evict|rent/i.test(t)) {
+    return clampWords('THEY EVICTED YOU WITH AI');
   }
   if (/hack|stolen|breach|password|identity|bank|voice\s*clone|fraud|scam/i.test(t)) {
     return clampWords('YOUR BANK ACCOUNT IS EMPTY');
@@ -252,6 +261,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   }
 
   if (fixState.shockHook !== false && project.script?.length) {
+    // Always topic-match — rejects stale bank hooks left in FIX_STATE from prior topics
     const hook = buildShockHookLine(topic, fixState.hookLine);
     const hookOverlay = buildShortHookOverlay(topic, hook, {
       preferredOverlay: fixState.hookOverlay,
@@ -263,6 +273,8 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
       ...(project.exportSettings || {}),
       hookLine: hook,
       hookOverlay,
+      impactBeats: buildImpactBeatsForTopic(topic),
+      impactBeatIntervalSec: 5,
     };
   }
 

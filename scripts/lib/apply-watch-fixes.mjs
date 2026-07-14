@@ -5,6 +5,16 @@
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
 
+/** Keep hook/overlay aligned to the current topic (prevents bank→landlord leakage). */
+function syncTopicHook(s, topic, visionFix) {
+  if (!topic) return;
+  s.hookLine = buildShockHookLine(topic, s.hookLine);
+  s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, {
+    preferredOverlay: s.hookOverlay,
+    visionFix,
+  });
+}
+
 const CUT_FLOOR = 0.85;
 
 /**
@@ -134,22 +144,30 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push(`0c. Silence gaps ${watch.objectiveQa.silenceFirst60Sec}s in first 60s → tighten pacing`);
   }
 
-  if (hookFail) {
-    s.shockHook = true;
+  // Always re-sync topic hook (even on PASS) so bank openers never stick on landlord videos
+  {
     const visionFix = watch.hookVision?.fix?.trim();
-    const extracted = extractOverlayFromVisionFix(visionFix);
-    const topicHint = (topic || '').toLowerCase().slice(0, 24);
-    const fixMatchesTopic =
-      topicHint.length > 0 && visionFix && visionFix.toLowerCase().includes(topicHint.split(/\s+/)[0]);
-    s.hookLine = buildShockHookLine(topic, fixMatchesTopic ? extracted || visionFix : undefined);
-    s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, { visionFix });
-    s.faceSeekBroll = true;
-    applied.push(`1. Hook FAIL → overlay: "${s.hookOverlay}" + face-seek intro`);
+    const before = s.hookLine;
+    syncTopicHook(s, topic, visionFix);
+    if (hookFail) {
+      s.shockHook = true;
+      const extracted = extractOverlayFromVisionFix(visionFix);
+      const topicHint = (topic || '').toLowerCase().slice(0, 24);
+      const fixMatchesTopic =
+        topicHint.length > 0 && visionFix && visionFix.toLowerCase().includes(topicHint.split(/\s+/)[0]);
+      s.hookLine = buildShockHookLine(topic, fixMatchesTopic ? extracted || visionFix : undefined);
+      s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, { visionFix });
+      s.faceSeekBroll = true;
+      applied.push(`1. Hook FAIL → overlay: "${s.hookOverlay}" + face-seek intro`);
+    } else if (before && before !== s.hookLine) {
+      applied.push(`1b. Topic-mismatched hook rewritten → "${s.hookLine}"`);
+    }
   }
 
   // Pacing: only shorten cuts when scene QA fails; if scenes already pass, diversify + interrupts
   if (pacing != null && pacing <= 5) {
     s.patternInterrupts = true;
+    s.impactBeatIntervalSec = 5;
     if (sceneFail || longestHold >= 3) {
       if ((s.cutIntervalSec ?? 1.25) > CUT_FLOOR) {
         const prev = s.cutIntervalSec ?? 1.25;
@@ -163,7 +181,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
       s.reHarvestMedia = true;
       s.mediaOffset = (s.mediaOffset || 0) + 4;
       s.fixStrategy = 'reharvest';
-      applied.push('2. Pacing low but scene PASS → diversify B-roll + impact beats (not shorter cuts)');
+      applied.push('2. Pacing low but scene PASS → diversify B-roll + denser topic impact beats');
     } else {
       s.patternInterrupts = true;
       applied.push('2. Pacing low → zoom-punch pattern interrupts ON');

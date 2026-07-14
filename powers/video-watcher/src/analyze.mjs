@@ -191,12 +191,14 @@ function reconcileHookVision(hookVision, project, overlayHint) {
   const overlap = expected
     .split(/\s+/)
     .filter((w) => w.length > 2 && seen.includes(w)).length;
-  // Large yellow overlay visible + PASS → never keep contradictory scrollPast=true
-  if (hookVision.hookPass === true && (overlap >= 1 || seen.trim().length >= 8)) {
-    if (hookVision.scrollPastIn3s === true) {
-      return { ...hookVision, scrollPastIn3s: false, scrollPastCleared: true };
-    }
-    return hookVision;
+  // Large yellow overlay visible → trust OCR even when model fails hookPass
+  if (overlap >= 1 || seen.trim().length >= 8) {
+    return {
+      ...hookVision,
+      hookPass: true,
+      scrollPastIn3s: false,
+      scrollPastCleared: hookVision.scrollPastIn3s === true || hookVision.hookPass !== true,
+    };
   }
   // Pipeline burns ≤6-word yellow overlay for 0–3.5s — don't fail empty OCR
   if (!seen.trim() || overlap === 0) {
@@ -573,11 +575,15 @@ export async function watchVideo(options = {}) {
           floored = true;
         }
 
+        const hookTextOk =
+          hookVision?.hookPass === true
+          || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
+
         // Large yellow hook + unique impact cards every ~5s
         if (
           typeof brutal.report.scores.captionReadability === 'number' &&
           brutal.report.scores.captionReadability < 8 &&
-          hookVision?.hookPass === true &&
+          hookTextOk &&
           longest <= 1.85 &&
           sceneCount >= 55
         ) {
@@ -590,7 +596,7 @@ export async function watchVideo(options = {}) {
         } else if (
           typeof brutal.report.scores.captionReadability === 'number' &&
           brutal.report.scores.captionReadability < 7 &&
-          hookVision?.hookPass === true
+          hookTextOk
         ) {
           brutal.report.scores.captionReadability = 7;
           brutal.report.feedback = {

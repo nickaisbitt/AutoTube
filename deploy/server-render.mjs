@@ -52,6 +52,7 @@ import {
 } from './server-render/youtubeProfile.mjs';
 import { renderViaFfmpegAssembly } from './server-render/ffmpegAssembly.mjs';
 import { buildEditTimeline } from './scripts/lib/build-edit-timeline.mjs';
+import { buildImpactBeatsForTopic } from './scripts/lib/impactBeatsByTopic.mjs';
 
 let sharpModule = null;
 async function getSharp() {
@@ -4184,6 +4185,17 @@ async function render() {
       ? (YOUTUBE_MODE ? buildRetentionHook(coldOpenSeg.narration) : (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60))
       : 'Watch this!');
 
+  const hookDurationSec = YOUTUBE_MODE ? 3.2 : 0.3;
+  const hookPhaseSplitSec = Math.min(1.5, hookDurationSec * 0.5);
+  const hookPhaseSplitFrame = Math.max(1, Math.round(hookPhaseSplitSec * FPS));
+  const topicBlob = project.topic || project.title || '';
+  const customBeats = project.exportSettings?.impactBeats;
+  const hookUpper = String(hookText || '').trim().toUpperCase();
+  const earlyHookBeats = (Array.isArray(customBeats) ? customBeats : buildImpactBeatsForTopic(topicBlob))
+    .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
+    .filter((t) => t && t !== hookUpper);
+  const hookRotateText = earlyHookBeats[0] || '';
+
   if (!isShortsMode) for (let f = 0; f < COLD_OPEN_FRAMES; f++) {
     // Fast visual beats: highest-scored assets first, ~0.5s per beat (checklist: 3–5 beats pre-narration)
     const beatIndex = Math.floor(f / COLD_OPEN_BEAT_FRAMES);
@@ -4246,9 +4258,13 @@ async function render() {
       ctx.fillText(coldOpenSeg?.title || 'Loading...', WIDTH / 2, HEIGHT / 2);
     }
 
-    // Opening hook overlay — bold text on dark background for first 0.3s (req c)
+    // Opening hook overlay — rotate to early impact beat after ~1.5s (matches ffmpeg path)
     if (f < COLD_OPEN_HOOK_FRAMES) {
-      const hookProgress = f / COLD_OPEN_HOOK_FRAMES;
+      const phase2 = hookRotateText && f >= hookPhaseSplitFrame && hookPhaseSplitFrame < COLD_OPEN_HOOK_FRAMES;
+      const activeHookText = phase2 ? hookRotateText : hookText;
+      const phaseLen = phase2 ? COLD_OPEN_HOOK_FRAMES - hookPhaseSplitFrame : hookPhaseSplitFrame;
+      const phaseFrame = phase2 ? f - hookPhaseSplitFrame : f;
+      const hookProgress = phaseLen > 0 ? phaseFrame / phaseLen : 0;
       // Dark overlay
       ctx.fillStyle = `rgba(0, 0, 0, ${0.85 * (1 - hookProgress * 0.7)})`;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
@@ -4263,7 +4279,7 @@ async function render() {
       ctx.shadowBlur = 24;
       ctx.shadowOffsetX = 2;
       ctx.shadowOffsetY = 2;
-      const { lines, fontSize } = wrapTitleText(ctx, hookText, WIDTH, Math.round(hookFontPx(HEIGHT) * 0.72), WIDTH * 0.9, 'bold');
+      const { lines, fontSize } = wrapTitleText(ctx, activeHookText, WIDTH, Math.round(hookFontPx(HEIGHT) * 0.72), WIDTH * 0.9, 'bold');
       ctx.font = `bold ${fontSize}px Impact, "Arial Black", system-ui, sans-serif`;
       const lineHeight = fontSize * 1.08;
       const startY = HEIGHT / 2 - ((lines.length - 1) * lineHeight) / 2;

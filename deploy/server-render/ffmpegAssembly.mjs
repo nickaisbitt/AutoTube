@@ -127,6 +127,18 @@ function encodeFlashClip(clipOut, durationSec, { w, h, preset }) {
   return r.status === 0 && existsSync(clipOut);
 }
 
+/** 0.06–0.08s — sub-second only; longer solid white reads as dead air in scene QA. */
+function flashClipDurationSec(clipIndex) {
+  return 0.06 + (clipIndex % 3) * 0.01;
+}
+
+/** Flash on asset swaps when pattern interrupts are on; dense in first 15s / first 3 clips. */
+function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset) {
+  if (!patternInterruptsEnabled() || sameAsset) return false;
+  const opener = timeAtCutSec < 15 || clipIndex < 3;
+  return opener || clipIndex % 2 === 0;
+}
+
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
   if (assetCount <= 1) return 0;
   if (intervalSec <= 0) return 0;
@@ -475,6 +487,20 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     const zoomPunch =
       patternInterruptsEnabled() && (i < 3 || i % 2 === 0);
     await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0, { zoomPunch });
+
+    const next = schedule[i + 1];
+    if (next) {
+      const sameAsset = assetKey(asset) === assetKey(next.asset);
+      const timeAtCut = renderedDuration;
+      if (shouldInsertFlashBetweenClips(clipIndex, timeAtCut, sameAsset)) {
+        const flashDur = flashClipDurationSec(clipIndex);
+        const flashOut = join(tmpDir, `flash-${String(clipIndex).padStart(3, '0')}.mp4`);
+        if (encodeFlashClip(flashOut, flashDur, { w, h, preset })) {
+          clipPaths.push(flashOut);
+          renderedDuration += flashDur;
+        }
+      }
+    }
   }
 
   let fillerRound = 0;

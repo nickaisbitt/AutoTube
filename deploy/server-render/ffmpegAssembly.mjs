@@ -134,6 +134,9 @@ function flashClipDurationSec(clipIndex) {
 
 /** Flash on asset swaps when pattern interrupts are on; dense in first 15s / first 3 clips. */
 function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset) {
+  if (process.env.AUTOTUBE_FLASH_INTERRUPTS !== '1' && process.env.AUTOTUBE_FLASH_INTERRUPTS !== 'true') {
+    return false;
+  }
   if (!patternInterruptsEnabled() || sameAsset) return false;
   const opener = timeAtCutSec < 15 || clipIndex < 3;
   return opener || clipIndex % 2 === 0;

@@ -235,5 +235,81 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
   if (hook.ok) {
     console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}..."`);
   }
+
+  // Short mid-video impact cards (not full karaoke) — boosts perceived pacing/variety
+  if (process.env.AUTOTUBE_IMPACT_BEATS !== '0') {
+    const beats = overlayImpactBeats(videoPath, project);
+    results.impactBeats = beats;
+    if (beats.ok) {
+      console.log(`  [ffmpeg] impact beats: ${beats.count} cards`);
+    }
+  }
   return results;
+}
+
+/**
+ * Burn ≤3-word yellow impact cards every ~8s after the hook window.
+ */
+export function overlayImpactBeats(videoPath, project, options = {}) {
+  if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
+  const probe = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', videoPath],
+    { encoding: 'utf8' },
+  );
+  const duration = parseFloat(probe.stdout || '0') || 0;
+  if (duration < 12) return { ok: false, error: 'too short' };
+
+  const defaults = [
+    'VOICE CLONE SCAM',
+    'THEY DRAINED IT',
+    'CALL THEM BACK',
+    'VERIFY FIRST',
+    'STOP THE TRANSFER',
+    'NOT YOUR MOM',
+  ];
+  const custom = Array.isArray(project?.exportSettings?.impactBeats)
+    ? project.exportSettings.impactBeats
+    : [];
+  const beats = (custom.length ? custom : defaults)
+    .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
+    .filter(Boolean);
+
+  const times = [];
+  for (let t = 8; t < duration - 2; t += 8) times.push(t);
+  if (!times.length) return { ok: false, error: 'no beat times' };
+
+  const hProbe = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=height', '-of', 'csv=p=0', videoPath],
+    { encoding: 'utf8' },
+  );
+  const h = parseInt((hProbe.stdout || '1080').trim(), 10) || 1080;
+  const fontSize = Math.round(h * 0.07);
+  const border = Math.max(4, Math.round(fontSize * 0.08));
+  const filters = [];
+  for (let i = 0; i < times.length; i += 1) {
+    const text = escapeDrawtext(beats[i % beats.length]);
+    const start = times[i];
+    const end = Math.min(duration - 0.05, start + 1.1);
+    filters.push(
+      `drawtext=text='${text}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.42:enable='between(t\\,${start}\\,${end})'`,
+    );
+  }
+  const tmpOut = videoPath.replace(/\.mp4$/, '-beats.mp4');
+  const r = spawnSync(
+    'ffmpeg',
+    ['-y', '-i', videoPath, '-vf', filters.join(','), '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', tmpOut],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  if (r.status !== 0 || !existsSync(tmpOut)) {
+    return { ok: false, error: (r.stderr || '').slice(-300) };
+  }
+  copyFileSync(tmpOut, videoPath);
+  try {
+    unlinkSync(tmpOut);
+  } catch {
+    /* ignore */
+  }
+  return { ok: true, count: times.length };
 }

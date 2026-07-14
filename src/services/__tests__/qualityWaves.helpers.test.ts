@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('quality waves 2–5 helpers', () => {
@@ -55,6 +58,82 @@ describe('quality waves 2–5 helpers', () => {
         motionProject,
       ).pass,
     ).toBe(true);
+  });
+
+  it('crime/heist topics use lower volume floor and aggregate soft-pass', async () => {
+    const { evaluateHarvestVolume, evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const topic = 'The diamond heist that used a fake airport';
+    const project = {
+      topic,
+      script: [
+        { id: 's1', title: 'Hook' },
+        { id: 's2', title: 'Vault' },
+        { id: 's3', title: 'Escape' },
+      ],
+      media: [
+        { segmentId: 's1', url: 'https://x/1.jpg' },
+        { segmentId: 's1', url: 'https://x/2.jpg' },
+        { segmentId: 's1', url: 'https://x/3.jpg' },
+        { segmentId: 's1', url: 'https://x/4.jpg' },
+        { segmentId: 's2', url: 'https://x/5.jpg' },
+        { segmentId: 's2', url: 'https://x/6.jpg' },
+        { segmentId: 's2', url: 'https://x/7.jpg' },
+        { segmentId: 's2', url: 'https://x/8.jpg' },
+        { segmentId: 's3', url: 'https://x/9.jpg' },
+        { segmentId: 's3', url: 'https://x/10.jpg' },
+        { segmentId: 's3', url: 'https://x/11.jpg' },
+        { segmentId: 's3', url: 'https://x/12.jpg' },
+      ],
+    };
+    const volume = evaluateHarvestVolume(project, 6);
+    expect(volume.crimeHeistTopic).toBe(true);
+    expect(volume.minPerSegment).toBe(4);
+    expect(volume.pass).toBe(true);
+
+    const thin = {
+      ...project,
+      media: ['s1', 's2', 's3'].flatMap((segId) =>
+        project.media.filter((m) => m.segmentId === segId).slice(0, 3),
+      ),
+    };
+    const thinVolume = evaluateHarvestVolume(thin, 6);
+    expect(thinVolume.pass).toBe(false);
+    const soft = evaluateHarvestVolumeWithSoftPass(
+      { volumePass: false, harvestQuality: thinVolume },
+      thin,
+    );
+    expect(soft.pass).toBe(true);
+    expect(soft.reason).toMatch(/soft-pass-crime-heist|soft-pass-aggregate/);
+  });
+
+  it('mergeVolumePadding keeps stock top-up after relevance filter', async () => {
+    const {
+      filterAssetsByRelevance,
+      isVolumePaddingAsset,
+      mergeVolumePadding,
+      scoreAssetRelevance,
+    } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const topic = 'The diamond heist that used a fake airport';
+    const seg = { id: 's1', title: 'The $100M Airport That Never Existed', narration: 'fake runway cargo switch' };
+    const padding = {
+      id: 'stock-topup-s1-0',
+      segmentId: 's1',
+      type: 'image',
+      url: 'https://images.unsplash.com/photo-1436491865332-7a61a109cc05?auto=format&w=1920',
+      alt: 'Airport runway plane takeoff',
+      query: 'stock-pool Hook',
+      source: 'Stock pool (volume top-up)',
+    };
+    expect(isVolumePaddingAsset(padding)).toBe(true);
+    expect(scoreAssetRelevance(padding, seg, topic)).toBeGreaterThan(0.2);
+
+    const project = { topic, script: [seg], media: [padding] };
+    const filtered = filterAssetsByRelevance(project.media, project, { minScore: 0.25 });
+    const merged = mergeVolumePadding(filtered.media, [padding]);
+    expect(merged.length).toBeGreaterThanOrEqual(1);
+    expect(merged.some((a) => a.source?.includes('volume top-up'))).toBe(true);
   });
 
   it('preferBright and anti-HUD appear in stockMotionQueries', async () => {
@@ -115,21 +194,131 @@ describe('quality waves 2–5 helpers', () => {
     expect(isBrutalHardFail(true, { success: true, report: { scores: { overall: 7 } } })).toBe(false);
   });
 
+  it('evaluatePlaceholderGate uses grain-only manifest accounting', async () => {
+    const { evaluatePlaceholderGate } = await import('../../../scripts/lib/run-objective-qa.mjs');
+    const base = mkdtempSync(join(tmpdir(), 'autotube-placeholder-'));
+    const assemblyDir = join(base, 'ffmpeg-assembly');
+    mkdirSync(assemblyDir, { recursive: true });
+    const videoPath = join(base, 'out.mp4');
+    writeFileSync(videoPath, '');
+
+    // Regression: 8 reuse fallbacks + 1 grain filler → 10% placeholders, not 90%.
+    writeFileSync(
+      join(assemblyDir, 'render-manifest.json'),
+      JSON.stringify({
+        clipCount: 10,
+        placeholderClipCount: 1,
+        placeholderPct: 10,
+      }),
+    );
+    const grainOnly = evaluatePlaceholderGate(videoPath);
+    expect(grainOnly.available).toBe(true);
+    expect(grainOnly.placeholderClipCount).toBe(1);
+    expect(grainOnly.placeholderPct).toBe(10);
+    expect(grainOnly.pass).toBe(true);
+
+    writeFileSync(
+      join(assemblyDir, 'render-manifest.json'),
+      JSON.stringify({
+        clipCount: 20,
+        placeholderClipCount: 3,
+      }),
+    );
+    const overLimit = evaluatePlaceholderGate(videoPath);
+    expect(overLimit.placeholderPct).toBe(15);
+    expect(overLimit.pass).toBe(false);
+  });
+
+  it('evaluatePlaceholderGate unavailable without render manifest', async () => {
+    const { evaluatePlaceholderGate } = await import('../../../scripts/lib/run-objective-qa.mjs');
+    const base = mkdtempSync(join(tmpdir(), 'autotube-placeholder-missing-'));
+    expect(evaluatePlaceholderGate(join(base, 'out.mp4'))).toEqual({ available: false });
+  });
+
+  const mildPlaceholderGate = {
+    available: true,
+    pass: false,
+    placeholderPct: 15,
+    maxPlaceholderPct: 10,
+  };
+  const passingSceneQa = {
+    available: true,
+    hookPass: true,
+    bodyPass: true,
+    longestHookSec: 1,
+    longestSceneSec: 1.5,
+  };
+  const passingClipGate = { available: true, pass: true, clipCount: 40, minClips: 20 };
+  const passingObjectiveQa = {
+    silencePass: true,
+    silenceFirst60Sec: 0,
+    scorePass: true,
+    score: 80,
+  };
+
   it('draft soft-passes mild placeholder_pct when scene body ok', async () => {
     const { evaluateObjectiveGate } = await import('../../../scripts/lib/run-objective-qa.mjs');
     const gate = evaluateObjectiveGate({
       renderTier: 'draft',
-      sceneQa: { available: true, hookPass: true, bodyPass: true, longestHookSec: 1, longestSceneSec: 1.5 },
-      clipCountGate: { available: true, pass: true, clipCount: 40, minClips: 20 },
+      sceneQa: passingSceneQa,
+      clipCountGate: passingClipGate,
+      placeholderGate: mildPlaceholderGate,
+      objectiveQa: { silencePass: true, silenceFirst60Sec: 0 },
+    });
+    expect(gate.tier).toBe('draft');
+    expect(gate.pass).toBe(true);
+    expect(gate.checks.find((c) => c.name === 'placeholder_pct')?.pass).toBe(true);
+    expect(gate.checks.some((c) => c.name === 'tech_score')).toBe(false);
+  });
+
+  it('full tier fails placeholder_pct that draft soft-passes', async () => {
+    const { evaluateObjectiveGate } = await import('../../../scripts/lib/run-objective-qa.mjs');
+    const parts = {
+      sceneQa: passingSceneQa,
+      clipCountGate: passingClipGate,
+      placeholderGate: mildPlaceholderGate,
+      objectiveQa: passingObjectiveQa,
+    };
+    const draft = evaluateObjectiveGate({ ...parts, renderTier: 'draft' });
+    const full = evaluateObjectiveGate({ ...parts, renderTier: 'full' });
+    expect(draft.checks.find((c) => c.name === 'placeholder_pct')?.pass).toBe(true);
+    expect(full.checks.find((c) => c.name === 'placeholder_pct')?.pass).toBe(false);
+    expect(draft.pass).toBe(true);
+    expect(full.pass).toBe(false);
+    expect(full.tier).toBe('full');
+  });
+
+  it('full tier enforces tech_score; draft defers it', async () => {
+    const { evaluateObjectiveGate } = await import('../../../scripts/lib/run-objective-qa.mjs');
+    const parts = {
+      sceneQa: passingSceneQa,
+      clipCountGate: passingClipGate,
+      placeholderGate: { available: true, pass: true, placeholderPct: 5, maxPlaceholderPct: 10 },
+      objectiveQa: { silencePass: true, silenceFirst60Sec: 0, scorePass: false, score: 50 },
+    };
+    const draft = evaluateObjectiveGate({ ...parts, renderTier: 'draft' });
+    const full = evaluateObjectiveGate({ ...parts, renderTier: 'full' });
+    expect(draft.checks.some((c) => c.name === 'tech_score')).toBe(false);
+    expect(full.checks.find((c) => c.name === 'tech_score')?.pass).toBe(false);
+    expect(draft.pass).toBe(true);
+    expect(full.pass).toBe(false);
+  });
+
+  it('draft does not soft-pass catastrophic placeholder_pct', async () => {
+    const { evaluateObjectiveGate } = await import('../../../scripts/lib/run-objective-qa.mjs');
+    const gate = evaluateObjectiveGate({
+      renderTier: 'draft',
+      sceneQa: passingSceneQa,
+      clipCountGate: passingClipGate,
       placeholderGate: {
         available: true,
         pass: false,
-        placeholderPct: 15,
+        placeholderPct: 25,
         maxPlaceholderPct: 10,
       },
       objectiveQa: { silencePass: true, silenceFirst60Sec: 0 },
     });
-    expect(gate.pass).toBe(true);
-    expect(gate.checks.find((c) => c.name === 'placeholder_pct')?.pass).toBe(true);
+    expect(gate.checks.find((c) => c.name === 'placeholder_pct')?.pass).toBe(false);
+    expect(gate.pass).toBe(false);
   });
 });

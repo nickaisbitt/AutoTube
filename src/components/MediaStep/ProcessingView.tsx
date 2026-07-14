@@ -18,11 +18,12 @@ interface ProcessingViewProps {
   message: string;
   statusMessageIndex: number;
   onCancel?: () => void;
+  'data-testid'?: string;
 }
 
-export default function ProcessingView({ progress, message, statusMessageIndex, onCancel }: ProcessingViewProps) {
+export default function ProcessingView({ progress, message, statusMessageIndex, onCancel, 'data-testid': testId }: ProcessingViewProps) {
   return (
-    <div className="flex h-full items-center justify-center px-6">
+    <div className="flex h-full items-center justify-center px-6" data-testid={testId}>
       <div className="w-full max-w-xl space-y-6 text-center">
         <div className="relative mx-auto h-20 w-20">
           <div className="absolute inset-0 bg-brand-500/20 animate-ping" />

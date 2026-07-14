@@ -1,6 +1,7 @@
 /**
  * Harvest quality gates: topic/segment relevance + per-segment volume.
  */
+import { isHeistTopic, isNursingHomeTopic } from './topic-family.mjs';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
@@ -39,6 +40,78 @@ const OFF_TOPIC_BLOCKLIST = [
 export const OFF_BRAND_VISUAL_RE =
   /\b(puppet|muppet|marionette|sock\s*puppet|claymation|stop[\s-]?motion|cartoon|anime|animated\s+character|animation\s+reel|minecraft|fortnite|gameplay|macro\s*insect|beetle|dung\s*beetle|insect|bug\s+macro|larva|caterpillar|spider\s+macro|ant\s+colony|wildlife\s+macro|hud\s+graphic|sci[\s-]?fi\s+hud)\b/i;
 
+/** Blurry / soft-focus stock that reads as cheap filler on retention audits. */
+export const BLURRY_LOW_QUALITY_RE =
+  /\b(blurry|out of focus|out-of-focus|defocused|soft focus|low.?res|pixelat|grainy|unfocused)\b/i;
+
+/** Washed-out / blown highlights — common when preferBright pulls wrong clips. */
+export const OVEREXPOSED_STOCK_RE =
+  /\b(overexposed|blown.?out|washed.?out|high.?key white|bleached white|too bright)\b/i;
+
+/** Staged reenactment B-roll that tanks documentary credibility. */
+export const STAGED_REENACT_RE =
+  /\b(staged|reenactment|re-?enact|dramatization|dramatised|dramatized|actors pretending|mock scenario|reenacted scene)\b/i;
+
+/** Produce/grocery literal matches (e.g. Pixabay "produce" token). */
+export const PRODUCE_GROCERY_JUNK_RE =
+  /\b(vegetable crate|produce crate|grocery stock|fruit market|food crate|farmers market|supermarket aisle|grocery aisle|vegetable market)\b/i;
+
+/** Empty hospital-bed stills with no patient/caregiver context. */
+export const EMPTY_HOSPITAL_BED_RE =
+  /\b(empty hospital bed|hospital bed only|unmade hospital bed|empty ward bed|blurry bed|hospital bed close|empty medical bed)\b/i;
+
+/** Generic corporate / architecture filler for serious investigation topics. */
+export const GENERIC_CORPORATE_FILLER_RE =
+  /\b(corporate handshake|team meeting smiling|empty office|business people walking|stock footage loop|generic corporate|open plan office|glass building skyline|architecture model|architectural model|scale model|conference room|office meeting|skyline timelapse)\b/i;
+
+/**
+ * @param {string} haystack
+ * @param {string} contextText
+ * @returns {string|null}
+ */
+export function genericStockJunkReason(haystack, contextText = '') {
+  const h = String(haystack || '');
+  const ctx = String(contextText || '').toLowerCase();
+  if (!h.trim()) return null;
+
+  if (BLURRY_LOW_QUALITY_RE.test(h)) return 'blurry/low-quality stock';
+  if (OVEREXPOSED_STOCK_RE.test(h)) return 'overexposed/washed-out stock';
+  if (STAGED_REENACT_RE.test(h) && !/\b(staged|reenact)/i.test(ctx)) {
+    return 'staged reenactment stock';
+  }
+  if (
+    PRODUCE_GROCERY_JUNK_RE.test(h)
+    && !/\bfood|poison|salmonella|grocery|produce|nutrition|diet|e\.?\s*coli|restaurant\b/i.test(ctx)
+  ) {
+    return 'off-topic produce/grocery stock';
+  }
+  if (
+    EMPTY_HOSPITAL_BED_RE.test(h)
+    && !/\b(patient|nurse|doctor|caregiver|family|elderly|visiting)\b/i.test(h)
+  ) {
+    return 'empty/blurry hospital bed filler';
+  }
+  if (isNursingHomeTopic(ctx)) {
+    if (GENERIC_CORPORATE_FILLER_RE.test(h)) return 'off-topic corporate/architecture for nursing';
+    if (PRODUCE_GROCERY_JUNK_RE.test(h)) return 'off-topic produce/grocery for nursing';
+    if (
+      EMPTY_HOSPITAL_BED_RE.test(h)
+      && !/\b(patient|caregiver|elderly|family|nurse)\b/i.test(h)
+    ) {
+      return 'empty/blurry hospital bed for nursing';
+    }
+  }
+  if (GENERIC_CORPORATE_FILLER_RE.test(h) && !/\b(office|corporate|business|company|startup)\b/i.test(ctx)) {
+    return 'generic corporate/architecture filler';
+  }
+  return null;
+}
+
+/** @param {string} haystack @param {string} [contextText] */
+export function isGenericStockJunk(haystack, contextText = '') {
+  return Boolean(genericStockJunkReason(String(haystack || ''), String(contextText || '')));
+}
+
 /**
  * @param {string} haystack
  * @param {string} contextText
@@ -53,12 +126,23 @@ function offTopicBlockReason(haystack, contextText) {
   if (OFF_BRAND_VISUAL_RE.test(haystack) && !OFF_BRAND_VISUAL_RE.test(contextText)) {
     return 'off-brand visual (puppet/cartoon/insect)';
   }
+  const junk = genericStockJunkReason(haystack, contextText);
+  if (junk) return junk;
   return null;
 }
 
 /** @param {string} haystack @param {string} [contextText] */
 export function isOffBrandVisual(haystack, contextText = '') {
   return Boolean(offTopicBlockReason(String(haystack || ''), String(contextText || '')));
+}
+
+/** Crime/heist topics often harvest unevenly after relevance dedupe (e.g. diamond heist). */
+export function isCrimeHeistTopic(topicBlob = '') {
+  const t = String(topicBlob || '');
+  return (
+    isHeistTopic(t)
+    || /\b(robbery|robbed|stolen|jewelry|thief|burglar|smuggl|trespass)\b/i.test(t)
+  );
 }
 
 /**
@@ -80,6 +164,12 @@ export function extractKeywords(text, max = 14) {
     if (out.length >= max) break;
   }
   return out;
+}
+
+/** Volume padding from top-up passes — must not be stripped by post-top-up relevance. */
+export function isVolumePaddingAsset(asset) {
+  const blob = `${asset?.source || ''} ${asset?.query || ''} ${asset?.id || ''}`.toLowerCase();
+  return /volume top-up|stock pool|stock-video|cyber-stock|stock video pool|topup-|stock-topup-/i.test(blob);
 }
 
 /**
@@ -115,8 +205,28 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   }
 
   const strongHits = topicHits + segHits;
-  if (strongHits === 0) return 0;
-  if (segHits === 0 && topicHits < 2) return 0;
+  if (strongHits === 0) {
+    if (
+      isCrimeHeistTopic(topic)
+      && /airport|runway|terminal|vault|safe|security|diamond|jewel|cargo|guard|heist|plane|aviation|warehouse|investigation|documentary|news/.test(
+        haystack,
+      )
+    ) {
+      return 0.35;
+    }
+    return 0;
+  }
+  if (segHits === 0 && topicHits < 2) {
+    if (
+      isCrimeHeistTopic(topic)
+      && /airport|runway|terminal|vault|safe|security|diamond|jewel|cargo|guard|heist|plane|aviation|warehouse|investigation|documentary|news/.test(
+        haystack,
+      )
+    ) {
+      return 0.3;
+    }
+    return 0;
+  }
 
   const denom = Math.min(Math.max(corpus.size, 1), 8);
   let score = strongHits / denom;
@@ -176,11 +286,31 @@ export function filterAssetsByRelevance(media, project, options = {}) {
 }
 
 /**
+ * Re-attach volume-padding assets dropped by relevance so per-segment counts hold.
+ * @param {object[]} media
+ * @param {object[]} padding
+ */
+export function mergeVolumePadding(media, padding) {
+  const out = [...media];
+  for (const asset of padding) {
+    const key = (asset.url || '').split('?')[0];
+    if (!key) continue;
+    if (out.some((m) => m.segmentId === asset.segmentId && (m.url || '').split('?')[0] === key)) continue;
+    out.push(asset);
+  }
+  return out;
+}
+
+/**
  * @param {object} project
  * @param {number} minPerSegment
  */
 export function evaluateHarvestVolume(project, minPerSegment = 6) {
   const segments = project.script || [];
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`;
+  const effectiveMin = isCrimeHeistTopic(topicBlob)
+    ? Math.max(3, minPerSegment - 2)
+    : minPerSegment;
   const perSegment = {};
 
   for (const seg of segments) {
@@ -196,13 +326,15 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
   }
 
   const failing = Object.entries(perSegment)
-    .filter(([, v]) => v.count < minPerSegment)
-    .map(([id, v]) => ({ segmentId: id, ...v, need: minPerSegment }));
+    .filter(([, v]) => v.count < effectiveMin)
+    .map(([id, v]) => ({ segmentId: id, ...v, need: effectiveMin }));
 
   return {
     pass: failing.length === 0,
     perSegment,
-    minPerSegment,
+    minPerSegment: effectiveMin,
+    requestedMinPerSegment: minPerSegment,
+    crimeHeistTopic: isCrimeHeistTopic(topicBlob),
     failing,
   };
 }
@@ -227,6 +359,13 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const cyber = mediaReport.cyberStockInjected || 0;
   const stockFetched = (mediaReport.pexelsFetched || 0) + (mediaReport.pixabayFetched || 0);
   const topUp = mediaReport.videoTopUp?.length || 0;
+  const volume = mediaReport.harvestQuality;
+  const minPer = volume?.minPerSegment ?? 6;
+  const perSeg = volume?.perSegment ? Object.values(volume.perSegment) : [];
+  const counts = perSeg.map((v) => v.count);
+  const minCount = counts.length ? Math.min(...counts) : 0;
+  const avgCount = counts.length ? counts.reduce((s, v) => s + v, 0) / counts.length : 0;
+  const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
 
   // Soft-pass A: cyber stills pad + at least 1 video/segment average
   if (cyber >= 6 && videosPerSeg >= 1) {
@@ -236,6 +375,22 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const motionRich = videosPerSeg >= 2 && (stockFetched > 0 || topUp >= segN);
   if (motionRich) {
     return { pass: true, reason: `soft-pass-motion(${videoCount}v/${segN}segs)` };
+  }
+  // Soft-pass C: uneven but adequate — common on crime/heist after relevance dedupe
+  const aggregateOk =
+    minCount >= Math.max(2, Math.floor(minPer * 0.5))
+    && avgCount >= minPer * 0.75
+    && media.length >= segN * Math.max(3, minPer - 2);
+  if (aggregateOk) {
+    return { pass: true, reason: `soft-pass-aggregate(avg=${avgCount.toFixed(1)}, min=${minCount})` };
+  }
+  // Soft-pass D: crime/heist with no empty segments and reasonable total fill
+  if (
+    isCrimeHeistTopic(topicBlob)
+    && minCount >= 2
+    && media.length >= segN * (minPer - 1)
+  ) {
+    return { pass: true, reason: `soft-pass-crime-heist(${media.length} assets/${segN} segs)` };
   }
   return { pass: false, reason: 'volume-hard-fail' };
 }

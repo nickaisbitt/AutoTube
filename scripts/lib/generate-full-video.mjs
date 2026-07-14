@@ -13,6 +13,7 @@ import { validateEditTimeline } from './build-edit-timeline.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import {
   STOCK_HEALTHCARE_IMAGES,
+  STOCK_HEIST_IMAGES,
   STOCK_MEDIA_POOL,
   STOCK_VIDEO_POOL,
   STOCK_CYBER_IMAGES,
@@ -34,10 +35,16 @@ import {
   evaluateHarvestVolume,
   evaluateHarvestVolumeWithSoftPass,
   isOffBrandVisual,
+  isGenericStockJunk,
+  isVolumePaddingAsset,
+  mergeVolumePadding,
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
 import {
+  isBankScamTopic,
+  isHealthcareCyberTopic,
   isHealthcareTopic,
+  isHeistTopic,
   isHousingTopic,
   isNursingHomeTopic,
   isVeteransBenefitsTopic,
@@ -68,7 +75,46 @@ export function resolvePixabayKey() {
   return (process.env.PIXABAY_API_KEY || process.env.VITE_PIXABAY_KEY || '').trim();
 }
 
+/** Dismiss z-[200] onboarding overlay so it cannot steal clicks mid-pipeline. */
+async function dismissOnboarding(page) {
+  await page
+    .evaluate(() => {
+      localStorage.setItem('autotube_onboarding_seen', 'true');
+    })
+    .catch(() => {});
+  if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 800 }).catch(() => false)) {
+    await page.getByTestId('onboarding-skip').click({ timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+}
+
+/** Read autotube_project wrapper (project + stepStatuses) from localStorage. */
+async function readProjectSnapshot(page) {
+  return page
+    .evaluate(() => {
+      try {
+        const raw = localStorage.getItem('autotube_project');
+        if (!raw) {
+          return { scriptLen: 0, mediaLen: 0, scriptStep: '', mediaStep: '', projectStatus: '' };
+        }
+        const stored = JSON.parse(raw);
+        const proj = stored.project || {};
+        return {
+          scriptLen: Array.isArray(proj.script) ? proj.script.length : 0,
+          mediaLen: Array.isArray(proj.media) ? proj.media.length : 0,
+          scriptStep: stored.stepStatuses?.script || '',
+          mediaStep: stored.stepStatuses?.media || '',
+          projectStatus: proj.status || '',
+        };
+      } catch {
+        return { scriptLen: 0, mediaLen: 0, scriptStep: '', mediaStep: '', projectStatus: '' };
+      }
+    })
+    .catch(() => ({ scriptLen: 0, mediaLen: 0, scriptStep: '', mediaStep: '', projectStatus: '' }));
+}
+
 async function clickPipelineButton(page, locator, { settleMs = 2000, timeout = 180_000 } = {}) {
+  await dismissOnboarding(page);
   await locator.waitFor({ state: 'visible', timeout });
   if (settleMs > 0) await page.waitForTimeout(settleMs);
   try {
@@ -281,7 +327,8 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
     if (uniqueCount < minPerSegment) {
       const offset = (report.stockTopUpOffset || 0) + uniqueCount;
       const need = minPerSegment - uniqueCount;
-      const stock = pickStockImages(need + 4, offset, STOCK_MEDIA_POOL);
+      const stockPool = isHeistTopic(topic) ? [...STOCK_HEIST_IMAGES, ...STOCK_MEDIA_POOL] : STOCK_MEDIA_POOL;
+      const stock = pickStockImages(need + 4, offset, stockPool);
       for (const img of stock) {
         if (uniqueCount >= minPerSegment) break;
         const key = img.url.split('?')[0];
@@ -308,7 +355,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
 }
 
 function isSeriousNewsTopic(topicBlob = '') {
-  return /bank|hack|stolen|identity|tornado|disaster|death|war|ransom|voice\s*clone|fraud|scam|warning|kill|phish|cyber|breach/i.test(
+  return /bank|hack|stolen|identity|tornado|disaster|death|war|ransom|voice\s*clone|fraud|scam|warning|kill|phish|cyber|breach|heist|diamond|jewel|vault|airport|museum|robbery/i.test(
     topicBlob || '',
   );
 }
@@ -510,8 +557,23 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
       blob,
     );
   }
+  if (isHousingTopic(topicBlob)) {
+    return /apartment|evict|rent|landlord|tenant|lease|keys|packing|boxes|notice|letter|for rent|door|couple|worried/.test(
+      blob,
+    );
+  }
   if (isVeteransBenefitsTopic(topicBlob)) {
-    return /veteran|military|benefits|ssn|identity|credit|paperwork|document|government|broker|phone|worried|letter/.test(
+    return /veteran|military|benefits|ssn|identity|credit|paperwork|document|government|broker|phone|worried|letter|dog tag/.test(
+      blob,
+    );
+  }
+  if (isHeistTopic(topicBlob)) {
+    return /airport|runway|terminal|vault|safe|security|diamond|jewel|cargo|guard|heist|plane|aviation|warehouse|jewelry|investigation|documentary|news/.test(
+      blob,
+    );
+  }
+  if (isHealthcareCyberTopic(topicBlob)) {
+    return /hospital|patient|medical|records|nurse|doctor|server|data|rack|workstation|hipaa|breach|laptop|corridor|waiting/.test(
       blob,
     );
   }
@@ -530,26 +592,18 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
 function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
+  if (isGenericStockJunk(blob, topicBlob)) return true;
   const lifestyleJunk =
     /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
       blob,
     );
   if (lifestyleJunk) return true;
-  // Architectural model / office mockups are junk for nursing abuse topics
-  if (
-    isNursingHomeTopic(topicBlob)
-    && /\b(architectural model|architecture model|scale model|office meeting|conference room|skyline|glass building|corporate office|business district|open plan office|vegetable|produce crate|grocery|fruit market|food crate|empty hospital bed|blurry bed)\b/i.test(
-      blob,
-    )
-  ) {
-    return true;
-  }
   const preferBright =
     options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
-  // Muddy/night stock when preferBright is on
+  // Muddy/night/overexposed stock when preferBright is on
   if (
     preferBright
-    && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy)\b/i.test(blob)
+    && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|overexposed|blown.?out|washed.?out)\b/i.test(blob)
   ) {
     return true;
   }
@@ -571,17 +625,33 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   const faceFirst = options.faceSeek === true;
   const preferBright = options.preferBright === true;
   const nursing = isNursingHomeTopic(topicBlob);
+  const housing = isHousingTopic(topicBlob);
+  const veterans = isVeteransBenefitsTopic(topicBlob);
+  const healthcareCyber = isHealthcareCyberTopic(topicBlob) && cyberTopic;
+  const heist = isHeistTopic(topicBlob);
   const brightBoost = preferBright
     ? nursing
       ? ['bright care home corridor day', 'well lit nursing home hallway', 'daylight elderly care room']
-      : ['bright office daylight people', 'sunny window light phone call', 'well lit hospital corridor day']
+      : housing
+        ? ['bright apartment interior daylight', 'sunny porch house exterior', 'well lit kitchen table worried']
+        : veterans
+          ? ['bright government office daylight', 'well lit desk paperwork documents', 'daylight veteran portrait worried']
+          : healthcareCyber
+            ? ['well lit hospital corridor day', 'bright hospital waiting room', 'daylight medical records desk']
+            : ['bright office daylight people', 'sunny window light phone call', 'well lit hospital corridor day']
     : [];
   // Anti-HUD: prefer real people/places; HUD/interface junk is filtered downstream
   const antiHud = nursing
-    ? ['documentary care home footage people', 'real surveillance hallway footage']
-    : ['real footage people office', 'documentary handheld camera people'];
+    ? ['documentary care home footage people', 'real surveillance hallway footage', 'authentic news interview elderly care']
+    : housing
+      ? ['real apartment building exterior footage', 'documentary tenant moving boxes']
+      : veterans
+        ? ['real veteran portrait worried', 'documentary government office paperwork']
+        : healthcareCyber
+          ? ['real hospital corridor footage people', 'documentary nurse workstation']
+          : ['real footage people office', 'documentary handheld camera people', 'news documentary real people not actors'];
   // Housing + "AI" must NOT pull podcast-mic / cyber B-roll (kills hook score)
-  if (isHousingTopic(topicBlob)) {
+  if (housing) {
     const faces = [
       'worried couple reading letter home',
       'stressed family apartment interior',
@@ -658,6 +728,27 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
     return [...brightBoost, ...antiHud, ...base];
   }
+  // Jewel / vault heists and fake-airport fraud — not bank OTP stock
+  if (heist) {
+    const faces = [
+      'investigator reviewing documents worried',
+      'shocked person reading news phone',
+      'security guard looking at monitor',
+      'person examining diamond jewelry close up',
+    ];
+    const topical = [
+      'airport runway cargo plane exterior',
+      'airport terminal security checkpoint',
+      'bank vault safe door security',
+      'diamond jewelry close up macro',
+      'cargo warehouse logistics forklift',
+      'jewelry store display diamonds',
+      'surveillance camera airport terminal',
+      'investigation news documentary footage',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
   if (cyberTopic) {
     const faces = [
       'shocked person looking at phone',
@@ -696,7 +787,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
 }
 
 /** Exported for unit tests (bright / anti-HUD / nursing query proof). */
-export { stockMotionQueries, isNursingHomeTopic, isHealthcareTopic };
+export { stockMotionQueries, isNursingHomeTopic, isHealthcareTopic, isJunkStockClip };
 
 /**
  * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
@@ -710,11 +801,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const housingTopic = isHousingTopic(topicBlob);
   // Bare "AI" matched landlord topics and flooded intros with podcast-mic stock
   const cyberTopic =
-    !housingTopic &&
-    !isNursingHomeTopic(topicBlob) &&
-    !isVeteransBenefitsTopic(topicBlob) &&
-    (/bank|hack|stolen|identity|ransom|voice.?clone|fraud|scam|phish|cyber|password|data.?breach/i.test(topicBlob)
-      || (isHealthcareTopic(topicBlob) && /hack|breach|ransom|leak|records?|data|cyber/i.test(topicBlob)));
+    !housingTopic
+    && !isNursingHomeTopic(topicBlob)
+    && !isVeteransBenefitsTopic(topicBlob)
+    && !isHeistTopic(topicBlob)
+    && (isBankScamTopic(topicBlob) || isHealthcareCyberTopic(topicBlob));
 
   stripJunkDemoVideos(project, report);
 
@@ -740,7 +831,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         continue;
       }
       if (
-        (cyberTopic || isNursingHomeTopic(topicBlob) || isVeteransBenefitsTopic(topicBlob))
+        (
+          cyberTopic
+          || housingTopic
+          || isNursingHomeTopic(topicBlob)
+          || isVeteransBenefitsTopic(topicBlob)
+          || isHealthcareCyberTopic(topicBlob)
+          || isHeistTopic(topicBlob)
+        )
         && !isCyberRelevantClip(clip, topicBlob)
       ) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
@@ -829,17 +927,20 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   let need = Math.max(minVideos - videoCount, stockNeed);
   const faceScore = (clip) => {
     const blob = `${clip.query || ''} ${clip.alt || ''}`.toLowerCase();
+    if (isGenericStockJunk(blob, topicBlob)) return -4;
     if (/microphone|podcast|recording studio|asmr|rode/i.test(blob)) return -2;
     if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -3;
     if (
       (options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1')
-      && /\b(night|dark|silhouette|low.?light|muddy|underexposed)\b/i.test(blob)
+      && /\b(night|dark|silhouette|low.?light|muddy|underexposed|overexposed|blown.?out|washed.?out)\b/i.test(blob)
     ) {
       return -2;
     }
     if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) return 3;
+    if (/airport|runway|vault|diamond|jewel|cargo|security|heist|jewelry/i.test(blob)) return 2;
     if (/face|person|people|couple|worried|shocked|reaction|crying|tenant|family|evict/i.test(blob)) return 2;
     if (/apartment|rent|keys|notice|letter|packing|boxes/i.test(blob)) return 1;
+    if (/\b(daylight|sunny|bright|well.?lit|documentary|handheld|cctv|surveillance)\b/i.test(blob)) return 1;
     return 0;
   };
   const picks = pickStockVideos(need + segments.length * 4, mediaOffset, pool)
@@ -1093,9 +1194,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     injectCyberStockStills(project, report, options.mediaOffset || 0);
     // Top-up can reintroduce off-brand / off-topic clips — gate again
     stripJunkDemoVideos(project, report);
+    const paddingBeforeFilter = (project.media || []).filter(isVolumePaddingAsset);
     const afterTopUp = filterAssetsByRelevance(project.media || [], project, { minScore: 0.2 });
     report.relevanceDroppedAfterTopUp = afterTopUp.dropped;
-    project.media = afterTopUp.media;
+    project.media = mergeVolumePadding(afterTopUp.media, paddingBeforeFilter);
     report.afterTopUp = project.media.length;
   }
 
@@ -1372,16 +1474,11 @@ export async function generateFullVideo(options) {
   try {
   // networkidle hangs when dev server is serving long harvest API streams
     await gotoDevServer();
-    // Force-dismiss onboarding before any clicks (modal is z-[200] and can reappear)
-    await page.evaluate(() => {
-      localStorage.setItem('autotube_onboarding_seen', 'true');
-    }).catch(() => {});
-    if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 2000 }).catch(() => false)) {
-      await page.getByTestId('onboarding-skip').click().catch(() => {});
-    }
+    await dismissOnboarding(page);
 
     await page.getByTestId('topic-input').fill(topic);
     await page.getByTestId('duration-select').selectOption('3').catch(() => {});
+    await dismissOnboarding(page);
     await page.getByTestId('generate-script-only').click();
     log('⏳ Script (live OpenRouter — fast loop mode)...');
 
@@ -1392,35 +1489,31 @@ export async function generateFullVideo(options) {
       const deadline = Date.now() + timeoutMs;
       let lastDump = 0;
       while (Date.now() < deadline) {
+        await dismissOnboarding(page);
         if (await sourceMediaBtn().isVisible({ timeout: 2_000 }).catch(() => false)) return true;
-        const state = await page.evaluate(() => {
-          let scriptLen = 0;
-          let status = '';
-          try {
-            const raw = localStorage.getItem('autotube_project');
-            if (raw) {
-              const p = JSON.parse(raw);
-              scriptLen = Array.isArray(p?.script) ? p.script.length : 0;
-              status = p?.status || '';
-            }
-          } catch {
-            /* ignore */
-          }
-          const body = document.body?.innerText?.slice(0, 800) || '';
-          return { scriptLen, status, body };
-        }).catch(() => ({ scriptLen: 0, status: '', body: '' }));
+        const snap = await readProjectSnapshot(page);
+        const body = await page
+          .evaluate(() => document.body?.innerText?.slice(0, 800) || '')
+          .catch(() => '');
 
-        if (state.scriptLen > 0 && /complete|ready/i.test(state.status || '')) {
-          // Project ready but button not yet painted — brief settle
+        const scriptComplete =
+          snap.scriptStep === 'complete'
+          || (snap.scriptLen > 0 && /complete/i.test(snap.projectStatus || ''));
+
+        if (scriptComplete) {
           await page.waitForTimeout(1500);
           if (await sourceMediaBtn().isVisible({ timeout: 5_000 }).catch(() => false)) return true;
         }
-        if (/Script generation failed|OpenRouter|API key required|error/i.test(state.body)) {
-          throw new Error(`Script UI error: ${state.body.slice(0, 200)}`);
+        if (/Script generation failed|OpenRouter|API key required/i.test(body)) {
+          throw new Error(
+            `SCRIPT_UI_ERROR: ${body.slice(0, 200)} (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'unknown'})`,
+          );
         }
         if (Date.now() - lastDump > 60_000) {
           lastDump = Date.now();
-          log(`   …still waiting for Source Media (${Math.round((deadline - Date.now()) / 1000)}s left, scriptLen=${state.scriptLen})`);
+          log(
+            `   …still waiting for Source Media (${Math.round((deadline - Date.now()) / 1000)}s left, scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'idle'})`,
+          );
         }
         await page.waitForTimeout(3_000);
       }
@@ -1432,93 +1525,99 @@ export async function generateFullVideo(options) {
       if (!ready) {
         // One recovery: dismiss onboarding, reload, refill, regenerate
         log('⚠ Script wait timed out — reloading once and retrying…');
-        await page.evaluate(() => localStorage.setItem('autotube_onboarding_seen', 'true')).catch(() => {});
         await gotoDevServer();
-        if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 2000 }).catch(() => false)) {
-          await page.getByTestId('onboarding-skip').click().catch(() => {});
-        }
+        await dismissOnboarding(page);
         await page.getByTestId('topic-input').fill(topic);
         await page.getByTestId('duration-select').selectOption('3').catch(() => {});
+        await dismissOnboarding(page);
         await page.getByTestId('generate-script-only').click();
         ready = await waitForScriptReady(Math.min(120_000, scriptTimeoutMs));
       }
       if (!ready) {
-        throw new Error('locator.waitFor: Timeout waiting for Source Media after reload');
+        const snap = await readProjectSnapshot(page);
+        throw new Error(
+          `SCRIPT_TIMEOUT: Source Media never appeared after ${Math.round(scriptTimeoutMs / 1000)}s (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'idle'}, projectStatus=${snap.projectStatus || 'unknown'})`,
+        );
       }
     } catch (err) {
       writeFileSync(join(outDir, 'browser-events.json'), JSON.stringify(browserEvents, null, 2));
+      const snap = await readProjectSnapshot(page);
       const uiState = await page.evaluate(() => ({
         bodyText: document.body?.innerText?.slice(0, 4000) || '',
         projectRawLength: localStorage.getItem('autotube_project')?.length || 0,
         configRawLength: sessionStorage.getItem('autotube_config_session')?.length || 0,
         fastMode: sessionStorage.getItem('autotube_loop_fast_mode'),
       })).catch((e) => ({ error: e.message }));
-      writeFileSync(join(outDir, 'ui-state-on-script-timeout.json'), JSON.stringify(uiState, null, 2));
+      writeFileSync(
+        join(outDir, 'ui-state-on-script-timeout.json'),
+        JSON.stringify({ ...uiState, projectSnapshot: snap }, null, 2),
+      );
       await page.screenshot({ path: join(outDir, 'script-timeout.png'), fullPage: true }).catch(() => {});
       throw err;
     }
 
+    await dismissOnboarding(page);
     await sourceMediaBtn().click({ timeout: 30_000 }).catch(async () => {
+      await dismissOnboarding(page);
       await sourceMediaBtn().click({ force: true, timeout: 30_000 });
     });
     log(`⏳ Media (${realHarvest ? 'live harvest' : 'mock harvest'})...`);
+
+    const mediaNextBtn = () =>
+      page.getByTestId('media-step-next').or(page.getByRole('button', { name: /Prepare Narration/i }));
 
     const mediaDeadline = Date.now() + mediaTimeoutMs;
     const mediaStart = Date.now();
     let mediaReady = false;
     let lastLogMin = -1;
     while (Date.now() < mediaDeadline) {
+      await dismissOnboarding(page);
       try {
-        mediaReady = await page
-          .getByRole('button', { name: /Prepare Narration/i })
-          .isVisible({ timeout: 10_000 });
+        mediaReady = await mediaNextBtn().isVisible({ timeout: 10_000 });
       } catch {
         mediaReady = false;
+      }
+      if (!mediaReady) {
+        const snap = await readProjectSnapshot(page);
+        if (snap.mediaStep === 'complete' && snap.mediaLen > 0) {
+          await page.waitForTimeout(1500);
+          mediaReady = await mediaNextBtn().isVisible({ timeout: 5_000 }).catch(() => false);
+        }
       }
       if (mediaReady) break;
       const elapsedMin = Math.floor((Date.now() - mediaStart) / 60000);
       if (elapsedMin >= 1 && elapsedMin !== lastLogMin && elapsedMin % 2 === 0) {
         lastLogMin = elapsedMin;
         const msg = await page.locator('[data-testid="dynamic-message"]').textContent().catch(() => '');
-        const progress = await page.evaluate(() => {
-          const raw = localStorage.getItem('autotube_project');
-          if (!raw) return { media: 0, segments: 0 };
-          try {
-            const p = JSON.parse(raw).project;
-            return { media: p?.media?.length ?? 0, segments: p?.script?.length ?? 0 };
-          } catch {
-            return { media: 0, segments: 0 };
-          }
-        }).catch(() => ({ media: 0, segments: 0 }));
-        log(`   … ${elapsedMin}min media harvest (${progress.media} assets / ${progress.segments} segments) ${msg ? `— ${msg.slice(0, 60)}` : ''}`);
+        const snap = await readProjectSnapshot(page);
+        log(
+          `   … ${elapsedMin}min media harvest (${snap.mediaLen} assets / ${snap.scriptLen} segments, mediaStep=${snap.mediaStep || 'processing'}) ${msg ? `— ${msg.slice(0, 60)}` : ''}`,
+        );
       }
       await page.waitForTimeout(5000);
     }
 
     if (!mediaReady) {
       writeFileSync(join(outDir, 'browser-events.json'), JSON.stringify(browserEvents, null, 2));
+      const snap = await readProjectSnapshot(page);
       const uiState = await page.evaluate(() => ({
         bodyText: document.body?.innerText?.slice(0, 4000) || '',
         projectRawLength: localStorage.getItem('autotube_project')?.length || 0,
-        mediaCount: (() => {
-          try {
-            return JSON.parse(localStorage.getItem('autotube_project') || '{}').project?.media?.length ?? 0;
-          } catch {
-            return 0;
-          }
-        })(),
         stepText: document.body?.innerText?.match(/Step \d+ — \w+/)?.[0] || '',
       })).catch((e) => ({ error: e.message }));
-      writeFileSync(join(outDir, 'ui-state-on-media-timeout.json'), JSON.stringify(uiState, null, 2));
+      writeFileSync(
+        join(outDir, 'ui-state-on-media-timeout.json'),
+        JSON.stringify({ ...uiState, projectSnapshot: snap }, null, 2),
+      );
       await page.screenshot({ path: join(outDir, 'media-timeout.png'), fullPage: true }).catch(() => {});
-      throw new Error(`Media harvest timed out after ${Math.round(mediaTimeoutMs / 60000)}min waiting for Prepare Narration`);
+      throw new Error(
+        `MEDIA_TIMEOUT: Prepare Narration never appeared after ${Math.round(mediaTimeoutMs / 60000)}min (mediaLen=${snap.mediaLen}, mediaStep=${snap.mediaStep || 'unknown'})`,
+      );
     }
 
-    await clickPipelineButton(
-      page,
-      page.getByTestId('media-step-next').or(page.locator('button:has-text("Prepare Narration")').first()),
-    );
+    await clickPipelineButton(page, mediaNextBtn());
     log('⏳ Narration...');
+    await dismissOnboarding(page);
     await page.getByTestId('skip-ai-edit-button').waitFor({ timeout: narrationTimeoutMs });
     if (fixState.rewriteScript === true) {
       log('✍️ rewriteScript lever ON — running AI edit instead of skip');
@@ -1528,10 +1627,12 @@ export async function generateFullVideo(options) {
         await clickPipelineButton(page, runAi, { timeout: Math.max(180_000, narrationTimeoutMs / 2) });
         await page.waitForTimeout(2000);
       } else {
+        await dismissOnboarding(page);
         await page.getByTestId('skip-ai-edit-button').click();
       }
       fixState.rewriteScript = false;
     } else {
+      await dismissOnboarding(page);
       await page.getByTestId('skip-ai-edit-button').click();
     }
     await page.waitForTimeout(500);
@@ -1593,12 +1694,15 @@ export async function generateFullVideo(options) {
           mediaReport.volumeSoftPass = soft.reason;
         } else {
           const failing = mediaReport.harvestQuality?.failing || [];
+          const minPer = mediaReport.harvestQuality?.minPerSegment ?? loopMinAssets;
           const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
+          const totalMedia = project.media?.length ?? 0;
+          const segCount = project.script?.length ?? 0;
           fixState.reHarvestMedia = true;
           fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
           return {
             ok: false,
-            error: `Harvest volume gate FAIL — ${detail}`,
+            error: `HARVEST_VOLUME_FAIL: ${failing.length}/${segCount} segments below ${minPer} assets — ${detail || 'no segment detail'} (total=${totalMedia}, soft-pass=${soft.reason || 'none'})`,
             harvestQualityFail: true,
             topic,
             outDir,

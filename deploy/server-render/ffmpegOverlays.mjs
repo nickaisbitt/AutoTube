@@ -32,15 +32,27 @@ function formatAssTime(sec) {
  * @param {object} project
  * @param {{ durationSec?: number }} [options]
  */
+function isInstructionHookText(text) {
+  const t = String(text || '').trim();
+  return /^(replace|rewrite|start with|use|change|fix|try)\b/i.test(t)
+    || /\brewrite\s+line\b/i.test(t)
+    || /\bshock hook\b/i.test(t);
+}
+
 export function overlayHookText(videoPath, project, options = {}) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
 
-  const hookText =
+  let hookText =
     project.exportSettings?.hookOverlay
     || process.env.AUTOTUBE_HOOK_OVERLAY
     || project.hookLine
     || process.env.AUTOTUBE_HOOK_LINE
     || project.exportSettings?.hookLine;
+  // Never burn editor instructions onto the frame (watcher sometimes suggests "Rewrite line 1 as…")
+  if (hookText && isInstructionHookText(hookText)) {
+    hookText = project.hookLine || project.exportSettings?.hookLine || '';
+    if (isInstructionHookText(hookText)) hookText = '';
+  }
   if (!hookText?.trim()) return { ok: false, error: 'no hook text' };
 
   const probe = spawnSync(

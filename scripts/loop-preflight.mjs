@@ -72,16 +72,17 @@ export async function runLoopPreflight({ devServer, requireOpenRouter = true } =
     if (!have(bin)) errors.push(`${bin} not found on PATH`);
   }
 
+  const pipOpt = 'pip install --break-system-packages';
   const scenedetect = spawnSync('python3', ['-c', 'import scenedetect'], { encoding: 'utf8' });
   if (scenedetect.status !== 0) {
-    console.log('[preflight] scenedetect not installed — run: pip install scenedetect');
+    console.log(`[preflight] scenedetect optional — scene QA skipped (${pipOpt} scenedetect)`);
   } else {
     console.log('[preflight] scenedetect OK');
   }
 
   const whisper = spawnSync('python3', ['-c', 'import faster_whisper'], { encoding: 'utf8' });
   if (whisper.status !== 0) {
-    console.log('[preflight] faster-whisper not installed — run: pip install faster-whisper');
+    console.log(`[preflight] faster-whisper optional — whisper align skipped; estimated VTT used (${pipOpt} faster-whisper)`);
   } else {
     console.log('[preflight] faster-whisper OK');
   }

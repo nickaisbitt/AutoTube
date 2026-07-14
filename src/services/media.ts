@@ -650,7 +650,7 @@ export function scoreCandidate(
 
   // 8b. Off-brand visuals (puppets/cartoons/insects) — tank serious news B-roll
   const offBrand =
-    /\b(puppet|muppet|marionette|sock\s*puppet|claymation|stop[\s-]?motion|cartoon|anime|animated\s+character|minecraft|fortnite|gameplay|macro\s*insect|beetle|insect|bug\s+macro|larva|caterpillar|spider\s+macro|hud\s+graphic|sci[\s-]?fi\s+hud)\b/i;
+    /\b(puppet|muppet|marionette|sock\s*puppet|claymation|stop[\s-]?motion|cartoon|anime|animated\s+character|minecraft|fortnite|gameplay|macro\s*insect|beetle|dung\s*beetle|insect|bug\s+macro|larva|caterpillar|spider\s+macro|wildlife\s+macro|hud\s+graphic|sci[\s-]?fi\s+hud)\b/i;
   if (offBrand.test(meta) && !offBrand.test(c.query)) {
     score -= 400;
   }

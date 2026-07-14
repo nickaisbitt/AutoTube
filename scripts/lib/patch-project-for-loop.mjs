@@ -110,6 +110,12 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/tornado|hurricane|flood|wildfire|earthquake/i.test(t)) {
     return clampWords('THIS WARNING CAME TOO LATE');
   }
+  if (/nursing\s*home|elder\s*abuse|care\s*home/i.test(t)) {
+    return clampWords('CAMERAS CAUGHT THE ABUSE');
+  }
+  if (/veteran|va\s+benefits|benefits\s+data|dark\s*web/i.test(t)) {
+    return clampWords('BENEFITS DATA FOR SALE');
+  }
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
     // Short + no colon — long "EXPOSED: HOSPITAL HACK EXPOSED" was edge-clipped by drawtext
     const kw = keywords.filter((k) => !/^expos/i.test(k)).slice(0, 2).join(' ');
@@ -124,6 +130,9 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   // Insurance before generic "scam" (otherwise bank hook lands on crash fraud videos)
   if (/insurance|car\s*crash|fake\s*crash|crash\s*video/i.test(t)) {
     return clampWords('FAKE CRASH SCAM EXPOSED');
+  }
+  if (/hospital|patient|healthcare|hipaa/i.test(t) && /hack|breach|leak|records?|data/i.test(t)) {
+    return clampWords('PATIENT RECORDS EXPOSED');
   }
   if (/hack|stolen|breach|password|identity|bank|voice\s*clone|fraud|scam/i.test(t)) {
     return clampWords('YOUR BANK ACCOUNT IS EMPTY');

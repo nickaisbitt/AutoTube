@@ -37,7 +37,7 @@ const OFF_TOPIC_BLOCKLIST = [
  * Allowed only when the topic itself is about that subject.
  */
 export const OFF_BRAND_VISUAL_RE =
-  /\b(puppet|muppet|marionette|sock\s*puppet|claymation|stop[\s-]?motion|cartoon|anime|animated\s+character|animation\s+reel|minecraft|fortnite|gameplay|macro\s*insect|beetle|insect|bug\s+macro|larva|caterpillar|spider\s+macro|ant\s+colony|hud\s+graphic|sci[\s-]?fi\s+hud)\b/i;
+  /\b(puppet|muppet|marionette|sock\s*puppet|claymation|stop[\s-]?motion|cartoon|anime|animated\s+character|animation\s+reel|minecraft|fortnite|gameplay|macro\s*insect|beetle|dung\s*beetle|insect|bug\s+macro|larva|caterpillar|spider\s+macro|ant\s+colony|wildlife\s+macro|hud\s+graphic|sci[\s-]?fi\s+hud)\b/i;
 
 /**
  * @param {string} haystack

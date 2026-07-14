@@ -29,15 +29,18 @@ function hookClashesWithTopic(topic, hook) {
   const ol = String(hook || '').toLowerCase();
   if (!tl || !ol) return false;
   const topicLandlord = /landlord|tenant|evict|rent/.test(tl);
-  const topicBank = /bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl);
+  const topicBank = /bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl)
+    && !/nursing\s*home|elder|abuse|veteran|benefits/.test(tl);
   const topicTicket = /ticket|bot|scalp|concert|fan/.test(tl);
-  const hookBank = /bank account|drained|voice clone|transfer|emptied real bank/.test(ol);
+  const topicCare = /nursing\s*home|elder|abuse|veteran|benefits|patient|hospital/.test(tl);
+  const hookBank = /bank account|drained|voice clone|transfer|emptied real bank|vanish before you hang/.test(ol);
   const hookLandlord = /evict|landlord|tenant|rent|lease/.test(ol);
   const hookTicket = /ticket|bot|scalp|concert/.test(ol);
   if (topicLandlord && hookBank && !hookLandlord) return true;
   if (topicBank && hookLandlord && !hookBank) return true;
   if (topicTicket && (hookBank || hookLandlord) && !hookTicket) return true;
-  if (!topicBank && hookBank && (topicLandlord || topicTicket)) return true;
+  if (topicCare && hookBank && !/veteran|benefit|patient|hospital|record/.test(ol)) return true;
+  if (!topicBank && hookBank && (topicLandlord || topicTicket || topicCare)) return true;
   return false;
 }
 
@@ -62,8 +65,17 @@ export function buildShockHookLine(topic, override) {
   if (/landlord|tenant|evict|rent/.test(tl)) {
     return 'AI already filed your eviction — before you knew.';
   }
+  if (/nursing\s*home|elder\s*abuse|care\s*home/.test(tl)) {
+    return 'The cameras kept rolling while staff hurt them.';
+  }
+  if (/veteran|va\s+benefits|dark\s*web.*broker|benefits\s+data/.test(tl)) {
+    return 'Your benefits file was already for sale.';
+  }
   if (/insurance|car\s*crash|fake\s*crash|crash\s*video/.test(tl)) {
     return 'That car crash was staged for the insurance payout.';
+  }
+  if (/hospital|patient|healthcare|hipaa/.test(tl) && /hack|breach|leak|records?|data|cyber/.test(tl)) {
+    return 'Your medical chart was already in the breach dump.';
   }
   if (/bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl)) {
     return 'This already emptied real bank accounts.';
@@ -82,8 +94,8 @@ export function buildShockHookLine(topic, override) {
   const templates = [
     `Billions lost overnight: ${short}.`,
     `They tried to hide this — here's the proof.`,
-    `Your money can vanish before you hang up.`,
-    `This already emptied real bank accounts.`,
+    `This is bigger than the headlines admit.`,
+    `Ordinary people are already paying the price.`,
   ];
   // Stable pick from topic hash so loop retries stay consistent
   let hash = 0;

@@ -9,12 +9,14 @@
 export function resolveTopicFamily(topic) {
   const t = String(topic || '').toLowerCase();
   if (/landlord|tenant|evict|rent|lease|apartment|housing/.test(t)) return 'landlord';
-  if (/hospital|healthcare|patient|hipaa|medical|clinic/.test(t)
-    && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?/.test(t)) {
+  if (/hospital|healthcare|patient|hipaa|medical|clinic|nursing\s*home/.test(t)
+    && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?|camera|abuse|broker/.test(t)) {
     return 'healthcare_cyber';
   }
-  if (/bank|fraud|scam|voice.?clone|hack|identity|password|phish/.test(t)) return 'bank_scam';
+  if (/veteran|benefits|dark\s*web|data\s*broker|ssn|va\s+benefits/.test(t)) return 'bank_scam';
+  if (/bank|fraud|scam|voice.?clone|hack|identity|password|phish|leak|breach|cyber/.test(t)) return 'bank_scam';
   if (/ticket|bot|scalp|concert|fan/.test(t)) return 'tickets';
+  if (/nursing\s*home|elder|abuse|camera/.test(t) && /abuse|camera|recorded|neglect/.test(t)) return 'healthcare_cyber';
   if (/nuclear|radiation|meltdown|tornado|hurricane|flood|wildfire|disaster/.test(t)) return 'disaster';
   return 'generic';
 }
@@ -36,6 +38,8 @@ export const TOPIC_FAMILY_QUERIES = {
     'smartphone banking app close up',
     'hacker typing computer dark',
     'bank building exterior city',
+    'government office paperwork documents',
+    'person checking credit report laptop',
   ],
   landlord: [
     'worried couple reading letter home',

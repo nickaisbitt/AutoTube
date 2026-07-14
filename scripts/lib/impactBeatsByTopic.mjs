@@ -25,8 +25,8 @@ export function buildImpactBeatsForTopic(topic) {
   }
 
   // Healthcare cyber before generic bank/hack (hospital topics used to get bank OTP cards)
-  if (/hospital|healthcare|patient|hipaa|medical|clinic|records?/.test(tl)
-    && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?/.test(tl)) {
+  if (/hospital|healthcare|patient|hipaa|medical|clinic|records?|nursing\s*home/.test(tl)
+    && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?|camera|abuse|broker/.test(tl)) {
     return [
       'RECORDS LEAKED',
       'PATIENT DATA OUT',
@@ -43,7 +43,42 @@ export function buildImpactBeatsForTopic(topic) {
     ];
   }
 
-  if (/bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl)) {
+  // Veterans / benefits / dark-web data brokers (before generic bank)
+  if (/veteran|benefits|dark\s*web|data\s*broker|ssn|social\s*security|va\s+benefits/.test(tl)) {
+    return [
+      'DATA BROKERED',
+      'BENEFITS EXPOSED',
+      'DARK WEB SALE',
+      'SSN FOR SALE',
+      'FILES LEAKED',
+      'IDENTITY RISK',
+      'FREEZE CREDIT',
+      'CALL THE VA',
+      'RECORDS STOLEN',
+      'BROKER LIST',
+      'LOCK IT DOWN',
+      'CHECK YOUR FILE',
+    ];
+  }
+
+  if (/nursing\s*home|elder\s*abuse|care\s*home/.test(tl)) {
+    return [
+      'CAMERAS ROLLING',
+      'STAFF CAUGHT',
+      'ABUSE ON TAPE',
+      'COVER UP',
+      'FAMILY IGNORED',
+      'SHIFT AFTER SHIFT',
+      'NO SUPERVISION',
+      'LOCKED DOORS',
+      'REPORT BURIED',
+      'CALL FOR HELP',
+      'WATCH THE TAPE',
+      'PROTECT THEM',
+    ];
+  }
+
+  if (/bank|fraud|scam|voice.?clone|hack|identity|password|leak|breach|cyber|ransom/.test(tl)) {
     return [
       'VOICE CLONE SCAM',
       'THEY DRAINED IT',

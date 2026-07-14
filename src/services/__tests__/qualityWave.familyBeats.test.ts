@@ -18,6 +18,18 @@ describe('topic family + impact beats', () => {
     expect(beats.join(' ')).not.toMatch(/OTP STOLEN|VOICE CLONE/i);
   });
 
+  it('avoids bank shock hooks on nursing-home / veterans topics', async () => {
+    const { buildShockHookLine } = await import('../../../e2e/openRouterMock.mjs');
+    const { buildShortHookOverlay } = await import('../../../scripts/lib/patch-project-for-loop.mjs');
+    const nursing = buildShockHookLine('The nursing home cameras that recorded abuse for years');
+    expect(nursing).not.toMatch(/bank|vanish before you hang/i);
+    expect(nursing).toMatch(/camera|staff|hurt/i);
+    expect(buildShortHookOverlay('nursing home cameras abuse', nursing)).toMatch(/CAMERAS|ABUSE/i);
+    const vet = buildShockHookLine('Why veterans benefits data leaked to dark web brokers');
+    expect(vet).toMatch(/benefits|sale|file/i);
+    expect(vet).not.toMatch(/emptied real bank/i);
+  });
+
   it('vision prompt rejects cartoons/puppets/insects', async () => {
     const { buildVisionCheckPrompt } = await import('../visionCheck');
     const { system } = buildVisionCheckPrompt('https://example.com/x.jpg');

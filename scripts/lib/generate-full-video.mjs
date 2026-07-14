@@ -365,14 +365,19 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
   const picks = pickStockImages(pool.length, mediaOffset % Math.max(pool.length, 1), pool);
   let added = 0;
 
+  // Motion-ok: do not pad with cyber stills — code/matrix stills tank visualVariety
+  if (motionOk) {
+    const videos = rebuilt.filter((a) => a.type === 'video');
+    project.media = videos;
+    report.cyberStockSkipped = `motion-ok (${stockMotion} stock videos; no still pad)`;
+    return;
+  }
+
   for (let s = 0; s < segments.length; s += 1) {
     const seg = segments[s];
     // Never put stills on the intro/hook — motion only in first seconds
     if (seg.type === 'intro' || s === 0) continue;
-    const segCount = rebuilt.filter((a) => a.segmentId === seg.id).length;
-    // Motion-ok: only pad body segments to pass volume gate (timeline still prefers video)
-    // Thin harvest: 1 curated still per body segment
-    const perSeg = motionOk ? Math.max(0, 8 - segCount) : 1;
+    const perSeg = 1;
     for (let i = 0; i < perSeg; i += 1) {
       const img = picks[(s * 7 + i + mediaOffset) % picks.length];
       if (!img) continue;
@@ -388,9 +393,6 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
       });
       added += 1;
     }
-  }
-  if (motionOk) {
-    report.cyberStockSkipped = `motion-ok (${stockMotion} stock videos; padded +${added})`;
   }
   // Videos first in media array so timeline / assembly prefers motion
   const videos = rebuilt.filter((a) => a.type === 'video');

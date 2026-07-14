@@ -296,7 +296,7 @@ export function buildBlindReviewPrompt(
 // ── API Call ──
 
 const OPENROUTER_ENDPOINT = '/api/llm';
-const BLIND_REVIEW_MODEL = 'openai/gpt-5.4-nano';
+const BLIND_REVIEW_MODEL = 'xiaomi/mimo-v2.5';
 const BLIND_REVIEW_TIMEOUT_MS = 60_000;
 const BLIND_REVIEW_MAX_RETRIES = 2;
 

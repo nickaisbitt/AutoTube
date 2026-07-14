@@ -501,7 +501,7 @@ export function resolveOpenRouterMockContent(messages, segments = MOCK_SCRIPT_SE
  * @param {string} [model]
  * @returns {string}
  */
-export function openRouterCompletionBody(content, model = 'openai/gpt-5.4-nano') {
+export function openRouterCompletionBody(content, model = 'xiaomi/mimo-v2.5') {
   return JSON.stringify({
     id: `mock-${Date.now()}`,
     model,
@@ -516,6 +516,6 @@ export function openRouterCompletionBody(content, model = 'openai/gpt-5.4-nano')
  */
 export function mockOpenRouterHttpBody(post, segments = MOCK_SCRIPT_SEGMENTS) {
   const content = resolveOpenRouterMockContent(post?.messages, segments);
-  const model = post?.model ?? 'openai/gpt-5.4-nano';
+  const model = post?.model ?? 'xiaomi/mimo-v2.5';
   return openRouterCompletionBody(content, model);
 }

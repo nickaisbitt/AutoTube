@@ -694,7 +694,9 @@ Analyze this project and return the EditPlan JSON.`;
 
 // ── OpenRouter configuration ────────────────────────────────────────────────
 const OPENROUTER_ENDPOINT = '/api/llm';
-const DEFAULT_EDIT_MODEL = 'openai/gpt-5.4-nano';
+import { DEFAULT_LLM_MODEL } from './llm/defaultModels';
+
+const DEFAULT_EDIT_MODEL = DEFAULT_LLM_MODEL;
 
 /**
  * Runs the full AI editing pass on a VideoProject.

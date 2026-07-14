@@ -126,7 +126,10 @@ export async function handleQualityCheck(
   const args = [CHECK_SCRIPT, videoPath, "--json"];
   if (includeVision && apiKey) {
     args.push("--api-key", apiKey);
-    args.push("--model", "google/gemini-2.0-flash-001");
+    args.push(
+      "--model",
+      "xiaomi/mimo-v2.5,deepseek/deepseek-v4-flash,google/gemma-4-31b-it",
+    );
   } else {
     args.push("--skip-vision");
   }

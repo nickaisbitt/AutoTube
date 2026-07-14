@@ -20,7 +20,18 @@ import os
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+# Slot-4 panel: two vision judges + one text-only second opinion (DeepSeek has no image input on OR).
+DEFAULT_VISION_JUDGES = [
+    'xiaomi/mimo-v2.5',
+    'google/gemma-4-31b-it',
+]
+DEFAULT_TEXT_JUDGE = 'deepseek/deepseek-v4-flash'
+DEFAULT_JUDGES = DEFAULT_VISION_JUDGES + [DEFAULT_TEXT_JUDGE]
+TEXT_ONLY_JUDGES = frozenset({DEFAULT_TEXT_JUDGE, 'deepseek/deepseek-v4-flash'})
 
 
 def _safe_float(value, default=0.0):
@@ -198,6 +209,8 @@ def run_video_analyzer(video_path, api_key, api_url, model, max_frames=8):
                 with open(analysis_file) as f:
                     data = json.load(f)
                 return {
+                    'model': model,
+                    'role': 'vision',
                     'transcript': data.get('transcript', {}).get('text', ''),
                     'frame_count': len(data.get('frame_analyses', [])),
                     'frames': [
@@ -212,6 +225,118 @@ def run_video_analyzer(video_path, api_key, api_url, model, max_frames=8):
             return None, "video-analyzer timed out after 5 minutes"
         except Exception as e:
             return None, f"video-analyzer error: {str(e)}"
+
+
+def run_text_quality_judge(api_key, api_url, model, vision_reports):
+    """Text-only second opinion over other judges' frame/video descriptions."""
+    if not vision_reports:
+        return None, "no vision reports for text judge"
+
+    dossier_parts = []
+    for vr in vision_reports:
+        dossier_parts.append(f"### Judge {vr.get('model')}")
+        dossier_parts.append(vr.get('video_description') or '')
+        for fr in (vr.get('frames') or [])[:8]:
+            dossier_parts.append(f"- frame {fr.get('index')}: {fr.get('description', '')}")
+    dossier = '\n'.join(dossier_parts)[:12000]
+
+    prompt = (
+        "You are a YouTube video quality judge. Other vision models already described frames. "
+        "From their notes only, list quality problems (dark frames, clutter, unreadable text, "
+        "static/boring visuals, audio cues if mentioned). "
+        "Reply JSON only: {\"issues\":[{\"severity\":\"critical|warning|info\",\"message\":\"...\"}],"
+        "\"summary\":\"one sentence\",\"flags\":{\"dark_background\":false}}"
+    )
+    body = {
+        'model': model,
+        'messages': [
+            {'role': 'system', 'content': prompt},
+            {'role': 'user', 'content': dossier},
+        ],
+        'temperature': 0.2,
+        'response_format': {'type': 'json_object'},
+    }
+    url = api_url.rstrip('/') + '/chat/completions'
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode('utf-8'),
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://autotube.local',
+        },
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+        content = payload['choices'][0]['message']['content']
+        parsed = json.loads(content) if isinstance(content, str) else content
+        return {
+            'model': model,
+            'role': 'text',
+            'video_description': parsed.get('summary', ''),
+            'frame_count': 0,
+            'frames': [],
+            'transcript': '',
+            'judge_issues': parsed.get('issues') or [],
+            'flags': parsed.get('flags') or {},
+        }, None
+    except Exception as e:
+        return None, f"text judge error: {e}"
+
+
+def run_multi_judge_vision(video_path, api_key, api_url, judges, max_frames=8):
+    """Run the quality-check judge panel and merge results."""
+    judges = [j.strip() for j in judges if j and j.strip()]
+    if not judges:
+        judges = list(DEFAULT_JUDGES)
+
+    vision_reports = []
+    text_reports = []
+    errors = []
+
+    for model in judges:
+        if model in TEXT_ONLY_JUDGES:
+            continue
+        print(f"👁  Vision judge: {model}", file=sys.stderr)
+        report, err = run_video_analyzer(video_path, api_key, api_url, model, max_frames)
+        if report:
+            vision_reports.append(report)
+        else:
+            errors.append(f"{model}: {err}")
+
+    for model in judges:
+        if model not in TEXT_ONLY_JUDGES:
+            continue
+        print(f"📝 Text judge: {model}", file=sys.stderr)
+        report, err = run_text_quality_judge(api_key, api_url, model, vision_reports)
+        if report:
+            text_reports.append(report)
+        else:
+            errors.append(f"{model}: {err}")
+
+    all_reports = vision_reports + text_reports
+    if not all_reports:
+        return None, '; '.join(errors) if errors else 'all judges failed'
+
+    # Primary vision blob for backward-compat scoring = first vision report
+    primary = vision_reports[0] if vision_reports else all_reports[0]
+    merged = dict(primary)
+    merged['judges'] = all_reports
+    merged['judge_models'] = [r.get('model') for r in all_reports]
+    merged['judge_errors'] = errors
+    # Union dark-background signal from text judge flags + all descriptions
+    blob = ' '.join(
+        (r.get('video_description') or '') + ' ' + ' '.join(
+            f.get('description', '') for f in (r.get('frames') or [])
+        )
+        for r in all_reports
+    ).lower()
+    dark_flag = any((r.get('flags') or {}).get('dark_background') for r in text_reports)
+    if dark_flag or 'dark background' in blob or 'very dark' in blob:
+        merged['panel_dark_background'] = True
+    return merged, ('; '.join(errors) if errors else None)
 
 
 def compute_quality_score(metrics):
@@ -262,16 +387,23 @@ def compute_quality_score(metrics):
                 score -= 10
                 issues.append({'severity': 'warning', 'category': 'visual', 'message': f'Low resolution: {w}x{h} (recommend 1920x1080)'})
 
-    # Vision analysis (25 points) — bonus if available
+    # Vision analysis (25 points) — panel / single judge
     vision = metrics.get('vision')
     if vision:
-        # Check if vision AI noted dark backgrounds
         description = (vision.get('video_description', '') + ' '.join(
             f.get('description', '') for f in vision.get('frames', [])
         )).lower()
-        if 'dark background' in description or 'very dark' in description:
+        dark = vision.get('panel_dark_background') or 'dark background' in description or 'very dark' in description
+        if dark:
             score -= 15
             issues.append({'severity': 'warning', 'category': 'visual', 'message': 'Vision AI detected dark backgrounds in video'})
+        for judge in vision.get('judges') or []:
+            for ji in judge.get('judge_issues') or []:
+                issues.append({
+                    'severity': ji.get('severity') or 'info',
+                    'category': 'visual',
+                    'message': f"[{judge.get('model')}] {ji.get('message', '')}",
+                })
 
     return max(0, min(100, score)), issues
 
@@ -281,7 +413,11 @@ def main():
     parser.add_argument('video_path', help='Path to the video file')
     parser.add_argument('--api-key', help='OpenRouter API key for vision analysis')
     parser.add_argument('--api-url', default='https://openrouter.ai/api/v1', help='API URL')
-    parser.add_argument('--model', default='google/gemini-2.0-flash-001', help='Vision model')
+    parser.add_argument(
+        '--model',
+        default=','.join(DEFAULT_JUDGES),
+        help='Comma-separated judge models (vision + optional text-only)',
+    )
     parser.add_argument('--max-frames', type=int, default=8, help='Max frames to analyze')
     parser.add_argument('--skip-vision', action='store_true', help='Skip vision model analysis')
     parser.add_argument('--json', action='store_true', help='Output JSON only')
@@ -321,13 +457,14 @@ def main():
         print("💡 Analyzing frame brightness...", file=sys.stderr)
     metrics['brightness'] = run_brightness_analysis(args.video_path)
 
-    # Step 5: Vision analysis (optional)
+    # Step 5: Multi-judge vision panel (optional)
     vision_error = None
     if not args.skip_vision and args.api_key:
+        judges = [m.strip() for m in args.model.split(',') if m.strip()]
         if not args.json:
-            print("👁  Running vision AI analysis...", file=sys.stderr)
-        metrics['vision'], vision_error = run_video_analyzer(
-            args.video_path, args.api_key, args.api_url, args.model, args.max_frames
+            print(f"👁  Running judge panel ({len(judges)} models)...", file=sys.stderr)
+        metrics['vision'], vision_error = run_multi_judge_vision(
+            args.video_path, args.api_key, args.api_url, judges, args.max_frames
         )
     elif not args.api_key:
         vision_error = "No API key provided — skipping vision analysis"

@@ -125,7 +125,11 @@ export async function handleQualityCheck(
   // Spawn Python quality check script — pass key via env only (not argv)
   const args = [CHECK_SCRIPT, resolvedPath, "--json"];
   if (includeVision && apiKey) {
-    args.push("--model", "google/gemini-2.0-flash-001");
+    // 3-judge panel: mimo + DeepSeek (text) + Gemma 4 — see check_quality.py DEFAULT_JUDGES
+    args.push(
+      "--model",
+      "xiaomi/mimo-v2.5,deepseek/deepseek-v4-flash,google/gemma-4-31b-it",
+    );
   } else {
     args.push("--skip-vision");
   }

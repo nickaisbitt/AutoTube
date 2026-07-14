@@ -30,7 +30,7 @@ export interface VisionCheckResult {
 // ---------------------------------------------------------------------------
 
 const OPENROUTER_ENDPOINT = '/api/llm';
-const VISION_MODEL = 'openai/gpt-5.4-mini';
+const VISION_MODEL = 'xiaomi/mimo-v2.5';
 const VISION_TIMEOUT_MS = 20_000;
 const VISION_MAX_RETRIES = 2;
 

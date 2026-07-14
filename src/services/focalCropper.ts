@@ -42,7 +42,7 @@ export const ASPECT_RATIO_MAX = 1.9;
 export const TARGET_ASPECT_RATIO = 16 / 9;
 
 const OPENROUTER_ENDPOINT = '/api/llm';
-const VISION_MODEL = 'rekaai/reka-edge';
+const VISION_MODEL = 'xiaomi/mimo-v2.5';
 const FOCAL_TIMEOUT_MS = 5_000;
 const FOCAL_MAX_RETRIES = 1;
 

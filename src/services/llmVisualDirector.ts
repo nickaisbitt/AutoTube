@@ -5,7 +5,7 @@ import { extractJson } from '../utils/extractJson';
 import { sanitiseTopic } from './llm/index';
 
 // Default model — matches the script generator for consistency.
-export const DEFAULT_VISUAL_MODEL = 'openai/gpt-5.4-mini';
+export const DEFAULT_VISUAL_MODEL = 'xiaomi/mimo-v2.5';
 
 // ---------------------------------------------------------------------------
 // Types

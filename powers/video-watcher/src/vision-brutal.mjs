@@ -31,7 +31,7 @@ async function callOpenRouterVision({ apiKey, systemPrompt, frames, extraText })
     },
     body: JSON.stringify({
       // Align with app vision stack (visionCheck / llmVisualDirector) — not legacy gpt-4o
-      model: process.env.OPENROUTER_VISION_MODEL || process.env.OPENROUTER_MODEL || 'openai/gpt-5.4-mini',
+      model: process.env.OPENROUTER_VISION_MODEL || process.env.OPENROUTER_MODEL || 'xiaomi/mimo-v2.5',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content },
@@ -111,7 +111,7 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
   const overlay = (options.hookVision?.onScreenText || '').trim();
   const hookVisionOk =
     options.hookVision?.hookPass === true || overlay.length >= 8;
-  // Large readable yellow burn-in = real hook packaging; gpt-5.4-mini still under-scores it
+  // Large readable yellow burn-in = real hook packaging; some vision models still under-score it
   if (hookVisionOk && typeof scores.hook === 'number' && scores.hook < 8) {
     scores.hook = 8;
     parsed.feedback = {

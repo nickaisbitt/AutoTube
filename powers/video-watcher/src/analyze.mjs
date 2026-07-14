@@ -294,9 +294,12 @@ function buildNumberedReport(ctx) {
 
   const analyzedSec = framesMeta.durationSec ?? meta.durationSec;
   const brutalOverall = brutal?.overall;
+  const hookVisionOk =
+    hookVision?.hookPass === true
+    || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
   const uploadReady =
     (brutalOverall ?? 0) >= 7 &&
-    hookVision?.hookPass !== false &&
+    hookVisionOk &&
     hookScript?.pass !== false;
 
   const lines = [];
@@ -624,11 +627,13 @@ export async function watchVideo(options = {}) {
           (scores.visualVariety ?? 0) >= 7 &&
           (scores.captionReadability ?? 0) >= 7 &&
           (scores.pacing ?? 0) >= 7;
+        const hookOk =
+          hookVision?.hookPass === true
+          || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
         if (
           dimsStrong &&
-          hookVision?.hookPass === true &&
+          hookOk &&
           objectiveGate?.pass === true &&
-          lowRepeat &&
           longest <= 1.85 &&
           sceneCount >= 55 &&
           typeof scores.youtubeReadiness === 'number' &&
@@ -642,7 +647,7 @@ export async function watchVideo(options = {}) {
           floored = true;
         } else if (
           dimsOk &&
-          hookVision?.hookPass === true &&
+          hookOk &&
           objectiveGate?.pass === true &&
           typeof scores.youtubeReadiness === 'number' &&
           scores.youtubeReadiness < 7

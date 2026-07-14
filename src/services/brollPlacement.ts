@@ -2,6 +2,7 @@
  * LLM-driven B-roll placement timeline for loop / ffmpeg assembly.
  */
 import type { MediaAsset, ScriptSegment, VideoProject } from '../types';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 
 export interface EditTimelineEntry {
@@ -121,7 +122,7 @@ export async function buildBrollPlacementPlan(
 
     if (!response.ok) throw new Error(`OpenRouter ${response.status}`);
     const data = await response.json();
-    const raw = data?.choices?.[0]?.message?.content;
+    const raw = openRouterMessageText(data?.choices?.[0]?.message);
     if (!raw) throw new Error('empty response');
 
     const parsed = JSON.parse(raw) as { entries?: EditTimelineEntry[] };

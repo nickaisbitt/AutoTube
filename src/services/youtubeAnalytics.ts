@@ -1,5 +1,6 @@
 import { logger } from './logger';
 import { safeSetItem, safeGetItem } from '../utils/storage';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 // ---------------------------------------------------------------------------
@@ -421,7 +422,7 @@ export async function analyzeCommentSentiment(
     }
 
     const data = await res.json();
-    const content: string = data?.choices?.[0]?.message?.content ?? '{}';
+    const content: string = openRouterMessageText(data?.choices?.[0]?.message) || '{}';
     let parsed: { results: Array<{ index: number; sentiment: number; label: string; isFlagged: boolean }> };
     try {
       parsed = JSON.parse(content);

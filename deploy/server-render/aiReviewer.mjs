@@ -295,7 +295,8 @@ async function callVisionReviewAPI(frames, scriptText, apiKey) {
   }
 
   const data = await response.json();
-  const resContent = data?.choices?.[0]?.message?.content;
+  const { openRouterMessageText } = await import('../../scripts/lib/openRouterMessageText.mjs');
+  const resContent = openRouterMessageText(data?.choices?.[0]?.message);
   if (!resContent) throw new Error('API returned empty response');
   
   return resContent;

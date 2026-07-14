@@ -655,6 +655,18 @@ export function scoreCandidate(
     score -= 400;
   }
 
+  // 8b2. Nursing abuse topics: demote office/architecture, boost CCTV/care
+  const topicLower = `${_topicContext?.topic || ''} ${_topicContext?.resolvedTitle || ''} ${c.query || ''}`.toLowerCase();
+  const nursingTopic = /nursing\s*home|elder\s*abuse|care\s*home/.test(topicLower);
+  if (nursingTopic) {
+    if (/\b(office|corporate|skyline|architectural|conference room|business district|glass building)\b/i.test(meta)) {
+      score -= 350;
+    }
+    if (/\b(cctv|surveillance|camera|nursing|elderly|caregiver|care home|wheelchair|hallway)\b/i.test(meta)) {
+      score += 200;
+    }
+  }
+
   // 8c. Prefer bright B-roll when loop flagged muddy/dark frames
   const preferBright =
     (typeof sessionStorage !== 'undefined'

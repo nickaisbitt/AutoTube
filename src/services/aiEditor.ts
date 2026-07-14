@@ -8,6 +8,7 @@ import type {
   AIEditOptions,
 } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 import { DEFAULT_LLM_MODEL } from './llm/defaultModels';
 
@@ -765,12 +766,12 @@ export async function runAIEditPass(
       editPlan = createDefaultEditPlan(project);
     } else {
       const data = await response.json();
-      const rawContent: unknown = data?.choices?.[0]?.message?.content;
+      const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
 
       // ── Phase 4: Evaluating media quality ──
       onProgress?.(70, 'Evaluating media quality...');
 
-      if (typeof rawContent !== 'string' || !rawContent.trim()) {
+      if (!rawContent) {
         logger.warn('AIEditor', 'LLM returned empty content, using default plan');
         editPlan = createDefaultEditPlan(project);
       } else {

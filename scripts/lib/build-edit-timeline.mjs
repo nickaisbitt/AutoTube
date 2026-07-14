@@ -61,8 +61,12 @@ export function buildEditTimeline(project, options = {}) {
     const scoreAsset = (a) => {
       const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
       if (isOffBrandVisual(blob, topicBlob)) return -8;
-      if (/architectural model|architecture model|scale model|conference room/i.test(blob)) return -5;
+      if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -5;
       if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
+      const preferBright = process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
+      if (preferBright && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy)\b/i.test(blob)) {
+        return -4;
+      }
       // Intro + outro: topic relevance first so office/arch models lose to care/CCTV clips
       if (isIntro || isOutro) {
         const rel = scoreAssetRelevance(a, seg, project.topic || '');
@@ -70,6 +74,7 @@ export function buildEditTimeline(project, options = {}) {
         if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 3;
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up/i.test(blob)) score += 1;
         if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;
+        if (preferBright && /\b(daylight|sunny|bright|well.?lit|window light)\b/i.test(blob)) score += 2;
         return score;
       }
       if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3;

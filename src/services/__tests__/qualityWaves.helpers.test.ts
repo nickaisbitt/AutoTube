@@ -71,6 +71,35 @@ describe('quality waves 2–5 helpers', () => {
     expect(q.every((x) => !/bright office daylight/i.test(x))).toBe(true);
   });
 
+  it('rejects synthetic stock-video query self-inflation', async () => {
+    const { scoreAssetRelevance } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const seg = { id: 's1', title: 'Intro', narration: 'cameras recorded nursing home abuse' };
+    const fake = {
+      alt: 'architectural model office',
+      url: 'https://x/arch.mp4',
+      query: 'stock-video Intro',
+    };
+    expect(scoreAssetRelevance(fake, seg, 'nursing home cameras abuse')).toBe(0);
+    const real = {
+      alt: 'security camera cctv hallway nursing home',
+      url: 'https://x/cctv.mp4',
+      query: 'security camera cctv hallway',
+    };
+    expect(scoreAssetRelevance(real, seg, 'nursing home cameras abuse')).toBeGreaterThan(0.2);
+  });
+
+  it('estimateRenderCost returns server-render shape', async () => {
+    const { estimateRenderCost, trackOpenRouterCost, getCostSummary } = await import('../costTracker.mjs');
+    const est = estimateRenderCost({
+      script: [{ duration: 30 }, { duration: 30 }],
+      exportSettings: { resolution: '1080p' },
+    });
+    expect(est.totalEstimate).toBeGreaterThan(0);
+    expect(est.apiCostEstimate).toBeDefined();
+    trackOpenRouterCost('xiaomi/mimo-v2.5', 100, 50, 'unit-test');
+    expect(getCostSummary().grandTotal).toBeGreaterThanOrEqual(0);
+  });
+
   it('openRouterMessageText falls back to reasoning', async () => {
     const { openRouterMessageText } = await import('../../utils/openRouterMessageText');
     expect(openRouterMessageText({ content: '', reasoning: '{"ok":true}' })).toBe('{"ok":true}');

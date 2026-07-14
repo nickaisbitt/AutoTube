@@ -5,6 +5,7 @@
 import type { ScriptSegment } from '../../types';
 import { logger } from '../logger';
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../../utils/openRouterMessageText';
 import { sanitiseTopic } from './parsing';
 import { DEFAULT_SCRIPT_MODEL } from './scriptGenerator';
 
@@ -81,8 +82,8 @@ export async function generateTitleVariants(
     }
 
     const data = await response.json();
-    const rawContent: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+    const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
+  if (!rawContent) {
       return fallback;
     }
 
@@ -170,8 +171,8 @@ export async function generateVideoTitle(
     }
 
     const data = await response.json();
-    const rawContent: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+    const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
+  if (!rawContent) {
       logger.warn('OpenRouter', 'Title generation returned empty content');
       return topic;
     }

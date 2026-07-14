@@ -37,7 +37,7 @@ export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
   healthcare_cyber: [
     'hospital corridor empty hallway',
     'medical records laptop paperwork',
-    'hospital computer workstation night',
+    'hospital computer workstation',
     'worried nurse looking at computer',
     'server room data center racks',
     'patient checking phone hospital waiting room',

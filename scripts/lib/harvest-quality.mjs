@@ -95,7 +95,11 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   const strongTopicKws = topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
   const corpus = new Set([...strongTopicKws, ...segKeywords]);
 
-  const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+  const haystackRaw = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
+  // Ignore synthetic stock-video/stock-pool queries that self-inflate relevance
+  const queryText = String(asset?.query || '');
+  const queryForScore = /^(stock-video|stock-pool)\b/i.test(queryText) ? '' : queryText.toLowerCase();
+  const haystack = `${haystackRaw} ${queryForScore}`.trim();
   if (!haystack.trim()) return 0;
 
   const contextText = `${topic} ${segText}`.toLowerCase();
@@ -120,7 +124,7 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   if (asset?.type === 'video' || /\.(mp4|webm|mov)/i.test(asset?.url || '')) {
     score += 0.05;
   }
-  if (asset?.query && segKeywords.some((k) => asset.query.toLowerCase().includes(k))) {
+  if (queryForScore && segKeywords.some((k) => queryForScore.includes(k))) {
     score += 0.1;
   }
 

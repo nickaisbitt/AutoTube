@@ -5,6 +5,7 @@
 import type { ScriptSegment } from '../../types';
 import { logger } from '../logger';
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../../utils/openRouterMessageText';
 import { assignPurposeTag, computePacingScore } from '../renderingShared';
 import { sanitiseTopic, parseSegmentsFromContent, validateSegment } from './parsing';
 import { DEFAULT_SCRIPT_MODEL } from './scriptGenerator';
@@ -151,8 +152,8 @@ async function polishScriptPass(
     }
 
     const data = await response.json();
-    const rawContent: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+    const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!rawContent) {
       return segments;
     }
 
@@ -230,8 +231,8 @@ async function trimScriptPass(
     }
 
     const data = await response.json();
-    const rawContent: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+    const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!rawContent) {
       return segments;
     }
 
@@ -465,8 +466,8 @@ Return ONLY a valid JSON array of the improved segments. No markdown, no preambl
     }
 
     const data = await response.json();
-    const rawContent: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+    const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!rawContent) {
       logger.warn('OpenRouter', 'Script review returned empty content');
       // Assign purpose tags even on fallback (Requirement 11.1, 11.2)
       for (const seg of segments) {

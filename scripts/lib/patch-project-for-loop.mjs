@@ -204,7 +204,9 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
     }
 
     if (key) seenUrls.add(key);
-    const sid = segIds.includes(asset.segmentId) ? asset.segmentId : segIds[0];
+    // Orphans go to a body segment (not intro) so off-topic clips don't land on the hook
+    const bodyId = segIds.find((id, idx) => idx > 0 && idx < segIds.length - 1) || segIds[Math.min(1, segIds.length - 1)] || segIds[0];
+    const sid = segIds.includes(asset.segmentId) ? asset.segmentId : bodyId;
     buckets[sid].push({ ...asset, segmentId: sid });
   }
 
@@ -291,7 +293,10 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   trimProjectForLoop(project, options.maxTotalSec ?? 75);
 
   stripSceneLayoutsForLoop(project);
-  balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4));
+  // skipMediaPatch = post-sanitize re-assert of hooks only — do not reshuffle B-roll onto intro
+  if (!options.skipMediaPatch && !options.skipBalance) {
+    balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4));
+  }
 
   if (fixState.brollPlacement !== false && project.script?.length && project.media?.length) {
     project.editTimeline = buildEditTimeline(project, {

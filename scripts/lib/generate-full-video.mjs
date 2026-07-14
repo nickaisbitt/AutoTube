@@ -521,8 +521,8 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
   return false;
 }
 
-function isJunkStockClip(clip = {}, topicBlob = '') {
-  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
+function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
+  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
   const lifestyleJunk =
     /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
@@ -532,7 +532,18 @@ function isJunkStockClip(clip = {}, topicBlob = '') {
   // Architectural model / office mockups are junk for nursing abuse topics
   if (
     isNursingHomeTopic(topicBlob)
-    && /architectural model|architecture model|scale model|office meeting|conference room|skyline|glass building/.test(blob)
+    && /\b(architectural model|architecture model|scale model|office meeting|conference room|skyline|glass building|corporate office|business district|open plan office)\b/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
+  const preferBright =
+    options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
+  // Muddy/night stock when preferBright is on
+  if (
+    preferBright
+    && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy)\b/i.test(blob)
   ) {
     return true;
   }
@@ -617,7 +628,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'hospital computer workstation',
       'server room data center racks',
       'hands typing medical keyboard',
-      'hospital exterior building night',
+      ...(preferBright ? ['hospital exterior building day'] : ['hospital exterior building night']),
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
     return [...brightBoost, ...antiHud, ...base];
@@ -698,14 +709,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     let addedForQuery = 0;
     for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
       if (liveClips.length >= 40 || addedForQuery >= 3) break;
-      if (isJunkStockClip(clip, topicBlob)) {
+      if (isJunkStockClip(clip, topicBlob, { preferBright: options.preferBright === true })) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
       if (
         (cyberTopic || isNursingHomeTopic(topicBlob))
         && !isCyberRelevantClip(clip, topicBlob)
-        && !/Pexels/i.test(clip.source || '')
       ) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
@@ -741,7 +751,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const seenPool = new Set();
   pool = pool.filter((v) => {
     const key = (v.url || '').split('?')[0];
-    if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key) || isJunkStockClip(v, topicBlob)) return false;
+    if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key) || isJunkStockClip(v, topicBlob, { preferBright: options.preferBright === true })) return false;
     seenPool.add(key);
     return true;
   });
@@ -794,7 +804,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const faceScore = (clip) => {
     const blob = `${clip.query || ''} ${clip.alt || ''}`.toLowerCase();
     if (/microphone|podcast|recording studio|asmr|rode/i.test(blob)) return -2;
-    if (/architectural model|architecture model|scale model|conference room|skyline/i.test(blob)) return -2;
+    if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -3;
+    if (
+      (options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1')
+      && /\b(night|dark|silhouette|low.?light|muddy|underexposed)\b/i.test(blob)
+    ) {
+      return -2;
+    }
     if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) return 3;
     if (/face|person|people|couple|worried|shocked|reaction|crying|tenant|family|evict/i.test(blob)) return 2;
     if (/apartment|rent|keys|notice|letter|packing|boxes/i.test(blob)) return 1;
@@ -835,7 +851,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         type: 'video',
         url: clip.url,
         alt: clip.alt || seg.title,
-        query: `stock-video ${seg.title}`,
+        query: clip.query || `stock-video ${seg.title}`,
         source: clip.source || 'Stock video pool',
         duration: 8,
         isFallback: false,

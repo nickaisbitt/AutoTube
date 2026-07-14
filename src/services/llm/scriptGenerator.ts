@@ -5,6 +5,7 @@
 import type { TopicConfig, ScriptSegment } from '../../types';
 import { logger } from '../logger';
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../../utils/openRouterMessageText';
 import { sanitiseTopic, parseSegmentsFromContent, injectTransitionIfMissing } from './parsing';
 import { fetchWikiContext, fetchTopicContext } from './topicContext';
 import { DEFAULT_LLM_MODEL } from './defaultModels';
@@ -402,8 +403,8 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
   const data = await response.json();
   logger.success('OpenRouter', 'Successfully generated script structure.');
 
-  const rawContent: unknown = data?.choices?.[0]?.message?.content;
-  if (typeof rawContent !== 'string' || !rawContent.trim()) {
+  const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
+  if (!rawContent) {
     logger.warn('OpenRouter', 'API returned no content in response');
     throw new Error('AI returned empty response');
   }
@@ -439,8 +440,8 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
         }, { timeoutMs: 90_000, maxRetries: 1, signal });
         if (retryResponse.ok) {
           const retryData = await retryResponse.json();
-          const retryContent: unknown = retryData?.choices?.[0]?.message?.content;
-          if (typeof retryContent === 'string' && retryContent.trim()) {
+          const retryContent = openRouterMessageText(retryData?.choices?.[0]?.message);
+          if (retryContent) {
             const retrySegments = parseSegmentsFromContent(retryContent);
             segments = injectTransitionIfMissing(retrySegments);
             logger.success('OpenRouter', 'Specificity retry produced improved segments');

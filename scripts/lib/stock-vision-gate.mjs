@@ -2,12 +2,26 @@
  * Lightweight vision gate for stock B-roll thumbnails (loop harvest).
  * Rejects obvious off-brand subjects that keyword filters miss (e.g. dung beetles).
  */
+import { openRouterMessageText } from './openRouterMessageText.mjs';
+
 const OFF_BRAND_VISION_PROMPT = [
   'You judge ONE stock photo/video thumbnail for a serious news YouTube channel.',
   'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
   'reject=true if: insect/beetle/bug macro, puppet/muppet, cartoon/anime character, Minecraft/Fortnite gameplay, sci-fi HUD overlay.',
   'reject=false for real people, offices, hospitals, documents, phones, city exteriors.',
 ].join(' ');
+
+function visionPromptForTopic(topicBlob = '') {
+  if (/\bnursing\s*home|elder\s*abuse|care\s*home\b/i.test(topicBlob)) {
+    return [
+      'You judge ONE stock thumbnail for a nursing-home abuse / CCTV investigation video.',
+      'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
+      'reject=true if: generic corporate office, architectural scale model, glass skyline, conference room, beetle/insect, puppet, cartoon, HUD overlay.',
+      'reject=false for: CCTV/surveillance, care-home hallway, elderly patient, caregiver, family visit, wheelchair corridor.',
+    ].join(' ');
+  }
+  return OFF_BRAND_VISION_PROMPT;
+}
 
 /**
  * @param {string} imageUrl
@@ -33,7 +47,7 @@ export async function visionRejectOffBrandStock(imageUrl, apiKey, topicBlob = ''
       body: JSON.stringify({
         model: process.env.OPENROUTER_VISION_MODEL || process.env.OPENROUTER_MODEL || 'xiaomi/mimo-v2.5',
         messages: [
-          { role: 'system', content: OFF_BRAND_VISION_PROMPT },
+          { role: 'system', content: visionPromptForTopic(topicBlob) },
           {
             role: 'user',
             content: [
@@ -49,10 +63,7 @@ export async function visionRejectOffBrandStock(imageUrl, apiKey, topicBlob = ''
     });
     if (!response.ok) return { reject: false, reason: `http-${response.status}` };
     const data = await response.json();
-    const message = data?.choices?.[0]?.message;
-    let raw = '';
-    if (typeof message?.content === 'string' && message.content.trim()) raw = message.content;
-    else if (typeof message?.reasoning === 'string' && message.reasoning.trim()) raw = message.reasoning;
+    const raw = openRouterMessageText(data?.choices?.[0]?.message);
     if (!raw) return { reject: false, reason: 'empty' };
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}') + 1;

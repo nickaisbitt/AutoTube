@@ -425,6 +425,9 @@ async function main() {
         fixState.mediaOffset = 0;
         fixState.renderTier = 'draft';
         fixState.fixStrategy = 'interval';
+        // Topic-specific overlays must not leak onto the next topic
+        delete fixState.hookLine;
+        delete fixState.hookOverlay;
         nextStep = 'new topic (max retries hit, fixes retained)';
       }
     } else {
@@ -434,6 +437,8 @@ async function main() {
       fixState.topicRetryCount = 0;
       fixState.generateFailureCount = 0;
       fixState.renderTier = 'draft';
+      delete fixState.hookLine;
+      delete fixState.hookOverlay;
     }
 
     saveFixState(LOOP_DIR, fixState);

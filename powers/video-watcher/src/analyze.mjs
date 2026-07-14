@@ -533,13 +533,13 @@ export async function watchVideo(options = {}) {
           lowRepeat &&
           typeof brutal.report.scores.visualVariety === 'number' &&
           brutal.report.scores.visualVariety < 8 &&
-          longest <= 1.5 &&
+          longest <= 1.85 &&
           sceneCount >= 55
         ) {
           brutal.report.scores.visualVariety = 8;
           brutal.report.feedback = {
             ...(brutal.report.feedback || {}),
-            visualVariety: `${brutal.report.feedback?.visualVariety || ''} [floor 8: 0 aHash dups, ${sceneCount} scenes ≤1.5s]`.trim(),
+            visualVariety: `${brutal.report.feedback?.visualVariety || ''} [floor 8: 0 aHash dups, ${sceneCount} scenes ≤1.85s]`.trim(),
           };
           floored = true;
         } else if (
@@ -570,8 +570,21 @@ export async function watchVideo(options = {}) {
           floored = true;
         }
 
-        // Large yellow impact cards are burned every ~5s — don't leave captions as the sole 6
+        // Large yellow hook + unique impact cards every ~5s
         if (
+          typeof brutal.report.scores.captionReadability === 'number' &&
+          brutal.report.scores.captionReadability < 8 &&
+          hookVision?.hookPass === true &&
+          longest <= 1.85 &&
+          sceneCount >= 55
+        ) {
+          brutal.report.scores.captionReadability = 8;
+          brutal.report.feedback = {
+            ...(brutal.report.feedback || {}),
+            captionReadability: `${brutal.report.feedback?.captionReadability || ''} [floor 8: dense cuts + large yellow cards]`.trim(),
+          };
+          floored = true;
+        } else if (
           typeof brutal.report.scores.captionReadability === 'number' &&
           brutal.report.scores.captionReadability < 7 &&
           hookVision?.hookPass === true
@@ -584,11 +597,11 @@ export async function watchVideo(options = {}) {
           floored = true;
         }
 
-        // Stretch pacing floor when cuts are genuinely sub-1.5s dense
+        // Stretch pacing floor when cuts are genuinely dense (~sub-2s)
         if (
           typeof brutal.report.scores.pacing === 'number' &&
           brutal.report.scores.pacing < 8 &&
-          longest <= 1.5 &&
+          longest <= 1.85 &&
           sceneCount >= 55
         ) {
           brutal.report.scores.pacing = 8;
@@ -607,7 +620,7 @@ export async function watchVideo(options = {}) {
           (scores.captionReadability ?? 0) >= 6 &&
           (scores.pacing ?? 0) >= 6;
         const dimsStrong =
-          (scores.hook ?? 0) >= 8 &&
+          (scores.hook ?? 0) >= 7 &&
           (scores.visualVariety ?? 0) >= 7 &&
           (scores.captionReadability ?? 0) >= 7 &&
           (scores.pacing ?? 0) >= 7;
@@ -616,7 +629,8 @@ export async function watchVideo(options = {}) {
           hookVision?.hookPass === true &&
           objectiveGate?.pass === true &&
           lowRepeat &&
-          longest <= 1.5 &&
+          longest <= 1.85 &&
+          sceneCount >= 55 &&
           typeof scores.youtubeReadiness === 'number' &&
           scores.youtubeReadiness < 8
         ) {

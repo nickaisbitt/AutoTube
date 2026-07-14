@@ -410,13 +410,16 @@ async function main() {
       const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState, currentTopic || topic);
       fixState = nextFix;
       fixesApplied = applied;
-      if (chasingHigherScore && applied.length === 0) {
+      if (chasingHigherScore) {
         fixState.reHarvestMedia = true;
         fixState.faceSeekBroll = true;
+        fixState.harvestVideoFirst = true;
+        fixState.patternInterrupts = true;
+        fixState.cutIntervalSec = Math.min(fixState.cutIntervalSec ?? 1, 0.85);
         fixState.mediaOffset = (fixState.mediaOffset || 0) + 4;
         fixState.fixStrategy = 'reharvest';
         applied.push(
-          `stretch: score ${brutalScore}/10 < ${cfg.untilScore} → face-seek reharvest toward higher bar`,
+          `stretch: score ${brutalScore}/10 < ${cfg.untilScore} → force face-seek reharvest (offset ${fixState.mediaOffset})`,
         );
         fixesApplied = applied;
       }

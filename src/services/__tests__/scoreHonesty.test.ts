@@ -17,6 +17,13 @@ describe('score-honesty', () => {
 
     expect(hasCriticalQualityIssues(['dung beetle B-roll'], 'scroll past')).toBe(true);
     expect(hasCriticalQualityIssues(['slightly soft captions'], 'solid opener')).toBe(false);
+    expect(
+      hasCriticalQualityIssues(
+        ['Blurry stock bed'],
+        'You would not scroll past this in 3 seconds because the hook is strong',
+      ),
+    ).toBe(false);
+    expect(hasCriticalQualityIssues([], 'Viewers will scroll past in 3 seconds')).toBe(true);
 
     const brutal = {
       report: {

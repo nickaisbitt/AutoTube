@@ -7,7 +7,11 @@
 export const SCORE_DIMS = ['hook', 'visualVariety', 'captionReadability', 'pacing', 'youtubeReadiness'];
 
 const CRITICAL_ISSUE_RE =
-  /\b(beetle|dung|insect|puppet|muppet|cartoon|anime|off-?brand|scroll\s*past|scam[\s-]?bait|unrelated|wrong topic|off[\s-]?topic|low-budget|unprofessional|untrustworthy)\b/i;
+  /\b(beetle|dung|insect|puppet|muppet|cartoon|anime|off-?brand|scam[\s-]?bait|unrelated|wrong topic|off[\s-]?topic|low-budget|unprofessional|untrustworthy)\b/i;
+
+/** True scroll-away signal — ignore "would NOT scroll past" praise. */
+const SCROLL_PAST_CRITICAL_RE =
+  /\b(?:would|will|likely|viewer[s]?\s+will)\s+scroll\s*past\b|\bscroll[- ]past:\s*yes\b|\bscrolls?\s+past\s+(?:in|within|after)\b/i;
 
 /**
  * @param {string[]} [topIssues]
@@ -15,7 +19,10 @@ const CRITICAL_ISSUE_RE =
  */
 export function hasCriticalQualityIssues(topIssues = [], verdict = '') {
   const blob = [...(topIssues || []), verdict || ''].join(' ');
-  return CRITICAL_ISSUE_RE.test(blob);
+  if (CRITICAL_ISSUE_RE.test(blob)) return true;
+  // Strip negations so "would not scroll past" is not treated as critical
+  const scrollBlob = blob.replace(/\b(?:would|will|do|does|did)\s+not\s+scroll\s*past\b/gi, ' ');
+  return SCROLL_PAST_CRITICAL_RE.test(scrollBlob);
 }
 
 /**

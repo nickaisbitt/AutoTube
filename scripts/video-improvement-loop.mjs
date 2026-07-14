@@ -14,7 +14,7 @@ import { runLoopPreflight, waitForDevServer } from './loop-preflight.mjs';
 import { pickRandomTopic } from './lib/random-topics.mjs';
 import { watchVideo, resolveVideoPath } from '../powers/video-watcher/src/analyze.mjs';
 import { scoreForTargetGate } from '../powers/video-watcher/src/score-honesty.mjs';
-import { loadFixState, saveFixState } from './lib/loop-state.mjs';
+import { loadFixState, saveFixState, clearTopicPackaging } from './lib/loop-state.mjs';
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
 
@@ -170,8 +170,7 @@ async function main() {
       currentTopic = pickRandomTopic();
       fixState.topicRetryCount = 0;
       fixState.fixStrategy = 'interval';
-      delete fixState.hookLine;
-      delete fixState.hookOverlay;
+      clearTopicPackaging(fixState);
     }
 
     const topic = cfg.reviewOnly ? '(review-only)' : currentTopic;
@@ -254,6 +253,7 @@ async function main() {
           fixState.pendingTopic = null;
           fixState.generateFailureCount = 0;
           fixState.topicRetryCount = 0;
+          clearTopicPackaging(fixState);
         } else {
           fixState.pendingTopic = currentTopic;
         }
@@ -366,8 +366,10 @@ async function main() {
         nextStep = `RETRY same topic after brutal fail (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`;
       } else {
         nextStep = 'new random topic (brutal fail exhausted retries)';
+        currentTopic = null;
         fixState.pendingTopic = null;
         fixState.topicRetryCount = 0;
+        clearTopicPackaging(fixState);
       }
       saveFixState(LOOP_DIR, fixState);
       const scoreLabel = brutalScore ?? 'null';
@@ -500,11 +502,9 @@ async function main() {
           fixState.pendingTopic = null;
           fixState.topicRetryCount = 0;
           fixState.generateFailureCount = 0;
-          fixState.mediaOffset = 0;
           fixState.renderTier = 'draft';
           fixState.fixStrategy = 'interval';
-          delete fixState.hookLine;
-          delete fixState.hookOverlay;
+          clearTopicPackaging(fixState);
           nextStep = 'new topic (max retries hit, fixes retained)';
         }
       }
@@ -515,8 +515,7 @@ async function main() {
       fixState.topicRetryCount = 0;
       fixState.generateFailureCount = 0;
       fixState.renderTier = 'draft';
-      delete fixState.hookLine;
-      delete fixState.hookOverlay;
+      clearTopicPackaging(fixState);
     }
 
     saveFixState(LOOP_DIR, fixState);
@@ -563,8 +562,7 @@ async function main() {
       fixState.pendingTopic = null;
       fixState.topicRetryCount = 0;
       fixState.generateFailureCount = 0;
-      delete fixState.hookLine;
-      delete fixState.hookOverlay;
+      clearTopicPackaging(fixState);
       saveFixState(LOOP_DIR, fixState);
     }
 

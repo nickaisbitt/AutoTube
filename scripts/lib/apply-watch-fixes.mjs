@@ -243,6 +243,17 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push('4b. topIssues → prefer bright B-roll');
   }
 
+  // Script rewrite lever: weak hook script or very low youtubeReadiness
+  const ytReady = watch.brutal?.report?.scores?.youtubeReadiness;
+  if (watch.hookScript?.pass === false || (typeof ytReady === 'number' && ytReady <= 5)) {
+    s.rewriteScript = true;
+    applied.push(
+      watch.hookScript?.pass === false
+        ? '4c. Hook script FAIL → rewriteScript ON (AI edit next generate)'
+        : `4c. youtubeReadiness ${ytReady}/10 ≤5 → rewriteScript ON`,
+    );
+  }
+
   if (renderTier === 'full' && (watch.brutal?.overall ?? 10) <= 5) {
     s.useFastPacing = true;
     s.patternInterrupts = true;
@@ -310,8 +321,10 @@ export function formatFixReport(applied, fixState) {
   lines.push(`22. brollPlacement: ${fixState.brollPlacement !== false}`);
   lines.push(`23. faceSeekBroll: ${fixState.faceSeekBroll === true}`);
   lines.push(`24. karaokeCaptions: ${fixState.karaokeCaptions !== false}`);
+  lines.push(`25. preferBrightBroll: ${fixState.preferBrightBroll === true}`);
+  lines.push(`26. rewriteScript: ${fixState.rewriteScript === true}`);
   if (fixState.lastBrutalScores) {
-    lines.push(`25. lastBrutal: ${JSON.stringify(fixState.lastBrutalScores)}`);
+    lines.push(`27. lastBrutal: ${JSON.stringify(fixState.lastBrutalScores)}`);
   }
   return lines.join('\n');
 }

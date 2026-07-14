@@ -37,7 +37,29 @@ export const DEFAULT_FIX_STATE = {
   brollPlacement: true,
   faceSeekBroll: true,
   karaokeCaptions: false,
+  preferBrightBroll: false,
+  rewriteScript: false,
 };
+
+/**
+ * Clear topic-specific packaging so the next random topic does not inherit
+ * hooks, overlays, impact beats, or harvest offset from the previous topic.
+ * @param {object} state
+ * @returns {object}
+ */
+export function clearTopicPackaging(state) {
+  if (!state || typeof state !== 'object') return state;
+  delete state.hookLine;
+  delete state.hookOverlay;
+  delete state.impactBeats;
+  delete state.impactBeatIntervalSec;
+  state.hookLine = null;
+  state.mediaOffset = 0;
+  state.harvestNonce = 0;
+  state.rewriteScript = false;
+  // Keep preferBrightBroll / faceSeek as learned pipeline prefs across topics
+  return state;
+}
 
 /**
  * @param {string} loopDir

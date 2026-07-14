@@ -144,6 +144,24 @@ export async function handleQualityCheck(
     },
   });
 
+  const QC_TIMEOUT_MS = Number(process.env.AUTOTUBE_QC_TIMEOUT_MS || 600_000);
+  const killTimer = setTimeout(() => {
+    if (!child.killed) {
+      try {
+        sendEvent({
+          type: "error",
+          message: `Quality check timed out after ${Math.round(QC_TIMEOUT_MS / 1000)}s`,
+        });
+      } catch {
+        /* stream may be closed */
+      }
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!child.killed) child.kill("SIGKILL");
+      }, 5000).unref?.();
+    }
+  }, QC_TIMEOUT_MS);
+
   let stdout = "";
   let stderr = "";
 
@@ -179,6 +197,7 @@ export async function handleQualityCheck(
 
   child.on("close", (code: number) => {
     clearInterval(heartbeat);
+    clearTimeout(killTimer);
 
     if (code !== 0) {
       sendEvent({
@@ -210,6 +229,7 @@ export async function handleQualityCheck(
 
   req.on("close", () => {
     clearInterval(heartbeat);
+    clearTimeout(killTimer);
     if (!child.killed) child.kill("SIGTERM");
   });
 }

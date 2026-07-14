@@ -270,7 +270,9 @@ def run_text_quality_judge(api_key, api_url, model, vision_reports):
     try:
         with urllib.request.urlopen(req, timeout=90) as resp:
             payload = json.loads(resp.read().decode('utf-8'))
-        content = payload['choices'][0]['message']['content']
+        content = payload['choices'][0]['message'].get('content') or ''
+        if not str(content).strip():
+            content = payload['choices'][0]['message'].get('reasoning') or ''
         parsed = json.loads(content) if isinstance(content, str) else content
         return {
             'model': model,

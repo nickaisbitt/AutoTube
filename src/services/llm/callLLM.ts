@@ -4,6 +4,7 @@
 
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { withRetry } from '../../utils/withRetry';
+import { openRouterMessageText } from '../../utils/openRouterMessageText';
 import { logger } from '../logger';
 import { trackOpenRouterCost } from '../costTracker';
 import { DEFAULT_LLM_MODEL } from './defaultModels';
@@ -86,13 +87,12 @@ export async function callLLM<T = string>(
       }
 
       const data = await response.json();
-      const rawContent: unknown = data?.choices?.[0]?.message?.content;
+      const content = openRouterMessageText(data?.choices?.[0]?.message);
 
-      if (typeof rawContent !== 'string' || !rawContent.trim()) {
+      if (!content) {
         throw new Error('LLM returned empty response');
       }
 
-      const content = rawContent.trim();
       const parsed: T = parser ? parser(content) : (content as unknown as T);
 
       const usage = data?.usage

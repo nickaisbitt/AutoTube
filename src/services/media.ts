@@ -657,8 +657,10 @@ export function scoreCandidate(
 
   // 8c. Prefer bright B-roll when loop flagged muddy/dark frames
   const preferBright =
-    typeof sessionStorage !== 'undefined'
-    && sessionStorage.getItem('autotube_loop_prefer_bright') === 'true';
+    (typeof sessionStorage !== 'undefined'
+      && sessionStorage.getItem('autotube_loop_prefer_bright') === 'true')
+    || (typeof process !== 'undefined'
+      && process.env?.AUTOTUBE_PREFER_BRIGHT_BROLL === '1');
   if (preferBright) {
     if (/\b(night|dark|silhouette|low.?light|underexposed|dimly|shadowy|black background)\b/i.test(meta)) {
       score -= 180;

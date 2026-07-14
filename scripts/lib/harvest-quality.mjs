@@ -202,3 +202,36 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
     failing,
   };
 }
+
+/**
+ * Soft-pass when curated cyber stills or stock-API motion filled a thin harvest.
+ * Requires motion-rich timelines (enough videos per segment), not stills alone.
+ *
+ * @param {{ volumePass?: boolean, cyberStockInjected?: number, pexelsFetched?: number, pixabayFetched?: number, videoTopUp?: unknown[] }} mediaReport
+ * @param {object} project
+ * @returns {{ pass: boolean, reason?: string }}
+ */
+export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
+  if (mediaReport?.volumePass !== false) {
+    return { pass: true, reason: 'volume-hard-pass' };
+  }
+  const segments = project?.script || [];
+  const segN = segments.length || 1;
+  const media = project?.media || [];
+  const videoCount = media.filter((a) => a.type === 'video' || /\.mp4/i.test(a.url || '')).length;
+  const videosPerSeg = videoCount / segN;
+  const cyber = mediaReport.cyberStockInjected || 0;
+  const stockFetched = (mediaReport.pexelsFetched || 0) + (mediaReport.pixabayFetched || 0);
+  const topUp = mediaReport.videoTopUp?.length || 0;
+
+  // Soft-pass A: cyber stills pad + at least 1 video/segment average
+  if (cyber >= 6 && videosPerSeg >= 1) {
+    return { pass: true, reason: `soft-pass-cyber(${cyber})` };
+  }
+  // Soft-pass B: stock motion rich — ≥2 videos/seg and live stock or top-up
+  const motionRich = videosPerSeg >= 2 && (stockFetched > 0 || topUp >= segN);
+  if (motionRich) {
+    return { pass: true, reason: `soft-pass-motion(${videoCount}v/${segN}segs)` };
+  }
+  return { pass: false, reason: 'volume-hard-fail' };
+}

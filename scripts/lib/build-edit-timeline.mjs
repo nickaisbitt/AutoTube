@@ -2,6 +2,7 @@
  * Single source of truth for B-roll edit timelines (loop + ffmpeg assembly).
  * Always use post-TTS segment.duration when building for render.
  */
+import { scoreAssetRelevance, isOffBrandVisual } from './harvest-quality.mjs';
 
 /**
  * @param {object} project
@@ -56,11 +57,19 @@ export function buildEditTimeline(project, options = {}) {
     const script = project.script || [];
     const isIntro = seg.type === 'intro' || seg === script[0];
     const isOutro = seg.type === 'outro' || seg === script[script.length - 1];
+    const topicBlob = `${project.topic || ''} ${seg.narration || ''} ${seg.title || ''}`;
     const scoreAsset = (a) => {
       const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
+      if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up/i.test(blob)) return 2;
       if (isOutro && /checklist|subscribe|relieved|direct.?camera|hospital|records?|laptop|verify|call/i.test(blob)) return 3;
+      // Outro topic lock: prefer assets that match topic/narration keywords
+      if (isOutro) {
+        const rel = scoreAssetRelevance(a, seg, project.topic || '');
+        if (rel < 0.2) return -4;
+        return Math.round(rel * 4);
+      }
       return 0;
     };
     // Intro/outro = motion only when videos exist. Body = almost all video (V-V-V-I).

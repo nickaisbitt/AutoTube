@@ -32,8 +32,10 @@ import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-e
 import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
+  evaluateHarvestVolumeWithSoftPass,
   isOffBrandVisual,
 } from './harvest-quality.mjs';
+import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -60,7 +62,7 @@ export function resolvePixabayKey() {
   return (process.env.PIXABAY_API_KEY || process.env.VITE_PIXABAY_KEY || '').trim();
 }
 
-async function clickPipelineButton(page, locator, { settleMs = 2000, timeout = 120_000 } = {}) {
+async function clickPipelineButton(page, locator, { settleMs = 2000, timeout = 180_000 } = {}) {
   await locator.waitFor({ state: 'visible', timeout });
   if (settleMs > 0) await page.waitForTimeout(settleMs);
   try {
@@ -542,6 +544,8 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   const brightBoost = preferBright
     ? ['bright office daylight people', 'sunny window light phone call', 'well lit hospital corridor day']
     : [];
+  // Anti-HUD: prefer real people/places; HUD/interface junk is filtered downstream
+  const antiHud = ['real footage people office', 'documentary handheld camera people'];
   // Housing + "AI" must NOT pull podcast-mic / cyber B-roll (kills hook score)
   if (isHousingTopic(topicBlob)) {
     const faces = [
@@ -561,7 +565,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'court documents paperwork close up',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...base];
+    return [...brightBoost, ...antiHud, ...base];
   }
   if (isHealthcareTopic(topicBlob) && cyberTopic) {
     const faces = [
@@ -579,7 +583,8 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'hands typing medical keyboard',
       'hospital exterior building night',
     ];
-    return faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
+    return [...brightBoost, ...antiHud, ...base];
   }
   if (cyberTopic) {
     const faces = [
@@ -599,10 +604,11 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'lock padlock security close up',
       'smartphone banking app hands',
     ];
-    return faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
+    return [...brightBoost, ...antiHud, ...base];
   }
   if (/tornado|storm|disaster/i.test(topicBlob)) {
-    return ['tornado storm damage news', 'severe weather radar', 'emergency news footage', 'people sheltering storm'];
+    return [...brightBoost, ...antiHud, 'tornado storm damage news', 'severe weather radar', 'emergency news footage', 'people sheltering storm'];
   }
   const words = String(topicBlob || '')
     .toLowerCase()
@@ -611,10 +617,14 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     .filter((w) => w.length > 3)
     .slice(0, 4);
   const base = words.length ? [words.join(' '), ...words.slice(0, 2)] : ['people using technology'];
-  return faceFirst
+  const withFaces = faceFirst
     ? ['person reacting to news phone', 'shocked face close up', ...base]
     : base;
+  return [...brightBoost, ...antiHud, ...withFaces];
 }
+
+/** Exported for unit tests (bright / anti-HUD query proof). */
+export { stockMotionQueries };
 
 /**
  * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
@@ -658,6 +668,18 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (cyberTopic && !isCyberRelevantClip(clip, topicBlob) && !/Pexels/i.test(clip.source || '')) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
+      }
+      // Vision gate on first few stock thumbs (keyword alone misses dung beetles)
+      const thumb = clip.thumbnailUrl || clip.image || '';
+      const apiKey = resolveOpenRouterKey();
+      if (thumb && apiKey && (report.visionStockChecked || 0) < 6) {
+        report.visionStockChecked = (report.visionStockChecked || 0) + 1;
+        const verdict = await visionRejectOffBrandStock(thumb, apiKey, topicBlob);
+        if (verdict.reject) {
+          report.visionStockRejected = (report.visionStockRejected || 0) + 1;
+          report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+          continue;
+        }
       }
       if (liveClips.some((c) => c.url === clip.url)) continue;
       liveClips.push({ ...clip, query: q });
@@ -1348,7 +1370,20 @@ export async function generateFullVideo(options) {
     );
     log('⏳ Narration...');
     await page.getByTestId('skip-ai-edit-button').waitFor({ timeout: narrationTimeoutMs });
-    await page.getByTestId('skip-ai-edit-button').click();
+    if (fixState.rewriteScript === true) {
+      log('✍️ rewriteScript lever ON — running AI edit instead of skip');
+      const runAi = page.getByTestId('run-ai-edit-button').or(page.locator('button:has-text("Run AI Edit")').first());
+      const hasRunAi = await runAi.isVisible().catch(() => false);
+      if (hasRunAi) {
+        await clickPipelineButton(page, runAi, { timeout: Math.max(180_000, narrationTimeoutMs / 2) });
+        await page.waitForTimeout(2000);
+      } else {
+        await page.getByTestId('skip-ai-edit-button').click();
+      }
+      fixState.rewriteScript = false;
+    } else {
+      await page.getByTestId('skip-ai-edit-button').click();
+    }
     await page.waitForTimeout(500);
 
     const project = await page.evaluate(() => {
@@ -1404,20 +1439,11 @@ export async function generateFullVideo(options) {
         log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
       }
       if (mediaReport.volumePass === false) {
-        // Soft-pass when curated stills or stock-API motion filled the timeline
-        const cyber = mediaReport.cyberStockInjected || 0;
-        const videoCount = (project.media || []).filter((a) => a.type === 'video').length;
-        const segN = (project.script || []).length || 1;
-        const motionRich =
-          videoCount >= segN * 2 &&
-          ((mediaReport.pexelsFetched || 0) + (mediaReport.pixabayFetched || 0) > 0 ||
-            (mediaReport.videoTopUp?.length || 0) >= segN);
-        if (cyber >= 6) {
-          log(`   ⚠️ Volume soft-pass via cyber stock (+${cyber})`);
+        const soft = evaluateHarvestVolumeWithSoftPass(mediaReport, project);
+        if (soft.pass) {
+          log(`   ⚠️ Volume ${soft.reason}`);
           mediaReport.volumePass = true;
-        } else if (motionRich) {
-          log(`   ⚠️ Volume soft-pass via stock motion (${videoCount} videos across ${segN} segs)`);
-          mediaReport.volumePass = true;
+          mediaReport.volumeSoftPass = soft.reason;
         } else {
           const failing = mediaReport.harvestQuality?.failing || [];
           const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');

@@ -538,7 +538,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   // Architectural model / office mockups are junk for nursing abuse topics
   if (
     isNursingHomeTopic(topicBlob)
-    && /\b(architectural model|architecture model|scale model|office meeting|conference room|skyline|glass building|corporate office|business district|open plan office)\b/i.test(
+    && /\b(architectural model|architecture model|scale model|office meeting|conference room|skyline|glass building|corporate office|business district|open plan office|vegetable|produce crate|grocery|fruit market|food crate|empty hospital bed|blurry bed)\b/i.test(
       blob,
     )
   ) {

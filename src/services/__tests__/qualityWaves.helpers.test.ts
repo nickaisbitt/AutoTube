@@ -105,4 +105,13 @@ describe('quality waves 2–5 helpers', () => {
     expect(openRouterMessageText({ content: '', reasoning: '{"ok":true}' })).toBe('{"ok":true}');
     expect(openRouterMessageText({ content: 'hello' })).toBe('hello');
   });
+
+  it('isBrutalHardFail ignores missing scores when vision was skipped', async () => {
+    const { isBrutalHardFail } = await import('../../../scripts/lib/brutal-gate.mjs');
+    expect(isBrutalHardFail(false, null)).toBe(false);
+    expect(isBrutalHardFail(false, { success: false })).toBe(false);
+    expect(isBrutalHardFail(true, null)).toBe(true);
+    expect(isBrutalHardFail(true, { success: false, error: 'boom' })).toBe(true);
+    expect(isBrutalHardFail(true, { success: true, report: { scores: { overall: 7 } } })).toBe(false);
+  });
 });

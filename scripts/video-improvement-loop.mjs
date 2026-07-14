@@ -17,6 +17,7 @@ import { scoreForTargetGate } from '../powers/video-watcher/src/score-honesty.mj
 import { loadFixState, saveFixState, clearTopicPackaging } from './lib/loop-state.mjs';
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
+import { isBrutalHardFail } from './lib/brutal-gate.mjs';
 
 const ROOT = process.cwd();
 const LOOP_DIR = join(ROOT, 'test-recordings', 'improvement-loop');
@@ -284,8 +285,10 @@ async function main() {
 
     const renderTier = fixState.renderTier || 'draft';
     const skipBrutalOnDraft = renderTier === 'draft' && !cfg.objectiveOnly;
+    // Draft intentionally skips brutal vision; only hard-fail when vision was requested.
+    const visionRequested = !(cfg.skipVision || skipBrutalOnDraft || cfg.objectiveOnly);
 
-    console.log(`\n👁 Video Watcher review (tier=${renderTier})...\n`);
+    console.log(`\n👁 Video Watcher review (tier=${renderTier}${visionRequested ? '' : ', vision skipped'})...\n`);
     let watch;
     const projectPathForWatch = join(runDir, 'project.json');
     const hookOverlayHint = (() => {
@@ -302,7 +305,7 @@ async function main() {
       watch = await watchVideo({
         video_path: videoPath,
         mode: cfg.watchMode,
-        skip_vision: cfg.skipVision || skipBrutalOnDraft || cfg.objectiveOnly,
+        skip_vision: !visionRequested,
         script_text: scriptText,
         render_tier: renderTier,
         project_path: existsSync(projectPathForWatch) ? projectPathForWatch : undefined,
@@ -335,7 +338,7 @@ async function main() {
       });
     }
 
-    const brutalFailed = watch.brutal?.success === false || !watch.brutal?.report?.scores;
+    const brutalFailed = isBrutalHardFail(visionRequested, watch.brutal);
     const gateScore = scoreForTargetGate(watch.brutal, cfg.untilScore);
     const brutalScore = typeof gateScore === 'number' ? gateScore : null;
     const brutalDims = watch.brutal?.report?.scores || null;

@@ -293,12 +293,15 @@ function buildNumberedReport(ctx) {
     apiKeyUsed,
     mode,
     renderTier,
+    skipVision = false,
   } = ctx;
 
   const analyzedSec = framesMeta.durationSec ?? meta.durationSec;
   const rawOverall = brutal?.rawOverall;
   const flooredOverall = brutal?.flooredOverall ?? brutal?.overall;
-  const brutalFailed = brutal?.success === false || brutal == null;
+  // Intentional skip_vision (draft tier) is not a hard fail — just no scores yet.
+  const brutalFailed =
+    !skipVision && (brutal?.success === false || brutal == null);
   const hookVisionOk =
     hookVision?.hookPass === true
     || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
@@ -323,7 +326,10 @@ function buildNumberedReport(ctx) {
   );
   n += 1;
 
-  if (brutalFailed) {
+  if (skipVision && brutal == null) {
+    lines.push(`${n}. **Brutal overall:** skipped (draft / skip_vision — promote on objective, score at full tier)`);
+    n += 1;
+  } else if (brutalFailed) {
     lines.push(`${n}. **Brutal overall:** FAILED — ${brutal?.error || 'no review'} (hard fail; do not treat as pass)`);
     n += 1;
   } else if (typeof flooredOverall === 'number') {
@@ -545,6 +551,7 @@ export async function watchVideo(options = {}) {
     apiKeyUsed: Boolean(apiKey) && !skipVision,
     mode,
     renderTier: options.render_tier,
+    skipVision,
   });
 
   const reportPath = join(outDir, 'WATCH_REPORT.md');

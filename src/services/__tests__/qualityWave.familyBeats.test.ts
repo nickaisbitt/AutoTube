@@ -153,4 +153,37 @@ describe('topic family + impact beats', () => {
     expect(outro.every((e) => e.assetId !== 'still')).toBe(true);
     expect(outro[0].assetId).toBe('face');
   });
+
+  it('intro timeline borrows motion when segment has a single asset', async () => {
+    const { buildEditTimeline } = await import('../../../scripts/lib/build-edit-timeline.mjs');
+    const project = {
+      topic: 'The nursing home cameras that recorded abuse for years',
+      script: [
+        { id: 's1', type: 'intro', duration: 4, narration: 'cameras recorded nursing home abuse' },
+        { id: 's2', type: 'body', duration: 4, narration: 'staff covered it up' },
+      ],
+      media: [
+        {
+          id: 'intro-only',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://x/intro.mp4',
+          alt: 'security camera cctv hallway nursing home',
+          query: 'security camera cctv hallway',
+        },
+        {
+          id: 'body-cctv',
+          segmentId: 's2',
+          type: 'video',
+          url: 'https://x/body.mp4',
+          alt: 'care home corridor wheelchair elderly',
+          query: 'care home corridor wheelchair',
+        },
+      ],
+    };
+    const intro = buildEditTimeline(project, { cutIntervalSec: 1 }).filter((e) => e.segmentId === 's1');
+    const ids = new Set(intro.map((e) => e.assetId));
+    expect(intro.length).toBeGreaterThan(1);
+    expect(ids.size).toBeGreaterThan(1);
+  });
 });

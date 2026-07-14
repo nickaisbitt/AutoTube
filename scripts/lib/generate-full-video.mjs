@@ -1548,6 +1548,21 @@ export async function generateFullVideo(options) {
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }
+    if (process.env.AUTOTUBE_BROLL_PLACEMENT === '1' && fixState.brollPlacement !== false) {
+      try {
+        const { buildBrollPlacementPlanNode } = await import('./broll-placement.mjs');
+        const plan = await buildBrollPlacementPlanNode(project, {
+          cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+          apiKey: resolveOpenRouterKey(),
+        });
+        if (plan.entries?.length) {
+          project.editTimeline = plan.entries;
+          log(`   📐 B-roll placement (${plan.source}): ${plan.entries.length} clips`);
+        }
+      } catch (e) {
+        log(`   ⚠️ B-roll placement skipped: ${e.message}`);
+      }
+    }
     accumulateExcludedUrls(fixState, project);
 
     try {

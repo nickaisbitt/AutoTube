@@ -86,8 +86,20 @@ export function buildEditTimeline(project, options = {}) {
       ? (() => {
           if (isIntro || isOutro) {
             const ranked = [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a));
-            const usable = ranked.filter((a) => scoreAsset(a) >= 0);
-            return uniqueAssetsByUrl(usable.length ? usable : ranked.slice(0, 1));
+            let usable = uniqueAssetsByUrl(ranked.filter((a) => scoreAsset(a) >= 0));
+            if (!usable.length) usable = uniqueAssetsByUrl(ranked.slice(0, 1));
+            // Avoid single-asset intro holds: borrow more topic-relevant motion from the global pool
+            if (usable.length < 2 && globalPool.length) {
+              const extras = uniqueAssetsByUrl(
+                [...globalPool]
+                  .filter((a) => a.type === 'video' && !usable.some((u) => u.id === a.id || urlKey(u) === urlKey(a)))
+                  .map((a) => ({ ...a, segmentId: seg.id }))
+                  .sort((a, b) => scoreAsset(b) - scoreAsset(a))
+                  .filter((a) => scoreAsset(a) >= 0),
+              );
+              usable = uniqueAssetsByUrl([...usable, ...extras]).slice(0, 6);
+            }
+            return usable.length ? usable : uniqueAssetsByUrl(ranked.slice(0, 1));
           }
           const out = [];
           let vi = 0;

@@ -691,6 +691,25 @@ export async function executeAssembleVideo(
   // Deep-clone the project so the render operates on an immutable snapshot
   const renderSnapshot = structuredClone(activeProject);
 
+  // Optional LLM B-roll timeline when loop flag is set (otherwise leave project timeline alone)
+  const loopBroll =
+    (typeof sessionStorage !== 'undefined' &&
+      sessionStorage.getItem('autotube_loop_broll_placement') === 'true') ||
+    (typeof process !== 'undefined' && process.env?.AUTOTUBE_BROLL_PLACEMENT === '1');
+  if (loopBroll) {
+    try {
+      const { buildBrollPlacementPlan } = await import('../../services/brollPlacement');
+      const apiKey =
+        (typeof localStorage !== 'undefined' && localStorage.getItem('openRouterKey')) || undefined;
+      const plan = await buildBrollPlacementPlan(renderSnapshot, apiKey || undefined, 1.25);
+      if (plan.entries?.length) {
+        renderSnapshot.editTimeline = plan.entries;
+      }
+    } catch {
+      /* keep existing timeline */
+    }
+  }
+
   const quality = exportOptions?.quality || 'high';
   const format = exportOptions?.format || 'mp4';
   const preset = QUALITY_PRESETS[quality];

@@ -20,12 +20,12 @@ function visionPromptForTopic(topicBlob = '') {
       'reject=false for: CCTV/surveillance, care-home hallway, elderly patient, caregiver, family visit, wheelchair corridor.',
     ].join(' ');
   }
-  if (/veteran|va\s+benefits|dark\s*web|data\s*broker|ssn/i.test(topicBlob)) {
+  if (/veteran|va\s+benefits|dark\s*web|data\s*broker|ssn|identity.?theft/i.test(topicBlob)) {
     return [
-      'You judge ONE stock thumbnail for a veterans benefits / identity-theft investigation video.',
+      'You judge ONE stock thumbnail for a veterans benefits / identity-theft / data-broker investigation video.',
       'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
-      'reject=true if: bank OTP scam props, voice-clone studio mic, beetle/insect, puppet, cartoon, sci-fi HUD.',
-      'reject=false for: veteran, paperwork, government office, credit report, worried person on phone, documents.',
+      'reject=true if: bank OTP keypad/SMS scam props, call-center headset farm, voice-clone studio mic, nursing-home CCTV hallway, beetle/insect, puppet, cartoon, sci-fi HUD, crypto trading screens.',
+      'reject=false for: veteran/military, VA/government office, benefits paperwork, SSN/credit report docs, identity theft victim on phone, dark-web/data-broker laptop (no HUD), worried family.',
     ].join(' ');
   }
   return OFF_BRAND_VISION_PROMPT;

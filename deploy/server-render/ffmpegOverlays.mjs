@@ -291,7 +291,7 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   for (let i = 0; i < times.length; i += 1) {
     const text = escapeDrawtext(beats[i % beats.length]);
     const start = times[i];
-    const end = Math.min(duration - 0.05, start + 1.1);
+    const end = Math.min(duration - 0.05, start + 2.0);
     filters.push(
       `drawtext=text='${text}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.42:enable='between(t\\,${start}\\,${end})'`,
     );

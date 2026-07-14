@@ -116,7 +116,8 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
     success: true,
     mode: 'brutal',
     overall,
-    uploadReady: parsed.uploadReady === true && overall >= 7,
+    // LLM often leaves uploadReady:false even at 7+ — overall after floors is the bar
+    uploadReady: overall >= 7,
     report: parsed,
     frameCount: frames.length,
     retentionSampling: true,

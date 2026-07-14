@@ -99,6 +99,14 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
   });
 
   const scores = { ...(parsed.scores || {}) };
+  for (const key of ['hook', 'visualVariety', 'captionReadability', 'pacing', 'youtubeReadiness']) {
+    const v = scores[key];
+    if (typeof v === 'boolean') scores[key] = v ? 7 : 5;
+    else if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) scores[key] = Number(v);
+    else if (typeof v !== 'number' || !Number.isFinite(v)) delete scores[key];
+    else scores[key] = Math.max(0, Math.min(10, v));
+  }
+  parsed.scores = scores;
   if (options.hookVision?.hookPass === true && typeof scores.hook === 'number' && scores.hook < 7) {
     const overlay = (options.hookVision.onScreenText || '').trim();
     scores.hook = 7;

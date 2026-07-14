@@ -133,13 +133,13 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
 
   const flush = () => {
     if (!buffer.length) return;
-    // Exclusive windows — never stack every segment's captions into a wall of text
-    const start = Math.max(bufferStart, lastCaptionEnd);
-    const end = Math.max(start + 0.35, Math.min(bufferEnd, start + 2.0));
-    if (end <= start) {
-      buffer = [];
-      return;
-    }
+    // Prefer speech-synced times; only nudge if we'd overlap the previous line
+    let start = bufferStart;
+    let end = Math.max(bufferEnd, start + 0.4);
+    if (start < lastCaptionEnd) start = lastCaptionEnd;
+    if (end <= start) end = start + 0.45;
+    // Cap line hold so captions stay punchy (≤4 words already)
+    end = Math.min(end, start + 2.4);
     const text = escapeAss(buffer.join(' ').toUpperCase());
     lines.push(`Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${text}`);
     lastCaptionEnd = end;

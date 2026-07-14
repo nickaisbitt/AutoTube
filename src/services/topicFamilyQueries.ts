@@ -17,7 +17,13 @@ export function resolveTopicFamily(topic: string): string {
   ) {
     return 'healthcare_cyber';
   }
-  if (/veteran|benefits|dark\s*web|data\s*broker|ssn|va\s+benefits/.test(t)) return 'bank_scam';
+  // Veterans benefits / dark-web brokers — not generic bank OTP scam visuals
+  if (
+    /veteran|va\s+benefits|va\s+records|dark\s*web|data\s*broker|ssn|social\s*security/.test(t)
+    || (/benefits/.test(t) && /veteran|va\b|dark\s*web|broker|ssn/.test(t))
+  ) {
+    return 'veterans_benefits';
+  }
   if (/bank|fraud|scam|voice.?clone|hack|identity|password|phish|leak|breach|cyber/.test(t)) return 'bank_scam';
   if (/ticket|bot|scalp|concert|fan/.test(t)) return 'tickets';
   if (/nuclear|radiation|meltdown|tornado|hurricane|flood|wildfire|disaster/.test(t)) return 'disaster';
@@ -41,6 +47,14 @@ export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
     'worried nurse looking at computer',
     'server room data center racks',
     'patient checking phone hospital waiting room',
+  ],
+  veterans_benefits: [
+    'veteran looking at phone worried',
+    'government office paperwork documents',
+    'person checking credit report laptop',
+    'military dog tags close up',
+    'shocked person reading letter documents',
+    'identity theft paperwork hands',
   ],
   bank_scam: [
     'shocked person looking at phone bank',

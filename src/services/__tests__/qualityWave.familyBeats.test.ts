@@ -18,6 +18,16 @@ describe('topic family + impact beats', () => {
     expect(qs.every((q) => !/server room|medical records laptop/i.test(q))).toBe(true);
   });
 
+  it('resolves veterans benefits family separately from bank scam', async () => {
+    const { resolveTopicFamily, topicFamilyQueries } = await import('../topicFamilyQueries');
+    const topic = 'Why veterans benefits data leaked to dark web brokers';
+    expect(resolveTopicFamily(topic)).toBe('veterans_benefits');
+    expect(resolveTopicFamily('employee benefits open enrollment HR')).toBe('generic');
+    const qs = topicFamilyQueries(topic, 3);
+    expect(qs.some((q) => /veteran|credit|paperwork|government|identity/i.test(q))).toBe(true);
+    expect(qs.every((q) => !/bank building|hacker typing|credit card payment/i.test(q))).toBe(true);
+  });
+
   it('builds healthcare impact beats instead of bank OTP cards', async () => {
     const { buildImpactBeatsForTopic } = await import('../../../scripts/lib/impactBeatsByTopic.mjs');
     const beats = buildImpactBeatsForTopic(

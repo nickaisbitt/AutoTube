@@ -62,7 +62,10 @@ export function buildImpactBeatsForTopic(topic) {
   }
 
   // Veterans / benefits / dark-web data brokers (before generic bank)
-  if (/veteran|benefits|dark\s*web|data\s*broker|ssn|social\s*security|va\s+benefits/.test(tl)) {
+  if (
+    /veteran|va\s+benefits|va\s+records|dark\s*web|data\s*broker|ssn|social\s*security/.test(tl)
+    || (/benefits/.test(tl) && /veteran|va\b|dark\s*web|broker|ssn/.test(tl))
+  ) {
     return [
       'DATA BROKERED',
       'BENEFITS EXPOSED',

@@ -214,15 +214,17 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
   };
 
   const script = options.project?.script || [];
+  // Muxed audio starts with INTRO_SILENCE_SECONDS (narration.mjs) before segment 0 speech
+  const INTRO_SILENCE_SEC = Number(process.env.AUTOTUBE_INTRO_SILENCE_SEC || 3.5);
   const segOffsetFor = (segKey) => {
     const n = Number(segKey);
-    if (!Number.isFinite(n) || n <= 0) return 0;
-    let off = 0;
+    if (!Number.isFinite(n) || n < 0) return INTRO_SILENCE_SEC;
+    let off = INTRO_SILENCE_SEC;
     for (let i = 0; i < n && i < script.length; i += 1) {
       off += Number(script[i]?.duration) || 0;
     }
     // Fallback when durations missing: stack by prior segment word ends
-    if (off <= 0 && n > 0) {
+    if (off <= INTRO_SILENCE_SEC && n > 0) {
       for (let i = 0; i < n; i += 1) {
         const prev = wordTimestampCache.get(i) || [];
         const maxEnd = prev.reduce((m, w) => Math.max(m, Number(w.end) || 0), 0);

@@ -40,6 +40,7 @@ import {
   isHealthcareTopic,
   isHousingTopic,
   isNursingHomeTopic,
+  isVeteransBenefitsTopic,
 } from './topic-family.mjs';
 
 export function resolveOpenRouterKey() {
@@ -509,6 +510,11 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
       blob,
     );
   }
+  if (isVeteransBenefitsTopic(topicBlob)) {
+    return /veteran|military|benefits|ssn|identity|credit|paperwork|document|government|broker|phone|worried|letter/.test(
+      blob,
+    );
+  }
   const topical =
     /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|worried|shock|texting|ransom|leak|breach|records?/.test(
       blob,
@@ -614,6 +620,25 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return [...brightBoost, ...antiHud, ...base];
   }
+  // Veterans benefits / dark-web brokers — not bank OTP / voice-clone stock
+  if (isVeteransBenefitsTopic(topicBlob)) {
+    const faces = [
+      'veteran looking at phone worried',
+      'shocked person reading letter documents',
+      'worried couple looking at paperwork',
+      'person checking credit report laptop',
+    ];
+    const topical = [
+      'government office paperwork documents',
+      'military dog tags close up',
+      'identity theft paperwork hands',
+      'laptop social security form',
+      'person calling phone worried face',
+      'credit freeze documents desk',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
   if (isHealthcareTopic(topicBlob) && cyberTopic) {
     const faces = [
       'worried patient looking at phone',
@@ -687,6 +712,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const cyberTopic =
     !housingTopic &&
     !isNursingHomeTopic(topicBlob) &&
+    !isVeteransBenefitsTopic(topicBlob) &&
     (/bank|hack|stolen|identity|ransom|voice.?clone|fraud|scam|phish|cyber|password|data.?breach/i.test(topicBlob)
       || (isHealthcareTopic(topicBlob) && /hack|breach|ransom|leak|records?|data|cyber/i.test(topicBlob)));
 
@@ -714,7 +740,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         continue;
       }
       if (
-        (cyberTopic || isNursingHomeTopic(topicBlob))
+        (cyberTopic || isNursingHomeTopic(topicBlob) || isVeteransBenefitsTopic(topicBlob))
         && !isCyberRelevantClip(clip, topicBlob)
       ) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
@@ -1484,9 +1510,6 @@ export async function generateFullVideo(options) {
       }
       if (mediaReport.cyberStockInjected) {
         log(`   🛡️ Cyber stock stills: +${mediaReport.cyberStockInjected}`);
-      }
-      if (mediaReport.cyberStockSkipped) {
-        log(`   🎬 Cyber stills: ${mediaReport.cyberStockSkipped}`);
       }
       if (mediaReport.cyberStockSkipped) {
         log(`   🎬 Cyber stills: ${mediaReport.cyberStockSkipped}`);

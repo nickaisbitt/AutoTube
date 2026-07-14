@@ -89,7 +89,7 @@ describe('quality waves 2–5 helpers', () => {
   });
 
   it('estimateRenderCost returns server-render shape', async () => {
-    const { estimateRenderCost, trackOpenRouterCost, getCostSummary } = await import('../costTracker.mjs');
+    const { estimateRenderCost, trackOpenRouterCost, getCostSummary } = await import('../costTracker.node.mjs');
     const est = estimateRenderCost({
       script: [{ duration: 30 }, { duration: 30 }],
       exportSettings: { resolution: '1080p' },

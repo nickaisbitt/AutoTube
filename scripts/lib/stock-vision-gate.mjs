@@ -20,6 +20,14 @@ function visionPromptForTopic(topicBlob = '') {
       'reject=false for: CCTV/surveillance, care-home hallway, elderly patient, caregiver, family visit, wheelchair corridor.',
     ].join(' ');
   }
+  if (/veteran|va\s+benefits|dark\s*web|data\s*broker|ssn/i.test(topicBlob)) {
+    return [
+      'You judge ONE stock thumbnail for a veterans benefits / identity-theft investigation video.',
+      'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
+      'reject=true if: bank OTP scam props, voice-clone studio mic, beetle/insect, puppet, cartoon, sci-fi HUD.',
+      'reject=false for: veteran, paperwork, government office, credit report, worried person on phone, documents.',
+    ].join(' ');
+  }
   return OFF_BRAND_VISION_PROMPT;
 }
 

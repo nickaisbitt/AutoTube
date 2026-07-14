@@ -41,7 +41,7 @@ import {
   measureAudioLoudness,
 } from './server-render/pipelineReliability.mjs';
 
-import { estimateRenderCost } from './src/services/costTracker.mjs';
+import { estimateRenderCost } from './src/services/costTracker.node.mjs';
 import {
   isYouTubeExportMode,
   captionMetrics,

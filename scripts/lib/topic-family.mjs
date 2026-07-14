@@ -13,6 +13,15 @@ export function isHousingTopic(topic) {
   return /landlord|tenant|evict|rent|lease|apartment|housing|foreclos/i.test(String(topic || ''));
 }
 
+/** @param {string} topic */
+export function isVeteransBenefitsTopic(topic) {
+  const t = String(topic || '').toLowerCase();
+  return (
+    /veteran|va\s+benefits|va\s+records|dark\s*web.*broker|data\s*broker.*ssn|ssn.*broker/.test(t)
+    || (/benefits/.test(t) && /veteran|va\b|dark\s*web|data\s*broker|ssn|social\s*security/.test(t))
+  );
+}
+
 /**
  * Hospital / patient-records cyber topics — excludes nursing-home abuse/camera stories.
  * @param {string} topic
@@ -20,6 +29,7 @@ export function isHousingTopic(topic) {
 export function isHealthcareCyberTopic(topic) {
   const t = String(topic || '').toLowerCase();
   if (isNursingHomeTopic(t)) return false;
+  if (isVeteransBenefitsTopic(t)) return false;
   return (
     /hospital|healthcare|patient|hipaa|medical|clinic|records?\b/.test(t)
     && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?\b|broker/.test(t)
@@ -58,8 +68,11 @@ export function impactBeatsMatchTopic(beats, topic) {
   if (isHousingTopic(t)) {
     return /lease|evict|rent|credit|blacklist|appeal|lock changed/.test(blob);
   }
-  if (/veteran|benefits|dark\s*web|data\s*broker|ssn|va\s+benefits/.test(t)) {
-    return /benefit|broker|ssn|va|dark web|credit|identity/.test(blob);
+  if (/veteran|va\s+benefits|benefits\s+data|dark\s*web|data\s*broker|ssn|social\s*security/.test(t)) {
+    return (
+      /benefit|broker|ssn|va\b|dark web|credit|identity|file|freeze/.test(blob)
+      && !/otp|wire|voice clone|lease|evict|hospital breach|charts stolen/.test(blob)
+    );
   }
   if (/bank|fraud|scam|voice.?clone|hack|identity|password|leak|breach|cyber|ransom/.test(t)) {
     return /otp|wire|voice|scam|transfer|callback|account|password/.test(blob);

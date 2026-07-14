@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import type { TopicConfig } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
+import { extractJson } from '../utils/extractJson';
 
 interface TopicStepProps {
   config: TopicConfig;
@@ -36,8 +38,6 @@ const CATEGORY_ICONS: Record<string, typeof TrendingUp> = {
 function getIconForCategory(category: string) {
   return CATEGORY_ICONS[category] || Lightbulb;
 }
-
-import { extractJson } from '../utils/extractJson';
 
 async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
   const today = new Date().toLocaleDateString('en-US', {
@@ -75,7 +75,7 @@ async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
   if (!response.ok) throw new Error(`API error: ${response.status}`);
 
   const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
+  const content = openRouterMessageText(data?.choices?.[0]?.message);
   if (!content) throw new Error('Empty response');
 
   let parsed = extractJson(content);

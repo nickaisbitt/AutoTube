@@ -43,8 +43,8 @@ export function buildEditTimeline(project, options = {}) {
     const isIntro = seg.type === 'intro' || seg === (project.script || [])[0];
     const scoreAsset = (a) => {
       const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
-      if (/microphone|podcast|recording studio|asmr/i.test(blob)) return -2;
-      if (/face|person|people|couple|worried|shocked|reaction|tenant|family/i.test(blob)) return 2;
+      if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind/i.test(blob)) return -2;
+      if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up/i.test(blob)) return 2;
       return 0;
     };
     // Intro = motion only when videos exist. Body = almost all video (V-V-V-I).

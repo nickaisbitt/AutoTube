@@ -402,33 +402,50 @@ async function main() {
       console.log(`   Flag file: ${TARGET_FILE}`);
     }
 
-    if (!uploadReady) {
+    // Chasing until-score (e.g. 8) must not stop just because uploadReady fires at ≥7
+    const chasingHigherScore =
+      Number.isFinite(cfg.untilScore) && brutalScore < cfg.untilScore;
+
+    if (!uploadReady || chasingHigherScore) {
       const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState, currentTopic || topic);
       fixState = nextFix;
       fixesApplied = applied;
+      if (chasingHigherScore && applied.length === 0) {
+        fixState.reHarvestMedia = true;
+        fixState.faceSeekBroll = true;
+        fixState.mediaOffset = (fixState.mediaOffset || 0) + 4;
+        fixState.fixStrategy = 'reharvest';
+        applied.push(
+          `stretch: score ${brutalScore}/10 < ${cfg.untilScore} → face-seek reharvest toward higher bar`,
+        );
+        fixesApplied = applied;
+      }
       const fixReport = formatFixReport(applied, fixState);
       writeFileSync(join(runDir, 'FIXES_APPLIED.md'), fixReport);
       console.log(`\n🔧 FIX GATE — must apply fixes before next topic:\n`);
       console.log(fixReport);
 
-      if (blockNextTopic && fixState.topicRetryCount < fixState.maxRetriesPerTopic) {
-        fixState.topicRetryCount += 1;
-        fixState.pendingTopic = currentTopic;
-        nextStep = `RETRY same topic with fixes (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`;
-        console.log(`\n⛔ Not advancing topic — ${nextStep}`);
-      } else if (fixState.topicRetryCount >= fixState.maxRetriesPerTopic) {
-        console.log(`\n⚠ Max retries on topic — advancing with accumulated fixes`);
-        currentTopic = null;
-        fixState.pendingTopic = null;
-        fixState.topicRetryCount = 0;
-        fixState.generateFailureCount = 0;
-        fixState.mediaOffset = 0;
-        fixState.renderTier = 'draft';
-        fixState.fixStrategy = 'interval';
-        // Topic-specific overlays must not leak onto the next topic
-        delete fixState.hookLine;
-        delete fixState.hookOverlay;
-        nextStep = 'new topic (max retries hit, fixes retained)';
+      if (blockNextTopic || chasingHigherScore) {
+        if (fixState.topicRetryCount < fixState.maxRetriesPerTopic) {
+          fixState.topicRetryCount += 1;
+          fixState.pendingTopic = currentTopic;
+          nextStep = chasingHigherScore
+            ? `RETRY same topic toward ${cfg.untilScore}/10 (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`
+            : `RETRY same topic with fixes (${fixState.topicRetryCount}/${fixState.maxRetriesPerTopic})`;
+          console.log(`\n⛔ Not advancing topic — ${nextStep}`);
+        } else {
+          console.log(`\n⚠ Max retries on topic — advancing with accumulated fixes`);
+          currentTopic = null;
+          fixState.pendingTopic = null;
+          fixState.topicRetryCount = 0;
+          fixState.generateFailureCount = 0;
+          fixState.mediaOffset = 0;
+          fixState.renderTier = 'draft';
+          fixState.fixStrategy = 'interval';
+          delete fixState.hookLine;
+          delete fixState.hookOverlay;
+          nextStep = 'new topic (max retries hit, fixes retained)';
+        }
       }
     } else {
       console.log('\n✅ Upload-ready — advancing to new random topic');
@@ -477,7 +494,8 @@ async function main() {
       break;
     }
 
-    if (cfg.untilPass && uploadReady) {
+    // Only stop on uploadReady when not chasing a higher until-score bar
+    if (cfg.untilPass && uploadReady && !chasingHigherScore) {
       console.log('\n🎉 Upload-ready — stopping loop.');
       break;
     }

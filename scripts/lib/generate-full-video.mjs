@@ -498,7 +498,7 @@ function isCyberRelevantClip(clip = {}) {
 function isJunkStockClip(clip = {}) {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
   return (
-    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|surgery|surgical|hospital|operating room|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|cartoon|animation|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair/.test(
+    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|surgery|surgical|hospital|operating room|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|cartoon|animation|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro insect|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
       blob,
     )
   );

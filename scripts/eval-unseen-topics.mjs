@@ -138,7 +138,17 @@ async function main() {
         models: {
           openrouter: process.env.OPENROUTER_MODEL || null,
           vision: process.env.OPENROUTER_VISION_MODEL || null,
+          watch:
+            process.env.AUTOTUBE_WATCH_MODEL
+            || process.env.OPENROUTER_VISION_MODEL
+            || process.env.OPENROUTER_MODEL
+            || null,
+          watchIndependent: Boolean(process.env.AUTOTUBE_WATCH_MODEL),
         },
+        sameModelJudgeLimitation:
+          !process.env.AUTOTUBE_WATCH_MODEL
+            ? 'Watcher uses same model family as generation unless AUTOTUBE_WATCH_MODEL is set.'
+            : null,
         cold: true,
         curatedPacks: false,
         familyTemplates: false,

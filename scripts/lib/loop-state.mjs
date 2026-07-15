@@ -39,6 +39,7 @@ export const DEFAULT_FIX_STATE = {
   karaokeCaptions: false,
   preferBrightBroll: false,
   rewriteScript: false,
+  maxReusePerUrl: 1,
 };
 
 /**

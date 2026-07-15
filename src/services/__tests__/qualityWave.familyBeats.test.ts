@@ -55,6 +55,37 @@ describe('topic family + impact beats', () => {
     expect(impactBeatsMatchTopic(['HOSPITAL BREACH', 'CHARTS STOLEN'], topic)).toBe(false);
   });
 
+  it('builds insurance fraud impact beats instead of bank OTP cards', async () => {
+    const { buildImpactBeatsForTopic } = await import('../../../scripts/lib/impactBeatsByTopic.mjs');
+    const { resolveTopicFamily } = await import('../topicFamilyQueries');
+    const topic = 'The insurance scam using fake car crash videos';
+    expect(resolveTopicFamily(topic)).toBe('insurance_fraud');
+    const beats = buildImpactBeatsForTopic(topic);
+    expect(beats.join(' ')).toMatch(/CRASH|CLAIM|DASHCAM|WHIPLASH/i);
+    expect(beats.join(' ')).not.toMatch(/OTP STOLEN|VOICE CLONE|LEASE DENIED/i);
+  });
+
+  it('caps per-URL reuse at 1 on housing body cuts when pool is large enough', async () => {
+    const { buildEditTimeline } = await import('../../../scripts/lib/build-edit-timeline.mjs');
+    const urls = Array.from({ length: 6 }, (_, i) => `https://videos.pexels.com/video-files/${i}/${i}.mp4`);
+    const project = {
+      topic: 'How landlords use AI to evict tenants faster',
+      script: [{ id: 's2', type: 'body', duration: 6, narration: 'eviction story' }],
+      media: urls.map((url, i) => ({
+        id: `a${i}`,
+        segmentId: 's2',
+        type: 'video',
+        url,
+        alt: i % 2 ? 'eviction notice tenant worried' : 'landlord apartment door',
+      })),
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    const uses = tl.map((e) => project.media.find((m) => m.id === e.assetId)?.url);
+    for (const url of urls) {
+      expect(uses.filter((u) => u === url).length).toBeLessThanOrEqual(1);
+    }
+  });
+
   it('rejects cross-topic hook overrides (healthcare hook on landlord)', async () => {
     const { buildShockHookLine, hookClashesWithTopic } = await import('../../../e2e/openRouterMock.mjs');
     const landlordTopic = 'How landlords use AI to evict tenants faster';

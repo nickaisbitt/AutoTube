@@ -5,7 +5,7 @@
 import { buildShockHookLine, hookClashesWithTopic } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
 import { buildImpactBeatsForTopic } from './impactBeatsByTopic.mjs';
-import { isNursingHomeTopic } from './topic-family.mjs';
+import { isHousingTopic, isNursingHomeTopic } from './topic-family.mjs';
 
 /** Keep hook/overlay aligned to the current topic (prevents bank→landlord leakage). */
 function syncTopicHook(s, topic, visionFix) {
@@ -231,6 +231,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     s.reHarvestMedia = true;
     s.mediaOffset = (s.mediaOffset || 0) + 6;
     s.fixStrategy = 'reharvest';
+    s.maxReusePerUrl = 1;
+    if (isHousingTopic(topic)) {
+      // Rewrite + loose reuse regresses housing (insect/off-brand B-roll)
+      s.rewriteScript = false;
+    }
     // Do not raise minAssets (that pads images and hurts variety further)
     applied.push(
       `3. visualVariety ${visualVariety}/10 → face/human B-roll reharvest (offset ${s.mediaOffset}, no image pad)`,
@@ -257,7 +262,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
 
   // Script rewrite lever: weak hook script or very low youtubeReadiness
   const ytReady = watch.brutal?.report?.scores?.youtubeReadiness;
-  if (watch.hookScript?.pass === false || (typeof ytReady === 'number' && ytReady <= 5)) {
+  if (watch.hookScript?.pass === false || (typeof ytReady === 'number' && ytReady <= 5 && !isHousingTopic(topic))) {
     s.rewriteScript = true;
     applied.push(
       watch.hookScript?.pass === false

@@ -4,11 +4,14 @@
 
 /**
  * @param {string} topic
- * @returns {'nursing_abuse'|'healthcare_cyber'|'heist_fraud'|'veterans_benefits'|'bank_scam'|'landlord'|'tickets'|'disaster'|'generic'}
+ * @returns {'nursing_abuse'|'healthcare_cyber'|'heist_fraud'|'veterans_benefits'|'bank_scam'|'landlord'|'insurance_fraud'|'tickets'|'disaster'|'generic'}
  */
 export function resolveTopicFamily(topic: string): string {
   const t = String(topic || '').toLowerCase();
   if (/landlord|tenant|evict|rent|lease|apartment|housing/.test(t)) return 'landlord';
+  if (/insurance|car\s*crash|fake\s*crash|staged\s*crash|crash\s*video|whiplash|claim\s*fraud|dashcam\s*scam/.test(t)) {
+    return 'insurance_fraud';
+  }
   // Nursing abuse / CCTV before healthcare cyber (nursing+camera used to resolve as hospital breach)
   if (/nursing\s*home|elder\s*abuse|care\s*home/.test(t)) return 'nursing_abuse';
   // Jewel / vault heists and fake-airport fraud — before generic bank OTP visuals
@@ -98,6 +101,14 @@ export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
     'tenant packing boxes apartment',
     'keys lock apartment door',
     'for rent sign house porch',
+  ],
+  insurance_fraud: [
+    'car crash dashcam footage highway',
+    'damaged car accident scene daylight',
+    'insurance adjuster inspecting car',
+    'traffic accident news footage',
+    'worried driver looking at phone',
+    'insurance claim paperwork desk',
   ],
   tickets: [
     'concert crowd phone tickets',

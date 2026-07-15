@@ -7,6 +7,7 @@ import {
   isHealthcareCyberTopic,
   isHeistTopic,
   isHousingTopic,
+  isInsuranceFraudTopic,
   isNursingHomeTopic,
   isVeteransBenefitsTopic,
 } from './topic-family.mjs';
@@ -117,6 +118,23 @@ export function buildImpactBeatsForTopic(topic) {
       'STAGE SET',
       'HEIST EXPOSED',
       'LOCK IT DOWN',
+    ];
+  }
+
+  if (isInsuranceFraudTopic(tl)) {
+    return [
+      'CRASH STAGED',
+      'CLAIM DENIED',
+      'DASHCAM FAKE',
+      'WHIPLASH SCAM',
+      'ADJUSTER ALERT',
+      'PAYOUT BLOCKED',
+      'VIDEO DOCTORED',
+      'IMPACT FAKED',
+      'POLICY VOID',
+      'FRAUD UNIT',
+      'NO INJURY',
+      'CASE CLOSED',
     ];
   }
 

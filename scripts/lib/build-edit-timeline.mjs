@@ -32,9 +32,8 @@ export function buildEditTimeline(project, options = {}) {
   const preferVideo = options.preferVideo !== false;
   const entries = [];
   const globalPool = uniqueAssetsByUrl(project.media || []);
-  const usedUrlsGlobally = new Set();
   const urlUseCount = new Map();
-  const maxReusePerUrl = options.maxReusePerUrl ?? 2;
+  const maxReusePerUrl = options.maxReusePerUrl ?? 1;
   const topicIsHousing = isHousingTopic(project.topic || '');
 
   for (const seg of project.script || []) {
@@ -63,7 +62,9 @@ export function buildEditTimeline(project, options = {}) {
     const isIntro =
       seg.type === 'intro'
       || (seg === script[0] && seg.type !== 'body' && seg.type !== 'outro' && seg.type !== 'section');
-    const isOutro = seg.type === 'outro' || seg === script[script.length - 1];
+    const isOutro =
+      seg.type === 'outro'
+      || (seg === script[script.length - 1] && !['body', 'intro', 'section'].includes(seg.type));
     const topicBlob = `${project.topic || ''} ${seg.narration || ''} ${seg.title || ''}`;
     const scoreAsset = (a) => {
       const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
@@ -88,6 +89,7 @@ export function buildEditTimeline(project, options = {}) {
         return score;
       }
       if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3;
+      if (topicIsHousing && /beetle|insect|wildlife|macro|spider|bug|larva|caterpillar/i.test(blob)) return -10;
       if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2;
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up/i.test(blob)) return 2;
       return 0;
@@ -112,20 +114,22 @@ export function buildEditTimeline(project, options = {}) {
             }
             return usable.length ? usable : uniqueAssetsByUrl(ranked.slice(0, 1));
           }
+          const ranked = [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a));
+          const usable = uniqueAssetsByUrl(ranked.filter((a) => scoreAsset(a) >= 0));
+          if (usable.length) return usable;
           const out = [];
           let vi = 0;
           let ii = 0;
           const total = Math.max(assets.length, 8);
           const pickVideo = () => {
-            const ranked = [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a));
             for (let j = 0; j < ranked.length; j++) {
               const candidate = ranked[(vi + j) % ranked.length];
               const key = urlKey(candidate);
-              if (key && usedUrlsGlobally.has(key)) continue;
+              if (key && (urlUseCount.get(key) || 0) >= maxReusePerUrl) continue;
               vi += 1;
               return candidate;
             }
-            const fallback = videos[vi % videos.length];
+            const fallback = ranked[vi % ranked.length];
             vi += 1;
             return fallback;
           };
@@ -152,22 +156,26 @@ export function buildEditTimeline(project, options = {}) {
       while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
       const pickFrom = (pool) => {
+        const canUse = (candidate) => {
+          const key = urlKey(candidate);
+          if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
+          if (topicIsHousing && !isIntro && scoreAsset(candidate) < 0) return false;
+          if (key && !isIntro && (urlUseCount.get(key) || 0) >= maxReusePerUrl) return false;
+          return true;
+        };
         for (let j = 0; j < pool.length; j++) {
           const candidate = pool[(ai + j) % pool.length];
-          const key = urlKey(candidate);
-          if (candidate.id === lastAssetId || (key && key === lastUrl)) continue;
-          if (key && usedUrlsGlobally.has(key)) continue;
-          if (key && !isIntro && (urlUseCount.get(key) || 0) >= maxReusePerUrl) continue;
-          return candidate;
+          if (canUse(candidate)) return candidate;
         }
-        for (let j = 0; j < pool.length; j++) {
-          const candidate = pool[(ai + j) % pool.length];
+        return pool.reduce((best, candidate) => {
           const key = urlKey(candidate);
-          if (candidate.id === lastAssetId || (key && key === lastUrl)) continue;
-          if (key && !isIntro && (urlUseCount.get(key) || 0) >= maxReusePerUrl) continue;
-          return candidate;
-        }
-        return pool[ai % pool.length];
+          const count = key ? (urlUseCount.get(key) || 0) : 0;
+          const bestKey = urlKey(best);
+          const bestCount = bestKey ? (urlUseCount.get(bestKey) || 0) : 0;
+          if (candidate.id === lastAssetId || (key && key === lastUrl)) return best;
+          if (topicIsHousing && !isIntro && scoreAsset(candidate) < 0) return best;
+          return count < bestCount ? candidate : best;
+        }, pool[ai % pool.length]);
       };
 
       let asset = pickFrom(ordered);
@@ -195,7 +203,6 @@ export function buildEditTimeline(project, options = {}) {
       lastAssetId = asset.id;
       lastUrl = urlKey(asset) || null;
       if (lastUrl && !isIntro) {
-        usedUrlsGlobally.add(lastUrl);
         urlUseCount.set(lastUrl, (urlUseCount.get(lastUrl) || 0) + 1);
       }
       t = end;
@@ -237,6 +244,7 @@ export function validateEditTimeline(project, options = {}) {
   if (rebuilt) {
     project.editTimeline = buildEditTimeline(project, {
       cutIntervalSec: options.cutIntervalSec ?? 1.25,
+      maxReusePerUrl: options.maxReusePerUrl ?? 1,
       reason: 'post-sanitize rebuild',
     });
   }

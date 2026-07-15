@@ -46,6 +46,7 @@ import {
   isHealthcareTopic,
   isHeistTopic,
   isHousingTopic,
+  isInsuranceFraudTopic,
   isNursingHomeTopic,
   isVeteransBenefitsTopic,
 } from './topic-family.mjs';
@@ -565,6 +566,11 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
       blob,
     );
   }
+  if (isInsuranceFraudTopic(topicBlob)) {
+    return /crash|car|dashcam|wreck|damage|insurance|claim|adjuster|injury|whiplash|accident|road|highway|driver/.test(
+      blob,
+    );
+  }
   if (isVeteransBenefitsTopic(topicBlob)) {
     return /veteran|military|benefits|ssn|identity|credit|paperwork|document|government|broker|phone|worried|letter|dog tag/.test(
       blob,
@@ -629,6 +635,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   const preferBright = options.preferBright === true;
   const nursing = isNursingHomeTopic(topicBlob);
   const housing = isHousingTopic(topicBlob);
+  const insurance = isInsuranceFraudTopic(topicBlob);
   const veterans = isVeteransBenefitsTopic(topicBlob);
   const healthcareCyber = isHealthcareCyberTopic(topicBlob) && cyberTopic;
   const heist = isHeistTopic(topicBlob);
@@ -637,7 +644,9 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       ? ['bright care home corridor day', 'well lit nursing home hallway', 'daylight elderly care room']
       : housing
         ? ['bright apartment interior daylight', 'sunny porch house exterior', 'well lit kitchen table worried']
-        : veterans
+        : insurance
+          ? ['daylight car crash dashcam footage', 'bright highway traffic accident news', 'well lit insurance paperwork desk']
+          : veterans
           ? ['bright government office daylight', 'well lit desk paperwork documents', 'daylight veteran portrait worried']
           : healthcareCyber
             ? ['well lit hospital corridor day', 'bright hospital waiting room', 'daylight medical records desk']
@@ -648,7 +657,9 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     ? ['documentary care home footage people', 'real surveillance hallway footage', 'authentic news interview elderly care']
     : housing
       ? ['real apartment building exterior footage', 'documentary eviction notice tenant worried']
-      : veterans
+      : insurance
+        ? ['real dashcam car crash footage', 'documentary insurance claim investigation']
+        : veterans
         ? ['real veteran portrait worried', 'documentary government office paperwork']
         : healthcareCyber
           ? ['real hospital corridor footage people', 'documentary nurse workstation']
@@ -671,6 +682,24 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'landlord house door knock',
       'court documents paperwork close up',
       'worried tenant reading letter kitchen',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
+  if (insurance) {
+    const faces = [
+      'shocked driver looking at phone car',
+      'worried couple insurance paperwork',
+      'person reviewing dashcam footage laptop',
+      'injured person holding neck whiplash',
+    ];
+    const topical = [
+      'car crash dashcam footage highway',
+      'damaged car accident scene daylight',
+      'insurance adjuster inspecting car damage',
+      'traffic accident news footage',
+      'car bumper damage close up',
+      'police accident scene road',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return [...brightBoost, ...antiHud, ...base];
@@ -1717,7 +1746,10 @@ export async function generateFullVideo(options) {
       // Re-assert shock hook + overlay after media mutations
       patchProjectForLoop(project, topic, { ...fixState, forceRealStock: false }, { skipMediaPatch: true });
     }
-    const timelineReport = validateEditTimeline(project, { cutIntervalSec: fixState.cutIntervalSec ?? 1.25 });
+    const timelineReport = validateEditTimeline(project, {
+      cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+      maxReusePerUrl: fixState.maxReusePerUrl ?? 1,
+    });
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }

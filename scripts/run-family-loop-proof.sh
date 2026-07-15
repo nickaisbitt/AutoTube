@@ -30,6 +30,7 @@ s.patternInterrupts=true;
 s.whisperAlign=true;
 s.impactBeatIntervalSec=3.5;
 s.rewriteScript=false;
+s.maxReusePerUrl=1;
 s.hookLine=null;
 delete s.hookOverlay;
 delete s.impactBeats;
@@ -57,8 +58,9 @@ if [ "${FORCE_DIAMOND:-0}" = "1" ]; then
   run_one diamond "The diamond heist that used a fake airport" 4 full
 fi
 run_one veterans "Why veterans benefits data leaked to dark web brokers" 4 draft
-run_one landlord "How landlords use AI to evict tenants faster" 4 full
+run_one landlord "How landlords use AI to evict tenants faster" 6 full
 run_one bank "Why your bank account could be emptied by an AI voice clone" 4 draft
 run_one healthcare "The hospital hack that exposed 10 million patient records overnight" 4 draft
+run_one insurance "The insurance scam using fake car crash videos" 4 draft
 
 echo "ALL PROOFS COMPLETE" | tee -a /tmp/loop-proof-all.log

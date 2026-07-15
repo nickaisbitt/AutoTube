@@ -301,6 +301,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   if (fixState.brollPlacement !== false && project.script?.length && project.media?.length) {
     project.editTimeline = buildEditTimeline(project, {
       cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+      maxReusePerUrl: fixState.maxReusePerUrl ?? 1,
       reason: 'loop heuristic placement',
     });
   }

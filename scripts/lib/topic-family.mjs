@@ -13,6 +13,12 @@ export function isHousingTopic(topic) {
   return /landlord|tenant|evict|rent|lease|apartment|housing|foreclos/i.test(String(topic || ''));
 }
 
+/** Staged car-crash / insurance fraud — not bank OTP or generic cyber. */
+export function isInsuranceFraudTopic(topic) {
+  const t = String(topic || '').toLowerCase();
+  return /insurance|car\s*crash|fake\s*crash|staged\s*crash|crash\s*video|whiplash|claim\s*fraud|dashcam\s*scam/.test(t);
+}
+
 /** @param {string} topic */
 export function isVeteransBenefitsTopic(topic) {
   const t = String(topic || '').toLowerCase();
@@ -44,6 +50,7 @@ export function isBankScamTopic(topic) {
     || isVeteransBenefitsTopic(t)
     || isHealthcareCyberTopic(t)
     || isHousingTopic(t)
+    || isInsuranceFraudTopic(t)
     || isHeistTopic(t)
   ) {
     return false;
@@ -112,6 +119,12 @@ export function impactBeatsMatchTopic(beats, topic) {
     return (
       /vault|diamond|jewel|heist|airport|runway|security|guard|safe|cargo|stolen|fake/.test(blob)
       && !/otp|wire|voice clone|lease|evict|hospital breach|charts stolen|nursing|abuse/.test(blob)
+    );
+  }
+  if (isInsuranceFraudTopic(t)) {
+    return (
+      /crash|claim|dashcam|whiplash|adjuster|staged|fraud|policy|payout/.test(blob)
+      && !/otp|wire|voice clone|lease|evict|hospital breach|charts stolen/.test(blob)
     );
   }
   // Generic: any overlap with long topic tokens

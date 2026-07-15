@@ -1277,7 +1277,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
 
   const deduped = dedupeMediaByPHash(relevance.media, {
     devServer,
-    maxDistance: loopMode ? 8 : VISUAL_DUP_MAX_DISTANCE,
+    maxDistance: loopMode ? 9 : VISUAL_DUP_MAX_DISTANCE,
     onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
   });
   project.media = [...deduped.media];
@@ -1327,7 +1327,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     // Top-up can reintroduce off-brand / off-topic clips — gate again
     stripJunkDemoVideos(project, report);
     const paddingBeforeFilter = (project.media || []).filter(isVolumePaddingAsset);
-    const afterTopUp = filterAssetsByRelevance(project.media || [], project, { minScore: 0.28 });
+    const afterTopUp = filterAssetsByRelevance(project.media || [], project, { minScore: 0.22 });
     report.relevanceDroppedAfterTopUp = afterTopUp.dropped;
     project.media = mergeVolumePadding(afterTopUp.media, paddingBeforeFilter);
     report.afterTopUp = project.media.length;

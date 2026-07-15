@@ -2,7 +2,7 @@
  * Patch generated project before server-render (loop fixes).
  */
 import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './stock-media-urls.mjs';
-import { buildImpactBeatsForTopic, buildShockHookLine } from '../../e2e/openRouterMock.mjs';
+import { buildImpactBeatsForTopic, buildShockHookLine, hookClashesWithTopic } from '../../e2e/openRouterMock.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
 
@@ -307,7 +307,11 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
 
   if (fixState.shockHook !== false && project.script?.length) {
     // Always topic-match — rejects stale bank hooks left in FIX_STATE from prior topics
-    const hook = buildShockHookLine(topic, fixState.hookLine);
+    const safeOverride =
+      fixState.hookLine && hookClashesWithTopic(topic, fixState.hookLine)
+        ? undefined
+        : fixState.hookLine;
+    const hook = buildShockHookLine(topic, safeOverride);
     const hookOverlay = buildShortHookOverlay(topic, hook, {
       preferredOverlay: fixState.hookOverlay,
       visionFix: fixState.hookOverlay && isInstructionOverlay(fixState.hookOverlay) ? fixState.hookOverlay : undefined,

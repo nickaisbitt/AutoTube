@@ -552,6 +552,9 @@ async function fetchPixabayVideos(query, perPage = 8) {
 /** Prefer phone/bank/security motion for cyber topics — deny lifestyle pets/nature filler. */
 function isCyberRelevantClip(clip = {}, topicBlob = '') {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
+  if (/beetle|dung beetle|insect swarm|macro insect|bug macro|wildlife macro|spider macro/.test(blob)) {
+    return false;
+  }
   if (isNursingHomeTopic(topicBlob)) {
     return /nursing|elder|care\s*home|cctv|camera|surveillance|caregiver|wheelchair|hallway|corridor|abuse|family|visit/.test(
       blob,

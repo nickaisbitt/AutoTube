@@ -55,6 +55,16 @@ describe('topic family + impact beats', () => {
     expect(impactBeatsMatchTopic(['HOSPITAL BREACH', 'CHARTS STOLEN'], topic)).toBe(false);
   });
 
+  it('rejects cross-topic hook overrides (healthcare hook on landlord)', async () => {
+    const { buildShockHookLine, hookClashesWithTopic } = await import('../../../e2e/openRouterMock.mjs');
+    const landlordTopic = 'How landlords use AI to evict tenants faster';
+    const healthcareHook = 'Your medical chart was already in the breach dump.';
+    expect(hookClashesWithTopic(landlordTopic, healthcareHook)).toBe(true);
+    const hook = buildShockHookLine(landlordTopic, healthcareHook);
+    expect(hook).toMatch(/evict|landlord|ai already filed/i);
+    expect(hook).not.toMatch(/medical chart|breach dump/i);
+  });
+
   it('avoids bank shock hooks on nursing-home / veterans topics', async () => {
     const { buildShockHookLine } = await import('../../../e2e/openRouterMock.mjs');
     const { buildShortHookOverlay } = await import('../../../scripts/lib/patch-project-for-loop.mjs');

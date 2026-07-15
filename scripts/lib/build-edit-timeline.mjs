@@ -33,6 +33,8 @@ export function buildEditTimeline(project, options = {}) {
   const entries = [];
   const globalPool = uniqueAssetsByUrl(project.media || []);
   const usedUrlsGlobally = new Set();
+  const urlUseCount = new Map();
+  const maxReusePerUrl = options.maxReusePerUrl ?? 2;
   const topicIsHousing = isHousingTopic(project.topic || '');
 
   for (const seg of project.script || []) {
@@ -155,12 +157,14 @@ export function buildEditTimeline(project, options = {}) {
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) continue;
           if (key && usedUrlsGlobally.has(key)) continue;
+          if (key && !isIntro && (urlUseCount.get(key) || 0) >= maxReusePerUrl) continue;
           return candidate;
         }
         for (let j = 0; j < pool.length; j++) {
           const candidate = pool[(ai + j) % pool.length];
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) continue;
+          if (key && !isIntro && (urlUseCount.get(key) || 0) >= maxReusePerUrl) continue;
           return candidate;
         }
         return pool[ai % pool.length];
@@ -190,7 +194,10 @@ export function buildEditTimeline(project, options = {}) {
       });
       lastAssetId = asset.id;
       lastUrl = urlKey(asset) || null;
-      if (lastUrl && !isIntro) usedUrlsGlobally.add(lastUrl);
+      if (lastUrl && !isIntro) {
+        usedUrlsGlobally.add(lastUrl);
+        urlUseCount.set(lastUrl, (urlUseCount.get(lastUrl) || 0) + 1);
+      }
       t = end;
       ai += 1;
     }

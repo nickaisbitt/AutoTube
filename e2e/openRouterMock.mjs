@@ -30,14 +30,28 @@ export function hookClashesWithTopic(topic, hook) {
   if (!tl || !ol) return false;
   const topicLandlord = /landlord|tenant|evict|rent/.test(tl);
   const topicBank = /bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl)
-    && !/nursing\s*home|elder|abuse|veteran|benefits/.test(tl);
+    && !/nursing\s*home|elder|abuse|veteran|benefits|landlord|tenant|evict/.test(tl);
   const topicTicket = /ticket|bot|scalp|concert|fan/.test(tl);
   const topicCare = /nursing\s*home|elder|abuse|veteran|benefits|patient|hospital/.test(tl);
+  const topicHealthcareCyber =
+    /hospital|healthcare|patient|hipaa|medical|clinic|records?\b/.test(tl)
+    && /hack|breach|ransom|leak|data|cyber|expos|stolen/.test(tl);
+  const topicHeist =
+    /\b(heist|diamond|jewel|vault)\b/.test(tl)
+    || (/\bfake\b/.test(tl) && /\bairport\b/.test(tl));
   const hookBank = /bank account|drained|voice clone|transfer|emptied real bank|vanish before you hang/.test(ol);
-  const hookLandlord = /evict|landlord|tenant|rent|lease/.test(ol);
+  const hookLandlord = /evict|landlord|tenant|rent|lease|ai already filed/.test(ol);
   const hookTicket = /ticket|bot|scalp|concert/.test(ol);
-  if (topicLandlord && hookBank && !hookLandlord) return true;
-  if (topicBank && hookLandlord && !hookBank) return true;
+  const hookHealthcare =
+    /medical chart|patient record|breach dump|hipaa|hospital hack|charts stolen|patient data/.test(ol);
+  const hookHeist = /runway|diamond|vault|jewels|fake airport/.test(ol);
+  const hookVeterans = /benefits file|veterans benefits|dark web broker/.test(ol);
+  if (topicLandlord && (hookBank || hookHealthcare || hookHeist || hookVeterans) && !hookLandlord) return true;
+  if (topicHealthcareCyber && (hookLandlord || hookBank || hookHeist || hookVeterans) && !hookHealthcare) {
+    return true;
+  }
+  if (topicHeist && (hookLandlord || hookBank || hookHealthcare) && !hookHeist) return true;
+  if (hookHealthcare && !topicHealthcareCyber && !/nursing\s*home|elder|abuse/.test(tl)) return true;
   if (topicTicket && (hookBank || hookLandlord) && !hookTicket) return true;
   if (topicCare && hookBank && !/veteran|benefit|patient|hospital|record/.test(ol)) return true;
   if (!topicBank && hookBank && (topicLandlord || topicTicket || topicCare)) return true;

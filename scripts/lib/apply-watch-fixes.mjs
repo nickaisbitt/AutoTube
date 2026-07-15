@@ -2,7 +2,7 @@
  * Map Video Watcher results → pipeline fixes (applied before next loop iteration).
  * Maps brutal dimensions / topIssues to harvest+overlay levers — not just cut-interval thrashing.
  */
-import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
+import { buildShockHookLine, hookClashesWithTopic } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
 import { buildImpactBeatsForTopic } from './impactBeatsByTopic.mjs';
 import { isNursingHomeTopic } from './topic-family.mjs';
@@ -10,7 +10,8 @@ import { isNursingHomeTopic } from './topic-family.mjs';
 /** Keep hook/overlay aligned to the current topic (prevents bank→landlord leakage). */
 function syncTopicHook(s, topic, visionFix) {
   if (!topic) return;
-  s.hookLine = buildShockHookLine(topic, s.hookLine);
+  const safeOverride = hookClashesWithTopic(topic, s.hookLine) ? undefined : s.hookLine;
+  s.hookLine = buildShockHookLine(topic, safeOverride);
   s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, {
     preferredOverlay: s.hookOverlay,
     visionFix,

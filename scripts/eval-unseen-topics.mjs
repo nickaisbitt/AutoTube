@@ -57,7 +57,7 @@ function coldFixState() {
   return {
     ...DEFAULT_FIX_STATE,
     renderTier: 'full',
-    cutIntervalSec: 0.85,
+    cutIntervalSec: 0.7,
     whisperAlign: true,
     faceSeekBroll: true,
     harvestVideoFirst: true,

@@ -34,4 +34,15 @@ Judge: independent `google/gemini-2.5-flash` when `AUTOTUBE_WATCH_MODEL` unset (
 
 See `eval/RELEASE-AGGREGATE-18.md` — critical **41.2% FAIL**, upload **58.8% PASS**.
 
-Results for wave 4 appended after sensor completes.
+## Sensor results (dev×2, independent judge)
+
+| Topic | Generate | Raw | Upload | Critical |
+|-------|----------|-----|--------|----------|
+| dev-01 school ransomware | OK | 5.8 | no | yes (scene_hook 3.9s) |
+| dev-02 port strike hack | OK | 6.8 | no | yes (scene_hook 3.9s) |
+
+**Aggregate:** 100% generate, 0% upload, **100% critical** (n=2), raw median **6.3**
+
+Dominant blocker: PySceneDetect hook longest scene **3.9s** (bar ≤3.0s). Mitigation in `82628a1+`: intro cuts capped at **0.7s**, cold `cutIntervalSec: 0.7`.
+
+Release bar (≤25% critical) **not met** — continue sensor loop after hook-hold fix.

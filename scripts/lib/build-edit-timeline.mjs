@@ -283,7 +283,7 @@ export function buildEditTimeline(project, options = {}) {
       : assets;
 
     const duration = seg.duration || 20;
-    const interval = isIntro ? Math.min(cut, 0.9) : Math.min(cut, MAX_BODY_CUT_SEC);
+    const interval = isIntro ? Math.min(cut, 0.7) : Math.min(cut, MAX_BODY_CUT_SEC);
     let t = 0;
     let ai = 0;
     let lastAssetId = null;

@@ -9,6 +9,50 @@ import {
   hasCriticalQualityIssues,
 } from './score-honesty.mjs';
 
+/**
+ * Independent blind-judge default for cold eval.
+ * Distinct family from generation (`xiaomi/mimo-v2.5`) so the auditor is not the author.
+ * Vision-capable + priced in costTracker; keep in sync with `src/services/costTracker.node.mjs`.
+ */
+export const COLD_EVAL_DEFAULT_WATCH_MODEL = 'google/gemini-2.5-flash';
+
+/** Generation vision/LLM model (what produced the video). */
+function generationModel(env) {
+  return env.OPENROUTER_VISION_MODEL || env.OPENROUTER_MODEL || 'xiaomi/mimo-v2.5';
+}
+
+function isColdEval(env) {
+  return env.AUTOTUBE_EVAL_COLD === '1' || env.AUTOTUBE_EVAL_COLD === 'true';
+}
+
+/**
+ * Resolve the model the brutal watcher should use.
+ * Priority:
+ *   1. AUTOTUBE_WATCH_MODEL (explicit independent judge — always wins)
+ *   2. Cold eval (AUTOTUBE_EVAL_COLD): default to an independent vision model
+ *      distinct from generation, so cold scores are not self-graded
+ *   3. Otherwise fall back to the generation vision/LLM model (document limitation)
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function resolveWatchModel(env = process.env) {
+  if (env.AUTOTUBE_WATCH_MODEL) return env.AUTOTUBE_WATCH_MODEL;
+  const genModel = generationModel(env);
+  if (isColdEval(env) && COLD_EVAL_DEFAULT_WATCH_MODEL !== genModel) {
+    return COLD_EVAL_DEFAULT_WATCH_MODEL;
+  }
+  return genModel;
+}
+
+/**
+ * Whether the resolved watcher model is an independent judge (differs from generation).
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function isIndependentWatchJudge(env = process.env) {
+  return resolveWatchModel(env) !== generationModel(env);
+}
+
 function parseJSONResponse(raw) {
   let cleaned = raw.trim();
   const fence = /^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/i;
@@ -35,12 +79,8 @@ async function callOpenRouterVision({ apiKey, systemPrompt, frames, extraText })
       'X-Title': 'AutoTube Video Watcher',
     },
     body: JSON.stringify({
-      // Prefer independent judge when set; else shared vision/gen model (document limitation).
-      model:
-        process.env.AUTOTUBE_WATCH_MODEL
-        || process.env.OPENROUTER_VISION_MODEL
-        || process.env.OPENROUTER_MODEL
-        || 'xiaomi/mimo-v2.5',
+      // Prefer independent judge (AUTOTUBE_WATCH_MODEL / cold-eval default); else shared gen model.
+      model: resolveWatchModel(process.env),
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content },

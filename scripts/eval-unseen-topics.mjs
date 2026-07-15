@@ -21,6 +21,7 @@ import { DEFAULT_FIX_STATE } from './lib/loop-state.mjs';
 import { loadEvalTopicSet, validateEvalTopicSet, findTopicLeak } from './lib/eval-topics.mjs';
 import { isEvalColdMode } from './lib/eval-flags.mjs';
 import { watchVideo } from '../powers/video-watcher/src/analyze.mjs';
+import { resolveWatchModel, isIndependentWatchJudge } from '../powers/video-watcher/src/vision-brutal.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
 import { runLoopPreflight, waitForDevServer } from './loop-preflight.mjs';
 import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
@@ -133,6 +134,14 @@ async function main() {
   const summaryPath = join(outDir, 'EVAL_SUMMARY.json');
   const mdPath = join(outDir, 'EVAL_SUMMARY.md');
 
+  // AUTOTUBE_EVAL_COLD is already forced above, so the watcher defaults to an
+  // independent vision judge unless AUTOTUBE_WATCH_MODEL overrides it.
+  const watchModel = resolveWatchModel(process.env);
+  const watchIndependent = isIndependentWatchJudge(process.env);
+  const watchDefaultedForColdEval = !process.env.AUTOTUBE_WATCH_MODEL && watchIndependent;
+  console.log(
+    `🎥 Blind judge model: ${watchModel} (${watchIndependent ? 'independent' : 'SAME-MODEL — inflates confidence'})`,
+  );
   writeFileSync(
     join(outDir, 'EVAL_META.json'),
     JSON.stringify(
@@ -144,17 +153,18 @@ async function main() {
         models: {
           openrouter: process.env.OPENROUTER_MODEL || null,
           vision: process.env.OPENROUTER_VISION_MODEL || null,
-          watch:
-            process.env.AUTOTUBE_WATCH_MODEL
-            || process.env.OPENROUTER_VISION_MODEL
-            || process.env.OPENROUTER_MODEL
-            || null,
-          watchIndependent: Boolean(process.env.AUTOTUBE_WATCH_MODEL),
+          watch: watchModel,
+          watchIndependent,
+          watchDefaultedForColdEval,
+          watchModelSource: process.env.AUTOTUBE_WATCH_MODEL
+            ? 'AUTOTUBE_WATCH_MODEL'
+            : watchDefaultedForColdEval
+              ? 'cold-eval-default'
+              : 'generation-model',
         },
-        sameModelJudgeLimitation:
-          !process.env.AUTOTUBE_WATCH_MODEL
-            ? 'Watcher uses same model family as generation unless AUTOTUBE_WATCH_MODEL is set.'
-            : null,
+        sameModelJudgeLimitation: watchIndependent
+          ? null
+          : 'Watcher uses same model family as generation unless AUTOTUBE_WATCH_MODEL is set.',
         cold: true,
         curatedPacks: false,
         familyTemplates: false,

@@ -22,10 +22,13 @@
 14. Critical-pattern timeline fixes + `--offset`; recheck on release 7–12 (`eval/RELEASE-SLICE-6b.md`) — critical **50%** (still fail)
 15. Topic-derived beats replace defensive overlays; recheck on release 13–18 (`eval/RELEASE-SLICE-6c.md`) — critical **40%** (still fail); combined 18 aggregate (`eval/RELEASE-AGGREGATE-18.md`): upload **58.8%** PASS, critical **41.2%** FAIL, raw median **7.4** PASS
 16. Independent blind judge wired for cold eval: `resolveWatchModel()` defaults cold runs to `google/gemini-2.5-flash` (distinct from generation) when `AUTOTUBE_WATCH_MODEL` unset; `EVAL_META.json` records `watch` / `watchIndependent` / `watchModelSource`
+17. Cold eval beat vision + sessionStorage `autotube_eval_cold` (`21d2a0b`)
+18. Timeline quarantine under cold eval (no housing/nursing boosts)
+19. Sentence-index semantic beat placement + intro/outro segment-local reuse
 
 ## Remaining (next execution wave — no pause)
 1. Drive held-out **critical rate ≤25%** (still failing at 40–50% across slices; combined 18 = 41.2%)
-2. Re-run cold slices with the independent judge now active by default (`models.watchIndependent: true`); optionally pin `AUTOTUBE_WATCH_MODEL`
+2. Confirm wave-4 sensor (`eval/COLD-EVAL-WAVE4.md`) with independent judge
 3. Expand toward release×24 (`--offset 18 --max 6`) only after (1)+(2)
 
 ## Stop conditions

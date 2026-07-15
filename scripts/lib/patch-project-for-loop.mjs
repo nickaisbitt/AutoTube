@@ -5,6 +5,15 @@ import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './st
 import { buildImpactBeatsForTopic, buildShockHookLine, hookClashesWithTopic } from '../../e2e/openRouterMock.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
+import {
+  isBankScamTopic,
+  isHealthcareCyberTopic,
+  isHeistTopic,
+  isHousingTopic,
+  isInsuranceFraudTopic,
+  isNursingHomeTopic,
+  isVeteransBenefitsTopic,
+} from './topic-family.mjs';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'they', 'this', 'that', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
@@ -86,10 +95,18 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
       .replace(/[^A-Z0-9\s:$%]/g, ' ')
       .split(/\s+/)
       .filter(Boolean);
-    return words.slice(0, maxWords).join(' ');
+    const clamped = words.slice(0, maxWords);
+    // A lone label with no payload (e.g. "BREAKING:" / "URGENT:") reads as a broken
+    // overlay in the 0–3s frame audit — drop it so callers fall back to real stakes.
+    if (clamped.length === 1 && /[:]$/.test(clamped[0])) return '';
+    return clamped.join(' ');
   };
 
   const keywords = topicKeywords(topic);
+  // Family classification uses TOPIC ONLY (same source of truth as impact beats +
+  // shock hook line) so overlay, hook, and mid-video cards never disagree. Loose
+  // keyword regexes still scan topic+hook for softer signals (disaster, tickets…).
+  const topicOnly = String(topic || '');
   const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
 
   // Family short stakes FIRST — preferred overlays often dump the full topic title
@@ -97,13 +114,13 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/tornado|hurricane|flood|wildfire|earthquake/i.test(t)) {
     return clampWords('THIS WARNING CAME TOO LATE');
   }
-  if (/nursing\s*home|elder\s*abuse|care\s*home/i.test(t)) {
+  if (isNursingHomeTopic(topicOnly)) {
     return clampWords('CAMERAS CAUGHT THE ABUSE');
   }
-  if (/veteran|va\s+benefits|benefits\s+data|dark\s*web/i.test(t)) {
+  if (isVeteransBenefitsTopic(topicOnly)) {
     return clampWords('BENEFITS DATA FOR SALE');
   }
-  if (/landlord|tenant|evict|rent/i.test(t)) {
+  if (isHousingTopic(topicOnly)) {
     return clampWords('THEY EVICTED YOU WITH AI');
   }
 
@@ -121,33 +138,43 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
   if (fromVision) return clampWords(fromVision);
 
-  if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
-    // Short + no colon — long "EXPOSED: HOSPITAL HACK EXPOSED" was edge-clipped by drawtext
-    const kw = keywords.filter((k) => !/^expos/i.test(k)).slice(0, 2).join(' ');
-    return clampWords(kw ? `${kw} EXPOSED` : 'EXPOSED');
+  // Specific families BEFORE the generic leak/expose catch-all so e.g. a hospital
+  // "patient data leak" gets PATIENT RECORDS EXPOSED, not HOSPITAL PATIENT EXPOSED.
+  if (isInsuranceFraudTopic(topicOnly)) {
+    return clampWords('FAKE CRASH SCAM EXPOSED');
+  }
+  if (isHeistTopic(topicOnly)) {
+    // Matches the heist shock hook ("the diamonds were already gone").
+    return clampWords('THE DIAMONDS ARE GONE');
+  }
+  if (isHealthcareCyberTopic(topicOnly)) {
+    return clampWords('PATIENT RECORDS EXPOSED');
   }
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return clampWords('EMERGENCY: THEY HID THE RISK');
   }
-  // Insurance before generic "scam" (otherwise bank hook lands on crash fraud videos)
-  if (/insurance|car\s*crash|fake\s*crash|crash\s*video/i.test(t)) {
-    return clampWords('FAKE CRASH SCAM EXPOSED');
-  }
-  if (/hospital|patient|healthcare|hipaa/i.test(t) && /hack|breach|leak|records?|data/i.test(t)) {
-    return clampWords('PATIENT RECORDS EXPOSED');
-  }
-  if (/hack|stolen|breach|password|identity|bank|voice\s*clone|fraud|scam/i.test(t)) {
+  // Only true bank/scam/voice-clone stories get the bank overlay. A generic
+  // hack/breach/leak topic keeps a keyword overlay so it stays coherent with the
+  // (generic) shock hook line instead of falsely promising an emptied bank account.
+  if (/bank|voice.?clone|otp|phish|wire\s*transfer|callback\s*scam/i.test(t)
+    || (isBankScamTopic(topicOnly) && /bank|scam|fraud|voice|otp|phish|wire|callback/i.test(t))) {
     return clampWords('YOUR BANK ACCOUNT IS EMPTY');
-  }
-  if (/fire|attack|blackout|disaster|death|kill|crash|bomb/i.test(t)) {
-    return clampWords(`BREAKING: ${keywords.slice(0, 3).join(' ')}`);
   }
   if (/ticket|bot|scalp|concert|fan/i.test(t)) {
     return clampWords('BOTS STOLE YOUR TICKETS');
   }
+  if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
+    // Short + no colon — long "EXPOSED: HOSPITAL HACK EXPOSED" was edge-clipped by drawtext
+    const kw = keywords.filter((k) => !/^expos/i.test(k)).slice(0, 2).join(' ');
+    return clampWords(kw ? `${kw} EXPOSED` : 'THE TRUTH EXPOSED');
+  }
+  if (/fire|attack|blackout|disaster|death|kill|crash|bomb/i.test(t)) {
+    const kw = keywords.slice(0, 3).join(' ');
+    return clampWords(kw ? `BREAKING: ${kw}` : 'BREAKING NEWS ALERT');
+  }
 
-  const core = keywords.slice(0, 4).join(' ') || 'CRISIS EXPOSED';
-  return clampWords(`URGENT: ${core}`);
+  const core = keywords.slice(0, 4).join(' ');
+  return clampWords(core ? `URGENT: ${core}` : 'THE COVER-UP EXPOSED');
 }
 
 const DATE_OPENER_RE =

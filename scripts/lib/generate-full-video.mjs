@@ -13,8 +13,6 @@ import { validateEditTimeline } from './build-edit-timeline.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import {
   STOCK_HEALTHCARE_IMAGES,
-  STOCK_HEIST_IMAGES,
-  STOCK_MEDIA_POOL,
   STOCK_VIDEO_POOL,
   STOCK_HOUSING_VIDEOS,
   STOCK_CYBER_IMAGES,
@@ -23,6 +21,7 @@ import {
   pickStockVideos,
   isJunkDemoVideoUrl,
   topicalStockVideos,
+  stockImagesForTopic,
 } from './stock-media-urls.mjs';
 import { curatedPacksEnabled, keepBestEnabled } from './eval-flags.mjs';
 import {
@@ -56,6 +55,12 @@ import {
   isNursingHomeTopic,
   isVeteransBenefitsTopic,
 } from './topic-family.mjs';
+import {
+  isScriptComplete,
+  detectScriptActivity,
+  sawFreshActivity,
+  chooseRecoveryAction,
+} from './script-wait-policy.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -118,6 +123,32 @@ async function readProjectSnapshot(page) {
       }
     })
     .catch(() => ({ scriptLen: 0, mediaLen: 0, scriptStep: '', mediaStep: '', projectStatus: '' }));
+}
+
+/**
+ * Read live script-generation signals straight from the DOM.
+ *
+ * The project (and its stepStatuses) is only written to localStorage AFTER the
+ * whole script pipeline completes, so `readProjectSnapshot` is blind while the
+ * script is still being generated. The Script step, however, renders a distinct
+ * "Generating Script" UI (rotating status + "N% complete") that lets us tell an
+ * actively-generating run apart from one that never started / is stuck.
+ */
+async function readScriptProgress(page) {
+  return page
+    .evaluate(() => {
+      const bodyText = document.body?.innerText || '';
+      const rotatingEl = document.querySelector('[data-testid="rotating-status"]');
+      const generating = Boolean(rotatingEl) || /Generating Script/i.test(bodyText);
+      const pctMatch = bodyText.match(/(\d+)%\s*complete/i);
+      return {
+        generating,
+        rotating: (rotatingEl?.textContent || '').trim(),
+        pct: pctMatch ? Number(pctMatch[1]) : null,
+        onTopicStep: Boolean(document.querySelector('[data-testid="generate-script-only"]')),
+      };
+    })
+    .catch(() => ({ generating: false, rotating: '', pct: null, onTopicStep: false }));
 }
 
 async function clickPipelineButton(page, locator, { settleMs = 2000, timeout = 180_000 } = {}) {
@@ -334,7 +365,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
     if (uniqueCount < minPerSegment) {
       const offset = (report.stockTopUpOffset || 0) + uniqueCount;
       const need = minPerSegment - uniqueCount;
-      const stockPool = isHeistTopic(topic) ? [...STOCK_HEIST_IMAGES, ...STOCK_MEDIA_POOL] : STOCK_MEDIA_POOL;
+      const stockPool = stockImagesForTopic(topic);
       const stock = pickStockImages(need + 4, offset, stockPool);
       for (const img of stock) {
         if (uniqueCount >= minPerSegment) break;
@@ -1603,7 +1634,12 @@ export async function generateFullVideo(options) {
     }
   };
 
+  // Soft deadline for the first "waiting for Source Media" pass. When the script
+  // is still actively generating at the soft deadline we extend up to the hard
+  // cap instead of tripping a false SCRIPT_TIMEOUT (cold live OpenRouter script
+  // generation — main call + title variants — can exceed 240s).
   const scriptTimeoutMs = realHarvest ? 240_000 : 180_000;
+  const scriptHardCapMs = realHarvest ? 600_000 : 240_000;
   const mediaTimeoutMs = realHarvest ? 1_200_000 : 300_000;
   const narrationTimeoutMs = realHarvest ? 900_000 : 600_000;
 
@@ -1621,58 +1657,99 @@ export async function generateFullVideo(options) {
     const sourceMediaBtn = () =>
       page.getByTestId('source-media-next').or(page.getByRole('button', { name: /Source Media/i }));
 
-    const waitForScriptReady = async (timeoutMs) => {
-      const deadline = Date.now() + timeoutMs;
+    // Re-fill the topic and trigger "Generate Script Only" again. Used when the
+    // original click never registered (still on the topic step) or after a reload.
+    const triggerScriptGeneration = async () => {
+      await dismissOnboarding(page);
+      await page.getByTestId('topic-input').fill(topic);
+      await page.getByTestId('duration-select').selectOption('3').catch(() => {});
+      await dismissOnboarding(page);
+      await page.getByTestId('generate-script-only').click();
+    };
+
+    // Waits for the Source Media button, extending the soft deadline (up to a
+    // hard cap) while script generation is genuinely progressing. Returns a rich
+    // status so the caller can pick a non-destructive recovery.
+    const waitForScriptReady = async (timeoutMs, { hardCapMs = timeoutMs } = {}) => {
+      const startedAt = Date.now();
+      const hardDeadline = startedAt + hardCapMs;
+      let deadline = startedAt + timeoutMs;
       let lastDump = 0;
-      while (Date.now() < deadline) {
+      let lastActivityAt = startedAt;
+      let prev = { scriptLen: 0, pct: null, rotating: '' };
+      while (Date.now() < deadline && Date.now() < hardDeadline) {
         await dismissOnboarding(page);
-        if (await sourceMediaBtn().isVisible({ timeout: 2_000 }).catch(() => false)) return true;
+        if (await sourceMediaBtn().isVisible({ timeout: 2_000 }).catch(() => false)) return { ok: true };
         const snap = await readProjectSnapshot(page);
+        const prog = await readScriptProgress(page);
         const body = await page
           .evaluate(() => document.body?.innerText?.slice(0, 800) || '')
           .catch(() => '');
 
-        const scriptComplete =
-          snap.scriptStep === 'complete'
-          || (snap.scriptLen > 0 && /complete/i.test(snap.projectStatus || ''));
-
-        if (scriptComplete) {
+        if (isScriptComplete(snap)) {
           await page.waitForTimeout(1500);
-          if (await sourceMediaBtn().isVisible({ timeout: 5_000 }).catch(() => false)) return true;
+          if (await sourceMediaBtn().isVisible({ timeout: 5_000 }).catch(() => false)) return { ok: true };
         }
         if (/Script generation failed|OpenRouter|API key required/i.test(body)) {
           throw new Error(
             `SCRIPT_UI_ERROR: ${body.slice(0, 200)} (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'unknown'})`,
           );
         }
+
+        // Extend the soft deadline while generation is healthily progressing so a
+        // slow cold OpenRouter call is not mistaken for a stuck/never-started run.
+        const active = detectScriptActivity(snap, prog);
+        if (active && sawFreshActivity(snap, prog, prev)) {
+          lastActivityAt = Date.now();
+        }
+        prev = { scriptLen: snap.scriptLen, pct: prog.pct, rotating: prog.rotating };
+        if (active && Date.now() - lastActivityAt < 120_000) {
+          deadline = Math.min(hardDeadline, Date.now() + 60_000);
+        }
+
         if (Date.now() - lastDump > 60_000) {
           lastDump = Date.now();
           log(
-            `   …still waiting for Source Media (${Math.round((deadline - Date.now()) / 1000)}s left, scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'idle'})`,
+            `   …still waiting for Source Media (${Math.round((deadline - Date.now()) / 1000)}s soft / ${Math.round((hardDeadline - Date.now()) / 1000)}s hard left, scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || (prog.generating ? 'generating' : 'idle')}, pct=${prog.pct ?? 'n/a'})`,
           );
         }
         await page.waitForTimeout(3_000);
       }
-      return false;
+      const snap = await readProjectSnapshot(page);
+      const prog = await readScriptProgress(page);
+      return {
+        ok: false,
+        active: detectScriptActivity(snap, prog),
+        onTopicStep: prog.onTopicStep,
+      };
     };
 
     try {
-      let ready = await waitForScriptReady(scriptTimeoutMs);
-      if (!ready) {
-        // One recovery: dismiss onboarding, reload, refill, regenerate
-        log('⚠ Script wait timed out — reloading once and retrying…');
-        await gotoDevServer();
-        await dismissOnboarding(page);
-        await page.getByTestId('topic-input').fill(topic);
-        await page.getByTestId('duration-select').selectOption('3').catch(() => {});
-        await dismissOnboarding(page);
-        await page.getByTestId('generate-script-only').click();
-        ready = await waitForScriptReady(Math.min(120_000, scriptTimeoutMs));
+      let result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs });
+      if (!result.ok) {
+        const action = chooseRecoveryAction(result);
+        if (action === 'grace') {
+          // Still actively generating — reloading would abort the live OpenRouter
+          // call. Grant one more hard-capped grace window instead.
+          log('⚠ Script still generating at soft cap — granting grace window (no reload)…');
+          result = await waitForScriptReady(120_000, { hardCapMs: 240_000 });
+        } else if (action === 'reclick') {
+          // Click never registered (still on the topic step) — re-trigger, no reload.
+          log('⚠ Still on topic step — re-triggering script generation (click likely missed)…');
+          await triggerScriptGeneration();
+          result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs });
+        } else {
+          // Genuinely stuck (blank/errored, not generating) — one reload recovery.
+          log('⚠ Script wait stuck — reloading once and retrying…');
+          await gotoDevServer();
+          await triggerScriptGeneration();
+          result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs });
+        }
       }
-      if (!ready) {
+      if (!result.ok) {
         const snap = await readProjectSnapshot(page);
         throw new Error(
-          `SCRIPT_TIMEOUT: Source Media never appeared after ${Math.round(scriptTimeoutMs / 1000)}s (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'idle'}, projectStatus=${snap.projectStatus || 'unknown'})`,
+          `SCRIPT_TIMEOUT: Source Media never appeared after ${Math.round(scriptHardCapMs / 1000)}s (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'idle'}, projectStatus=${snap.projectStatus || 'unknown'})`,
         );
       }
     } catch (err) {

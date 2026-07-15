@@ -3,6 +3,12 @@
  * Keep pool large enough that 3 segments × 6 assets don't force heavy reuse.
  */
 import { curatedPacksEnabled } from './eval-flags.mjs';
+import {
+  isBankScamTopic,
+  isHealthcareCyberTopic,
+  isHeistTopic,
+  isVeteransBenefitsTopic,
+} from './topic-family.mjs';
 
 export const STOCK_HEALTHCARE_IMAGES = [
   {
@@ -474,4 +480,108 @@ export function pickStockImages(count, offset = 0, pool = STOCK_MEDIA_POOL) {
 
 export function pickStockVideos(count, offset = 0, pool = STOCK_VIDEO_POOL) {
   return pickStockImages(count, offset, pool);
+}
+
+const STOCK_ALT_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'this', 'that', 'from', 'your', 'about', 'why',
+  'how', 'what', 'when', 'who', 'are', 'was', 'were', 'has', 'have', 'into',
+]);
+
+/**
+ * Broadens a topic word to visual subjects present in stock `alt` captions so a
+ * generic pool image (padlock, server, phone…) can still be scored as on-topic.
+ * Keeps this a general relevance hint — NOT a per-topic curated template.
+ */
+const STOCK_ALT_SYNONYMS = {
+  hack: ['cyber', 'security', 'code', 'server', 'matrix', 'padlock', 'fingerprint', 'data'],
+  hacked: ['cyber', 'security', 'code', 'server', 'padlock', 'data'],
+  breach: ['cyber', 'security', 'server', 'data', 'padlock'],
+  cyber: ['cyber', 'security', 'code', 'server', 'padlock'],
+  data: ['server', 'laptop', 'code', 'analytics', 'cyber', 'data'],
+  ransomware: ['cyber', 'security', 'server', 'code'],
+  bank: ['credit', 'payment', 'card', 'checkout', 'shopping', 'security'],
+  banking: ['credit', 'payment', 'card', 'checkout', 'shopping'],
+  scam: ['phone', 'smartphone', 'laptop', 'credit', 'card', 'payment'],
+  fraud: ['credit', 'card', 'payment', 'security', 'shopping'],
+  identity: ['fingerprint', 'biometric', 'security', 'padlock', 'phone'],
+  password: ['padlock', 'security', 'fingerprint', 'code'],
+  phone: ['smartphone', 'phone'],
+  voice: ['phone', 'smartphone'],
+  clone: ['phone', 'smartphone', 'robot'],
+  hospital: ['doctor', 'medical', 'hospital', 'patient', 'health', 'clinic', 'laboratory'],
+  patient: ['doctor', 'medical', 'patient', 'hospital', 'health'],
+  medical: ['doctor', 'medical', 'hospital', 'laboratory', 'health'],
+  healthcare: ['doctor', 'medical', 'hospital', 'health'],
+  records: ['data', 'laptop', 'server', 'analytics'],
+  diamond: ['diamond', 'jewelry', 'jewel', 'vault'],
+  jewel: ['jewelry', 'diamond', 'vault'],
+  heist: ['vault', 'security', 'guard', 'surveillance'],
+  vault: ['vault', 'safe', 'security'],
+  airport: ['airport', 'runway', 'terminal'],
+  ticket: ['crowd', 'concert', 'event'],
+  concert: ['crowd', 'concert', 'event'],
+  veteran: ['security', 'data', 'laptop'],
+  benefits: ['data', 'laptop', 'analytics'],
+};
+
+function stockTopicTokens(topic) {
+  return String(topic || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOCK_ALT_STOP_WORDS.has(w));
+}
+
+function altRelevanceScore(alt, tokens) {
+  const a = String(alt || '').toLowerCase();
+  if (!a) return 0;
+  let score = 0;
+  for (const tok of tokens) {
+    if (a.includes(tok)) {
+      score += 2;
+      continue;
+    }
+    const syns = STOCK_ALT_SYNONYMS[tok];
+    if (syns && syns.some((s) => a.includes(s))) score += 1;
+  }
+  return score;
+}
+
+/**
+ * Rank a stock image pool by how well each caption matches the topic. Stable:
+ * ties keep original order, and a topic with no signal returns the pool unchanged.
+ * @param {string} topic
+ * @param {Array<{url:string,alt?:string}>} pool
+ */
+export function rankStockImagesByTopic(topic, pool = STOCK_MEDIA_POOL) {
+  const tokens = stockTopicTokens(topic);
+  if (!tokens.length) return [...pool];
+  return pool
+    .map((img, i) => ({ img, i, score: altRelevanceScore(img.alt, tokens) }))
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .map((x) => x.img);
+}
+
+/**
+ * Topic-matched stock image pool for volume top-up. Leads with the existing
+ * on-brand subset (heist / healthcare / cyber) for the topic family, appends the
+ * broad pool for diversity, dedupes by URL, then ranks by caption relevance so
+ * the fallback B-roll connects to the hook instead of generic corporate stock.
+ * @param {string} topic
+ */
+export function stockImagesForTopic(topic, pool = STOCK_MEDIA_POOL) {
+  const t = String(topic || '');
+  let lead = [];
+  if (isHeistTopic(t)) lead = STOCK_HEIST_IMAGES;
+  else if (isHealthcareCyberTopic(t)) lead = STOCK_HEALTHCARE_IMAGES;
+  else if (isVeteransBenefitsTopic(t) || isBankScamTopic(t)) lead = STOCK_CYBER_IMAGES;
+
+  const seen = new Set();
+  const deduped = [...lead, ...pool].filter((img) => {
+    const key = (img.url || '').split('?')[0];
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return rankStockImagesByTopic(t, deduped);
 }

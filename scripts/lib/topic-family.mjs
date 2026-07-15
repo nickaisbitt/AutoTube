@@ -35,6 +35,13 @@ export function isSchoolEducationTopic(topic) {
     && !/\bhospital\b|\bpatient\b|surgery|\bicu\b/.test(t);
 }
 
+/** Fertility / reproductive clinic data topics — not hospital ransomware cards. */
+export function isFertilityClinicTopic(topic) {
+  const t = String(topic || '').toLowerCase();
+  return /fertility|ivf|embryo|reproductive|surrogacy|egg\s*donor|sperm\s*bank/.test(t)
+    && !isSchoolEducationTopic(t);
+}
+
 /**
  * Hospital / patient-records cyber topics — excludes nursing-home abuse/camera stories
  * and school district student-record breaches.
@@ -45,6 +52,7 @@ export function isHealthcareCyberTopic(topic) {
   if (isNursingHomeTopic(t)) return false;
   if (isVeteransBenefitsTopic(t)) return false;
   if (isSchoolEducationTopic(t)) return false;
+  if (isFertilityClinicTopic(t)) return false;
   return (
     /hospital|healthcare|patient|hipaa|medical|clinic/.test(t)
     && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?\b|broker/.test(t)

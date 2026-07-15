@@ -20,7 +20,7 @@
  * | script-default   | (fallback)                                                            | unknown / malformed requests |
  */
 
-import { isSchoolEducationTopic } from '../scripts/lib/topic-family.mjs';
+import { isSchoolEducationTopic, isFertilityClinicTopic } from '../scripts/lib/topic-family.mjs';
 
 const LONG_NARRATION_BLOCK =
   'Hospitals paid billions after hackers exploited one weakness — and your medical records were already in the blast radius. Your identity, credit lines, and family safety depend on understanding how clinics adopt automation, where data leaks happen, and which guardrails regulators enforce across Epic, UnitedHealth, Mayo Clinic, and regional providers nationwide.';
@@ -105,6 +105,12 @@ export function buildShockHookLine(topic, override) {
     && /hack|ransom|breach|cyber|leak|data|records/.test(tl)
   ) {
     return 'Student counseling files were already stolen.';
+  }
+  if (
+    isFertilityClinicTopic(tl)
+    && /telegram|dark\s*web|sold|broker|leak|data|hack/.test(tl)
+  ) {
+    return 'Your fertility file was already listed for sale.';
   }
   if (
     /port|strike|container|shipping|supply\s*chain|cargo|dock|freight|maritime/.test(tl)

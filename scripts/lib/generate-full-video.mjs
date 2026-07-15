@@ -1807,6 +1807,11 @@ export async function generateFullVideo(options) {
         }
       }
       if (!result.ok) {
+        log('⚠ Script wait final fallback — one more generate click + 300s wait…');
+        await triggerScriptGeneration();
+        result = await waitForScriptReady(120_000, { hardCapMs: 300_000 });
+      }
+      if (!result.ok) {
         const snap = await readProjectSnapshot(page);
         throw new Error(
           `SCRIPT_TIMEOUT: Source Media never appeared after ${Math.round(scriptHardCapMs / 1000)}s (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'idle'}, projectStatus=${snap.projectStatus || 'unknown'})`,

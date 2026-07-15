@@ -10,6 +10,7 @@ import {
   isInsuranceFraudTopic,
   isNursingHomeTopic,
   isSchoolEducationTopic,
+  isFertilityClinicTopic,
   isVeteransBenefitsTopic,
 } from './topic-family.mjs';
 

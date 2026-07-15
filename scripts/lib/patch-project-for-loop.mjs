@@ -13,6 +13,7 @@ import {
   isInsuranceFraudTopic,
   isNursingHomeTopic,
   isSchoolEducationTopic,
+  isFertilityClinicTopic,
   isVeteransBenefitsTopic,
 } from './topic-family.mjs';
 
@@ -150,6 +151,9 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   }
   if (isSchoolEducationTopic(topicOnly) && /hack|ransom|breach|cyber|leak|data|records/i.test(t)) {
     return clampWords('STUDENT RECORDS HELD HOSTAGE');
+  }
+  if (isFertilityClinicTopic(topicOnly) && /telegram|dark\s*web|sold|broker|leak|data|hack/i.test(t)) {
+    return clampWords('FERTILITY DATA FOR SALE');
   }
   if (isHealthcareCyberTopic(topicOnly)) {
     return clampWords('PATIENT RECORDS EXPOSED');

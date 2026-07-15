@@ -223,7 +223,7 @@ async function main() {
     };
 
     try {
-      const gen = await generateFullVideo({
+      let gen = await generateFullVideo({
         topic: row.topic,
         realHarvest: true,
         fixState,
@@ -231,6 +231,23 @@ async function main() {
         youtubeMode: true,
         loopShort: false,
       });
+      if (!gen.ok && String(gen.error || '').includes('SCRIPT_TIMEOUT')) {
+        console.log(`↻ ${row.id}: SCRIPT_TIMEOUT — one cold retry (nonce ${(fixState.harvestNonce || 0) + 1})`);
+        const retryState = {
+          ...fixState,
+          harvestNonce: (fixState.harvestNonce || 0) + 1,
+          mediaOffset: (fixState.mediaOffset || 0) + 2,
+        };
+        gen = await generateFullVideo({
+          topic: row.topic,
+          realHarvest: true,
+          fixState: retryState,
+          runId: Date.now() + 1,
+          youtubeMode: true,
+          loopShort: false,
+        });
+        record.pass = 'retry-after-timeout';
+      }
       record.generateOk = gen.ok === true;
       record.generateError = gen.ok ? null : gen.error || 'generate failed';
       record.durationSec = gen.durationSec ?? null;

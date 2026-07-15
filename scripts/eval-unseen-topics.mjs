@@ -31,6 +31,7 @@ function parseArgs(argv) {
   const cfg = {
     set: 'dev',
     max: 0,
+    offset: 0,
     validateOnly: false,
     delaySec: 5,
     watchMode: 'quick',
@@ -39,6 +40,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--set' && argv[i + 1]) cfg.set = argv[++i];
     else if (a === '--max' && argv[i + 1]) cfg.max = Math.max(0, parseInt(argv[++i], 10) || 0);
+    else if (a === '--offset' && argv[i + 1]) cfg.offset = Math.max(0, parseInt(argv[++i], 10) || 0);
     else if (a === '--validate-only') cfg.validateOnly = true;
     else if (a === '--delay' && argv[i + 1]) cfg.delaySec = Math.max(0, parseFloat(argv[++i]) || 0);
     else if (a === '--watch-mode' && argv[i + 1]) cfg.watchMode = argv[++i];
@@ -60,6 +62,7 @@ function coldFixState() {
     harvestVideoFirst: true,
     preferBrightBroll: true,
     patternInterrupts: true,
+    maxReusePerUrl: 1,
     reHarvestMedia: false,
     keepBestMedia: false,
     frozenProjectPath: null,
@@ -119,7 +122,10 @@ async function main() {
     process.exit(1);
   }
 
-  const topics = cfg.max > 0 ? set.topics.slice(0, cfg.max) : set.topics;
+  const offset = cfg.offset || 0;
+  const topics = cfg.max > 0
+    ? set.topics.slice(offset, offset + cfg.max)
+    : set.topics.slice(offset);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const outDir = join(ROOT, 'test-recordings', `eval-${cfg.set}-${stamp}`);
   mkdirSync(outDir, { recursive: true });

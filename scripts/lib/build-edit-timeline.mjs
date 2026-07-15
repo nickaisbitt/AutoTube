@@ -128,8 +128,12 @@ export function buildEditTimeline(project, options = {}) {
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -5;
       if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
       if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
+      // Always demote dark/muddy stock — critical watch fail pattern
+      if (/\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|black background|black frame)\b/i.test(blob)) {
+        return -5;
+      }
       const preferBright = process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
-      if (preferBright && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|overexposed|blown.?out|washed.?out)\b/i.test(blob)) {
+      if (preferBright && /\b(overexposed|blown.?out|washed.?out)\b/i.test(blob)) {
         return -4;
       }
       let beatBoost = 0;
@@ -143,8 +147,11 @@ export function buildEditTimeline(project, options = {}) {
         const rel = scoreAssetRelevance(a, seg, project.topic || '');
         let score = rel < 0.15 ? -4 : Math.round(rel * 5);
         if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court/i.test(blob)) score += 3;
-        if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 3;
-        if (/face|person|people|couple|worried|shocked|reaction|family|close.?up/i.test(blob)) score += 1;
+        if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 5;
+        // Hook needs a human face — but care/CCTV still outranks generic faces on nursing topics
+        if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait|eyes/i.test(blob)) {
+          score += /nursing|elderly|care\s*home|cctv|abuse/i.test(topicBlob) ? 1 : 4;
+        }
         if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;
         if (preferBright && /\b(daylight|sunny|bright|well.?lit|window light)\b/i.test(blob)) score += 2;
         return score + beatBoost;
@@ -152,7 +159,7 @@ export function buildEditTimeline(project, options = {}) {
       if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3 + beatBoost;
       if (topicIsHousing && /beetle|insect|wildlife|macro|spider|bug|larva|caterpillar/i.test(blob)) return -10;
       if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2 + beatBoost;
-      if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up/i.test(blob)) return 2 + beatBoost;
+      if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(blob)) return 3 + beatBoost;
       return beatBoost;
     };
     // Intro/outro = motion only when videos exist. Body = almost all video (V-V-V-I).
@@ -221,8 +228,7 @@ export function buildEditTimeline(project, options = {}) {
         const canUse = (candidate) => {
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-          if (topicIsHousing && !isIntro && scoreAsset(candidate, activeBeat) < 0) return false;
-          if (key && !isIntro && (urlUseCount.get(key) || 0) >= maxReusePerUrl) return false;
+          if (key && (urlUseCount.get(key) || 0) >= maxReusePerUrl) return false;
           return true;
         };
         // Beat-aware re-rank only when a beat sheet window is active; otherwise
@@ -272,7 +278,7 @@ export function buildEditTimeline(project, options = {}) {
       });
       lastAssetId = asset.id;
       lastUrl = urlKey(asset) || null;
-      if (lastUrl && !isIntro) {
+      if (lastUrl) {
         urlUseCount.set(lastUrl, (urlUseCount.get(lastUrl) || 0) + 1);
       }
       t = end;

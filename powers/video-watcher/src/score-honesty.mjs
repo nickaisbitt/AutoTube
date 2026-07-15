@@ -9,9 +9,9 @@ export const SCORE_DIMS = ['hook', 'visualVariety', 'captionReadability', 'pacin
 const CRITICAL_ISSUE_RE =
   /\b(beetle|dung|insect|puppet|muppet|cartoon|anime|off-?brand|scam[\s-]?bait|unrelated|wrong topic|off[\s-]?topic|low-budget|unprofessional|untrustworthy)\b/i;
 
-/** True scroll-away signal — ignore "would NOT scroll past" praise. */
+/** Hook-fail scroll signals — not full-video churn ("scroll past within 10–15 seconds"). */
 const SCROLL_PAST_CRITICAL_RE =
-  /\b(?:would|will|likely|viewer[s]?\s+will)\s+scroll\s*past\b|\bscroll[- ]past:\s*yes\b|\bscrolls?\s+past\s+(?:in|within|after)\b/i;
+  /\b(?:would|will)\s+scroll\s*past\b|\bscroll[- ]past:\s*yes\b|\bscrolls?\s+past\s+(?:in|within)\s+(?:[0-3](?:\.\d+)?\s*s|0\s*[-–]\s*3)/i;
 
 /** On-screen overlay glitches that read as broken UI, not intentional copy. */
 const OVERLAY_GLITCH_RE = /\bauto\s+skipped\b/i;

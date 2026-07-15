@@ -24,6 +24,12 @@ describe('score-honesty', () => {
       ),
     ).toBe(false);
     expect(hasCriticalQualityIssues([], 'Viewers will scroll past in 3 seconds')).toBe(true);
+    expect(
+      hasCriticalQualityIssues(
+        ['Over-reliance on stock footage'],
+        'would likely make me scroll past within 10-15 seconds',
+      ),
+    ).toBe(false);
     expect(hasCriticalQualityIssues(['AUTO SKIPPED frame on screen'], '')).toBe(true);
 
     const brutal = {

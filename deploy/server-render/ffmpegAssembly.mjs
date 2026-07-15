@@ -138,10 +138,10 @@ function hookSceneCutsEnabled() {
 }
 
 /** Flash on asset swaps when pattern interrupts are on; dense in first 15s / first 3 clips. */
-function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset, { isHookSegment = false } = {}) {
+function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset, { isHookSegment = false, scheduleIndex = 0 } = {}) {
   // PySceneDetect merges visually similar B-roll even when editTimeline cuts every ~0.7s.
   // Sub-second flashes in the hook segment create detectable scene boundaries (scene_hook ≤3s).
-  if (hookSceneCutsEnabled() && isHookSegment) {
+  if (hookSceneCutsEnabled() && isHookSegment && scheduleIndex % 2 === 0) {
     return true;
   }
   if (process.env.AUTOTUBE_FLASH_INTERRUPTS !== '1' && process.env.AUTOTUBE_FLASH_INTERRUPTS !== 'true') {
@@ -505,7 +505,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (next) {
       const sameAsset = assetKey(asset) === assetKey(next.asset);
       const timeAtCut = renderedDuration;
-      if (shouldInsertFlashBetweenClips(clipIndex, timeAtCut, sameAsset, { isHookSegment })) {
+      if (shouldInsertFlashBetweenClips(clipIndex, timeAtCut, sameAsset, { isHookSegment, scheduleIndex: i })) {
         const flashDur = flashClipDurationSec(clipIndex);
         const flashOut = join(tmpDir, `flash-${String(clipIndex).padStart(3, '0')}.mp4`);
         if (encodeFlashClip(flashOut, flashDur, { w, h, preset })) {

@@ -20,6 +20,8 @@
  * | script-default   | (fallback)                                                            | unknown / malformed requests |
  */
 
+import { isSchoolEducationTopic } from '../scripts/lib/topic-family.mjs';
+
 const LONG_NARRATION_BLOCK =
   'Hospitals paid billions after hackers exploited one weakness — and your medical records were already in the blast radius. Your identity, credit lines, and family safety depend on understanding how clinics adopt automation, where data leaks happen, and which guardrails regulators enforce across Epic, UnitedHealth, Mayo Clinic, and regional providers nationwide.';
 

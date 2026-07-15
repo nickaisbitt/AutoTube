@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { scoreCandidateAgainstBeat } from '../beatRelevance';
+import { bestBeatRelevanceForCandidate } from '../media';
 
 const beat = {
   intent: 'evidence: show school counseling records breach',
@@ -29,5 +30,31 @@ describe('beatRelevance', () => {
       beat,
     );
     expect(generic.reject).toBe(true);
+  });
+
+  it('bestBeatRelevanceForCandidate picks the strongest segment beat', () => {
+    const beats = [
+      { ...beat, id: 'a', segmentId: 's1', sentenceIndex: 0, role: 'evidence' as const, scale: 'personal' as const, sourcePreference: 'news' as const, evidence: 't' },
+      {
+        ...beat,
+        id: 'b',
+        segmentId: 's1',
+        sentenceIndex: 1,
+        role: 'mechanism' as const,
+        scale: 'institutional' as const,
+        searchableSubject: 'school district ransomware server room',
+        narrationExcerpt: 'District servers encrypted overnight.',
+        mustShow: ['server room'],
+        sourcePreference: 'news' as const,
+        evidence: 't2',
+      },
+    ];
+    const ranked = bestBeatRelevanceForCandidate(
+      { alt: 'school district ransomware server room locked doors', query: 'ransomware servers' },
+      beats,
+    );
+    expect(ranked).not.toBeNull();
+    expect(ranked!.reject).toBe(false);
+    expect(ranked!.score).toBeGreaterThan(0.3);
   });
 });

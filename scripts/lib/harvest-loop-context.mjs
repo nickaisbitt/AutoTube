@@ -17,6 +17,10 @@ export function harvestContextFromFixState(fixState = {}) {
     excludeUrls: Array.isArray(fixState.excludedUrls) ? fixState.excludedUrls : [],
     preferBrightBroll: fixState.preferBrightBroll === true,
     faceSeekBroll: fixState.faceSeekBroll === true,
+    visualBeats:
+      process.env.AUTOTUBE_VISUAL_BEATS === '1'
+      || process.env.AUTOTUBE_VISUAL_BEATS === 'true'
+      || fixState.visualBeats === true,
   };
 }
 
@@ -25,12 +29,17 @@ export function harvestContextFromFixState(fixState = {}) {
  * @param {object} ctx
  */
 export function harvestSessionStoragePayload(ctx) {
+  const visualBeats =
+    process.env.AUTOTUBE_VISUAL_BEATS === '1'
+    || process.env.AUTOTUBE_VISUAL_BEATS === 'true'
+    || ctx.visualBeats === true;
   return {
     autotube_loop_harvest_nonce: String(ctx.harvestNonce || 0),
     autotube_loop_media_offset: String(ctx.mediaOffset || 0),
     autotube_loop_exclude_urls: JSON.stringify((ctx.excludeUrls || []).slice(0, 300)),
     autotube_loop_prefer_bright: ctx.preferBrightBroll ? 'true' : 'false',
     autotube_loop_face_seek: ctx.faceSeekBroll ? 'true' : 'false',
+    autotube_visual_beats: visualBeats ? 'true' : 'false',
   };
 }
 

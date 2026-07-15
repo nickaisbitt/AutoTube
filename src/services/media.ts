@@ -28,6 +28,8 @@ import { isWatermarked } from './sourceProviders/watermarkFilter';
 import { determineLicense, isLicenseCompatible } from './licenseTracker';
 import { computePaletteBonus } from './qualityValidation/colorPalette';
 import { computeImageAHash, isSimilarToAny } from './perceptualHash';
+import { scoreCandidateAgainstBeat } from './beatRelevance';
+import type { VisualBeat } from './visualBeatSheet';
 
 function isLoopFastMode(): boolean {
   return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
@@ -2095,6 +2097,29 @@ async function harvestMediaWithSafetyNet(
   return { candidates: filteredScored, trace };
 }
 
+/**
+ * Best heuristic beat-relevance across a segment's beats.
+ * Used to demote/reject off-brand stock when VisualBeatSheet is active.
+ */
+export function bestBeatRelevanceForCandidate(
+  candidate: { alt?: string; url?: string; query?: string; source?: string },
+  beats?: VisualBeat[] | null,
+): { score: number; reject: boolean; reasons: string[] } | null {
+  if (!beats?.length) return null;
+  let best: { score: number; reject: boolean; reasons: string[] } | null = null;
+  for (const beat of beats) {
+    const r = scoreCandidateAgainstBeat(candidate, beat);
+    if (
+      !best
+      || (!r.reject && best.reject)
+      || (r.reject === best.reject && r.score > best.score)
+    ) {
+      best = r;
+    }
+  }
+  return best;
+}
+
 function rankShotCandidates(
   candidates: MediaCandidate[],
   shot: { concept: string; queries: string[]; vibe: string },
@@ -2102,6 +2127,7 @@ function rankShotCandidates(
   excludedUrls: Set<string>,
   preferredType?: MediaCandidate['type'],
   blockedUrls?: Set<string>,
+  beats?: VisualBeat[] | null,
 ): MediaCandidate[] {
   const shotMeta = `${shot.concept} ${shot.vibe} ${shot.queries.join(' ')}`.toLowerCase();
   const shotTerms = shotMeta.split(/\s+/).filter((word) => word.length > 2);
@@ -2129,6 +2155,16 @@ function rankShotCandidates(
       if (shot.concept.toLowerCase().includes('portrait') && /(portrait|speaker|interview|person|people)/i.test(meta)) score += 25;
       if (shot.vibe.toLowerCase().includes('urgent') && candidate.type === 'video') score += 15;
 
+      const beatRel = bestBeatRelevanceForCandidate(candidate, beats);
+      if (beatRel) {
+        if (beatRel.reject) {
+          // Heavy demotion — still allow fill if nothing else survives
+          score -= 450;
+        } else {
+          score += Math.round(beatRel.score * 140);
+        }
+      }
+
       return { candidate, score };
     })
     .filter((x): x is { candidate: MediaCandidate; score: number } => x != null)
@@ -2149,8 +2185,9 @@ async function pickDistinctShotCandidate(
   preferredType?: MediaCandidate['type'],
   blockedUrls?: Set<string>,
   signal?: AbortSignal,
+  beats?: VisualBeat[] | null,
 ): Promise<MediaCandidate | undefined> {
-  const ranked = rankShotCandidates(candidates, shot, segmentIndex, excludedUrls, preferredType, blockedUrls);
+  const ranked = rankShotCandidates(candidates, shot, segmentIndex, excludedUrls, preferredType, blockedUrls, beats);
   for (const candidate of ranked) {
     if (signal?.aborted) return undefined;
     if (!isLoopFastMode()) return candidate;
@@ -2199,9 +2236,11 @@ export async function sourceSegmentMedia(
   config: AppConfig,
   signal?: AbortSignal,
   progressCallback?: (message: string, pct: number) => void,
+  beats?: VisualBeat[] | null,
 ): Promise<{ assets: Omit<MediaAsset, 'id' | 'segmentId'>[]; plan: SegmentVisualPlan; segmentId: string }> {
   try {
     const finalAssets: Omit<MediaAsset, 'id' | 'segmentId'>[] = [];
+    const segmentBeats = beats?.length ? beats : null;
     const shotsToHarvest = plan.shots && plan.shots.length > 0
       ? plan.shots
       : [{ concept: plan.visualAction, queries: plan.queries, vibe: plan.visualConcept }];
@@ -2346,6 +2385,7 @@ export async function sourceSegmentMedia(
         i > 0 ? finalAssets[i - 1]?.type : undefined,
         blockedUrlsForPick(),
         signal,
+        segmentBeats,
       );
 
       if (!best) {
@@ -2357,6 +2397,7 @@ export async function sourceSegmentMedia(
           undefined,
           blockedUrlsForPick(),
           signal,
+          segmentBeats,
         );
       }
 
@@ -2396,6 +2437,7 @@ export async function sourceSegmentMedia(
                 undefined,
                 blockedUrlsForPick(),
                 signal,
+                segmentBeats,
               );
               if (fallback) {
                 best = fallback;
@@ -2473,6 +2515,7 @@ export async function sourceSegmentMedia(
         undefined,
         blockedUrlsForPick(),
         signal,
+        segmentBeats,
       );
       if (extra) {
         usedUrlsMap.set(extra.url, segmentIndex);
@@ -2549,6 +2592,7 @@ export async function sourceSegmentMedia(
           'video',
           blockedUrlsForPick(),
           signal,
+          segmentBeats,
         );
         if (!videoPick || videoPick.type !== 'video') break;
         usedUrlsMap.set(videoPick.url, segmentIndex);
@@ -2599,6 +2643,7 @@ export async function sourceSegmentMedia(
             undefined,
             deduplicationRegistry.usedUrls,
             signal,
+            segmentBeats,
           );
           if (replacement) {
             usedUrlsMap.set(replacement.url, segmentIndex);

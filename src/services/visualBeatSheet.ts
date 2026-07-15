@@ -49,11 +49,19 @@ const DEFAULT_MAX = 24;
 
 export function visualBeatsEnabled(): boolean {
   try {
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_visual_beats') === 'true') {
+      return true;
+    }
     const env =
       (typeof process !== 'undefined' && process.env)
       || (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env)
       || {};
-    return env.AUTOTUBE_VISUAL_BEATS === '1' || env.AUTOTUBE_VISUAL_BEATS === 'true';
+    return (
+      env.AUTOTUBE_VISUAL_BEATS === '1'
+      || env.AUTOTUBE_VISUAL_BEATS === 'true'
+      || env.VITE_AUTOTUBE_VISUAL_BEATS === '1'
+      || env.VITE_AUTOTUBE_VISUAL_BEATS === 'true'
+    );
   } catch {
     return false;
   }

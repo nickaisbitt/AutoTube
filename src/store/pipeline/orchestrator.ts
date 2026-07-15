@@ -330,6 +330,7 @@ export async function executeSourceMedia(
     setProcessingProgress(15 + Math.round((i / activeProject.script.length) * 80));
     setProcessingMessage(`[${beatLabel}] ${conceptLabel} — harvesting…`);
 
+    const segmentBeats = beatSheet?.beats.filter((b) => b.segmentId === segment.id) || null;
     const sourced = await sourceSegmentMedia(segment, plan, topicContext, usedUrls, i, appConfig, signal,
       (message: string, pct: number) => {
         const segmentStart = 15 + Math.round((i / activeProject.script.length) * 80);
@@ -338,6 +339,7 @@ export async function executeSourceMedia(
         setProcessingProgress(Math.min(mappedPct, 95));
         setProcessingMessage(message);
       },
+      segmentBeats,
     );
 
     if (sourced.assets.length === 0) {

@@ -163,6 +163,12 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/ticket|bot|scalp|concert|fan/i.test(t)) {
     return clampWords('BOTS STOLE YOUR TICKETS');
   }
+
+  const spoken = (hookLine || '').trim();
+  if (spoken.length >= 12 && !isInstructionOverlay(spoken)) {
+    return clampWords(spoken);
+  }
+
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
     // Short + no colon — long "EXPOSED: HOSPITAL HACK EXPOSED" was edge-clipped by drawtext
     const kw = keywords.filter((k) => !/^expos/i.test(k)).slice(0, 2).join(' ');
@@ -206,6 +212,42 @@ export function stripSceneLayoutsForLoop(project) {
   project.script = project.script.map((seg) => {
     const { sceneLayout, ...rest } = seg;
     return rest;
+  });
+  return project;
+}
+
+/** Move the best face/motion video onto the intro segment for the 0–3s hook audit. */
+export function promoteIntroFaceVideo(project) {
+  if (!project?.script?.length || !project?.media?.length) return project;
+  const intro = project.script[0];
+  if (!intro?.id) return project;
+
+  const faceScore = (asset) => {
+    const blob = `${asset?.query || ''} ${asset?.alt || ''} ${asset?.url || ''}`.toLowerCase();
+    if (/microphone|podcast|studio|asmr|cartoon|puppet|minecraft|beetle|insect/i.test(blob)) return -5;
+    if (/face|person|people|portrait|close.?up|worried|shocked|reaction|eyes|direct.?camera/i.test(blob)) return 6;
+    if (asset?.type === 'video') return 2;
+    return 0;
+  };
+
+  const videos = project.media.filter((m) => m.type === 'video');
+  if (!videos.length) return project;
+  const best = [...videos].sort((a, b) => faceScore(b) - faceScore(a))[0];
+  if (!best || faceScore(best) < 2) return project;
+
+  const bodySeg = project.script.find((s, i) => i > 0 && s.id !== intro.id)?.id;
+  project.media = project.media.map((m) => {
+    if (m.id === best.id) return { ...m, segmentId: intro.id };
+    if (
+      m.segmentId === intro.id
+      && m.id !== best.id
+      && m.type === 'video'
+      && faceScore(m) < faceScore(best)
+      && bodySeg
+    ) {
+      return { ...m, segmentId: bodySeg };
+    }
+    return m;
   });
   return project;
 }
@@ -323,6 +365,9 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   // skipMediaPatch = post-sanitize re-assert of hooks only — do not reshuffle B-roll onto intro
   if (!options.skipMediaPatch && !options.skipBalance) {
     balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4));
+    if (fixState.faceSeekBroll !== false) {
+      promoteIntroFaceVideo(project);
+    }
   }
 
   if (fixState.brollPlacement !== false && project.script?.length && project.media?.length) {

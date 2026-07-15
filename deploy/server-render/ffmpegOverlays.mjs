@@ -121,40 +121,17 @@ export function overlayHookText(videoPath, project, options = {}) {
   const line1 = lines[0] || '';
   const line2 = lines[1] || '';
   if (!line1) return { ok: false, error: 'no hook text' };
-  // Hook window ≤3s (watcher audits 0–3s). Rotate to an early impact beat after 1.5s
-  // so nursing videos don't hold one static string across similar B-roll shots.
+  // Hook window ≤3s (watcher audits 0–3s). One stable overlay — rotating into impact
+  // beats at 1.5s stacked with karaoke captions read as nonsensical text spam.
   const durationSec = options.durationSec ?? 3.0;
-  const phaseSplit = Math.min(1.5, durationSec * 0.5);
   const border = Math.max(5, Math.round(fontSize * 0.08));
   const filters = [
-    `drawtext=text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.26:enable='between(t\\,0\\,${phaseSplit})'`,
+    `drawtext=text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.26:enable='between(t\\,0\\,${durationSec})'`,
   ];
   if (line2) {
     filters.push(
-      `drawtext=text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${phaseSplit})'`,
+      `drawtext=text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
     );
-  }
-
-  const topic = String(project?.topic || project?.title || '');
-  const earlyBeats = (Array.isArray(project?.exportSettings?.impactBeats)
-    ? project.exportSettings.impactBeats
-    : buildImpactBeatsForTopic(topic))
-    .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
-    .filter((t) => t && t !== hookText.trim().toUpperCase());
-  const rotateText = earlyBeats[0] || '';
-  if (rotateText && phaseSplit < durationSec - 0.05) {
-    const { lines: rotLines, fontSize: rotSize } = layoutHookLines(rotateText.split(/\s+/), w, h);
-    const rotBorder = Math.max(5, Math.round(rotSize * 0.08));
-    if (rotLines[0]) {
-      filters.push(
-        `drawtext=text='${escapeDrawtext(rotLines[0])}':fontsize=${rotSize}:fontcolor=yellow:borderw=${rotBorder}:bordercolor=black:x=(w-text_w)/2:y=h*0.26:enable='between(t\\,${phaseSplit}\\,${durationSec})'`,
-      );
-    }
-    if (rotLines[1]) {
-      filters.push(
-        `drawtext=text='${escapeDrawtext(rotLines[1])}':fontsize=${rotSize}:fontcolor=yellow:borderw=${rotBorder}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,${phaseSplit}\\,${durationSec})'`,
-      );
-    }
   }
 
   const vf = filters.join(',');
@@ -312,8 +289,9 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
     process.env.AUTOTUBE_KARAOKE_CAPTIONS === '0'
     || process.env.AUTOTUBE_KARAOKE_CAPTIONS === 'false'
     || project?.exportSettings?.karaokeCaptions === false;
+  const karaokeOn = Boolean(wordTimestampCache?.size) && !karaokeOff;
 
-  if (wordTimestampCache?.size && !karaokeOff) {
+  if (karaokeOn) {
     const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, { project });
     results.captions = caps;
     if (caps.ok) {
@@ -330,13 +308,16 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
     console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}..."`);
   }
 
-  // Short mid-video impact cards (not full karaoke) — boosts perceived pacing/variety
-  if (process.env.AUTOTUBE_IMPACT_BEATS !== '0') {
+  // Impact cards only when karaoke is off — burning both reads as fragmented text spam.
+  if (process.env.AUTOTUBE_IMPACT_BEATS !== '0' && !karaokeOn) {
     const beats = overlayImpactBeats(videoPath, project);
     results.impactBeats = beats;
     if (beats.ok) {
       console.log(`  [ffmpeg] impact beats: ${beats.count} cards`);
     }
+  } else if (karaokeOn) {
+    results.impactBeats = { ok: true, skipped: true, reason: 'karaoke-on' };
+    console.log('  [ffmpeg] impact beats skipped (karaoke captions on)');
   }
   return results;
 }
@@ -389,10 +370,8 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   const border = Math.max(5, Math.round(fontSize * 0.09));
   const yFracs = [0.36, 0.44, 0.52];
   const filters = [];
-  // Skip beat 0 when hook window already rotated into the first impact card (~1.5–3s)
-  const beatOffset = hookEndSec <= 3.5 ? 1 : 0;
   for (let i = 0; i < times.length; i += 1) {
-    const text = escapeDrawtext(uniqueBeats[(i + beatOffset) % uniqueBeats.length]);
+    const text = escapeDrawtext(uniqueBeats[i % uniqueBeats.length]);
     const start = times[i];
     const end = Math.min(duration - 0.05, start + 1.4);
     const y = `h*${yFracs[i % yFracs.length]}`;

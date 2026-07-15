@@ -28,7 +28,7 @@ import { isWatermarked } from './sourceProviders/watermarkFilter';
 import { determineLicense, isLicenseCompatible } from './licenseTracker';
 import { computePaletteBonus } from './qualityValidation/colorPalette';
 import { computeImageAHash, isSimilarToAny } from './perceptualHash';
-import { scoreCandidateAgainstBeat } from './beatRelevance';
+import { scoreCandidateAgainstBeat, rankCandidatesWithBeatVision, BEAT_VISION_MAX_PER_SEGMENT } from './beatRelevance';
 import type { VisualBeat } from './visualBeatSheet';
 
 function isLoopFastMode(): boolean {
@@ -2186,8 +2186,15 @@ async function pickDistinctShotCandidate(
   blockedUrls?: Set<string>,
   signal?: AbortSignal,
   beats?: VisualBeat[] | null,
+  visionCtx?: { apiKey?: string; budget?: { remaining: number } },
 ): Promise<MediaCandidate | undefined> {
-  const ranked = rankShotCandidates(candidates, shot, segmentIndex, excludedUrls, preferredType, blockedUrls, beats);
+  let ranked = rankShotCandidates(candidates, shot, segmentIndex, excludedUrls, preferredType, blockedUrls, beats);
+  if (beats?.length && visionCtx?.apiKey && visionCtx.budget && visionCtx.budget.remaining > 0) {
+    ranked = await rankCandidatesWithBeatVision(ranked, beats, visionCtx.apiKey, {
+      signal,
+      budget: visionCtx.budget,
+    });
+  }
   for (const candidate of ranked) {
     if (signal?.aborted) return undefined;
     if (!isLoopFastMode()) return candidate;
@@ -2241,6 +2248,10 @@ export async function sourceSegmentMedia(
   try {
     const finalAssets: Omit<MediaAsset, 'id' | 'segmentId'>[] = [];
     const segmentBeats = beats?.length ? beats : null;
+    const beatVisionBudget = { remaining: BEAT_VISION_MAX_PER_SEGMENT };
+    const visionCtx = config.openRouterKey
+      ? { apiKey: config.openRouterKey, budget: beatVisionBudget }
+      : undefined;
     const shotsToHarvest = plan.shots && plan.shots.length > 0
       ? plan.shots
       : [{ concept: plan.visualAction, queries: plan.queries, vibe: plan.visualConcept }];
@@ -2386,6 +2397,7 @@ export async function sourceSegmentMedia(
         blockedUrlsForPick(),
         signal,
         segmentBeats,
+        visionCtx,
       );
 
       if (!best) {
@@ -2398,6 +2410,7 @@ export async function sourceSegmentMedia(
           blockedUrlsForPick(),
           signal,
           segmentBeats,
+          visionCtx,
         );
       }
 
@@ -2438,6 +2451,7 @@ export async function sourceSegmentMedia(
                 blockedUrlsForPick(),
                 signal,
                 segmentBeats,
+                visionCtx,
               );
               if (fallback) {
                 best = fallback;
@@ -2516,6 +2530,7 @@ export async function sourceSegmentMedia(
         blockedUrlsForPick(),
         signal,
         segmentBeats,
+        visionCtx,
       );
       if (extra) {
         usedUrlsMap.set(extra.url, segmentIndex);
@@ -2593,6 +2608,7 @@ export async function sourceSegmentMedia(
           blockedUrlsForPick(),
           signal,
           segmentBeats,
+          visionCtx,
         );
         if (!videoPick || videoPick.type !== 'video') break;
         usedUrlsMap.set(videoPick.url, segmentIndex);
@@ -2644,6 +2660,7 @@ export async function sourceSegmentMedia(
             deduplicationRegistry.usedUrls,
             signal,
             segmentBeats,
+            visionCtx,
           );
           if (replacement) {
             usedUrlsMap.set(replacement.url, segmentIndex);

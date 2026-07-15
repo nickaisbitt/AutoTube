@@ -47,6 +47,15 @@ describe('unseen-topic eval harness foundations', () => {
     expect(topicFamilyQueries('hospital hack patient records', 4)).toEqual([]);
   });
 
+  it('keeps curated packs and family templates off by default (opt-in)', async () => {
+    delete process.env.AUTOTUBE_EVAL_COLD;
+    delete process.env.AUTOTUBE_CURATED_PACKS;
+    delete process.env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES;
+    const flags = await import('../../../scripts/lib/eval-flags.mjs');
+    expect(flags.curatedPacksEnabled()).toBe(false);
+    expect(flags.topicFamilyTemplatesEnabled()).toBe(false);
+  });
+
   it('passes script visualNote into generateAIPlan signature', async () => {
     const { generateAIPlan } = await import('../llmVisualDirector');
     expect(typeof generateAIPlan).toBe('function');

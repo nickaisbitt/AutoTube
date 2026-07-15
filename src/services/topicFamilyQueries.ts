@@ -1,22 +1,20 @@
 /**
  * Topic-family visual search anchors shared by visual director + planner fallbacks.
- * Disabled during cold evaluation (AUTOTUBE_EVAL_COLD=1) so packs cannot inflate scores.
+ * Opt-in only (`AUTOTUBE_TOPIC_FAMILY_TEMPLATES=1`). Off by default and always off
+ * during cold evaluation so family regex cannot inflate generator scores.
  */
 
-function topicFamilyTemplatesEnabled(): boolean {
+export function topicFamilyTemplatesEnabled(): boolean {
   try {
     const env =
       (typeof process !== 'undefined' && process.env)
       || (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env)
       || {};
     if (env.AUTOTUBE_EVAL_COLD === '1' || env.AUTOTUBE_EVAL_COLD === 'true') return false;
-    if (env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES === '0' || env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES === 'false') {
-      return false;
-    }
+    return env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES === '1' || env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES === 'true';
   } catch {
-    /* ignore */
+    return false;
   }
-  return true;
 }
 
 /**

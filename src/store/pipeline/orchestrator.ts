@@ -28,6 +28,7 @@ import {
   queriesFromBeatSheet,
   visualBeatsEnabled,
 } from '../../services/visualBeatSheet';
+import { gateProjectMediaAgainstBeats } from '../../services/beatEvidenceGate';
 import { logger } from '../../services/logger';
 import {
   generateAIScript,
@@ -400,6 +401,17 @@ export async function executeSourceMedia(
     visualPlans,
     ...(beatSheet ? { visualBeatSheet: beatSheet } : {}),
   } as VideoProject;
+
+  if (beatSheet) {
+    const gated = gateProjectMediaAgainstBeats(updatedProject);
+    updatedProject = gated.project;
+    if (gated.dropped || gated.demoted) {
+      logger.info(
+        'Store',
+        `BeatEvidenceGate: dropped=${gated.dropped} demoted=${gated.demoted}`,
+      );
+    }
+  }
 
   const loopFastMode = isLoopFastMode();
   if (!loopFastMode) {

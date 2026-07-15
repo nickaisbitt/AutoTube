@@ -49,21 +49,37 @@ const DEFAULT_MAX = 24;
 
 export function visualBeatsEnabled(): boolean {
   try {
-    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_visual_beats') === 'true') {
-      return true;
+    if (typeof sessionStorage !== 'undefined') {
+      const ss = sessionStorage.getItem('autotube_visual_beats');
+      if (ss === 'false') return false;
+      if (ss === 'true') return true;
     }
     const env =
       (typeof process !== 'undefined' && process.env)
       || (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env)
       || {};
-    return (
+    // Explicit off
+    if (
+      env.AUTOTUBE_VISUAL_BEATS === '0'
+      || env.AUTOTUBE_VISUAL_BEATS === 'false'
+      || env.VITE_AUTOTUBE_VISUAL_BEATS === '0'
+      || env.VITE_AUTOTUBE_VISUAL_BEATS === 'false'
+    ) {
+      return false;
+    }
+    // Explicit on
+    if (
       env.AUTOTUBE_VISUAL_BEATS === '1'
       || env.AUTOTUBE_VISUAL_BEATS === 'true'
       || env.VITE_AUTOTUBE_VISUAL_BEATS === '1'
       || env.VITE_AUTOTUBE_VISUAL_BEATS === 'true'
-    );
+    ) {
+      return true;
+    }
+    // Default ON — generator readiness path (opt-out with =0)
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 

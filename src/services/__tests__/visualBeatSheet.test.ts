@@ -64,8 +64,10 @@ describe('visualBeatSheet', () => {
     expect(queriesFromBeatSheet(sheet, 's1').length).toBeGreaterThan(0);
   });
 
-  it('feature flag defaults off', () => {
+  it('feature flag defaults on (opt-out with =0)', () => {
     delete process.env.AUTOTUBE_VISUAL_BEATS;
+    expect(visualBeatsEnabled()).toBe(true);
+    process.env.AUTOTUBE_VISUAL_BEATS = '0';
     expect(visualBeatsEnabled()).toBe(false);
     process.env.AUTOTUBE_VISUAL_BEATS = '1';
     expect(visualBeatsEnabled()).toBe(true);

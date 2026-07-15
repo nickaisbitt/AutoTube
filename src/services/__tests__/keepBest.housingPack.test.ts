@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   shouldKeepBest,
   KEEP_BEST_RAW_FLOOR,
@@ -8,6 +8,10 @@ import {
 import { STOCK_HOUSING_VIDEOS, topicalStockVideos } from '../../../scripts/lib/stock-media-urls.mjs';
 
 describe('keep-best + housing pack', () => {
+  beforeEach(() => {
+    process.env.AUTOTUBE_CURATED_PACKS = '1';
+    delete process.env.AUTOTUBE_EVAL_COLD;
+  });
   it(`keeps best when upload-ready or raw ≥ ${KEEP_BEST_RAW_FLOOR}`, () => {
     expect(
       shouldKeepBest({

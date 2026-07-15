@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 describe('topic family + impact beats', () => {
+  beforeEach(() => {
+    process.env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES = '1';
+    delete process.env.AUTOTUBE_EVAL_COLD;
+  });
+
   it('resolves healthcare cyber family and query anchors', async () => {
     const { resolveTopicFamily, topicFamilyQueries } = await import('../topicFamilyQueries');
     expect(resolveTopicFamily('hospital hack patient records leaked')).toBe('healthcare_cyber');

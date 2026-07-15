@@ -6,6 +6,7 @@
  */
 import { scoreAssetRelevance, isOffBrandVisual, isGenericStockJunk } from './harvest-quality.mjs';
 import { isHousingTopic } from './topic-family.mjs';
+import { isEvalColdMode } from './eval-flags.mjs';
 
 /**
  * @param {object} project
@@ -57,14 +58,54 @@ export function scoreAssetAgainstBeat(asset, beat) {
   return hits * 2 + excerptHits;
 }
 
+function splitSentences(text) {
+  return String(text || '')
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 12);
+}
+
 /**
- * Pick the beat active for a local time within a segment (evenly spaced).
+ * Proportional sentence start within a segment (narration-aligned when no whisper sidecar).
+ * @param {object} beat
+ * @param {object} seg
+ * @param {number} duration
+ */
+export function beatStartSecForBeat(beat, seg, duration) {
+  if (!beat || !seg || duration <= 0) return 0;
+  const sentences = splitSentences(seg.narration || '');
+  if (!sentences.length) return 0;
+  const idx = Math.min(Math.max(0, beat.sentenceIndex ?? 0), sentences.length - 1);
+  const totalChars = sentences.reduce((sum, line) => sum + line.length, 0) || 1;
+  let charsBefore = 0;
+  for (let i = 0; i < idx; i += 1) charsBefore += sentences[i].length;
+  return (charsBefore / totalChars) * duration;
+}
+
+/**
+ * Pick the beat active for a local time within a segment.
+ * Uses sentenceIndex + narration proportion when beats carry sentence metadata;
+ * falls back to even spacing otherwise.
  * @param {object[]} beats
  * @param {number} localSec
  * @param {number} duration
+ * @param {object} [seg]
  */
-export function beatAtSegmentTime(beats, localSec, duration) {
+export function beatAtSegmentTime(beats, localSec, duration, seg = null) {
   if (!beats?.length) return null;
+  if (seg && beats.some((b) => typeof b.sentenceIndex === 'number')) {
+    const ranked = beats
+      .map((beat) => ({
+        beat,
+        start: beatStartSecForBeat(beat, seg, duration),
+      }))
+      .sort((a, b) => a.start - b.start);
+    let active = ranked[0]?.beat ?? beats[0];
+    for (const { beat, start } of ranked) {
+      if (start <= localSec + 0.01) active = beat;
+    }
+    return active;
+  }
   if (beats.length === 1 || duration <= 0) return beats[0];
   const idx = Math.min(
     beats.length - 1,
@@ -96,7 +137,8 @@ export function buildEditTimeline(project, options = {}) {
       cut = Math.min(impliedCut, MAX_BODY_CUT_SEC);
     }
   }
-  const topicIsHousing = isHousingTopic(project.topic || '');
+  const topicIsHousing = !isEvalColdMode() && isHousingTopic(project.topic || '');
+  const coldEval = isEvalColdMode();
   const beatSheet = project.visualBeatSheet;
   const beatsBySeg = new Map();
   for (const b of beatSheet?.beats || []) {
@@ -106,6 +148,7 @@ export function buildEditTimeline(project, options = {}) {
   }
 
   for (const seg of project.script || []) {
+    const segmentUrlUse = new Map();
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
     if (!assets.length) {
       // Borrow from global pool but prefer face/CTA motion over random intro leftovers
@@ -136,10 +179,16 @@ export function buildEditTimeline(project, options = {}) {
       || (seg === script[script.length - 1] && !['body', 'intro', 'section'].includes(seg.type));
     const topicBlob = `${project.topic || ''} ${seg.narration || ''} ${seg.title || ''}`;
     const segBeats = beatsBySeg.get(seg.id) || [];
+    const reuseCountFor = (key, introOutroOnly) => {
+      if (!key) return 0;
+      if (introOutroOnly) return segmentUrlUse.get(key) || 0;
+      return urlUseCount.get(key) || 0;
+    };
     const scoreAsset = (a, activeBeat = null) => {
       const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
       const key = urlKey(a);
-      const priorUses = key ? (urlUseCount.get(key) || 0) : 0;
+      const introOutroReuse = isIntro || isOutro;
+      const priorUses = reuseCountFor(key, introOutroReuse);
       let reusePenalty = priorUses > 0 ? -3 * priorUses : 0;
       if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (isGenericStockJunk(blob, topicBlob)) return -6;
@@ -165,16 +214,16 @@ export function buildEditTimeline(project, options = {}) {
         const rel = scoreAssetRelevance(a, seg, project.topic || '');
         let score = rel < 0.15 ? -4 : Math.round(rel * 5);
         if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court/i.test(blob)) score += 3;
-        if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 5;
+        if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 5;
         // Hook needs a human face — but care/CCTV still outranks generic faces on nursing topics
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait|eyes/i.test(blob)) {
-          score += /nursing|elderly|care\s*home|cctv|abuse/i.test(topicBlob) ? 1 : 4;
+          score += !coldEval && /nursing|elderly|care\s*home|cctv|abuse/i.test(topicBlob) ? 1 : 4;
         }
         if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;
         if (preferBright && /\b(daylight|sunny|bright|well.?lit|window light)\b/i.test(blob)) score += 2;
         return score + beatBoost + reusePenalty;
       }
-      if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3 + beatBoost;
+      if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3 + beatBoost;
       if (topicIsHousing && /beetle|insect|wildlife|macro|spider|bug|larva|caterpillar/i.test(blob)) return -10;
       if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2 + beatBoost;
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(blob)) return 3 + beatBoost + reusePenalty;
@@ -241,12 +290,13 @@ export function buildEditTimeline(project, options = {}) {
     let lastUrl = null;
     while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
-      const activeBeat = beatAtSegmentTime(segBeats, t, duration);
+      const activeBeat = beatAtSegmentTime(segBeats, t, duration, seg);
       const pickFrom = (pool) => {
+        const introOutroReuse = isIntro || isOutro;
         const canUse = (candidate) => {
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-          if (key && (urlUseCount.get(key) || 0) >= effectiveMaxReuse) return false;
+          if (key && reuseCountFor(key, introOutroReuse) >= effectiveMaxReuse) return false;
           return true;
         };
         // Beat-aware re-rank only when a beat sheet window is active; otherwise
@@ -260,9 +310,9 @@ export function buildEditTimeline(project, options = {}) {
         }
         return rankedPool.reduce((best, candidate) => {
           const key = urlKey(candidate);
-          const count = key ? (urlUseCount.get(key) || 0) : 0;
+          const count = reuseCountFor(key, introOutroReuse);
           const bestKey = urlKey(best);
-          const bestCount = bestKey ? (urlUseCount.get(bestKey) || 0) : 0;
+          const bestCount = reuseCountFor(bestKey, introOutroReuse);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) return best;
           if (topicIsHousing && !isIntro && scoreAsset(candidate, activeBeat) < 0) return best;
           if (activeBeat && scoreAsset(candidate, activeBeat) !== scoreAsset(best, activeBeat)) {
@@ -297,7 +347,11 @@ export function buildEditTimeline(project, options = {}) {
       lastAssetId = asset.id;
       lastUrl = urlKey(asset) || null;
       if (lastUrl) {
-        urlUseCount.set(lastUrl, (urlUseCount.get(lastUrl) || 0) + 1);
+        if (isIntro || isOutro) {
+          segmentUrlUse.set(lastUrl, (segmentUrlUse.get(lastUrl) || 0) + 1);
+        } else {
+          urlUseCount.set(lastUrl, (urlUseCount.get(lastUrl) || 0) + 1);
+        }
       }
       t = end;
       ai += 1;

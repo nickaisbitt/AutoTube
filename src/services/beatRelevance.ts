@@ -33,14 +33,19 @@ function tokens(text: string): string[] {
 export function beatVisionEnabled(): boolean {
   try {
     if (typeof sessionStorage !== 'undefined') {
+      const evalCold = sessionStorage.getItem('autotube_eval_cold') === 'true';
       const ss = sessionStorage.getItem('autotube_beat_vision');
       if (ss === 'true') return true;
-      if (ss === 'false') return false;
+      if (ss === 'false' && !evalCold) return false;
     }
     const env =
       (typeof process !== 'undefined' && process.env)
       || (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env)
       || {};
+    if (env.AUTOTUBE_EVAL_COLD === '1' || env.AUTOTUBE_EVAL_COLD === 'true') {
+      if (env.AUTOTUBE_BEAT_VISION === '0' || env.AUTOTUBE_BEAT_VISION === 'false') return false;
+      return true;
+    }
     if (env.AUTOTUBE_BEAT_VISION === '0' || env.AUTOTUBE_BEAT_VISION === 'false') return false;
     if (env.AUTOTUBE_BEAT_VISION === '1' || env.AUTOTUBE_BEAT_VISION === 'true') return true;
     if (env.VITE_AUTOTUBE_BEAT_VISION === '1' || env.VITE_AUTOTUBE_BEAT_VISION === 'true') return true;
@@ -48,7 +53,10 @@ export function beatVisionEnabled(): boolean {
     const loopFast =
       typeof sessionStorage !== 'undefined'
       && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
-    if (loopFast) return false;
+    const evalColdSession =
+      typeof sessionStorage !== 'undefined'
+      && sessionStorage.getItem('autotube_eval_cold') === 'true';
+    if (loopFast && !evalColdSession) return false;
     return env.AUTOTUBE_VISUAL_BEATS !== '0' && env.AUTOTUBE_VISUAL_BEATS !== 'false';
   } catch {
     return false;

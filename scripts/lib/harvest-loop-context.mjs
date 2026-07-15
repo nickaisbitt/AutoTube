@@ -3,6 +3,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isEvalColdMode } from './eval-flags.mjs';
 
 const DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investigation', 'report', 'leaked', 'official'];
 
@@ -25,7 +26,8 @@ export function harvestContextFromFixState(fixState = {}) {
   const beatVision =
     process.env.AUTOTUBE_BEAT_VISION === '1'
     || process.env.AUTOTUBE_BEAT_VISION === 'true'
-    || fixState.beatVision === true;
+    || fixState.beatVision === true
+    || (isEvalColdMode() && process.env.AUTOTUBE_BEAT_VISION !== '0');
   return {
     harvestNonce: fixState.harvestNonce || 0,
     mediaOffset: fixState.mediaOffset || 0,
@@ -51,8 +53,9 @@ export function harvestSessionStoragePayload(ctx) {
   const beatVision =
     process.env.AUTOTUBE_BEAT_VISION === '1'
     || process.env.AUTOTUBE_BEAT_VISION === 'true'
-    || ctx.beatVision === true;
-  return {
+    || ctx.beatVision === true
+    || (isEvalColdMode() && process.env.AUTOTUBE_BEAT_VISION !== '0');
+  const payload = {
     autotube_loop_harvest_nonce: String(ctx.harvestNonce || 0),
     autotube_loop_media_offset: String(ctx.mediaOffset || 0),
     autotube_loop_exclude_urls: JSON.stringify((ctx.excludeUrls || []).slice(0, 300)),
@@ -61,6 +64,10 @@ export function harvestSessionStoragePayload(ctx) {
     autotube_visual_beats: visualBeats ? 'true' : 'false',
     autotube_beat_vision: beatVision ? 'true' : 'false',
   };
+  if (isEvalColdMode()) {
+    payload.autotube_eval_cold = 'true';
+  }
+  return payload;
 }
 
 /**

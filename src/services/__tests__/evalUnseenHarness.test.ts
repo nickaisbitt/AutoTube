@@ -56,6 +56,19 @@ describe('unseen-topic eval harness foundations', () => {
     expect(flags.topicFamilyTemplatesEnabled()).toBe(false);
   });
 
+  it('enables beat vision + eval cold in harvest session payload', async () => {
+    process.env.AUTOTUBE_EVAL_COLD = '1';
+    process.env.AUTOTUBE_BEAT_VISION = '1';
+    const { harvestContextFromFixState, harvestSessionStoragePayload } = await import(
+      '../../../scripts/lib/harvest-loop-context.mjs'
+    );
+    const ctx = harvestContextFromFixState({ beatVision: true, visualBeats: true });
+    expect(ctx.beatVision).toBe(true);
+    const payload = harvestSessionStoragePayload(ctx);
+    expect(payload.autotube_beat_vision).toBe('true');
+    expect(payload.autotube_eval_cold).toBe('true');
+  });
+
   it('passes script visualNote into generateAIPlan signature', async () => {
     const { generateAIPlan } = await import('../llmVisualDirector');
     expect(typeof generateAIPlan).toBe('function');

@@ -65,6 +65,8 @@ function coldFixState() {
     patternInterrupts: false,
     karaokeCaptions: true,
     minAssetsPerSegment: 5,
+    visualBeats: true,
+    beatVision: true,
     maxReusePerUrl: 1,
     reHarvestMedia: false,
     keepBestMedia: false,
@@ -106,6 +108,8 @@ async function main() {
   process.env.AUTOTUBE_CURATED_PACKS = '0';
   process.env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES = '0';
   process.env.AUTOTUBE_KEEP_BEST = '0';
+  process.env.AUTOTUBE_VISUAL_BEATS = '1';
+  process.env.AUTOTUBE_BEAT_VISION = '1';
   unsetFlash();
 
   const set = loadEvalTopicSet(cfg.set);
@@ -168,6 +172,8 @@ async function main() {
           ? null
           : 'Watcher uses same model family as generation unless AUTOTUBE_WATCH_MODEL is set.',
         cold: true,
+        beatVision: true,
+        visualBeats: true,
         curatedPacks: false,
         familyTemplates: false,
         keepBest: false,

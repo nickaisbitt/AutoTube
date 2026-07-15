@@ -1,16 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import {
   beatAtSegmentTime,
+  beatStartSecForBeat,
   scoreAssetAgainstBeat,
   buildEditTimeline,
 } from '../../../scripts/lib/build-edit-timeline.mjs';
 
 describe('beat-aware edit timeline', () => {
-  it('maps local time to evenly spaced beats', () => {
+  it('maps local time to evenly spaced beats when sentence metadata absent', () => {
     const beats = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
     expect(beatAtSegmentTime(beats, 0, 30)?.id).toBe('a');
     expect(beatAtSegmentTime(beats, 15, 30)?.id).toBe('b');
     expect(beatAtSegmentTime(beats, 29, 30)?.id).toBe('c');
+  });
+
+  it('maps local time to sentence-aligned beats when sentenceIndex present', () => {
+    const seg = {
+      narration: 'First sentence is short. Second sentence is much longer and should dominate the timeline window.',
+      duration: 20,
+    };
+    const beats = [
+      { id: 'early', sentenceIndex: 0 },
+      { id: 'late', sentenceIndex: 1 },
+    ];
+    expect(beatStartSecForBeat(beats[0], seg, 20)).toBeLessThan(beatStartSecForBeat(beats[1], seg, 20));
+    expect(beatAtSegmentTime(beats, 0.5, 20, seg)?.id).toBe('early');
+    expect(beatAtSegmentTime(beats, 19, 20, seg)?.id).toBe('late');
   });
 
   it('scores beat-matching assets higher than beetles', () => {

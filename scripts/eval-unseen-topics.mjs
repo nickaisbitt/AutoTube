@@ -290,8 +290,13 @@ function buildSummary(rows, cfg, outDir) {
 
 function percentile(sorted, p) {
   if (!sorted.length) return null;
-  const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))));
-  return sorted[idx];
+  if (sorted.length === 1) return sorted[0];
+  const pos = p * (sorted.length - 1);
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo];
+  const w = pos - lo;
+  return sorted[lo] * (1 - w) + sorted[hi] * w;
 }
 
 function formatSummaryMd(s) {

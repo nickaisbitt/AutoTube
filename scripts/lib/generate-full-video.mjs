@@ -16,6 +16,7 @@ import {
   STOCK_HEIST_IMAGES,
   STOCK_MEDIA_POOL,
   STOCK_VIDEO_POOL,
+  STOCK_HOUSING_VIDEOS,
   STOCK_CYBER_IMAGES,
   MIXKIT_VIDEO_POOL,
   pickStockImages,
@@ -30,6 +31,10 @@ import {
   loadLastProjectUrls,
 } from './harvest-loop-context.mjs';
 import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-env-from-fix-state.mjs';
+import {
+  applyFrozenMediaToProject,
+  loadFrozenProject,
+} from './keep-best.mjs';
 import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
@@ -901,6 +906,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
 
   let pool = [
     ...liveClips,
+    ...(housingTopic ? STOCK_HOUSING_VIDEOS : []),
     ...(cyberTopic ? MIXKIT_VIDEO_POOL : []),
     ...(seriousTopic ? topicalStockVideos(topicBlob, STOCK_VIDEO_POOL) : STOCK_VIDEO_POOL.filter((v) => !(v.tags || []).includes('filler'))),
   ];
@@ -1257,12 +1263,14 @@ export async function generateFullVideo(options) {
   if (!topic?.trim()) throw new Error('topic is required');
 
   const fixState = { ...(options.fixState || {}) };
-  if (fixState.reHarvestMedia) {
+  if (fixState.reHarvestMedia && !fixState.keepBestMedia) {
     fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
     fixState.reHarvestMedia = false;
     if (!options.quiet) {
       console.log(`   🔄 Re-harvest requested — nonce ${fixState.harvestNonce}, offset ${fixState.mediaOffset || 0}`);
     }
+  } else if (fixState.reHarvestMedia && fixState.keepBestMedia) {
+    fixState.reHarvestMedia = false;
   }
   const priorUrls = loadLastProjectUrls(process.cwd());
   // Never seed excludes from stale last-project during re-harvest (nonce > 0) — that starves harvest.
@@ -1301,6 +1309,100 @@ export async function generateFullVideo(options) {
     if (!options.quiet) console.log(msg);
   };
   const loopMinAssets = Math.max(2, Math.min(8, fixState.minAssetsPerSegment || 6));
+
+  // Fast path: polish a frozen cut (skip Playwright harvest lottery)
+  if (fixState.keepBestMedia && fixState.frozenProjectPath) {
+    const frozen = loadFrozenProject(fixState.frozenProjectPath);
+    if (frozen?.media?.length && frozen?.script?.length) {
+      log(`\n🎬 Generate (keep-best polish): ${topic}`);
+      log(`   Mode: reuse frozen media — skip Playwright harvest`);
+      log(`   Out: ${outDir}\n`);
+      const project = JSON.parse(JSON.stringify(frozen));
+      project.topic = topic;
+      project.title = topic;
+      patchProjectForLoop(project, topic, { ...fixState, forceRealStock: false }, { skipMediaPatch: true });
+      const timelineReport = validateEditTimeline(project, {
+        cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+        maxReusePerUrl: fixState.maxReusePerUrl ?? 1,
+      });
+      if (timelineReport.rebuilt) {
+        log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips)`);
+      }
+      const projectPath = `/tmp/autotube-project.json`;
+      writeFileSync(projectPath, JSON.stringify(project, null, 2));
+      writeFileSync(join(outDir, 'project.json'), JSON.stringify(project, null, 2));
+      writeFileSync(join(root, 'test-recordings', 'last-project.json'), JSON.stringify(project, null, 2));
+      const scriptText =
+        project.script?.map((s) => s.narration).filter(Boolean).join('\n\n') || '';
+      const mp4Out = join(outDir, 'final-video.mp4');
+      log(`🎥 Render → ${mp4Out}`);
+      const renderEnv = buildRenderEnvFromFixState(fixState, { devServer, projectPath });
+      const renderSnapshot = renderEnvJournalSnapshot(fixState);
+      writeFileSync(join(outDir, 'render-env.json'), JSON.stringify(renderSnapshot, null, 2));
+      const render = spawnSync('node', ['server-render.mjs', mp4Out], {
+        cwd: root,
+        env: renderEnv,
+        encoding: 'utf8',
+        timeout: 1_800_000,
+        stdio: ['inherit', 'pipe', 'pipe'],
+      });
+      writeFileSync(join(outDir, 'render.log'), `${render.stdout || ''}\n${render.stderr || ''}`);
+      if (render.status !== 0 && render.status !== null) {
+        return {
+          ok: false,
+          error: `keep-best render failed: exit ${render.status}`,
+          topic,
+          outDir,
+          fixState,
+        };
+      }
+      const finalMp4 = mp4Out.replace('.mp4', '-final.mp4');
+      const produced = existsSync(finalMp4) ? finalMp4 : existsSync(mp4Out) ? mp4Out : null;
+      if (!produced) {
+        return { ok: false, error: 'keep-best: No output MP4', topic, outDir, fixState };
+      }
+      const gate = validateOutput(produced, 'Render output', { minBytes: MIN_RENDER_OUTPUT_BYTES });
+      if (!gate.valid) {
+        return { ok: false, error: gate.error, topic, outDir, fixState };
+      }
+      copyFileSync(produced, join(outDir, 'FINAL-VIDEO-final.mp4'));
+      spawnSync('node', ['scripts/finalize-ship-artifacts.mjs'], {
+        cwd: root,
+        env: {
+          ...process.env,
+          AUTOTUBE_LOOP_MODE: '1',
+          AUTOTUBE_FINALIZE_SOURCE: produced,
+          MIN_DURATION_SEC: process.env.MIN_DURATION_SEC || '30',
+          REAL_PASS_FIXTURE: '1',
+        },
+        stdio: options.quiet ? 'pipe' : 'inherit',
+      });
+      const probe = spawnSync(
+        'ffprobe',
+        ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', produced],
+        { encoding: 'utf8' },
+      );
+      const durationSec = probe.stdout ? parseFloat(probe.stdout.trim()) : NaN;
+      return {
+        ok: true,
+        topic,
+        outDir,
+        projectPath,
+        videoPath: produced,
+        canonicalPath: join(root, 'test-recordings', 'FINAL-VIDEO-final.mp4'),
+        scriptText,
+        durationSec,
+        sizeMb: (gate.size / 1024 / 1024).toFixed(2),
+        realHarvest: false,
+        fixState,
+        renderEnv: renderSnapshot,
+        harvestNonce: fixState.harvestNonce || 0,
+        keepBestPolish: true,
+      };
+    }
+    log('⚠️ Keep-best frozen project unusable — falling back to full generate');
+    fixState.keepBestMedia = false;
+  }
 
   if (!(await checkDevServer(devServer))) {
     return { ok: false, error: `Dev server not reachable at ${devServer}`, topic, outDir };
@@ -1683,8 +1785,26 @@ export async function generateFullVideo(options) {
     await browser.close().catch(() => {});
     browser = null;
 
-    patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
-    if (realHarvest) {
+    // Keep-best polish: reuse frozen media/timeline instead of lottery reharvest
+    const frozenPath = fixState.frozenProjectPath;
+    if (fixState.keepBestMedia && frozenPath) {
+      const frozen = loadFrozenProject(frozenPath);
+      const applied = applyFrozenMediaToProject(project, frozen);
+      if (applied.ok) {
+        log(
+          `❄️ Keep-best polish: reused ${applied.mediaCount} frozen assets / ${applied.timelineCount} timeline cuts (no reharvest lottery)`,
+        );
+        fixState.reHarvestMedia = false;
+      } else {
+        log('⚠️ Keep-best: frozen project missing/invalid — falling back to live media');
+        fixState.keepBestMedia = false;
+      }
+    }
+
+    patchProjectForLoop(project, topic, fixState, {
+      skipMediaPatch: realHarvest || fixState.keepBestMedia === true,
+    });
+    if (realHarvest && !fixState.keepBestMedia) {
       const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, {
         loopMode: true,
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
@@ -1753,7 +1873,7 @@ export async function generateFullVideo(options) {
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }
-    if (process.env.AUTOTUBE_BROLL_PLACEMENT === '1' && fixState.brollPlacement !== false) {
+    if (process.env.AUTOTUBE_BROLL_PLACEMENT === '1' && fixState.brollPlacement !== false && !fixState.keepBestMedia) {
       try {
         const { buildBrollPlacementPlanNode } = await import('./broll-placement.mjs');
         const plan = await buildBrollPlacementPlanNode(project, {

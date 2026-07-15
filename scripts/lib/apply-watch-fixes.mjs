@@ -6,6 +6,7 @@ import { buildShockHookLine, hookClashesWithTopic } from '../../e2e/openRouterMo
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
 import { buildImpactBeatsForTopic } from './impactBeatsByTopic.mjs';
 import { isHousingTopic, isNursingHomeTopic } from './topic-family.mjs';
+import { shouldKeepBest, enterPolishMode } from './keep-best.mjs';
 
 /** Keep hook/overlay aligned to the current topic (prevents bank→landlord leakage). */
 function syncTopicHook(s, topic, visionFix) {
@@ -284,6 +285,12 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push('6. Loudness off target → YouTube voice-first mix (AUTOTUBE_YOUTUBE_MODE=1)');
   }
 
+  // Keep-best beats reharvest lottery: freeze a shippable cut and polish next.
+  if (shouldKeepBest(watch) && renderTier === 'full') {
+    const raw = watch.brutal?.rawOverall ?? watch.brutal?.overall;
+    enterPolishMode(s, { rawOverall: raw, frozenProjectPath: s.frozenProjectPath }, applied);
+  }
+
   s.appliedFixes = [...(s.appliedFixes || []), ...applied.map((a) => `[${new Date().toISOString()}] ${a}`)];
 
   const objectivePass = watch.objectiveGate?.pass === true;
@@ -340,8 +347,10 @@ export function formatFixReport(applied, fixState) {
   lines.push(`24. karaokeCaptions: ${fixState.karaokeCaptions !== false}`);
   lines.push(`25. preferBrightBroll: ${fixState.preferBrightBroll === true}`);
   lines.push(`26. rewriteScript: ${fixState.rewriteScript === true}`);
+  lines.push(`27. keepBestMedia: ${fixState.keepBestMedia === true}`);
+  lines.push(`28. frozenProjectPath: ${fixState.frozenProjectPath || '(none)'}`);
   if (fixState.lastBrutalScores) {
-    lines.push(`27. lastBrutal: ${JSON.stringify(fixState.lastBrutalScores)}`);
+    lines.push(`29. lastBrutal: ${JSON.stringify(fixState.lastBrutalScores)}`);
   }
   return lines.join('\n');
 }

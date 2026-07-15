@@ -18,6 +18,7 @@ import { loadFixState, saveFixState, clearTopicPackaging } from './lib/loop-stat
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
 import { isBrutalHardFail } from './lib/brutal-gate.mjs';
+import { shouldKeepBest, saveFrozenProject, enterPolishMode } from './lib/keep-best.mjs';
 
 const ROOT = process.cwd();
 const LOOP_DIR = join(ROOT, 'test-recordings', 'improvement-loop');
@@ -473,7 +474,28 @@ async function main() {
       const { applied, fixState: nextFix, blockNextTopic } = applyFixesFromWatch(watch, fixState, currentTopic || topic);
       fixState = nextFix;
       fixesApplied = applied;
-      if (chasingHigherScore) {
+
+      // Persist frozen cut when keep-best qualifies (upload-ready or raw ≥ 7.4)
+      const projectForFreeze = existsSync(join(runDir, 'project.json'))
+        ? join(runDir, 'project.json')
+        : join(ROOT, 'test-recordings', 'last-project.json');
+      if (shouldKeepBest(watch) && renderTier === 'full') {
+        const frozen = saveFrozenProject(LOOP_DIR, projectForFreeze, {
+          rawOverall: watch.brutal?.rawOverall ?? brutalScore,
+          videoPath,
+          topic: currentTopic || topic,
+        });
+        if (frozen) {
+          enterPolishMode(
+            fixState,
+            { frozenProjectPath: frozen, rawOverall: watch.brutal?.rawOverall ?? brutalScore },
+            applied,
+          );
+          fixesApplied = applied;
+        }
+      }
+
+      if (chasingHigherScore && !fixState.keepBestMedia) {
         fixState.reHarvestMedia = true;
         fixState.faceSeekBroll = true;
         fixState.harvestVideoFirst = true;
@@ -483,6 +505,11 @@ async function main() {
         fixState.fixStrategy = 'reharvest';
         applied.push(
           `stretch: score ${brutalScore}/10 < ${cfg.untilScore} → force face-seek reharvest (offset ${fixState.mediaOffset})`,
+        );
+        fixesApplied = applied;
+      } else if (chasingHigherScore && fixState.keepBestMedia) {
+        applied.push(
+          `stretch: score ${brutalScore}/10 < ${cfg.untilScore} → keep-best polish (reuse frozen media, no reharvest)`,
         );
         fixesApplied = applied;
       }

@@ -3,10 +3,11 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { clearKeepBest } from './keep-best.mjs';
 
 export const FIX_STATE_VERSION = 3;
 
-/** @typedef {'interval' | 'hard_cuts' | 'reharvest' | 'new_topic'} FixStrategy */
+/** @typedef {'interval' | 'hard_cuts' | 'reharvest' | 'polish' | 'new_topic'} FixStrategy */
 
 export const DEFAULT_FIX_STATE = {
   version: FIX_STATE_VERSION,
@@ -40,6 +41,8 @@ export const DEFAULT_FIX_STATE = {
   preferBrightBroll: false,
   rewriteScript: false,
   maxReusePerUrl: 1,
+  keepBestMedia: false,
+  frozenProjectPath: null,
 };
 
 /**
@@ -59,6 +62,7 @@ export function clearTopicPackaging(state) {
   state.harvestNonce = 0;
   state.rewriteScript = false;
   // Keep preferBrightBroll / faceSeek as learned pipeline prefs across topics
+  clearKeepBest(state);
   return state;
 }
 

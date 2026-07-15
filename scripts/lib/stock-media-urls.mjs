@@ -195,6 +195,80 @@ export const MIXKIT_VIDEO_POOL = [
  * Used when YouTube yt-dlp is unavailable so ffmpeg assembly still gets motion B-roll.
  * Prefer archive.org for serious topics — sample/demo clips tank brutal visualVariety.
  */
+/** Curated housing / landlord clips (proven Pexels URLs from upload-ready landlord passes). */
+export const STOCK_HOUSING_VIDEOS = [
+  {
+    url: 'https://videos.pexels.com/video-files/7010416/7010416-uhd_3840_2160_25fps.mp4',
+    alt: 'person holding eviction notice paper',
+    tags: ['housing', 'evict', 'landlord', 'notice', 'tenant'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/6964246/6964246-hd_1920_1080_25fps.mp4',
+    alt: 'documentary eviction notice tenant worried',
+    tags: ['housing', 'evict', 'tenant', 'worried'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/6963496/6963496-hd_1920_1080_25fps.mp4',
+    alt: 'worried couple reading letter home',
+    tags: ['housing', 'couple', 'letter', 'worried'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/6964005/6964005-hd_1920_1080_25fps.mp4',
+    alt: 'worried couple reading letter home',
+    tags: ['housing', 'couple', 'letter', 'worried'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/6963972/6963972-hd_1920_1080_25fps.mp4',
+    alt: 'worried couple reading letter home',
+    tags: ['housing', 'couple', 'letter'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/7254276/7254276-uhd_4096_2160_25fps.mp4',
+    alt: 'stressed family apartment interior',
+    tags: ['housing', 'family', 'apartment'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/19229735/19229735-uhd_3840_2160_24fps.mp4',
+    alt: 'stressed family apartment interior',
+    tags: ['housing', 'family', 'apartment'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/18877216/18877216-uhd_3840_2160_30fps.mp4',
+    alt: 'stressed family apartment interior',
+    tags: ['housing', 'family', 'apartment'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/7491481/7491481-hd_1920_1080_30fps.mp4',
+    alt: 'person holding eviction notice paper',
+    tags: ['housing', 'evict', 'notice'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/5981355/5981355-uhd_4096_2160_25fps.mp4',
+    alt: 'documentary eviction notice tenant worried',
+    tags: ['housing', 'tenant', 'worried'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/4553301/4553301-uhd_4096_2160_25fps.mp4',
+    alt: 'tenant packing apartment documentary',
+    tags: ['housing', 'tenant', 'apartment'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/4553296/4553296-uhd_4096_2160_25fps.mp4',
+    alt: 'tenant apartment interior motion',
+    tags: ['housing', 'tenant', 'apartment'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/7205258/7205258-uhd_3840_2160_25fps.mp4',
+    alt: 'apartment building exterior city',
+    tags: ['housing', 'apartment', 'building'],
+  },
+  {
+    url: 'https://videos.pexels.com/video-files/7205253/7205253-uhd_3840_2160_25fps.mp4',
+    alt: 'apartment building exterior city',
+    tags: ['housing', 'apartment', 'building'],
+  },
+];
+
 export const STOCK_VIDEO_POOL = [
   {
     url: 'https://archive.org/download/yt_dFkLfTrGmVg/dFkLfTrGmVg.ia.mp4',
@@ -358,6 +432,12 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
   const isDisaster = /tornado|hurricane|flood|wildfire|earthquake|storm|disaster|warning|fema/i.test(blob);
   const isHeist =
     /\b(heist|diamond|jewel|jewelry|vault|airport|museum|robbery|antwerp|smuggl)\b/i.test(blob);
+  const isHousing =
+    /landlord|tenant|evict|rent|lease|apartment|housing|foreclos/i.test(blob);
+  if (isHousing && pool === STOCK_VIDEO_POOL) {
+    // Prefer curated housing pack when caller passed the main pool
+    return STOCK_HOUSING_VIDEOS;
+  }
   const keys = [];
   if (isCyber) keys.push(...cyberKeys);
   if (isDisaster) keys.push(...disasterKeys);

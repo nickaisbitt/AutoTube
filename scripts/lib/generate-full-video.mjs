@@ -10,7 +10,7 @@ import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pip
 import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
 import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
-import { dedupeMediaByPHash } from './perceptual-hash.mjs';
+import { dedupeMediaByPHash, VISUAL_DUP_MAX_DISTANCE } from './perceptual-hash.mjs';
 import {
   STOCK_HEALTHCARE_IMAGES,
   STOCK_VIDEO_POOL,
@@ -1277,6 +1277,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
 
   const deduped = dedupeMediaByPHash(relevance.media, {
     devServer,
+    maxDistance: loopMode ? 8 : VISUAL_DUP_MAX_DISTANCE,
     onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
   });
   project.media = [...deduped.media];
@@ -1326,7 +1327,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     // Top-up can reintroduce off-brand / off-topic clips — gate again
     stripJunkDemoVideos(project, report);
     const paddingBeforeFilter = (project.media || []).filter(isVolumePaddingAsset);
-    const afterTopUp = filterAssetsByRelevance(project.media || [], project, { minScore: 0.2 });
+    const afterTopUp = filterAssetsByRelevance(project.media || [], project, { minScore: 0.28 });
     report.relevanceDroppedAfterTopUp = afterTopUp.dropped;
     project.media = mergeVolumePadding(afterTopUp.media, paddingBeforeFilter);
     report.afterTopUp = project.media.length;

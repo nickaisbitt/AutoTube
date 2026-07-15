@@ -312,7 +312,14 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   } else if (!isVideo && hardCuts) {
     const drift = 0.08 + (clipIndex % 5) * 0.02;
     vf = `zoompan=z='min(zoom+${drift.toFixed(3)},1.12)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
-  } else if (hardCuts && clipIndex > 0) {
+  } else if (isVideo && hardCuts && frames > 2) {
+    const drift = 0.003 + (clipIndex % 9) * 0.0008;
+    vf = `zoompan=z='min(zoom+${drift.toFixed(4)},1.07)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
+    if (clipIndex > 0) {
+      const fadeOut = Math.max(0.04, durationSec - 0.04);
+      vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
+    }
+  } else if (hardCuts && clipIndex > 0 && !isVideo) {
     const fadeOut = Math.max(0.04, durationSec - 0.04);
     vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
   } else if (!isVideo && !draft) {

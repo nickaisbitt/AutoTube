@@ -138,6 +138,9 @@ export function buildEditTimeline(project, options = {}) {
     const segBeats = beatsBySeg.get(seg.id) || [];
     const scoreAsset = (a, activeBeat = null) => {
       const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
+      const key = urlKey(a);
+      const priorUses = key ? (urlUseCount.get(key) || 0) : 0;
+      let reusePenalty = priorUses > 0 ? -3 * priorUses : 0;
       if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (isGenericStockJunk(blob, topicBlob)) return -6;
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -5;
@@ -169,13 +172,13 @@ export function buildEditTimeline(project, options = {}) {
         }
         if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;
         if (preferBright && /\b(daylight|sunny|bright|well.?lit|window light)\b/i.test(blob)) score += 2;
-        return score + beatBoost;
+        return score + beatBoost + reusePenalty;
       }
       if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3 + beatBoost;
       if (topicIsHousing && /beetle|insect|wildlife|macro|spider|bug|larva|caterpillar/i.test(blob)) return -10;
       if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2 + beatBoost;
-      if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(blob)) return 3 + beatBoost;
-      return beatBoost;
+      if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(blob)) return 3 + beatBoost + reusePenalty;
+      return beatBoost + reusePenalty;
     };
     // Intro/outro = motion only when videos exist. Body = almost all video (V-V-V-I).
     const ordered = preferVideo && videos.length

@@ -279,27 +279,45 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
 }
 
 /**
+ * Decide which text overlays to burn. Impact beats are hook-only-mode cards;
+ * skip them whenever karaoke captions are requested (even if word timestamps
+ * failed to load — otherwise we still spam hook + impact + nothing).
+ */
+export function overlayTextPolicy(project, wordTimestampCache) {
+  const karaokeOff =
+    process.env.AUTOTUBE_KARAOKE_CAPTIONS === '0'
+    || process.env.AUTOTUBE_KARAOKE_CAPTIONS === 'false'
+    || project?.exportSettings?.karaokeCaptions === false;
+  const karaokeRequested = !karaokeOff;
+  const karaokeActive = karaokeRequested && Boolean(wordTimestampCache?.size);
+  return {
+    karaokeRequested,
+    karaokeActive,
+    burnImpactBeats: process.env.AUTOTUBE_IMPACT_BEATS !== '0' && !karaokeRequested,
+  };
+}
+
+/**
  * Apply YouTube overlays after ffmpeg assembly mux.
  */
 export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCache) {
   const results = {};
   if (!isYouTubeExportMode(project)) return results;
 
-  const karaokeOff =
-    process.env.AUTOTUBE_KARAOKE_CAPTIONS === '0'
-    || process.env.AUTOTUBE_KARAOKE_CAPTIONS === 'false'
-    || project?.exportSettings?.karaokeCaptions === false;
-  const karaokeOn = Boolean(wordTimestampCache?.size) && !karaokeOff;
+  const { karaokeRequested, karaokeActive, burnImpactBeats } = overlayTextPolicy(project, wordTimestampCache);
 
-  if (karaokeOn) {
+  if (karaokeActive) {
     const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, { project });
     results.captions = caps;
     if (caps.ok) {
       console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);
     }
-  } else if (karaokeOff) {
+  } else if (!karaokeRequested) {
     console.log('  [ffmpeg] karaoke captions skipped (hook-only overlay mode)');
     results.captions = { ok: true, skipped: true };
+  } else {
+    console.log('  [ffmpeg] karaoke captions skipped (no word timestamps)');
+    results.captions = { ok: false, skipped: true, reason: 'no-timestamps' };
   }
 
   const hook = overlayHookText(videoPath, project);
@@ -309,15 +327,15 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
   }
 
   // Impact cards only when karaoke is off — burning both reads as fragmented text spam.
-  if (process.env.AUTOTUBE_IMPACT_BEATS !== '0' && !karaokeOn) {
+  if (burnImpactBeats) {
     const beats = overlayImpactBeats(videoPath, project);
     results.impactBeats = beats;
     if (beats.ok) {
       console.log(`  [ffmpeg] impact beats: ${beats.count} cards`);
     }
-  } else if (karaokeOn) {
-    results.impactBeats = { ok: true, skipped: true, reason: 'karaoke-on' };
-    console.log('  [ffmpeg] impact beats skipped (karaoke captions on)');
+  } else if (karaokeRequested) {
+    results.impactBeats = { ok: true, skipped: true, reason: karaokeActive ? 'karaoke-on' : 'karaoke-requested' };
+    console.log('  [ffmpeg] impact beats skipped (karaoke captions requested)');
   }
   return results;
 }

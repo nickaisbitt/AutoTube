@@ -4,15 +4,30 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildImpactBeatsForTopic } from '../scripts/lib/impactBeatsByTopic.mjs';
 import { promoteIntroFaceVideo } from '../scripts/lib/patch-project-for-loop.mjs';
+import { overlayTextPolicy } from '../deploy/server-render/ffmpegOverlays.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('ffmpeg overlay policy — less text spam', () => {
   it('skips impact beats when karaoke captions are on', () => {
     const src = readFileSync(join(root, 'deploy/server-render/ffmpegOverlays.mjs'), 'utf8');
-    expect(src).toContain('!karaokeOn');
-    expect(src).toContain("reason: 'karaoke-on'");
+    expect(src).toContain('karaokeRequested');
     expect(src).not.toMatch(/Rotate to an early impact beat/);
+  });
+
+  it('overlayTextPolicy skips impact beats when karaoke requested but timestamps missing', () => {
+    const project = { exportSettings: { karaokeCaptions: true } };
+    const empty = new Map();
+    const policy = overlayTextPolicy(project, empty);
+    expect(policy.karaokeRequested).toBe(true);
+    expect(policy.karaokeActive).toBe(false);
+    expect(policy.burnImpactBeats).toBe(false);
+  });
+
+  it('overlayTextPolicy burns impact beats only in hook-only mode', () => {
+    const project = { exportSettings: { karaokeCaptions: false } };
+    const policy = overlayTextPolicy(project, new Map());
+    expect(policy.burnImpactBeats).toBe(true);
   });
 
   it('generic impact beats use readable phrases (not keyword mashups)', () => {

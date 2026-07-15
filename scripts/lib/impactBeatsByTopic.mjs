@@ -172,18 +172,27 @@ export function buildImpactBeatsForTopic(topic) {
     ];
   }
 
+  const kw = String(topic || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 3)
+    .slice(0, 3);
+  const a = kw[0] || 'PROOF';
+  const b = kw[1] || 'EXPOSED';
+  const c = kw[2] || 'NOW';
   return [
-    'STAY WITH ME',
-    'THIS IS REAL',
-    'WATCH CLOSELY',
-    'HERE IS PROOF',
-    'DO THIS NOW',
-    'SHARE THIS',
-    'DONT SKIP',
-    'ONE MORE FACT',
-    'REMEMBER THIS',
-    'ACT TODAY',
-    'TELL SOMEONE',
-    'SAVE THIS',
+    `${a} ${b}`,
+    `WHY ${a}`,
+    `${b} HIDING`,
+    `FOLLOW THE ${a}`,
+    `${c} MATTERS`,
+    `SEE THE ${a}`,
+    `${a} RECORDS`,
+    `WHO ALLOWED THIS`,
+    `READ THE ${b}`,
+    `ACT ON ${a}`,
+    `SHARE THE ${b}`,
+    `REMEMBER ${a}`,
   ];
 }

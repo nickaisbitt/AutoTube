@@ -283,7 +283,8 @@ export function buildEditTimeline(project, options = {}) {
       : assets;
 
     const duration = seg.duration || 20;
-    const interval = isIntro ? Math.min(cut, 0.7) : Math.min(cut, MAX_BODY_CUT_SEC);
+    const interval = isIntro ? Math.min(cut, 0.65) : Math.min(cut, MAX_BODY_CUT_SEC);
+    const maxReuseThisSeg = isIntro || isOutro ? 1 : effectiveMaxReuse;
     let t = 0;
     let ai = 0;
     let lastAssetId = null;
@@ -296,7 +297,7 @@ export function buildEditTimeline(project, options = {}) {
         const canUse = (candidate) => {
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-          if (key && reuseCountFor(key, introOutroReuse) >= effectiveMaxReuse) return false;
+          if (key && reuseCountFor(key, introOutroReuse) >= maxReuseThisSeg) return false;
           return true;
         };
         // Beat-aware re-rank only when a beat sheet window is active; otherwise

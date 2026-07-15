@@ -132,8 +132,18 @@ function flashClipDurationSec(clipIndex) {
   return 0.06 + (clipIndex % 3) * 0.01;
 }
 
+function hookSceneCutsEnabled() {
+  return process.env.AUTOTUBE_HOOK_SCENE_CUTS === '1'
+    || process.env.AUTOTUBE_HOOK_SCENE_CUTS === 'true';
+}
+
 /** Flash on asset swaps when pattern interrupts are on; dense in first 15s / first 3 clips. */
-function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset) {
+function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset, { isHookSegment = false } = {}) {
+  // PySceneDetect merges visually similar B-roll even when editTimeline cuts every ~0.7s.
+  // Sub-second flashes in the hook segment create detectable scene boundaries (scene_hook ≤3s).
+  if (hookSceneCutsEnabled() && isHookSegment) {
+    return true;
+  }
   if (process.env.AUTOTUBE_FLASH_INTERRUPTS !== '1' && process.env.AUTOTUBE_FLASH_INTERRUPTS !== 'true') {
     return false;
   }
@@ -392,7 +402,7 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, 
   return r.status === 0 && existsSync(clipOut);
 }
 
-async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
+async function renderSegmentClips(segment, segMedia, project, outputPath, options, { isHookSegment = false } = {}) {
   const interval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
   const targetDuration = segment.duration || 20;
   const schedule = buildClipSchedule(segment, segMedia, interval, project);
@@ -495,7 +505,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (next) {
       const sameAsset = assetKey(asset) === assetKey(next.asset);
       const timeAtCut = renderedDuration;
-      if (shouldInsertFlashBetweenClips(clipIndex, timeAtCut, sameAsset)) {
+      if (shouldInsertFlashBetweenClips(clipIndex, timeAtCut, sameAsset, { isHookSegment })) {
         const flashDur = flashClipDurationSec(clipIndex);
         const flashOut = join(tmpDir, `flash-${String(clipIndex).padStart(3, '0')}.mp4`);
         if (encodeFlashClip(flashOut, flashDur, { w, h, preset })) {
@@ -572,7 +582,8 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
 
     console.log(`  [ffmpeg] segment ${si + 1}/${project.script.length}: ${seg.title} (${(seg.duration || 0).toFixed(1)}s)`);
     const segOut = join(workDir, `segment-${si}.mp4`);
-    const result = await renderSegmentClips(seg, segMedia, project, segOut, options);
+    const isHookSegment = si === 0 || seg.type === 'intro';
+    const result = await renderSegmentClips(seg, segMedia, project, segOut, options, { isHookSegment });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };
     }

@@ -19,4 +19,7 @@ fi
 echo "=== PHASE 3: Insurance fraud family ===" | tee -a /tmp/loop-all-three.log
 ./scripts/run-insurance-loop-proof.sh 2>&1 | tee -a /tmp/loop-all-three.log
 
+echo "=== PHASE 4: 9.3 brutal stretch (nursing) ===" | tee -a /tmp/loop-all-three.log
+./scripts/run-93-stretch-proof.sh 2>&1 | tee -a /tmp/loop-all-three.log
+
 echo "ALL THREE PHASES COMPLETE" | tee -a /tmp/loop-all-three.log

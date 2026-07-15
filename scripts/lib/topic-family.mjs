@@ -55,8 +55,7 @@ export function isBankScamTopic(topic) {
   ) {
     return false;
   }
-  return /bank|fraud|scam|voice.?clone|otp|phish|wire\s*transfer|callback\s*scam/.test(t)
-    || (/hack|identity|password|leak|breach|cyber|ransom/.test(t) && !/hospital|patient|healthcare|hipaa|medical|clinic/.test(t));
+  return /bank|fraud|scam|voice.?clone|otp|phish|wire\s*transfer|callback\s*scam/.test(t);
 }
 
 /**

@@ -150,14 +150,20 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (isHealthcareCyberTopic(topicOnly)) {
     return clampWords('PATIENT RECORDS EXPOSED');
   }
+  if (
+    /port|strike|container|shipping|supply\s*chain|cargo|dock|freight|maritime/i.test(t)
+    && /hack|breach|track|cyber|ransom/i.test(t)
+  ) {
+    return clampWords('THE TRACKING HACK WAS LIVE');
+  }
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return clampWords('EMERGENCY: THEY HID THE RISK');
   }
-  // Only true bank/scam/voice-clone stories get the bank overlay. A generic
-  // hack/breach/leak topic keeps a keyword overlay so it stays coherent with the
-  // (generic) shock hook line instead of falsely promising an emptied bank account.
-  if (/bank|voice.?clone|otp|phish|wire\s*transfer|callback\s*scam/i.test(t)
-    || (isBankScamTopic(topicOnly) && /bank|scam|fraud|voice|otp|phish|wire|callback/i.test(t))) {
+  // Only true bank/scam/voice-clone stories get the bank overlay.
+  if (
+    /bank|voice.?clone|otp|phish|wire\s*transfer|callback\s*scam/i.test(t)
+    || (isBankScamTopic(topicOnly) && /bank|scam|fraud|voice|otp|phish|wire|callback/i.test(t))
+  ) {
     return clampWords('YOUR BANK ACCOUNT IS EMPTY');
   }
   if (/ticket|bot|scalp|concert|fan/i.test(t)) {

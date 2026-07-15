@@ -85,6 +85,13 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     expect(overlay).toBe('MILLIONS OF PASSWORDS LEAKED BEFORE ANYONE');
     expect(overlay).not.toMatch(/^URGENT:/);
   });
+
+  it('does not slap bank overlay on port/supply-chain hack topics', () => {
+    const topic = 'The port strike that hid a container-tracking hack';
+    const overlay = buildShortHookOverlay(topic, '');
+    expect(overlay).not.toBe('YOUR BANK ACCOUNT IS EMPTY');
+    expect(overlay).toMatch(/TRACKING|HACK|STRIKE/i);
+  });
 });
 
 describe('stock selection — connects B-roll to the topic', () => {

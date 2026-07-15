@@ -98,7 +98,13 @@ export function buildShockHookLine(topic, override) {
   if (/hospital|patient|healthcare|hipaa/.test(tl) && /hack|breach|leak|records?|data|cyber/.test(tl)) {
     return 'Your medical chart was already in the breach dump.';
   }
-  if (/bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl)) {
+  if (
+    /port|strike|container|shipping|supply\s*chain|cargo|dock|freight|maritime/.test(tl)
+    && /hack|breach|track|cyber|ransom/.test(tl)
+  ) {
+    return 'The strike was cover — the tracking system was already hacked.';
+  }
+  if (/bank|fraud|scam|voice.?clone|otp|phish|wire\s*transfer|password\s*breach|identity\s*theft/.test(tl)) {
     return 'This already emptied real bank accounts.';
   }
   if (/ticket|bot|scalp|concert|fan/.test(tl)) {

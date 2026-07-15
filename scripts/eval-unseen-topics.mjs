@@ -63,6 +63,7 @@ function coldFixState() {
     harvestVideoFirst: true,
     preferBrightBroll: true,
     patternInterrupts: false,
+    karaokeCaptions: true,
     maxReusePerUrl: 1,
     reHarvestMedia: false,
     keepBestMedia: false,

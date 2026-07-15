@@ -16,19 +16,17 @@
 8. Pre-render `gateProjectMediaAgainstBeats` before media quality gate
 9. Defaults: VisualBeats **ON**; family templates + curated packs **opt-in only**
 10. Beat-aware edit timeline (semantic windows via VisualBeatSheet; Whisper caption align already on in cold eval)
+11. Cold **dev×6** calibrated (`eval/CALIBRATION-dev6.md`)
+12. Cold **release×6** slice (`eval/RELEASE-SLICE-6.md`) — improved but critical 33% > 25% bar
+13. `AUTOTUBE_WATCH_MODEL` + judge limitation docs (`eval/JUDGE-LIMITATION.md`)
 
-## Remaining (execute in order — no pause-for-permission)
-
-### Phase B — Measure (sensors only)
-5. Full cold **dev×6** with beats + ranking + beat vision — **DONE** (`eval/CALIBRATION-dev6.md`)
-6. ~~Whisper semantic timeline~~ shipped as beat-aware placement + existing whisper align
-7. Calibrate only after B5: provisional bars documented in `eval/CALIBRATION-dev6.md`
-
-### Phase C — Release gate
-8. Cold **release×6** affordable slice (of 24), then expand — **IN PROGRESS**
-9. Independent judge model env (`AUTOTUBE_WATCH_MODEL`) if available — else document same-model limitation
+## Remaining (next execution wave — no pause)
+1. Cut held-out **critical rate ≤25%** (repetition / dark / face-less hooks)
+2. Re-run release slice with independent `AUTOTUBE_WATCH_MODEL`
+3. Expand toward release×24 only after (1)+(2)
 
 ## Stop conditions
-- Do not open new quality-integration side quests
+- Do not open new quality-integration side quests as “proof”
 - Do not run keep-best / housing pack loops as readiness
 - After each code phase: commit + push + cold sensor run before claiming progress
+- **Do not claim release-ready** until critical bar + independent judge pass

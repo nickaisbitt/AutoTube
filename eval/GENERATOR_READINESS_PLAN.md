@@ -17,12 +17,13 @@
 9. Defaults: VisualBeats **ON**; family templates + curated packs **opt-in only**
 10. Beat-aware edit timeline (semantic windows via VisualBeatSheet; Whisper caption align already on in cold eval)
 11. Cold **dev×6** calibrated (`eval/CALIBRATION-dev6.md`)
-12. Cold **release×6** slice (`eval/RELEASE-SLICE-6.md`) — improved but critical 33% > 25% bar
+12. Cold **release×6** slice (`eval/RELEASE-SLICE-6.md`) — upload/raw pass; critical 33%
 13. `AUTOTUBE_WATCH_MODEL` + judge limitation docs (`eval/JUDGE-LIMITATION.md`)
+14. Critical-pattern timeline fixes + `--offset`; recheck on release 7–12 (`eval/RELEASE-SLICE-6b.md`) — critical **50%** (still fail)
 
 ## Remaining (next execution wave — no pause)
-1. Cut held-out **critical rate ≤25%** (repetition / dark / face-less hooks)
-2. Re-run release slice with independent `AUTOTUBE_WATCH_MODEL`
+1. Drive held-out **critical rate ≤25%** (still failing at 33–50% across slices)
+2. Re-run with independent `AUTOTUBE_WATCH_MODEL`
 3. Expand toward release×24 only after (1)+(2)
 
 ## Stop conditions

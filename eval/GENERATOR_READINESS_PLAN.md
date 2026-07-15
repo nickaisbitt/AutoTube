@@ -15,12 +15,13 @@
 7. Multimodal vision top-N per beat (`AUTOTUBE_BEAT_VISION`, budgeted)
 8. Pre-render `gateProjectMediaAgainstBeats` before media quality gate
 9. Defaults: VisualBeats **ON**; family templates + curated packs **opt-in only**
+10. Beat-aware edit timeline (semantic windows via VisualBeatSheet; Whisper caption align already on in cold eval)
 
 ## Remaining (execute in order — no pause-for-permission)
 
 ### Phase B — Measure (sensors only)
-5. Full cold **dev×6** with beats + ranking + beat vision
-6. If A/B still weak on critical/stock: ship Whisper-aligned semantic timeline (bounded), then re-run same 6
+5. Full cold **dev×6** with beats + ranking + beat vision  ← IN PROGRESS
+6. ~~Whisper semantic timeline~~ shipped as beat-aware placement + existing whisper align
 7. Calibrate only after B5: set provisional release bars from observed percentiles (document, don’t invent)
 
 ### Phase C — Release gate

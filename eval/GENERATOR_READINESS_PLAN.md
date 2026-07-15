@@ -20,12 +20,12 @@
 ## Remaining (execute in order — no pause-for-permission)
 
 ### Phase B — Measure (sensors only)
-5. Full cold **dev×6** with beats + ranking + beat vision  ← IN PROGRESS
+5. Full cold **dev×6** with beats + ranking + beat vision — **DONE** (`eval/CALIBRATION-dev6.md`)
 6. ~~Whisper semantic timeline~~ shipped as beat-aware placement + existing whisper align
-7. Calibrate only after B5: set provisional release bars from observed percentiles (document, don’t invent)
+7. Calibrate only after B5: provisional bars documented in `eval/CALIBRATION-dev6.md`
 
 ### Phase C — Release gate
-8. Cold **release×24** once (or max affordable subset if cost-bound), blind watcher, report only raw/upload/critical
+8. Cold **release×6** affordable slice (of 24), then expand — **IN PROGRESS**
 9. Independent judge model env (`AUTOTUBE_WATCH_MODEL`) if available — else document same-model limitation
 
 ## Stop conditions

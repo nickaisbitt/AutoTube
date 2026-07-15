@@ -28,16 +28,25 @@ export function isVeteransBenefitsTopic(topic) {
   );
 }
 
+/** @param {string} topic */
+export function isSchoolEducationTopic(topic) {
+  const t = String(topic || '').toLowerCase();
+  return /school|student|district|classroom|university|campus|college|teacher|counseling|k-12|k12|principal|tuition/.test(t)
+    && !/\bhospital\b|\bpatient\b|surgery|\bicu\b/.test(t);
+}
+
 /**
- * Hospital / patient-records cyber topics — excludes nursing-home abuse/camera stories.
+ * Hospital / patient-records cyber topics — excludes nursing-home abuse/camera stories
+ * and school district student-record breaches.
  * @param {string} topic
  */
 export function isHealthcareCyberTopic(topic) {
   const t = String(topic || '').toLowerCase();
   if (isNursingHomeTopic(t)) return false;
   if (isVeteransBenefitsTopic(t)) return false;
+  if (isSchoolEducationTopic(t)) return false;
   return (
-    /hospital|healthcare|patient|hipaa|medical|clinic|records?\b/.test(t)
+    /hospital|healthcare|patient|hipaa|medical|clinic/.test(t)
     && /hack|breach|ransom|leak|data|cyber|expos|stolen|records?\b|broker/.test(t)
   );
 }
@@ -98,6 +107,10 @@ export function impactBeatsMatchTopic(beats, topic) {
       /camera|abuse|staff|care|elder|supervision|tape|family|shift/.test(blob)
       && !/hospital breach|charts stolen|patient data|hipaa|otp|wire|voice clone|lease|evict/.test(blob)
     );
+  }
+  if (isSchoolEducationTopic(t)) {
+    return /student|school|records|ransom|data|files|district|campus/.test(blob)
+      && !/hospital breach|patient data|otp|wire|voice clone|lease|evict/.test(blob);
   }
   if (isHealthcareCyberTopic(t)) {
     return /hospital|patient|records|hipaa|breach|charts|er locked/.test(blob);

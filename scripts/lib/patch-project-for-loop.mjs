@@ -12,6 +12,7 @@ import {
   isHousingTopic,
   isInsuranceFraudTopic,
   isNursingHomeTopic,
+  isSchoolEducationTopic,
   isVeteransBenefitsTopic,
 } from './topic-family.mjs';
 
@@ -146,6 +147,9 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (isHeistTopic(topicOnly)) {
     // Matches the heist shock hook ("the diamonds were already gone").
     return clampWords('THE DIAMONDS ARE GONE');
+  }
+  if (isSchoolEducationTopic(topicOnly) && /hack|ransom|breach|cyber|leak|data|records/i.test(t)) {
+    return clampWords('STUDENT RECORDS HELD HOSTAGE');
   }
   if (isHealthcareCyberTopic(topicOnly)) {
     return clampWords('PATIENT RECORDS EXPOSED');

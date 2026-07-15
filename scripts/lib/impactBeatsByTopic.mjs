@@ -9,6 +9,7 @@ import {
   isHousingTopic,
   isInsuranceFraudTopic,
   isNursingHomeTopic,
+  isSchoolEducationTopic,
   isVeteransBenefitsTopic,
 } from './topic-family.mjs';
 
@@ -48,6 +49,23 @@ export function buildImpactBeatsForTopic(topic) {
       'CALL FOR HELP',
       'WATCH THE TAPE',
       'PROTECT THEM',
+    ];
+  }
+
+  if (isSchoolEducationTopic(tl) && /hack|breach|ransom|leak|data|cyber|records/.test(tl)) {
+    return [
+      'STUDENT DATA OUT',
+      'SCHOOL FILES LOCKED',
+      'RANSOM DEMAND',
+      'PARENTS NOT TOLD',
+      'COUNSELING LEAKED',
+      'DISTRICT BREACHED',
+      'RECORDS FOR SALE',
+      'LOCK THEM OUT',
+      'DATA HELD HOSTAGE',
+      'CLASSROOMS AT RISK',
+      'WHO KNEW FIRST',
+      'FIX IT NOW',
     ];
   }
 

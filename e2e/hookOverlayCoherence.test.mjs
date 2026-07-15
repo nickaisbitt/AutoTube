@@ -92,6 +92,13 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     expect(overlay).not.toBe('YOUR BANK ACCOUNT IS EMPTY');
     expect(overlay).toMatch(/TRACKING|HACK|STRIKE/i);
   });
+
+  it('routes school ransomware to education overlay, not hospital cards', () => {
+    const topic = 'How school districts lost student mental-health records to ransomware';
+    const overlay = buildShortHookOverlay(topic, '');
+    expect(overlay).not.toBe('PATIENT RECORDS EXPOSED');
+    expect(overlay).toMatch(/STUDENT|RECORDS|SCHOOL/i);
+  });
 });
 
 describe('stock selection — connects B-roll to the topic', () => {

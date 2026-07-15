@@ -53,6 +53,7 @@ import {
   isHousingTopic,
   isInsuranceFraudTopic,
   isNursingHomeTopic,
+  isSchoolEducationTopic,
   isVeteransBenefitsTopic,
 } from './topic-family.mjs';
 import {
@@ -618,6 +619,11 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
       blob,
     );
   }
+  if (isSchoolEducationTopic(topicBlob)) {
+    return /school|student|classroom|teacher|campus|library|counseling|laptop|computer|server|data|cyber|worried|parent|records|phone|document|district/.test(
+      blob,
+    );
+  }
   if (isHealthcareCyberTopic(topicBlob)) {
     return /hospital|patient|medical|records|nurse|doctor|server|data|rack|workstation|hipaa|breach|laptop|corridor|waiting/.test(
       blob,
@@ -674,6 +680,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   const housing = isHousingTopic(topicBlob);
   const insurance = isInsuranceFraudTopic(topicBlob);
   const veterans = isVeteransBenefitsTopic(topicBlob);
+  const school = isSchoolEducationTopic(topicBlob);
   const healthcareCyber = isHealthcareCyberTopic(topicBlob) && cyberTopic;
   const heist = isHeistTopic(topicBlob);
   const brightBoost = preferBright
@@ -779,6 +786,24 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return [...brightBoost, ...antiHud, ...base];
   }
+  if (school && /hack|ransom|breach|cyber|leak|data|records/.test(topicBlob)) {
+    const faces = [
+      'worried parent reading letter school',
+      'student laptop classroom worried',
+      'teacher shocked looking at computer',
+      'parent child homework worried kitchen',
+    ];
+    const topical = [
+      'school hallway students walking',
+      'classroom laptop student desk',
+      'school computer lab students',
+      'school office paperwork desk',
+      'library students studying laptops',
+      'server room data center school',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
   if (isHealthcareTopic(topicBlob) && cyberTopic) {
     const faces = [
       'worried patient looking at phone',
@@ -870,12 +895,15 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const seriousTopic = isSeriousNewsTopic(topicBlob);
   const housingTopic = isHousingTopic(topicBlob);
   // Bare "AI" matched landlord topics and flooded intros with podcast-mic stock
+  const schoolCyber =
+    isSchoolEducationTopic(topicBlob)
+    && /hack|ransom|breach|cyber|leak|data|records/.test(topicBlob);
   const cyberTopic =
     !housingTopic
     && !isNursingHomeTopic(topicBlob)
     && !isVeteransBenefitsTopic(topicBlob)
     && !isHeistTopic(topicBlob)
-    && (isBankScamTopic(topicBlob) || isHealthcareCyberTopic(topicBlob));
+    && (isBankScamTopic(topicBlob) || isHealthcareCyberTopic(topicBlob) || schoolCyber);
 
   stripJunkDemoVideos(project, report);
 
@@ -907,6 +935,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           || isNursingHomeTopic(topicBlob)
           || isVeteransBenefitsTopic(topicBlob)
           || isHealthcareCyberTopic(topicBlob)
+          || schoolCyber
           || isHeistTopic(topicBlob)
         )
         && !isCyberRelevantClip(clip, topicBlob)
@@ -987,7 +1016,17 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   // Motion-first: when stock API keys exist, require real stock motion (not thin harvest proxies)
   const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
   const minVideos = hasStockKeys
-    ? Math.max(12, segments.length * 4)
+    ? Math.min(
+      32,
+      Math.max(
+        12,
+        segments.length * 4,
+        Math.ceil(
+          (segments.reduce((s, seg) => s + (Number(seg.duration) || 15), 0)
+            / (options.cutIntervalSec || 1.25)) * 0.55,
+        ),
+      ),
+    )
     : Math.min(segments.length * 2, 6);
   const stockNeed = hasStockKeys
     ? Math.max(0, Math.max(12, segments.length * 4) - stockApiVideos.length)
@@ -1261,6 +1300,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     await topUpVideoBroll(project, report, options.mediaOffset || 0, devServer, {
       faceSeek: options.faceSeek === true,
       preferBright: options.preferBright === true,
+      cutIntervalSec: options.cutIntervalSec,
     });
     injectCyberStockStills(project, report, options.mediaOffset || 0);
     // Top-up can reintroduce off-brand / off-topic clips — gate again
@@ -1889,6 +1929,7 @@ export async function generateFullVideo(options) {
         mediaOffset: fixState.mediaOffset || 0,
         faceSeek: fixState.faceSeekBroll === true || fixState.harvestVideoFirst !== false,
         preferBright: fixState.preferBrightBroll === true,
+        cutIntervalSec: fixState.cutIntervalSec ?? 0.85,
       });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
       if (mediaReport.videoTopUp?.length) {

@@ -99,6 +99,12 @@ export function buildShockHookLine(topic, override) {
     return 'Your medical chart was already in the breach dump.';
   }
   if (
+    isSchoolEducationTopic(tl)
+    && /hack|ransom|breach|cyber|leak|data|records/.test(tl)
+  ) {
+    return 'Student counseling files were already stolen.';
+  }
+  if (
     /port|strike|container|shipping|supply\s*chain|cargo|dock|freight|maritime/.test(tl)
     && /hack|breach|track|cyber|ransom/.test(tl)
   ) {

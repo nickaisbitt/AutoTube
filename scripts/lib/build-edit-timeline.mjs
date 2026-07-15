@@ -74,13 +74,22 @@ export function beatAtSegmentTime(beats, localSec, duration) {
 }
 
 export function buildEditTimeline(project, options = {}) {
-  const cut = options.cutIntervalSec ?? 1.25;
+  let cut = options.cutIntervalSec ?? 1.25;
   const reason = options.reason ?? 'heuristic placement';
   const preferVideo = options.preferVideo !== false;
   const entries = [];
   const globalPool = uniqueAssetsByUrl(project.media || []);
   const urlUseCount = new Map();
   const maxReusePerUrl = options.maxReusePerUrl ?? 1;
+  const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
+  const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
+  if (uniqueVideos.length > 0 && totalDur > 0 && maxReusePerUrl > 0) {
+    const maxUniqueSlots = uniqueVideos.length * maxReusePerUrl;
+    const impliedCut = totalDur / maxUniqueSlots;
+    if (impliedCut > cut) {
+      cut = Math.min(impliedCut, 3.5);
+    }
+  }
   const topicIsHousing = isHousingTopic(project.topic || '');
   const beatSheet = project.visualBeatSheet;
   const beatsBySeg = new Map();

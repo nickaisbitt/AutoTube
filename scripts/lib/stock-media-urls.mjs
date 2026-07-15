@@ -2,6 +2,8 @@
  * Real stock image URLs for fixtures / volume top-up (not picsum).
  * Keep pool large enough that 3 segments × 6 assets don't force heavy reuse.
  */
+import { curatedPacksEnabled } from './eval-flags.mjs';
+
 export const STOCK_HEALTHCARE_IMAGES = [
   {
     url: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&w=1920&q=85',
@@ -434,8 +436,8 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
     /\b(heist|diamond|jewel|jewelry|vault|airport|museum|robbery|antwerp|smuggl)\b/i.test(blob);
   const isHousing =
     /landlord|tenant|evict|rent|lease|apartment|housing|foreclos/i.test(blob);
-  if (isHousing && pool === STOCK_VIDEO_POOL) {
-    // Prefer curated housing pack when caller passed the main pool
+  if (isHousing && pool === STOCK_VIDEO_POOL && curatedPacksEnabled()) {
+    // Prefer curated housing pack when caller passed the main pool (disabled in cold eval)
     return STOCK_HOUSING_VIDEOS;
   }
   const keys = [];

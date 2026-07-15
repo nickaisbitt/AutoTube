@@ -36,6 +36,8 @@
     "loop:serve": "npm run dev -- --port 5173 --host 0.0.0.0",
     "loop:video:mock": "node scripts/video-improvement-loop.mjs --until-score 9.1 --mock-harvest",
     "loop:video:once": "node scripts/video-improvement-loop.mjs --max 1",
+    "eval:unseen": "node scripts/eval-unseen-topics.mjs",
+    "eval:unseen:validate": "node scripts/eval-unseen-topics.mjs --validate-only",
     "loop:objective": "node scripts/video-improvement-loop.mjs --max 1 --objective-only",
     "loop:gate": "AUTOTUBE_RENDER_QUALITY=high node scripts/video-improvement-loop.mjs --max 1",
     "test:unit": "vitest run --passWithNoTests",

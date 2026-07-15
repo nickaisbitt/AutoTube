@@ -19,6 +19,7 @@ import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mj
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
 import { isBrutalHardFail } from './lib/brutal-gate.mjs';
 import { shouldKeepBest, saveFrozenProject, enterPolishMode } from './lib/keep-best.mjs';
+import { keepBestEnabled } from './lib/eval-flags.mjs';
 
 const ROOT = process.cwd();
 const LOOP_DIR = join(ROOT, 'test-recordings', 'improvement-loop');
@@ -479,7 +480,7 @@ async function main() {
       const projectForFreeze = existsSync(join(runDir, 'project.json'))
         ? join(runDir, 'project.json')
         : join(ROOT, 'test-recordings', 'last-project.json');
-      if (shouldKeepBest(watch) && renderTier === 'full') {
+      if (keepBestEnabled() && shouldKeepBest(watch) && renderTier === 'full') {
         const frozen = saveFrozenProject(LOOP_DIR, projectForFreeze, {
           rawOverall: watch.brutal?.rawOverall ?? brutalScore,
           videoPath,
@@ -495,7 +496,7 @@ async function main() {
         }
       }
 
-      if (chasingHigherScore && !fixState.keepBestMedia) {
+      if (chasingHigherScore && !(keepBestEnabled() && fixState.keepBestMedia)) {
         fixState.reHarvestMedia = true;
         fixState.faceSeekBroll = true;
         fixState.harvestVideoFirst = true;
@@ -507,7 +508,7 @@ async function main() {
           `stretch: score ${brutalScore}/10 < ${cfg.untilScore} → force face-seek reharvest (offset ${fixState.mediaOffset})`,
         );
         fixesApplied = applied;
-      } else if (chasingHigherScore && fixState.keepBestMedia) {
+      } else if (chasingHigherScore && keepBestEnabled() && fixState.keepBestMedia) {
         applied.push(
           `stretch: score ${brutalScore}/10 < ${cfg.untilScore} → keep-best polish (reuse frozen media, no reharvest)`,
         );

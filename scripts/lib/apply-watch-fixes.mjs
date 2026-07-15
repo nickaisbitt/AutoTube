@@ -7,6 +7,7 @@ import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-proj
 import { buildImpactBeatsForTopic } from './impactBeatsByTopic.mjs';
 import { isHousingTopic, isNursingHomeTopic } from './topic-family.mjs';
 import { shouldKeepBest, enterPolishMode } from './keep-best.mjs';
+import { keepBestEnabled } from './eval-flags.mjs';
 
 /** Keep hook/overlay aligned to the current topic (prevents bank→landlord leakage). */
 function syncTopicHook(s, topic, visionFix) {
@@ -286,7 +287,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   }
 
   // Keep-best beats reharvest lottery: freeze a shippable cut and polish next.
-  if (shouldKeepBest(watch) && renderTier === 'full') {
+  if (keepBestEnabled() && shouldKeepBest(watch) && renderTier === 'full') {
     const raw = watch.brutal?.rawOverall ?? watch.brutal?.overall;
     enterPolishMode(s, { rawOverall: raw, frozenProjectPath: s.frozenProjectPath }, applied);
   }

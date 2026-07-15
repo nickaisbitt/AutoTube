@@ -24,6 +24,7 @@ import {
   isJunkDemoVideoUrl,
   topicalStockVideos,
 } from './stock-media-urls.mjs';
+import { curatedPacksEnabled, keepBestEnabled } from './eval-flags.mjs';
 import {
   accumulateExcludedUrls,
   harvestContextFromFixState,
@@ -906,7 +907,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
 
   let pool = [
     ...liveClips,
-    ...(housingTopic ? STOCK_HOUSING_VIDEOS : []),
+    ...(housingTopic && curatedPacksEnabled() ? STOCK_HOUSING_VIDEOS : []),
     ...(cyberTopic ? MIXKIT_VIDEO_POOL : []),
     ...(seriousTopic ? topicalStockVideos(topicBlob, STOCK_VIDEO_POOL) : STOCK_VIDEO_POOL.filter((v) => !(v.tags || []).includes('filler'))),
   ];
@@ -1311,7 +1312,7 @@ export async function generateFullVideo(options) {
   const loopMinAssets = Math.max(2, Math.min(8, fixState.minAssetsPerSegment || 6));
 
   // Fast path: polish a frozen cut (skip Playwright harvest lottery)
-  if (fixState.keepBestMedia && fixState.frozenProjectPath) {
+  if (keepBestEnabled() && fixState.keepBestMedia && fixState.frozenProjectPath) {
     const frozen = loadFrozenProject(fixState.frozenProjectPath);
     if (frozen?.media?.length && frozen?.script?.length) {
       log(`\n🎬 Generate (keep-best polish): ${topic}`);
@@ -1787,7 +1788,7 @@ export async function generateFullVideo(options) {
 
     // Keep-best polish: reuse frozen media/timeline instead of lottery reharvest
     const frozenPath = fixState.frozenProjectPath;
-    if (fixState.keepBestMedia && frozenPath) {
+    if (keepBestEnabled() && fixState.keepBestMedia && frozenPath) {
       const frozen = loadFrozenProject(frozenPath);
       const applied = applyFrozenMediaToProject(project, frozen);
       if (applied.ok) {

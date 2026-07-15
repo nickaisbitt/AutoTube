@@ -804,7 +804,15 @@ export async function planSegmentVisuals(
     typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
 
   if (openRouterKey && !loopFastMode) {
-    const aiPlan = await generateAIPlan(segment.narration, topicContext, openRouterKey, undefined, signal, segment.title);
+    const aiPlan = await generateAIPlan(
+      segment.narration,
+      topicContext,
+      openRouterKey,
+      undefined,
+      signal,
+      segment.title,
+      segment.visualNote,
+    );
     // If AI returned a useful plan with shots, use it
     if (aiPlan.shots && aiPlan.shots.length > 0) {
       return {

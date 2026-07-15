@@ -157,11 +157,15 @@ export async function generateAIPlan(
   model = DEFAULT_VISUAL_MODEL,
   signal?: AbortSignal,
   segmentTitle?: string,
+  visualNote?: string,
 ): Promise<LlmVisualPlan> {
   const topic = sanitiseTopic(topicContext.resolvedTitle || topicContext.topic);
   const fallbackTopic = topic;
 
   const titleLine = segmentTitle ? `\nSEGMENT TITLE: ${segmentTitle}` : '';
+  const visualNoteLine = visualNote?.trim()
+    ? `\nSCRIPT VISUAL NOTE (treat as required intent — search this scene, do not invent unrelated B-roll): ${visualNote.trim()}`
+    : '';
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   const prompt = `You are a professional Creative Director and photo researcher.
 
@@ -172,14 +176,14 @@ IMPORTANT: Today is ${today}. The information in the following topic and narrati
 
 Plan TWO DISTINCT SHOTS for this specific video segment. Each shot must have MULTIPLE diverse search queries targeting different source types.
 
-TOPIC: ${topic}${titleLine}
+TOPIC: ${topic}${titleLine}${visualNoteLine}
 DESCRIPTION: ${topicContext.description}
 NARRATION: "${segmentText}"
 ${topicContext.recentNews && topicContext.recentNews.length > 0 ? `\nRECENT NEWS (live from web):\n${topicContext.recentNews.map((n, i) => `  ${i + 1}. [${n.source}] ${n.headline}${n.date ? ` (${n.date})` : ''} — ${n.snippet.substring(0, 200)}`).join('\n')}` : ''}
 ${topicContext.extract ? `\nWIKIPEDIA CONTEXT:\n${topicContext.extract.substring(0, 1000)}` : ''}
 
 CRITICAL:
-1. Your shots MUST be about the NARRATION above.
+1. Your shots MUST be about the NARRATION above${visualNote?.trim() ? ' AND honor the SCRIPT VISUAL NOTE' : ''}.
 2. Provide TWO distinct shots (Primary and Secondary) to maintain visual velocity.
 3. Your shots must be SPECIFIC and SEARCHABLE. Instead of "Establish visual context", say exactly what should be on screen: "Aerial shot of NCL Luna cruise ship at Port of Miami", "Close-up of Fincantieri shipyard construction".
 4. For EACH shot, provide 3-4 diverse search queries targeting different source types:
@@ -193,11 +197,7 @@ CRITICAL:
    - "geopolitical": Nation-state actors, global infrastructure, international conflict → use WIDE-CONTEXT visuals (maps, infrastructure, satellite imagery, government buildings, military)
    - "practical": Advice, protection steps, actionable tips → use CLEAR/INSTRUCTIONAL visuals (checklists, UI screenshots, step-by-step, clean graphics)
 6. Your shot choices MUST match the classification scale. Personal segments need intimate shots. Geopolitical segments need wide-context shots. When the story shifts scope, the visual language must shift too.
-7. TOPIC FAMILY ANCHORS — prefer these searchable scenes when they fit the narration (never use cartoon/puppet/insect filler):
-   - Hospital / patient / healthcare cyber: hospital corridor, medical records laptop, nurse at workstation, server room, waiting-room worry
-   - Bank / scam / voice clone: shocked face on phone, banking app hands, wire transfer laptop, bank exterior
-   - Landlord / eviction: eviction notice paper, apartment exterior, packing boxes, couple reading letter
-   - NEVER: beetles, puppets, gaming footage, fashion runway, podcast-mic studio as the primary shot for cyber/news topics
+7. Prefer concrete, searchable subjects grounded in the narration. NEVER use cartoon/puppet/insect/macro wildlife filler for serious topics.
 
 Return JSON:
 {

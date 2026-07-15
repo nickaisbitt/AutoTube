@@ -1,6 +1,23 @@
 /**
  * Topic-family visual search anchors shared by visual director + planner fallbacks.
+ * Disabled during cold evaluation (AUTOTUBE_EVAL_COLD=1) so packs cannot inflate scores.
  */
+
+function topicFamilyTemplatesEnabled(): boolean {
+  try {
+    const env =
+      (typeof process !== 'undefined' && process.env)
+      || (typeof import.meta !== 'undefined' && (import.meta as { env?: Record<string, string> }).env)
+      || {};
+    if (env.AUTOTUBE_EVAL_COLD === '1' || env.AUTOTUBE_EVAL_COLD === 'true') return false;
+    if (env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES === '0' || env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES === 'false') {
+      return false;
+    }
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
 
 /**
  * @param {string} topic
@@ -136,6 +153,7 @@ export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
  * @returns {string[]}
  */
 export function topicFamilyQueries(topic: string, n = 4): string[] {
+  if (!topicFamilyTemplatesEnabled()) return [];
   const family = resolveTopicFamily(topic);
   return (TOPIC_FAMILY_QUERIES[family] || TOPIC_FAMILY_QUERIES.generic).slice(0, n);
 }

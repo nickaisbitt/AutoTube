@@ -70,6 +70,23 @@ export function buildImpactBeatsForTopic(topic) {
     ];
   }
 
+  if (isFertilityClinicTopic(tl) && /telegram|dark\s*web|sold|broker|leak|data|hack/.test(tl)) {
+    return [
+      'FERTILITY DATA OUT',
+      'TELEGRAM LEAK',
+      'FILES FOR SALE',
+      'CLINIC BREACHED',
+      'PATIENTS EXPOSED',
+      'DARK WEB LIST',
+      'WHO LEAKED IT',
+      'FREEZE ACCESS',
+      'CALL THE CLINIC',
+      'PROTECT YOUR FILE',
+      'DATA BROKERED',
+      'ACT NOW',
+    ];
+  }
+
   // Healthcare cyber — hospital/patient records breach (not nursing-home abuse)
   if (isHealthcareCyberTopic(tl)) {
     return [

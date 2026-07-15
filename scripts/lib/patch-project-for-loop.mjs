@@ -329,6 +329,27 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
     }
   }
 
+  // Intro must not hoard every video — body segments need unique motion for scene QA.
+  const introId = segIds[0];
+  const videoCount = project.media.filter((m) => m.type === 'video').length;
+  const introCap = Math.max(
+    effectiveMin + 1,
+    Math.min(10, Math.ceil(videoCount / Math.max(2, segIds.length)) + 2),
+  );
+  if (introId && buckets[introId]?.length > introCap) {
+    const bodyIds = segIds.slice(1).sort((a, b) => buckets[a].length - buckets[b].length);
+    while (buckets[introId].length > introCap && bodyIds.length) {
+      const needy = bodyIds.find((id) => buckets[id].length < effectiveMin + 1) || bodyIds[0];
+      const moved = buckets[introId].pop();
+      if (!moved) break;
+      buckets[needy].push({
+        ...moved,
+        id: `${moved.id}-rebal-${needy.slice(0, 6)}-${buckets[needy].length}`,
+        segmentId: needy,
+      });
+    }
+  }
+
   project.media = segIds.flatMap((id) => buckets[id]);
   return project;
 }

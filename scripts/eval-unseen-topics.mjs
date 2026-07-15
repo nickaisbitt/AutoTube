@@ -64,6 +64,7 @@ function coldFixState() {
     preferBrightBroll: true,
     patternInterrupts: false,
     karaokeCaptions: true,
+    minAssetsPerSegment: 5,
     maxReusePerUrl: 1,
     reHarvestMedia: false,
     keepBestMedia: false,

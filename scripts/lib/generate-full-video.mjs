@@ -786,6 +786,26 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return [...brightBoost, ...antiHud, ...base];
   }
+  if (
+    /port|strike|container|shipping|cargo|dock|freight|supply\s*chain|maritime/.test(topicBlob)
+    && /hack|breach|track|cyber|ransom/.test(topicBlob)
+  ) {
+    const faces = [
+      'worried dock worker looking at phone',
+      'shocked logistics manager tablet',
+      'person reading shipping notice worried',
+    ];
+    const topical = [
+      'shipping container port crane',
+      'cargo ship dock workers',
+      'container yard logistics trucks',
+      'port strike workers picket line',
+      'warehouse forklift shipping boxes',
+      'tracking screen logistics map',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
   if (school && /hack|ransom|breach|cyber|leak|data|records/.test(topicBlob)) {
     const faces = [
       'worried parent reading letter school',
@@ -913,7 +933,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     preferBright: options.preferBright === true,
   });
 
-  for (const q of queries.slice(0, 8)) {
+  for (const q of queries.slice(0, 12)) {
     const fromPexels = await fetchPexelsVideos(q, 8);
     const fromPixabay = await fetchPixabayVideos(q, 8);
     // Skip noisy archive.org for cyber topics when stock API keys exist
@@ -923,7 +943,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         : [];
     let addedForQuery = 0;
     for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
-      if (liveClips.length >= 40 || addedForQuery >= 3) break;
+      if (liveClips.length >= 56 || addedForQuery >= 4) break;
       if (isJunkStockClip(clip, topicBlob, { preferBright: options.preferBright === true })) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
@@ -1023,7 +1043,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         segments.length * 4,
         Math.ceil(
           (segments.reduce((s, seg) => s + (Number(seg.duration) || 15), 0)
-            / (options.cutIntervalSec || 1.25)) * 0.55,
+            / (options.cutIntervalSec || 1.25)) * 0.65,
         ),
       ),
     )

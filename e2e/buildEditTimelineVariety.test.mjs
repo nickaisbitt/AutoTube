@@ -18,6 +18,6 @@ describe('buildEditTimeline — anti-repetition', () => {
     const adaptive = buildEditTimeline(project, { cutIntervalSec: 0.85, maxReusePerUrl: 1 });
     const naiveClipCount = Math.ceil(40 / 0.85);
     expect(adaptive.length).toBeLessThan(naiveClipCount);
-    expect(adaptive.length).toBeLessThanOrEqual(12);
+    expect(adaptive.length).toBeGreaterThanOrEqual(16);
   });
 });

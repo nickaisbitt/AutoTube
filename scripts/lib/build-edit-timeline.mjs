@@ -83,11 +83,17 @@ export function buildEditTimeline(project, options = {}) {
   const maxReusePerUrl = options.maxReusePerUrl ?? 1;
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
-  if (uniqueVideos.length > 0 && totalDur > 0 && maxReusePerUrl > 0) {
-    const maxUniqueSlots = uniqueVideos.length * maxReusePerUrl;
+  const MAX_BODY_CUT_SEC = 2.25;
+  let effectiveMaxReuse = maxReusePerUrl;
+  if (uniqueVideos.length > 0 && totalDur > 0) {
+    const clipsNeeded = totalDur / Math.min(cut, MAX_BODY_CUT_SEC);
+    if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
+      effectiveMaxReuse = Math.min(2, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
+    }
+    const maxUniqueSlots = uniqueVideos.length * effectiveMaxReuse;
     const impliedCut = totalDur / maxUniqueSlots;
     if (impliedCut > cut) {
-      cut = Math.min(impliedCut, 3.5);
+      cut = Math.min(impliedCut, MAX_BODY_CUT_SEC);
     }
   }
   const topicIsHousing = isHousingTopic(project.topic || '');
@@ -202,7 +208,7 @@ export function buildEditTimeline(project, options = {}) {
             for (let j = 0; j < ranked.length; j++) {
               const candidate = ranked[(vi + j) % ranked.length];
               const key = urlKey(candidate);
-              if (key && (urlUseCount.get(key) || 0) >= maxReusePerUrl) continue;
+              if (key && (urlUseCount.get(key) || 0) >= effectiveMaxReuse) continue;
               vi += 1;
               return candidate;
             }
@@ -225,7 +231,7 @@ export function buildEditTimeline(project, options = {}) {
       : assets;
 
     const duration = seg.duration || 20;
-    const interval = isIntro ? Math.min(cut, 0.9) : cut;
+    const interval = isIntro ? Math.min(cut, 0.9) : Math.min(cut, MAX_BODY_CUT_SEC);
     let t = 0;
     let ai = 0;
     let lastAssetId = null;
@@ -237,7 +243,7 @@ export function buildEditTimeline(project, options = {}) {
         const canUse = (candidate) => {
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-          if (key && (urlUseCount.get(key) || 0) >= maxReusePerUrl) return false;
+          if (key && (urlUseCount.get(key) || 0) >= effectiveMaxReuse) return false;
           return true;
         };
         // Beat-aware re-rank only when a beat sheet window is active; otherwise

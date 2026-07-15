@@ -24,6 +24,12 @@ import {
 } from '../../services/media';
 import { resolveTopicContext, planSegmentVisuals } from '../../services/visualPlanner';
 import {
+  buildVisualBeatSheetFromScript,
+  queriesFromBeatSheet,
+  visualBeatsEnabled,
+} from '../../services/visualBeatSheet';
+import { logger } from '../../services/logger';
+import {
   generateAIScript,
   reviewAndImproveScript,
   refineScriptMultiPass,
@@ -46,7 +52,6 @@ import { CHART_KEYWORDS } from '../../services/captionUtils';
 import { runAIEditPass } from '../../services/aiEditor';
 import { resolveProjectHookLine, syncIntroNarrationToHook } from '../../services/seoTitles';
 import { prepareThumbnailConcepts } from '../../services/thumbnail';
-import { logger } from '../../services/logger';
 import { runBlindReview } from '../../services/blindReview';
 import { generateGrokTts, generateMeloTts } from '../../services/tts';
 import { CURRENT_PROJECT_VERSION } from '../../services/projectMigrations';
@@ -285,6 +290,33 @@ export async function executeSourceMedia(
     visualPlans[seg.id] = await planSegmentVisuals(seg, topicContext, appConfig.openRouterKey, signal);
   }
 
+  // Optional: merge bounded script-grounded beat queries (feature-flagged)
+  let beatSheet = null;
+  if (visualBeatsEnabled()) {
+    beatSheet = buildVisualBeatSheetFromScript(activeProject.topic, activeProject.script);
+    logger.info(
+      'Store',
+      `VisualBeatSheet: ${beatSheet.beats.length} beats (warnings=${beatSheet.warnings.join(',') || 'none'})`,
+    );
+    for (const seg of activeProject.script) {
+      const plan = visualPlans[seg.id];
+      if (!plan) continue;
+      const beatQueries = queriesFromBeatSheet(beatSheet, seg.id);
+      if (!beatQueries.length) continue;
+      plan.queries = [...new Set([...(beatQueries || []), ...(plan.queries || [])])];
+      for (const q of beatQueries) {
+        if (!plan.concepts.some((c) => c.description === q)) {
+          plan.concepts.unshift({
+            description: q,
+            queries: [q],
+            priority: 120,
+            visualType: 'concept',
+          });
+        }
+      }
+    }
+  }
+
   // STEP 3: harvest images for each plan
   const media: MediaAsset[] = [];
   const usedUrls = new Set<string>();
@@ -364,7 +396,8 @@ export async function executeSourceMedia(
     media,
     topicContext,
     visualPlans,
-  };
+    ...(beatSheet ? { visualBeatSheet: beatSheet } : {}),
+  } as VideoProject;
 
   const loopFastMode = isLoopFastMode();
   if (!loopFastMode) {

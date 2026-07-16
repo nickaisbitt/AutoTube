@@ -69,7 +69,16 @@ Critical bar passes at 5.9% but upload/raw remain primary blockers.
 
 **dev-02** (port strike) now generates on first pass with `everSawGenerating` script wait — was a persistent failure through wave 2.
 
-## Merged with retry pass (`eval-retry-2026-07-16T17-10-02-195Z`)
+## release×6 wave-3 slice 0–5 (`f3fe632`, 2026-07-16T19:16)
+
+| Metric | Result |
+|--------|--------|
+| Generate | **100%** (6/6) — rel-03, rel-06 fixed |
+| Critical | **0%** |
+| Upload | **0%** |
+| Raw median | **6.2** |
+
+Remaining slices 6–23 running → `/tmp/eval-release-wave3-rest.log` (`eval-retry-2026-07-16T17-10-02-195Z`)
 
 | Metric | First pass | + Retry | Bar |
 |--------|------------|---------|-----|

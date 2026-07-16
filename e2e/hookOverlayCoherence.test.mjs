@@ -69,7 +69,7 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     expect(overlay).toBe('DEEPFAKE FOOLED MILLIONS');
   });
 
-  it('clamps every overlay to at most 6 words', () => {
+  it('clamps every overlay to at most 8 words', () => {
     const topics = [
       'a very long winded topic about many different overlapping scandals happening',
       'hospital ransomware breach leaks patient records nationwide right now today',
@@ -98,6 +98,16 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     const overlay = buildShortHookOverlay(topic, '');
     expect(overlay).not.toBe('PATIENT RECORDS EXPOSED');
     expect(overlay).toMatch(/STUDENT|RECORDS|SCHOOL/i);
+  });
+
+  it('routes library fine topics to a complete stakes overlay', () => {
+    const topic = 'How a municipal library fine system trapped low-income families in debt';
+    const overlay = buildShortHookOverlay(
+      topic,
+      'Ordinary people are already paying the price.',
+    );
+    expect(overlay).toBe('LIBRARY FINES TRAP FAMILIES');
+    expect(overlay).not.toMatch(/\bTHE$/);
   });
 });
 

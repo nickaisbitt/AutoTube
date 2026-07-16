@@ -442,19 +442,22 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const avgCount = counts.length ? counts.reduce((s, v) => s + v, 0) / counts.length : 0;
   const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
 
-  // Cold eval: reject soft-pass when the pool is mostly generic junk or low relevance.
+  // Cold eval: reject soft-pass only when the pool is mostly junk AND thin on motion.
+  // A hard mean-relevance floor alone was failing harvest (0 assets after soft-pass reject).
   if (isEvalColdMode() && media.length) {
     const junkCount = media.filter((a) => {
       const blob = `${a.alt || ''} ${a.query || ''} ${a.source || ''}`;
       return isGenericStockJunk(blob, topicBlob);
     }).length;
-    if (junkCount / media.length > 0.3) {
-      return { pass: false, reason: `soft-pass-rejected-junk(${junkCount}/${media.length})` };
-    }
+    const junkRatio = junkCount / media.length;
     const scores = media.map((a) => scoreAssetRelevance(a, segments[0] || {}, project?.topic || ''));
     const meanRel = scores.reduce((s, v) => s + v, 0) / scores.length;
-    if (meanRel < 0.28) {
-      return { pass: false, reason: `soft-pass-rejected-relevance(mean=${meanRel.toFixed(2)})` };
+    const motionThick = videosPerSeg >= 3;
+    if (junkRatio > 0.5 && meanRel < 0.18 && !motionThick) {
+      return {
+        pass: false,
+        reason: `soft-pass-rejected-junk(${junkCount}/${media.length},mean=${meanRel.toFixed(2)})`,
+      };
     }
   }
 

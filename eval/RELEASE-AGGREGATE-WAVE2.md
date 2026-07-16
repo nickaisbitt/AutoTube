@@ -58,6 +58,17 @@ Critical bar passes at 5.9% but upload/raw remain primary blockers.
 
 **Not release-ready.** Critical ≤25% holds at merged **13.6%** (rel-10/16/19 on retry watches); generate **88.5%** after retry; upload **9.1%** (rel-08, rel-13); raw **6.4**.
 
+## dev×2 wave-3 sensor (`f3fe632`, 2026-07-16T18:43)
+
+| Metric | Result | Bar |
+|--------|--------|-----|
+| Generate | **100%** (2/2) | — |
+| Critical | **0%** | PASS |
+| Upload | **0%** | — |
+| Raw median | **6.2** | — |
+
+**dev-02** (port strike) now generates on first pass with `everSawGenerating` script wait — was a persistent failure through wave 2.
+
 ## Merged with retry pass (`eval-retry-2026-07-16T17-10-02-195Z`)
 
 | Metric | First pass | + Retry | Bar |

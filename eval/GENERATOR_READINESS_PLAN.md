@@ -38,6 +38,12 @@
 - SCRIPT_TIMEOUT: cumulative 600s hard cap across grace/reclick/reload (was resetting to 240s)
 - Skip generic `buildShockHookLine` templates in hook overlay; clamp drawtext to 8 words
 - Beat relevance + timeline: `isGenericStockJunk` for camcorder/corporate/lab/port loops
+- **Script wait (`742ca5f`):** no reload for 180s after live generating signals (reload was cancelling OpenRouter)
+
+### dev×2 sensor @ `3d7d7de` (pre script-wait fix)
+- Generate **50%** (dev-02 SCRIPT_TIMEOUT — reload cancelled generation)
+- Critical **0%** on dev-01; raw **6.0**
+- Re-run in progress via `scripts/run-eval-chain.mjs` @ `742ca5f`
 
 ## Stop conditions
 - Do not open new quality-integration side quests as “proof”

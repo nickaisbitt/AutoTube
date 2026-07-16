@@ -1741,9 +1741,11 @@ export async function generateFullVideo(options) {
     // status so the caller can pick a non-destructive recovery.
     const scriptWaitStartedAt = Date.now();
     let lastGeneratingAt = 0;
+    let everSawGenerating = false;
     const noteScriptSignals = (prog = {}) => {
       if (prog.generating || prog.pct != null) {
         lastGeneratingAt = Date.now();
+        everSawGenerating = true;
       }
     };
     const waitForScriptReady = async (timeoutMs, { hardCapMs = timeoutMs, waitStartedAt = scriptWaitStartedAt } = {}) => {
@@ -1780,7 +1782,11 @@ export async function generateFullVideo(options) {
           lastActivityAt = Date.now();
         }
         prev = { scriptLen: snap.scriptLen, pct: prog.pct, rotating: prog.rotating };
-        if (active && Date.now() - lastActivityAt < 120_000) {
+        // Keep extending while live signals exist OR we already saw generation start
+        // (OpenRouter can stall on one % for minutes without rotating-text churn).
+        if ((active || everSawGenerating) && Date.now() < hardDeadline) {
+          deadline = Math.min(hardDeadline, Date.now() + 60_000);
+        } else if (active && Date.now() - lastActivityAt < 120_000) {
           deadline = Math.min(hardDeadline, Date.now() + 60_000);
         }
 
@@ -1799,40 +1805,43 @@ export async function generateFullVideo(options) {
         ok: false,
         active: detectScriptActivity(snap, prog),
         onTopicStep: prog.onTopicStep,
-        recentlyGenerating: lastGeneratingAt > 0 && Date.now() - lastGeneratingAt < 180_000,
+        recentlyGenerating: lastGeneratingAt > 0 && Date.now() - lastGeneratingAt < 300_000,
+        everSawGenerating,
       };
     };
 
     try {
       let result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
       if (!result.ok) {
-        const action = chooseRecoveryAction(result);
+        const action = everSawGenerating ? 'grace' : chooseRecoveryAction(result);
         if (action === 'grace') {
           // Still actively generating — reloading would abort the live OpenRouter
           // call. Grant one more hard-capped grace window instead.
           log('⚠ Script still generating at soft cap — granting grace window (no reload)…');
           result = await waitForScriptReady(120_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
-        } else if (action === 'reclick') {
+        } else if (action === 'reclick' && !everSawGenerating) {
           // Click never registered (still on the topic step) — re-trigger, no reload.
           log('⚠ Still on topic step — re-triggering script generation (click likely missed)…');
           await triggerScriptGeneration();
           result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
-        } else {
+        } else if (!everSawGenerating) {
           // Genuinely stuck (blank/errored, not generating) — one reload recovery.
           log('⚠ Script wait stuck — reloading once and retrying…');
           await gotoDevServer();
           await triggerScriptGeneration();
           lastGeneratingAt = Date.now();
           result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+        } else {
+          log('⚠ Script wait soft cap — grace until hard cap (generation was live)…');
+          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
         }
       }
       if (!result.ok) {
-        const stillRecent = lastGeneratingAt > 0 && Date.now() - lastGeneratingAt < 180_000;
-        if (stillRecent) {
-          log('⚠ Script signals were live recently — final grace wait (no re-click)…');
-          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+        if (everSawGenerating) {
+          log('⚠ Script still pending after recovery — final grace until hard cap (no re-click)…');
+          result = await waitForScriptReady(300_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
         } else {
-          log('⚠ Script wait final fallback — one more generate click + 300s wait…');
+          log('⚠ Script wait final fallback — one more generate click + wait…');
           await triggerScriptGeneration();
           lastGeneratingAt = Date.now();
           result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });

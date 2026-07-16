@@ -49,7 +49,7 @@ function isInstructionHookText(text) {
  * @param {number} videoH
  */
 export function layoutHookLines(words, videoW, videoH) {
-  const tokens = (words || []).map((w) => String(w || '').trim()).filter(Boolean).slice(0, 6);
+  const tokens = (words || []).map((w) => String(w || '').trim()).filter(Boolean).slice(0, 8);
   if (!tokens.length) return { lines: [], fontSize: hookFontPx(videoH) };
 
   const maxLineW = Math.max(320, videoW * 0.9);

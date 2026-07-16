@@ -23,7 +23,7 @@ import {
   topicalStockVideos,
   stockImagesForTopic,
 } from './stock-media-urls.mjs';
-import { curatedPacksEnabled, keepBestEnabled } from './eval-flags.mjs';
+import { curatedPacksEnabled, keepBestEnabled, isEvalColdMode } from './eval-flags.mjs';
 import {
   accumulateExcludedUrls,
   harvestContextFromFixState,
@@ -1268,7 +1268,9 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
 
-  const relevance = filterAssetsByRelevance(validated, project);
+  const relevance = filterAssetsByRelevance(validated, project, {
+    minScore: isEvalColdMode() ? 0.28 : 0.25,
+  });
   report.relevanceDropped = relevance.dropped;
   if (relevance.dropped.length) {
     report.beforeRelevance = validated.length;
@@ -1327,7 +1329,9 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     // Top-up can reintroduce off-brand / off-topic clips — gate again
     stripJunkDemoVideos(project, report);
     const paddingBeforeFilter = (project.media || []).filter(isVolumePaddingAsset);
-    const afterTopUp = filterAssetsByRelevance(project.media || [], project, { minScore: 0.22 });
+    const afterTopUp = filterAssetsByRelevance(project.media || [], project, {
+      minScore: isEvalColdMode() ? 0.26 : 0.22,
+    });
     report.relevanceDroppedAfterTopUp = afterTopUp.dropped;
     project.media = mergeVolumePadding(afterTopUp.media, paddingBeforeFilter);
     report.afterTopUp = project.media.length;

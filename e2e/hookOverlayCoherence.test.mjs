@@ -56,7 +56,7 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
       expect(overlay.length).toBeGreaterThan(3);
       // No lone "BREAKING:" / "URGENT:" style label
       expect(/^\S+:$/.test(overlay.trim())).toBe(false);
-      expect(wordCount(overlay)).toBeLessThanOrEqual(6);
+      expect(wordCount(overlay)).toBeLessThanOrEqual(8);
     }
   });
 
@@ -75,14 +75,14 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
       'hospital ransomware breach leaks patient records nationwide right now today',
     ];
     for (const topic of topics) {
-      expect(wordCount(buildShortHookOverlay(topic, ''))).toBeLessThanOrEqual(6);
+      expect(wordCount(buildShortHookOverlay(topic, ''))).toBeLessThanOrEqual(8);
     }
   });
 
   it('prefers the spoken shock hook on generic topics (not keyword salad)', () => {
     const hook = 'Millions of passwords leaked before anyone noticed the breach.';
     const overlay = buildShortHookOverlay('massive password breach exposes millions', hook);
-    expect(overlay).toBe('MILLIONS OF PASSWORDS LEAKED BEFORE ANYONE');
+    expect(overlay).toBe('MILLIONS OF PASSWORDS LEAKED BEFORE ANYONE NOTICED');
     expect(overlay).not.toMatch(/^URGENT:/);
   });
 

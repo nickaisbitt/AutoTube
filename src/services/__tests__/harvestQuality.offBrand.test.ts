@@ -194,7 +194,7 @@ describe('hook overlay layout + templates', () => {
     );
     expect(overlay).toMatch(/EXPOSED/);
     expect(overlay).not.toMatch(/EXPOSED:/);
-    expect(overlay.split(/\s+/).length).toBeLessThanOrEqual(6);
+    expect(overlay.split(/\s+/).length).toBeLessThanOrEqual(8);
   });
 
   it('splits long hooks so lines fit ~90% of 1920px width', async () => {

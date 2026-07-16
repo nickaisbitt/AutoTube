@@ -87,9 +87,16 @@ export function extractOverlayFromVisionFix(visionFix) {
   return words.slice(0, 8).join(' ').toUpperCase();
 }
 
-/** Urgent 4–7 word on-screen hook for watcher 0–3s frame audit. */
+/** Urgent 4–8 word on-screen hook for watcher 0–3s frame audit. */
 export function buildShortHookOverlay(topic, hookLine, options = {}) {
-  const maxWords = 6;
+  const maxWords = 8;
+
+  const trimDanglingTail = (words) => {
+    const out = [...words];
+    const dangling = /^(THE|A|AN|ARE|IS|WAS|FOR|TO|IN|ON|AT|WITH|YOUR|ALREADY|PAYING|WHO|THAT|THIS)$/i;
+    while (out.length > 4 && dangling.test(out[out.length - 1])) out.pop();
+    return out;
+  };
 
   const clampWords = (text) => {
     const words = (text || '')
@@ -97,7 +104,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
       .replace(/[^A-Z0-9\s:$%]/g, ' ')
       .split(/\s+/)
       .filter(Boolean);
-    const clamped = words.slice(0, maxWords);
+    const clamped = trimDanglingTail(words.slice(0, maxWords));
     // A lone label with no payload (e.g. "BREAKING:" / "URGENT:") reads as a broken
     // overlay in the 0–3s frame audit — drop it so callers fall back to real stakes.
     if (clamped.length === 1 && /[:]$/.test(clamped[0])) return '';
@@ -154,6 +161,15 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   }
   if (isFertilityClinicTopic(topicOnly) && /telegram|dark\s*web|sold|broker|leak|data|hack/i.test(t)) {
     return clampWords('FERTILITY DATA FOR SALE');
+  }
+  if (/library|overdue\s*book|municipal\s*fine|library\s*fine/i.test(t)) {
+    return clampWords('LIBRARY FINES TRAP FAMILIES');
+  }
+  if (/coral|reef|restoration|marine\s*biology/i.test(t)) {
+    return clampWords('THE REEF PROJECT COLLAPSED');
+  }
+  if (/olympic|relay|doping|drug\s*test|coach/i.test(t) && /forge|fake|test|doping|steroid/i.test(t)) {
+    return clampWords('FORGED DRUG TESTS EXPOSED');
   }
   if (isHealthcareCyberTopic(topicOnly)) {
     return clampWords('PATIENT RECORDS EXPOSED');

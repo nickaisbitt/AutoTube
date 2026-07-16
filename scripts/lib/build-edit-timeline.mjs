@@ -195,6 +195,7 @@ export function buildEditTimeline(project, options = {}) {
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -5;
       if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
       if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
+      if (/camcorder|handheld camcorder|person holding camera|holding camcorder|vintage camera/i.test(blob)) return -4;
       // Always demote dark/muddy stock — critical watch fail pattern
       if (/\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|black background|black frame)\b/i.test(blob)) {
         return -5;

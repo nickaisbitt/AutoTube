@@ -60,6 +60,10 @@ export const PRODUCE_GROCERY_JUNK_RE =
 export const EMPTY_HOSPITAL_BED_RE =
   /\b(empty hospital bed|hospital bed only|unmade hospital bed|empty ward bed|blurry bed|hospital bed close|empty medical bed)\b/i;
 
+/** Overused camcorder / “person holding camera” loops on non-surveillance topics. */
+export const CAMCORDER_STOCK_LOOP_RE =
+  /\b(camcorder|handheld camcorder|person holding (a )?camera|holding camcorder|vintage (video )?camera|filming with camcorder)\b/i;
+
 /** Generic corporate / architecture filler for serious investigation topics. */
 export const GENERIC_CORPORATE_FILLER_RE =
   /\b(corporate handshake|team meeting smiling|empty office|business people walking|stock footage loop|generic corporate|open plan office|glass building skyline|architecture model|architectural model|scale model|conference room|office meeting|skyline timelapse)\b/i;
@@ -120,6 +124,12 @@ export function genericStockJunkReason(haystack, contextText = '') {
     && !/\b(concert|ticket|scalp|music festival|barber)\b/i.test(ctx)
   ) {
     return 'random lifestyle filler';
+  }
+  if (
+    CAMCORDER_STOCK_LOOP_RE.test(h)
+    && !/\b(cctv|surveillance|security camera|nursing home|abuse|recorded)\b/i.test(ctx)
+  ) {
+    return 'generic camcorder/camera-holding loop';
   }
   return null;
 }

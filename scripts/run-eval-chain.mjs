@@ -33,10 +33,14 @@ const agg = spawnSync('node', ['scripts/aggregate-eval-summaries.mjs', 'eval-rel
   cwd: ROOT,
   stdio: 'inherit',
 });
-const retry = spawnSync('node', ['scripts/retry-eval-failures.mjs', 'eval-'], {
-  cwd: ROOT,
-  stdio: 'inherit',
-});
+const retry = spawnSync(
+  'node',
+  [
+    'scripts/retry-eval-failures.mjs',
+    '--dirs=eval-dev-2026-07-16T12-19-47-651Z,eval-release-2026-07-16T12-35-01-109Z,eval-release-2026-07-16T13-20-44-286Z,eval-release-2026-07-16T14-28-14-216Z,eval-release-2026-07-16T15-52-59-278Z',
+  ],
+  { cwd: ROOT, stdio: 'inherit' },
+);
 if (retry.status === 0) {
   spawnSync('node', ['scripts/aggregate-eval-summaries.mjs', 'eval-'], {
     cwd: ROOT,

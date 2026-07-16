@@ -27,10 +27,14 @@
 19. Sentence-index semantic beat placement + intro/outro segment-local reuse
 
 ## Remaining (next execution wave — no pause)
-1. Drive held-out **critical rate ≤25%** (release×24 overnight: **4.5%** PASS; upload **9%** FAIL; raw median **6.4** FAIL)
-2. Drive **generate ≥95%** (release×24: **91.7%** — rel-07, rel-22 SCRIPT_TIMEOUT; grace hard-cap fixed)
-3. Drive **upload-ready ≥50%** + **raw median ≥7.2** (generic stock rejection + body scene cuts + hook overlay completeness)
-4. Re-run cold sensor after fix wave (`824d4fe`+): dev×2 → release×6 slices
+1. **Generate ≥95%** — wave2 chain **65.4%** (9 failures); retry pass running (`d494882`)
+2. **Upload ≥50%** + **raw ≥7.2** — wave2 **5.9%** upload, raw **6.3** (see `eval/RELEASE-AGGREGATE-WAVE2.md`)
+3. **Critical ≤25%** — wave2 **5.9%** PASS (rel-19 only critical)
+
+### Wave 2 chain complete (`eval/RELEASE-AGGREGATE-WAVE2.md`)
+- 26 topics, ~5h, log `/tmp/eval-full-chain-2.log`
+- rel-08 upload pass (raw 7.0); rel-19 critical (raw 4.2)
+- Script grace fixes rescue retries (rel-18/22) but 9 topics still fail generate
 
 ### Fix wave (`824d4fe`+)
 - Body scene flashes on **every** cut when `AUTOTUBE_HOOK_SCENE_CUTS` (was every 2nd — 6s holds)

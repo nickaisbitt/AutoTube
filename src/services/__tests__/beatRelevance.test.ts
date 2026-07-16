@@ -32,6 +32,20 @@ describe('beatRelevance', () => {
     expect(generic.reject).toBe(true);
   });
 
+  it('rejects camcorder and corporate filler without beat context', () => {
+    const camcorder = scoreCandidateAgainstBeat(
+      { alt: 'person holding camcorder filming', query: 'camcorder stock' },
+      beat,
+    );
+    expect(camcorder.reject).toBe(true);
+
+    const corporate = scoreCandidateAgainstBeat(
+      { alt: 'corporate handshake team meeting smiling', query: 'generic corporate' },
+      beat,
+    );
+    expect(corporate.reject).toBe(true);
+  });
+
   it('bestBeatRelevanceForCandidate picks the strongest segment beat', () => {
     const beats = [
       { ...beat, id: 'a', segmentId: 's1', sentenceIndex: 0, role: 'evidence' as const, scale: 'personal' as const, sourcePreference: 'news' as const, evidence: 't' },

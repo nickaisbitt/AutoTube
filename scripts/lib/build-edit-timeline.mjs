@@ -54,6 +54,8 @@ export function scoreAssetAgainstBeat(asset, beat) {
   for (const t of excerpt) {
     if (blob.includes(t)) excerptHits += 1;
   }
+  const beatContext = `${beat.searchableSubject || ''} ${beat.narrationExcerpt || ''}`;
+  if (isGenericStockJunk(blob, beatContext)) return -6;
   if (/stock photo|b-roll footage|generic corporate/.test(blob) && hits === 0) return -4;
   return hits * 2 + excerptHits;
 }
@@ -124,7 +126,7 @@ export function buildEditTimeline(project, options = {}) {
   const maxReusePerUrl = options.maxReusePerUrl ?? 1;
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
-  const MAX_BODY_CUT_SEC = 2.0;
+  const MAX_BODY_CUT_SEC = 1.25;
   let effectiveMaxReuse = maxReusePerUrl;
   if (uniqueVideos.length > 0 && totalDur > 0) {
     const clipsNeeded = totalDur / Math.min(cut, MAX_BODY_CUT_SEC);

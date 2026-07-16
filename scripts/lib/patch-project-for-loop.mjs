@@ -87,6 +87,18 @@ export function extractOverlayFromVisionFix(visionFix) {
   return words.slice(0, 8).join(' ').toUpperCase();
 }
 
+/** Generic hash-template hooks from buildShockHookLine — not topic-specific enough for overlay. */
+function isGenericTemplateHook(hookLine) {
+  const h = (hookLine || '').trim();
+  if (!h) return false;
+  return (
+    /^ordinary people are already paying the price\.?$/i.test(h)
+    || /^they tried to hide this\b/i.test(h)
+    || /^this is bigger than the headlines admit/i.test(h)
+    || /^billions lost overnight:/i.test(h)
+  );
+}
+
 /** Urgent 4–8 word on-screen hook for watcher 0–3s frame audit. */
 export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const maxWords = 8;
@@ -195,7 +207,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   }
 
   const spoken = (hookLine || '').trim();
-  if (spoken.length >= 12 && !isInstructionOverlay(spoken)) {
+  if (spoken.length >= 12 && !isInstructionOverlay(spoken) && !isGenericTemplateHook(spoken)) {
     return clampWords(spoken);
   }
 

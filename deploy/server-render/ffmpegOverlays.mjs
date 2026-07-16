@@ -116,7 +116,8 @@ export function overlayHookText(videoPath, project, options = {}) {
     .toUpperCase()
     .replace(/:/g, ' ') // avoid ffmpeg drawtext option-separator footguns
     .split(/\s+/)
-    .filter(Boolean);
+    .filter(Boolean)
+    .slice(0, 8);
   const { lines, fontSize } = layoutHookLines(words, w, h);
   const line1 = lines[0] || '';
   const line2 = lines[1] || '';

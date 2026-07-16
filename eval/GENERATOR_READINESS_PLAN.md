@@ -27,9 +27,17 @@
 19. Sentence-index semantic beat placement + intro/outro segment-local reuse
 
 ## Remaining (next execution wave — no pause)
-1. Drive held-out **critical rate ≤25%** (still failing at 40–50% across slices; combined 18 = 41.2%)
-2. Confirm wave-4 sensor (`eval/COLD-EVAL-WAVE4.md`) with independent judge
-3. Expand toward release×24 (`--offset 18 --max 6`) only after (1)+(2)
+1. Drive held-out **critical rate ≤25%** (release×24 overnight: **4.5%** PASS; upload **9%** FAIL; raw median **6.4** FAIL)
+2. Drive **generate ≥95%** (release×24: **91.7%** — rel-07, rel-22 SCRIPT_TIMEOUT; grace hard-cap fixed)
+3. Drive **upload-ready ≥50%** + **raw median ≥7.2** (generic stock rejection + body scene cuts + hook overlay completeness)
+4. Re-run cold sensor after fix wave (`824d4fe`+): dev×2 → release×6 slices
+
+### Fix wave (`824d4fe`+)
+- Body scene flashes on **every** cut when `AUTOTUBE_HOOK_SCENE_CUTS` (was every 2nd — 6s holds)
+- `MAX_BODY_CUT_SEC` 2.0 → 1.25 (match cold `cutIntervalSec: 0.7`)
+- SCRIPT_TIMEOUT: cumulative 600s hard cap across grace/reclick/reload (was resetting to 240s)
+- Skip generic `buildShockHookLine` templates in hook overlay; clamp drawtext to 8 words
+- Beat relevance + timeline: `isGenericStockJunk` for camcorder/corporate/lab/port loops
 
 ## Stop conditions
 - Do not open new quality-integration side quests as “proof”

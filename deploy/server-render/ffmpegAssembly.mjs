@@ -140,7 +140,7 @@ function hookSceneCutsEnabled() {
 /** Flash on asset swaps when pattern interrupts are on; dense in first 15s / first 3 clips. */
 function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset, { isHookSegment = false, scheduleIndex = 0 } = {}) {
   // Sub-second flashes create PySceneDetect boundaries when similar B-roll merges edits.
-  if (hookSceneCutsEnabled() && scheduleIndex % 2 === 0) {
+  if (hookSceneCutsEnabled()) {
     return true;
   }
   if (process.env.AUTOTUBE_FLASH_INTERRUPTS !== '1' && process.env.AUTOTUBE_FLASH_INTERRUPTS !== 'true') {

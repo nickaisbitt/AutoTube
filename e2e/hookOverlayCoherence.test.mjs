@@ -109,6 +109,16 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     expect(overlay).toBe('LIBRARY FINES TRAP FAMILIES');
     expect(overlay).not.toMatch(/\bTHE$/);
   });
+
+  it('rejects generic template shock hooks in favor of topic stakes', () => {
+    const overlay = buildShortHookOverlay(
+      'massive password breach exposes millions',
+      'Ordinary people are already paying the price.',
+    );
+    expect(overlay).toContain('EXPOSED');
+    expect(overlay).not.toMatch(/\bTHE$/);
+    expect(overlay).not.toBe('ORDINARY PEOPLE ARE ALREADY PAYING THE');
+  });
 });
 
 describe('stock selection — connects B-roll to the topic', () => {

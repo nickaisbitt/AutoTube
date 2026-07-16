@@ -74,7 +74,15 @@ export const HOUSING_STOCK_LOOP_RE =
 
 /** Street-barber / random lifestyle clips that read as off-topic on investigation topics. */
 export const RANDOM_LIFESTYLE_FILLER_RE =
-  /\b(street barber|barber shop|haircut street|musician busking|concert crowd phone|stadium crowd|food truck|coffee shop latte|band playing|orchestra playing|jazz band|live band|musicians on stage)\b/i;
+  /\b(street barber|barber shop|haircut street|musician busking|concert crowd phone|stadium crowd|sports crowd|cheering fans|food truck|coffee shop latte|band playing|orchestra playing|jazz band|live band|musicians on stage)\b/i;
+
+/** Generic lab/science B-roll loops on non-science topics. */
+export const SCIENCE_LAB_LOOP_RE =
+  /\b(lab technician pipette|microscope close up generic|scientist in lab coat walking|laboratory b-?roll|test tube rack generic)\b/i;
+
+/** Ferry/port timelapse filler on unrelated infrastructure stories. */
+export const PORT_FERRY_LOOP_RE =
+  /\b(ferry timelapse|port crane timelapse|container ship aerial generic|cargo ship sunset timelapse)\b/i;
 
 /**
  * @param {string} haystack
@@ -130,6 +138,18 @@ export function genericStockJunkReason(haystack, contextText = '') {
     && !/\b(cctv|surveillance|security camera|nursing home|abuse|recorded)\b/i.test(ctx)
   ) {
     return 'generic camcorder/camera-holding loop';
+  }
+  if (
+    SCIENCE_LAB_LOOP_RE.test(h)
+    && !/\b(lab|science|research|biology|chemistry|physics|experiment|study)\b/i.test(ctx)
+  ) {
+    return 'generic science lab loop';
+  }
+  if (
+    PORT_FERRY_LOOP_RE.test(h)
+    && !/\b(port|ferry|shipping|maritime|cargo|container|dock|freight)\b/i.test(ctx)
+  ) {
+    return 'generic port/ferry timelapse';
   }
   return null;
 }

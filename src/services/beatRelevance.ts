@@ -30,6 +30,27 @@ function tokens(text: string): string[] {
     .filter((w) => w.length > 3);
 }
 
+/** Mirrors scripts/lib/harvest-quality.mjs generic junk rules for beat scoring. */
+function isGenericBeatJunk(blob: string, contextBlob: string): boolean {
+  const ctx = contextBlob.toLowerCase();
+  const genericRe =
+    /\b(camcorder|handheld camcorder|person holding (a )?camera|corporate handshake|empty office|architecture model|conference room|skyline timelapse|stadium crowd|sports crowd|band playing|orchestra|stock footage loop|b-roll footage|stock photo|generic corporate|lab technician pipette|ferry timelapse|port crane timelapse)\b/i;
+  if (!genericRe.test(blob)) return false;
+  if (/\b(camcorder|cctv|surveillance)\b/i.test(blob) && /\b(cctv|surveillance|camera|recorded)\b/i.test(ctx)) {
+    return false;
+  }
+  if (/\b(port|ferry|shipping|maritime|cargo|container)\b/i.test(blob) && /\b(port|ferry|shipping|maritime|cargo|container)\b/i.test(ctx)) {
+    return false;
+  }
+  if (/\b(lab|science|research|experiment)\b/i.test(blob) && /\b(lab|science|research|biology|chemistry)\b/i.test(ctx)) {
+    return false;
+  }
+  if (/\b(office|corporate|business|company)\b/i.test(blob) && /\b(office|corporate|business|company)\b/i.test(ctx)) {
+    return false;
+  }
+  return true;
+}
+
 export function beatVisionEnabled(): boolean {
   try {
     if (typeof sessionStorage !== 'undefined') {
@@ -74,6 +95,7 @@ export function scoreCandidateAgainstBeat(
   const blob = `${candidate.alt || ''} ${candidate.query || ''} ${candidate.source || ''} ${candidate.url || ''}`.toLowerCase();
   const reasons: string[] = [];
   let score = 0;
+  const beatContext = `${beat.searchableSubject || ''} ${beat.narrationExcerpt || ''} ${beat.intent || ''}`;
 
   for (const avoid of beat.mustAvoid || []) {
     if (avoid && blob.includes(avoid.toLowerCase())) {
@@ -121,6 +143,9 @@ export function scoreCandidateAgainstBeat(
   }
 
   // Generic stock language without subject overlap → soft reject
+  if (isGenericBeatJunk(blob, beatContext)) {
+    return { score: Math.min(score, 0.1), reasons: [...reasons, 'generic-stock-junk'], reject: true };
+  }
   const generic = /stock photo|b-roll footage|establish visual|supporting b-roll|generic corporate/.test(blob);
   if (generic && hits === 0) {
     return { score: Math.min(score, 0.15), reasons: [...reasons, 'generic-stock'], reject: true };

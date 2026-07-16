@@ -61,6 +61,7 @@ import {
   detectScriptActivity,
   sawFreshActivity,
   chooseRecoveryAction,
+  isDeadScriptGeneration,
 } from './script-wait-policy.mjs';
 
 export function resolveOpenRouterKey() {
@@ -1775,19 +1776,40 @@ export async function generateFullVideo(options) {
           );
         }
 
-        // Extend the soft deadline while generation is healthily progressing so a
-        // slow cold OpenRouter call is not mistaken for a stuck/never-started run.
+        // Extend soft deadline only while generation is actively progressing.
+        // everSawGenerating alone used to burn the full 600s hard cap after a
+        // dead timeout abort (idle UI, empty project).
         const active = detectScriptActivity(snap, prog);
         if (active && sawFreshActivity(snap, prog, prev)) {
           lastActivityAt = Date.now();
         }
         prev = { scriptLen: snap.scriptLen, pct: prog.pct, rotating: prog.rotating };
-        // Keep extending while live signals exist OR we already saw generation start
-        // (OpenRouter can stall on one % for minutes without rotating-text churn).
-        if ((active || everSawGenerating) && Date.now() < hardDeadline) {
+        if (active && Date.now() - lastActivityAt < 120_000) {
           deadline = Math.min(hardDeadline, Date.now() + 60_000);
-        } else if (active && Date.now() - lastActivityAt < 120_000) {
-          deadline = Math.min(hardDeadline, Date.now() + 60_000);
+        }
+
+        // Dead after start (timeout abort → cancelled UI) — stop waiting early.
+        const idleMs = lastGeneratingAt > 0 ? Date.now() - lastGeneratingAt : 0;
+        if (
+          isDeadScriptGeneration({
+            everSawGenerating,
+            active,
+            idleMs,
+            bodyText: body,
+            scriptLen: snap.scriptLen,
+          })
+        ) {
+          return {
+            ok: false,
+            active: false,
+            onTopicStep: prog.onTopicStep,
+            recentlyGenerating: false,
+            everSawGenerating,
+            idleMs,
+            bodyText: body,
+            scriptLen: snap.scriptLen,
+            deadAfterStart: true,
+          };
         }
 
         if (Date.now() - lastDump > 60_000) {
@@ -1801,50 +1823,75 @@ export async function generateFullVideo(options) {
       const snap = await readProjectSnapshot(page);
       const prog = await readScriptProgress(page);
       noteScriptSignals(prog);
+      const body = await page
+        .evaluate(() => document.body?.innerText?.slice(0, 800) || '')
+        .catch(() => '');
+      const idleMs = lastGeneratingAt > 0 ? Date.now() - lastGeneratingAt : 0;
       return {
         ok: false,
         active: detectScriptActivity(snap, prog),
         onTopicStep: prog.onTopicStep,
         recentlyGenerating: lastGeneratingAt > 0 && Date.now() - lastGeneratingAt < 300_000,
         everSawGenerating,
+        idleMs,
+        bodyText: body,
+        scriptLen: snap.scriptLen,
+        deadAfterStart: isDeadScriptGeneration({
+          everSawGenerating,
+          active: detectScriptActivity(snap, prog),
+          idleMs,
+          bodyText: body,
+          scriptLen: snap.scriptLen,
+        }),
       };
     };
 
     try {
       let result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
       if (!result.ok) {
-        const action = everSawGenerating ? 'grace' : chooseRecoveryAction(result);
+        const action = chooseRecoveryAction(result);
         if (action === 'grace') {
           // Still actively generating — reloading would abort the live OpenRouter
           // call. Grant one more hard-capped grace window instead.
           log('⚠ Script still generating at soft cap — granting grace window (no reload)…');
           result = await waitForScriptReady(120_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
-        } else if (action === 'reclick' && !everSawGenerating) {
-          // Click never registered (still on the topic step) — re-trigger, no reload.
-          log('⚠ Still on topic step — re-triggering script generation (click likely missed)…');
+        } else if (action === 'reclick') {
+          // Click missed OR generation died after start (timeout abort) — fresh click.
+          log(
+            result.deadAfterStart || result.everSawGenerating
+              ? '⚠ Script generation died after start — re-triggering (no hard-cap burn)…'
+              : '⚠ Still on topic step — re-triggering script generation (click likely missed)…',
+          );
           await triggerScriptGeneration();
-          result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
-        } else if (!everSawGenerating) {
+          everSawGenerating = false;
+          lastGeneratingAt = Date.now();
+          result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: Date.now() });
+        } else {
           // Genuinely stuck (blank/errored, not generating) — one reload recovery.
           log('⚠ Script wait stuck — reloading once and retrying…');
           await gotoDevServer();
           await triggerScriptGeneration();
+          everSawGenerating = false;
           lastGeneratingAt = Date.now();
-          result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
-        } else {
-          log('⚠ Script wait soft cap — grace until hard cap (generation was live)…');
-          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+          result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: Date.now() });
         }
       }
       if (!result.ok) {
-        if (everSawGenerating) {
-          log('⚠ Script still pending after recovery — final grace until hard cap (no re-click)…');
-          result = await waitForScriptReady(300_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+        const action2 = chooseRecoveryAction(result);
+        if (action2 === 'reclick' || result.deadAfterStart) {
+          log('⚠ Script wait final fallback — one more generate click + wait…');
+          await triggerScriptGeneration();
+          everSawGenerating = false;
+          lastGeneratingAt = Date.now();
+          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: Date.now() });
+        } else if (action2 === 'grace') {
+          log('⚠ Script still pending — final grace wait…');
+          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
         } else {
           log('⚠ Script wait final fallback — one more generate click + wait…');
           await triggerScriptGeneration();
           lastGeneratingAt = Date.now();
-          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: Date.now() });
         }
       }
       if (!result.ok) {

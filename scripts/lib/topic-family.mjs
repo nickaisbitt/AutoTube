@@ -13,10 +13,18 @@ export function isHousingTopic(topic) {
   return /landlord|tenant|evict|rent|lease|apartment|housing|foreclos/i.test(String(topic || ''));
 }
 
-/** Staged car-crash / insurance fraud — not bank OTP or generic cyber. */
+/** Staged car-crash / insurance fraud — not grocery loyalty "insurance pricing". */
 export function isInsuranceFraudTopic(topic) {
   const t = String(topic || '').toLowerCase();
-  return /insurance|car\s*crash|fake\s*crash|staged\s*crash|crash\s*video|whiplash|claim\s*fraud|dashcam\s*scam/.test(t);
+  // Loyalty cards / shopper tracking into insurance pricing is NOT staged-crash fraud.
+  if (/loyalty\s*card|shopper|grocery|pricing|premium\s*pricing|data\s*broker/.test(t) && !/crash|staged|dashcam|whiplash/.test(t)) {
+    return false;
+  }
+  return (
+    /fake\s*crash|staged\s*crash|crash\s*video|whiplash|claim\s*fraud|dashcam\s*scam/.test(t)
+    || (/insurance/.test(t) && /crash|fraud|scam|staged|claim|dashcam|whiplash/.test(t))
+    || /car\s*crash/.test(t)
+  );
 }
 
 /** @param {string} topic */

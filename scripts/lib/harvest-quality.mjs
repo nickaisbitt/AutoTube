@@ -367,7 +367,7 @@ export function mergeVolumePadding(media, padding, project = null) {
     pad = filtered.media;
   }
   const out = [...media];
-  for (const asset of padding) {
+  for (const asset of pad) {
     const key = (asset.url || '').split('?')[0];
     if (!key) continue;
     if (out.some((m) => m.segmentId === asset.segmentId && (m.url || '').split('?')[0] === key)) continue;
@@ -441,6 +441,22 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const minCount = counts.length ? Math.min(...counts) : 0;
   const avgCount = counts.length ? counts.reduce((s, v) => s + v, 0) / counts.length : 0;
   const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
+
+  // Cold eval: reject soft-pass when the pool is mostly generic junk or low relevance.
+  if (isEvalColdMode() && media.length) {
+    const junkCount = media.filter((a) => {
+      const blob = `${a.alt || ''} ${a.query || ''} ${a.source || ''}`;
+      return isGenericStockJunk(blob, topicBlob);
+    }).length;
+    if (junkCount / media.length > 0.3) {
+      return { pass: false, reason: `soft-pass-rejected-junk(${junkCount}/${media.length})` };
+    }
+    const scores = media.map((a) => scoreAssetRelevance(a, segments[0] || {}, project?.topic || ''));
+    const meanRel = scores.reduce((s, v) => s + v, 0) / scores.length;
+    if (meanRel < 0.28) {
+      return { pass: false, reason: `soft-pass-rejected-relevance(mean=${meanRel.toFixed(2)})` };
+    }
+  }
 
   // Soft-pass A: cyber stills pad + at least 1 video/segment average
   if (cyber >= 6 && videosPerSeg >= 1) {

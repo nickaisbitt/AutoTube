@@ -136,6 +136,39 @@ describe('quality waves 2–5 helpers', () => {
     expect(merged.some((a) => a.source?.includes('volume top-up'))).toBe(true);
   });
 
+  it('mergeVolumePadding drops off-topic padding when project is passed', async () => {
+    process.env.AUTOTUBE_EVAL_COLD = '1';
+    const { mergeVolumePadding } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const topic = 'How school districts lost student mental-health records to ransomware';
+    const project = {
+      topic,
+      script: [{ id: 's1', title: 'Intro', narration: 'student counseling records stolen' }],
+      media: [],
+    };
+    const keep = {
+      id: 'ok',
+      segmentId: 's1',
+      type: 'video',
+      url: 'https://example.com/school.mp4',
+      alt: 'school hallway students worried phones',
+      query: 'school ransomware',
+      source: 'Stock pool (volume top-up)',
+    };
+    const junk = {
+      id: 'junk',
+      segmentId: 's1',
+      type: 'video',
+      url: 'https://example.com/office.mp4',
+      alt: 'corporate handshake empty office skyline timelapse',
+      query: 'stock footage loop',
+      source: 'Stock pool (volume top-up)',
+    };
+    const merged = mergeVolumePadding([keep], [junk], project);
+    expect(merged.some((a) => a.id === 'junk')).toBe(false);
+    expect(merged.some((a) => a.id === 'ok')).toBe(true);
+    delete process.env.AUTOTUBE_EVAL_COLD;
+  });
+
   it('preferBright and anti-HUD appear in stockMotionQueries', async () => {
     const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
     const q = stockMotionQueries('bank fraud otp scam', true, { preferBright: true, faceSeek: true });

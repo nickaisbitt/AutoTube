@@ -94,8 +94,14 @@ export async function executeGenerateScript(
     segments = await generateAIScript(config, appConfig.openRouterKey, undefined, signal);
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
-      logger.info('Store', 'Script generation cancelled by user');
-      return null;
+      // Per-attempt fetch timeouts also surface as AbortError — only treat as
+      // user cancel when the caller's AbortSignal was actually aborted.
+      if (signal?.aborted) {
+        logger.info('Store', 'Script generation cancelled by user');
+        return null;
+      }
+      logger.error('Store', 'Script generation timed out (AbortError without user cancel)', err);
+      throw err;
     }
     logger.error('Store', 'AI script generation failed', err);
     throw err;

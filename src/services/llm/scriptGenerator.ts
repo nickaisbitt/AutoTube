@@ -389,8 +389,10 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
       response_format: { type: 'json_object' },
     }),
   }, {
-    timeoutMs: 30_000,
-    maxRetries: 3,
+    // Cold OpenRouter script calls (main + title variants) routinely exceed 30s;
+    // the /api/llm proxy allows ~120s — match that budget so we don't abort as "user cancel".
+    timeoutMs: 180_000,
+    maxRetries: 2,
     signal,
   });
 

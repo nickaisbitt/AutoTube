@@ -87,7 +87,7 @@ export function buildShockHookLine(topic, override) {
   if (/veteran|va\s+benefits|dark\s*web.*broker|benefits\s+data/.test(tl)) {
     return 'Your benefits file was already for sale.';
   }
-  if (/insurance|car\s*crash|fake\s*crash|crash\s*video/.test(tl)) {
+  if (/insurance|car\s*crash|fake\s*crash|crash\s*video/.test(tl) && !(/loyalty|shopper|grocery|pricing/.test(tl) && !/crash|staged/.test(tl))) {
     return 'That car crash was staged for the insurance payout.';
   }
   if (

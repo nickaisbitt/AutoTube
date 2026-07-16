@@ -96,6 +96,7 @@ function isGenericTemplateHook(hookLine) {
     || /^they tried to hide this\b/i.test(h)
     || /^this is bigger than the headlines admit/i.test(h)
     || /^billions lost overnight:/i.test(h)
+    || /^here'?s the proof\.?$/i.test(h)
   );
 }
 
@@ -214,6 +215,39 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/gene-therapy|clinical trial|trial excluded|minority participants/i.test(t)) {
     return clampWords('THE TRIAL EXCLUDED THEM');
   }
+  if (/ambulance|gps\s*route|demolished|paramedic|911\s*dispatch/i.test(t)) {
+    return clampWords('GPS SENT CREWS TO RUINS');
+  }
+  if (/climate\s*sensor|sensor\s*calibrat|fake\s*climate|university\s*lab/i.test(t)) {
+    return clampWords('THE LAB FAKED THE DATA');
+  }
+  if (/ferry|bridge\s*toll|tunnel\s*sensor|transit\s*app/i.test(t) && /hack|breach|outage|fail/i.test(t)) {
+    return clampWords('THE FERRY SYSTEM WENT DARK');
+  }
+  if (/language.?learning|duolingo|vocab\s*app|language\s*app/i.test(t)) {
+    return clampWords('THE APP SOLD YOUR VOICE');
+  }
+  if (/loyalty\s*card|grocery.*insurance|shopper.*pricing|insurance\s*pricing/i.test(t)) {
+    return clampWords('LOYALTY CARDS SOLD YOU OUT');
+  }
+  if (/archival\s*film|film\s*reel|climate.?control.*archive|botched\s*climate/i.test(t)) {
+    return clampWords('THE REELS DISSOLVED OVERNIGHT');
+  }
+  if (/bridge\s*inspection|photocopied|old\s*reports/i.test(t)) {
+    return clampWords('INSPECTORS FAKED THE REPORTS');
+  }
+  if (/esports|betting\s*market|arena\s*blackout/i.test(t)) {
+    return clampWords('THE BLACKOUT MOVED THE ODDS');
+  }
+  if (/shipwreck|stole\s*artifacts|protected\s*wreck/i.test(t)) {
+    return clampWords('THE DIVER LOOTED THE WRECK');
+  }
+  if (/appliance\s*recall|apartment\s*renter/i.test(t)) {
+    return clampWords('THE RECALL NEVER REACHED YOU');
+  }
+  if (/refugee\s*housing|housing\s*lottery|gamed\s*by\s*landlord/i.test(t)) {
+    return clampWords('LANDLORDS GAMED THE LOTTERY');
+  }
 
   const spoken = (hookLine || '').trim();
   if (spoken.length >= 12 && !isInstructionOverlay(spoken) && !isGenericTemplateHook(spoken)) {
@@ -230,8 +264,9 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     return clampWords(kw ? `BREAKING: ${kw}` : 'BREAKING NEWS ALERT');
   }
 
-  const core = keywords.slice(0, 4).join(' ');
-  return clampWords(core ? `URGENT: ${core}` : 'THE COVER-UP EXPOSED');
+  // Prefer stakes over "URGENT: keyword salad" for cold generic topics
+  const core = keywords.slice(0, 3).join(' ');
+  return clampWords(core ? `${core} EXPOSED` : 'THE COVER-UP EXPOSED');
 }
 
 const DATE_OPENER_RE =
@@ -275,10 +310,22 @@ export function promoteIntroFaceVideo(project) {
 
   const faceScore = (asset) => {
     const blob = `${asset?.query || ''} ${asset?.alt || ''} ${asset?.url || ''}`.toLowerCase();
+    const topic = String(project.topic || '').toLowerCase();
     if (/microphone|podcast|studio|asmr|cartoon|puppet|minecraft|beetle|insect/i.test(blob)) return -5;
-    if (/face|person|people|portrait|close.?up|worried|shocked|reaction|eyes|direct.?camera/i.test(blob)) return 6;
-    if (asset?.type === 'video') return 2;
-    return 0;
+    if (/architectural model|conference room|skyline|corporate office|empty park|people in a park/i.test(blob)) {
+      return -4;
+    }
+    if (/camcorder|person holding camera|filming with phone|dslr camera/i.test(blob)
+      && !/cctv|surveillance|podcast|recording/i.test(topic)) {
+      return -3;
+    }
+    // Topic keyword overlap on intro assets beats generic faces
+    const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && blob.includes(w)).length;
+    if (/face|person|people|portrait|close.?up|worried|shocked|reaction|eyes|direct.?camera/i.test(blob)) {
+      return 6 + Math.min(3, topicHits);
+    }
+    if (asset?.type === 'video') return 2 + Math.min(2, topicHits);
+    return topicHits;
   };
 
   const videos = project.media.filter((m) => m.type === 'video');

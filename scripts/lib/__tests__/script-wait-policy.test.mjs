@@ -4,6 +4,7 @@ import {
   detectScriptActivity,
   sawFreshActivity,
   chooseRecoveryAction,
+  isDeadScriptGeneration,
 } from '../script-wait-policy.mjs';
 
 describe('isScriptComplete', () => {
@@ -26,8 +27,6 @@ describe('isScriptComplete', () => {
 
 describe('detectScriptActivity', () => {
   it('detects the live "Generating Script" DOM signal even when the snapshot is blank', () => {
-    // This is the core regression: mid-generation the localStorage snapshot is
-    // empty (scriptLen=0, scriptStep=''), but the DOM shows generation is live.
     const snap = { scriptStep: '', scriptLen: 0 };
     const prog = { generating: true, rotating: 'Building narrative arc...', pct: 15 };
     expect(detectScriptActivity(snap, prog)).toBe(true);
@@ -70,6 +69,48 @@ describe('sawFreshActivity', () => {
   });
 });
 
+describe('isDeadScriptGeneration', () => {
+  it('is false while still actively generating', () => {
+    expect(isDeadScriptGeneration({ everSawGenerating: true, active: true, idleMs: 120_000 })).toBe(false);
+  });
+
+  it('detects cancelled UI immediately', () => {
+    expect(
+      isDeadScriptGeneration({
+        everSawGenerating: true,
+        active: false,
+        idleMs: 5_000,
+        scriptLen: 0,
+        bodyText: 'Script generation cancelled by user\nNo script generated yet.',
+      }),
+    ).toBe(true);
+  });
+
+  it('detects idle ≥90s after start with empty script', () => {
+    expect(
+      isDeadScriptGeneration({
+        everSawGenerating: true,
+        active: false,
+        idleMs: 90_000,
+        scriptLen: 0,
+        bodyText: 'No script generated yet.',
+      }),
+    ).toBe(true);
+  });
+
+  it('is false when idle is still short and no cancel message', () => {
+    expect(
+      isDeadScriptGeneration({
+        everSawGenerating: true,
+        active: false,
+        idleMs: 30_000,
+        scriptLen: 0,
+        bodyText: 'PROGRESS\n14%',
+      }),
+    ).toBe(false);
+  });
+});
+
 describe('chooseRecoveryAction', () => {
   it('grants a grace window (no reload) while actively generating', () => {
     expect(chooseRecoveryAction({ active: true, onTopicStep: false })).toBe('grace');
@@ -83,15 +124,44 @@ describe('chooseRecoveryAction', () => {
     expect(chooseRecoveryAction({ active: false, onTopicStep: false })).toBe('reload');
   });
 
-  it('grants grace when generation was live recently (avoid reload abort)', () => {
-    expect(chooseRecoveryAction({ active: false, onTopicStep: false, recentlyGenerating: true })).toBe('grace');
+  it('grants grace when generation was live recently and idle is short', () => {
+    expect(
+      chooseRecoveryAction({
+        active: false,
+        onTopicStep: false,
+        recentlyGenerating: true,
+        idleMs: 30_000,
+      }),
+    ).toBe('grace');
   });
 
-  it('never reloads once generation ever started', () => {
-    expect(chooseRecoveryAction({ active: false, onTopicStep: false, everSawGenerating: true })).toBe('grace');
+  it('reclicks when generation died after start (idle ≥90s)', () => {
+    expect(
+      chooseRecoveryAction({
+        active: false,
+        onTopicStep: true,
+        everSawGenerating: true,
+        idleMs: 90_000,
+        scriptLen: 0,
+        bodyText: 'No script generated yet.',
+      }),
+    ).toBe('reclick');
   });
 
-  it('prefers grace over reload even if somehow also on the topic step', () => {
+  it('reclicks immediately on cancelled UI after start', () => {
+    expect(
+      chooseRecoveryAction({
+        active: false,
+        onTopicStep: false,
+        everSawGenerating: true,
+        idleMs: 10_000,
+        scriptLen: 0,
+        bodyText: 'Script generation cancelled by user',
+      }),
+    ).toBe('reclick');
+  });
+
+  it('prefers grace over reload even if somehow also on the topic step while active', () => {
     expect(chooseRecoveryAction({ active: true, onTopicStep: true })).toBe('grace');
   });
 });

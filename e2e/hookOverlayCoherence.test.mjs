@@ -129,6 +129,26 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     expect(overlay).toBe('SETTLEMENTS WERE BURIED SILENTLY');
     expect(overlay).not.toMatch(/^URGENT:/);
   });
+
+  it('routes ambulance GPS topics to stakes overlay', () => {
+    expect(
+      buildShortHookOverlay('Why rural ambulance GPS routes send crews to demolished houses', ''),
+    ).toBe('GPS SENT CREWS TO RUINS');
+  });
+
+  it('does not use staged-crash overlay for grocery loyalty insurance pricing', () => {
+    const overlay = buildShortHookOverlay(
+      'Why grocery loyalty cards tracked shoppers into insurance pricing',
+      '',
+    );
+    expect(overlay).toBe('LOYALTY CARDS SOLD YOU OUT');
+    expect(overlay).not.toBe('FAKE CRASH SCAM EXPOSED');
+  });
+
+  it('avoids URGENT keyword salad fallback for generic topics', () => {
+    const overlay = buildShortHookOverlay('obscure municipal widget scandal', '');
+    expect(overlay).not.toMatch(/^URGENT:/);
+  });
 });
 
 describe('stock selection — connects B-roll to the topic', () => {

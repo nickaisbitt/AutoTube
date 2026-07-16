@@ -194,10 +194,10 @@ export function buildEditTimeline(project, options = {}) {
       let reusePenalty = priorUses > 0 ? -3 * priorUses : 0;
       if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (isGenericStockJunk(blob, topicBlob)) return -6;
-      if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -5;
+      if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|empty park|people in park/i.test(blob)) return -5;
       if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
       if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
-      if (/camcorder|handheld camcorder|person holding camera|holding camcorder|vintage camera/i.test(blob)) return -4;
+      if (/camcorder|handheld camcorder|person holding camera|holding camcorder|vintage camera|filming with phone|dslr camera/i.test(blob)) return -4;
       // Always demote dark/muddy stock — critical watch fail pattern
       if (/\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|black background|black frame)\b/i.test(blob)) {
         return -5;
@@ -209,6 +209,8 @@ export function buildEditTimeline(project, options = {}) {
       let beatBoost = 0;
       if (activeBeat) {
         beatBoost = scoreAssetAgainstBeat(a, activeBeat);
+        // First 3s of intro: require beat match when available
+        if (isIntro && beatBoost < 0) return -6;
       } else if (segBeats.length) {
         beatBoost = Math.max(...segBeats.map((b) => scoreAssetAgainstBeat(a, b)));
       }
@@ -222,6 +224,8 @@ export function buildEditTimeline(project, options = {}) {
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait|eyes/i.test(blob)) {
           score += !coldEval && /nursing|elderly|care\s*home|cctv|abuse/i.test(topicBlob) ? 1 : 4;
         }
+        // Cold intro: beat match outranks establishing stock
+        if (coldEval && isIntro && beatBoost > 0) score += beatBoost * 2;
         if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;
         if (preferBright && /\b(daylight|sunny|bright|well.?lit|window light)\b/i.test(blob)) score += 2;
         return score + beatBoost + reusePenalty;

@@ -68,24 +68,57 @@ export function sawFreshActivity(snap = {}, prog = {}, prev = {}) {
 }
 
 /**
+ * True when generation started but is now dead (timeout abort / cancelled UI)
+ * so grace-to-hard-cap would only waste wall clock. Prefer a fresh generate click.
+ *
+ * @param {{
+ *   everSawGenerating?: boolean,
+ *   active?: boolean,
+ *   idleMs?: number,
+ *   bodyText?: string,
+ *   scriptLen?: number,
+ * }} state
+ */
+export function isDeadScriptGeneration(state = {}) {
+  if (!state.everSawGenerating) return false;
+  if (state.active) return false;
+  if (Number(state.scriptLen) > 0) return false;
+  const body = String(state.bodyText || '');
+  if (/Script generation cancelled/i.test(body)) return true;
+  if (/No script generated yet/i.test(body) && (state.idleMs ?? 0) >= 90_000) return true;
+  if ((state.idleMs ?? 0) >= 90_000) return true;
+  return false;
+}
+
+/**
  * Chooses a recovery action when the soft deadline elapses without the Source
  * Media button appearing.
  *
  * - 'grace'   : still actively generating — grant more time, do NOT reload
  *               (reloading aborts the live OpenRouter call).
- * - 'reclick' : still on the topic step — the generate click never registered;
- *               re-fill + re-click instead of a full reload.
+ * - 'reclick' : still on the topic step OR generation died after starting —
+ *               re-fill + re-click instead of burning the hard cap.
  * - 'reload'  : genuinely stuck (blank/errored, not generating, not on topic
  *               step) — reload once and retry from scratch.
  *
- * @param {{active: boolean, onTopicStep: boolean, recentlyGenerating?: boolean, everSawGenerating?: boolean}} state
+ * @param {{
+ *   active: boolean,
+ *   onTopicStep: boolean,
+ *   recentlyGenerating?: boolean,
+ *   everSawGenerating?: boolean,
+ *   idleMs?: number,
+ *   bodyText?: string,
+ *   scriptLen?: number,
+ * }} state
  * @returns {'grace'|'reclick'|'reload'}
  */
 export function chooseRecoveryAction(state = {}) {
   if (state.active) return 'grace';
-  if (state.everSawGenerating) return 'grace';
-  // Reload aborts the live OpenRouter call — prefer grace if generation was live recently.
-  if (state.recentlyGenerating) return 'grace';
+  // Dead after start (timeout abort) — fresh click beats grace-to-600s.
+  if (isDeadScriptGeneration(state)) return 'reclick';
+  // Still recently live and not yet idle long enough — keep waiting.
+  if (state.recentlyGenerating && (state.idleMs ?? 0) < 90_000) return 'grace';
+  if (state.everSawGenerating && (state.idleMs ?? 0) < 90_000) return 'grace';
   if (state.onTopicStep) return 'reclick';
   return 'reload';
 }

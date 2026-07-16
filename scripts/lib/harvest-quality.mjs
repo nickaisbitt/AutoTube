@@ -70,7 +70,7 @@ export const HOUSING_STOCK_LOOP_RE =
 
 /** Street-barber / random lifestyle clips that read as off-topic on investigation topics. */
 export const RANDOM_LIFESTYLE_FILLER_RE =
-  /\b(street barber|barber shop|haircut street|musician busking|concert crowd phone|stadium crowd|food truck|coffee shop latte)\b/i;
+  /\b(street barber|barber shop|haircut street|musician busking|concert crowd phone|stadium crowd|food truck|coffee shop latte|band playing|orchestra playing|jazz band|live band|musicians on stage)\b/i;
 
 /**
  * @param {string} haystack

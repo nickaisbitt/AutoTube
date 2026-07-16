@@ -124,7 +124,7 @@ export function buildEditTimeline(project, options = {}) {
   const maxReusePerUrl = options.maxReusePerUrl ?? 1;
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
-  const MAX_BODY_CUT_SEC = 2.25;
+  const MAX_BODY_CUT_SEC = 2.0;
   let effectiveMaxReuse = maxReusePerUrl;
   if (uniqueVideos.length > 0 && totalDur > 0) {
     const clipsNeeded = totalDur / Math.min(cut, MAX_BODY_CUT_SEC);

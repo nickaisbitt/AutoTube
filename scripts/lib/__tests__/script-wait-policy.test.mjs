@@ -83,6 +83,10 @@ describe('chooseRecoveryAction', () => {
     expect(chooseRecoveryAction({ active: false, onTopicStep: false })).toBe('reload');
   });
 
+  it('grants grace when generation was live recently (avoid reload abort)', () => {
+    expect(chooseRecoveryAction({ active: false, onTopicStep: false, recentlyGenerating: true })).toBe('grace');
+  });
+
   it('prefers grace over reload even if somehow also on the topic step', () => {
     expect(chooseRecoveryAction({ active: true, onTopicStep: true })).toBe('grace');
   });

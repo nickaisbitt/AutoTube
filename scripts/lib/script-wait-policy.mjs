@@ -78,11 +78,13 @@ export function sawFreshActivity(snap = {}, prog = {}, prev = {}) {
  * - 'reload'  : genuinely stuck (blank/errored, not generating, not on topic
  *               step) — reload once and retry from scratch.
  *
- * @param {{active: boolean, onTopicStep: boolean}} state
+ * @param {{active: boolean, onTopicStep: boolean, recentlyGenerating?: boolean}} state
  * @returns {'grace'|'reclick'|'reload'}
  */
 export function chooseRecoveryAction(state = {}) {
   if (state.active) return 'grace';
+  // Reload aborts the live OpenRouter call — prefer grace if generation was live recently.
+  if (state.recentlyGenerating) return 'grace';
   if (state.onTopicStep) return 'reclick';
   return 'reload';
 }

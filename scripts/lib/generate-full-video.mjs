@@ -140,7 +140,11 @@ async function readScriptProgress(page) {
     .evaluate(() => {
       const bodyText = document.body?.innerText || '';
       const rotatingEl = document.querySelector('[data-testid="rotating-status"]');
-      const generating = Boolean(rotatingEl) || /Generating Script/i.test(bodyText);
+      const cancelBtn = document.querySelector('[data-testid="cancel-script-button"]');
+      const generating =
+        Boolean(rotatingEl)
+        || Boolean(cancelBtn)
+        || /Generating Script/i.test(bodyText);
       const pctMatch = bodyText.match(/(\d+)%\s*complete/i);
       return {
         generating,
@@ -1736,6 +1740,12 @@ export async function generateFullVideo(options) {
     // hard cap) while script generation is genuinely progressing. Returns a rich
     // status so the caller can pick a non-destructive recovery.
     const scriptWaitStartedAt = Date.now();
+    let lastGeneratingAt = 0;
+    const noteScriptSignals = (prog = {}) => {
+      if (prog.generating || prog.pct != null) {
+        lastGeneratingAt = Date.now();
+      }
+    };
     const waitForScriptReady = async (timeoutMs, { hardCapMs = timeoutMs, waitStartedAt = scriptWaitStartedAt } = {}) => {
       const startedAt = Date.now();
       const hardDeadline = waitStartedAt + hardCapMs;
@@ -1748,6 +1758,7 @@ export async function generateFullVideo(options) {
         if (await sourceMediaBtn().isVisible({ timeout: 2_000 }).catch(() => false)) return { ok: true };
         const snap = await readProjectSnapshot(page);
         const prog = await readScriptProgress(page);
+        noteScriptSignals(prog);
         const body = await page
           .evaluate(() => document.body?.innerText?.slice(0, 800) || '')
           .catch(() => '');
@@ -1783,10 +1794,12 @@ export async function generateFullVideo(options) {
       }
       const snap = await readProjectSnapshot(page);
       const prog = await readScriptProgress(page);
+      noteScriptSignals(prog);
       return {
         ok: false,
         active: detectScriptActivity(snap, prog),
         onTopicStep: prog.onTopicStep,
+        recentlyGenerating: lastGeneratingAt > 0 && Date.now() - lastGeneratingAt < 180_000,
       };
     };
 
@@ -1809,13 +1822,21 @@ export async function generateFullVideo(options) {
           log('⚠ Script wait stuck — reloading once and retrying…');
           await gotoDevServer();
           await triggerScriptGeneration();
+          lastGeneratingAt = Date.now();
           result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
         }
       }
       if (!result.ok) {
-        log('⚠ Script wait final fallback — one more generate click + 300s wait…');
-        await triggerScriptGeneration();
-        result = await waitForScriptReady(120_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+        const stillRecent = lastGeneratingAt > 0 && Date.now() - lastGeneratingAt < 180_000;
+        if (stillRecent) {
+          log('⚠ Script signals were live recently — final grace wait (no re-click)…');
+          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+        } else {
+          log('⚠ Script wait final fallback — one more generate click + 300s wait…');
+          await triggerScriptGeneration();
+          lastGeneratingAt = Date.now();
+          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+        }
       }
       if (!result.ok) {
         const snap = await readProjectSnapshot(page);

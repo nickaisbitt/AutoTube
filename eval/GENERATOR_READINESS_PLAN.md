@@ -27,30 +27,22 @@
 19. Sentence-index semantic beat placement + intro/outro segment-local reuse
 
 ## Remaining (next execution wave — no pause)
-1. **Generate ≥95%** — wave2 chain **65.4%** (9 failures); retry pass running (`d494882`)
-2. **Upload ≥50%** + **raw ≥7.2** — wave2 **5.9%** upload, raw **6.3** (see `eval/RELEASE-AGGREGATE-WAVE2.md`)
-3. **Critical ≤25%** — wave2 **5.9%** PASS (rel-19 only critical)
+1. **Generate ≥95%** — wave3 first-pass **62.5%** (later slices collapsed); fix `803ea69` (180s LLM + idle reclick) under sensor
+2. **Upload ≥50%** + **raw ≥7.2** — wave3 **0%** upload, raw **6.2** (see `eval/RELEASE-AGGREGATE-WAVE3.md`)
+3. **Critical ≤25%** — wave3 **0%** PASS
 
-### Wave 2 chain complete (`eval/RELEASE-AGGREGATE-WAVE2.md`)
-- 26 topics, ~5h, log `/tmp/eval-full-chain-2.log`
-- rel-08 upload pass (raw 7.0); rel-19 critical (raw 4.2)
-- Script grace fixes rescue retries (rel-18/22) but 9 topics still fail generate
+### Wave 3 release×24 (`eval/RELEASE-AGGREGATE-WAVE3.md`)
+- Generate 62.5% / upload 0% / critical 0% / raw 6.2
+- Slice 0–5 was 100% generate @ `f3fe632`; later slices degraded under 30s LLM abort
 
-### Fix wave (`824d4fe`+)
-- Body scene flashes on **every** cut when `AUTOTUBE_HOOK_SCENE_CUTS` (was every 2nd — 6s holds)
-- `MAX_BODY_CUT_SEC` 2.0 → 1.25 (match cold `cutIntervalSec: 0.7`)
-- SCRIPT_TIMEOUT: cumulative 600s hard cap across grace/reclick/reload (was resetting to 240s)
-- Skip generic `buildShockHookLine` templates in hook overlay; clamp drawtext to 8 words
-- Beat relevance + timeline: `isGenericStockJunk` for camcorder/corporate/lab/port loops
-- **Script wait (`742ca5f`):** no reload for 180s after live generating signals (reload was cancelling OpenRouter)
-
-### dev×2 sensor @ `3d7d7de` (pre script-wait fix)
-- Generate **50%** (dev-02 SCRIPT_TIMEOUT — reload cancelled generation)
-- Critical **0%** on dev-01; raw **6.0**
-- Re-run in progress via `scripts/run-eval-chain.mjs` @ `742ca5f`
+### Fix wave `803ea69` (P0–P3)
+- Script LLM timeout 180s; timeout ≠ user cancel; idle-after-start reclick (≥90s)
+- `mergeVolumePadding` uses filtered pad; cold soft-pass relevance/junk gate
+- Topic stakes overlays (ambulance, loyalty, ferry, …); insurance-family narrowed
+- Intro demotes office/camera junk; beat-prefer first 3s
 
 ## Stop conditions
 - Do not open new quality-integration side quests as “proof”
 - Do not run keep-best / housing pack loops as readiness
 - After each code phase: commit + push + cold sensor run before claiming progress
-- **Do not claim release-ready** until critical bar + independent judge pass
+- **Do not claim release-ready** until all four bars pass on held-out first-pass with independent judge

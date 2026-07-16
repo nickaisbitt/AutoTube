@@ -43,5 +43,14 @@ See `eval/RELEASE-AGGREGATE-18.md` — critical **41.2% FAIL**, upload **58.8% P
 
 \*False positive: verdict "scroll past within 10–15 seconds" — fixed in `58d6893`.
 
-## Sensor results (pending) — `58d6893`
+## Sensor results — `58d6893` (scroll-past fix + hook flashes)
+
+| Topic | Generate | Raw | Upload | Critical | scene_hook |
+|-------|----------|-----|--------|----------|------------|
+| dev-01 | OK | 6.8 | no | **no** | PASS |
+| dev-02 | OK | 6.6 | no | **no** | PASS |
+
+**Aggregate:** 100% generate, **0% critical**, 0% upload, raw median **6.7** (n=2).
+
+Upload bar (≥50% at raw ≥7.2) still open — next lever is stock relevance/variety, not scene QA.
 

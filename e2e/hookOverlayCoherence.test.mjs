@@ -119,6 +119,16 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     expect(overlay).not.toMatch(/\bTHE$/);
     expect(overlay).not.toBe('ORDINARY PEOPLE ARE ALREADY PAYING THE');
   });
+
+  it('routes podcast misconduct to stakes overlay not keyword salad', () => {
+    const topic = 'How a podcast network buried host misconduct settlements';
+    const overlay = buildShortHookOverlay(
+      topic,
+      'Billions lost overnight: a podcast network buried host misconduct settlements.',
+    );
+    expect(overlay).toBe('SETTLEMENTS WERE BURIED SILENTLY');
+    expect(overlay).not.toMatch(/^URGENT:/);
+  });
 });
 
 describe('stock selection — connects B-roll to the topic', () => {

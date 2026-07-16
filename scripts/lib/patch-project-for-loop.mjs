@@ -205,6 +205,15 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/ticket|bot|scalp|concert|fan/i.test(t)) {
     return clampWords('BOTS STOLE YOUR TICKETS');
   }
+  if (/podcast|host misconduct|misconduct settlement|buried.*settlement/i.test(t)) {
+    return clampWords('SETTLEMENTS WERE BURIED SILENTLY');
+  }
+  if (/observatory|near-earth|asteroid|astronomy/i.test(t)) {
+    return clampWords('THE ASTEROID REPORT WAS LATE');
+  }
+  if (/gene-therapy|clinical trial|trial excluded|minority participants/i.test(t)) {
+    return clampWords('THE TRIAL EXCLUDED THEM');
+  }
 
   const spoken = (hookLine || '').trim();
   if (spoken.length >= 12 && !isInstructionOverlay(spoken) && !isGenericTemplateHook(spoken)) {

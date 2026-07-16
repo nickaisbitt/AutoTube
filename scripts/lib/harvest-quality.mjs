@@ -2,6 +2,7 @@
  * Harvest quality gates: topic/segment relevance + per-segment volume.
  */
 import { isHeistTopic, isHousingTopic, isNursingHomeTopic } from './topic-family.mjs';
+import { isEvalColdMode } from './eval-flags.mjs';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
@@ -80,9 +81,17 @@ export const RANDOM_LIFESTYLE_FILLER_RE =
 export const SCIENCE_LAB_LOOP_RE =
   /\b(lab technician pipette|microscope close up generic|scientist in lab coat walking|laboratory b-?roll|test tube rack generic)\b/i;
 
+/** Ultrasound / medical stock on non-health topics. */
+export const OFF_TOPIC_MEDICAL_STOCK_RE =
+  /\b(ultrasound monitor|ultrasound screen|pregnancy ultrasound|fetal ultrasound|hospital corridor empty)\b/i;
+
 /** Ferry/port timelapse filler on unrelated infrastructure stories. */
 export const PORT_FERRY_LOOP_RE =
   /\b(ferry timelapse|port crane timelapse|container ship aerial generic|cargo ship sunset timelapse)\b/i;
+
+/** Repeated camera/phone B-roll loops on non-surveillance topics. */
+export const CAMERA_PHONE_LOOP_RE =
+  /\b(person filming with phone|filming with smartphone|holding phone recording|camera on tripod generic|dslr camera close up)\b/i;
 
 /**
  * @param {string} haystack
@@ -150,6 +159,18 @@ export function genericStockJunkReason(haystack, contextText = '') {
     && !/\b(port|ferry|shipping|maritime|cargo|container|dock|freight)\b/i.test(ctx)
   ) {
     return 'generic port/ferry timelapse';
+  }
+  if (
+    OFF_TOPIC_MEDICAL_STOCK_RE.test(h)
+    && !/\b(patient|doctor|nurse|hospital|healthcare|pregnancy|clinic|medical)\b/i.test(ctx)
+  ) {
+    return 'off-topic medical/ultrasound stock';
+  }
+  if (
+    CAMERA_PHONE_LOOP_RE.test(h)
+    && !/\b(cctv|surveillance|podcast|recording studio|filming|documentary)\b/i.test(ctx)
+  ) {
+    return 'generic camera/phone filming loop';
   }
   return null;
 }
@@ -337,7 +358,14 @@ export function filterAssetsByRelevance(media, project, options = {}) {
  * @param {object[]} media
  * @param {object[]} padding
  */
-export function mergeVolumePadding(media, padding) {
+export function mergeVolumePadding(media, padding, project = null) {
+  let pad = padding || [];
+  if (project && pad.length) {
+    const filtered = filterAssetsByRelevance(pad, project, {
+      minScore: isEvalColdMode() ? 0.22 : 0.18,
+    });
+    pad = filtered.media;
+  }
   const out = [...media];
   for (const asset of padding) {
     const key = (asset.url || '').split('?')[0];
@@ -418,8 +446,9 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   if (cyber >= 6 && videosPerSeg >= 1) {
     return { pass: true, reason: `soft-pass-cyber(${cyber})` };
   }
-  // Soft-pass B: stock motion rich — ≥2 videos/seg and live stock or top-up
-  const motionRich = videosPerSeg >= 2 && (stockFetched > 0 || topUp >= segN);
+  // Soft-pass B: stock motion rich — stricter in cold eval (thin generic B-roll)
+  const motionMinPerSeg = isEvalColdMode() ? 2.5 : 2;
+  const motionRich = videosPerSeg >= motionMinPerSeg && (stockFetched > 0 || topUp >= segN);
   if (motionRich) {
     return { pass: true, reason: `soft-pass-motion(${videoCount}v/${segN}segs)` };
   }

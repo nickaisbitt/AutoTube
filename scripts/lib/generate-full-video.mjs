@@ -1273,7 +1273,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   }
 
   const relevance = filterAssetsByRelevance(validated, project, {
-    minScore: isEvalColdMode() ? 0.28 : 0.25,
+    minScore: isEvalColdMode() ? 0.3 : 0.25,
   });
   report.relevanceDropped = relevance.dropped;
   if (relevance.dropped.length) {
@@ -1334,10 +1334,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     stripJunkDemoVideos(project, report);
     const paddingBeforeFilter = (project.media || []).filter(isVolumePaddingAsset);
     const afterTopUp = filterAssetsByRelevance(project.media || [], project, {
-      minScore: isEvalColdMode() ? 0.26 : 0.22,
+      minScore: isEvalColdMode() ? 0.28 : 0.22,
     });
     report.relevanceDroppedAfterTopUp = afterTopUp.dropped;
-    project.media = mergeVolumePadding(afterTopUp.media, paddingBeforeFilter);
+    project.media = mergeVolumePadding(afterTopUp.media, paddingBeforeFilter, project);
     report.afterTopUp = project.media.length;
   }
 

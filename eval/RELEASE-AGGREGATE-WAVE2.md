@@ -56,10 +56,30 @@ Critical bar passes at 5.9% but upload/raw remain primary blockers.
 
 ## Verdict
 
-**Not release-ready.** Critical ≤25% holds; generate reliability, upload-ready, and raw median all fail. Script wait improvements help (no reload abort; eval retry rescues rel-18/19/22) but 9 topics still fail generate on first pass+retry.
+**Not release-ready.** Critical ≤25% holds at merged **13.6%** (rel-10/16/19 on retry watches); generate **88.5%** after retry; upload **9.1%** (rel-08, rel-13); raw **6.4**.
 
-## Next ranked fixes
+## Merged with retry pass (`eval-retry-2026-07-16T17-10-02-195Z`)
 
-1. **Generate:** OpenRouter script timeout — consider longer hard cap or server-side script poll without UI dependency
-2. **Upload/raw:** Stronger beat-vision rejection, topic-specific hook stakes, reduce soft-pass volume padding
-3. **rel-19 critical:** Read `WATCH_REPORT.md` for podcast overlay/stock pattern
+| Metric | First pass | + Retry | Bar |
+|--------|------------|---------|-----|
+| Generate | 65.4% | **88.5%** (23/26) | ≥95% FAIL |
+| Upload | 5.9% | **9.1%** (2/22) | ≥50% FAIL |
+| Critical | 5.9% | **13.6%** (3/22) | ≤25% PASS |
+| Raw median | 6.3 | **6.4** | ≥7.2 FAIL |
+
+**Retry rescued:** rel-05, rel-07, rel-10, rel-13 (raw **7.2**, upload pass), rel-16, rel-17  
+**Still fail generate:** dev-02, rel-03, rel-06
+
+## Upload passes (merged)
+
+| ID | Raw | Source |
+|----|-----|--------|
+| rel-08 | 7.0 | wave2 |
+| rel-13 | 7.2 | retry |
+
+## Next fixes (`ceb9ff7`+)
+
+- Podcast/observatory/gene-therapy hook overlays (rel-19 critical driver)
+- Tighter cold relevance (0.30) + filtered volume padding merge
+- Stricter motion soft-pass (2.5 v/seg cold)
+- Camera/ultrasound junk rejection in harvest

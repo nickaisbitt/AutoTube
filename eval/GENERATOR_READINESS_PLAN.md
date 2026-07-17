@@ -35,11 +35,17 @@
 - Generate 62.5% / upload 0% / critical 0% / raw 6.2
 - Slice 0–5 was 100% generate @ `f3fe632`; later slices degraded under 30s LLM abort
 
-### Fix wave `803ea69` (P0–P3)
+### Fix wave `803ea69`–`127cfb9` (P0–P3)
 - Script LLM timeout 180s; timeout ≠ user cancel; idle-after-start reclick (≥90s)
-- `mergeVolumePadding` uses filtered pad; cold soft-pass relevance/junk gate
+- `mergeVolumePadding` uses filtered pad
 - Topic stakes overlays (ambulance, loyalty, ferry, …); insurance-family narrowed
 - Intro demotes office/camera junk; beat-prefer first 3s
+- Soft-pass junk reject removed after it collapsed generate (HARVEST_VOLUME_FAIL)
+
+### Sensor wave4d
+- **dev-02 upload-ready raw 7.4** (first post-wave2 upload signal)
+- Release 0–5: gen 50%, upload 0%, critical 0%, raw med 6.4
+- Remaining: harvest volume reliability + lift release raw to ≥7.2
 
 ## Stop conditions
 - Do not open new quality-integration side quests as “proof”

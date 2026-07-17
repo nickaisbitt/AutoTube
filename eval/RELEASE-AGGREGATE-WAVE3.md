@@ -33,9 +33,14 @@ rel-11, rel-14, rel-15, rel-17, rel-19, rel-20, rel-21, rel-22, rel-24
 
 **Not release-ready.** Critical bar holds at 0%. Upload/raw stuck at 0% / 6.2. Generate unreliable on later slices under pre-fix waiter.
 
-## Next measurement
+## Sensor wave-4 @ `c77e5e1` / `99a76a6` (after P0–P3)
 
-Cold sensor on `803ea69+`:
-- script LLM timeout 180s + idle-after-start reclick
-- mergeVolumePadding filter fix
-- topic stakes overlays + soft-pass relevance/junk gate
+| Suite | Generate | Upload | Critical | Raw med |
+|-------|----------|--------|----------|---------|
+| wave4a (0.30 relevance) | ~17% | 0% | 0% | — | HARVEST_VOLUME_FAIL |
+| wave4b (softened gate) | 50% release | 0% | 0% | 6.4 |
+| wave4c (0.28 relevance) | **66.7%** release / 50% dev | 0% | 25% | **6.4** (rel-03 **6.8**) |
+
+Soft-pass junk rejection removed after sensors — it blocked generate more than it lifted raw. Padding filter + hooks + script idle reclick retained.
+
+Logs: `/tmp/eval-sensor-wave4c.log`

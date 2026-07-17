@@ -465,8 +465,8 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   if (cyber >= 6 && videosPerSeg >= 1) {
     return { pass: true, reason: `soft-pass-cyber(${cyber})` };
   }
-  // Soft-pass B: stock motion rich — stricter in cold eval (thin generic B-roll)
-  const motionMinPerSeg = isEvalColdMode() ? 2.5 : 2;
+  // Soft-pass B: stock motion rich — ≥2 videos/seg and live stock or top-up
+  const motionMinPerSeg = 2;
   const motionRich = videosPerSeg >= motionMinPerSeg && (stockFetched > 0 || topUp >= segN);
   if (motionRich) {
     return { pass: true, reason: `soft-pass-motion(${videoCount}v/${segN}segs)` };

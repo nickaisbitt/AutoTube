@@ -102,6 +102,23 @@ async function dismissOnboarding(page) {
   }
 }
 
+/** Wait for topic field (onboarding / crash can leave it missing). */
+async function fillTopicInput(page, topic, { attempts = 3 } = {}) {
+  for (let i = 1; i <= attempts; i += 1) {
+    await dismissOnboarding(page);
+    const input = page.getByTestId('topic-input');
+    try {
+      await input.waitFor({ state: 'visible', timeout: 45_000 });
+      await input.fill(topic, { timeout: 30_000 });
+      return;
+    } catch (err) {
+      if (i === attempts) throw err;
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
+      await dismissOnboarding(page);
+    }
+  }
+}
+
 /** Read autotube_project wrapper (project + stepStatuses) from localStorage. */
 async function readProjectSnapshot(page) {
   return page
@@ -1817,7 +1834,15 @@ export async function generateFullVideo(options) {
   const gotoDevServer = async () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
+        await page.addInitScript(() => {
+          try {
+            localStorage.setItem('autotube_onboarding_seen', 'true');
+          } catch {
+            /* ignore */
+          }
+        });
         await page.goto(devServer, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+        await dismissOnboarding(page);
         return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1846,7 +1871,7 @@ export async function generateFullVideo(options) {
     await gotoDevServer();
     await dismissOnboarding(page);
 
-    await page.getByTestId('topic-input').fill(topic);
+    await fillTopicInput(page, topic);
     await page.getByTestId('duration-select').selectOption('3').catch(() => {});
     await dismissOnboarding(page);
     await page.getByTestId('generate-script-only').click();
@@ -1857,7 +1882,7 @@ export async function generateFullVideo(options) {
 
     const triggerScriptGeneration = async () => {
       await dismissOnboarding(page);
-      await page.getByTestId('topic-input').fill(topic);
+      await fillTopicInput(page, topic);
       await page.getByTestId('duration-select').selectOption('3').catch(() => {});
       await dismissOnboarding(page);
       await page.getByTestId('generate-script-only').click();

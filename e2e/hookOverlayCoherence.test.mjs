@@ -136,6 +136,24 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     ).toBe('GPS SENT CREWS TO RUINS');
   });
 
+  it('routes zoning flood-risk map to policy stakes not weather disaster', () => {
+    expect(
+      buildShortHookOverlay('The city zoning map that erased flood-risk neighborhoods', ''),
+    ).toBe('THEY ERASED THE FLOOD MAP');
+  });
+
+  it('routes airline cabin-pressure to stakes overlay', () => {
+    expect(
+      buildShortHookOverlay('How a regional airline hid recurring cabin-pressure failures', ''),
+    ).toBe('THE CABIN KEPT FAILING');
+  });
+
+  it('routes indie cloud lockout to stakes overlay', () => {
+    expect(
+      buildShortHookOverlay('Why indie game studios are losing source code in cloud lockouts', ''),
+    ).toBe('THEIR SOURCE CODE VANISHED');
+  });
+
   it('does not use staged-crash overlay for grocery loyalty insurance pricing', () => {
     const overlay = buildShortHookOverlay(
       'Why grocery loyalty cards tracked shoppers into insurance pricing',

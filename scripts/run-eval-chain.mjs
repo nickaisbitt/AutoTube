@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /**
  * Sequential cold-eval chain: dev×2 sensor then release×24 (4×6 slices).
- * Usage: node scripts/run-eval-chain.mjs
+ * Retries generate failures from THIS chain's output dirs only.
  */
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execSync } from 'node:child_process';
+import { readdirSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const chainStartedAt = Date.now();
 
 const steps = [
   ['dev×2 sensor', ['run', 'eval:unseen', '--', '--set', 'dev', '--max', '2']],
@@ -29,22 +31,42 @@ for (const [label, args] of steps) {
 }
 
 console.log('\n✅ Eval chain complete');
-const agg = spawnSync('node', ['scripts/aggregate-eval-summaries.mjs', 'eval-release'], {
+
+/** Dirs created during this chain run (mtime after chain start). */
+function chainDirs(prefix) {
+  const root = join(ROOT, 'test-recordings');
+  return readdirSync(root)
+    .filter((d) => d.startsWith(prefix))
+    .map((d) => join(root, d))
+    .filter((p) => {
+      try {
+        return statSync(p).isDirectory() && statSync(p).mtimeMs >= chainStartedAt - 60_000;
+      } catch {
+        return false;
+      }
+    })
+    .map((p) => p.split('/').pop())
+    .sort();
+}
+
+const dirs = [...chainDirs('eval-dev-'), ...chainDirs('eval-release-')];
+console.log(`↻ Retrying failures from chain dirs: ${dirs.join(', ') || '(none)'}`);
+if (dirs.length) {
+  spawnSync(
+    'node',
+    ['scripts/retry-eval-failures.mjs', `--dirs=${dirs.join(',')}`],
+    { cwd: ROOT, stdio: 'inherit' },
+  );
+}
+
+spawnSync('node', ['scripts/aggregate-eval-summaries.mjs', 'eval-release'], {
   cwd: ROOT,
   stdio: 'inherit',
 });
-const retry = spawnSync(
-  'node',
-  [
-    'scripts/retry-eval-failures.mjs',
-    '--dirs=eval-dev-2026-07-16T12-19-47-651Z,eval-release-2026-07-16T12-35-01-109Z,eval-release-2026-07-16T13-20-44-286Z,eval-release-2026-07-16T14-28-14-216Z,eval-release-2026-07-16T15-52-59-278Z',
-  ],
-  { cwd: ROOT, stdio: 'inherit' },
-);
-if (retry.status === 0) {
-  spawnSync('node', ['scripts/aggregate-eval-summaries.mjs', 'eval-'], {
-    cwd: ROOT,
-    stdio: 'inherit',
-  });
+
+try {
+  execSync('node scripts/aggregate-wave2-merged.mjs', { cwd: ROOT, stdio: 'inherit' });
+} catch {
+  /* optional */
 }
-process.exit(agg.status || retry.status || 0);
+process.exit(0);

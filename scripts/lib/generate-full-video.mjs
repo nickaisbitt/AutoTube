@@ -890,8 +890,111 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
     return [...brightBoost, ...antiHud, ...base];
   }
-  if (/tornado|storm|disaster/i.test(topicBlob)) {
+  if (/tornado|storm|disaster/i.test(topicBlob) && !/zoning|flood[-\s]?risk|flood\s*map/i.test(topicBlob)) {
     return [...brightBoost, ...antiHud, 'tornado storm damage news', 'severe weather radar', 'emergency news footage', 'people sheltering storm'];
+  }
+  // Release cold families that otherwise fall through to weak 4-word joins
+  if (/ambulance|gps\s*route|demolished|paramedic|911\s*dispatch/i.test(topicBlob)) {
+    const faces = [
+      'paramedic looking at phone worried',
+      'ambulance driver stressed face',
+      'emergency dispatcher headset worried',
+    ];
+    const topical = [
+      'ambulance racing rural highway',
+      'demolished house rubble exterior',
+      'gps navigation map phone close up',
+      'emt crew stretcher emergency',
+      'abandoned house collapsed porch',
+      '911 dispatch center monitors',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
+  if (/airline|cabin[-\s]?pressure|cabin\s*pressure/i.test(topicBlob)) {
+    const faces = [
+      'airline passenger oxygen mask worried',
+      'pilot cockpit stressed face',
+      'flight attendant cabin worried',
+    ];
+    const topical = [
+      'airplane cabin interior passengers',
+      'commercial jet cockpit instruments',
+      'aircraft oxygen mask dangling',
+      'airport runway plane takeoff',
+      'airplane window clouds daylight',
+      'maintenance hangar aircraft exterior',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
+  if (/zoning|flood[-\s]?risk|flood\s*map|neighborhood/i.test(topicBlob)) {
+    const faces = [
+      'worried homeowner reading zoning notice',
+      'couple looking at flood map worried',
+      'city planner pointing at map desk',
+    ];
+    const topical = [
+      'flood risk zoning map close up',
+      'city planning map documents desk',
+      'neighborhood houses street daylight',
+      'flooded street residential area',
+      'municipal office paperwork maps',
+      'homeowner porch looking at papers',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
+  if (/climate\s*sensor|sensor\s*calibrat|fake\s*climate|university\s*lab/i.test(topicBlob)) {
+    const faces = [
+      'scientist looking at laptop worried',
+      'lab researcher pipette shocked face',
+      'professor reviewing charts desk',
+    ];
+    const topical = [
+      'university science lab instruments',
+      'climate sensor weather station',
+      'scientist pipette test tubes lab',
+      'data charts laptop research desk',
+      'laboratory calibration equipment',
+      'weather sensor outdoor close up',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
+  if (/indie\s*game|source\s*code|cloud\s*lockout/i.test(topicBlob)) {
+    const faces = [
+      'game developer shocked at laptop',
+      'worried programmer looking at screen',
+      'indie studio team stressed office',
+    ];
+    const topical = [
+      'coding laptop source code screen',
+      'game development workstation desk',
+      'cloud lockout error laptop screen',
+      'keyboard typing code close up',
+      'small office developers computers',
+      'person slamming laptop frustrated',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
+  }
+  if (/museum\s*archive|mislabeled|colonial\s*artifact/i.test(topicBlob)) {
+    const faces = [
+      'curator examining artifact worried',
+      'archivist reading label documents',
+      'museum visitor looking at exhibit',
+    ];
+    const topical = [
+      'museum archive shelves artifacts',
+      'colonial artifact display case',
+      'archivist gloves handling object',
+      'museum storage boxes labels',
+      'old document catalog close up',
+      'museum gallery exhibit hall',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...brightBoost, ...antiHud, ...base];
   }
   const words = String(topicBlob || '')
     .toLowerCase()

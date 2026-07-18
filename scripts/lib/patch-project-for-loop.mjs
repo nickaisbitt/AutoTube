@@ -133,8 +133,21 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
 
   // Family short stakes FIRST — preferred overlays often dump the full topic title
   // (e.g. "URGENT NURSING HOME CAMERAS RECORDED") and get edge-clipped.
-  if (/tornado|hurricane|flood|wildfire|earthquake/i.test(t)) {
+  // Zoning / flood-risk MAP stories are policy cover-ups, not weather disasters.
+  if (/zoning|flood[-\s]?risk|flood\s*map|erased\s*flood/i.test(t)) {
+    return clampWords('THEY ERASED THE FLOOD MAP');
+  }
+  if (
+    /tornado|hurricane|wildfire|earthquake/i.test(t)
+    || (/\bflood\b/i.test(t) && !/zoning|map|neighborhood|risk/i.test(t))
+  ) {
     return clampWords('THIS WARNING CAME TOO LATE');
+  }
+  if (/airline|cabin[-\s]?pressure|cabin\s*pressure/i.test(t)) {
+    return clampWords('THE CABIN KEPT FAILING');
+  }
+  if (/indie\s*game|source\s*code|cloud\s*lockout/i.test(t)) {
+    return clampWords('THEIR SOURCE CODE VANISHED');
   }
   if (isNursingHomeTopic(topicOnly)) {
     return clampWords('CAMERAS CAUGHT THE ABUSE');

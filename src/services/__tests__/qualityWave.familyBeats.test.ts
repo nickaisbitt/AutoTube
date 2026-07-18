@@ -118,6 +118,20 @@ describe('topic family + impact beats', () => {
     expect(vet).not.toMatch(/emptied real bank/i);
   });
 
+  it('spoken stakes for release cold families (not hash templates)', async () => {
+    const { buildShockHookLine } = await import('../../../e2e/openRouterMock.mjs');
+    const zoning = buildShockHookLine('The city zoning map that erased flood-risk neighborhoods');
+    expect(zoning).toMatch(/flood|zoning|erased/i);
+    expect(zoning).not.toMatch(/already trapped|ordinary people are already paying/i);
+    const ambulance = buildShockHookLine(
+      'Why rural ambulance GPS routes send crews to demolished houses',
+    );
+    expect(ambulance).toMatch(/gps|ambulance|gone/i);
+    expect(ambulance).not.toMatch(/they tried to hide this|ordinary people are already paying/i);
+    const airline = buildShockHookLine('How a regional airline hid recurring cabin-pressure failures');
+    expect(airline).toMatch(/cabin|pressure/i);
+  });
+
   it('nursing stock queries prefer CCTV/care over office/hospital cyber', async () => {
     const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
     const q = stockMotionQueries('The nursing home cameras that recorded abuse for years', false, {

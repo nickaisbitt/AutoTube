@@ -37,6 +37,23 @@ function tokens(text) {
     .filter((w) => w.length > 3);
 }
 
+/** Coarse visual cluster so cold body cuts don't loop the same subject. */
+export function visualSubjectCluster(asset) {
+  const blob = `${asset?.query || ''} ${asset?.alt || ''} ${asset?.url || ''}`.toLowerCase();
+  if (/ambulance|paramedic|emt|911|dispatch/.test(blob)) return 'ambulance';
+  if (/aerial|drone|overhead|bird.?eye|skyline|from above/.test(blob)) return 'aerial';
+  if (/coding|source.?code|laptop screen|computer screen|typing keyboard|ide /.test(blob)) return 'coding';
+  if (/airplane|aircraft|cabin|cockpit|jet |airport/.test(blob)) return 'aircraft';
+  if (/flood|zoning|map |documents?|paperwork/.test(blob)) return 'mapdocs';
+  if (/lab|pipette|sensor|calibrat|test tube/.test(blob)) return 'lab';
+  if (/ship|port|container|cargo|dock|crane/.test(blob)) return 'port';
+  if (/face|person|people|couple|worried|shocked|portrait|close.?up|crew|pilot|driver/.test(blob)) {
+    return 'human';
+  }
+  if (/office|conference|corporate|meeting room/.test(blob)) return 'office';
+  return 'other';
+}
+
 /** Heuristic overlap between asset metadata and a beat subject/excerpt. */
 export function scoreAssetAgainstBeat(asset, beat) {
   if (!beat) return 0;
@@ -233,6 +250,16 @@ export function buildEditTimeline(project, options = {}) {
       if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3 + beatBoost;
       if (topicIsHousing && /beetle|insect|wildlife|macro|spider|bug|larva|caterpillar/i.test(blob)) return -10;
       if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2 + beatBoost;
+      // Cold body: topic relevance + human faces beat looping subject stock
+      if (coldEval) {
+        const rel = scoreAssetRelevance(a, seg, project.topic || '');
+        let score = rel < 0.12 ? -2 : Math.round(rel * 4);
+        if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait|crew|pilot|driver|paramedic/i.test(blob)) {
+          score += 3;
+        }
+        if (preferBright && /\b(daylight|sunny|bright|well.?lit|window light)\b/i.test(blob)) score += 1;
+        return score + beatBoost + reusePenalty;
+      }
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(blob)) return 3 + beatBoost + reusePenalty;
       return beatBoost + reusePenalty;
     };
@@ -296,6 +323,7 @@ export function buildEditTimeline(project, options = {}) {
     let ai = 0;
     let lastAssetId = null;
     let lastUrl = null;
+    let lastCluster = null;
     while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
       const activeBeat = beatAtSegmentTime(segBeats, t, duration, seg);
@@ -307,10 +335,17 @@ export function buildEditTimeline(project, options = {}) {
           if (key && reuseCountFor(key, introOutroReuse) >= maxReuseThisSeg) return false;
           return true;
         };
-        // Beat-aware re-rank only when a beat sheet window is active; otherwise
-        // preserve ordered preference (intro topic lock / care-over-face borrow order).
-        const rankedPool = activeBeat
-          ? [...pool].sort((a, b) => scoreAsset(b, activeBeat) - scoreAsset(a, activeBeat))
+        const diversityScore = (candidate) => {
+          let s = scoreAsset(candidate, activeBeat);
+          if (coldEval && !isIntro && !isOutro && lastCluster) {
+            const cluster = visualSubjectCluster(candidate);
+            if (cluster === lastCluster && cluster !== 'human' && cluster !== 'other') s -= 4;
+          }
+          return s;
+        };
+        // Beat-aware / cold diversity re-rank when useful; else preserve ordered preference.
+        const rankedPool = (activeBeat || (coldEval && !isIntro && !isOutro))
+          ? [...pool].sort((a, b) => diversityScore(b) - diversityScore(a))
           : pool;
         for (let j = 0; j < rankedPool.length; j++) {
           const candidate = rankedPool[(ai + j) % rankedPool.length];
@@ -323,8 +358,8 @@ export function buildEditTimeline(project, options = {}) {
           const bestCount = reuseCountFor(bestKey, introOutroReuse);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) return best;
           if (topicIsHousing && !isIntro && scoreAsset(candidate, activeBeat) < 0) return best;
-          if (activeBeat && scoreAsset(candidate, activeBeat) !== scoreAsset(best, activeBeat)) {
-            return scoreAsset(candidate, activeBeat) > scoreAsset(best, activeBeat) ? candidate : best;
+          if (diversityScore(candidate) !== diversityScore(best)) {
+            return diversityScore(candidate) > diversityScore(best) ? candidate : best;
           }
           return count < bestCount ? candidate : best;
         }, rankedPool[ai % rankedPool.length]);
@@ -354,6 +389,7 @@ export function buildEditTimeline(project, options = {}) {
       });
       lastAssetId = asset.id;
       lastUrl = urlKey(asset) || null;
+      lastCluster = visualSubjectCluster(asset);
       if (lastUrl) {
         if (isIntro || isOutro) {
           segmentUrlUse.set(lastUrl, (segmentUrlUse.get(lastUrl) || 0) + 1);

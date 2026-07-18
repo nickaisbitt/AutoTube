@@ -228,6 +228,24 @@ describe('quality waves 2–5 helpers', () => {
     expect(q.every((x) => !/bright office daylight/i.test(x))).toBe(true);
   });
 
+  it('release cold families get topical motion packs not weak topic joins', async () => {
+    const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
+    const ambulance = stockMotionQueries(
+      'Why rural ambulance GPS routes send crews to demolished houses',
+      false,
+      { faceSeek: true },
+    );
+    expect(ambulance.some((x) => /ambulance|demolished|paramedic|gps/i.test(x))).toBe(true);
+    expect(ambulance.some((x) => /face|worried|stressed|dispatcher/i.test(x))).toBe(true);
+    const zoning = stockMotionQueries(
+      'The city zoning map that erased flood-risk neighborhoods',
+      false,
+      { faceSeek: true },
+    );
+    expect(zoning.some((x) => /zoning|flood risk|map/i.test(x))).toBe(true);
+    expect(zoning.every((x) => !/tornado storm damage/i.test(x))).toBe(true);
+  });
+
   it('rejects synthetic stock-video query self-inflation', async () => {
     const { scoreAssetRelevance } = await import('../../../scripts/lib/harvest-quality.mjs');
     const seg = { id: 's1', title: 'Intro', narration: 'cameras recorded nursing home abuse' };

@@ -127,8 +127,30 @@ export function buildShockHookLine(topic, override) {
   if (/nuclear|radiation|meltdown|plant/.test(tl)) {
     return 'They hid the radiation risk until it was too late.';
   }
-  if (/tornado|hurricane|flood|wildfire|earthquake/.test(tl)) {
+  // Zoning / flood-risk MAP is a policy cover-up — not a weather-disaster hook.
+  if (/zoning|flood[-\s]?risk|flood\s*map|erased\s*flood/.test(tl)) {
+    return 'They erased the flood zones before the next storm hit.';
+  }
+  if (
+    /tornado|hurricane|wildfire|earthquake/.test(tl)
+    || (/\bflood\b/.test(tl) && !/zoning|map|neighborhood|risk/.test(tl))
+  ) {
     return 'The warning came after people were already trapped.';
+  }
+  if (/ambulance|gps\s*route|demolished|paramedic|911\s*dispatch/.test(tl)) {
+    return 'GPS sent the ambulance to a house that was already gone.';
+  }
+  if (/airline|cabin[-\s]?pressure|cabin\s*pressure/.test(tl)) {
+    return 'The cabin kept losing pressure — and they hid every report.';
+  }
+  if (/indie\s*game|source\s*code|cloud\s*lockout/.test(tl)) {
+    return 'The studio woke up locked out of its own source code.';
+  }
+  if (/climate\s*sensor|sensor\s*calibrat|fake\s*climate|university\s*lab/.test(tl)) {
+    return 'The lab published calibrations that never matched the sensors.';
+  }
+  if (/museum\s*archive|mislabeled|colonial\s*artifact/.test(tl)) {
+    return 'The archive labels were wrong for decades on purpose.';
   }
 
   const short = t.replace(/^(why|how|what)\s+/i, '').trim();

@@ -653,7 +653,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       [
         '-y', '-i', outputPath,
         '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11',
-        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k',
+        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
         normalizedOut,
       ],
       { encoding: 'utf8', timeout: 300_000 },

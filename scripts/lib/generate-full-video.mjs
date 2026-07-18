@@ -1194,51 +1194,67 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     if (/\b(daylight|sunny|bright|well.?lit|documentary|handheld|cctv|surveillance)\b/i.test(blob)) return 1;
     return 0;
   };
-  const picks = pickStockVideos(need + segments.length * 4, mediaOffset, pool)
+  const picks = pickStockVideos(need + segments.length * 8, mediaOffset, pool)
     .slice()
     .sort((a, b) => faceScore(b) - faceScore(a));
   let vi = 0;
+  const injectClip = async (seg, clip, tag) => {
+    const key = clip.url.split('?')[0];
+    if (!key || used.has(key)) return false;
+    const isIntro = seg.type === 'intro' || seg === segments[0];
+    if (isIntro && faceScore(clip) < 0) return false;
+    const ok = await canFetch(clip.url, { timeoutMs: 10000, minBytes: 2048, expectVideo: true });
+    if (!ok) {
+      report.videoTopUpFailed = report.videoTopUpFailed || [];
+      report.videoTopUpFailed.push({ url: clip.url, reason: 'probe failed' });
+      return false;
+    }
+    const n = (report.videoTopUp || []).length;
+    project.media.push({
+      id: `stock-video-${seg.id}-${tag}-${n}`,
+      segmentId: seg.id,
+      type: 'video',
+      url: clip.url,
+      alt: clip.alt || seg.title,
+      query: clip.query || `stock-video ${seg.title}`,
+      source: clip.source || 'Stock video pool',
+      duration: 8,
+      isFallback: false,
+    });
+    used.add(key);
+    need -= 1;
+    report.videoTopUp = report.videoTopUp || [];
+    report.videoTopUp.push({ segmentId: seg.id, url: clip.url, source: clip.source || 'pool' });
+    return true;
+  };
+
   for (const seg of segments) {
     if (need <= 0) break;
     const segVideos = (project.media || []).filter(
       (a) => a.segmentId === seg.id && a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
     ).length;
     const isIntro = seg.type === 'intro' || seg === segments[0];
-    const perSegTarget = hasStockKeys ? (isIntro ? 5 : 4) : 2;
+    // Higher per-seg targets so dense 0.7s cuts have unique motion (was 4–5 → ~12 uniq).
+    const perSegTarget = hasStockKeys ? (isIntro ? 8 : 7) : 2;
     const want = Math.max(0, perSegTarget - segVideos);
-    // Intro: highest faceScore first.
     if (isIntro) {
       picks.sort((a, b) => faceScore(b) - faceScore(a));
       vi = 0;
     }
     for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1, vi += 1) {
-      const clip = picks[vi];
-      const key = clip.url.split('?')[0];
-      if (used.has(key)) continue;
-      if (isIntro && faceScore(clip) < 0) continue;
-      // Probe archive links before queueing.
-      const ok = await canFetch(clip.url, { timeoutMs: 10000, minBytes: 2048, expectVideo: true });
-      if (!ok) {
-        report.videoTopUpFailed = report.videoTopUpFailed || [];
-        report.videoTopUpFailed.push({ url: clip.url, reason: 'probe failed' });
-        continue;
-      }
-      project.media.push({
-        id: `stock-video-${seg.id}-${i}`,
-        segmentId: seg.id,
-        type: 'video',
-        url: clip.url,
-        alt: clip.alt || seg.title,
-        query: clip.query || `stock-video ${seg.title}`,
-        source: clip.source || 'Stock video pool',
-        duration: 8,
-        isFallback: false,
-      });
-      used.add(key);
-      need -= 1;
-      report.videoTopUp = report.videoTopUp || [];
-      report.videoTopUp.push({ segmentId: seg.id, url: clip.url, source: clip.source || 'pool' });
+      await injectClip(seg, picks[vi], `s${i}`);
     }
+  }
+
+  // Variety drain: keep assigning unused pool URLs until minVideos is met.
+  let drainGuard = 0;
+  while (need > 0 && vi < picks.length && drainGuard < picks.length * 2) {
+    drainGuard += 1;
+    const clip = picks[vi];
+    vi += 1;
+    if (!clip?.url || used.has(clip.url.split('?')[0])) continue;
+    const seg = segments[drainGuard % segments.length];
+    await injectClip(seg, clip, `d${drainGuard}`);
   }
 }
 

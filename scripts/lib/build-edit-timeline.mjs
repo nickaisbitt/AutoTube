@@ -144,13 +144,13 @@ export function buildEditTimeline(project, options = {}) {
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
   const MAX_BODY_CUT_SEC = 1.25;
-  // Keep requested cut for pacing. Only bump reuse (≤2) when the unique pool cannot
-  // cover duration — never silently widen to 1.25s (Wave6 pacing trap).
+  // Keep requested cut for pacing. Cap reuse at 3 when the unique pool is thin —
+  // never silently widen to 1.25s (Wave6 pacing trap).
   let effectiveMaxReuse = maxReusePerUrl;
   if (uniqueVideos.length > 0 && totalDur > 0 && cut > 0) {
     const clipsNeeded = totalDur / Math.min(cut, MAX_BODY_CUT_SEC);
     if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
-      effectiveMaxReuse = Math.min(2, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
+      effectiveMaxReuse = Math.min(3, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
     }
   }
   const topicIsHousing = !isEvalColdMode() && isHousingTopic(project.topic || '');

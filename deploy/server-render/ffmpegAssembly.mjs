@@ -137,12 +137,8 @@ function hookSceneCutsEnabled() {
     || process.env.AUTOTUBE_HOOK_SCENE_CUTS === 'true';
 }
 
-/** Flash on asset swaps when pattern interrupts are on; dense in first 15s / first 3 clips. */
+/** Flash only when explicitly opted in — hookSceneCuts uses zoom-punch instead (no blinks). */
 function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset, { isHookSegment = false, scheduleIndex = 0 } = {}) {
-  // Sub-second flashes create scene boundaries when similar B-roll would merge.
-  if (hookSceneCutsEnabled()) {
-    return true;
-  }
   if (process.env.AUTOTUBE_FLASH_INTERRUPTS !== '1' && process.env.AUTOTUBE_FLASH_INTERRUPTS !== 'true') {
     return false;
   }

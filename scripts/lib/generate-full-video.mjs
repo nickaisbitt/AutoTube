@@ -1175,19 +1175,19 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
   const minVideos = hasStockKeys
     ? Math.min(
-      40,
+      28,
       Math.max(
         16,
-        segments.length * 5,
+        segments.length * 4,
         Math.ceil(
           (segments.reduce((s, seg) => s + (Number(seg.duration) || 15), 0)
-            / (options.cutIntervalSec || 1.25)) * 0.9,
+            / (options.cutIntervalSec || 1.25)) * 0.75,
         ),
       ),
     )
     : Math.min(segments.length * 2, 6);
   const stockNeed = hasStockKeys
-    ? Math.max(0, Math.max(16, segments.length * 5) - stockApiVideos.length)
+    ? Math.max(0, Math.max(16, segments.length * 4) - stockApiVideos.length)
     : 0;
   if (videoCount >= minVideos && stockNeed <= 0) return;
 
@@ -1251,8 +1251,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       (a) => a.segmentId === seg.id && a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
     ).length;
     const isIntro = seg.type === 'intro' || seg === segments[0];
-    // Higher per-seg targets so dense 0.7s cuts have unique motion (was 4–5 → ~12 uniq).
-    const perSegTarget = hasStockKeys ? (isIntro ? 8 : 7) : 2;
+    // Per-seg floor; variety drain below fills up to minVideos (≤28).
+    const perSegTarget = hasStockKeys ? (isIntro ? 6 : 5) : 2;
     const want = Math.max(0, perSegTarget - segVideos);
     if (isIntro) {
       picks.sort((a, b) => faceScore(b) - faceScore(a));

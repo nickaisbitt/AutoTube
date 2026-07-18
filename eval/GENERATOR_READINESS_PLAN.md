@@ -53,6 +53,10 @@
 - Port-strike variety still thin (13 unique); topical-first helped school to variety 8
 - Release×24 in progress on tip with honesty + junk-title fixes for remaining topics
 
+### Wave 5 release×24 (`eval/RELEASE-AGGREGATE-WAVE5.md`)
+- Generate **79.2%** / upload **21.1%** (4 topics) / critical **26.3%** / raw **6.4**
+- Upload path proven (rel-05/10/14/19); SCRIPT_UI_ERROR JSON truncations fixed post-run (`reclick` + eval retry)
+
 ## Stop conditions
 - Do not open new quality-integration side quests as “proof”
 - Do not run keep-best / housing pack loops as readiness

@@ -36,6 +36,13 @@ describe('score-honesty', () => {
         "While the hook is strong, the video's generic stock footage aesthetic would likely make me scroll past within 3 seconds.",
       ),
     ).toBe(false);
+    // Standard brutal opener for non-upload videos — not a hook-fail critical
+    expect(
+      hasCriticalQualityIssues(
+        ['Over-reliance on generic stock footage'],
+        'I would scroll past this in 3 seconds; the generic stock footage fails to capitalize on the hook.',
+      ),
+    ).toBe(false);
     expect(hasCriticalQualityIssues(['AUTO SKIPPED frame on screen'], '')).toBe(true);
 
     const brutal = {

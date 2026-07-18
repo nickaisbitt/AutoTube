@@ -15,7 +15,7 @@ const SCROLL_PAST_CRITICAL_RE =
 
 /** Soft retention hedges — not critical (hook vision already reports scroll-past yes/no). */
 const SOFT_SCROLL_HEDGE_RE =
-  /\b(?:would|will|might|may|could)\s+(?:likely|probably|quickly)\s+(?:make\s+(?:me|viewers?|someone)\s+)?scroll\s*past\b|\b(?:would|will|might|may|could)\s+make\s+(?:me|viewers?|someone)\s+scroll\s*past\b/gi;
+  /\bi\s+would\s+scroll\s*past\s+this\b|\b(?:would|will|might|may|could)\s+(?:likely|probably|quickly)\s+(?:make\s+(?:me|viewers?|someone)\s+)?scroll\s*past\b|\b(?:would|will|might|may|could)\s+make\s+(?:me|viewers?|someone)\s+scroll\s*past\b/gi;
 
 /** On-screen overlay glitches that read as broken UI, not intentional copy. */
 const OVERLAY_GLITCH_RE = /\bauto\s+skipped\b/i;

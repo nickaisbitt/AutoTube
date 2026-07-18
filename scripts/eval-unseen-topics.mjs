@@ -238,8 +238,13 @@ async function main() {
         youtubeMode: true,
         loopShort: false,
       });
-      if (!gen.ok && String(gen.error || '').includes('SCRIPT_TIMEOUT')) {
-        console.log(`↻ ${row.id}: SCRIPT_TIMEOUT — one cold retry (nonce ${(fixState.harvestNonce || 0) + 1})`);
+      const scriptFail =
+        String(gen.error || '').includes('SCRIPT_TIMEOUT')
+        || String(gen.error || '').includes('SCRIPT_UI_ERROR');
+      if (!gen.ok && scriptFail) {
+        console.log(
+          `↻ ${row.id}: ${String(gen.error || '').includes('SCRIPT_UI_ERROR') ? 'SCRIPT_UI_ERROR' : 'SCRIPT_TIMEOUT'} — one cold retry (nonce ${(fixState.harvestNonce || 0) + 1})`,
+        );
         const retryState = {
           ...fixState,
           harvestNonce: (fixState.harvestNonce || 0) + 1,

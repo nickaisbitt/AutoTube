@@ -1887,10 +1887,33 @@ export async function generateFullVideo(options) {
           await page.waitForTimeout(1500);
           if (await sourceMediaBtn().isVisible({ timeout: 5_000 }).catch(() => false)) return { ok: true };
         }
-        if (/Script generation failed|OpenRouter|API key required/i.test(body)) {
+        // Hard key/config errors — abort. Soft LLM/JSON failures — recover via reclick
+        // (unexpected end of JSON / empty response are common under load; throwing here
+        // was burning topics at ~244s without using the reclick path).
+        if (/API key required|OpenRouter API key/i.test(body)) {
           throw new Error(
             `SCRIPT_UI_ERROR: ${body.slice(0, 200)} (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'unknown'})`,
           );
+        }
+        // Dead after start (timeout abort → cancelled UI) — stop waiting early.
+        const idleMs = lastGeneratingAt > 0 ? Date.now() - lastGeneratingAt : 0;
+        if (
+          /AI script generation failed|Script generation failed|Unexpected end of JSON|invalid structure|empty response/i.test(
+            body,
+          )
+          && Number(snap.scriptLen) === 0
+        ) {
+          return {
+            ok: false,
+            active: false,
+            onTopicStep: prog.onTopicStep || true,
+            recentlyGenerating: false,
+            everSawGenerating: true,
+            idleMs: Math.max(idleMs, 90_000),
+            bodyText: body,
+            scriptLen: 0,
+            deadAfterStart: true,
+          };
         }
 
         // Extend soft deadline only while generation is actively progressing.
@@ -1904,9 +1927,6 @@ export async function generateFullVideo(options) {
         if (active && Date.now() - lastActivityAt < 120_000) {
           deadline = Math.min(hardDeadline, Date.now() + 60_000);
         }
-
-        // Dead after start (timeout abort → cancelled UI) — stop waiting early.
-        const idleMs = lastGeneratingAt > 0 ? Date.now() - lastGeneratingAt : 0;
         if (
           isDeadScriptGeneration({
             everSawGenerating,

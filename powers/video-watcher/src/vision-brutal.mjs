@@ -35,7 +35,6 @@ export function resolveWatchModel(env = process.env) {
   return genModel;
 }
 
-/**
 /** @param {NodeJS.ProcessEnv} [env] */
 export function isIndependentWatchJudge(env = process.env) {
   return resolveWatchModel(env) !== generationModel(env);

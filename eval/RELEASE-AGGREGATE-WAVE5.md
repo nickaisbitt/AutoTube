@@ -29,3 +29,9 @@ rel-09, rel-12, rel-17, rel-18, rel-24
 
 ## Verdict
 **Not release-ready.** Upload path is live (4 topics) but bars still open. Generate reliability hit by OpenRouter JSON truncations (fixed reclick + eval retry after this aggregate). Raw still ~6.4 median — need denser topical variety on the long tail.
+
+## Retry pass (post first-pass, not for release claim)
+- rel-09 → raw **7.2** (generate recovered)
+- rel-18 → raw 6.4
+- rel-12/17/24 still SCRIPT failures (pre reclick fix)
+- Follow-up: `d2d9b6e` reclick on JSON fail + SCRIPT_UI_ERROR eval retry

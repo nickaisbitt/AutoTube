@@ -448,16 +448,17 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   async function pushClip(asset, durationSec, label, hintOffset = 0, { zoomPunch = false } = {}) {
     const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
     clipIndex += 1;
-    const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
-    let ok = false;
-    if (!localSrc) {
-      // Prefer grain over previous-clip reuse (reuse merges into long scenes).
-      console.log(`  [ffmpeg] ${label}: grain placeholder — asset fetch failed`);
-      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, null);
-      if (ok) grainPlaceholderCount += 1;
-    } else {
+
+    const tryEncode = async (candidate, tag) => {
+      const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(
+        candidate,
+        segMedia,
+        devServer,
+        cacheDir,
+      );
+      if (!localSrc) return false;
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
-      ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
+      let ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
         w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, zoomPunch,
       });
       if (!ok) {
@@ -469,15 +470,30 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
             ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
               w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1, zoomPunch,
             });
-            if (ok) console.log(`  [ffmpeg] ${label}: video → thumbnail still`);
+            if (ok) console.log(`  [ffmpeg] ${label}: ${tag} → thumbnail still`);
           }
         }
       }
-      if (!ok) {
-        console.log(`  [ffmpeg] ${label}: grain placeholder — encode failed`);
-        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, null);
-        if (ok) grainPlaceholderCount += 1;
+      return ok;
+    };
+
+    let ok = await tryEncode(asset, 'primary');
+    if (!ok) {
+      // Try other segment assets before grain (gray fillers read as blank screens).
+      const primaryKey = assetKey(asset);
+      for (const alt of segMedia) {
+        if (!alt || assetKey(alt) === primaryKey) continue;
+        ok = await tryEncode(alt, 'alt');
+        if (ok) {
+          console.log(`  [ffmpeg] ${label}: fell back to alternate segment asset`);
+          break;
+        }
       }
+    }
+    if (!ok) {
+      console.log(`  [ffmpeg] ${label}: grain placeholder — no usable asset`);
+      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, null);
+      if (ok) grainPlaceholderCount += 1;
     }
     if (!ok) {
       return false;

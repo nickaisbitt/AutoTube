@@ -462,13 +462,14 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   if (aggregateOk) {
     return { pass: true, reason: `soft-pass-aggregate(avg=${avgCount.toFixed(1)}, min=${minCount})` };
   }
-  // Soft-pass C2 (cold): no empty segs + some motion
+  // Soft-pass C2 (cold): no empty segs + enough unique motion for dense cuts
   if (
     isEvalColdMode()
     && minCount >= 2
     && avgCount >= 3
     && media.length >= segN * 3
-    && (videoCount >= segN || stockFetched > 0 || topUp > 0)
+    && videoCount >= Math.max(segN * 3, 9)
+    && (stockFetched > 0 || topUp > 0)
   ) {
     return { pass: true, reason: `soft-pass-cold-thin(avg=${avgCount.toFixed(1)}, min=${minCount}, v=${videoCount})` };
   }

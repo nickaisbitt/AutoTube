@@ -169,7 +169,7 @@ describe('quality waves 2–5 helpers', () => {
     delete process.env.AUTOTUBE_EVAL_COLD;
   });
 
-  it('soft-pass-cold-thin allows thin but non-empty cold harvests', async () => {
+  it('soft-pass-cold-thin requires enough unique motion (not 1 video/seg)', async () => {
     process.env.AUTOTUBE_EVAL_COLD = '1';
     const { evaluateHarvestVolumeWithSoftPass } = await import(
       '../../../scripts/lib/harvest-quality.mjs'
@@ -183,17 +183,39 @@ describe('quality waves 2–5 helpers', () => {
       ],
       media: [
         { segmentId: 'a', type: 'video', url: 'https://x/a1.mp4', alt: 'ambulance' },
-        { segmentId: 'a', type: 'image', url: 'https://x/a2.jpg', alt: 'gps map' },
+        { segmentId: 'a', type: 'video', url: 'https://x/a2.mp4', alt: 'gps map' },
+        { segmentId: 'a', type: 'video', url: 'https://x/a3.mp4', alt: 'dispatch desk' },
+        { segmentId: 'a', type: 'image', url: 'https://x/a4.jpg', alt: 'map still' },
         { segmentId: 'b', type: 'video', url: 'https://x/b1.mp4', alt: 'paramedic' },
-        { segmentId: 'b', type: 'image', url: 'https://x/b2.jpg', alt: 'demolished house' },
-        { segmentId: 'b', type: 'image', url: 'https://x/b3.jpg', alt: 'dispatch' },
+        { segmentId: 'b', type: 'video', url: 'https://x/b2.mp4', alt: 'demolished house' },
+        { segmentId: 'b', type: 'video', url: 'https://x/b3.mp4', alt: 'dispatch' },
+        { segmentId: 'b', type: 'image', url: 'https://x/b4.jpg', alt: 'ruins still' },
         { segmentId: 'c', type: 'video', url: 'https://x/c1.mp4', alt: 'rural road' },
-        { segmentId: 'c', type: 'image', url: 'https://x/c2.jpg', alt: 'crew' },
-        { segmentId: 'c', type: 'image', url: 'https://x/c3.jpg', alt: 'ruins' },
+        { segmentId: 'c', type: 'video', url: 'https://x/c2.mp4', alt: 'crew' },
+        { segmentId: 'c', type: 'video', url: 'https://x/c3.mp4', alt: 'ruins' },
         { segmentId: 'c', type: 'image', url: 'https://x/c4.jpg', alt: 'house' },
       ],
     };
     const soft = evaluateHarvestVolumeWithSoftPass(
+      {
+        volumePass: false,
+        harvestQuality: {
+          minPerSegment: 6,
+          perSegment: {
+            a: { count: 4 },
+            b: { count: 4 },
+            c: { count: 4 },
+          },
+        },
+        pexelsFetched: 8,
+        videoTopUp: [1, 2, 3, 4],
+      },
+      project,
+    );
+    expect(soft.pass).toBe(true);
+    expect(soft.reason).toMatch(/soft-pass-cold-thin|soft-pass-motion|soft-pass-aggregate/);
+
+    const tooThin = evaluateHarvestVolumeWithSoftPass(
       {
         volumePass: false,
         harvestQuality: {
@@ -205,12 +227,14 @@ describe('quality waves 2–5 helpers', () => {
           },
         },
         pexelsFetched: 5,
-        videoTopUp: [1, 2, 3],
+        videoTopUp: [1],
       },
-      project,
+      {
+        ...project,
+        media: project.media.filter((m) => m.type === 'image' || /a1|b1|c1/.test(m.url)),
+      },
     );
-    expect(soft.pass).toBe(true);
-    expect(soft.reason).toMatch(/soft-pass-cold-thin|soft-pass-motion|soft-pass-aggregate/);
+    expect(tooThin.pass).toBe(false);
     delete process.env.AUTOTUBE_EVAL_COLD;
   });
 

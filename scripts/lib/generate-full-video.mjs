@@ -1054,9 +1054,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     preferBright: options.preferBright === true,
   });
 
-  for (const q of queries.slice(0, 12)) {
-    const fromPexels = await fetchPexelsVideos(q, 8);
-    const fromPixabay = await fetchPixabayVideos(q, 8);
+  for (const q of queries.slice(0, 18)) {
+    const fromPexels = await fetchPexelsVideos(q, 10);
+    const fromPixabay = await fetchPixabayVideos(q, 10);
     // Skip archive.org for cyber topics when stock API keys exist.
     const fromArchive =
       !cyberTopic || !(resolvePexelsKey() || resolvePixabayKey())
@@ -1064,7 +1064,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         : [];
     let addedForQuery = 0;
     for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
-      if (liveClips.length >= 56 || addedForQuery >= 4) break;
+      if (liveClips.length >= 80 || addedForQuery >= 5) break;
       if (isJunkStockClip(clip, topicBlob, { preferBright: options.preferBright === true })) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
@@ -1158,19 +1158,19 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
   const minVideos = hasStockKeys
     ? Math.min(
-      32,
+      40,
       Math.max(
-        12,
-        segments.length * 4,
+        16,
+        segments.length * 5,
         Math.ceil(
           (segments.reduce((s, seg) => s + (Number(seg.duration) || 15), 0)
-            / (options.cutIntervalSec || 1.25)) * 0.65,
+            / (options.cutIntervalSec || 1.25)) * 0.9,
         ),
       ),
     )
     : Math.min(segments.length * 2, 6);
   const stockNeed = hasStockKeys
-    ? Math.max(0, Math.max(12, segments.length * 4) - stockApiVideos.length)
+    ? Math.max(0, Math.max(16, segments.length * 5) - stockApiVideos.length)
     : 0;
   if (videoCount >= minVideos && stockNeed <= 0) return;
 

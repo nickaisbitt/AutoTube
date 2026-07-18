@@ -144,16 +144,13 @@ export function buildEditTimeline(project, options = {}) {
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
   const MAX_BODY_CUT_SEC = 1.25;
+  // Keep requested cut for pacing. Only bump reuse (≤2) when the unique pool cannot
+  // cover duration — never silently widen to 1.25s (Wave6 pacing trap).
   let effectiveMaxReuse = maxReusePerUrl;
-  if (uniqueVideos.length > 0 && totalDur > 0) {
+  if (uniqueVideos.length > 0 && totalDur > 0 && cut > 0) {
     const clipsNeeded = totalDur / Math.min(cut, MAX_BODY_CUT_SEC);
     if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
       effectiveMaxReuse = Math.min(2, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
-    }
-    const maxUniqueSlots = uniqueVideos.length * effectiveMaxReuse;
-    const impliedCut = totalDur / maxUniqueSlots;
-    if (impliedCut > cut) {
-      cut = Math.min(impliedCut, MAX_BODY_CUT_SEC);
     }
   }
   const topicIsHousing = !isEvalColdMode() && isHousingTopic(project.topic || '');
@@ -328,30 +325,33 @@ export function buildEditTimeline(project, options = {}) {
     while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
       const activeBeat = beatAtSegmentTime(segBeats, t, duration, seg);
-      const pickFrom = (pool) => {
+      const diversityScore = (candidate) => {
+        let s = scoreAsset(candidate, activeBeat);
+        if (coldEval && !isIntro && !isOutro && lastCluster) {
+          const cluster = visualSubjectCluster(candidate);
+          if (cluster === lastCluster && cluster !== 'human' && cluster !== 'other') s -= 4;
+        }
+        return s;
+      };
+      const pickFrom = (pool, { allowOverReuse = false } = {}) => {
         const introOutroReuse = isIntro || isOutro;
         const canUse = (candidate) => {
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-          if (key && reuseCountFor(key, introOutroReuse) >= maxReuseThisSeg) return false;
+          if (!allowOverReuse && key && reuseCountFor(key, introOutroReuse) >= maxReuseThisSeg) {
+            return false;
+          }
           return true;
         };
-        const diversityScore = (candidate) => {
-          let s = scoreAsset(candidate, activeBeat);
-          if (coldEval && !isIntro && !isOutro && lastCluster) {
-            const cluster = visualSubjectCluster(candidate);
-            if (cluster === lastCluster && cluster !== 'human' && cluster !== 'other') s -= 4;
-          }
-          return s;
-        };
-        // Beat-aware / cold diversity re-rank when useful.
         const rankedPool = (activeBeat || (coldEval && !isIntro && !isOutro))
           ? [...pool].sort((a, b) => diversityScore(b) - diversityScore(a))
           : pool;
+        if (!rankedPool.length) return null;
         for (let j = 0; j < rankedPool.length; j++) {
           const candidate = rankedPool[(ai + j) % rankedPool.length];
           if (canUse(candidate)) return candidate;
         }
+        if (!allowOverReuse) return null;
         return rankedPool.reduce((best, candidate) => {
           const key = urlKey(candidate);
           const count = reuseCountFor(key, introOutroReuse);
@@ -366,21 +366,31 @@ export function buildEditTimeline(project, options = {}) {
         }, rankedPool[ai % rankedPool.length]);
       };
 
-      let asset = pickFrom(ordered);
+      // Prefer segment pool → unused global URLs → over-reuse last resort.
+      let asset =
+        pickFrom(ordered)
+        || (!isIntro && !isOutro ? pickFrom(globalPool) : null)
+        || pickFrom(ordered, { allowOverReuse: true })
+        || pickFrom(globalPool, { allowOverReuse: true })
+        || ordered[ai % ordered.length]
+        || globalPool[0];
       let attempts = 0;
 
       while (
-        attempts < Math.max(ordered.length, globalPool.length) &&
-        (asset.id === lastAssetId || (urlKey(asset) && urlKey(asset) === lastUrl))
+        asset
+        && attempts < Math.max(ordered.length, globalPool.length)
+        && (asset.id === lastAssetId || (urlKey(asset) && urlKey(asset) === lastUrl))
       ) {
         // Intro/outro: stay topic-locked (no global-pool beetle/still).
-        asset = pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool);
+        asset =
+          pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool)
+          || pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool, {
+            allowOverReuse: true,
+          });
         ai += 1;
         attempts += 1;
       }
-      if (!isIntro && !isOutro && urlKey(asset) === lastUrl && globalPool.length > 1) {
-        asset = pickFrom(globalPool);
-      }
+      if (!asset) continue;
       entries.push({
         segmentId: seg.id,
         startSec: t,

@@ -172,10 +172,15 @@ describe('isJunkStockClip + faceSeek relevance', () => {
     expect(isJunkStockClip({ alt: 'security camera cctv nursing home' }, topic)).toBe(false);
   });
 
-  it('stockMotionQueries include anti-staged documentary anchors when faceSeek on', async () => {
+  it('stockMotionQueries put faces first and keep anti-HUD as late fillers', async () => {
     const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
     const q = stockMotionQueries('bank fraud otp scam', true, { preferBright: true, faceSeek: true });
-    expect(q.some((x) => /documentary|real footage|not actors/i.test(x))).toBe(true);
+    expect(q.some((x) => /phone|worried|shocked|otp|bank/i.test(x))).toBe(true);
+    // Generic anti-HUD / bright fillers must not crowd out topical heads.
+    const faceIdx = q.findIndex((x) => /shocked|worried|phone/i.test(x));
+    const fillerIdx = q.findIndex((x) => /news interview|pedestrians|bright office/i.test(x));
+    expect(faceIdx).toBeGreaterThanOrEqual(0);
+    if (fillerIdx >= 0) expect(faceIdx).toBeLessThan(fillerIdx);
   });
 
   it('visionPromptForTopic mentions blurry/staged/overexposed junk on nursing topics', async () => {

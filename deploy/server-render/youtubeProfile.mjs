@@ -19,11 +19,10 @@ export function isYouTubeExportMode(project) {
 }
 
 export function captionMetrics(height, width) {
-  // Keep captions punchy but not frame-dominating (brutal captionReadability tanks when too big)
-  // ASS PlayRes-scaled fontsize ≈ on-screen px when PlayResY matches video height
-  const basePx = Math.round(height * 0.045);
-  const currentPx = Math.round(height * 0.052);
-  const strokePx = Math.max(4, Math.round(height * 0.005));
+  // Mobile-first size: 0.052 read as "small captions" on cold near-misses (raw 6.8).
+  const basePx = Math.round(height * 0.058);
+  const currentPx = Math.round(height * 0.068);
+  const strokePx = Math.max(5, Math.round(height * 0.007));
   const bottomPad = Math.round(height * 0.09);
   return { basePx, currentPx, strokePx, bottomPad, maxWords: 4, barWidth: width * 0.92 };
 }

@@ -270,8 +270,9 @@ export function buildEditTimeline(project, options = {}) {
             const ranked = [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a));
             let usable = uniqueAssetsByUrl(ranked.filter((a) => scoreAsset(a) >= 0));
             if (!usable.length) usable = uniqueAssetsByUrl(ranked.slice(0, 1));
-            // Avoid single-asset intro holds: borrow more topic-relevant motion from the global pool
-            if (usable.length < 2 && globalPool.length) {
+            // Avoid single-asset / thin intro holds: borrow enough unique motion for dense cuts
+            const introSlotsNeeded = Math.max(4, Math.ceil((seg.duration || 20) / Math.min(cut, 0.65)));
+            if (usable.length < introSlotsNeeded && globalPool.length) {
               const extras = uniqueAssetsByUrl(
                 [...globalPool]
                   .filter((a) => a.type === 'video' && !usable.some((u) => u.id === a.id || urlKey(u) === urlKey(a)))
@@ -279,7 +280,7 @@ export function buildEditTimeline(project, options = {}) {
                   .sort((a, b) => scoreAsset(b) - scoreAsset(a))
                   .filter((a) => scoreAsset(a) >= 0),
               );
-              usable = uniqueAssetsByUrl([...usable, ...extras]).slice(0, 6);
+              usable = uniqueAssetsByUrl([...usable, ...extras]).slice(0, Math.max(8, introSlotsNeeded));
             }
             return usable.length ? usable : uniqueAssetsByUrl(ranked.slice(0, 1));
           }

@@ -450,13 +450,11 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
     let ok = false;
     if (!localSrc) {
-      console.log(`  [ffmpeg] ${label}: reuse/placeholder — asset fetch failed`);
-      const reusePath = clipPaths[clipPaths.length - 1] || null;
-      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, reusePath);
-      if (ok) {
-        if (reusePath) reuseClipCount += 1;
-        else grainPlaceholderCount += 1;
-      }
+      // Prefer grain over previous-clip reuse — reuse extends visually-identical holds
+      // that PySceneDetect merges into 5s+ scene FAIL even with flash wedges.
+      console.log(`  [ffmpeg] ${label}: grain placeholder — asset fetch failed`);
+      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, null);
+      if (ok) grainPlaceholderCount += 1;
     } else {
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
       ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
@@ -476,13 +474,9 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
         }
       }
       if (!ok) {
-        console.log(`  [ffmpeg] ${label}: encode failed — reuse/placeholder`);
-        const reusePath = clipPaths[clipPaths.length - 1] || null;
-        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, reusePath);
-        if (ok) {
-          if (reusePath) reuseClipCount += 1;
-          else grainPlaceholderCount += 1;
-        }
+        console.log(`  [ffmpeg] ${label}: grain placeholder — encode failed`);
+        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, null);
+        if (ok) grainPlaceholderCount += 1;
       }
     }
     if (!ok) {
@@ -495,9 +489,10 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    // Dense zoom-punch in opener (first 3 clips) + every other clip after
+    // Zoom-punch forces ContentDetector cuts when similar B-roll would merge through
+    // sub-second white flashes (cold hookSceneCuts path keeps patternInterrupts off).
     const zoomPunch =
-      patternInterruptsEnabled() && (i < 3 || i % 2 === 0);
+      (patternInterruptsEnabled() || hookSceneCutsEnabled()) && (i < 3 || i % 2 === 0);
     await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0, { zoomPunch });
 
     const next = schedule[i + 1];

@@ -175,7 +175,7 @@ function loadOptionalScript(explicitPath) {
   return project?.script?.map((s) => s.narration).filter(Boolean).join('\n\n') || '';
 }
 
-/** Vision OCR often misses large yellow burn-in; trust pipeline hook overlay when present. */
+/** Trust pipeline hook overlay when Vision OCR misses yellow burn-in. */
 function reconcileHookVision(hookVision, project, overlayHint) {
   if (!hookVision) return hookVision;
   const expected = (
@@ -192,7 +192,6 @@ function reconcileHookVision(hookVision, project, overlayHint) {
   const overlap = expected
     .split(/\s+/)
     .filter((w) => w.length > 2 && seen.includes(w)).length;
-  // Large yellow overlay visible → trust OCR even when model fails hookPass
   if (overlap >= 1 || seen.trim().length >= 8) {
     return {
       ...hookVision,
@@ -201,7 +200,7 @@ function reconcileHookVision(hookVision, project, overlayHint) {
       scrollPastCleared: hookVision.scrollPastIn3s === true || hookVision.hookPass !== true,
     };
   }
-  // Pipeline burns ≤6-word yellow overlay for 0–3.5s — don't fail empty OCR
+  // Don't fail empty OCR when the pipeline overlay is on screen.
   if (!seen.trim() || overlap === 0) {
     return {
       ...hookVision,
@@ -299,7 +298,7 @@ function buildNumberedReport(ctx) {
   const analyzedSec = framesMeta.durationSec ?? meta.durationSec;
   const rawOverall = brutal?.rawOverall;
   const flooredOverall = brutal?.flooredOverall ?? brutal?.overall;
-  // Intentional skip_vision (draft tier) is not a hard fail — just no scores yet.
+  // skip_vision (draft) is not a hard fail.
   const brutalFailed =
     !skipVision && (brutal?.success === false || brutal == null);
   const hookVisionOk =
@@ -500,7 +499,6 @@ export async function watchVideo(options = {}) {
       );
     } catch (e) {
       hookVision = { hookPass: false, error: e.message };
-      // Still apply overlay trust if vision threw after frames
       hookVision = reconcileHookVision(
         hookVision,
         projectForHook,

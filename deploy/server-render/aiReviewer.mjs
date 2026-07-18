@@ -20,10 +20,7 @@ function computeFrameTimestamps(durationSec, targetFrames = 8) {
   return timestamps;
 }
 
-/**
- * Retention-aware timestamps: always include hook 0–3s, dense first 30s, sparse remainder.
- * Fixes brutal vision scoring hook/pacing without ever seeing the opener.
- */
+/** Retention timestamps: hook 0–3s, dense first 30s, sparse remainder. */
 export function computeRetentionFrameTimestamps(durationSec, options = {}) {
   if (durationSec <= 0) return [];
   const maxFrames = Math.max(8, Math.min(24, options.maxFrames ?? 18));

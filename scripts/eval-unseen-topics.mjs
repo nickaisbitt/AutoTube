@@ -1,17 +1,7 @@
 #!/usr/bin/env node
 /**
- * Cold-start unseen-topic evaluation harness.
- *
- * Measures FIRST-PASS generator quality only:
- * - fresh FIX_STATE per topic
- * - AUTOTUBE_EVAL_COLD=1 (no curated packs, family templates, keep-best)
- * - zero fix retries
- * - blind watcher (no script_text / hook_overlay hints)
- *
- * Usage:
- *   npm run eval:unseen -- --set dev --max 2
- *   npm run eval:unseen -- --set release --max 24
- *   npm run eval:unseen -- --set dev --validate-only
+ * Cold-start unseen-topic eval (first-pass only; blind watcher).
+ * Usage: npm run eval:unseen -- --set dev|release --max N
  */
 import { mkdirSync, writeFileSync, existsSync, copyFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -104,7 +94,6 @@ async function main() {
   applyEnvLocalToProcess();
   const cfg = parseArgs(process.argv);
 
-  // Force cold-eval semantics for this process
   process.env.AUTOTUBE_EVAL_COLD = '1';
   process.env.AUTOTUBE_CURATED_PACKS = '0';
   process.env.AUTOTUBE_TOPIC_FAMILY_TEMPLATES = '0';
@@ -141,8 +130,6 @@ async function main() {
   const summaryPath = join(outDir, 'EVAL_SUMMARY.json');
   const mdPath = join(outDir, 'EVAL_SUMMARY.md');
 
-  // AUTOTUBE_EVAL_COLD is already forced above, so the watcher defaults to an
-  // independent vision judge unless AUTOTUBE_WATCH_MODEL overrides it.
   const watchModel = resolveWatchModel(process.env);
   const watchIndependent = isIndependentWatchJudge(process.env);
   const watchDefaultedForColdEval = !process.env.AUTOTUBE_WATCH_MODEL && watchIndependent;
@@ -293,13 +280,11 @@ async function main() {
           copyFileSync(gen.projectPath, join(topicDir, 'project.json'));
         }
 
-        // Blind watcher: no script_text, no hook_overlay
         const watch = await watchVideo({
           video_path: record.videoPath,
           mode: cfg.watchMode,
           skip_vision: false,
           render_tier: 'full',
-          // intentionally omit script_text and hook_overlay
         });
         if (watch.reportPath && existsSync(watch.reportPath)) {
           copyFileSync(watch.reportPath, join(topicDir, 'WATCH_REPORT.md'));

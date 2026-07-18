@@ -34,18 +34,15 @@ const OFF_TOPIC_BLOCKLIST = [
   { pattern: /\belectric car fire\b/i, requires: /\belectric car|ev fire|tesla fire\b/i },
 ];
 
-/**
- * Off-brand visual junk that wrecks serious cyber/news B-roll (watcher: beetles, puppets, cartoons).
- * Allowed only when the topic itself is about that subject.
- */
+/** Off-brand visual junk (beetles, puppets, cartoons); allowed only if topic matches. */
 export const OFF_BRAND_VISUAL_RE =
   /\b(puppet|muppet|marionette|sock\s*puppet|claymation|stop[\s-]?motion|cartoon|anime|animated\s+character|animation\s+reel|minecraft|fortnite|gameplay|macro\s*insect|beetle|dung\s*beetle|insect|bug\s+macro|larva|caterpillar|spider\s+macro|ant\s+colony|wildlife\s+macro|hud\s+graphic|sci[\s-]?fi\s+hud)\b/i;
 
-/** Blurry / soft-focus stock that reads as cheap filler on retention audits. */
+/** Blurry / soft-focus stock. */
 export const BLURRY_LOW_QUALITY_RE =
   /\b(blurry|out of focus|out-of-focus|defocused|soft focus|low.?res|pixelat|grainy|unfocused)\b/i;
 
-/** Washed-out / blown highlights — common when preferBright pulls wrong clips. */
+/** Washed-out / overexposed stock. */
 export const OVEREXPOSED_STOCK_RE =
   /\b(overexposed|blown.?out|washed.?out|high.?key white|bleached white|too bright)\b/i;
 
@@ -170,8 +167,7 @@ export function genericStockJunkReason(haystack, contextText = '') {
     CAMERA_PHONE_LOOP_RE.test(h)
     && !/\b(cctv|surveillance|podcast|recording studio)\b/i.test(ctx)
   ) {
-    // Do not exempt just because the stock *query* said "documentary" — that is how
-    // camcorder loops leaked into port/school cold evals.
+    // Query text alone ("documentary") is not enough to exempt camcorder junk.
     return 'generic camera/phone filming loop';
   }
   return null;
@@ -256,7 +252,7 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   const corpus = new Set([...strongTopicKws, ...segKeywords]);
 
   const haystackRaw = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
-  // Ignore synthetic stock-video/stock-pool queries that self-inflate relevance
+  // Ignore synthetic stock-video/stock-pool queries.
   const queryText = String(asset?.query || '');
   const queryForScore = /^(stock-video|stock-pool)\b/i.test(queryText) ? '' : queryText.toLowerCase();
   const haystack = `${haystackRaw} ${queryForScore}`.trim();
@@ -363,8 +359,7 @@ export function filterAssetsByRelevance(media, project, options = {}) {
 export function mergeVolumePadding(media, padding, project = null) {
   let pad = padding || [];
   if (project && pad.length) {
-    // Keep volume padding unless it's hard junk/off-brand — a strict relevance
-    // floor here was stripping stock pads and causing HARVEST_VOLUME_FAIL.
+    // Keep volume padding unless hard junk/off-brand.
     const topicBlob = `${project.topic || ''} ${project.title || ''}`;
     pad = pad.filter((asset) => {
       const blob = `${asset.alt || ''} ${asset.query || ''} ${asset.source || ''} ${asset.url || ''}`;
@@ -449,17 +444,17 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const avgCount = counts.length ? counts.reduce((s, v) => s + v, 0) / counts.length : 0;
   const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
 
-  // Soft-pass A: cyber stills pad + at least 1 video/segment average
+  // Soft-pass A: cyber stills + ≥1 video/seg
   if (cyber >= 6 && videosPerSeg >= 1) {
     return { pass: true, reason: `soft-pass-cyber(${cyber})` };
   }
-  // Soft-pass B: stock motion rich — ≥2 videos/seg and live stock or top-up
+  // Soft-pass B: ≥2 videos/seg + live stock/top-up
   const motionMinPerSeg = 2;
   const motionRich = videosPerSeg >= motionMinPerSeg && (stockFetched > 0 || topUp >= segN);
   if (motionRich) {
     return { pass: true, reason: `soft-pass-motion(${videoCount}v/${segN}segs)` };
   }
-  // Soft-pass C: uneven but adequate — common after relevance dedupe
+  // Soft-pass C: uneven but adequate
   const aggregateOk =
     minCount >= Math.max(2, Math.floor(minPer * 0.5))
     && avgCount >= minPer * 0.75
@@ -467,7 +462,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   if (aggregateOk) {
     return { pass: true, reason: `soft-pass-aggregate(avg=${avgCount.toFixed(1)}, min=${minCount})` };
   }
-  // Soft-pass C2 (cold): thinner pools still ship if no empty segments + some motion
+  // Soft-pass C2 (cold): no empty segs + some motion
   if (
     isEvalColdMode()
     && minCount >= 2
@@ -477,7 +472,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   ) {
     return { pass: true, reason: `soft-pass-cold-thin(avg=${avgCount.toFixed(1)}, min=${minCount}, v=${videoCount})` };
   }
-  // Soft-pass D: crime/heist with no empty segments and reasonable total fill
+  // Soft-pass D: crime/heist, no empty segs
   if (
     isCrimeHeistTopic(topicBlob)
     && minCount >= 2

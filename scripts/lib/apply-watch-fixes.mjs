@@ -9,7 +9,7 @@ import { isHousingTopic, isNursingHomeTopic } from './topic-family.mjs';
 import { shouldKeepBest, enterPolishMode } from './keep-best.mjs';
 import { keepBestEnabled } from './eval-flags.mjs';
 
-/** Keep hook/overlay aligned to the current topic (prevents bank→landlord leakage). */
+/** Keep hook/overlay aligned to the current topic. */
 function syncTopicHook(s, topic, visionFix) {
   if (!topic) return;
   const safeOverride = hookClashesWithTopic(topic, s.hookLine) ? undefined : s.hookLine;
@@ -109,7 +109,6 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   const objectiveFail = watch.objectiveGate?.available && watch.objectiveGate.pass === false;
   const bias = parseTopIssueBias(watch);
 
-  // Dimension snapshot for journal / debugging
   s.lastBrutalScores = {
     overall: watch.brutal?.overall ?? null,
     hook: watch.brutal?.report?.scores?.hook ?? null,
@@ -130,7 +129,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     const sceneBodyOk = watch.sceneQa?.bodyPass === true;
     const draftTier = (watch.objectiveGate?.tier || watch.renderTier || s.renderTier) === 'draft';
     if (failed.includes('placeholder_pct') && draftTier && sceneBodyOk) {
-      // Soft: don't burn a harvest cycle on draft placeholder alone when scenes already cut
+      // Soft: don't reharvest for draft placeholder when scenes already cut.
       s.mediaOffset = (s.mediaOffset || 0) + 1;
       applied.push('0a. Placeholder FAIL on draft (scene body OK) → soft bump offset, keep promote path');
     } else if (failed.includes('placeholder_pct')) {
@@ -156,7 +155,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push(`0c. Silence gaps ${watch.objectiveQa.silenceFirst60Sec}s in first 60s → tighten pacing`);
   }
 
-  // Always re-sync topic hook (even on PASS) so bank openers never stick on landlord videos
+  // Re-sync topic hook even on PASS (stale openers stick across topics).
   {
     const visionFix = watch.hookVision?.fix?.trim();
     const before = s.hookLine;
@@ -176,7 +175,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     }
   }
 
-  // Pacing: only shorten cuts when scene QA fails; if scenes already pass, diversify + interrupts
+  // Shorten cuts only when scene QA fails; else diversify + interrupts.
   if (pacing != null && pacing <= 5) {
     s.patternInterrupts = true;
     s.impactBeatIntervalSec = isNursingHomeTopic(topic) ? 3.5 : 4;
@@ -199,7 +198,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
       applied.push('2. Pacing low → zoom-punch pattern interrupts ON');
     }
   } else if (pacing != null && pacing <= 7) {
-    // Mid pacing (common on nursing) — denser cards without thrashing cut interval
+    // Mid pacing: denser cards without thrashing cut interval.
     s.patternInterrupts = true;
     s.impactBeatIntervalSec = Math.min(s.impactBeatIntervalSec || 5, isNursingHomeTopic(topic) ? 3.5 : 4);
   }
@@ -217,7 +216,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     );
   }
 
-  // Real repetition only — do NOT treat visualVariety alone as "Repetition FAIL"
+  // Real repetition only (not visualVariety alone).
   if (repeatPct >= 25 || dupRuns >= 2) {
     s.harvestVideoFirst = true;
     s.faceSeekBroll = true;
@@ -235,10 +234,10 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     s.fixStrategy = 'reharvest';
     s.maxReusePerUrl = 1;
     if (isHousingTopic(topic)) {
-      // Rewrite + loose reuse regresses housing (insect/off-brand B-roll)
+      // Rewrite + loose reuse regresses housing.
       s.rewriteScript = false;
     }
-    // Do not raise minAssets (that pads images and hurts variety further)
+    // Do not raise minAssets (pads images, hurts variety).
     applied.push(
       `3. visualVariety ${visualVariety}/10 → face/human B-roll reharvest (offset ${s.mediaOffset}, no image pad)`,
     );
@@ -247,8 +246,6 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   if (captionReadability != null && captionReadability <= 5) {
     s.karaokeCaptions = false;
     applied.push('3b. captionReadability ≤5 → hook-only / impact-beat captions (karaoke OFF)');
-  } else if (captionReadability != null && captionReadability >= 7 && s.karaokeCaptions === false) {
-    // keep hook-only if it was working
   }
 
   if (bias.wantFaces || bias.wantLessCorporate) {
@@ -262,7 +259,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push('4b. topIssues → prefer bright B-roll');
   }
 
-  // Script rewrite lever: weak hook script or very low youtubeReadiness
+  // Script rewrite on weak hook or very low youtubeReadiness.
   const ytReady = watch.brutal?.report?.scores?.youtubeReadiness;
   if (watch.hookScript?.pass === false || (typeof ytReady === 'number' && ytReady <= 5 && !isHousingTopic(topic))) {
     s.rewriteScript = true;
@@ -277,7 +274,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     s.useFastPacing = true;
     s.patternInterrupts = true;
     s.faceSeekBroll = true;
-    // Kinetic text is canvas-only on ffmpeg loop path — do not pretend it helps
+    // Kinetic text is canvas-only on the ffmpeg loop path.
     s.showKineticText = false;
     applied.push('5. Overall ≤5/10 → face-seek + zoom-punch (kinetic skipped on ffmpeg path)');
   }
@@ -286,7 +283,7 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push('6. Loudness off target → YouTube voice-first mix (AUTOTUBE_YOUTUBE_MODE=1)');
   }
 
-  // Keep-best beats reharvest lottery: freeze a shippable cut and polish next.
+  // Keep-best: freeze a shippable cut and polish next.
   if (keepBestEnabled() && shouldKeepBest(watch) && renderTier === 'full') {
     const raw = watch.brutal?.rawOverall ?? watch.brutal?.overall;
     enterPolishMode(s, { rawOverall: raw, frozenProjectPath: s.frozenProjectPath }, applied);

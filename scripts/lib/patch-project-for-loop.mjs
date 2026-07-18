@@ -46,7 +46,7 @@ export function extractOverlayFromVisionFix(visionFix) {
   if (!visionFix?.trim()) return null;
   let text = visionFix.trim();
 
-  // Prefer the actual suggested hook in quotes or after like:/as:
+  // Prefer suggested hook in quotes or after like:/as:
   const quotedAny = text.match(/['"]([^'"]{8,})['"]/);
   const likeClause = text.match(/\blike[:\s]+['"]?([^'"\n.]{8,})['"]?/i);
   const asColon = text.match(/\b(?:rewrite\s+line\s*\d*\s*)?as[:\s]+['"]?(.+?)['"]?\s*$/i);
@@ -70,7 +70,7 @@ export function extractOverlayFromVisionFix(visionFix) {
   }
 
   text = text.split(/[—–]/)[0].split(/[.!?]/)[0].trim();
-  // Strip leftover instruction crumbs like "REWRITE LINE 1 AS" / "a concrete shock hook like"
+  // Strip editor-instruction crumbs.
   text = text
     .replace(/\brewrite\s+line\s*\d*\s*as\b[:\s]*/gi, '')
     .replace(/\breplace\s+the\s+first\s+line\s+with\b[:\s]*/gi, '')
@@ -78,7 +78,7 @@ export function extractOverlayFromVisionFix(visionFix) {
     .replace(/^a\s+shock\s+hook\s+like\b[:\s]*/gi, '')
     .trim();
   if (text.length < 5 || isInstructionOverlay(text)) return null;
-  // Reject meta phrasing that still isn't a viewer-facing hook
+  // Reject meta phrasing that isn't a viewer-facing hook.
   if (/\b(shock hook|concrete|rewrite|replace|templated?)\b/i.test(text) && text.split(/\s+/).length <= 6) {
     return null;
   }
@@ -118,22 +118,18 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
       .split(/\s+/)
       .filter(Boolean);
     const clamped = trimDanglingTail(words.slice(0, maxWords));
-    // A lone label with no payload (e.g. "BREAKING:" / "URGENT:") reads as a broken
-    // overlay in the 0–3s frame audit — drop it so callers fall back to real stakes.
+    // Drop lone labels ("BREAKING:" / "URGENT:") with no payload.
     if (clamped.length === 1 && /[:]$/.test(clamped[0])) return '';
     return clamped.join(' ');
   };
 
   const keywords = topicKeywords(topic);
-  // Family classification uses TOPIC ONLY (same source of truth as impact beats +
-  // shock hook line) so overlay, hook, and mid-video cards never disagree. Loose
-  // keyword regexes still scan topic+hook for softer signals (disaster, tickets…).
+  // Family from topic only (aligns overlay/hook/impact cards). Soft signals scan topic+hook.
   const topicOnly = String(topic || '');
   const t = `${topic || ''} ${hookLine || ''}`.toLowerCase();
 
-  // Family short stakes FIRST — preferred overlays often dump the full topic title
-  // (e.g. "URGENT NURSING HOME CAMERAS RECORDED") and get edge-clipped.
-  // Zoning / flood-risk MAP stories are policy cover-ups, not weather disasters.
+  // Family short stakes first (full topic titles get edge-clipped).
+  // Zoning/flood-risk maps are policy stories, not weather disasters.
   if (/zoning|flood[-\s]?risk|flood\s*map|erased\s*flood/i.test(t)) {
     return clampWords('THEY ERASED THE FLOOD MAP');
   }
@@ -164,7 +160,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     const keys = keywords.map((k) => k.toLowerCase());
     const prefLower = preferred.toLowerCase();
     const overlapsTopic = keys.some((k) => k.length > 3 && prefLower.includes(k.toLowerCase()));
-    // Stale overlays from a previous topic (e.g. bank hook on landlord video) must not stick
+    // Drop stale overlays from a previous topic.
     if (overlapsTopic || options.forcePreferred === true) {
       return clampWords(preferred);
     }
@@ -173,13 +169,12 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
   if (fromVision) return clampWords(fromVision);
 
-  // Specific families BEFORE the generic leak/expose catch-all so e.g. a hospital
-  // "patient data leak" gets PATIENT RECORDS EXPOSED, not HOSPITAL PATIENT EXPOSED.
+  // Specific families before generic leak/expose catch-all.
   if (isInsuranceFraudTopic(topicOnly)) {
     return clampWords('FAKE CRASH SCAM EXPOSED');
   }
   if (isHeistTopic(topicOnly)) {
-    // Matches the heist shock hook ("the diamonds were already gone").
+    // Heist stakes overlay.
     return clampWords('THE DIAMONDS ARE GONE');
   }
   if (isSchoolEducationTopic(topicOnly) && /hack|ransom|breach|cyber|leak|data|records/i.test(t)) {
@@ -209,7 +204,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   if (/nuclear|radiation|meltdown|plant/i.test(t)) {
     return clampWords('EMERGENCY: THEY HID THE RISK');
   }
-  // Only true bank/scam/voice-clone stories get the bank overlay.
+  // Bank overlay only for bank/scam/voice-clone topics.
   if (
     /bank|voice.?clone|otp|phish|wire\s*transfer|callback\s*scam/i.test(t)
     || (isBankScamTopic(topicOnly) && /bank|scam|fraud|voice|otp|phish|wire|callback/i.test(t))
@@ -268,7 +263,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   }
 
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {
-    // Short + no colon — long "EXPOSED: HOSPITAL HACK EXPOSED" was edge-clipped by drawtext
+    // Short, no colon (drawtext edge-clips long "EXPOSED: …" lines).
     const kw = keywords.filter((k) => !/^expos/i.test(k)).slice(0, 2).join(' ');
     return clampWords(kw ? `${kw} EXPOSED` : 'THE TRUTH EXPOSED');
   }
@@ -277,7 +272,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     return clampWords(kw ? `BREAKING: ${kw}` : 'BREAKING NEWS ALERT');
   }
 
-  // Prefer stakes over "URGENT: keyword salad" for cold generic topics
+  // Prefer stakes over "URGENT: keyword salad".
   const core = keywords.slice(0, 3).join(' ');
   return clampWords(core ? `${core} EXPOSED` : 'THE COVER-UP EXPOSED');
 }
@@ -297,7 +292,7 @@ export function rewriteIntroOpener(project, hookLine) {
     || /^in\s+(?:late\s+|early\s+|mid-?)?\d{4}/i.test(first)
     || /^(in this video|today we|let me explain|welcome)\b/i.test(first)
     || /^in late\s+\d{4}/i.test(first);
-  // Always force shock opener in loop mode when hook provided — vision bar demands stakes first
+  // Loop mode: force shock opener when hook is provided.
   intro.narration = rest ? `${hookLine.trim()} ${rest}`.trim() : hookLine.trim();
   if (weak) {
     /* already rewritten above */
@@ -332,7 +327,7 @@ export function promoteIntroFaceVideo(project) {
       && !/cctv|surveillance|podcast|recording/i.test(topic)) {
       return -3;
     }
-    // Topic keyword overlap on intro assets beats generic faces
+    // Topic keyword overlap on intro beats generic faces.
     const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && blob.includes(w)).length;
     if (/face|person|people|portrait|close.?up|worried|shocked|reaction|eyes|direct.?camera/i.test(blob)) {
       return 6 + Math.min(3, topicHits);
@@ -384,7 +379,7 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
     }
 
     if (key) seenUrls.add(key);
-    // Orphans go to a body segment (not intro) so off-topic clips don't land on the hook
+    // Orphans go to a body segment, not intro.
     const bodyId = segIds.find((id, idx) => idx > 0 && idx < segIds.length - 1) || segIds[Math.min(1, segIds.length - 1)] || segIds[0];
     const sid = segIds.includes(asset.segmentId) ? asset.segmentId : bodyId;
     buckets[sid].push({ ...asset, segmentId: sid });
@@ -430,7 +425,7 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
     }
   }
 
-  // Intro must not hoard every video — body segments need unique motion for scene QA.
+  // Don't let intro hoard every video; body needs unique motion.
   const introId = segIds[0];
   const videoCount = project.media.filter((m) => m.type === 'video').length;
   const introCap = Math.max(
@@ -494,7 +489,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   trimProjectForLoop(project, options.maxTotalSec ?? 75);
 
   stripSceneLayoutsForLoop(project);
-  // skipMediaPatch = post-sanitize re-assert of hooks only — do not reshuffle B-roll onto intro
+  // skipMediaPatch: re-assert hooks only; don't reshuffle B-roll.
   if (!options.skipMediaPatch && !options.skipBalance) {
     balanceMediaAcrossSegments(project, Math.max(3, fixState.minAssetsPerSegment || 4));
     if (fixState.faceSeekBroll !== false) {
@@ -511,7 +506,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
   }
 
   if (fixState.shockHook !== false && project.script?.length) {
-    // Always topic-match — rejects stale bank hooks left in FIX_STATE from prior topics
+    // Topic-match rejects stale hooks left in FIX_STATE.
     const safeOverride =
       fixState.hookLine && hookClashesWithTopic(topic, fixState.hookLine)
         ? undefined
@@ -554,7 +549,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     musicPreset: 'neutral',
     resolution: '1080p',
     youtubeMode: true,
-  // Karaoke on by default in loop (reduced caption size in youtubeProfile)
+  // Karaoke on by default in loop.
   karaokeCaptions: fixState.karaokeCaptions !== false,
     hookOverlay: project.exportSettings?.hookOverlay ?? fixState.hookOverlay ?? undefined,
     hookLine: project.exportSettings?.hookLine ?? project.hookLine ?? fixState.hookLine ?? undefined,

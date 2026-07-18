@@ -1,7 +1,6 @@
 /**
- * Honest scoring helpers for Video Watcher brutal reviews.
- * Scene/OCR floors may nudge dims by at most +1 over the model raw score.
- * Critical topIssues block fake upload-ready / stretch-to-8 floors.
+ * Honest scoring for Video Watcher brutal reviews.
+ * Floors may nudge dims by at most +1 over model raw; critical issues block upload-ready.
  */
 
 export const SCORE_DIMS = ['hook', 'visualVariety', 'captionReadability', 'pacing', 'youtubeReadiness'];
@@ -9,15 +8,12 @@ export const SCORE_DIMS = ['hook', 'visualVariety', 'captionReadability', 'pacin
 const CRITICAL_ISSUE_RE =
   /\b(beetle|dung|insect|puppet|muppet|cartoon|anime|off-?brand|scam[\s-]?bait|unrelated|wrong topic|off[\s-]?topic|low-budget|unprofessional|untrustworthy)\b/i;
 
-/** Hook-fail scroll signals — not soft "would likely make me scroll past" boilerplate. */
 const SCROLL_PAST_CRITICAL_RE =
   /\b(?:would|will)\s+scroll\s*past\b|\bscroll[- ]past:\s*yes\b|\b(?:viewers?|audience)\s+(?:would|will)\s+scroll\s*past\b|\bscrolls?\s+past\s+(?:in|within)\s+(?:[0-3](?:\.\d+)?\s*s(?:ec(?:onds?)?)?|0\s*[-–]\s*3)/i;
 
-/** Soft retention hedges — not critical (hook vision already reports scroll-past yes/no). */
 const SOFT_SCROLL_HEDGE_RE =
   /\bi\s+would\s+scroll\s*past\s+this\b|\b(?:would|will|might|may|could)\s+(?:likely|probably|quickly)\s+(?:make\s+(?:me|viewers?|someone)\s+)?scroll\s*past\b|\b(?:would|will|might|may|could)\s+make\s+(?:me|viewers?|someone)\s+scroll\s*past\b/gi;
 
-/** On-screen overlay glitches that read as broken UI, not intentional copy. */
 const OVERLAY_GLITCH_RE = /\bauto\s+skipped\b/i;
 
 /**
@@ -28,27 +24,20 @@ export function hasCriticalQualityIssues(topIssues = [], verdict = '') {
   const blob = [...(topIssues || []), verdict || ''].join(' ');
   if (CRITICAL_ISSUE_RE.test(blob)) return true;
   if (OVERLAY_GLITCH_RE.test(blob)) return true;
-  // Strip negations + soft hedges so "would likely make me scroll past within 3s"
-  // is not treated as critical when hook vision already said scroll-past: no.
   const scrollBlob = blob
     .replace(/\b(?:would|will|do|does|did)\s+not\s+scroll\s*past\b/gi, ' ')
     .replace(SOFT_SCROLL_HEDGE_RE, ' ');
   return SCROLL_PAST_CRITICAL_RE.test(scrollBlob);
 }
 
-/**
- * @param {Record<string, number>} scores
- */
+/** @param {Record<string, number>} scores */
 export function averageScore(scores = {}) {
   const vals = Object.values(scores).filter((v) => typeof v === 'number' && Number.isFinite(v));
   if (!vals.length) return null;
   return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
 }
 
-/**
- * Raise a dim toward `target` but never more than raw+1.
- * @returns {boolean} whether the score changed
- */
+/** Raise a dim toward `target` but never more than raw+1. */
 export function applyCappedFloor(scores, feedback, key, target, note) {
   const raw = scores[key];
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return false;
@@ -74,7 +63,6 @@ export function applyCappedFloor(scores, feedback, key, target, note) {
 export function applyHonestSceneFloors(brutal, ctx = {}) {
   if (!brutal?.report?.scores) return brutal;
 
-  // Preserve model-raw overall if already set (pre-hook-floor); else snapshot now
   const rawScores = brutal.rawScores || { ...brutal.report.scores };
   if (!brutal.rawScores) brutal.rawScores = { ...rawScores };
   const rawOverall =
@@ -142,7 +130,6 @@ export function applyHonestSceneFloors(brutal, ctx = {}) {
       hookVision?.hookPass === true
       || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
 
-    // Never mint youtubeReadiness 8 when critical issues remain
     if (
       !critical &&
       dimsStrong &&
@@ -159,7 +146,6 @@ export function applyHonestSceneFloors(brutal, ctx = {}) {
 
   const flooredOverall = averageScore(scores);
   brutal.flooredOverall = flooredOverall;
-  // Display overall stays floored for continuity; gates use rawOverall
   brutal.overall = flooredOverall ?? rawOverall ?? 0;
   brutal.hasCriticalIssues = critical;
   const rawOk = typeof rawOverall === 'number' && rawOverall >= 7;
@@ -168,10 +154,7 @@ export function applyHonestSceneFloors(brutal, ctx = {}) {
   return brutal;
 }
 
-/**
- * Score used for --until-score / stretch gates (honesty-first).
- * Prefer raw; allow floored only if raw is within 0.5 of target.
- */
+/** Prefer raw for --until-score; floored only if raw is within 0.5 of target. */
 export function scoreForTargetGate(brutal, untilScore) {
   if (brutal?.success === false) return null;
   const raw = brutal?.rawOverall;

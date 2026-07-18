@@ -53,7 +53,7 @@ export function layoutHookLines(words, videoW, videoH) {
   if (!tokens.length) return { lines: [], fontSize: hookFontPx(videoH) };
 
   const maxLineW = Math.max(320, videoW * 0.9);
-  // Impact-ish glyph width estimate (drawtext has no measure API here)
+  // Glyph width estimate (drawtext has no measure API).
   const estWidth = (line, size) => String(line).length * size * 0.62;
 
   const pack = (size) => {
@@ -69,7 +69,7 @@ export function layoutHookLines(words, videoW, videoH) {
       }
     }
     if (cur.length) lines.push(cur.join(' '));
-    // Prefer 2 short lines over one overlong line when we still overflow
+    // Prefer 2 short lines over one overlong line.
     if (lines.length === 1 && tokens.length >= 3 && estWidth(lines[0], size) > maxLineW) {
       const mid = Math.ceil(tokens.length / 2);
       return [tokens.slice(0, mid).join(' '), tokens.slice(mid).join(' ')].filter(Boolean);
@@ -96,7 +96,7 @@ export function overlayHookText(videoPath, project, options = {}) {
     || project.hookLine
     || process.env.AUTOTUBE_HOOK_LINE
     || project.exportSettings?.hookLine;
-  // Never burn editor instructions onto the frame (watcher sometimes suggests "Rewrite line 1 as…")
+  // Never burn editor instructions onto the frame.
   if (hookText && isInstructionHookText(hookText)) {
     hookText = project.hookLine || project.exportSettings?.hookLine || '';
     if (isInstructionHookText(hookText)) hookText = '';
@@ -122,8 +122,7 @@ export function overlayHookText(videoPath, project, options = {}) {
   const line1 = lines[0] || '';
   const line2 = lines[1] || '';
   if (!line1) return { ok: false, error: 'no hook text' };
-  // Hook window ≤3s (watcher audits 0–3s). One stable overlay — rotating into impact
-  // beats at 1.5s stacked with karaoke captions read as nonsensical text spam.
+  // Hook window ≤3s: one stable overlay (don't stack with impact/karaoke).
   const durationSec = options.durationSec ?? 3.0;
   const border = Math.max(5, Math.round(fontSize * 0.08));
   const filters = [
@@ -203,12 +202,12 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
 
   const flush = () => {
     if (!buffer.length) return;
-    // Prefer speech-synced times; only nudge if we'd overlap the previous line
+    // Prefer speech-synced times; nudge only on overlap.
     let start = bufferStart;
     let end = Math.max(bufferEnd, start + 0.4);
     if (start < lastCaptionEnd) start = lastCaptionEnd;
     if (end <= start) end = start + 0.45;
-    // Cap line hold so captions stay punchy (≤4 words already)
+    // Cap line hold so captions stay punchy.
     end = Math.min(end, start + 2.4);
     const text = escapeAss(buffer.join(' ').toUpperCase());
     lines.push(`Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${text}`);
@@ -218,7 +217,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
   };
 
   const script = options.project?.script || [];
-  // Muxed audio starts with INTRO_SILENCE_SECONDS (narration.mjs) before segment 0 speech
+  // Muxed audio starts with INTRO_SILENCE_SECONDS before segment 0 speech.
   const INTRO_SILENCE_SEC = Number(process.env.AUTOTUBE_INTRO_SILENCE_SEC || 3.5);
   const segOffsetFor = (segKey) => {
     const n = Number(segKey);
@@ -227,7 +226,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
     for (let i = 0; i < n && i < script.length; i += 1) {
       off += Number(script[i]?.duration) || 0;
     }
-    // Fallback when durations missing: stack by prior segment word ends
+    // Fallback: stack by prior segment word ends.
     if (off <= INTRO_SILENCE_SEC && n > 0) {
       for (let i = 0; i < n; i += 1) {
         const prev = wordTimestampCache.get(i) || [];
@@ -327,7 +326,7 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
     console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}..."`);
   }
 
-  // Impact cards only when karaoke is off — burning both reads as fragmented text spam.
+  // Impact cards only when karaoke is off.
   if (burnImpactBeats) {
     const beats = overlayImpactBeats(videoPath, project);
     results.impactBeats = beats;
@@ -361,12 +360,12 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   const custom = Array.isArray(project?.exportSettings?.impactBeats)
     ? project.exportSettings.impactBeats
     : [];
-  // Prefer project beats only when they match the topic family (hospital cards must not stick on nursing)
+  // Prefer project beats only when they match the topic family.
   const customOnTopic = impactBeatsMatchTopic(custom, topic);
   const beats = (customOnTopic ? custom : defaults)
     .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
     .filter(Boolean);
-  // Prefer unique cards across the timeline — repetition tanks captionReadability
+  // Prefer unique cards across the timeline.
   const uniqueBeats = [...new Set(beats)];
 
   const hookEndSec = Number(options.hookEndSec ?? 3) || 3;
@@ -374,7 +373,7 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
     3.5,
     Number(project?.exportSettings?.impactBeatIntervalSec || options.intervalSec || 4) || 4,
   );
-  // Start right after hook window — avoid 3–5s dead zone of static / empty text
+  // Start right after hook window.
   const times = [];
   for (let t = hookEndSec; t < duration - 2; t += interval) times.push(t);
   if (!times.length) return { ok: false, error: 'no beat times' };

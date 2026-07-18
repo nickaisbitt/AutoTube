@@ -35,7 +35,7 @@ export function buildImpactBeatsForTopic(topic) {
     ];
   }
 
-  // Nursing abuse / CCTV BEFORE healthcare cyber (nursing + camera/abuse used to match hospital cards)
+  // Nursing before healthcare cyber (shared camera/abuse tokens).
   if (isNursingHomeTopic(tl)) {
     return [
       'CAMERAS ROLLING',
@@ -87,7 +87,6 @@ export function buildImpactBeatsForTopic(topic) {
     ];
   }
 
-  // Healthcare cyber — hospital/patient records breach (not nursing-home abuse)
   if (isHealthcareCyberTopic(tl)) {
     return [
       'RECORDS LEAKED',
@@ -105,7 +104,7 @@ export function buildImpactBeatsForTopic(topic) {
     ];
   }
 
-  // Veterans / benefits / dark-web data brokers (before generic bank)
+  // Veterans/dark-web before generic bank.
   if (isVeteransBenefitsTopic(tl)) {
     return [
       'DATA BROKERED',

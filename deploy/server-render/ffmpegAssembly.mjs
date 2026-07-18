@@ -93,7 +93,7 @@ function hardCutsEnabled() {
   }
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
   const youtubeMode = process.env.AUTOTUBE_YOUTUBE_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === 'true';
-  // YouTube / ffmpeg assembly: hard cuts by default for retention pacing
+  // Hard cuts by default for retention pacing.
   return loopMode || youtubeMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
 }
 
@@ -139,7 +139,7 @@ function hookSceneCutsEnabled() {
 
 /** Flash on asset swaps when pattern interrupts are on; dense in first 15s / first 3 clips. */
 function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset, { isHookSegment = false, scheduleIndex = 0 } = {}) {
-  // Sub-second flashes create PySceneDetect boundaries when similar B-roll merges edits.
+  // Sub-second flashes create scene boundaries when similar B-roll would merge.
   if (hookSceneCutsEnabled()) {
     return true;
   }
@@ -316,7 +316,7 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   const frames = Math.max(1, Math.round(durationSec * FPS));
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
   if (zoomPunch && frames > 2) {
-    // Visible pattern interrupt without blank flash frames (vision samples those as dead air)
+    // Pattern interrupt without blank flash frames.
     vf = `scale=${Math.round(w * 1.25)}:${Math.round(h * 1.25)},zoompan=z='1.25-0.25*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`;
   } else if (!isVideo && hardCuts) {
     const drift = 0.08 + (clipIndex % 5) * 0.02;
@@ -383,7 +383,7 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, 
     );
     if (rReuse.status === 0 && existsSync(clipOut)) return true;
   }
-  // Mid-gray grain — near-black placeholders read as "black screen interrupts" in watches.
+  // Mid-gray grain (near-black reads as black-screen interrupts).
   const r = spawnSync(
     'ffmpeg',
     [
@@ -425,7 +425,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const devServer = options.devServer || 'http://localhost:5173';
   let renderedDuration = 0;
   let clipIndex = 0;
-  // Only grain fillers count as placeholders — clip reuse is real B-roll with zoom.
+  // Only grain fillers count as placeholders.
   let grainPlaceholderCount = 0;
   let reuseClipCount = 0;
   const videoOffsets = new Map();
@@ -451,8 +451,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
     let ok = false;
     if (!localSrc) {
-      // Prefer grain over previous-clip reuse — reuse extends visually-identical holds
-      // that PySceneDetect merges into 5s+ scene FAIL even with flash wedges.
+      // Prefer grain over previous-clip reuse (reuse merges into long scenes).
       console.log(`  [ffmpeg] ${label}: grain placeholder — asset fetch failed`);
       ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, null);
       if (ok) grainPlaceholderCount += 1;
@@ -490,8 +489,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    // Zoom-punch forces ContentDetector cuts when similar B-roll would merge through
-    // sub-second white flashes (cold hookSceneCuts path keeps patternInterrupts off).
+    // Zoom-punch forces cuts when similar B-roll would merge (hookSceneCuts path).
     const zoomPunch =
       (patternInterruptsEnabled() || hookSceneCutsEnabled()) && (i < 3 || i % 2 === 0);
     await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0, { zoomPunch });

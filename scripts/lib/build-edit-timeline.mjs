@@ -170,7 +170,7 @@ export function buildEditTimeline(project, options = {}) {
     const segmentUrlUse = new Map();
     let assets = uniqueAssetsByUrl((project.media || []).filter((m) => m.segmentId === seg.id));
     if (!assets.length) {
-      // Borrow from global pool but prefer face/CTA motion over random intro leftovers
+      // Borrow from global pool; prefer face/CTA motion.
       assets = uniqueAssetsByUrl(
         [...globalPool]
           .sort((a, b) => {
@@ -215,7 +215,7 @@ export function buildEditTimeline(project, options = {}) {
       if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
       if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
       if (/camcorder|handheld camcorder|person holding camera|holding camcorder|vintage camera|filming with phone|dslr camera/i.test(blob)) return -4;
-      // Always demote dark/muddy stock — critical watch fail pattern
+      // Demote dark/muddy stock.
       if (/\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|black background|black frame)\b/i.test(blob)) {
         return -5;
       }
@@ -226,22 +226,22 @@ export function buildEditTimeline(project, options = {}) {
       let beatBoost = 0;
       if (activeBeat) {
         beatBoost = scoreAssetAgainstBeat(a, activeBeat);
-        // First 3s of intro: require beat match when available
+        // First 3s: require beat match when available.
         if (isIntro && beatBoost < 0) return -6;
       } else if (segBeats.length) {
         beatBoost = Math.max(...segBeats.map((b) => scoreAssetAgainstBeat(a, b)));
       }
-      // Intro + outro: topic relevance first so office/arch models lose to care/CCTV clips
+      // Intro/outro: topic relevance first.
       if (isIntro || isOutro) {
         const rel = scoreAssetRelevance(a, seg, project.topic || '');
         let score = rel < 0.15 ? -4 : Math.round(rel * 5);
         if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court/i.test(blob)) score += 3;
         if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 5;
-        // Hook needs a human face — but care/CCTV still outranks generic faces on nursing topics
+        // Hook needs a face; care/CCTV outranks generic faces on nursing.
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait|eyes/i.test(blob)) {
           score += !coldEval && /nursing|elderly|care\s*home|cctv|abuse/i.test(topicBlob) ? 1 : 4;
         }
-        // Cold intro: beat match outranks establishing stock
+        // Cold intro: beat match outranks establishing stock.
         if (coldEval && isIntro && beatBoost > 0) score += beatBoost * 2;
         if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;
         if (preferBright && /\b(daylight|sunny|bright|well.?lit|window light)\b/i.test(blob)) score += 2;
@@ -250,7 +250,7 @@ export function buildEditTimeline(project, options = {}) {
       if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3 + beatBoost;
       if (topicIsHousing && /beetle|insect|wildlife|macro|spider|bug|larva|caterpillar/i.test(blob)) return -10;
       if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2 + beatBoost;
-      // Cold body: topic relevance + human faces beat looping subject stock
+      // Cold body: topic relevance + faces beat looping subject stock.
       if (coldEval) {
         const rel = scoreAssetRelevance(a, seg, project.topic || '');
         let score = rel < 0.12 ? -2 : Math.round(rel * 4);
@@ -263,14 +263,14 @@ export function buildEditTimeline(project, options = {}) {
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(blob)) return 3 + beatBoost + reusePenalty;
       return beatBoost + reusePenalty;
     };
-    // Intro/outro = motion only when videos exist. Body = almost all video (V-V-V-I).
+    // Intro/outro: motion only when videos exist. Body: mostly video.
     const ordered = preferVideo && videos.length
       ? (() => {
           if (isIntro || isOutro) {
             const ranked = [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a));
             let usable = uniqueAssetsByUrl(ranked.filter((a) => scoreAsset(a) >= 0));
             if (!usable.length) usable = uniqueAssetsByUrl(ranked.slice(0, 1));
-            // Avoid single-asset / thin intro holds: borrow enough unique motion for dense cuts
+            // Borrow enough unique motion for dense intro cuts.
             const introSlotsNeeded = Math.max(4, Math.ceil((seg.duration || 20) / Math.min(cut, 0.65)));
             if (usable.length < introSlotsNeeded && globalPool.length) {
               const extras = uniqueAssetsByUrl(
@@ -344,7 +344,7 @@ export function buildEditTimeline(project, options = {}) {
           }
           return s;
         };
-        // Beat-aware / cold diversity re-rank when useful; else preserve ordered preference.
+        // Beat-aware / cold diversity re-rank when useful.
         const rankedPool = (activeBeat || (coldEval && !isIntro && !isOutro))
           ? [...pool].sort((a, b) => diversityScore(b) - diversityScore(a))
           : pool;
@@ -373,7 +373,7 @@ export function buildEditTimeline(project, options = {}) {
         attempts < Math.max(ordered.length, globalPool.length) &&
         (asset.id === lastAssetId || (urlKey(asset) && urlKey(asset) === lastUrl))
       ) {
-        // Intro/outro: stay in ordered (topic-locked) — never pull beetle/still from global pool
+        // Intro/outro: stay topic-locked (no global-pool beetle/still).
         asset = pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool);
         ai += 1;
         attempts += 1;

@@ -9,11 +9,7 @@ import {
   hasCriticalQualityIssues,
 } from './score-honesty.mjs';
 
-/**
- * Independent blind-judge default for cold eval.
- * Distinct family from generation (`xiaomi/mimo-v2.5`) so the auditor is not the author.
- * Vision-capable + priced in costTracker; keep in sync with `src/services/costTracker.node.mjs`.
- */
+/** Cold-eval default watch model (independent of generation; keep in sync with costTracker). */
 export const COLD_EVAL_DEFAULT_WATCH_MODEL = 'google/gemini-2.5-flash';
 
 /** Generation vision/LLM model (what produced the video). */
@@ -26,12 +22,7 @@ function isColdEval(env) {
 }
 
 /**
- * Resolve the model the brutal watcher should use.
- * Priority:
- *   1. AUTOTUBE_WATCH_MODEL (explicit independent judge — always wins)
- *   2. Cold eval (AUTOTUBE_EVAL_COLD): default to an independent vision model
- *      distinct from generation, so cold scores are not self-graded
- *   3. Otherwise fall back to the generation vision/LLM model (document limitation)
+ * Watch model: AUTOTUBE_WATCH_MODEL → cold-eval default → generation model.
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {string}
  */
@@ -45,10 +36,7 @@ export function resolveWatchModel(env = process.env) {
 }
 
 /**
- * Whether the resolved watcher model is an independent judge (differs from generation).
- * @param {NodeJS.ProcessEnv} [env]
- * @returns {boolean}
- */
+/** @param {NodeJS.ProcessEnv} [env] */
 export function isIndependentWatchJudge(env = process.env) {
   return resolveWatchModel(env) !== generationModel(env);
 }
@@ -79,7 +67,6 @@ async function callOpenRouterVision({ apiKey, systemPrompt, frames, extraText })
       'X-Title': 'AutoTube Video Watcher',
     },
     body: JSON.stringify({
-      // Prefer independent judge (AUTOTUBE_WATCH_MODEL / cold-eval default); else shared gen model.
       model: resolveWatchModel(process.env),
       messages: [
         { role: 'system', content: systemPrompt },
@@ -103,7 +90,7 @@ async function callOpenRouterVision({ apiKey, systemPrompt, frames, extraText })
   return parseJSONResponse(text);
 }
 
-/** Prefer message.content; fall back to reasoning (mimo / reasoning models). */
+/** Prefer message.content; fall back to reasoning. */
 function messageText(message) {
   if (!message || typeof message !== 'object') return '';
   if (typeof message.content === 'string' && message.content.trim()) return message.content;
@@ -180,7 +167,7 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
   const overlay = (options.hookVision?.onScreenText || '').trim();
   const hookVisionOk =
     options.hookVision?.hookPass === true || overlay.length >= 8;
-  // Large readable yellow burn-in may bump hook, but never more than +1 over model raw
+  // Hook floor from readable yellow burn-in (≤ +1 over raw).
   if (hookVisionOk && typeof scores.hook === 'number') {
     const feedback = { ...(parsed.feedback || {}) };
     applyCappedFloor(
@@ -205,7 +192,6 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
     flooredOverall: overall,
     rawScores: modelRawScores,
     hasCriticalIssues: critical,
-    // Honest bar: model raw ≥7 and no critical topIssues (floors applied later in analyze)
     uploadReady: (modelRawOverall ?? overall) >= 7 && !critical,
     report: parsed,
     frameCount: frames.length,
@@ -217,7 +203,7 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
  * Hook-only vision (frames at ~0–3s).
  */
 export async function runHookVisionReview(videoPath, apiKey) {
-  // Explicit 0–3s — even spacing on duration=5 previously started at 1s and missed the opener
+  // Hook frames at 0–3s (retention sampling).
   const frames = extractFrames(videoPath, 4, 4, { retention: true });
   if (frames.length < 2) throw new Error('Hook frame extraction failed');
   const parsed = await callOpenRouterVision({

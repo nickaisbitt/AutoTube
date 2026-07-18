@@ -367,7 +367,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
       }
     }
 
-    // Last-resort: rotate curated Unsplash pool so volume gate can pass without Pexels.
+    // Last-resort Unsplash pad when Pexels is unavailable.
     if (uniqueCount < minPerSegment) {
       const offset = (report.stockTopUpOffset || 0) + uniqueCount;
       const need = minPerSegment - uniqueCount;
@@ -471,7 +471,7 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
   const picks = pickStockImages(pool.length, mediaOffset % Math.max(pool.length, 1), pool);
   let added = 0;
 
-  // Motion-ok: do not pad with cyber stills — code/matrix stills tank visualVariety
+  // Motion-ok: skip cyber still pads (they tank visualVariety).
   if (motionOk) {
     const videos = rebuilt.filter((a) => a.type === 'video');
     project.media = videos;
@@ -481,7 +481,7 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
 
   for (let s = 0; s < segments.length; s += 1) {
     const seg = segments[s];
-    // Never put stills on the intro/hook — motion only in first seconds
+    // Intro/hook: motion only.
     if (seg.type === 'intro' || s === 0) continue;
     const perSeg = 1;
     for (let i = 0; i < perSeg; i += 1) {
@@ -500,7 +500,7 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
       added += 1;
     }
   }
-  // Videos first in media array so timeline / assembly prefers motion
+  // Prefer motion assets first in the media array.
   const videos = rebuilt.filter((a) => a.type === 'video');
   const stills = rebuilt.filter((a) => a.type !== 'video');
   project.media = [...videos, ...stills];
@@ -638,7 +638,7 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
     /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|worried|shock|texting|ransom|leak|breach|records?/.test(
       blob,
     );
-  // Bare office/business/architecture alone is NOT enough for cyber relevance
+  // Office/business/architecture alone is not cyber-relevant.
   if (topical) return true;
   if (isHealthcareTopic(topicBlob) && /hospital|patient|clinic|nurse|doctor|medical|corridor|ward/.test(blob)) {
     return true;
@@ -650,7 +650,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
   if (isGenericStockJunk(blob, topicBlob)) return true;
-  // Hashtag / TikTok / kids-cartoon titles that slip past URL host filters
+  // Junk titles that slip past URL host filters.
   if (
     /#fyp|#tiktok|#disney|sofia the first|encerr[oó]|maleta|minecraft|fortnite|roblox|gacha|asmr|mukbang|\belmo\b|sesame street|muppet|cookie monster|big bird|peppa pig|cocomelon/i.test(
       blob,
@@ -665,14 +665,14 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   if (lifestyleJunk) return true;
   const preferBright =
     options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
-  // Muddy/night/overexposed stock when preferBright is on
+  // Reject muddy/night/overexposed stock when preferBright is on.
   if (
     preferBright
     && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|overexposed|blown.?out|washed.?out)\b/i.test(blob)
   ) {
     return true;
   }
-  // Surgical OR / hygiene hospital stills are junk UNLESS the topic is healthcare cyber
+  // Surgical/hygiene hospital stills are junk unless the topic is healthcare cyber.
   if (/surgery|surgical|operating room/.test(blob) && !isHealthcareTopic(topicBlob)) return true;
   if (
     /hospital/.test(blob)
@@ -686,7 +686,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
 }
 
 function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
-  // Never send the full long topic sentence to Pixabay — it matches random tokens.
+  // Pixabay: short query tokens only (long topics match noise).
   const faceFirst = options.faceSeek === true;
   const preferBright = options.preferBright === true;
   const nursing = isNursingHomeTopic(topicBlob);
@@ -709,8 +709,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
             ? ['well lit hospital corridor day', 'bright hospital waiting room', 'daylight medical records desk']
             : ['bright office daylight people', 'sunny window light phone call', 'well lit hospital corridor day']
     : [];
-  // Anti-HUD fillers — appended AFTER topical packs so they don't crowd out subject B-roll.
-  // Avoid "handheld camera" queries (pull camcorder loops that kill variety).
+  // Anti-HUD fillers after topical packs. Avoid "handheld camera" (camcorder loops).
   const antiHud = nursing
     ? ['documentary care home footage people', 'real surveillance hallway footage', 'authentic news interview elderly care']
     : housing
@@ -724,7 +723,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
           : ['news interview worried person', 'city street pedestrians daylight', 'person reading news phone outdoor'];
   /** Topic + faces first; bright/antiHud only as late fillers. */
   const withFillers = (base) => [...base, ...brightBoost.slice(0, 2), ...antiHud.slice(0, 2)];
-  // Housing + "AI" must NOT pull podcast-mic / cyber B-roll (kills hook score)
+  // Housing+"AI": avoid podcast-mic / cyber B-roll.
   if (housing) {
     const faces = [
       'worried couple reading letter home',
@@ -764,7 +763,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return withFillers(base);
   }
-  // Nursing abuse / CCTV — never hospital-breach stock
+  // Nursing abuse/CCTV: never hospital-breach stock.
   if (nursing) {
     const faces = [
       'worried family elderly care visit',
@@ -783,7 +782,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return withFillers(base);
   }
-  // Veterans benefits / dark-web brokers — not bank OTP / voice-clone stock
+  // Veterans/dark-web: not bank OTP / voice-clone stock.
   if (isVeteransBenefitsTopic(topicBlob)) {
     const faces = [
       'veteran looking at phone worried',
@@ -862,7 +861,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
     return withFillers(base);
   }
-  // Jewel / vault heists and fake-airport fraud — not bank OTP stock
+  // Heist/airport fraud: not bank OTP stock.
   if (heist) {
     const faces = [
       'investigator reviewing documents worried',
@@ -892,7 +891,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'man reaction shock close up',
       'elderly person phone call worried',
     ];
-    // Mic/podcast studio only as late filler — never faces-first opener material
+    // Mic/podcast studio only as late filler.
     const topical = [
       'credit card payment laptop hands',
       'hacker typing computer dark',
@@ -907,7 +906,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   if (/tornado|storm|disaster/i.test(topicBlob) && !/zoning|flood[-\s]?risk|flood\s*map/i.test(topicBlob)) {
     return withFillers(['tornado storm damage news', 'severe weather radar', 'emergency news footage', 'people sheltering storm']);
   }
-  // Release cold families that otherwise fall through to weak 4-word joins
+  // Cold-eval topic packs that otherwise get weak 4-word joins.
   if (/ambulance|gps\s*route|demolished|paramedic|911\s*dispatch/i.test(topicBlob)) {
     const faces = [
       'paramedic looking at phone worried',
@@ -1036,7 +1035,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
   const seriousTopic = isSeriousNewsTopic(topicBlob);
   const housingTopic = isHousingTopic(topicBlob);
-  // Bare "AI" matched landlord topics and flooded intros with podcast-mic stock
+  // Bare "AI" matched landlord topics and pulled podcast-mic stock.
   const schoolCyber =
     isSchoolEducationTopic(topicBlob)
     && /hack|ransom|breach|cyber|leak|data|records/.test(topicBlob);
@@ -1058,7 +1057,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   for (const q of queries.slice(0, 12)) {
     const fromPexels = await fetchPexelsVideos(q, 8);
     const fromPixabay = await fetchPixabayVideos(q, 8);
-    // Skip noisy archive.org for cyber topics when stock API keys exist
+    // Skip archive.org for cyber topics when stock API keys exist.
     const fromArchive =
       !cyberTopic || !(resolvePexelsKey() || resolvePixabayKey())
         ? (devServer ? await fetchArchiveVideoResults(devServer, q) : [])
@@ -1085,7 +1084,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
-      // Vision gate on first few stock thumbs (keyword alone misses dung beetles)
+      // Vision gate on stock thumbs (keywords miss off-brand junk).
       const thumb = clip.thumbnailUrl || clip.image || '';
       const apiKey = resolveOpenRouterKey();
       if (thumb && apiKey && (report.visionStockChecked || 0) < 6) {
@@ -1113,7 +1112,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     ...(cyberTopic ? MIXKIT_VIDEO_POOL : []),
     ...(seriousTopic ? topicalStockVideos(topicBlob, STOCK_VIDEO_POOL) : STOCK_VIDEO_POOL.filter((v) => !(v.tags || []).includes('filler'))),
   ];
-  // Dedupe pool by URL + drop junk tags
+  // Dedupe by URL; drop junk tags.
   const seenPool = new Set();
   pool = pool.filter((v) => {
     const key = (v.url || '').split('?')[0];
@@ -1121,7 +1120,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     seenPool.add(key);
     return true;
   });
-  // Round-robin by query so one phone shot doesn't dominate
+  // Round-robin by query so one shot doesn't dominate.
   const byQuery = new Map();
   for (const clip of pool) {
     const q = clip.query || clip.source || 'pool';
@@ -1155,7 +1154,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   );
   const stockApiVideos = usableVideos.filter((a) => /pexels|pixabay|mixkit|archive\.org/i.test(`${a.url} ${a.source || ''}`));
   const videoCount = usableVideos.length;
-  // Motion-first: when stock API keys exist, require real stock motion (not thin harvest proxies)
+  // With stock API keys, require real stock motion (not harvest proxies).
   const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
   const minVideos = hasStockKeys
     ? Math.min(
@@ -1207,7 +1206,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const isIntro = seg.type === 'intro' || seg === segments[0];
     const perSegTarget = hasStockKeys ? (isIntro ? 5 : 4) : 2;
     const want = Math.max(0, perSegTarget - segVideos);
-    // Intro: burn the highest faceScore picks first
+    // Intro: highest faceScore first.
     if (isIntro) {
       picks.sort((a, b) => faceScore(b) - faceScore(a));
       vi = 0;
@@ -1217,7 +1216,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       const key = clip.url.split('?')[0];
       if (used.has(key)) continue;
       if (isIntro && faceScore(clip) < 0) continue;
-      // Quick probe so we don't queue dead archive links
+      // Probe archive links before queueing.
       const ok = await canFetch(clip.url, { timeoutMs: 10000, minBytes: 2048, expectVideo: true });
       if (!ok) {
         report.videoTopUpFailed = report.videoTopUpFailed || [];
@@ -1307,8 +1306,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
 
   for (const asset of project.media) {
-    // For videos, only junk-check the clip URL — thumbnails are often youtube/ovp
-    // placeholders and must not kill an otherwise usable /api/download-clip asset.
+    // Videos: junk-check clip URL only (thumbs are often placeholders).
     if (asset.type === 'video') {
       if (isJunkHarvestUrl(asset.url) && !isProxiedClipUrl(asset.url) && !asset.url?.includes('youtube.com') && !asset.url?.includes('youtu.be') && !asset.url?.includes('vimeo.com')) {
         report.dropped.push({ url: asset.url, reason: 'junk URL (avatar/video-thumb placeholder)' });
@@ -1448,7 +1446,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       cutIntervalSec: options.cutIntervalSec,
     });
     injectCyberStockStills(project, report, options.mediaOffset || 0);
-    // Top-up can reintroduce off-brand / off-topic clips — gate again
+    // Re-gate after top-up (can reintroduce junk).
     stripJunkDemoVideos(project, report);
     const paddingBeforeFilter = (project.media || []).filter(isVolumePaddingAsset);
     const afterTopUp = filterAssetsByRelevance(project.media || [], project, {
@@ -1492,7 +1490,7 @@ export async function generateFullVideo(options) {
     fixState.reHarvestMedia = false;
   }
   const priorUrls = loadLastProjectUrls(process.cwd());
-  // Never seed excludes from stale last-project during re-harvest (nonce > 0) — that starves harvest.
+  // Re-harvest (nonce > 0): don't seed excludes from stale last-project.
   if (
     priorUrls.length &&
     (!fixState.excludedUrls || fixState.excludedUrls.length === 0) &&
@@ -1529,7 +1527,7 @@ export async function generateFullVideo(options) {
   };
   const loopMinAssets = Math.max(2, Math.min(8, fixState.minAssetsPerSegment || 6));
 
-  // Fast path: polish a frozen cut (skip Playwright harvest lottery)
+  // Fast path: polish a frozen cut.
   if (keepBestEnabled() && fixState.keepBestMedia && fixState.frozenProjectPath) {
     const frozen = loadFrozenProject(fixState.frozenProjectPath);
     if (frozen?.media?.length && frozen?.script?.length) {
@@ -1821,10 +1819,7 @@ export async function generateFullVideo(options) {
     }
   };
 
-  // Soft deadline for the first "waiting for Source Media" pass. When the script
-  // is still actively generating at the soft deadline we extend up to the hard
-  // cap instead of tripping a false SCRIPT_TIMEOUT (cold live OpenRouter script
-  // generation — main call + title variants — can exceed 240s).
+  // Soft wait for Source Media; extend to hard cap while script gen is active.
   const scriptTimeoutMs = realHarvest ? 240_000 : 180_000;
   const scriptHardCapMs = realHarvest ? 600_000 : 240_000;
   const mediaTimeoutMs = realHarvest ? 1_200_000 : 300_000;
@@ -1844,8 +1839,6 @@ export async function generateFullVideo(options) {
     const sourceMediaBtn = () =>
       page.getByTestId('source-media-next').or(page.getByRole('button', { name: /Source Media/i }));
 
-    // Re-fill the topic and trigger "Generate Script Only" again. Used when the
-    // original click never registered (still on the topic step) or after a reload.
     const triggerScriptGeneration = async () => {
       await dismissOnboarding(page);
       await page.getByTestId('topic-input').fill(topic);
@@ -1854,9 +1847,6 @@ export async function generateFullVideo(options) {
       await page.getByTestId('generate-script-only').click();
     };
 
-    // Waits for the Source Media button, extending the soft deadline (up to a
-    // hard cap) while script generation is genuinely progressing. Returns a rich
-    // status so the caller can pick a non-destructive recovery.
     const scriptWaitStartedAt = Date.now();
     let lastGeneratingAt = 0;
     let everSawGenerating = false;
@@ -1887,15 +1877,12 @@ export async function generateFullVideo(options) {
           await page.waitForTimeout(1500);
           if (await sourceMediaBtn().isVisible({ timeout: 5_000 }).catch(() => false)) return { ok: true };
         }
-        // Hard key/config errors — abort. Soft LLM/JSON failures — recover via reclick
-        // (unexpected end of JSON / empty response are common under load; throwing here
-        // was burning topics at ~244s without using the reclick path).
+        // Hard key errors abort; soft LLM/JSON failures recover via reclick.
         if (/API key required|OpenRouter API key/i.test(body)) {
           throw new Error(
             `SCRIPT_UI_ERROR: ${body.slice(0, 200)} (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'unknown'})`,
           );
         }
-        // Dead after start (timeout abort → cancelled UI) — stop waiting early.
         const idleMs = lastGeneratingAt > 0 ? Date.now() - lastGeneratingAt : 0;
         if (
           /AI script generation failed|Script generation failed|Unexpected end of JSON|invalid structure|empty response/i.test(
@@ -1917,8 +1904,6 @@ export async function generateFullVideo(options) {
         }
 
         // Extend soft deadline only while generation is actively progressing.
-        // everSawGenerating alone used to burn the full 600s hard cap after a
-        // dead timeout abort (idle UI, empty project).
         const active = detectScriptActivity(snap, prog);
         if (active && sawFreshActivity(snap, prog, prev)) {
           lastActivityAt = Date.now();
@@ -1988,12 +1973,9 @@ export async function generateFullVideo(options) {
       if (!result.ok) {
         const action = chooseRecoveryAction(result);
         if (action === 'grace') {
-          // Still actively generating — reloading would abort the live OpenRouter
-          // call. Grant one more hard-capped grace window instead.
           log('⚠ Script still generating at soft cap — granting grace window (no reload)…');
           result = await waitForScriptReady(120_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
         } else if (action === 'reclick') {
-          // Click missed OR generation died after start (timeout abort) — fresh click.
           log(
             result.deadAfterStart || result.everSawGenerating
               ? '⚠ Script generation died after start — re-triggering (no hard-cap burn)…'
@@ -2004,7 +1986,6 @@ export async function generateFullVideo(options) {
           lastGeneratingAt = Date.now();
           result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: Date.now() });
         } else {
-          // Genuinely stuck (blank/errored, not generating) — one reload recovery.
           log('⚠ Script wait stuck — reloading once and retrying…');
           await gotoDevServer();
           await triggerScriptGeneration();
@@ -2148,7 +2129,7 @@ export async function generateFullVideo(options) {
     await browser.close().catch(() => {});
     browser = null;
 
-    // Keep-best polish: reuse frozen media/timeline instead of lottery reharvest
+    // Keep-best: reuse frozen media/timeline.
     const frozenPath = fixState.frozenProjectPath;
     if (keepBestEnabled() && fixState.keepBestMedia && frozenPath) {
       const frozen = loadFrozenProject(frozenPath);
@@ -2210,7 +2191,7 @@ export async function generateFullVideo(options) {
           mediaReport.volumePass = true;
           mediaReport.volumeSoftPass = soft.reason;
         } else {
-          // Last chance: pad thin segments from topical stock, then re-check soft-pass.
+          // Last chance: pad thin segments, then re-check soft-pass.
           await topUpHarvestVolume(project, devServer, Math.max(4, Math.floor(loopMinAssets * 0.75)), mediaReport);
           const volume2 = evaluateHarvestVolume(project, loopMinAssets);
           mediaReport.harvestQuality = volume2;
@@ -2241,7 +2222,7 @@ export async function generateFullVideo(options) {
           }
         }
       }
-      // Re-assert shock hook + overlay after media mutations
+      // Re-assert shock hook + overlay after media mutations.
       patchProjectForLoop(project, topic, { ...fixState, forceRealStock: false }, { skipMediaPatch: true });
     }
     const timelineReport = validateEditTimeline(project, {

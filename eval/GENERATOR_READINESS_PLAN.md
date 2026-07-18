@@ -47,6 +47,12 @@
 - Release 0–5: gen 50%, upload 0%, critical 0%, raw med 6.4
 - Remaining: harvest volume reliability + lift release raw to ≥7.2
 
+### Sensor chain-5 @ `eb3455e`+ (topical-first + scene zoom-punch)
+- Dev×2: generate **100%**, upload **0%**, critical **50%** (false-positive scroll hedge — fixed in follow-up), raw median **6.8** (was 6.1)
+- Scene QA PASS on both (longest ~2.7–2.8s) after zoom-punch under hookSceneCuts
+- Port-strike variety still thin (13 unique); topical-first helped school to variety 8
+- Release×24 in progress on tip with honesty + junk-title fixes for remaining topics
+
 ## Stop conditions
 - Do not open new quality-integration side quests as “proof”
 - Do not run keep-best / housing pack loops as readiness

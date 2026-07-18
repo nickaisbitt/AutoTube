@@ -383,13 +383,14 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, 
     );
     if (rReuse.status === 0 && existsSync(clipOut)) return true;
   }
+  // Mid-gray grain — near-black placeholders read as "black screen interrupts" in watches.
   const r = spawnSync(
     'ffmpeg',
     [
       '-y',
       '-f', 'lavfi',
-      '-i', `color=c=0x111111:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
-      '-vf', `noise=alls=18:allf=t+u,eq=brightness=-0.05:saturation=0.4`,
+      '-i', `color=c=0x3a3a42:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
+      '-vf', `noise=alls=22:allf=t+u,eq=brightness=0.02:saturation=0.35`,
       '-c:v', 'libx264',
       '-preset', preset,
       '-pix_fmt', 'yuv420p',

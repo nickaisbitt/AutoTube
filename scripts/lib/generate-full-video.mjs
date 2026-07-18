@@ -652,7 +652,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   if (isGenericStockJunk(blob, topicBlob)) return true;
   // Hashtag / TikTok / kids-cartoon titles that slip past URL host filters
   if (
-    /#fyp|#tiktok|#disney|sofia the first|encerr[oó]|maleta|minecraft|fortnite|roblox|gacha|asmr|mukbang/i.test(
+    /#fyp|#tiktok|#disney|sofia the first|encerr[oó]|maleta|minecraft|fortnite|roblox|gacha|asmr|mukbang|\belmo\b|sesame street|muppet|cookie monster|big bird|peppa pig|cocomelon/i.test(
       blob,
     )
   ) {

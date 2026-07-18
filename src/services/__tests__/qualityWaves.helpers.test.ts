@@ -214,11 +214,29 @@ describe('quality waves 2–5 helpers', () => {
     delete process.env.AUTOTUBE_EVAL_COLD;
   });
 
-  it('preferBright and anti-HUD appear in stockMotionQueries', async () => {
+  it('preferBright fillers append after topical packs (not crowding subject queries)', async () => {
     const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
     const q = stockMotionQueries('bank fraud otp scam', true, { preferBright: true, faceSeek: true });
     expect(q.some((x) => /bright office daylight/i.test(x))).toBe(true);
-    expect(q.some((x) => /real footage people office/i.test(x))).toBe(true);
+    // Faces/topical must lead — generic bright/antiHud are late fillers only
+    const faceIdx = q.findIndex((x) => /shocked person looking at phone/i.test(x));
+    const brightIdx = q.findIndex((x) => /bright office daylight/i.test(x));
+    expect(faceIdx).toBeGreaterThanOrEqual(0);
+    expect(brightIdx).toBeGreaterThan(faceIdx);
+  });
+
+  it('port-strike queries lead with dock/cargo not office handheld filler', async () => {
+    const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
+    const q = stockMotionQueries('The port strike that hid a container-tracking hack', true, {
+      preferBright: true,
+      faceSeek: true,
+    });
+    expect(q.some((x) => /container|cargo|dock|shipping|port strike/i.test(x))).toBe(true);
+    expect(q.every((x) => !/handheld camera|bright office daylight people/i.test(x))).toBe(true);
+    const topicalIdx = q.findIndex((x) => /shipping container|cargo ship|port strike/i.test(x));
+    const fillerIdx = q.findIndex((x) => /news interview|city street pedestrians/i.test(x));
+    expect(topicalIdx).toBeGreaterThanOrEqual(0);
+    if (fillerIdx >= 0) expect(fillerIdx).toBeGreaterThan(topicalIdx);
   });
 
   it('nursing preferBright uses care-home boost not office', async () => {

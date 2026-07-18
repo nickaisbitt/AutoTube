@@ -63,7 +63,7 @@ export const EMPTY_HOSPITAL_BED_RE =
 
 /** Overused camcorder / “person holding camera” loops on non-surveillance topics. */
 export const CAMCORDER_STOCK_LOOP_RE =
-  /\b(camcorder|handheld camcorder|person holding (a )?camera|holding camcorder|vintage (video )?camera|filming with camcorder)\b/i;
+  /\b(camcorder|handheld (camcorder|camera)|person holding (a )?camera|holding (a )?(camcorder|camera)|vintage (video )?camera|filming with (a )?(camcorder|camera|phone)|old (video )?camera|super.?8|home movie camera)\b/i;
 
 /** Generic corporate / architecture filler for serious investigation topics. */
 export const GENERIC_CORPORATE_FILLER_RE =
@@ -168,8 +168,10 @@ export function genericStockJunkReason(haystack, contextText = '') {
   }
   if (
     CAMERA_PHONE_LOOP_RE.test(h)
-    && !/\b(cctv|surveillance|podcast|recording studio|filming|documentary)\b/i.test(ctx)
+    && !/\b(cctv|surveillance|podcast|recording studio)\b/i.test(ctx)
   ) {
+    // Do not exempt just because the stock *query* said "documentary" — that is how
+    // camcorder loops leaked into port/school cold evals.
     return 'generic camera/phone filming loop';
   }
   return null;

@@ -701,7 +701,8 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
             ? ['well lit hospital corridor day', 'bright hospital waiting room', 'daylight medical records desk']
             : ['bright office daylight people', 'sunny window light phone call', 'well lit hospital corridor day']
     : [];
-  // Anti-HUD: prefer real people/places; HUD/interface junk is filtered downstream
+  // Anti-HUD fillers — appended AFTER topical packs so they don't crowd out subject B-roll.
+  // Avoid "handheld camera" queries (pull camcorder loops that kill variety).
   const antiHud = nursing
     ? ['documentary care home footage people', 'real surveillance hallway footage', 'authentic news interview elderly care']
     : housing
@@ -712,7 +713,9 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
         ? ['real veteran portrait worried', 'documentary government office paperwork']
         : healthcareCyber
           ? ['real hospital corridor footage people', 'documentary nurse workstation']
-          : ['real footage people office', 'documentary handheld camera people', 'news documentary real people not actors'];
+          : ['news interview worried person', 'city street pedestrians daylight', 'person reading news phone outdoor'];
+  /** Topic + faces first; bright/antiHud only as late fillers. */
+  const withFillers = (base) => [...base, ...brightBoost.slice(0, 2), ...antiHud.slice(0, 2)];
   // Housing + "AI" must NOT pull podcast-mic / cyber B-roll (kills hook score)
   if (housing) {
     const faces = [
@@ -733,7 +736,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'worried tenant reading letter kitchen',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (insurance) {
     const faces = [
@@ -751,7 +754,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'police accident scene road',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   // Nursing abuse / CCTV — never hospital-breach stock
   if (nursing) {
@@ -770,7 +773,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'cctv camera ceiling close up',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   // Veterans benefits / dark-web brokers — not bank OTP / voice-clone stock
   if (isVeteransBenefitsTopic(topicBlob)) {
@@ -789,7 +792,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'credit freeze documents desk',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (
     /port|strike|container|shipping|cargo|dock|freight|supply\s*chain|maritime/.test(topicBlob)
@@ -808,8 +811,11 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'warehouse forklift shipping boxes',
       'tracking screen logistics map',
     ];
+    const brightPort = preferBright
+      ? ['bright container port daylight', 'sunny cargo ship dock', 'daylight warehouse shipping boxes']
+      : [];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return [...base, ...brightPort, ...antiHud.slice(0, 1)];
   }
   if (school && /hack|ransom|breach|cyber|leak|data|records/.test(topicBlob)) {
     const faces = [
@@ -827,7 +833,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'server room data center school',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (isHealthcareTopic(topicBlob) && cyberTopic) {
     const faces = [
@@ -846,7 +852,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       ...(preferBright ? ['hospital exterior building day'] : ['hospital exterior building night']),
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   // Jewel / vault heists and fake-airport fraud — not bank OTP stock
   if (heist) {
@@ -867,7 +873,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'investigation news documentary footage',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (cyberTopic) {
     const faces = [
@@ -888,10 +894,10 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'smartphone banking app hands',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (/tornado|storm|disaster/i.test(topicBlob) && !/zoning|flood[-\s]?risk|flood\s*map/i.test(topicBlob)) {
-    return [...brightBoost, ...antiHud, 'tornado storm damage news', 'severe weather radar', 'emergency news footage', 'people sheltering storm'];
+    return withFillers(['tornado storm damage news', 'severe weather radar', 'emergency news footage', 'people sheltering storm']);
   }
   // Release cold families that otherwise fall through to weak 4-word joins
   if (/ambulance|gps\s*route|demolished|paramedic|911\s*dispatch/i.test(topicBlob)) {
@@ -909,7 +915,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       '911 dispatch center monitors',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (/airline|cabin[-\s]?pressure|cabin\s*pressure/i.test(topicBlob)) {
     const faces = [
@@ -926,7 +932,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'maintenance hangar aircraft exterior',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (/zoning|flood[-\s]?risk|flood\s*map|neighborhood/i.test(topicBlob)) {
     const faces = [
@@ -943,7 +949,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'homeowner porch looking at papers',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (/climate\s*sensor|sensor\s*calibrat|fake\s*climate|university\s*lab/i.test(topicBlob)) {
     const faces = [
@@ -960,7 +966,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'weather sensor outdoor close up',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (/indie\s*game|source\s*code|cloud\s*lockout/i.test(topicBlob)) {
     const faces = [
@@ -977,7 +983,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'person slamming laptop frustrated',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   if (/museum\s*archive|mislabeled|colonial\s*artifact/i.test(topicBlob)) {
     const faces = [
@@ -994,7 +1000,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'museum gallery exhibit hall',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return [...brightBoost, ...antiHud, ...base];
+    return withFillers(base);
   }
   const words = String(topicBlob || '')
     .toLowerCase()
@@ -1006,7 +1012,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   const withFaces = faceFirst
     ? ['person reacting to news phone', 'shocked face close up', ...base]
     : base;
-  return [...brightBoost, ...antiHud, ...withFaces];
+  return withFillers(withFaces);
 }
 
 /** Exported for unit tests (bright / anti-HUD / nursing query proof). */

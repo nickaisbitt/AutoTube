@@ -30,6 +30,12 @@ describe('score-honesty', () => {
         'would likely make me scroll past within 10-15 seconds',
       ),
     ).toBe(false);
+    expect(
+      hasCriticalQualityIssues(
+        ['Generic stock footage feel'],
+        "While the hook is strong, the video's generic stock footage aesthetic would likely make me scroll past within 3 seconds.",
+      ),
+    ).toBe(false);
     expect(hasCriticalQualityIssues(['AUTO SKIPPED frame on screen'], '')).toBe(true);
 
     const brutal = {

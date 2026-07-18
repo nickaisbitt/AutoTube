@@ -650,6 +650,14 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
   if (isGenericStockJunk(blob, topicBlob)) return true;
+  // Hashtag / TikTok / kids-cartoon titles that slip past URL host filters
+  if (
+    /#fyp|#tiktok|#disney|sofia the first|encerr[oó]|maleta|minecraft|fortnite|roblox|gacha|asmr|mukbang/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
   const lifestyleJunk =
     /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
       blob,

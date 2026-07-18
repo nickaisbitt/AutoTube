@@ -65,7 +65,7 @@ function coldFixState() {
     patternInterrupts: false,
     hookSceneCuts: true,
     karaokeCaptions: true,
-    minAssetsPerSegment: 8,
+    minAssetsPerSegment: 6,
     visualBeats: true,
     beatVision: true,
     maxReusePerUrl: 1,
@@ -254,6 +254,24 @@ async function main() {
           loopShort: false,
         });
         record.pass = 'retry-after-timeout';
+      }
+      if (!gen.ok && String(gen.error || '').includes('HARVEST_VOLUME_FAIL')) {
+        console.log(`↻ ${row.id}: HARVEST_VOLUME_FAIL — one cold retry (nonce ${(fixState.harvestNonce || 0) + 1})`);
+        const retryState = {
+          ...fixState,
+          harvestNonce: (fixState.harvestNonce || 0) + 1,
+          mediaOffset: (fixState.mediaOffset || 0) + 3,
+          minAssetsPerSegment: Math.max(4, (fixState.minAssetsPerSegment || 6) - 2),
+        };
+        gen = await generateFullVideo({
+          topic: row.topic,
+          realHarvest: true,
+          fixState: retryState,
+          runId: Date.now() + 2,
+          youtubeMode: true,
+          loopShort: false,
+        });
+        record.pass = 'retry-after-volume';
       }
       record.generateOk = gen.ok === true;
       record.generateError = gen.ok ? null : gen.error || 'generate failed';

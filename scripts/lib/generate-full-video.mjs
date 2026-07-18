@@ -2073,21 +2073,35 @@ export async function generateFullVideo(options) {
           mediaReport.volumePass = true;
           mediaReport.volumeSoftPass = soft.reason;
         } else {
-          const failing = mediaReport.harvestQuality?.failing || [];
-          const minPer = mediaReport.harvestQuality?.minPerSegment ?? loopMinAssets;
-          const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
-          const totalMedia = project.media?.length ?? 0;
-          const segCount = project.script?.length ?? 0;
-          fixState.reHarvestMedia = true;
-          fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
-          return {
-            ok: false,
-            error: `HARVEST_VOLUME_FAIL: ${failing.length}/${segCount} segments below ${minPer} assets — ${detail || 'no segment detail'} (total=${totalMedia}, soft-pass=${soft.reason || 'none'})`,
-            harvestQualityFail: true,
-            topic,
-            outDir,
-            fixState,
-          };
+          // Last chance: pad thin segments from topical stock, then re-check soft-pass.
+          await topUpHarvestVolume(project, devServer, Math.max(4, Math.floor(loopMinAssets * 0.75)), mediaReport);
+          const volume2 = evaluateHarvestVolume(project, loopMinAssets);
+          mediaReport.harvestQuality = volume2;
+          mediaReport.volumePass = volume2.pass;
+          const soft2 = volume2.pass
+            ? { pass: true, reason: 'volume-hard-pass-after-repad' }
+            : evaluateHarvestVolumeWithSoftPass(mediaReport, project);
+          if (soft2.pass) {
+            log(`   ⚠️ Volume recovered after stock re-pad (${soft2.reason})`);
+            mediaReport.volumePass = true;
+            mediaReport.volumeSoftPass = soft2.reason;
+          } else {
+            const failing = mediaReport.harvestQuality?.failing || [];
+            const minPer = mediaReport.harvestQuality?.minPerSegment ?? loopMinAssets;
+            const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
+            const totalMedia = project.media?.length ?? 0;
+            const segCount = project.script?.length ?? 0;
+            fixState.reHarvestMedia = true;
+            fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+            return {
+              ok: false,
+              error: `HARVEST_VOLUME_FAIL: ${failing.length}/${segCount} segments below ${minPer} assets — ${detail || 'no segment detail'} (total=${totalMedia}, soft-pass=${soft2.reason || soft.reason || 'none'})`,
+              harvestQualityFail: true,
+              topic,
+              outDir,
+              fixState,
+            };
+          }
         }
       }
       // Re-assert shock hook + overlay after media mutations

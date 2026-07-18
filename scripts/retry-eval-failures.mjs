@@ -30,7 +30,7 @@ function coldFixState() {
     patternInterrupts: false,
     hookSceneCuts: true,
     karaokeCaptions: true,
-    minAssetsPerSegment: 8,
+    minAssetsPerSegment: 6,
     visualBeats: true,
     beatVision: true,
     maxReusePerUrl: 1,

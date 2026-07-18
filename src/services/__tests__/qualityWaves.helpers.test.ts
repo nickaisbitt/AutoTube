@@ -136,7 +136,7 @@ describe('quality waves 2–5 helpers', () => {
     expect(merged.some((a) => a.source?.includes('volume top-up'))).toBe(true);
   });
 
-  it('mergeVolumePadding drops off-topic padding when project is passed', async () => {
+  it('mergeVolumePadding drops junk padding when project is passed', async () => {
     process.env.AUTOTUBE_EVAL_COLD = '1';
     const { mergeVolumePadding } = await import('../../../scripts/lib/harvest-quality.mjs');
     const topic = 'How school districts lost student mental-health records to ransomware';
@@ -166,6 +166,51 @@ describe('quality waves 2–5 helpers', () => {
     const merged = mergeVolumePadding([keep], [junk], project);
     expect(merged.some((a) => a.id === 'junk')).toBe(false);
     expect(merged.some((a) => a.id === 'ok')).toBe(true);
+    delete process.env.AUTOTUBE_EVAL_COLD;
+  });
+
+  it('soft-pass-cold-thin allows thin but non-empty cold harvests', async () => {
+    process.env.AUTOTUBE_EVAL_COLD = '1';
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: 'Why rural ambulance GPS routes send crews to demolished houses',
+      script: [
+        { id: 'a', title: 'A' },
+        { id: 'b', title: 'B' },
+        { id: 'c', title: 'C' },
+      ],
+      media: [
+        { segmentId: 'a', type: 'video', url: 'https://x/a1.mp4', alt: 'ambulance' },
+        { segmentId: 'a', type: 'image', url: 'https://x/a2.jpg', alt: 'gps map' },
+        { segmentId: 'b', type: 'video', url: 'https://x/b1.mp4', alt: 'paramedic' },
+        { segmentId: 'b', type: 'image', url: 'https://x/b2.jpg', alt: 'demolished house' },
+        { segmentId: 'b', type: 'image', url: 'https://x/b3.jpg', alt: 'dispatch' },
+        { segmentId: 'c', type: 'video', url: 'https://x/c1.mp4', alt: 'rural road' },
+        { segmentId: 'c', type: 'image', url: 'https://x/c2.jpg', alt: 'crew' },
+        { segmentId: 'c', type: 'image', url: 'https://x/c3.jpg', alt: 'ruins' },
+        { segmentId: 'c', type: 'image', url: 'https://x/c4.jpg', alt: 'house' },
+      ],
+    };
+    const soft = evaluateHarvestVolumeWithSoftPass(
+      {
+        volumePass: false,
+        harvestQuality: {
+          minPerSegment: 6,
+          perSegment: {
+            a: { count: 2 },
+            b: { count: 3 },
+            c: { count: 4 },
+          },
+        },
+        pexelsFetched: 5,
+        videoTopUp: [1, 2, 3],
+      },
+      project,
+    );
+    expect(soft.pass).toBe(true);
+    expect(soft.reason).toMatch(/soft-pass-cold-thin|soft-pass-motion|soft-pass-aggregate/);
     delete process.env.AUTOTUBE_EVAL_COLD;
   });
 

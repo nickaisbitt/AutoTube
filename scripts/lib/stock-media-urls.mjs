@@ -442,6 +442,8 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
     /\b(heist|diamond|jewel|jewelry|vault|airport|museum|robbery|antwerp|smuggl)\b/i.test(blob);
   const isHousing =
     /landlord|tenant|evict|rent|lease|apartment|housing|foreclos/i.test(blob);
+  const isAirline =
+    /airline|cabin[-\s]?pressure|cabin\s*pressure|aircraft|aviation|airplane|cockpit|oxygen\s*mask/i.test(blob);
   if (isHousing && pool === STOCK_VIDEO_POOL && curatedPacksEnabled()) {
     // Prefer curated housing pack when caller passed the main pool (disabled in cold eval)
     return STOCK_HOUSING_VIDEOS;
@@ -450,8 +452,16 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
   if (isCyber) keys.push(...cyberKeys);
   if (isDisaster) keys.push(...disasterKeys);
   if (isHeist) keys.push(...heistKeys);
-  if (!keys.length) return usable;
-  const scored = usable
+  if (isAirline) keys.push('news', 'human', 'city', 'street');
+  // Drop Mixkit office/business pads for non-workplace topics.
+  const workplace = /open.?plan\s*office|coworking|office\s*culture|remote\s*work|startup\s*office/i.test(blob);
+  let filtered = usable;
+  if (!workplace && !isCyber) {
+    filtered = usable.filter((v) => !(v.tags || []).some((t) => /office|business/i.test(t)));
+    if (!filtered.length) filtered = usable;
+  }
+  if (!keys.length) return filtered;
+  const scored = filtered
     .map((v) => {
       const tags = v.tags || [];
       const hit = keys.reduce((n, k) => n + (tags.includes(k) ? 1 : 0), 0);
@@ -461,10 +471,10 @@ export function topicalStockVideos(topicBlob = '', pool = STOCK_VIDEO_POOL) {
   const matched = scored.filter((s) => s.hit > 0).map((s) => s.v);
   if (isCyber && !isDisaster) {
     const cyberOnly = matched.filter((v) => (v.tags || []).some((t) => cyberKeys.includes(t)));
-    return cyberOnly.length ? cyberOnly : matched.length ? matched : usable.filter((v) => /mixkit\.co/i.test(v.url));
+    return cyberOnly.length ? cyberOnly : matched.length ? matched : filtered.filter((v) => /mixkit\.co/i.test(v.url));
   }
   const rest = scored.filter((s) => s.hit === 0).map((s) => s.v);
-  return matched.length ? [...matched, ...rest] : usable;
+  return matched.length ? [...matched, ...rest] : filtered;
 }
 
 /** Pick unique stock URLs rotating by offset (for top-up / mock diversity). */

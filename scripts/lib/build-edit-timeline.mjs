@@ -5,7 +5,7 @@
  * active beat for each time window (narration-aligned semantic placement).
  */
 import { scoreAssetRelevance, isOffBrandVisual, isGenericStockJunk } from './harvest-quality.mjs';
-import { isHousingTopic } from './topic-family.mjs';
+import { isAirlineTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
 
 /**
@@ -144,17 +144,19 @@ export function buildEditTimeline(project, options = {}) {
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
   const MAX_BODY_CUT_SEC = 1.25;
-  // Keep requested cut for pacing. Cap reuse at 2 when the unique pool is thin —
-  // never silently widen to 1.25s (Wave6 pacing trap). Soft anti-reuse across
-  // the whole timeline (not just adjacent) via stronger reusePenalty below.
+  // Keep requested cut for pacing. Prefer unique URLs; hard-cap reuse at 3 even
+  // when allowOverReuse — never 9× the same office pad (Wave7 trap).
+  const HARD_MAX_REUSE = 3;
   let effectiveMaxReuse = maxReusePerUrl;
   if (uniqueVideos.length > 0 && totalDur > 0 && cut > 0) {
     const clipsNeeded = totalDur / Math.min(cut, MAX_BODY_CUT_SEC);
     if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
-      effectiveMaxReuse = Math.min(2, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
+      effectiveMaxReuse = Math.min(HARD_MAX_REUSE, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
     }
   }
   const topicIsHousing = !isEvalColdMode() && isHousingTopic(project.topic || '');
+  const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
+  const topicIsAirline = isAirlineTopic(project.topic || '');
   const coldEval = isEvalColdMode();
   const beatSheet = project.visualBeatSheet;
   const beatsBySeg = new Map();
@@ -210,6 +212,18 @@ export function buildEditTimeline(project, options = {}) {
       let reusePenalty = priorUses > 0 ? -5 * priorUses - Math.max(0, priorUses - 1) * 2 : 0;
       if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (isGenericStockJunk(blob, topicBlob)) return -8;
+      // Hard-ban office/cowork pads on non-workplace stories.
+      if (
+        !topicIsWorkplace
+        && (/office|coworking|open.?plan|imac|boardroom|conference room|corporate office|bright office daylight/i.test(blob)
+          || visualSubjectCluster(a) === 'office')
+      ) {
+        return -20;
+      }
+      if (topicIsAirline && !/airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|runway|jet|passenger|attendant|hangar|airport|pilot|plane|flight/i.test(blob)) {
+        // Soft demote off-story stock on airline topics (faces still ok).
+        if (!/face|person|people|worried|shocked|portrait|close.?up/i.test(blob)) reusePenalty -= 4;
+      }
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|empty park|people in park|press conference|news desk|office desk/i.test(blob)) return -6;
       if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
       if (/microphone|podcast|recording studio|asmr|rode|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -5;
@@ -329,7 +343,8 @@ export function buildEditTimeline(project, options = {}) {
       const activeBeat = beatAtSegmentTime(segBeats, t, duration, seg);
       const diversityScore = (candidate) => {
         let s = scoreAsset(candidate, activeBeat);
-        if (coldEval && !isIntro && !isOutro && lastCluster) {
+        // Soft anti-repeat of the same subject cluster (not just adjacent URL).
+        if (!isIntro && !isOutro && lastCluster) {
           const cluster = visualSubjectCluster(candidate);
           if (cluster === lastCluster && cluster !== 'human' && cluster !== 'other') s -= 4;
         }
@@ -340,7 +355,18 @@ export function buildEditTimeline(project, options = {}) {
         const canUse = (candidate) => {
           const key = urlKey(candidate);
           if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-          if (!allowOverReuse && key && reuseCountFor(key, introOutroReuse) >= maxReuseThisSeg) {
+          const uses = reuseCountFor(key, introOutroReuse);
+          // Never exceed hard max — even as last resort (stops 9× office loops).
+          if (key && uses >= HARD_MAX_REUSE) return false;
+          if (!allowOverReuse && key && uses >= maxReuseThisSeg) {
+            return false;
+          }
+          // Never over-reuse office pads on non-workplace topics.
+          if (
+            !topicIsWorkplace
+            && visualSubjectCluster(candidate) === 'office'
+            && uses >= 1
+          ) {
             return false;
           }
           return true;

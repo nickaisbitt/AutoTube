@@ -679,8 +679,12 @@ export function scoreCandidate(
     if (/\b(night|dark|silhouette|low.?light|underexposed|dimly|shadowy|black background)\b/i.test(meta)) {
       score -= 180;
     }
-    if (/\b(daylight|sunny|bright|well.?lit|office daylight|window light)\b/i.test(meta)) {
+    // Do not boost generic "office daylight" — that injects cowork pads on airline topics.
+    if (/\b(daylight|sunny|bright|well.?lit|window light|cabin daylight|airport|runway)\b/i.test(meta)) {
       score += 80;
+    }
+    if (/\b(office daylight|open.?plan office|coworking|imac desk)\b/i.test(meta) && !/\b(office culture|coworking|remote work)\b/i.test(c.query || '')) {
+      score -= 120;
     }
   }
 

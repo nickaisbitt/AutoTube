@@ -46,6 +46,7 @@ import {
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
 import {
+  isAirlineTopic,
   isBankScamTopic,
   isHealthcareCyberTopic,
   isHealthcareTopic,
@@ -55,6 +56,7 @@ import {
   isNursingHomeTopic,
   isSchoolEducationTopic,
   isVeteransBenefitsTopic,
+  isWorkplaceTopic,
 } from './topic-family.mjs';
 import {
   isScriptComplete,
@@ -671,6 +673,11 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
       blob,
     );
   }
+  if (isAirlineTopic(topicBlob)) {
+    return /airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|runway|jet|passenger|attendant|hangar|airport|pilot|plane|flight|mechanic|fuselage|tarmac/.test(
+      blob,
+    );
+  }
   if (isSchoolEducationTopic(topicBlob)) {
     return /school|student|classroom|teacher|campus|library|counseling|laptop|computer|server|data|cyber|worried|parent|records|phone|document|district/.test(
       blob,
@@ -697,6 +704,15 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
   if (isGenericStockJunk(blob, topicBlob)) return true;
+  // Office/cowork pads are never OK on non-workplace stories (airline, nursing, etc.).
+  if (
+    !isWorkplaceTopic(topicBlob)
+    && /\b(office|coworking|open.?plan|imac|boardroom|conference room|startup office|corporate handshake|bright office daylight)\b/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
   // Junk titles that slip past URL host filters.
   if (
     /#fyp|#tiktok|#disney|sofia the first|encerr[oó]|maleta|minecraft|fortnite|roblox|gacha|asmr|mukbang|\belmo\b|sesame street|muppet|cookie monster|big bird|peppa pig|cocomelon/i.test(
@@ -743,6 +759,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   const school = isSchoolEducationTopic(topicBlob);
   const healthcareCyber = isHealthcareCyberTopic(topicBlob) && cyberTopic;
   const heist = isHeistTopic(topicBlob);
+  const airline = isAirlineTopic(topicBlob);
   const brightBoost = preferBright
     ? nursing
       ? ['bright care home corridor day', 'well lit nursing home hallway', 'daylight elderly care room']
@@ -754,7 +771,11 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
           ? ['bright government office daylight', 'well lit desk paperwork documents', 'daylight veteran portrait worried']
           : healthcareCyber
             ? ['well lit hospital corridor day', 'bright hospital waiting room', 'daylight medical records desk']
-            : ['bright office daylight people', 'sunny window light phone call', 'well lit hospital corridor day']
+            : airline
+              ? ['bright airplane cabin daylight', 'sunny airport runway plane', 'daylight cockpit instruments']
+              : heist
+                ? ['bright airport terminal daylight', 'sunny runway plane exterior', 'daylight security vault door']
+                : ['news interview worried person outdoor', 'sunny city street pedestrians', 'daylight documentary handheld']
     : [];
   // Anti-HUD fillers after topical packs. Avoid "handheld camera" (camcorder loops).
   const antiHud = nursing
@@ -767,9 +788,19 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
         ? ['real veteran portrait worried', 'documentary government office paperwork']
         : healthcareCyber
           ? ['real hospital corridor footage people', 'documentary nurse workstation']
-          : ['news interview worried person', 'city street pedestrians daylight', 'person reading news phone outdoor'];
+          : airline
+            ? ['real airplane cabin passengers daylight', 'documentary airport runway plane']
+            : ['news interview worried person', 'city street pedestrians daylight', 'person reading news phone outdoor'];
   /** Topic + faces first; bright/antiHud only as late fillers. */
   const withFillers = (base) => [...base, ...brightBoost.slice(0, 2), ...antiHud.slice(0, 2)];
+  // Airline: aviation bright fillers only — never append generic office pads.
+  const withAirlineFillers = (base) => [
+    ...base,
+    'bright airplane cabin daylight',
+    'sunny airport runway plane',
+    'daylight cockpit instruments',
+    'real airplane cabin passengers daylight',
+  ];
   // Housing+"AI": avoid podcast-mic / cyber B-roll.
   if (housing) {
     const faces = [
@@ -971,7 +1002,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return withFillers(base);
   }
-  if (/airline|cabin[-\s]?pressure|cabin\s*pressure/i.test(topicBlob)) {
+  if (/airline|cabin[-\s]?pressure|cabin\s*pressure/i.test(topicBlob) || isAirlineTopic(topicBlob)) {
     const faces = [
       'airline passenger oxygen mask worried',
       'pilot cockpit stressed face',
@@ -986,7 +1017,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'maintenance hangar aircraft exterior',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return withFillers(base);
+    return withAirlineFillers(base);
   }
   if (/zoning|flood[-\s]?risk|flood\s*map|neighborhood/i.test(topicBlob)) {
     const faces = [
@@ -1125,6 +1156,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           || isHealthcareCyberTopic(topicBlob)
           || schoolCyber
           || isHeistTopic(topicBlob)
+          || isAirlineTopic(topicBlob)
         )
         && !isCyberRelevantClip(clip, topicBlob)
       ) {
@@ -1226,6 +1258,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const faceScore = (clip) => {
     const blob = `${clip.query || ''} ${clip.alt || ''}`.toLowerCase();
     if (isGenericStockJunk(blob, topicBlob)) return -4;
+    if (
+      !isWorkplaceTopic(topicBlob)
+      && /\b(office|coworking|open.?plan|imac|boardroom|conference room|bright office daylight)\b/i.test(blob)
+    ) {
+      return -20;
+    }
     if (/microphone|podcast|recording studio|asmr|rode|press conference|news desk/i.test(blob)) return -3;
     if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|open plan office|coworking/i.test(blob)) return -4;
     if (

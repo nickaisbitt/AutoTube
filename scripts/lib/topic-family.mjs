@@ -13,6 +13,27 @@ export function isHousingTopic(topic) {
   return /landlord|tenant|evict|rent|lease|apartment|housing|foreclos/i.test(String(topic || ''));
 }
 
+/** Airline / cabin-pressure / aviation investigation stories. */
+export function isAirlineTopic(topic) {
+  const t = String(topic || '').toLowerCase();
+  return (
+    /airline|cabin[-\s]?pressure|cabin\s*pressure|oxygen\s*mask|flight\s*attendant|cockpit/.test(t)
+    || (/\b(aircraft|aviation|airplane|aeroplane)\b/.test(t)
+      && /\b(fail|hid|scandal|cover.?up|pressure|mechanic|safety|crash|incident)\b/.test(t))
+  );
+}
+
+/**
+ * Topic is *about* workplaces (not merely mentioning "company" / "business").
+ * Used to allow office B-roll only when the story is workplace-centric.
+ */
+export function isWorkplaceTopic(topic) {
+  const t = String(topic || '').toLowerCase();
+  return /open.?plan\s*office|coworking|corporate\s*workplace|office\s*culture|remote\s*work|startup\s*office|work.?from.?home|hybrid\s*work|desk\s*job|open\s*office/.test(
+    t,
+  );
+}
+
 /** Staged car-crash / insurance fraud — not grocery loyalty "insurance pricing". */
 export function isInsuranceFraudTopic(topic) {
   const t = String(topic || '').toLowerCase();

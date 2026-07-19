@@ -114,6 +114,14 @@ describe('generic stock junk harvest gate', () => {
       /mic|podcast|press/i,
     );
     expect(isGenericStockJunk('empty podcast studio recording booth empty', nursingTopic)).toBe(true);
+    expect(isGenericStockJunk('bright office daylight people coworking', nursingTopic)).toBe(true);
+    // "company hid reports" must NOT exempt office pads.
+    expect(
+      isGenericStockJunk(
+        'bright office daylight people open plan office',
+        'How a regional airline hid recurring cabin-pressure failures at the company',
+      ),
+    ).toBe(true);
 
     expect(isGenericStockJunk('worried family visiting nursing home', nursingTopic)).toBe(false);
     expect(isGenericStockJunk('security camera cctv hallway nursing home', nursingTopic)).toBe(false);

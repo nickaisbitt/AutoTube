@@ -364,7 +364,37 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   return r.status === 0 && existsSync(clipOut);
 }
 
-/** Last-resort filler — animated grain, never flat purple/blue cards (vision calls those dead air). */
+/** True when a rendered clip is near-black (reads as title-card blink under captions). */
+function clipIsNearBlack(clipPath, { sampleAtSec = 0.15 } = {}) {
+  if (!clipPath || !existsSync(clipPath)) return true;
+  const metaFile = `${clipPath}.yavg.txt`;
+  try {
+    const r = spawnSync(
+      'ffmpeg',
+      [
+        '-v', 'error',
+        '-ss', String(sampleAtSec),
+        '-i', clipPath,
+        '-frames:v', '1',
+        '-vf', 'scale=160:90,signalstats,metadata=print:file=' + metaFile,
+        '-f', 'null',
+        '-',
+      ],
+      { encoding: 'utf8', timeout: 30_000 },
+    );
+    if (r.status !== 0 || !existsSync(metaFile)) return false;
+    const txt = readFileSync(metaFile, 'utf8');
+    const m = txt.match(/lavfi\.signalstats\.YAVG=([0-9.]+)/);
+    try { unlinkSync(metaFile); } catch { /* ignore */ }
+    if (!m) return false;
+    return Number(m[1]) < 28;
+  } catch {
+    try { unlinkSync(metaFile); } catch { /* ignore */ }
+    return false;
+  }
+}
+
+/** Last-resort filler — prefer reuse; grain only if nothing else exists (and never near-black). */
 function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, reusePath = null) {
   if (reusePath && existsSync(reusePath)) {
     const frames = Math.max(1, Math.round(durationSec * FPS));
@@ -377,17 +407,16 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, 
       ],
       { encoding: 'utf8', timeout: 120_000 },
     );
-    if (rReuse.status === 0 && existsSync(clipOut)) return true;
+    if (rReuse.status === 0 && existsSync(clipOut) && !clipIsNearBlack(clipOut)) return true;
   }
-  // Bright mid-tone grain only — dark fillers read as black-screen blinks.
-  // Prefer reusePath above; this path should almost never run once any clip succeeded.
+  // Soft blue-gray motion pad — never pure black/near-black (title-card blinks).
   const r = spawnSync(
     'ffmpeg',
     [
       '-y',
       '-f', 'lavfi',
-      '-i', `color=c=0x8a8a96:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
-      '-vf', `noise=alls=12:allf=t+u,eq=brightness=0.08:contrast=1.05:saturation=0.4`,
+      '-i', `color=c=0x9aa3b2:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
+      '-vf', `noise=alls=10:allf=t+u,eq=brightness=0.12:contrast=1.05:saturation=0.45`,
       '-c:v', 'libx264',
       '-preset', preset,
       '-pix_fmt', 'yuv420p',
@@ -425,7 +454,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   // Only grain fillers count as placeholders.
   let grainPlaceholderCount = 0;
   let reuseClipCount = 0;
-  let lastSuccessfulClipPath = null;
+  let lastSuccessfulClipPath = options.sharedLastGoodRef?.path || null;
   const projectMedia = Array.isArray(project?.media) ? project.media : [];
   const videoOffsets = new Map();
   const videoDurations = new Map();
@@ -460,6 +489,11 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       let ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
         w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, zoomPunch,
       });
+      if (ok && clipIsNearBlack(clipOut)) {
+        console.log(`  [ffmpeg] ${label}: ${tag} near-black — rejecting`);
+        try { unlinkSync(clipOut); } catch { /* ignore */ }
+        ok = false;
+      }
       if (!ok) {
         const thumb = resolvedAsset.thumbnailUrl;
         if (thumb) {
@@ -469,6 +503,10 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
             ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
               w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1, zoomPunch,
             });
+            if (ok && clipIsNearBlack(clipOut)) {
+              try { unlinkSync(clipOut); } catch { /* ignore */ }
+              ok = false;
+            }
             if (ok) console.log(`  [ffmpeg] ${label}: ${tag} → thumbnail still`);
           }
         }
@@ -508,8 +546,10 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     }
     if (!ok) {
       // Reuse last good clip with zoom before inventing grain (kills black blinks).
+      const sharedGood = options.sharedLastGoodClipPath;
       const reuseCandidates = [
         lastSuccessfulClipPath,
+        sharedGood,
         ...[...clipPaths].reverse(),
       ].filter((p, i, arr) => p && existsSync(p) && arr.indexOf(p) === i);
       for (const reusePath of reuseCandidates) {
@@ -522,6 +562,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       }
     }
     if (!ok) {
+      // Only invent grain when we have literally nothing to reuse.
       console.log(`  [ffmpeg] ${label}: bright grain placeholder — no usable asset`);
       ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, null);
       if (ok) grainPlaceholderCount += 1;
@@ -530,6 +571,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       return false;
     }
     lastSuccessfulClipPath = clipOut;
+    if (options.sharedLastGoodRef) options.sharedLastGoodRef.path = clipOut;
     clipPaths.push(clipOut);
     renderedDuration += durationSec;
     return true;
@@ -612,6 +654,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const preset = ffmpegPreset();
 
   const mediaPool = project.media || [];
+  const sharedLastGoodRef = { path: null };
 
   for (let si = 0; si < (project.script || []).length; si++) {
     const seg = project.script[si];
@@ -624,7 +667,11 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     console.log(`  [ffmpeg] segment ${si + 1}/${project.script.length}: ${seg.title} (${(seg.duration || 0).toFixed(1)}s)`);
     const segOut = join(workDir, `segment-${si}.mp4`);
     const isHookSegment = si === 0 || seg.type === 'intro';
-    const result = await renderSegmentClips(seg, segMedia, project, segOut, options, { isHookSegment });
+    const result = await renderSegmentClips(seg, segMedia, project, segOut, {
+      ...options,
+      sharedLastGoodClipPath: sharedLastGoodRef.path,
+      sharedLastGoodRef,
+    }, { isHookSegment });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };
     }

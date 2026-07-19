@@ -1,7 +1,7 @@
 /**
  * Harvest quality gates: topic/segment relevance + per-segment volume.
  */
-import { isHeistTopic, isHousingTopic, isNursingHomeTopic } from './topic-family.mjs';
+import { isHeistTopic, isHousingTopic, isNursingHomeTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
 
 const STOP_WORDS = new Set([
@@ -64,7 +64,7 @@ export const CAMCORDER_STOCK_LOOP_RE =
 
 /** Generic corporate / architecture filler for serious investigation topics. */
 export const GENERIC_CORPORATE_FILLER_RE =
-  /\b(corporate handshake|team meeting smiling|empty office|business people walking|stock footage loop|generic corporate|open plan office|glass building skyline|architecture model|architectural model|scale model|conference room|office meeting|skyline timelapse|press conference|news desk|talking head office|office desk laptop|business handshake|coworkers laughing|modern office interior|coworking space|boardroom|executive desk|city office window)\b/i;
+  /\b(corporate handshake|team meeting smiling|empty office|business people walking|stock footage loop|generic corporate|open plan office|open-?plan|glass building skyline|architecture model|architectural model|scale model|conference room|office meeting|skyline timelapse|press conference|news desk|talking head office|office desk laptop|business handshake|coworkers laughing|modern office interior|coworking(?:\s+space)?|boardroom|executive desk|city office window|imac|people working at desks?|office interior|coworking desk|startup office|bright office daylight)\b/i;
 
 /** Press / mic / podcast pads that read as generic explainer stock. */
 export const PRESS_MIC_PODCAST_FILLER_RE =
@@ -131,7 +131,7 @@ export function genericStockJunkReason(haystack, contextText = '') {
       return 'empty/blurry hospital bed for nursing';
     }
   }
-  if (GENERIC_CORPORATE_FILLER_RE.test(h) && !/\b(office|corporate|business|company|startup)\b/i.test(ctx)) {
+  if (GENERIC_CORPORATE_FILLER_RE.test(h) && !isWorkplaceTopic(ctx)) {
     return 'generic corporate/architecture filler';
   }
   if (

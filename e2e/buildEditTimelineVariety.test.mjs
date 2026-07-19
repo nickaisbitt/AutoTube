@@ -21,8 +21,8 @@ describe('buildEditTimeline — anti-repetition', () => {
     // HARD_MAX_REUSE_CEIL=6 — never climb to 9–12× on a thin pool.
     expect(Math.max(...Object.values(uses))).toBeLessThanOrEqual(6);
     const spans = tl.map((e) => e.endSec - e.startSec);
-    // May lengthen up to MAX_BODY_CUT_SEC (1.25) when unique pool is thin.
-    expect(Math.max(...spans)).toBeLessThanOrEqual(1.26);
+    // May lengthen up to MAX_BODY_CUT_THIN_SEC (2.0) when unique pool is thin.
+    expect(Math.max(...spans)).toBeLessThanOrEqual(2.01);
     expect(Math.max(...tl.map((e) => e.endSec))).toBeGreaterThanOrEqual(39.5);
   });
 

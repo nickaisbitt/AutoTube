@@ -144,8 +144,9 @@ export function buildEditTimeline(project, options = {}) {
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
   const MAX_BODY_CUT_SEC = 1.25;
+  const MAX_BODY_CUT_THIN_SEC = 2.0;
   // Keep requested cut for pacing. Dynamic hard-cap: at least 3, at most 6 —
-  // never climb to 9–12×, and never create 20s+ holds by extending one clip.
+  // never climb to 9–12×. Thin pools lengthen cuts up to 2s instead.
   const HARD_MAX_REUSE_FLOOR = 3;
   const HARD_MAX_REUSE_CEIL = 6;
   let effectiveMaxReuse = maxReusePerUrl;
@@ -162,8 +163,8 @@ export function buildEditTimeline(project, options = {}) {
       effectiveMaxReuse = Math.min(hardMaxReuse, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
     }
     const maxSlots = uniqueVideos.length * hardMaxReuse;
-    if (clipsNeeded > maxSlots) {
-      effectiveCut = Math.min(MAX_BODY_CUT_SEC, Math.max(cut, totalDur / maxSlots));
+    if (totalDur / Math.min(effectiveCut, MAX_BODY_CUT_SEC) > maxSlots) {
+      effectiveCut = Math.min(MAX_BODY_CUT_THIN_SEC, Math.max(cut, totalDur / maxSlots));
     }
   } else {
     hardMaxReuse = HARD_MAX_REUSE_CEIL;
@@ -445,13 +446,17 @@ export function buildEditTimeline(project, options = {}) {
         attempts += 1;
       }
       if (!asset) {
-        // Absolute last resort: least-used under hardMax (or least-used overall if
-        // every URL is capped — should be rare after adaptive cut).
+        // Absolute last resort under hardMax only; if capped, lengthen prior cut.
         const pool = [...ordered, ...globalPool];
         const ranked = pool
           .filter((c) => c && c.id !== lastAssetId && urlKey(c) !== lastUrl)
           .sort((a, b) => reuseCountFor(urlKey(a), isIntro || isOutro) - reuseCountFor(urlKey(b), isIntro || isOutro));
-        asset = ranked.find((c) => reuseCountFor(urlKey(c), isIntro || isOutro) < hardMaxReuse) || ranked[0] || null;
+        asset = ranked.find((c) => reuseCountFor(urlKey(c), isIntro || isOutro) < hardMaxReuse) || null;
+        if (!asset && entries.length && entries[entries.length - 1].segmentId === seg.id) {
+          entries[entries.length - 1].endSec = end;
+          t = end;
+          continue;
+        }
       }
       if (!asset) continue;
       entries.push({

@@ -82,7 +82,7 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
   it('prefers the spoken shock hook on generic topics (not keyword salad)', () => {
     const hook = 'Millions of passwords leaked before anyone noticed the breach.';
     const overlay = buildShortHookOverlay('massive password breach exposes millions', hook);
-    expect(overlay).toBe('MILLIONS OF PASSWORDS LEAKED BEFORE ANYONE NOTICED');
+    expect(overlay).toBe('BEFORE ANYONE NOTICED THE BREACH');
     expect(overlay).not.toMatch(/^URGENT:/);
   });
 
@@ -145,7 +145,17 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
   it('routes airline cabin-pressure to stakes overlay', () => {
     expect(
       buildShortHookOverlay('How a regional airline hid recurring cabin-pressure failures', ''),
-    ).toBe('THE CABIN KEPT FAILING');
+    ).toBe('WHY DID THE CABIN KEEP FAILING?');
+  });
+
+  it('uses the airline narration question without leaking instructions', () => {
+    const hook = 'The cabin kept losing pressure — and they hid every report.';
+    expect(
+      buildShortHookOverlay('How a regional airline hid recurring cabin-pressure failures', hook),
+    ).toBe('WHY DID THE CABIN KEEP FAILING?');
+    expect(
+      buildShortHookOverlay('obscure municipal widget scandal', 'Rewrite line 1 as: Who got paid?'),
+    ).not.toMatch(/REWRITE|LINE/);
   });
 
   it('routes indie cloud lockout to stakes overlay', () => {

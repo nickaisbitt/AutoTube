@@ -100,6 +100,34 @@ function isGenericTemplateHook(hookLine) {
   );
 }
 
+function buildTensionOverlayFromHook(hookLine) {
+  const spoken = (hookLine || '').trim();
+  if (spoken.length < 12 || isInstructionOverlay(spoken) || isGenericTemplateHook(spoken)) return null;
+
+  const firstSentence = (spoken.match(/^[^.!?]+[.!?]?/)?.[0] || spoken)
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s"'“”]+|[\s"'“”]+$/g, '')
+    .trim();
+  if (!firstSentence || isInstructionOverlay(firstSentence)) return null;
+
+  if (/^(why|how|what|who|when|where|did|does|could|would|will|can)\b/i.test(firstSentence)) {
+    return firstSentence.endsWith('?') ? firstSentence : `${firstSentence}?`;
+  }
+
+  const cabinPressure = /\bcabin\b.*\b(pressure|fail|failing|losing)\b|\bpressure\b.*\bcabin\b/i;
+  if (cabinPressure.test(firstSentence)) {
+    return 'Why did the cabin keep failing?';
+  }
+
+  const bridge = firstSentence.match(/\b(before|until|while|after)\b\s+(.+)$/i);
+  if (bridge?.[0]) return bridge[0];
+
+  const concealed = firstSentence.match(/\b(?:they|officials|executives|the\s+\w+|a\s+\w+)\s+(?:hid|buried|erased|withheld|ignored|covered\s+up)\b\s+(.+)$/i);
+  if (concealed?.[0]) return concealed[0];
+
+  return null;
+}
+
 /** Urgent 4–8 word on-screen hook for watcher 0–3s frame audit. */
 export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const maxWords = 8;
@@ -114,7 +142,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   const clampWords = (text) => {
     const words = (text || '')
       .toUpperCase()
-      .replace(/[^A-Z0-9\s:$%]/g, ' ')
+      .replace(/[^A-Z0-9\s:$%?]/g, ' ')
       .split(/\s+/)
       .filter(Boolean);
     const clamped = trimDanglingTail(words.slice(0, maxWords));
@@ -140,7 +168,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     return clampWords('THIS WARNING CAME TOO LATE');
   }
   if (/airline|cabin[-\s]?pressure|cabin\s*pressure/i.test(t)) {
-    return clampWords('THE CABIN KEPT FAILING');
+    return clampWords(buildTensionOverlayFromHook(hookLine) || 'WHY DID THE CABIN KEEP FAILING?');
   }
   if (/indie\s*game|source\s*code|cloud\s*lockout/i.test(t)) {
     return clampWords('THEIR SOURCE CODE VANISHED');
@@ -259,7 +287,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
 
   const spoken = (hookLine || '').trim();
   if (spoken.length >= 12 && !isInstructionOverlay(spoken) && !isGenericTemplateHook(spoken)) {
-    return clampWords(spoken);
+    return clampWords(buildTensionOverlayFromHook(spoken) || spoken);
   }
 
   if (/whistle|expose|leak|cover|hidden|secret|erase/i.test(t)) {

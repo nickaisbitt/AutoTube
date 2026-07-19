@@ -669,6 +669,30 @@ export function scoreCandidate(
     }
   }
 
+  // 8b3. Airline/aviation hooks need human stakes, not branded aircraft wallpaper.
+  const airlineTopic = /\b(airline|aviation|airport|aircraft|flight|cabin[-\s]?pressure|cabin\s*pressure)\b/i.test(topicLower);
+  if (airlineTopic) {
+    const airlineMeta = `${meta} ${c.query || ''} ${c.source || ''}`.toLowerCase();
+    const regionalTopic = /\b(regional|commuter|local|domestic|small\s+airline)\b/i.test(topicLower);
+
+    if (/\b(face|faces|passenger|passengers|traveler|traveller|pilot|flight attendant|cabin crew|oxygen|oxygen mask|worried|anxious|concerned|reaction)\b/i.test(airlineMeta)) {
+      score += 240;
+    }
+    if (/\b(hangar|maintenance|inspection|paperwork|documents?|report|safety report|clipboard|aircraft mechanic)\b/i.test(airlineMeta)) {
+      score += 170;
+    }
+
+    if (/\b(emirates|wizz|qatar|lufthansa)\b/i.test(airlineMeta)) {
+      score -= regionalTopic ? 420 : 260;
+    }
+    if (/\b(airline\s+logo|logo\s+close[-\s]?up|close[-\s]?up\s+of\s+.*logo|tail\s+logo|brand\s+logo|branded\s+livery)\b/i.test(airlineMeta)) {
+      score -= 320;
+    }
+    if (/\b(back\s+of\s+head|rear\s+view|from\s+behind|tourist|selfie|spotter|behind\s+fence|chain[-\s]?link\s+fence|observation\s+deck|corporate|office|conference\s+room|business\s+meeting|desk|stock\s+office)\b/i.test(airlineMeta)) {
+      score -= 260;
+    }
+  }
+
   // 8c. Prefer bright B-roll when loop flagged muddy/dark frames
   const preferBright =
     (typeof sessionStorage !== 'undefined'

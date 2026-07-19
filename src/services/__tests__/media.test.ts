@@ -207,6 +207,52 @@ describe('scoreCandidate', () => {
     // Total Wikimedia bonus over baseline: +80 (authority) + 100 (licensed source) = 180
     expect(wikiScore - baselineScore).toBe(180);
   });
+
+  it('promotes face-first airline stakes over branded logo close-ups', () => {
+    const aviationTopic: TopicContext = {
+      ...baseTopicContext,
+      topic: 'How a regional airline hid recurring cabin-pressure failures',
+      resolvedTitle: 'How a regional airline hid recurring cabin-pressure failures',
+    };
+    const query = 'regional airline cabin pressure';
+    const passenger: MediaCandidate = {
+      ...baseCandidate,
+      alt: 'worried passenger face wearing oxygen mask inside aircraft cabin',
+      query,
+      sourceUrl: undefined,
+    };
+    const brandedLogo: MediaCandidate = {
+      ...baseCandidate,
+      alt: 'Qatar Airways airline logo close-up on aircraft tail',
+      query,
+      sourceUrl: undefined,
+    };
+
+    expect(scoreCandidate(passenger, aviationTopic) - scoreCandidate(brandedLogo, aviationTopic)).toBeGreaterThan(500);
+  });
+
+  it('demotes corporate aviation stock below hangar paperwork stakes', () => {
+    const aviationTopic: TopicContext = {
+      ...baseTopicContext,
+      topic: 'Aviation safety reports at a regional airline',
+      resolvedTitle: 'Aviation safety reports at a regional airline',
+    };
+    const query = 'aviation safety report';
+    const paperwork: MediaCandidate = {
+      ...baseCandidate,
+      alt: 'airline safety report paperwork on clipboard inside aircraft hangar',
+      query,
+      sourceUrl: undefined,
+    };
+    const corporate: MediaCandidate = {
+      ...baseCandidate,
+      alt: 'corporate office business meeting about airline brand strategy',
+      query,
+      sourceUrl: undefined,
+    };
+
+    expect(scoreCandidate(paperwork, aviationTopic)).toBeGreaterThan(scoreCandidate(corporate, aviationTopic));
+  });
 });
 
 // ---------------------------------------------------------------------------

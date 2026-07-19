@@ -73,12 +73,16 @@ export function resolveTopicFamily(topic: string): string {
 /** @type {Record<string, string[]>} */
 export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
   airline: [
+    'airplane cabin passenger face worried',
+    'pilot cockpit headset face close-up',
+    'flight attendant airplane cabin face',
+    'passenger oxygen mask airplane cabin',
     'oxygen mask deploy airplane cabin',
     'maintenance hangar night aircraft',
     'mechanic tools aircraft hangar',
-    'FAA report paperwork close-up',
     'cabin pressure gauge cockpit',
     'airplane cabin passengers daylight',
+    'airport runway plane takeoff',
   ],
   nursing_abuse: [
     'security camera cctv hallway corridor',

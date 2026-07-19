@@ -30,6 +30,11 @@ import { computePaletteBonus } from './qualityValidation/colorPalette';
 import { computeImageAHash, isSimilarToAny } from './perceptualHash';
 import { scoreCandidateAgainstBeat, rankCandidatesWithBeatVision, BEAT_VISION_MAX_PER_SEGMENT } from './beatRelevance';
 import type { VisualBeat } from './visualBeatSheet';
+import {
+  isSafeStockProviderQuery,
+  resolveTopicFamily,
+  stockProviderQueriesForTopic,
+} from './topicFamilyQueries';
 
 function isLoopFastMode(): boolean {
   return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
@@ -2240,6 +2245,20 @@ async function pickDistinctShotCandidate(
 
 function buildSpecificQuery(baseQuery: string, topicContext: TopicContext): string {
   const topic = topicContext.topic || topicContext.coreSubject || '';
+  const family = resolveTopicFamily(topic);
+
+  // Airline cabin-pressure: never append the full topic essay / rocket "flight" modifiers.
+  // Long "Captain Chen … How a regional airline…" queries return mailboxes & random pads.
+  if (family === 'airline') {
+    const base = String(baseQuery || '').trim().replace(/\s+/g, ' ');
+    if (isSafeStockProviderQuery(base)) return base;
+    const safe = stockProviderQueriesForTopic(topic, 10);
+    if (!safe.length) return 'airplane cabin passengers daylight';
+    let hash = 0;
+    for (let i = 0; i < base.length; i += 1) hash = (hash + base.charCodeAt(i) * (i + 1)) % 997;
+    return safe[hash % safe.length];
+  }
+
   let query = baseQuery;
   if (topic) {
     const baseLower = baseQuery.toLowerCase();
@@ -2251,7 +2270,13 @@ function buildSpecificQuery(baseQuery: string, topicContext: TopicContext): stri
 
   // A+++ Strategy: Automatically append high-fidelity B-roll modifiers to search queries for key themes
   const qLower = query.toLowerCase();
-  if (qLower.includes('launch') || qLower.includes('rocket') || qLower.includes('spacex') || qLower.includes('starship') || qLower.includes('flight')) {
+  // Do NOT match bare "flight" — that turns airline cabin stories into rocket launch scrapes.
+  if (
+    qLower.includes('launch')
+    || qLower.includes('rocket')
+    || qLower.includes('spacex')
+    || qLower.includes('starship')
+  ) {
     query += ' launch footage archive';
   } else if (qLower.includes('presentation') || qLower.includes('ceo') || qLower.includes('keynote') || qLower.includes('unveil') || qLower.includes('office')) {
     query += ' keynote event stage';

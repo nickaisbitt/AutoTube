@@ -266,8 +266,14 @@ export function buildEditTimeline(project, options = {}) {
     const segBeats = beatsBySeg.get(seg.id) || [];
     const reuseCountFor = (key, introOutroOnly) => {
       if (!key) return 0;
-      if (introOutroOnly) return segmentUrlUse.get(key) || 0;
-      return urlUseCount.get(key) || 0;
+      // Always enforce the global cap. Intro/outro also track per-segment uses
+      // so a clip cannot burn the whole hardMax inside one bookend segment —
+      // but never ignore global uses (that previously allowed 3×3 = 9–12 reuse).
+      const globalUses = urlUseCount.get(key) || 0;
+      if (introOutroOnly) {
+        return Math.max(globalUses, segmentUrlUse.get(key) || 0);
+      }
+      return globalUses;
     };
     const scoreAsset = (a, activeBeat = null) => {
       const blob = assetBlob(a);
@@ -550,10 +556,10 @@ export function buildEditTimeline(project, options = {}) {
         if (recentTimelineUrls.length > RECENT_URL_WINDOW) recentTimelineUrls.shift();
       }
       if (lastUrl) {
+        // Always count globally so hardMax is timeline-wide, not per-segment.
+        urlUseCount.set(lastUrl, (urlUseCount.get(lastUrl) || 0) + 1);
         if (isIntro || isOutro) {
           segmentUrlUse.set(lastUrl, (segmentUrlUse.get(lastUrl) || 0) + 1);
-        } else {
-          urlUseCount.set(lastUrl, (urlUseCount.get(lastUrl) || 0) + 1);
         }
       }
       t = end;

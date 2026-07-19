@@ -672,6 +672,15 @@ const AIRLINE_MEGA_CARRIER_PATTERNS = [
   /\bqatar\s*airways\b|\bqatar\b/i,
   /\blufthansa\b/i,
   /\bryan\s*air\b|\bryanair\b/i,
+  /\bunited\s*airlines?\b|\bunited-airlines\b/i,
+  /\bdelta\s*air\b|\bdelta-airlines\b/i,
+  /\bamerican\s*airlines?\b/i,
+  /\bbritish\s*airways\b/i,
+  /\bair\s*france\b/i,
+  /\bk\s*l\s*m\b|\bklm\b/i,
+  /\beasyjet\b|\beasy\s*jet\b/i,
+  /\bsouthwest\s*airlines?\b/i,
+  /\bjetblue\b/i,
 ];
 
 function mentionsMegaCarrier(blob = '') {

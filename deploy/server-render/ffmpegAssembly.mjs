@@ -104,32 +104,7 @@ function patternInterruptsEnabled() {
   if (process.env.AUTOTUBE_PATTERN_INTERRUPTS === '1' || process.env.AUTOTUBE_PATTERN_INTERRUPTS === 'true') {
     return true;
   }
-  return (
-    process.env.AUTOTUBE_YOUTUBE_MODE === '1'
-    || process.env.AUTOTUBE_YOUTUBE_MODE === 'true'
-    || process.env.AUTOTUBE_LOOP_MODE === '1'
-    || process.env.AUTOTUBE_LOOP_MODE === 'true'
-  );
-}
-
-/** Short white flash cut for retention pattern interrupts (canvas path equivalent). */
-function encodeFlashClip(clipOut, durationSec, { w, h, preset }) {
-  const frames = Math.max(1, Math.round(durationSec * FPS));
-  const r = spawnSync(
-    'ffmpeg',
-    [
-      '-y', '-f', 'lavfi', '-i', `color=c=white:s=${w}x${h}:d=${durationSec}:r=${FPS}`,
-      '-frames:v', String(frames),
-      '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p', '-an', clipOut,
-    ],
-    { encoding: 'utf8', timeout: 60_000 },
-  );
-  return r.status === 0 && existsSync(clipOut);
-}
-
-/** 0.06–0.08s — sub-second only; longer solid white reads as dead air in scene QA. */
-function flashClipDurationSec(clipIndex) {
-  return 0.06 + (clipIndex % 3) * 0.01;
+  return false;
 }
 
 function hookSceneCutsEnabled() {
@@ -137,14 +112,9 @@ function hookSceneCutsEnabled() {
     || process.env.AUTOTUBE_HOOK_SCENE_CUTS === 'true';
 }
 
-/** Flash only when explicitly opted in — hookSceneCuts uses zoom-punch instead (no blinks). */
-function shouldInsertFlashBetweenClips(clipIndex, timeAtCutSec, sameAsset, { isHookSegment = false, scheduleIndex = 0 } = {}) {
-  if (process.env.AUTOTUBE_FLASH_INTERRUPTS !== '1' && process.env.AUTOTUBE_FLASH_INTERRUPTS !== 'true') {
-    return false;
-  }
-  if (!patternInterruptsEnabled() || sameAsset) return false;
-  const opener = timeAtCutSec < 15 || clipIndex < 3;
-  return opener || clipIndex % 2 === 0;
+function shouldApplyHookZoomPunch(scheduleIndex) {
+  const cutNumber = scheduleIndex + 1;
+  return cutNumber % 9 === 4 || cutNumber % 9 === 0;
 }
 
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
@@ -313,7 +283,7 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
   if (zoomPunch && frames > 2) {
     // Pattern interrupt without blank flash frames.
-    vf = `scale=${Math.round(w * 1.25)}:${Math.round(h * 1.25)},zoompan=z='1.25-0.25*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`;
+    vf = `scale=${Math.round(w * 1.12)}:${Math.round(h * 1.12)},zoompan=z='1.12-0.12*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`;
   } else if (!isVideo && hardCuts) {
     const drift = 0.08 + (clipIndex % 5) * 0.02;
     vf = `zoompan=z='min(zoom+${drift.toFixed(3)},1.12)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
@@ -534,24 +504,12 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    // Zoom-punch forces cuts when similar B-roll would merge (hookSceneCuts path).
+    // Hook-only pattern interrupt: occasional mild punch, no blink/blank frames.
     const zoomPunch =
-      (patternInterruptsEnabled() || hookSceneCutsEnabled()) && (i < 3 || i % 2 === 0);
+      isHookSegment
+      && (patternInterruptsEnabled() || hookSceneCutsEnabled())
+      && shouldApplyHookZoomPunch(i);
     await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0, { zoomPunch });
-
-    const next = schedule[i + 1];
-    if (next) {
-      const sameAsset = assetKey(asset) === assetKey(next.asset);
-      const timeAtCut = renderedDuration;
-      if (shouldInsertFlashBetweenClips(clipIndex, timeAtCut, sameAsset, { isHookSegment, scheduleIndex: i })) {
-        const flashDur = flashClipDurationSec(clipIndex);
-        const flashOut = join(tmpDir, `flash-${String(clipIndex).padStart(3, '0')}.mp4`);
-        if (encodeFlashClip(flashOut, flashDur, { w, h, preset })) {
-          clipPaths.push(flashOut);
-          renderedDuration += flashDur;
-        }
-      }
-    }
   }
 
   let fillerRound = 0;

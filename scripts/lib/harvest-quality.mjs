@@ -1,7 +1,7 @@
 /**
  * Harvest quality gates: topic/segment relevance + per-segment volume.
  */
-import { isHeistTopic, isHousingTopic, isNursingHomeTopic, isWorkplaceTopic } from './topic-family.mjs';
+import { isCovidTopic, isHeistTopic, isHousingTopic, isNursingHomeTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
 
 const STOP_WORDS = new Set([
@@ -41,6 +41,10 @@ export const OFF_BRAND_VISUAL_RE =
 /** Blurry / soft-focus stock. */
 export const BLURRY_LOW_QUALITY_RE =
   /\b(blurry|out of focus|out-of-focus|defocused|soft focus|low.?res|pixelat|grainy|unfocused)\b/i;
+
+/** Grainy found-footage aesthetics that fight clean captions. */
+export const FOUND_FOOTAGE_AESTHETIC_RE =
+  /\b(found[\s-]?footage|vhs|film grain|heavy grain|noisy footage|lo-?fi video|retro camcorder aesthetic)\b/i;
 
 /** Washed-out / overexposed stock. */
 export const OVEREXPOSED_STOCK_RE =
@@ -94,6 +98,29 @@ export const PORT_FERRY_LOOP_RE =
 export const CAMERA_PHONE_LOOP_RE =
   /\b(person filming with phone|filming with smartphone|holding phone recording|camera on tripod generic|dslr camera close up)\b/i;
 
+/** Monochrome stock unless the topic explicitly asks for it. */
+export const MONOCHROME_STOCK_RE =
+  /\b(black[\s-]+and[\s-]+white|b\s*[&/]\s*w|monochrome|gr[ae]yscale)\b/i;
+
+/** Airline life-vest demos read as overused safety-card filler. */
+export const AIRLINE_SAFETY_DEMO_STOCK_RE =
+  /\b(life\s*(?:vest|jacket)\s*(?:demo|demonstration|safety|instruction|tutorial)|safety\s+demonstration\s+(?:vest|life\s*(?:vest|jacket))|flight\s+attendants?\s+(?:wearing\s+)?life\s*(?:vest|jacket)|life\s*(?:vest|jacket).{0,40}(?:flight\s+attendant|cabin\s+crew|safety\s+demo))\b/i;
+
+/** Metadata that admits generated/warped people or gibberish icons. */
+export const AI_LOOKING_STOCK_RE =
+  /\b(ai[\s-]?(?:generated|looking)|generated\s+by\s+ai|synthetic\s+(?:face|faces|person|people|human|humans)|uncanny\s+valley|deepfake[\s-]?(?:ish|style|looking)|melted\s+faces?|warped\s+faces?|distorted\s+faces?|deformed\s+faces?|gibberish\s+(?:vest\s+)?(?:icon|icons|text|logo|patch|symbols?)|nonsense\s+(?:text|logo|icon|icons|patch|symbols?)|fake\s+(?:face|faces|human|person|people))\b/i;
+
+/** Overused COVID masked passenger loops outside COVID stories. */
+export const COVID_MASKED_CABIN_COUPLE_RE =
+  /\b(?=.*\b(covid(?:-?19)?|coronavirus|pandemic)\b)(?=.*\bmask(?:ed|s|ing)?\b)(?=.*\b(?:airplane|aircraft|plane|flight|cabin)\b)(?=.*\b(?:couple|passengers?|travellers?|travelers?)\b).+/i;
+
+/** Dark airplane-window vignettes that usually become dead opener stock. */
+export const AIRPLANE_CABIN_WINDOW_RE =
+  /\b((?:airplane|aircraft|plane|flight|cabin)\s+window|window\s+(?:seat|view).{0,80}(?:airplane|aircraft|plane|flight|cabin)|(?:airplane|aircraft|plane|flight|cabin).{0,80}window\s+(?:seat|view)?)\b/i;
+
+export const DARK_WINDOW_TONE_RE =
+  /\b(night|dark|silhouette|black|shadowy|dim(?:ly)? lit|low light)\b/i;
+
 /**
  * @param {string} haystack
  * @param {string} contextText
@@ -104,8 +131,20 @@ export function genericStockJunkReason(haystack, contextText = '') {
   const ctx = String(contextText || '').toLowerCase();
   if (!h.trim()) return null;
 
+  if (FOUND_FOOTAGE_AESTHETIC_RE.test(h)) return 'grainy/found-footage stock';
   if (BLURRY_LOW_QUALITY_RE.test(h)) return 'blurry/low-quality stock';
   if (OVEREXPOSED_STOCK_RE.test(h)) return 'overexposed/washed-out stock';
+  if (AI_LOOKING_STOCK_RE.test(h)) return 'AI-looking/deepfake-ish stock';
+  if (AIRLINE_SAFETY_DEMO_STOCK_RE.test(h)) return 'generic life-vest/safety-demo stock';
+  if (AIRPLANE_CABIN_WINDOW_RE.test(h) && DARK_WINDOW_TONE_RE.test(h)) {
+    return 'dark airplane/cabin-window stock';
+  }
+  if (MONOCHROME_STOCK_RE.test(h) && !MONOCHROME_STOCK_RE.test(ctx)) {
+    return 'black-and-white/monochrome stock';
+  }
+  if (COVID_MASKED_CABIN_COUPLE_RE.test(h) && !isCovidTopic(ctx)) {
+    return 'overused COVID masked airplane-cabin passenger stock';
+  }
   if (STAGED_REENACT_RE.test(h) && !/\b(staged|reenact)/i.test(ctx)) {
     return 'staged reenactment stock';
   }

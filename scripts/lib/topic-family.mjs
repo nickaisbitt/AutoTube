@@ -23,6 +23,13 @@ export function isAirlineTopic(topic) {
   );
 }
 
+/** COVID / pandemic topics where masked-cabin footage can be motivated. */
+export function isCovidTopic(topic) {
+  return /\b(covid(?:-?19)?|coronavirus|pandemic|sars[-\s]?cov[-\s]?2|mask mandate|quarantine)\b/i.test(
+    String(topic || ''),
+  );
+}
+
 /**
  * Topic is *about* workplaces (not merely mentioning "company" / "business").
  * Used to allow office B-roll only when the story is workplace-centric.

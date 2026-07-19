@@ -85,6 +85,89 @@ describe('off-brand visual harvest gate', () => {
 describe('generic stock junk harvest gate', () => {
   const nursingTopic = 'The nursing home cameras that recorded abuse for years';
 
+  it('rejects B&W life-vest demos and dark cabin-window stock for airline topics', async () => {
+    const {
+      AIRPLANE_CABIN_WINDOW_RE,
+      AIRLINE_SAFETY_DEMO_STOCK_RE,
+      DARK_WINDOW_TONE_RE,
+      MONOCHROME_STOCK_RE,
+      filterAssetsByRelevance,
+      genericStockJunkReason,
+      isGenericStockJunk,
+    } = await import('../../../scripts/lib/harvest-quality.mjs');
+
+    const airlineTopic = 'How a regional airline hid recurring cabin-pressure failures';
+    expect(MONOCHROME_STOCK_RE.test('black and white flight attendants')).toBe(true);
+    expect(AIRLINE_SAFETY_DEMO_STOCK_RE.test('flight attendant life vest demo')).toBe(true);
+    expect(AIRPLANE_CABIN_WINDOW_RE.test('airplane cabin window view')).toBe(true);
+    expect(DARK_WINDOW_TONE_RE.test('dark night silhouette')).toBe(true);
+
+    expect(
+      genericStockJunkReason('black and white flight attendant life vest demo', airlineTopic),
+    ).toMatch(/life-vest|safety-demo/i);
+    expect(genericStockJunkReason('black and white airline cabin b-roll', airlineTopic)).toMatch(
+      /black-and-white|monochrome/i,
+    );
+    expect(genericStockJunkReason('airplane cabin window dark night silhouette', airlineTopic)).toMatch(
+      /dark.*window/i,
+    );
+    expect(isGenericStockJunk('covid masked couple passengers in airplane cabin', airlineTopic)).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'covid masked couple passengers in airplane cabin',
+        'COVID mask mandate changed airline cabin rules',
+      ),
+    ).toBe(false);
+
+    const project = {
+      topic: airlineTopic,
+      script: [
+        {
+          id: 's1',
+          title: 'Cabin pressure failures',
+          narration: 'airline cabin pressure failure cockpit mechanic oxygen inspection',
+        },
+      ],
+      media: [],
+    };
+    const { media: kept, dropped } = filterAssetsByRelevance(
+      [
+        {
+          id: 'vest',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://example.com/vest.mp4',
+          alt: 'black and white flight attendant life vest demo',
+          query: 'airline cabin pressure safety',
+        },
+        {
+          id: 'window',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://example.com/window.mp4',
+          alt: 'airplane cabin window dark night silhouette',
+          query: 'airline cabin pressure failure',
+        },
+        {
+          id: 'mechanic',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://example.com/mechanic.mp4',
+          alt: 'airline mechanic inspecting oxygen pressure gauge in cockpit',
+          query: 'airline cabin pressure mechanic',
+        },
+      ],
+      project,
+      { minScore: 0.2 },
+    );
+
+    expect(dropped.some((d: { url?: string; reason?: string }) => d.url?.includes('vest') && /life-vest|safety-demo/i.test(d.reason || ''))).toBe(true);
+    expect(dropped.some((d: { url?: string; reason?: string }) => d.url?.includes('window') && /dark.*window/i.test(d.reason || ''))).toBe(true);
+    expect(kept.some((a: { id: string }) => a.id === 'mechanic')).toBe(true);
+    expect(kept.some((a: { id: string }) => a.id === 'vest')).toBe(false);
+    expect(kept.some((a: { id: string }) => a.id === 'window')).toBe(false);
+  });
+
   it('rejects blurry, overexposed, staged reenactment, produce, and empty hospital bed filler', async () => {
     const {
       isGenericStockJunk,

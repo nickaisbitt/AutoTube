@@ -1149,13 +1149,13 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'oxygen mask deploy airplane cabin',
       'maintenance hangar night aircraft',
       'mechanic tools aircraft hangar',
-      'redacted paperwork documents desk',
-      'FAA report paperwork close-up',
       'cabin pressure gauge cockpit',
       'airplane cabin passengers daylight',
       'cockpit instruments close-up',
       'aircraft maintenance hangar',
       'airport runway plane takeoff',
+      'boarding airplane jet bridge',
+      'airplane cabin aisle daylight',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return withAirlineFillers(base);

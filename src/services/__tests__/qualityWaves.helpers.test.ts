@@ -221,7 +221,7 @@ describe('quality waves 2–5 helpers', () => {
     expect(soft.pass).toBe(true);
   });
 
-  it('airline soft-pass-motion requires at least eight strong aviation videos', async () => {
+  it('airline soft-pass-motion requires at least four strong aviation videos', async () => {
     const { evaluateHarvestVolumeWithSoftPass } = await import(
       '../../../scripts/lib/harvest-quality.mjs'
     );
@@ -229,7 +229,7 @@ describe('quality waves 2–5 helpers', () => {
       topic: airlineTopic,
       script: airlineScript(),
       media: [
-        ...Array.from({ length: 7 }, (_, i) => strongAirlineVideo(i)),
+        ...Array.from({ length: 3 }, (_, i) => strongAirlineVideo(i)),
         ...Array.from({ length: 17 }, (_, i) => ({
           type: 'video',
           segmentId: `s${(i % 6) + 1}`,
@@ -243,7 +243,7 @@ describe('quality waves 2–5 helpers', () => {
 
     const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(project.media.length), project);
     expect(soft.pass).toBe(false);
-    expect(soft.reason).toBe('soft-pass-motion-airline-aviation-strong-floor(7/8 videos)');
+    expect(soft.reason).toBe('soft-pass-motion-airline-aviation-strong-floor(3/4 videos)');
   });
 
   it('airline soft-pass-motion uses a tighter generic-junk video ratio', async () => {

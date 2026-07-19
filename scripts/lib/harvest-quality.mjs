@@ -358,6 +358,14 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
     ) {
       return 0.35;
     }
+    if (
+      isAirlineTopic(topic)
+      && /\b(airplane|aircraft|aviation|cabin|cockpit|oxygen\s*mask|hangar|runway|tarmac|boarding|flight\s*attendant|pilot\s*cockpit)\b/i.test(
+        haystack,
+      )
+    ) {
+      return 0.4;
+    }
     return 0;
   }
   if (segHits === 0 && topicHits < 2) {
@@ -368,6 +376,14 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
       )
     ) {
       return 0.3;
+    }
+    if (
+      isAirlineTopic(topic)
+      && /\b(airplane|aircraft|aviation|cabin|cockpit|oxygen\s*mask|hangar|runway|tarmac|boarding|flight\s*attendant|pilot\s*cockpit)\b/i.test(
+        haystack,
+      )
+    ) {
+      return 0.35;
     }
     return 0;
   }
@@ -614,7 +630,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   return { pass: false, reason: 'volume-hard-fail' };
 }
 
-const AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS = 8;
+const AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
 const AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
 const AIRLINE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
 
@@ -678,9 +694,9 @@ function isAirlineStrongVideo(asset = {}) {
   if (AIRLINE_STRONG_OXYGEN_RE.test(blob)) return true;
   if (AIRLINE_STRONG_HANGAR_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
   if (AIRLINE_STRONG_RUNWAY_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
-  // Controlled search queries count as strong even when alt is a provider placeholder.
+  // Controlled search queries / aviation tokens count as strong even with placeholder alts.
   if (
-    /\b(airplane cabin|pilot cockpit|flight attendant airplane|passenger oxygen mask|oxygen mask deploy|maintenance hangar|mechanic tools aircraft|cabin pressure gauge|airport runway plane)\b/i.test(
+    /\b(airplane cabin|pilot cockpit|flight attendant airplane|passenger oxygen mask|oxygen mask deploy|maintenance hangar|mechanic tools aircraft|cabin pressure gauge|airport runway plane|aircraft maintenance|airplane|aircraft|cockpit|hangar|runway|tarmac|boarding)\b/i.test(
       blob,
     )
   ) {

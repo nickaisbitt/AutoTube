@@ -414,11 +414,11 @@ describe('isJunkStockClip + faceSeek relevance', () => {
         'oxygen mask deploy airplane cabin',
         'maintenance hangar night aircraft',
         'mechanic tools aircraft hangar',
-        'redacted paperwork documents desk',
-        'FAA report paperwork close-up',
         'cabin pressure gauge cockpit',
+        'airport runway plane takeoff',
       ]),
     );
+    expect(q.every((query) => !/FAA report paperwork|redacted paperwork/i.test(query))).toBe(true);
     expect(q.every((query) => wordCount(query) >= 3 && wordCount(query) <= 6)).toBe(true);
     expect(q.every((query) => query.length <= 64 && isSafeStockMotionQuery(query))).toBe(true);
     expect(q.every((query) => !query.toLowerCase().includes('regional airline cabin pressure cover up'))).toBe(

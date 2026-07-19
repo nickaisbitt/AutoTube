@@ -6,7 +6,7 @@ import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
 import { buildImpactBeatsForTopic } from '../../scripts/lib/impactBeatsByTopic.mjs';
-import { impactBeatsMatchTopic } from '../../scripts/lib/topic-family.mjs';
+import { impactBeatsMatchTopic, isAirlineTopic } from '../../scripts/lib/topic-family.mjs';
 
 function escapeDrawtext(text) {
   return String(text || '')
@@ -18,6 +18,24 @@ function escapeDrawtext(text) {
 
 function escapeAss(text) {
   return String(text || '').replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}');
+}
+
+const WEAK_CAPTION_END_WORDS = new Set(['THE', 'A', 'AN', 'OF', 'TO', 'FOR', 'AND', 'WHAT', 'IS']);
+const PHRASE_END_RE = /[.?!,;]["')\]]*$/;
+
+function normalizedCaptionWord(word) {
+  return String(word || '')
+    .toUpperCase()
+    .replace(/^[^A-Z0-9']+|[^A-Z0-9']+$/g, '');
+}
+
+function isWeakCaptionEndWord(word) {
+  const normalized = normalizedCaptionWord(word);
+  return Boolean(normalized) && WEAK_CAPTION_END_WORDS.has(normalized);
+}
+
+function hasPhraseBoundary(word) {
+  return PHRASE_END_RE.test(String(word || '').trim());
 }
 
 function formatAssTime(sec) {
@@ -175,6 +193,7 @@ export function overlayHookText(videoPath, project, options = {}) {
 export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = {}) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
 
+  const project = options.project || {};
   const probe = spawnSync(
     'ffprobe',
     ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=height,width', '-of', 'csv=p=0', videoPath],
@@ -183,6 +202,12 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
   const [wStr, hStr] = (probe.stdout || '1280,720').trim().split(',');
   const w = parseInt(wStr, 10) || 1280;
   const h = parseInt(hStr, 10) || 720;
+  const durationProbe = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', videoPath],
+    { encoding: 'utf8', timeout: 30_000 },
+  );
+  const videoDuration = Number(String(durationProbe.stdout || '').trim());
   const cm = captionMetrics(h, w);
   const fontSize = cm.currentPx;
 
@@ -208,27 +233,80 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
   const lines = [...header];
   let idx = 0;
   let buffer = [];
-  let bufferStart = 0;
-  let bufferEnd = 0;
   let lastCaptionEnd = 0;
+  let lastCaptionText = '';
 
-  const flush = () => {
+  const captionTextFor = (words) => words.map((item) => item.word).join(' ').toUpperCase();
+  const flush = (count = buffer.length) => {
     if (!buffer.length) return;
+    const flushWords = buffer.slice(0, count);
+    if (!flushWords.length) return;
     // Prefer speech-synced times; nudge only on overlap.
-    let start = bufferStart;
-    let end = Math.max(bufferEnd, start + 0.4);
+    let start = flushWords[0].start;
+    let end = Math.max(flushWords.reduce((max, item) => Math.max(max, item.end), start), start + 0.4);
     if (start < lastCaptionEnd) start = lastCaptionEnd;
     if (end <= start) end = start + 0.45;
     // Cap line hold so captions stay punchy.
     end = Math.min(end, start + 2.4);
-    const text = escapeAss(buffer.join(' ').toUpperCase());
-    lines.push(`Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${text}`);
+    const rawText = captionTextFor(flushWords);
+    if (rawText !== lastCaptionText) {
+      const text = escapeAss(rawText);
+      lines.push(`Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${text}`);
+      lastCaptionText = rawText;
+      idx += 1;
+    }
     lastCaptionEnd = end;
-    idx += 1;
-    buffer = [];
+    buffer = buffer.slice(count);
   };
 
-  const script = options.project?.script || [];
+  const flushableCaptionWordCount = () => {
+    let count = buffer.length;
+    while (count > 1 && isWeakCaptionEndWord(buffer[count - 1].word)) count -= 1;
+    return count;
+  };
+
+  const maybeFlushCaptionBuffer = (word) => {
+    if (!buffer.length) return;
+    const flushableCount = flushableCaptionWordCount();
+    const phraseEnded = hasPhraseBoundary(word);
+    if (phraseEnded && flushableCount === buffer.length) {
+      flush();
+      return;
+    }
+    if (buffer.length >= cm.maxWords && flushableCount === buffer.length) {
+      flush();
+      return;
+    }
+    if (buffer.length > cm.maxWords && flushableCount > 0) {
+      flush(flushableCount);
+    }
+  };
+
+  const resolveEndCtaText = () => {
+    const custom = project?.exportSettings?.ctaText || process.env.AUTOTUBE_END_CTA;
+    if (custom?.trim()) return custom.trim();
+
+    const topic = [
+      project?.topic,
+      project?.title,
+      project?.exportSettings?.topic,
+      project?.exportSettings?.title,
+    ].filter(Boolean).join(' ');
+    if (isAirlineTopic(topic)) return 'VERIFY BEFORE YOU FLY';
+    return '';
+  };
+
+  const addEndCta = () => {
+    const ctaText = resolveEndCtaText();
+    if (!ctaText || !Number.isFinite(videoDuration) || videoDuration < 4) return null;
+    const start = Math.max(lastCaptionEnd + 0.12, videoDuration - 3);
+    const end = Math.min(videoDuration - 0.05, start + 2.4);
+    if (end - start < 0.55) return null;
+    lines.push(`Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${escapeAss(ctaText.toUpperCase())}`);
+    return ctaText;
+  };
+
+  const script = project.script || [];
   // Muxed audio starts with INTRO_SILENCE_SECONDS before segment 0 speech.
   const INTRO_SILENCE_SEC = Number(process.env.AUTOTUBE_INTRO_SILENCE_SEC || 3.5);
   const segOffsetFor = (segKey) => {
@@ -254,20 +332,25 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
   for (const [segKey, words] of entries) {
     const segOffset = segOffsetFor(segKey);
     for (const w of words) {
+      const word = String(w.word || '').trim();
+      if (!word) continue;
       const absStart = (Number(w.start) || 0) + segOffset;
       const absEnd = (Number(w.end) || absStart + 0.3) + segOffset;
       if (absEnd <= hookEndSec) continue;
       const start = Math.max(absStart, hookEndSec);
-      if (!buffer.length) bufferStart = start;
-      buffer.push(w.word);
-      bufferEnd = Math.max(absEnd, start + 0.3);
-      if (buffer.length >= cm.maxWords) flush();
+      buffer.push({
+        word,
+        start,
+        end: Math.max(absEnd, start + 0.3),
+      });
+      maybeFlushCaptionBuffer(word);
     }
     flush();
   }
   flush();
 
   if (idx === 0) return { ok: false, error: 'no word timestamps' };
+  const ctaText = addEndCta();
 
   writeFileSync(assPath, lines.join('\n'));
   const tmpOut = videoPath.replace(/\.mp4$/, '-captioned.mp4');
@@ -297,7 +380,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
   } catch {
     /* ignore */
   }
-  return { ok: true, captionCount: idx };
+  return { ok: true, captionCount: idx, ctaText };
 }
 
 /**

@@ -39,6 +39,60 @@ const MUSIC_PRESET_MAP = {
   ambient: 'bg-neutral.aac',
 };
 
+const STATIC_MUSIC_DUCK_DB = -18.4;
+const STATIC_MUSIC_PEAK_DB = -8;
+const DYNAMIC_MUSIC_DUCK_DB = -34;
+const DYNAMIC_MUSIC_PEAK_DB = -14;
+const YOUTUBE_DYNAMIC_MUSIC_DUCK_DB = -40;
+const YOUTUBE_DYNAMIC_MUSIC_PEAK_DB = -17;
+const STATIC_FALLBACK_MUSIC_DUCK_DB = -21;
+const YOUTUBE_STATIC_FALLBACK_MUSIC_DUCK_DB = -24;
+
+function dbToLinear(dbValue) {
+  return Math.pow(10, dbValue / 20);
+}
+
+function formatFfmpegNumber(value) {
+  return Number(value).toFixed(6).replace(/\.?0+$/, '');
+}
+
+function summarizeFfmpegFailure(result) {
+  return (result.stderr || result.error?.message || '').slice(-500);
+}
+
+function buildDuckingVolumeExpression(narrationTimings, options) {
+  const { duckingLevel, peakLevel, fadeDuration, lookAhead, totalDuration } = options;
+  const duckingLinear = formatFfmpegNumber(dbToLinear(duckingLevel));
+  const peakLinear = formatFfmpegNumber(dbToLinear(peakLevel));
+  const segments = [...narrationTimings]
+    .filter((segment) => Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.end > segment.start)
+    .sort((a, b) => a.start - b.start);
+
+  return segments.reduceRight((expression, segment) => {
+    const duckStart = Math.max(0, segment.start - lookAhead);
+    const duckEnd = Math.min(totalDuration, segment.end + lookAhead);
+    const fadeInStart = Math.max(0, duckStart - fadeDuration);
+    const fadeOutEnd = Math.min(totalDuration, duckEnd + fadeDuration);
+
+    let nextExpression = expression;
+    if (fadeOutEnd > duckEnd) {
+      const fadeOutLength = formatFfmpegNumber(fadeOutEnd - duckEnd);
+      const fadeOut = `${duckingLinear}+(${peakLinear}-${duckingLinear})*((t-${formatFfmpegNumber(duckEnd)})/${fadeOutLength})`;
+      nextExpression = `if(between(t,${formatFfmpegNumber(duckEnd)},${formatFfmpegNumber(fadeOutEnd)}),${fadeOut},${nextExpression})`;
+    }
+
+    nextExpression = `if(between(t,${formatFfmpegNumber(duckStart)},${formatFfmpegNumber(duckEnd)}),${duckingLinear},${nextExpression})`;
+
+    if (duckStart > fadeInStart) {
+      const fadeInLength = formatFfmpegNumber(duckStart - fadeInStart);
+      const fadeIn = `${peakLinear}-(${peakLinear}-${duckingLinear})*((t-${formatFfmpegNumber(fadeInStart)})/${fadeInLength})`;
+      nextExpression = `if(between(t,${formatFfmpegNumber(fadeInStart)},${formatFfmpegNumber(duckStart)}),${fadeIn},${nextExpression})`;
+    }
+
+    return nextExpression;
+  }, peakLinear);
+}
+
 /**
  * Resolves the background music file path for a given video style and/or preset.
  * musicPreset takes priority over style when provided.
@@ -190,11 +244,11 @@ export function convertAudioFormat(inputFile, outputFile, options = {}) {
  * @returns {number} Linear volume multiplier (0.0–1.0).
  */
 export function computeBgMusicVolume(hasNarration, options = {}) {
-  const { duckingLevel = -18.4, peakLevel = -8 } = options;
+  const { duckingLevel = STATIC_MUSIC_DUCK_DB, peakLevel = STATIC_MUSIC_PEAK_DB } = options;
 
   // Convert dB to linear scale: linear = 10^(dB/20)
   const dbValue = hasNarration ? duckingLevel : peakLevel;
-  return Math.pow(10, dbValue / 20);
+  return dbToLinear(dbValue);
 }
 
 /**
@@ -213,64 +267,33 @@ export function computeBgMusicVolume(hasNarration, options = {}) {
  */
 export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, totalDuration, options = {}) {
   const yt = process.env.AUTOTUBE_YOUTUBE_MODE === '1';
-  const { duckingLevel = yt ? -36 : -32, peakLevel = yt ? -22 : -18, fadeDuration = 0.35, lookAhead = 0.1 } = options;
+  const {
+    duckingLevel = yt ? YOUTUBE_DYNAMIC_MUSIC_DUCK_DB : DYNAMIC_MUSIC_DUCK_DB,
+    peakLevel = yt ? YOUTUBE_DYNAMIC_MUSIC_PEAK_DB : DYNAMIC_MUSIC_PEAK_DB,
+    fadeDuration = 0.28,
+    lookAhead = 0.15,
+  } = options;
 
-  console.log(`  🎚️ Applying dynamic ducking envelope (${narrationTimings.length} narration segments)...`);
+  console.log(
+    `  🎚️ Applying dynamic ducking envelope (${narrationTimings.length} narration segments, ${duckingLevel}dB under voice / ${peakLevel}dB gaps)...`,
+  );
 
-  // Build volume automation filter string
-  // Format: volume=enable='between(t,start,end)':volume=value
-  const duckingLinear = Math.pow(10, duckingLevel / 20);
-  const peakLinear = Math.pow(10, peakLevel / 20);
-
-  // Start at peak level
-  let filterParts = [`volume=${peakLinear}:eval=frame`];
-
-  // Apply ducking during each narration segment with fade transitions
-  narrationTimings.forEach((segment, idx) => {
-    const { start, end } = segment;
-
-    // Fade down before narration starts with look-ahead
-    const fadeStart = Math.max(0, start - fadeDuration - lookAhead);
-    filterParts.push(
-      `volume=${duckingLinear}:enable='between(t,${fadeStart},${end + lookAhead})'`
-    );
-
-    // Fade up after narration ends
-    if (idx < narrationTimings.length - 1) {
-      const nextStart = narrationTimings[idx + 1].start;
-      const gapDuration = nextStart - end;
-      if (gapDuration > fadeDuration * 2) {
-        // Enough room for fade up and hold at peak
-        filterParts.push(
-          `volume=${peakLinear}:enable='between(t,${end + fadeDuration},${nextStart - fadeDuration})'`
-        );
-      }
-    } else {
-      // Last segment: fade up to end or total duration
-      const fadeEnd = Math.min(totalDuration, end + fadeDuration + 2);
-      filterParts.push(
-        `volume=${peakLinear}:enable='between(t,${end + fadeDuration},${fadeEnd})'`
-      );
-    }
+  // A single absolute gain expression preserves music movement in gaps. Chained
+  // volume filters multiply gains together and made the bed flat and too quiet.
+  const volumeExpression = buildDuckingVolumeExpression(narrationTimings, {
+    duckingLevel,
+    peakLevel,
+    fadeDuration,
+    lookAhead,
+    totalDuration,
   });
-
-  // Intro hook: first 3s at 5% volume (let the hook breathe)
-  const introLinear = 0.05 / peakLinear;
-  filterParts.push(`volume=${introLinear}:enable='between(t,0,3)':eval=frame`);
-
-  // Outro: last 5s at 30% volume (build to ending)
-  const outroLinear = 0.3 / peakLinear;
-  filterParts.push(`volume=${outroLinear}:enable='between(t,${Math.max(0, totalDuration - 5)},${totalDuration})':eval=frame`);
-
-  // Combine filter parts with commas
-  const fullFilter = filterParts.join(',');
 
   const result = spawnSync('ffmpeg', [
     '-y',
     '-stream_loop', '-1',
     '-i', bgMusicPath,
     '-t', String(totalDuration),
-    '-filter_complex', `[0:a]aresample=48000:async=1,${fullFilter}[ducked]`,
+    '-filter_complex', `[0:a]aresample=48000:async=1,volume='${volumeExpression}':eval=frame[ducked]`,
     '-map', '[ducked]',
     '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
     outputFile,
@@ -842,7 +865,10 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
 
     // Fallback to static volume mixing if dynamic ducking not available or failed
     if (!mixOk) {
-      const bgVolume = computeBgMusicVolume(true); // Ducking level (-18dB)
+      const fallbackDuckingDb = process.env.AUTOTUBE_YOUTUBE_MODE === '1'
+        ? YOUTUBE_STATIC_FALLBACK_MUSIC_DUCK_DB
+        : STATIC_FALLBACK_MUSIC_DUCK_DB;
+      const bgVolume = computeBgMusicVolume(true, { duckingLevel: fallbackDuckingDb });
       mixOk = mixNarrationWithBgMusic(narrationFile, bgMusicPath, mixedAudio, bgVolume, mixOptions);
     }
 
@@ -861,6 +887,9 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
       ], { encoding: 'utf8', timeout: 300000 });
       
       try { unlinkSync(mixedAudio); } catch {}
+      if (mux.status !== 0) {
+        console.warn('  ⚠ Final mux with mixed audio failed:', summarizeFfmpegFailure(mux));
+      }
       return mux.status === 0;
     }
   }
@@ -885,6 +914,9 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
   ], { encoding: 'utf8', timeout: 300000 });
   
   try { unlinkSync(normalizedNarration); } catch {}
+  if (mux.status !== 0) {
+    console.warn('  ⚠ Final mux with narration failed:', summarizeFfmpegFailure(mux));
+  }
   return mux.status === 0;
 }
 

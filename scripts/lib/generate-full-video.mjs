@@ -103,17 +103,47 @@ async function dismissOnboarding(page) {
 }
 
 /** Wait for topic field (onboarding / crash can leave it missing). */
-async function fillTopicInput(page, topic, { attempts = 3 } = {}) {
+async function fillTopicInput(page, topic, { attempts = 5 } = {}) {
   for (let i = 1; i <= attempts; i += 1) {
     await dismissOnboarding(page);
+    // Close stray overlays that steal clicks / hide the topic field.
+    await page.keyboard.press('Escape').catch(() => {});
+    await page
+      .evaluate(() => {
+        localStorage.setItem('autotube_onboarding_seen', 'true');
+        document.querySelectorAll('[data-testid="onboarding-modal"]').forEach((el) => {
+          el.style.display = 'none';
+        });
+      })
+      .catch(() => {});
     const input = page.getByTestId('topic-input');
     try {
-      await input.waitFor({ state: 'visible', timeout: 45_000 });
-      await input.fill(topic, { timeout: 30_000 });
-      return;
+      await input.waitFor({ state: 'visible', timeout: 60_000 });
+      await input.scrollIntoViewIfNeeded().catch(() => {});
+      await input.click({ timeout: 10_000 }).catch(() => {});
+      await input.fill('');
+      await input.fill(topic, { timeout: 45_000 });
+      const got = await input.inputValue().catch(() => '');
+      if (got.trim() === String(topic).trim()) return;
+      // Fallback: set value via DOM when Playwright fill races React.
+      await page
+        .evaluate((value) => {
+          const el = document.querySelector('[data-testid="topic-input"]');
+          if (!el) return false;
+          const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+          proto?.set?.call(el, value);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return el.value === value;
+        }, topic)
+        .catch(() => false);
+      const got2 = await input.inputValue().catch(() => '');
+      if (got2.trim() === String(topic).trim()) return;
+      throw new Error(`topic-input value mismatch (got "${got2.slice(0, 40)}")`);
     } catch (err) {
       if (i === attempts) throw err;
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {});
+      await page.waitForTimeout(800);
       await dismissOnboarding(page);
     }
   }
@@ -1196,8 +1226,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const faceScore = (clip) => {
     const blob = `${clip.query || ''} ${clip.alt || ''}`.toLowerCase();
     if (isGenericStockJunk(blob, topicBlob)) return -4;
-    if (/microphone|podcast|recording studio|asmr|rode/i.test(blob)) return -2;
-    if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district/i.test(blob)) return -3;
+    if (/microphone|podcast|recording studio|asmr|rode|press conference|news desk/i.test(blob)) return -3;
+    if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|open plan office|coworking/i.test(blob)) return -4;
     if (
       (options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1')
       && /\b(night|dark|silhouette|low.?light|muddy|underexposed|overexposed|blown.?out|washed.?out)\b/i.test(blob)

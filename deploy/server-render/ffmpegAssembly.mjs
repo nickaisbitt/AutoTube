@@ -379,14 +379,15 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, 
     );
     if (rReuse.status === 0 && existsSync(clipOut)) return true;
   }
-  // Mid-gray grain (near-black reads as black-screen interrupts).
+  // Bright mid-tone grain only — dark fillers read as black-screen blinks.
+  // Prefer reusePath above; this path should almost never run once any clip succeeded.
   const r = spawnSync(
     'ffmpeg',
     [
       '-y',
       '-f', 'lavfi',
-      '-i', `color=c=0x3a3a42:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
-      '-vf', `noise=alls=22:allf=t+u,eq=brightness=0.02:saturation=0.35`,
+      '-i', `color=c=0x8a8a96:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
+      '-vf', `noise=alls=12:allf=t+u,eq=brightness=0.08:contrast=1.05:saturation=0.4`,
       '-c:v', 'libx264',
       '-preset', preset,
       '-pix_fmt', 'yuv420p',
@@ -424,6 +425,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   // Only grain fillers count as placeholders.
   let grainPlaceholderCount = 0;
   let reuseClipCount = 0;
+  let lastSuccessfulClipPath = null;
+  const projectMedia = Array.isArray(project?.media) ? project.media : [];
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
@@ -475,7 +478,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
     let ok = await tryEncode(asset, 'primary');
     if (!ok) {
-      // Try other segment assets before grain (gray fillers read as blank screens).
+      // Try other segment assets before any synthetic filler.
       const primaryKey = assetKey(asset);
       for (const alt of segMedia) {
         if (!alt || assetKey(alt) === primaryKey) continue;
@@ -486,14 +489,47 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
         }
       }
     }
+    if (!ok && projectMedia.length) {
+      // Any project media beats grain/black blinks.
+      const primaryKey = assetKey(asset);
+      const tried = new Set(
+        [asset, ...segMedia].map((a) => assetKey(a)).filter(Boolean),
+      );
+      for (const alt of projectMedia) {
+        if (!alt) continue;
+        const k = assetKey(alt);
+        if (k === primaryKey || tried.has(k)) continue;
+        ok = await tryEncode(alt, 'project');
+        if (ok) {
+          console.log(`  [ffmpeg] ${label}: fell back to project media asset`);
+          break;
+        }
+      }
+    }
     if (!ok) {
-      console.log(`  [ffmpeg] ${label}: grain placeholder — no usable asset`);
+      // Reuse last good clip with zoom before inventing grain (kills black blinks).
+      const reuseCandidates = [
+        lastSuccessfulClipPath,
+        ...[...clipPaths].reverse(),
+      ].filter((p, i, arr) => p && existsSync(p) && arr.indexOf(p) === i);
+      for (const reusePath of reuseCandidates) {
+        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, reusePath);
+        if (ok) {
+          console.log(`  [ffmpeg] ${label}: reused prior clip (no grain)`);
+          reuseClipCount += 1;
+          break;
+        }
+      }
+    }
+    if (!ok) {
+      console.log(`  [ffmpeg] ${label}: bright grain placeholder — no usable asset`);
       ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, null);
       if (ok) grainPlaceholderCount += 1;
     }
     if (!ok) {
       return false;
     }
+    lastSuccessfulClipPath = clipOut;
     clipPaths.push(clipOut);
     renderedDuration += durationSec;
     return true;

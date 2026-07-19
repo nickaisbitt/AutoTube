@@ -144,13 +144,14 @@ export function buildEditTimeline(project, options = {}) {
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
   const MAX_BODY_CUT_SEC = 1.25;
-  // Keep requested cut for pacing. Cap reuse at 3 when the unique pool is thin —
-  // never silently widen to 1.25s (Wave6 pacing trap).
+  // Keep requested cut for pacing. Cap reuse at 2 when the unique pool is thin —
+  // never silently widen to 1.25s (Wave6 pacing trap). Soft anti-reuse across
+  // the whole timeline (not just adjacent) via stronger reusePenalty below.
   let effectiveMaxReuse = maxReusePerUrl;
   if (uniqueVideos.length > 0 && totalDur > 0 && cut > 0) {
     const clipsNeeded = totalDur / Math.min(cut, MAX_BODY_CUT_SEC);
     if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
-      effectiveMaxReuse = Math.min(3, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
+      effectiveMaxReuse = Math.min(2, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
     }
   }
   const topicIsHousing = !isEvalColdMode() && isHousingTopic(project.topic || '');
@@ -205,12 +206,13 @@ export function buildEditTimeline(project, options = {}) {
       const key = urlKey(a);
       const introOutroReuse = isIntro || isOutro;
       const priorUses = reuseCountFor(key, introOutroReuse);
-      let reusePenalty = priorUses > 0 ? -3 * priorUses : 0;
+      // Soft anti-reuse across the timeline (non-adjacent too): steepen with uses.
+      let reusePenalty = priorUses > 0 ? -5 * priorUses - Math.max(0, priorUses - 1) * 2 : 0;
       if (isOffBrandVisual(blob, topicBlob)) return -8;
-      if (isGenericStockJunk(blob, topicBlob)) return -6;
-      if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|empty park|people in park/i.test(blob)) return -5;
+      if (isGenericStockJunk(blob, topicBlob)) return -8;
+      if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|empty park|people in park|press conference|news desk|office desk/i.test(blob)) return -6;
       if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
-      if (/microphone|podcast|recording studio|asmr|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -3;
+      if (/microphone|podcast|recording studio|asmr|rode|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -5;
       if (/camcorder|handheld camcorder|person holding camera|holding camcorder|vintage camera|filming with phone|dslr camera/i.test(blob)) return -4;
       // Demote dark/muddy stock.
       if (/\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|black background|black frame)\b/i.test(blob)) {

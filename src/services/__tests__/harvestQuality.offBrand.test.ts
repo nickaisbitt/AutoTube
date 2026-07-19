@@ -110,6 +110,10 @@ describe('generic stock junk harvest gate', () => {
     expect(genericStockJunkReason('architectural model conference room', nursingTopic)).toMatch(
       /nursing|corporate/i,
     );
+    expect(genericStockJunkReason('podcast microphone condenser mic', nursingTopic)).toMatch(
+      /mic|podcast|press/i,
+    );
+    expect(isGenericStockJunk('empty podcast studio recording booth empty', nursingTopic)).toBe(true);
 
     expect(isGenericStockJunk('worried family visiting nursing home', nursingTopic)).toBe(false);
     expect(isGenericStockJunk('security camera cctv hallway nursing home', nursingTopic)).toBe(false);

@@ -64,7 +64,11 @@ export const CAMCORDER_STOCK_LOOP_RE =
 
 /** Generic corporate / architecture filler for serious investigation topics. */
 export const GENERIC_CORPORATE_FILLER_RE =
-  /\b(corporate handshake|team meeting smiling|empty office|business people walking|stock footage loop|generic corporate|open plan office|glass building skyline|architecture model|architectural model|scale model|conference room|office meeting|skyline timelapse)\b/i;
+  /\b(corporate handshake|team meeting smiling|empty office|business people walking|stock footage loop|generic corporate|open plan office|glass building skyline|architecture model|architectural model|scale model|conference room|office meeting|skyline timelapse|press conference|news desk|talking head office|office desk laptop|business handshake|coworkers laughing|modern office interior|coworking space|boardroom|executive desk|city office window)\b/i;
+
+/** Press / mic / podcast pads that read as generic explainer stock. */
+export const PRESS_MIC_PODCAST_FILLER_RE =
+  /\b(podcast microphone|studio microphone|condenser mic|rode mic|asmr mic|radio host desk|interview mic close.?up|microphone only|empty podcast studio|recording booth empty)\b/i;
 
 /** Overused eviction/housing B-roll loops (boxes/stressed tenant without narrative anchor). */
 export const HOUSING_STOCK_LOOP_RE =
@@ -129,6 +133,12 @@ export function genericStockJunkReason(haystack, contextText = '') {
   }
   if (GENERIC_CORPORATE_FILLER_RE.test(h) && !/\b(office|corporate|business|company|startup)\b/i.test(ctx)) {
     return 'generic corporate/architecture filler';
+  }
+  if (
+    PRESS_MIC_PODCAST_FILLER_RE.test(h)
+    && !/\b(podcast|radio|interview|microphone|broadcast|asmr|studio)\b/i.test(ctx)
+  ) {
+    return 'generic press/mic/podcast filler';
   }
   if (isHousingTopic(ctx) && HOUSING_STOCK_LOOP_RE.test(h) && !/\b(eviction notice|court|lease|landlord|tenant|letter|keys)\b/i.test(h)) {
     return 'generic housing/moving-box loop stock';

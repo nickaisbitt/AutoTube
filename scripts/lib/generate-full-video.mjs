@@ -732,6 +732,16 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   ) {
     return true;
   }
+  // Dark airplane-window vignettes read as black title cards under hook text.
+  if (
+    /\b(airplane window|plane window|cabin window)\b/i.test(blob)
+    && /\b(night|dark|silhouette|black|dim|underexposed)\b/i.test(blob)
+  ) {
+    return true;
+  }
+  if (/\b(black and white|b&w|monochrome|grayscale)\b/i.test(blob) && preferBright) {
+    return true;
+  }
   const lifestyleJunk =
     /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
       blob,

@@ -235,6 +235,20 @@ export function buildEditTimeline(project, options = {}) {
       ) {
         return -20;
       }
+      // Dark window vignettes / B&W stock read as dead air under captions.
+      if (/\b(airplane window|plane window|cabin window)\b/.test(blob) && /\b(night|dark|silhouette|black)\b/.test(blob)) {
+        return -15;
+      }
+      if (/\b(black and white|b&w|monochrome|grayscale)\b/.test(blob)) return -6;
+      // Intro must lead with faces / bright cabin — not distant runway silhouettes.
+      if (isIntro) {
+        if (/face|person|people|worried|shocked|portrait|close.?up|passenger|pilot|attendant/i.test(blob)) {
+          reusePenalty += 6;
+        }
+        if (/runway|tarmac|fence|aerial|from above|distant plane|plane in (the )?sky/i.test(blob)) {
+          return -8;
+        }
+      }
       if (topicIsAirline && !/airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|runway|jet|passenger|attendant|hangar|airport|pilot|plane|flight/i.test(blob)) {
         // Soft demote off-story stock on airline topics (faces still ok).
         if (!/face|person|people|worried|shocked|portrait|close.?up/i.test(blob)) reusePenalty -= 4;

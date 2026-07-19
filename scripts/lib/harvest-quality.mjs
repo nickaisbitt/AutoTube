@@ -441,7 +441,16 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const segments = project?.script || [];
   const segN = segments.length || 1;
   const media = project?.media || [];
-  const videoCount = media.filter((a) => a.type === 'video' || /\.mp4/i.test(a.url || '')).length;
+  const uniqueVideos = [];
+  const seenVideoKeys = new Set();
+  for (const asset of media) {
+    if (!(asset.type === 'video' || /\.mp4/i.test(asset.url || ''))) continue;
+    const key = String(asset.url || asset.id || `${asset.segmentId || ''}:${asset.alt || ''}:${asset.query || ''}`).split('?')[0];
+    if (!key || seenVideoKeys.has(key)) continue;
+    seenVideoKeys.add(key);
+    uniqueVideos.push(asset);
+  }
+  const videoCount = uniqueVideos.length;
   const videosPerSeg = videoCount / segN;
   const cyber = mediaReport.cyberStockInjected || 0;
   const stockFetched = (mediaReport.pexelsFetched || 0) + (mediaReport.pixabayFetched || 0);
@@ -453,6 +462,22 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const minCount = counts.length ? Math.min(...counts) : 0;
   const avgCount = counts.length ? counts.reduce((s, v) => s + v, 0) / counts.length : 0;
   const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
+  const hasStockKeys = Boolean(
+    process.env.PEXELS_API_KEY
+      || process.env.VITE_PEXELS_KEY
+      || process.env.PIXABAY_API_KEY
+      || process.env.VITE_PIXABAY_KEY,
+  );
+  const liveStockPresent =
+    stockFetched > 0
+    || uniqueVideos.some((a) => /pexels|pixabay/i.test(`${a.source || ''} ${a.url || ''}`));
+  const stockKeyMotionAvailable = hasStockKeys || liveStockPresent;
+  const genericJunkVideos = uniqueVideos.filter((asset) => {
+    const blob = `${asset.alt || ''} ${asset.query || ''} ${asset.source || ''} ${asset.title || ''} ${asset.url || ''}`;
+    return isGenericStockJunk(blob, topicBlob);
+  }).length;
+  const uniqueTopicalVideos = videoCount - genericJunkVideos;
+  const genericJunkRatio = videoCount ? genericJunkVideos / videoCount : 0;
 
   // Soft-pass A: cyber stills + ≥1 video/seg
   if (cyber >= 6 && videosPerSeg >= 1) {
@@ -462,6 +487,18 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const motionMinPerSeg = 2;
   const motionRich = videosPerSeg >= motionMinPerSeg && (stockFetched > 0 || topUp >= segN);
   if (motionRich) {
+    if (genericJunkRatio > 0.4) {
+      return {
+        pass: false,
+        reason: `soft-pass-motion-generic-junk(${genericJunkVideos}/${videoCount} videos)`,
+      };
+    }
+    if (stockKeyMotionAvailable && uniqueTopicalVideos < 16) {
+      return {
+        pass: false,
+        reason: `soft-pass-motion-unique-video-floor(${uniqueTopicalVideos}/16 topical videos)`,
+      };
+    }
     return { pass: true, reason: `soft-pass-motion(${videoCount}v/${segN}segs)` };
   }
   // Soft-pass C: uneven but adequate

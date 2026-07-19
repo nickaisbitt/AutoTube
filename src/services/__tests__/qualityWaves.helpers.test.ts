@@ -4,6 +4,18 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('quality waves 2–5 helpers', () => {
+  const stockKeyEnvNames = ['PEXELS_API_KEY', 'VITE_PEXELS_KEY', 'PIXABAY_API_KEY', 'VITE_PIXABAY_KEY'] as const;
+  const saveStockKeyEnv = () => stockKeyEnvNames.map((name) => [name, process.env[name]] as const);
+  const restoreStockKeyEnv = (saved: readonly (readonly [string, string | undefined])[]) => {
+    for (const [name, value] of saved) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  };
+
   it('clearTopicPackaging resets hooks and mediaOffset', async () => {
     const { clearTopicPackaging } = await import('../../../scripts/lib/loop-state.mjs');
     const state = {
@@ -45,19 +57,83 @@ describe('quality waves 2–5 helpers', () => {
 
     const motionProject = {
       script: [{ id: 'a' }, { id: 'b' }],
-      media: [
-        { type: 'video', segmentId: 'a', url: 'https://x/a.mp4' },
-        { type: 'video', segmentId: 'a', url: 'https://x/a2.mp4' },
-        { type: 'video', segmentId: 'b', url: 'https://x/b.mp4' },
-        { type: 'video', segmentId: 'b', url: 'https://x/b2.mp4' },
-      ],
+      media: Array.from({ length: 16 }, (_, i) => ({
+        type: 'video',
+        segmentId: i < 8 ? 'a' : 'b',
+        url: `https://x/motion-${i}.mp4`,
+        alt: i < 8 ? 'ambulance gps dispatch' : 'rural road paramedic',
+      })),
     };
     expect(
       evaluateHarvestVolumeWithSoftPass(
-        { volumePass: false, pexelsFetched: 3, videoTopUp: [1, 2] },
+        { volumePass: false, pexelsFetched: 16, videoTopUp: [1, 2] },
         motionProject,
       ).pass,
     ).toBe(true);
+  });
+
+  it('soft-pass-motion fails closed below stock-key unique video floor', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const saved = saveStockKeyEnv();
+    try {
+      process.env.PEXELS_API_KEY = 'test-key';
+      delete process.env.VITE_PEXELS_KEY;
+      delete process.env.PIXABAY_API_KEY;
+      delete process.env.VITE_PIXABAY_KEY;
+      const project = {
+        topic: 'How school districts lost student mental-health records to ransomware',
+        script: [{ id: 's1' }, { id: 's2' }, { id: 's3' }, { id: 's4' }],
+        media: Array.from({ length: 12 }, (_, i) => ({
+          type: 'video',
+          segmentId: `s${(i % 4) + 1}`,
+          url: `https://videos.pexels.com/topical-${i}.mp4`,
+          alt: i % 2 ? 'school hallway student records ransomware' : 'worried parent phone data breach',
+          source: 'Pexels Videos',
+        })),
+      };
+      const soft = evaluateHarvestVolumeWithSoftPass(
+        { volumePass: false, pexelsFetched: 12, videoTopUp: [1, 2, 3, 4] },
+        project,
+      );
+      expect(soft.pass).toBe(false);
+      expect(soft.reason).toBe('soft-pass-motion-unique-video-floor(12/16 topical videos)');
+    } finally {
+      restoreStockKeyEnv(saved);
+    }
+  });
+
+  it('soft-pass-motion rejects generic-junk dominated video pools', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const saved = saveStockKeyEnv();
+    try {
+      for (const name of stockKeyEnvNames) delete process.env[name];
+      const project = {
+        topic: 'How school districts lost student mental-health records to ransomware',
+        script: [{ id: 's1' }, { id: 's2' }],
+        media: Array.from({ length: 16 }, (_, i) => ({
+          type: 'video',
+          segmentId: i % 2 ? 's1' : 's2',
+          url: `https://x/generic-mix-${i}.mp4`,
+          alt: i < 7
+            ? 'corporate handshake empty office skyline timelapse'
+            : 'school hallway students worried phone ransomware records',
+          query: i < 7 ? 'stock footage loop' : 'school ransomware records',
+          source: 'Stock video pool',
+        })),
+      };
+      const soft = evaluateHarvestVolumeWithSoftPass(
+        { volumePass: false, videoTopUp: [1, 2] },
+        project,
+      );
+      expect(soft.pass).toBe(false);
+      expect(soft.reason).toBe('soft-pass-motion-generic-junk(7/16 videos)');
+    } finally {
+      restoreStockKeyEnv(saved);
+    }
   });
 
   it('crime/heist topics use lower volume floor and aggregate soft-pass', async () => {
@@ -185,14 +261,21 @@ describe('quality waves 2–5 helpers', () => {
         { segmentId: 'a', type: 'video', url: 'https://x/a1.mp4', alt: 'ambulance' },
         { segmentId: 'a', type: 'video', url: 'https://x/a2.mp4', alt: 'gps map' },
         { segmentId: 'a', type: 'video', url: 'https://x/a3.mp4', alt: 'dispatch desk' },
+        { segmentId: 'a', type: 'video', url: 'https://x/a5.mp4', alt: 'ambulance rural road' },
+        { segmentId: 'a', type: 'video', url: 'https://x/a6.mp4', alt: 'gps route map close up' },
         { segmentId: 'a', type: 'image', url: 'https://x/a4.jpg', alt: 'map still' },
         { segmentId: 'b', type: 'video', url: 'https://x/b1.mp4', alt: 'paramedic' },
         { segmentId: 'b', type: 'video', url: 'https://x/b2.mp4', alt: 'demolished house' },
         { segmentId: 'b', type: 'video', url: 'https://x/b3.mp4', alt: 'dispatch' },
+        { segmentId: 'b', type: 'video', url: 'https://x/b5.mp4', alt: 'paramedic team ambulance' },
+        { segmentId: 'b', type: 'video', url: 'https://x/b6.mp4', alt: 'demolished house street' },
         { segmentId: 'b', type: 'image', url: 'https://x/b4.jpg', alt: 'ruins still' },
         { segmentId: 'c', type: 'video', url: 'https://x/c1.mp4', alt: 'rural road' },
         { segmentId: 'c', type: 'video', url: 'https://x/c2.mp4', alt: 'crew' },
         { segmentId: 'c', type: 'video', url: 'https://x/c3.mp4', alt: 'ruins' },
+        { segmentId: 'c', type: 'video', url: 'https://x/c5.mp4', alt: 'emergency crew rural route' },
+        { segmentId: 'c', type: 'video', url: 'https://x/c6.mp4', alt: 'gps map ambulance dispatch' },
+        { segmentId: 'c', type: 'video', url: 'https://x/c7.mp4', alt: 'demolished house address' },
         { segmentId: 'c', type: 'image', url: 'https://x/c4.jpg', alt: 'house' },
       ],
     };
@@ -207,7 +290,7 @@ describe('quality waves 2–5 helpers', () => {
             c: { count: 4 },
           },
         },
-        pexelsFetched: 8,
+        pexelsFetched: 16,
         videoTopUp: [1, 2, 3, 4],
       },
       project,

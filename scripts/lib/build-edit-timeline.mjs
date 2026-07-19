@@ -346,7 +346,7 @@ export function buildEditTimeline(project, options = {}) {
       : assets;
 
     const duration = seg.duration || 20;
-    const interval = isIntro ? Math.min(effectiveCut, 0.65) : Math.min(effectiveCut, MAX_BODY_CUT_SEC);
+    const interval = isIntro ? Math.min(effectiveCut, 0.65) : effectiveCut;
     const maxReuseThisSeg = isIntro || isOutro ? 1 : effectiveMaxReuse;
     let t = 0;
     let ai = 0;

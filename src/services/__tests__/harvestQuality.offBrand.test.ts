@@ -278,6 +278,55 @@ describe('isJunkStockClip + faceSeek relevance', () => {
     if (fillerIdx >= 0) expect(faceIdx).toBeLessThan(fillerIdx);
   });
 
+  it('airline stock queries stay short and lead with faces when faceSeek is enabled', async () => {
+    const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
+    const topic = 'The regional airline cabin-pressure cover-up that hid oxygen mask failures';
+    const q = stockMotionQueries(topic, false, { preferBright: true, faceSeek: true });
+    const wordCount = (query: string) => query.replace(/-/g, ' ').trim().split(/\s+/).length;
+
+    expect(q.slice(0, 3)).toEqual([
+      'worried passenger face close-up',
+      'pilot face close-up',
+      'flight attendant face',
+    ]);
+    expect(q).toEqual(
+      expect.arrayContaining([
+        'oxygen mask deploy',
+        'maintenance hangar night',
+        'mechanic tools hangar',
+        'redacted paperwork documents',
+        'FAA report paperwork',
+        'cabin pressure gauge',
+      ]),
+    );
+    expect(q.every((query) => wordCount(query) >= 3 && wordCount(query) <= 5)).toBe(true);
+    expect(q.every((query) => !query.toLowerCase().includes('regional airline cabin pressure cover up'))).toBe(
+      true,
+    );
+  });
+
+  it('airline junk filters reject mega-carriers and off-beat lifestyle clips', async () => {
+    const { isCyberRelevantClip, isJunkStockClip } = await import('../../../scripts/lib/generate-full-video.mjs');
+    const topic = 'The regional airline cabin-pressure cover-up that hid oxygen mask failures';
+
+    expect(
+      isJunkStockClip(
+        { alt: 'Lufthansa aircraft on runway', url: 'https://videos.example/lufthansa-plane.mp4' },
+        topic,
+      ),
+    ).toBe(true);
+    expect(
+      isJunkStockClip(
+        { alt: 'Lufthansa cabin pressure report paperwork', url: 'https://videos.example/lufthansa-report.mp4' },
+        'The Lufthansa cabin pressure cover-up',
+      ),
+    ).toBe(false);
+    expect(isJunkStockClip({ alt: 'covid face mask couple walking street' }, topic)).toBe(true);
+    expect(isCyberRelevantClip({ alt: 'mechanic tools hangar aircraft maintenance' }, topic)).toBe(true);
+    expect(isCyberRelevantClip({ alt: 'woman in red hat lifestyle travel portrait' }, topic)).toBe(false);
+    expect(isCyberRelevantClip({ alt: 'back of head only tourist watching plane behind fence' }, topic)).toBe(false);
+  });
+
   it('visionPromptForTopic mentions blurry/staged/overexposed junk on nursing topics', async () => {
     const { visionPromptForTopic } = await import('../../../scripts/lib/stock-vision-gate.mjs');
     const prompt = visionPromptForTopic('The nursing home cameras that recorded abuse for years');

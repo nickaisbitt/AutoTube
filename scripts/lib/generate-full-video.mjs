@@ -603,6 +603,7 @@ async function fetchPexelsVideos(query, perPage = 8) {
         url: landscape.link,
         alt: `Pexels: ${query}`,
         source: 'Pexels Videos',
+        sourceUrl: video.url,
         thumbnailUrl: video.image,
         duration: video.duration,
       });
@@ -631,6 +632,7 @@ async function fetchPixabayVideos(query, perPage = 8) {
         url: pick.url,
         alt: hit.tags || `Pixabay: ${query}`,
         source: 'Pixabay Videos',
+        sourceUrl: hit.pageURL,
         thumbnailUrl: hit.userImageURL || undefined,
         duration: hit.duration,
       });
@@ -643,8 +645,23 @@ async function fetchPixabayVideos(query, perPage = 8) {
 
 /** Pixabay/Pexels often match topic words literally (piggy bank, wash hands, rotate phone). */
 /** Prefer phone/bank/security motion for cyber topics — deny lifestyle pets/nature filler. */
+const AIRLINE_RELEVANCE_RE =
+  /\b(airline|aircraft|airplane|aeroplane|aviation|cabin|cockpit|oxygen|runway|jet|passenger|attendant|hangar|airport|pilot|plane|flight|mechanic|fuselage|tarmac|faa|pressure gauge|cabin pressure)\b/i;
+
+const AIRLINE_MEGA_CARRIER_PATTERNS = [
+  /\bemirates\b/i,
+  /\bwizz\s*air\b|\bwizzair\b/i,
+  /\bqatar\s*airways\b|\bqatar\b/i,
+  /\blufthansa\b/i,
+  /\bryan\s*air\b|\bryanair\b/i,
+];
+
+function mentionsMegaCarrier(blob = '') {
+  return AIRLINE_MEGA_CARRIER_PATTERNS.some((re) => re.test(blob || ''));
+}
+
 function isCyberRelevantClip(clip = {}, topicBlob = '') {
-  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''}`.toLowerCase();
+  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
   if (/beetle|dung beetle|insect swarm|macro insect|bug macro|wildlife macro|spider macro/.test(blob)) {
     return false;
   }
@@ -674,9 +691,8 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
     );
   }
   if (isAirlineTopic(topicBlob)) {
-    return /airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|runway|jet|passenger|attendant|hangar|airport|pilot|plane|flight|mechanic|fuselage|tarmac/.test(
-      blob,
-    );
+    if (isJunkStockClip(clip, topicBlob)) return false;
+    return AIRLINE_RELEVANCE_RE.test(blob);
   }
   if (isSchoolEducationTopic(topicBlob)) {
     return /school|student|classroom|teacher|campus|library|counseling|laptop|computer|server|data|cyber|worried|parent|records|phone|document|district/.test(
@@ -701,9 +717,36 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
 }
 
 function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
-  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
+  const preferBright =
+    options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
+  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''} ${clip.query || ''}`.toLowerCase();
+  const topicText = String(topicBlob || '').toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
   if (isGenericStockJunk(blob, topicBlob)) return true;
+  const covidTopic = /\b(covid|coronavirus|pandemic|mask mandate|face masks?|surgical masks?|n95)\b/.test(topicText);
+  if (
+    !covidTopic
+    && /(?:covid|coronavirus|pandemic|surgical masks?|face masks?|medical masks?|protective masks?).{0,40}\b(couple|people|man and woman|woman and man)\b|\b(couple|people|man and woman|woman and man)\b.{0,40}(?:covid|coronavirus|pandemic|surgical masks?|face masks?|medical masks?|protective masks?)/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
+  if (isAirlineTopic(topicText)) {
+    const topicMentionsMegaCarrier = mentionsMegaCarrier(topicText);
+    if (!topicMentionsMegaCarrier && mentionsMegaCarrier(`${clip.alt || ''} ${clip.sourceUrl || ''} ${clip.url || ''}`)) {
+      return true;
+    }
+    if (/\bred\s+hat\b.{0,40}\b(lifestyle|tourist|travel|walking|portrait|fashion)\b|\b(lifestyle|tourist|travel|walking|portrait|fashion)\b.{0,40}\bred\s+hat\b/i.test(blob)) {
+      return true;
+    }
+    if (/\b(back of head only|back of (?:a )?(?:head|person|woman|man)|from behind|rear view)\b/i.test(blob)) {
+      return true;
+    }
+    if (/\b(chain.?link fence|airport fence|behind (?:a )?fence|tourist fence|plane spotter|plane spotting|watching planes)\b/i.test(blob)) {
+      return true;
+    }
+  }
   // Office/cowork pads are never OK on non-workplace stories (airline, nursing, etc.).
   if (
     !isWorkplaceTopic(topicBlob)
@@ -746,13 +789,15 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
     /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
       blob,
     );
-  if (lifestyleJunk) return true;
-  const preferBright =
-    options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
+  if (lifestyleJunk) {
+    const aviationRunway = isAirlineTopic(topicText) && /\brunway\b/i.test(blob) && AIRLINE_RELEVANCE_RE.test(blob);
+    if (!aviationRunway) return true;
+  }
   // Reject muddy/night/overexposed stock when preferBright is on.
   if (
     preferBright
     && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|overexposed|blown.?out|washed.?out)\b/i.test(blob)
+    && !(isAirlineTopic(topicText) && /\bmaintenance hangar night\b|\bhangar\b.{0,30}\bnight\b/i.test(blob))
   ) {
     return true;
   }
@@ -960,6 +1005,27 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
     return withFillers(base);
   }
+  if (airline) {
+    const faces = [
+      'worried passenger face close-up',
+      'pilot face close-up',
+      'flight attendant face',
+      'passenger oxygen mask worried',
+    ];
+    const topical = [
+      'oxygen mask deploy',
+      'maintenance hangar night',
+      'mechanic tools hangar',
+      'redacted paperwork documents',
+      'FAA report paperwork',
+      'cabin pressure gauge',
+      'airplane cabin passengers',
+      'cockpit instruments close-up',
+      'aircraft maintenance hangar',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 6), ...faces, ...topical.slice(6)];
+    return withAirlineFillers(base);
+  }
   // Heist/airport fraud: not bank OTP stock.
   if (heist) {
     const faces = [
@@ -1022,23 +1088,6 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return withFillers(base);
-  }
-  if (/airline|cabin[-\s]?pressure|cabin\s*pressure/i.test(topicBlob) || isAirlineTopic(topicBlob)) {
-    const faces = [
-      'airline passenger oxygen mask worried',
-      'pilot cockpit stressed face',
-      'flight attendant cabin worried',
-    ];
-    const topical = [
-      'airplane cabin interior passengers',
-      'commercial jet cockpit instruments',
-      'aircraft oxygen mask dangling',
-      'airport runway plane takeoff',
-      'airplane window clouds daylight',
-      'maintenance hangar aircraft exterior',
-    ];
-    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
-    return withAirlineFillers(base);
   }
   if (/zoning|flood[-\s]?risk|flood\s*map|neighborhood/i.test(topicBlob)) {
     const faces = [
@@ -1122,7 +1171,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
 }
 
 /** Exported for unit tests (bright / anti-HUD / nursing query proof). */
-export { stockMotionQueries, isNursingHomeTopic, isHealthcareTopic, isJunkStockClip };
+export { stockMotionQueries, isNursingHomeTopic, isHealthcareTopic, isJunkStockClip, isCyberRelevantClip };
 
 /**
  * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
@@ -1217,6 +1266,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   pool = pool.filter((v) => {
     const key = (v.url || '').split('?')[0];
     if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key) || isJunkStockClip(v, topicBlob, { preferBright: options.preferBright === true })) return false;
+    if (isAirlineTopic(topicBlob) && !isCyberRelevantClip(v, topicBlob)) return false;
     seenPool.add(key);
     return true;
   });
@@ -1287,6 +1337,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     }
     if (/microphone|podcast|recording studio|asmr|rode|press conference|news desk/i.test(blob)) return -3;
     if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|open plan office|coworking/i.test(blob)) return -4;
+    if (isAirlineTopic(topicBlob)) {
+      if (/worried passenger|passenger face|pilot face|flight attendant face|oxygen mask|cabin pressure|pressure gauge|mechanic tools|maintenance hangar|redacted|faa report|paperwork|documents/i.test(blob)) return 5;
+      if (/airline|aircraft|airplane|aviation|cabin|cockpit|passenger|pilot|attendant|flight|mechanic|hangar|faa|oxygen/i.test(blob)) return 3;
+      if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
+    }
     if (
       (options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1')
       && /\b(night|dark|silhouette|low.?light|muddy|underexposed|overexposed|blown.?out|washed.?out)\b/i.test(blob)

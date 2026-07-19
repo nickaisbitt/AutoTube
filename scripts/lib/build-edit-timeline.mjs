@@ -17,6 +17,10 @@ function urlKey(asset) {
   return (asset?.url || '').split('?')[0] || asset?.id || '';
 }
 
+function assetBlob(asset) {
+  return `${asset?.query || ''} ${asset?.alt || ''} ${asset?.source || ''} ${asset?.url || ''}`.toLowerCase();
+}
+
 function uniqueAssetsByUrl(assets) {
   const seen = new Set();
   const out = [];
@@ -39,11 +43,23 @@ function tokens(text) {
 
 /** Coarse visual cluster so cold body cuts don't loop the same subject. */
 export function visualSubjectCluster(asset) {
-  const blob = `${asset?.query || ''} ${asset?.alt || ''} ${asset?.url || ''}`.toLowerCase();
+  const blob = assetBlob(asset);
   if (/ambulance|paramedic|emt|911|dispatch/.test(blob)) return 'ambulance';
   if (/aerial|drone|overhead|bird.?eye|skyline|from above/.test(blob)) return 'aerial';
   if (/coding|source.?code|laptop screen|computer screen|typing keyboard|ide /.test(blob)) return 'coding';
-  if (/airplane|aircraft|cabin|cockpit|jet |airport/.test(blob)) return 'aircraft';
+  if (
+    /masked|face mask|surgical mask|respirator/.test(blob)
+    && /couple|people|person|passenger|patient|family/.test(blob)
+  ) {
+    return 'masked-human';
+  }
+  if (/back of head|from behind|rear view|backs? to camera|looking through (a )?window|looking out (the )?window|staring out (the )?window/.test(blob)) {
+    return 'back-view-human';
+  }
+  if (/cockpit|flight deck/.test(blob)) return 'cockpit';
+  if (/airplane window|plane window|cabin window|window seat/.test(blob)) return 'window-view';
+  if (/cabin|airplane interior|aircraft interior|passenger seats|aisle|flight attendant/.test(blob)) return 'cabin-interior';
+  if (/runway|tarmac|airport|airplane|aircraft|jet |plane in (the )?sky/.test(blob)) return 'aircraft';
   if (/flood|zoning|map |documents?|paperwork/.test(blob)) return 'mapdocs';
   if (/lab|pipette|sensor|calibrat|test tube/.test(blob)) return 'lab';
   if (/ship|port|container|cargo|dock|crane/.test(blob)) return 'port';
@@ -54,10 +70,37 @@ export function visualSubjectCluster(asset) {
   return 'other';
 }
 
+function isHumanCluster(cluster) {
+  return cluster === 'human';
+}
+
+function isBackViewDeadAir(asset) {
+  const blob = assetBlob(asset);
+  return /\b(back of head|from behind|rear view|backs? to camera|looking through (a )?window|looking out (the )?window|staring out (the )?window)\b/.test(blob);
+}
+
+function isRejectedIntroLeadVisual(asset) {
+  const blob = assetBlob(asset);
+  return /\b(runway|tarmac|fence|sky|clouds?|aerial|from above|distant plane|plane in (the )?sky|back of head|from behind|rear view|looking through (a )?window|looking out (the )?window|airplane window|plane window|cabin window)\b/.test(blob);
+}
+
+function isBrightCabinInterior(asset) {
+  const blob = assetBlob(asset);
+  return /\b(cabin|airplane interior|aircraft interior|plane interior|passenger seats?|aisle|overhead bins?)\b/.test(blob)
+    && /\b(bright|daylight|sunny|well.?lit|window light|interior)\b/.test(blob);
+}
+
+function isIntroLeadVisual(asset) {
+  if (isRejectedIntroLeadVisual(asset)) return false;
+  const blob = assetBlob(asset);
+  return /\b(face|faces|person|people|worried|shocked|portrait|close.?up|passenger|pilot|attendant|crew|flight attendant|cabin crew)\b/.test(blob)
+    || isBrightCabinInterior(asset);
+}
+
 /** Heuristic overlap between asset metadata and a beat subject/excerpt. */
 export function scoreAssetAgainstBeat(asset, beat) {
   if (!beat) return 0;
-  const blob = `${asset?.alt || ''} ${asset?.query || ''} ${asset?.source || ''} ${asset?.url || ''}`.toLowerCase();
+  const blob = assetBlob(asset);
   for (const avoid of beat.mustAvoid || []) {
     if (avoid && blob.includes(String(avoid).toLowerCase())) return -8;
   }
@@ -143,8 +186,10 @@ export function buildEditTimeline(project, options = {}) {
   const maxReusePerUrl = options.maxReusePerUrl ?? 1;
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
+  const coldEval = isEvalColdMode();
   const MAX_BODY_CUT_SEC = 1.25;
   const MAX_BODY_CUT_THIN_SEC = 2.0;
+  const RECENT_URL_WINDOW = 4;
   // Keep requested cut for pacing. Dynamic hard-cap: at least 3, at most 6 —
   // never climb to 9–12×. Thin pools lengthen cuts up to 2s instead.
   const HARD_MAX_REUSE_FLOOR = 3;
@@ -159,9 +204,13 @@ export function buildEditTimeline(project, options = {}) {
       HARD_MAX_REUSE_CEIL,
       Math.max(HARD_MAX_REUSE_FLOOR, Math.ceil(clipsNeeded / uniqueVideos.length)),
     );
+    if (coldEval && uniqueVideos.length >= 20) {
+      hardMaxReuse = Math.min(4, hardMaxReuse);
+    }
     if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
       effectiveMaxReuse = Math.min(hardMaxReuse, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
     }
+    effectiveMaxReuse = Math.min(effectiveMaxReuse, hardMaxReuse);
     const maxSlots = uniqueVideos.length * hardMaxReuse;
     if (totalDur / Math.min(effectiveCut, MAX_BODY_CUT_SEC) > maxSlots) {
       effectiveCut = Math.min(MAX_BODY_CUT_THIN_SEC, Math.max(cut, totalDur / maxSlots));
@@ -169,12 +218,14 @@ export function buildEditTimeline(project, options = {}) {
   } else {
     hardMaxReuse = HARD_MAX_REUSE_CEIL;
   }
-  const topicIsHousing = !isEvalColdMode() && isHousingTopic(project.topic || '');
+  const topicIsHousing = !coldEval && isHousingTopic(project.topic || '');
   const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
   const topicIsAirline = isAirlineTopic(project.topic || '');
-  const coldEval = isEvalColdMode();
   const beatSheet = project.visualBeatSheet;
   const beatsBySeg = new Map();
+  const recentTimelineUrls = [];
+  let previousTimelineUrl = null;
+  let previousTimelineCluster = null;
   for (const b of beatSheet?.beats || []) {
     const list = beatsBySeg.get(b.segmentId) || [];
     list.push(b);
@@ -219,12 +270,15 @@ export function buildEditTimeline(project, options = {}) {
       return urlUseCount.get(key) || 0;
     };
     const scoreAsset = (a, activeBeat = null) => {
-      const blob = `${a.query || ''} ${a.alt || ''} ${a.url || ''}`.toLowerCase();
+      const blob = assetBlob(a);
       const key = urlKey(a);
       const introOutroReuse = isIntro || isOutro;
       const priorUses = reuseCountFor(key, introOutroReuse);
-      // Soft anti-reuse across the timeline (non-adjacent too): steepen with uses.
-      let reusePenalty = priorUses > 0 ? -5 * priorUses - Math.max(0, priorUses - 1) * 2 : 0;
+      // Soft anti-reuse across the timeline (non-adjacent too): after 2 uses,
+      // heavily prefer fresh perceived variety before the hard cap is reached.
+      let reusePenalty = 0;
+      if (priorUses === 1) reusePenalty = -5;
+      if (priorUses >= 2) reusePenalty = -25 - (priorUses - 2) * 12;
       if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (isGenericStockJunk(blob, topicBlob)) return -8;
       // Hard-ban office/cowork pads on non-workplace stories.
@@ -242,11 +296,11 @@ export function buildEditTimeline(project, options = {}) {
       if (/\b(black and white|b&w|monochrome|grayscale)\b/.test(blob)) return -6;
       // Intro must lead with faces / bright cabin — not distant runway silhouettes.
       if (isIntro) {
-        if (/face|person|people|worried|shocked|portrait|close.?up|passenger|pilot|attendant/i.test(blob)) {
+        if (isIntroLeadVisual(a)) {
           reusePenalty += 6;
         }
-        if (/runway|tarmac|fence|aerial|from above|distant plane|plane in (the )?sky/i.test(blob)) {
-          return -8;
+        if (isRejectedIntroLeadVisual(a)) {
+          return -12;
         }
       }
       if (topicIsAirline && !/airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|runway|jet|passenger|attendant|hangar|airport|pilot|plane|flight/i.test(blob)) {
@@ -255,7 +309,8 @@ export function buildEditTimeline(project, options = {}) {
       }
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|empty park|people in park|press conference|news desk|office desk/i.test(blob)) return -6;
       if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
-      if (/microphone|podcast|recording studio|asmr|rode|sequin|fashion runway|back of head|from behind|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -5;
+      if (isBackViewDeadAir(a)) return -14;
+      if (/microphone|podcast|recording studio|asmr|rode|sequin|fashion runway|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -5;
       if (/camcorder|handheld camcorder|person holding camera|holding camcorder|vintage camera|filming with phone|dslr camera/i.test(blob)) return -4;
       // Demote dark/muddy stock.
       if (/\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|black background|black frame)\b/i.test(blob)) {
@@ -370,6 +425,15 @@ export function buildEditTimeline(project, options = {}) {
     while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
       const activeBeat = beatAtSegmentTime(segBeats, t, duration, seg);
+      const introLeadWindow = seg === script[0] && t < 3;
+      const introOutroReuse = isIntro || isOutro;
+      const violatesConsecutiveCluster = (candidate) => {
+        const cluster = visualSubjectCluster(candidate);
+        if (cluster === 'other') return false;
+        if (!previousTimelineCluster || cluster !== previousTimelineCluster) return false;
+        const key = urlKey(candidate);
+        return !(isHumanCluster(cluster) && key && key !== previousTimelineUrl);
+      };
       const diversityScore = (candidate) => {
         let s = scoreAsset(candidate, activeBeat);
         // Soft anti-repeat of the same subject cluster (not just adjacent URL).
@@ -379,51 +443,39 @@ export function buildEditTimeline(project, options = {}) {
         }
         return s;
       };
+      const canUseCandidate = (candidate, { allowOverReuse = false } = {}) => {
+        if (!candidate) return false;
+        const key = urlKey(candidate);
+        if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
+        if (introLeadWindow && !isIntroLeadVisual(candidate)) return false;
+        if (key && recentTimelineUrls.includes(key)) return false;
+        if (violatesConsecutiveCluster(candidate)) return false;
+        const uses = reuseCountFor(key, introOutroReuse);
+        // Never exceed hard max — even as last resort (stops 9–12× loops).
+        if (key && uses >= hardMaxReuse) return false;
+        if (!allowOverReuse && key && uses >= maxReuseThisSeg) return false;
+        // Never over-reuse office pads on non-workplace topics.
+        if (
+          !topicIsWorkplace
+          && visualSubjectCluster(candidate) === 'office'
+          && uses >= 1
+        ) {
+          return false;
+        }
+        return true;
+      };
       const pickFrom = (pool, { allowOverReuse = false } = {}) => {
-        const introOutroReuse = isIntro || isOutro;
-        const canUse = (candidate) => {
-          const key = urlKey(candidate);
-          if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-          const uses = reuseCountFor(key, introOutroReuse);
-          // Never exceed hard max — even as last resort (stops 9–12× loops).
-          if (key && uses >= hardMaxReuse) return false;
-          if (!allowOverReuse && key && uses >= maxReuseThisSeg) {
-            return false;
-          }
-          // Never over-reuse office pads on non-workplace topics.
-          if (
-            !topicIsWorkplace
-            && visualSubjectCluster(candidate) === 'office'
-            && uses >= 1
-          ) {
-            return false;
-          }
-          return true;
-        };
         const rankedPool = (activeBeat || (coldEval && !isIntro && !isOutro))
           ? [...pool].sort((a, b) => diversityScore(b) - diversityScore(a))
           : pool;
         if (!rankedPool.length) return null;
         for (let j = 0; j < rankedPool.length; j++) {
           const candidate = rankedPool[(ai + j) % rankedPool.length];
-          if (canUse(candidate)) return candidate;
+          if (canUseCandidate(candidate, { allowOverReuse })) return candidate;
         }
         if (!allowOverReuse) return null;
         // Last-resort: least-used under hardMax only.
-        const underCap = rankedPool.filter((candidate) => {
-          const key = urlKey(candidate);
-          const count = reuseCountFor(key, introOutroReuse);
-          if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-          if (key && count >= hardMaxReuse) return false;
-          if (
-            !topicIsWorkplace
-            && visualSubjectCluster(candidate) === 'office'
-            && count >= 1
-          ) {
-            return false;
-          }
-          return true;
-        });
+        const underCap = rankedPool.filter((candidate) => canUseCandidate(candidate, { allowOverReuse: true }));
         if (!underCap.length) return null;
         return underCap.reduce((best, candidate) => {
           const key = urlKey(candidate);
@@ -449,7 +501,7 @@ export function buildEditTimeline(project, options = {}) {
       while (
         asset
         && attempts < Math.max(ordered.length, globalPool.length)
-        && (asset.id === lastAssetId || (urlKey(asset) && urlKey(asset) === lastUrl))
+        && !canUseCandidate(asset, { allowOverReuse: true })
       ) {
         asset =
           pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool)
@@ -463,16 +515,23 @@ export function buildEditTimeline(project, options = {}) {
         // Absolute last resort under hardMax only; if capped, lengthen prior cut.
         const pool = [...ordered, ...globalPool];
         const ranked = pool
-          .filter((c) => c && c.id !== lastAssetId && urlKey(c) !== lastUrl)
-          .sort((a, b) => reuseCountFor(urlKey(a), isIntro || isOutro) - reuseCountFor(urlKey(b), isIntro || isOutro));
-        asset = ranked.find((c) => reuseCountFor(urlKey(c), isIntro || isOutro) < hardMaxReuse) || null;
+          .filter((c) => canUseCandidate(c, { allowOverReuse: true }))
+          .sort((a, b) => {
+            const countDelta = reuseCountFor(urlKey(a), introOutroReuse) - reuseCountFor(urlKey(b), introOutroReuse);
+            if (countDelta !== 0) return countDelta;
+            return diversityScore(b) - diversityScore(a);
+          });
+        asset = ranked[0] || null;
         if (!asset && entries.length && entries[entries.length - 1].segmentId === seg.id) {
           entries[entries.length - 1].endSec = end;
           t = end;
           continue;
         }
       }
-      if (!asset) continue;
+      if (!asset) {
+        t = end;
+        continue;
+      }
       entries.push({
         segmentId: seg.id,
         startSec: t,
@@ -480,9 +539,16 @@ export function buildEditTimeline(project, options = {}) {
         assetId: asset.id,
         reason: activeBeat ? `beat:${activeBeat.id || activeBeat.searchableSubject || 'match'}` : reason,
       });
+      const assetUrl = urlKey(asset) || null;
       lastAssetId = asset.id;
-      lastUrl = urlKey(asset) || null;
+      lastUrl = assetUrl;
       lastCluster = visualSubjectCluster(asset);
+      previousTimelineUrl = assetUrl;
+      previousTimelineCluster = lastCluster;
+      if (assetUrl) {
+        recentTimelineUrls.push(assetUrl);
+        if (recentTimelineUrls.length > RECENT_URL_WINDOW) recentTimelineUrls.shift();
+      }
       if (lastUrl) {
         if (isIntro || isOutro) {
           segmentUrlUse.set(lastUrl, (segmentUrlUse.get(lastUrl) || 0) + 1);

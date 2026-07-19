@@ -358,36 +358,6 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   return r.status === 0 && existsSync(clipOut);
 }
 
-/** True when a rendered clip is near-black (reads as title-card blink under captions). */
-function clipIsNearBlack(clipPath, { sampleAtSec = 0.15 } = {}) {
-  if (!clipPath || !existsSync(clipPath)) return true;
-  const metaFile = `${clipPath}.yavg.txt`;
-  try {
-    const r = spawnSync(
-      'ffmpeg',
-      [
-        '-v', 'error',
-        '-ss', String(sampleAtSec),
-        '-i', clipPath,
-        '-frames:v', '1',
-        '-vf', 'scale=160:90,signalstats,metadata=print:file=' + metaFile,
-        '-f', 'null',
-        '-',
-      ],
-      { encoding: 'utf8', timeout: 30_000 },
-    );
-    if (r.status !== 0 || !existsSync(metaFile)) return false;
-    const txt = readFileSync(metaFile, 'utf8');
-    const m = txt.match(/lavfi\.signalstats\.YAVG=([0-9.]+)/);
-    try { unlinkSync(metaFile); } catch { /* ignore */ }
-    if (!m) return false;
-    return Number(m[1]) < 28;
-  } catch {
-    try { unlinkSync(metaFile); } catch { /* ignore */ }
-    return false;
-  }
-}
-
 /** Last-resort filler — prefer reuse; grain only if nothing else exists (and never near-black). */
 function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, reusePath = null) {
   if (reusePath && existsSync(reusePath)) {
@@ -401,7 +371,7 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, 
       ],
       { encoding: 'utf8', timeout: 120_000 },
     );
-    if (rReuse.status === 0 && existsSync(clipOut) && !clipIsNearBlack(clipOut)) return true;
+    if (rReuse.status === 0 && existsSync(clipOut)) return true;
   }
   // Soft blue-gray motion pad — never pure black/near-black (title-card blinks).
   const r = spawnSync(
@@ -483,11 +453,6 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       let ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
         w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, zoomPunch,
       });
-      if (ok && clipIsNearBlack(clipOut)) {
-        console.log(`  [ffmpeg] ${label}: ${tag} near-black — rejecting`);
-        try { unlinkSync(clipOut); } catch { /* ignore */ }
-        ok = false;
-      }
       if (!ok) {
         const thumb = resolvedAsset.thumbnailUrl;
         if (thumb) {
@@ -497,10 +462,6 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
             ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
               w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1, zoomPunch,
             });
-            if (ok && clipIsNearBlack(clipOut)) {
-              try { unlinkSync(clipOut); } catch { /* ignore */ }
-              ok = false;
-            }
             if (ok) console.log(`  [ffmpeg] ${label}: ${tag} → thumbnail still`);
           }
         }

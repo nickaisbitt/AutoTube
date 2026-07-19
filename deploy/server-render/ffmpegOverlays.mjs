@@ -145,6 +145,17 @@ export function overlayHookText(videoPath, project, options = {}) {
   if (r.status !== 0 || !existsSync(tmpOut)) {
     return { ok: false, error: (r.stderr || '').slice(-300) };
   }
+  // Reject truncated/corrupt outputs (moov missing) so we don't ship caption-less finals.
+  const probeOk = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', tmpOut],
+    { encoding: 'utf8', timeout: 30_000 },
+  );
+  const dur = parseFloat(probeOk.stdout || '');
+  if (probeOk.status !== 0 || !Number.isFinite(dur) || dur < 1) {
+    try { unlinkSync(tmpOut); } catch { /* ignore */ }
+    return { ok: false, error: 'hook overlay produced corrupt/truncated mp4' };
+  }
   copyFileSync(tmpOut, videoPath);
   try {
     unlinkSync(tmpOut);
@@ -268,6 +279,16 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
   );
   if (r.status !== 0 || !existsSync(tmpOut)) {
     return { ok: false, error: (r.stderr || '').slice(-300) };
+  }
+  const probeOk = spawnSync(
+    'ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', tmpOut],
+    { encoding: 'utf8', timeout: 30_000 },
+  );
+  const dur = parseFloat(probeOk.stdout || '');
+  if (probeOk.status !== 0 || !Number.isFinite(dur) || dur < 1) {
+    try { unlinkSync(tmpOut); } catch { /* ignore */ }
+    return { ok: false, error: 'caption overlay produced corrupt/truncated mp4' };
   }
   copyFileSync(tmpOut, videoPath);
   try {

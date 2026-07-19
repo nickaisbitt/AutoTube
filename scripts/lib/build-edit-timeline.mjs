@@ -144,14 +144,19 @@ export function buildEditTimeline(project, options = {}) {
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
   const MAX_BODY_CUT_SEC = 1.25;
-  // Keep requested cut for pacing. Prefer unique URLs; hard-cap reuse at 3 even
-  // when allowOverReuse — never 9× the same office pad (Wave7 trap).
+  // Keep requested cut for pacing, but lengthen slightly when unique pool cannot
+  // support dense cuts under HARD_MAX (avoids silent 12× reuse).
   const HARD_MAX_REUSE = 3;
   let effectiveMaxReuse = maxReusePerUrl;
+  let effectiveCut = cut;
   if (uniqueVideos.length > 0 && totalDur > 0 && cut > 0) {
-    const clipsNeeded = totalDur / Math.min(cut, MAX_BODY_CUT_SEC);
-    if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
-      effectiveMaxReuse = Math.min(HARD_MAX_REUSE, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
+    const maxSlots = uniqueVideos.length * HARD_MAX_REUSE;
+    const clipsAtCut = totalDur / Math.min(cut, MAX_BODY_CUT_SEC);
+    if (clipsAtCut > maxSlots) {
+      effectiveCut = Math.min(MAX_BODY_CUT_SEC, Math.max(cut, totalDur / maxSlots));
+    }
+    if (clipsAtCut > uniqueVideos.length * effectiveMaxReuse) {
+      effectiveMaxReuse = Math.min(HARD_MAX_REUSE, Math.max(effectiveMaxReuse, Math.ceil(clipsAtCut / uniqueVideos.length)));
     }
   }
   const topicIsHousing = !isEvalColdMode() && isHousingTopic(project.topic || '');
@@ -331,7 +336,7 @@ export function buildEditTimeline(project, options = {}) {
       : assets;
 
     const duration = seg.duration || 20;
-    const interval = isIntro ? Math.min(cut, 0.65) : Math.min(cut, MAX_BODY_CUT_SEC);
+    const interval = isIntro ? Math.min(effectiveCut, 0.65) : Math.min(effectiveCut, MAX_BODY_CUT_SEC);
     const maxReuseThisSeg = isIntro || isOutro ? 1 : effectiveMaxReuse;
     let t = 0;
     let ai = 0;
@@ -380,28 +385,42 @@ export function buildEditTimeline(project, options = {}) {
           if (canUse(candidate)) return candidate;
         }
         if (!allowOverReuse) return null;
-        return rankedPool.reduce((best, candidate) => {
+        // Last-resort: least-used under HARD_MAX only — never climb to 9–12×.
+        const underCap = rankedPool.filter((candidate) => {
+          const key = urlKey(candidate);
+          const count = reuseCountFor(key, introOutroReuse);
+          if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
+          if (key && count >= HARD_MAX_REUSE) return false;
+          if (
+            !topicIsWorkplace
+            && visualSubjectCluster(candidate) === 'office'
+            && count >= 1
+          ) {
+            return false;
+          }
+          return true;
+        });
+        if (!underCap.length) return null;
+        return underCap.reduce((best, candidate) => {
           const key = urlKey(candidate);
           const count = reuseCountFor(key, introOutroReuse);
           const bestKey = urlKey(best);
           const bestCount = reuseCountFor(bestKey, introOutroReuse);
-          if (candidate.id === lastAssetId || (key && key === lastUrl)) return best;
           if (topicIsHousing && !isIntro && scoreAsset(candidate, activeBeat) < 0) return best;
           if (diversityScore(candidate) !== diversityScore(best)) {
             return diversityScore(candidate) > diversityScore(best) ? candidate : best;
           }
           return count < bestCount ? candidate : best;
-        }, rankedPool[ai % rankedPool.length]);
+        }, underCap[0]);
       };
 
       // Prefer segment pool → unused global URLs → over-reuse last resort.
+      // Never fall back to uncapped ordered[i] (that caused 12× reuse).
       let asset =
         pickFrom(ordered)
         || (!isIntro && !isOutro ? pickFrom(globalPool) : null)
         || pickFrom(ordered, { allowOverReuse: true })
-        || pickFrom(globalPool, { allowOverReuse: true })
-        || ordered[ai % ordered.length]
-        || globalPool[0];
+        || pickFrom(globalPool, { allowOverReuse: true });
       let attempts = 0;
 
       while (
@@ -409,7 +428,6 @@ export function buildEditTimeline(project, options = {}) {
         && attempts < Math.max(ordered.length, globalPool.length)
         && (asset.id === lastAssetId || (urlKey(asset) && urlKey(asset) === lastUrl))
       ) {
-        // Intro/outro: stay topic-locked (no global-pool beetle/still).
         asset =
           pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool)
           || pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool, {
@@ -418,7 +436,15 @@ export function buildEditTimeline(project, options = {}) {
         ai += 1;
         attempts += 1;
       }
-      if (!asset) continue;
+      if (!asset) {
+        // Extend previous unique clip instead of over-reusing past HARD_MAX.
+        if (entries.length && entries[entries.length - 1].segmentId === seg.id) {
+          entries[entries.length - 1].endSec = end;
+          t = end;
+          continue;
+        }
+        continue;
+      }
       entries.push({
         segmentId: seg.id,
         startSec: t,

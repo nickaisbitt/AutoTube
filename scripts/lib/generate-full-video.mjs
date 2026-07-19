@@ -468,7 +468,7 @@ function stripJunkDemoVideos(project, report) {
       isJunkDemoVideoUrl(url)
       || isJunkStockClip(asset, topicBlob)
       || isOffBrandVisual(`${asset.alt || ''} ${url} ${asset.query || ''}`, topicBlob)
-      || (/\/api\/download-clip/i.test(url) && /youtube\.com|youtu\.be/i.test(url));
+      || (/\/api\/download-clip/i.test(url) && /youtube\.com|youtu\.be|tiktok\.com/i.test(url));
     if (junk) {
       report.junkVideoDropped = report.junkVideoDropped || [];
       report.junkVideoDropped.push({ url, reason: 'demo/off-topic/broken proxy clip' });
@@ -716,6 +716,17 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   // Junk titles that slip past URL host filters.
   if (
     /#fyp|#tiktok|#disney|sofia the first|encerr[oó]|maleta|minecraft|fortnite|roblox|gacha|asmr|mukbang|\belmo\b|sesame street|muppet|cookie monster|big bird|peppa pig|cocomelon/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
+  // TikTok/proxy harvest often injects psychology cards, HUD, off-story text screens.
+  if (/tiktok\.com|\/api\/download-clip\?url=.*tiktok/i.test(`${clip.url || ''} ${blob}`)) {
+    return true;
+  }
+  if (
+    /\b(psychology textbook|textbook page|powerpoint slide|presentation slide|sci-?fi (cockpit|hud)|spaceship|nebula|galaxy stock|hud overlay|holographic ui)\b/i.test(
       blob,
     )
   ) {

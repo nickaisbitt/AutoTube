@@ -467,6 +467,7 @@ function stripJunkDemoVideos(project, report) {
     const junk =
       isJunkDemoVideoUrl(url)
       || isJunkStockClip(asset, topicBlob)
+      || (isAirlineTopic(topicBlob) && !isAirlineRelevantClip(asset, topicBlob))
       || isOffBrandVisual(`${asset.alt || ''} ${url} ${asset.query || ''}`, topicBlob)
       || (/\/api\/download-clip/i.test(url) && /youtube\.com|youtu\.be|tiktok\.com/i.test(url));
     if (junk) {
@@ -601,7 +602,9 @@ async function fetchPexelsVideos(query, perPage = 8) {
       if (!landscape?.link) continue;
       out.push({
         url: landscape.link,
-        alt: `Pexels: ${query}`,
+        // Do not echo the search query into alt — that launders irrelevant clips as "aviation".
+        alt: 'Pexels video',
+        query,
         source: 'Pexels Videos',
         sourceUrl: video.url,
         thumbnailUrl: video.image,
@@ -630,7 +633,9 @@ async function fetchPixabayVideos(query, perPage = 8) {
       if (!pick?.url) continue;
       out.push({
         url: pick.url,
-        alt: hit.tags || `Pixabay: ${query}`,
+        // Prefer real Pixabay tags as visual evidence; never fall back to query echo.
+        alt: hit.tags || 'Pixabay video',
+        query,
         source: 'Pixabay Videos',
         sourceUrl: hit.pageURL,
         thumbnailUrl: hit.userImageURL || undefined,
@@ -645,8 +650,21 @@ async function fetchPixabayVideos(query, perPage = 8) {
 
 /** Pixabay/Pexels often match topic words literally (piggy bank, wash hands, rotate phone). */
 /** Prefer phone/bank/security motion for cyber topics — deny lifestyle pets/nature filler. */
-const AIRLINE_RELEVANCE_RE =
-  /\b(airline|aircraft|airplane|aeroplane|aviation|cabin|cockpit|oxygen|runway|jet|passenger|attendant|hangar|airport|pilot|plane|flight|mechanic|fuselage|tarmac|faa|pressure gauge|cabin pressure)\b/i;
+/** Strong aviation evidence — must appear in real visual metadata, not just the search query echo. */
+const AIRLINE_STRONG_RE =
+  /\b(airline|aircraft|airplane|aeroplane|aviation|cockpit|oxygen\s*mask|runway|hangar|airport|fuselage|tarmac|jet\s*bridge|boarding|cabin\s*(interior|pressure|passengers?)|pressure\s*gauge|flight\s*attendant|faa|bombardier|embraer|q400|regional\s*jet)\b/i;
+/** Weak tokens alone are not enough (passenger/pilot/flight match hospital & sports stock). */
+const AIRLINE_WEAK_RE = /\b(passenger|pilot|plane|jet|flight|mechanic|attendant)\b/i;
+const AIRLINE_WEAK_CONTEXT_RE =
+  /\b(cabin|cockpit|airplane|aircraft|airport|seat|aisle|galley|headset|yoke|throttle|hangar|tarmac|runway|oxygen|fuselage)\b/i;
+/** Queries we trust when API alt is just an echo of the search string. */
+const AIRLINE_TRUSTED_QUERY_RE =
+  /\b(oxygen\s*mask|cockpit|hangar|runway|tarmac|cabin\s*(interior|pressure|passengers?)|airplane|aircraft|fuselage|flight\s*attendant|pilot\s*(cockpit|headset|face)|boarding|jet\s*bridge|pressure\s*gauge|faa\s*report|maintenance\s*hangar|airplane\s*cabin)\b/i;
+/** Never OK on airline stories — keyword miss from faceSeek / long topic harvest. */
+const AIRLINE_OFF_TOPIC_RE =
+  /\b(football|soccer|nfl|athlete|jersey|stadium|basketball|tennis|hockey|golf|baseball|sports?\s*player|cheerleader|astronaut|space\s*suit|spacewalk|nasa|space\s*station|galaxy|nebula|hospital\s*patient|icu\b|surgery|surgeon|operating\s*room|nurse\s*station|ambulance\s*stretcher|iv\s*drip|hospital\s*bed|garage|auto\s*repair|car\s*engine|crying\s*(woman|girl|man)|emotional\s*portrait|stock\s*reaction|yoga|gym\s*workout|fashion\s*runway)\b/i;
+
+const AIRLINE_RELEVANCE_RE = AIRLINE_STRONG_RE;
 
 const AIRLINE_MEGA_CARRIER_PATTERNS = [
   /\bemirates\b/i,
@@ -658,6 +676,67 @@ const AIRLINE_MEGA_CARRIER_PATTERNS = [
 
 function mentionsMegaCarrier(blob = '') {
   return AIRLINE_MEGA_CARRIER_PATTERNS.some((re) => re.test(blob || ''));
+}
+
+/**
+ * Visual evidence for airline relevance — strip echoed search/topic text so
+ * "Pexels: worried passenger face" cannot launder a hospital/football clip.
+ */
+function airlineVisualEvidenceBlob(clip = {}) {
+  const query = String(clip.query || '').trim().toLowerCase();
+  const rawAlt = String(clip.alt || '').trim();
+  let alt = rawAlt.toLowerCase();
+  const providerEcho = /^(pexels|pixabay)(?:\s+video)?:\s*/i.test(rawAlt)
+    || /^(pexels|pixabay)\s+video$/i.test(rawAlt);
+  alt = alt
+    .replace(/^pexels:\s*/i, '')
+    .replace(/^pixabay:\s*/i, '')
+    .replace(/^pexels video:\s*/i, '')
+    .replace(/^(pexels|pixabay)\s+video$/i, '');
+  if (query && alt.includes(query.slice(0, Math.min(48, query.length)))) {
+    alt = alt.replace(query, ' ');
+  }
+  // Provider echo / placeholder alts are not visual proof — only real tags/URLs count.
+  if (providerEcho) {
+    alt = '';
+  }
+  // UI/stock harvest often sets alt = topic sentence — not visual proof.
+  if (
+    /regional airline|cabin[-\s]?pressure|cabin pressure fail|how a .+\bhid\b/i.test(alt)
+    || alt.length > 90
+  ) {
+    alt = '';
+  }
+  return `${alt} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''}`.toLowerCase();
+}
+
+/** Resolve the search string used to fetch this clip (field or legacy provider-echo alt). */
+function airlineClipSearchQuery(clip = {}) {
+  const direct = String(clip.query || '').trim();
+  if (direct) return direct;
+  const rawAlt = String(clip.alt || '').trim();
+  const m = rawAlt.match(/^(?:pexels|pixabay)(?:\s+video)?:\s*(.+)$/i);
+  return m ? m[1].trim() : '';
+}
+
+function isAirlineRelevantClip(clip = {}, topicBlob = '') {
+  const full = `${clip.alt || ''} ${clip.query || ''} ${clip.url || ''} ${clip.source || ''}`.toLowerCase();
+  if (AIRLINE_OFF_TOPIC_RE.test(full)) return false;
+  const evidence = airlineVisualEvidenceBlob(clip);
+  if (AIRLINE_STRONG_RE.test(evidence)) return true;
+  if (AIRLINE_WEAK_RE.test(evidence) && AIRLINE_WEAK_CONTEXT_RE.test(evidence)) return true;
+  // Echo-only alts: allow only short, controlled aviation search queries (not topic essays).
+  const query = airlineClipSearchQuery(clip);
+  if (
+    query.length > 0
+    && query.length <= 72
+    && !/\bhow a\b|\bhid\b|\bfailures\b/i.test(query)
+    && AIRLINE_TRUSTED_QUERY_RE.test(query)
+    && !AIRLINE_OFF_TOPIC_RE.test(query)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function isCyberRelevantClip(clip = {}, topicBlob = '') {
@@ -692,7 +771,7 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
   }
   if (isAirlineTopic(topicBlob)) {
     if (isJunkStockClip(clip, topicBlob)) return false;
-    return AIRLINE_RELEVANCE_RE.test(blob);
+    return isAirlineRelevantClip(clip, topicBlob);
   }
   if (isSchoolEducationTopic(topicBlob)) {
     return /school|student|classroom|teacher|campus|library|counseling|laptop|computer|server|data|cyber|worried|parent|records|phone|document|district/.test(
@@ -733,6 +812,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
     return true;
   }
   if (isAirlineTopic(topicText)) {
+    if (AIRLINE_OFF_TOPIC_RE.test(blob)) return true;
     const topicMentionsMegaCarrier = mentionsMegaCarrier(topicText);
     if (!topicMentionsMegaCarrier && mentionsMegaCarrier(`${clip.alt || ''} ${clip.sourceUrl || ''} ${clip.url || ''}`)) {
       return true;
@@ -744,6 +824,14 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
       return true;
     }
     if (/\b(chain.?link fence|airport fence|behind (?:a )?fence|tourist fence|plane spotter|plane spotting|watching planes)\b/i.test(blob)) {
+      return true;
+    }
+    // Generic crying/reaction portraits are not cabin-pressure B-roll.
+    if (
+      /\b(crying|tears|emotional|distressed)\b/i.test(blob)
+      && !AIRLINE_STRONG_RE.test(airlineVisualEvidenceBlob(clip))
+      && !AIRLINE_TRUSTED_QUERY_RE.test(String(clip.query || ''))
+    ) {
       return true;
     }
   }
@@ -790,7 +878,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
       blob,
     );
   if (lifestyleJunk) {
-    const aviationRunway = isAirlineTopic(topicText) && /\brunway\b/i.test(blob) && AIRLINE_RELEVANCE_RE.test(blob);
+    const aviationRunway = isAirlineTopic(topicText) && /\brunway\b/i.test(blob) && AIRLINE_STRONG_RE.test(blob);
     if (!aviationRunway) return true;
   }
   // Reject muddy/night/overexposed stock when preferBright is on.
@@ -1006,24 +1094,26 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     return withFillers(base);
   }
   if (airline) {
+    // Face queries MUST bind to cabin/cockpit — bare "worried face" returns football/hospital/astronaut.
     const faces = [
-      'worried passenger face close-up',
-      'pilot face close-up',
-      'flight attendant face',
-      'passenger oxygen mask worried',
+      'airplane cabin passenger face worried',
+      'pilot cockpit headset face close-up',
+      'flight attendant airplane cabin face',
+      'passenger oxygen mask airplane cabin',
     ];
     const topical = [
-      'oxygen mask deploy',
-      'maintenance hangar night',
-      'mechanic tools hangar',
-      'redacted paperwork documents',
-      'FAA report paperwork',
-      'cabin pressure gauge',
-      'airplane cabin passengers',
+      'oxygen mask deploy airplane cabin',
+      'maintenance hangar night aircraft',
+      'mechanic tools aircraft hangar',
+      'redacted paperwork documents desk',
+      'FAA report paperwork close-up',
+      'cabin pressure gauge cockpit',
+      'airplane cabin passengers daylight',
       'cockpit instruments close-up',
       'aircraft maintenance hangar',
+      'airport runway plane takeoff',
     ];
-    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 6), ...faces, ...topical.slice(6)];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return withAirlineFillers(base);
   }
   // Heist/airport fraud: not bank OTP stock.
@@ -1171,7 +1261,14 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
 }
 
 /** Exported for unit tests (bright / anti-HUD / nursing query proof). */
-export { stockMotionQueries, isNursingHomeTopic, isHealthcareTopic, isJunkStockClip, isCyberRelevantClip };
+export {
+  stockMotionQueries,
+  isNursingHomeTopic,
+  isHealthcareTopic,
+  isJunkStockClip,
+  isCyberRelevantClip,
+  isAirlineRelevantClip,
+};
 
 /**
  * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
@@ -1236,7 +1333,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Vision gate on stock thumbs (keywords miss off-brand junk).
       const thumb = clip.thumbnailUrl || clip.image || '';
       const apiKey = resolveOpenRouterKey();
-      if (thumb && apiKey && (report.visionStockChecked || 0) < 6) {
+      const visionBudget = isAirlineTopic(topicBlob) ? 14 : 6;
+      if (thumb && apiKey && (report.visionStockChecked || 0) < visionBudget) {
         report.visionStockChecked = (report.visionStockChecked || 0) + 1;
         const verdict = await visionRejectOffBrandStock(thumb, apiKey, topicBlob);
         if (verdict.reject) {
@@ -1338,7 +1436,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     if (/microphone|podcast|recording studio|asmr|rode|press conference|news desk/i.test(blob)) return -3;
     if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|open plan office|coworking/i.test(blob)) return -4;
     if (isAirlineTopic(topicBlob)) {
-      if (/worried passenger|passenger face|pilot face|flight attendant face|oxygen mask|cabin pressure|pressure gauge|mechanic tools|maintenance hangar|redacted|faa report|paperwork|documents/i.test(blob)) return 5;
+      if (AIRLINE_OFF_TOPIC_RE.test(blob)) return -20;
+      if (!isAirlineRelevantClip(clip, topicBlob)) return -20;
+      if (/airplane cabin passenger|pilot cockpit|flight attendant airplane|oxygen mask|cabin pressure|pressure gauge|mechanic tools|maintenance hangar|redacted|faa report|paperwork|documents/i.test(blob)) return 5;
       if (/airline|aircraft|airplane|aviation|cabin|cockpit|passenger|pilot|attendant|flight|mechanic|hangar|faa|oxygen/i.test(blob)) return 3;
       if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
     }

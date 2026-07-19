@@ -37,6 +37,14 @@ export function visionPromptForTopic(topicBlob = '') {
       'reject=false for: hospital corridor with people, medical records laptop, nurse at workstation, server room racks, patient waiting room worried, HIPAA paperwork.',
     ].join(' ');
   }
+  if (/airline|cabin[-\s]?pressure|cabin\s*pressure|aircraft|aviation|airplane|cockpit|oxygen\s*mask/i.test(topicBlob)) {
+    return [
+      'You judge ONE stock thumbnail for an airline cabin-pressure / aviation safety investigation video.',
+      'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
+      'reject=true if: football/soccer/athlete/sports, hospital patient/ICU/surgery, astronaut/space suit, crying stock portrait with no airplane, garage/auto mechanic, office coworking, random lifestyle, beetle/insect, puppet, cartoon, sci-fi HUD, blurry filler.',
+      'reject=false for: airplane cabin, cockpit, oxygen mask, airport runway/tarmac, hangar/aircraft maintenance, flight attendant or pilot in aircraft context, aviation paperwork.',
+    ].join(' ');
+  }
   return OFF_BRAND_VISION_PROMPT;
 }
 

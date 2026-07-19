@@ -285,28 +285,32 @@ describe('isJunkStockClip + faceSeek relevance', () => {
     const wordCount = (query: string) => query.replace(/-/g, ' ').trim().split(/\s+/).length;
 
     expect(q.slice(0, 3)).toEqual([
-      'worried passenger face close-up',
-      'pilot face close-up',
-      'flight attendant face',
+      'airplane cabin passenger face worried',
+      'pilot cockpit headset face close-up',
+      'flight attendant airplane cabin face',
     ]);
     expect(q).toEqual(
       expect.arrayContaining([
-        'oxygen mask deploy',
-        'maintenance hangar night',
-        'mechanic tools hangar',
-        'redacted paperwork documents',
-        'FAA report paperwork',
-        'cabin pressure gauge',
+        'oxygen mask deploy airplane cabin',
+        'maintenance hangar night aircraft',
+        'mechanic tools aircraft hangar',
+        'redacted paperwork documents desk',
+        'FAA report paperwork close-up',
+        'cabin pressure gauge cockpit',
       ]),
     );
-    expect(q.every((query) => wordCount(query) >= 3 && wordCount(query) <= 5)).toBe(true);
+    expect(q.every((query) => wordCount(query) >= 3 && wordCount(query) <= 6)).toBe(true);
     expect(q.every((query) => !query.toLowerCase().includes('regional airline cabin pressure cover up'))).toBe(
       true,
     );
+    // Bare face queries without cabin/cockpit binding are banned (they return sports/hospital pads).
+    expect(q.every((query) => !/^worried passenger face/i.test(query))).toBe(true);
   });
 
   it('airline junk filters reject mega-carriers and off-beat lifestyle clips', async () => {
-    const { isCyberRelevantClip, isJunkStockClip } = await import('../../../scripts/lib/generate-full-video.mjs');
+    const { isCyberRelevantClip, isJunkStockClip, isAirlineRelevantClip } = await import(
+      '../../../scripts/lib/generate-full-video.mjs'
+    );
     const topic = 'The regional airline cabin-pressure cover-up that hid oxygen mask failures';
 
     expect(
@@ -325,6 +329,50 @@ describe('isJunkStockClip + faceSeek relevance', () => {
     expect(isCyberRelevantClip({ alt: 'mechanic tools hangar aircraft maintenance' }, topic)).toBe(true);
     expect(isCyberRelevantClip({ alt: 'woman in red hat lifestyle travel portrait' }, topic)).toBe(false);
     expect(isCyberRelevantClip({ alt: 'back of head only tourist watching plane behind fence' }, topic)).toBe(false);
+
+    // Echoed search query must NOT count as aviation proof (football/hospital pads).
+    expect(
+      isAirlineRelevantClip(
+        { alt: 'Pexels: worried passenger face', query: 'worried passenger face' },
+        topic,
+      ),
+    ).toBe(false);
+    expect(
+      isAirlineRelevantClip(
+        { alt: 'football player celebration stadium', query: 'worried passenger face' },
+        topic,
+      ),
+    ).toBe(false);
+    expect(
+      isAirlineRelevantClip(
+        { alt: 'hospital patient in bed icu', query: 'airplane cabin passenger face worried' },
+        topic,
+      ),
+    ).toBe(false);
+    expect(
+      isAirlineRelevantClip(
+        { alt: 'astronaut space suit floating', query: 'pilot face close-up' },
+        topic,
+      ),
+    ).toBe(false);
+    expect(
+      isAirlineRelevantClip(
+        {
+          alt: 'Pexels video',
+          query: 'airplane cabin passenger face worried',
+        },
+        topic,
+      ),
+    ).toBe(true);
+    expect(
+      isAirlineRelevantClip(
+        {
+          alt: topic,
+          query: topic,
+        },
+        topic,
+      ),
+    ).toBe(false);
   });
 
   it('visionPromptForTopic mentions blurry/staged/overexposed junk on nursing topics', async () => {

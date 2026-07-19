@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { repairMergedCaptionText } from '../deploy/server-render/ffmpegOverlays.mjs';
+import { hookOverlayWords } from '../scripts/lib/hook-overlay-text.mjs';
 import { buildShortHookOverlay } from '../scripts/lib/patch-project-for-loop.mjs';
 import {
   rankStockImagesByTopic,
@@ -146,6 +148,17 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     expect(
       buildShortHookOverlay('How a regional airline hid recurring cabin-pressure failures', ''),
     ).toBe('WHY DID THE CABIN KEEP FAILING?');
+  });
+
+  it('keeps cabin keep separated when hook text arrives glued', () => {
+    const topic = 'How a regional airline hid recurring cabin-pressure failures';
+    const overlay = buildShortHookOverlay(topic, 'Why did the cabinKeep fail?');
+    expect(overlay).toBe('WHY DID THE CABIN KEEP FAILING?');
+    expect(overlay).not.toContain('CABINKEEP');
+
+    const words = hookOverlayWords('Why did the CABINKEEP fail?', { maxWords: 8 });
+    expect(words.join(' ')).toBe('WHY DID THE CABIN KEEP FAIL?');
+    expect(repairMergedCaptionText('Why did CABINKEEP fail?').toUpperCase()).not.toContain('CABINKEEP');
   });
 
   it('uses the airline narration question without leaking instructions', () => {

@@ -41,9 +41,23 @@ function tokens(text) {
     .filter((w) => w.length > 3);
 }
 
+const AIRLINE_LIMITED_CLUSTERS = new Set(['paperwork', 'mail', 'document', 'financial']);
+
 /** Coarse visual cluster so cold body cuts don't loop the same subject. */
 export function visualSubjectCluster(asset) {
   const blob = assetBlob(asset);
+  if (/\b(u\.?s\.?\s*mail|usps|postal|post\s*box|mailbox|mail\s*box|letterbox|envelopes?|mailroom|mail\s+truck)\b/.test(blob)) {
+    return 'mail';
+  }
+  if (/\b(financial|finance|bank\s*statement|credit\s*card|invoice|receipt|tax\s*form|money|dollars?|stock\s*market|spreadsheet|budget|accounting|ledger|loan)\b/.test(blob)) {
+    return 'financial';
+  }
+  if (/\b(paperwork|forms?|paper\s*stack|stack\s*of\s*papers|clipboard|file\s*folder|filing\s*cabinet)\b/.test(blob)) {
+    return 'paperwork';
+  }
+  if (/\b(documents?|records?|contract|passport|boarding\s*pass|ticket\s*counter|case\s*file)\b/.test(blob)) {
+    return 'document';
+  }
   if (/ambulance|paramedic|emt|911|dispatch/.test(blob)) return 'ambulance';
   if (/aerial|drone|overhead|bird.?eye|skyline|from above/.test(blob)) return 'aerial';
   if (/coding|source.?code|laptop screen|computer screen|typing keyboard|ide /.test(blob)) return 'coding';
@@ -60,7 +74,7 @@ export function visualSubjectCluster(asset) {
   if (/airplane window|plane window|cabin window|window seat/.test(blob)) return 'window-view';
   if (/cabin|airplane interior|aircraft interior|passenger seats|aisle|flight attendant/.test(blob)) return 'cabin-interior';
   if (/runway|tarmac|airport|airplane|aircraft|jet |plane in (the )?sky/.test(blob)) return 'aircraft';
-  if (/flood|zoning|map |documents?|paperwork/.test(blob)) return 'mapdocs';
+  if (/flood|zoning|map /.test(blob)) return 'mapdocs';
   if (/lab|pipette|sensor|calibrat|test tube/.test(blob)) return 'lab';
   if (/ship|port|container|cargo|dock|crane/.test(blob)) return 'port';
   if (/face|person|people|couple|worried|shocked|portrait|close.?up|crew|pilot|driver/.test(blob)) {
@@ -79,9 +93,15 @@ function isBackViewDeadAir(asset) {
   return /\b(back of head|from behind|rear view|backs? to camera|looking through (a )?window|looking out (the )?window|staring out (the )?window)\b/.test(blob);
 }
 
-function isRejectedIntroLeadVisual(asset) {
+function isRejectedIntroLeadVisual(asset, { airline = false } = {}) {
   const blob = assetBlob(asset);
-  return /\b(runway|tarmac|fence|sky|clouds?|aerial|from above|distant plane|plane in (the )?sky|back of head|from behind|rear view|looking through (a )?window|looking out (the )?window|airplane window|plane window|cabin window)\b/.test(blob);
+  if (/\b(runway|tarmac|fence|sky|clouds?|aerial|from above|distant plane|distant aircraft|plane in (the )?sky|aircraft in (the )?sky|back of head|from behind|rear view|looking through (a )?window|looking out (the )?window|airplane window|plane window|cabin window)\b/.test(blob)) {
+    return true;
+  }
+  return airline && (
+    /\b(mailbox|mail box|u\.?s\.?\s*mail|usps|postal|envelopes?|paperwork|documents?|financial|bank statement|invoice|receipt|tax form)\b/.test(blob)
+    || AIRLINE_LIMITED_CLUSTERS.has(visualSubjectCluster(asset))
+  );
 }
 
 function isBrightCabinInterior(asset) {
@@ -90,10 +110,21 @@ function isBrightCabinInterior(asset) {
     && /\b(bright|daylight|sunny|well.?lit|window light|interior)\b/.test(blob);
 }
 
-function isIntroLeadVisual(asset) {
+function isAirlineIntroLeadVisual(asset) {
+  if (isRejectedIntroLeadVisual(asset, { airline: true })) return false;
+  const blob = assetBlob(asset);
+  const hasCabin = /\b(cabin|airplane interior|aircraft interior|plane interior|passenger seats?|aisle|overhead bins?|flight attendant|cabin crew)\b/.test(blob);
+  const hasCockpit = /\b(cockpit|flight deck)\b/.test(blob);
+  const hasPassengerFace = /\b(passenger|pilot|attendant|crew|traveler|person|people|woman|man|family)\b/.test(blob)
+    && /\b(face|faces|worried|shocked|reaction|portrait|close.?up|eyes)\b/.test(blob);
+  return hasCockpit || hasCabin || hasPassengerFace || isBrightCabinInterior(asset);
+}
+
+function isIntroLeadVisual(asset, { airline = false } = {}) {
+  if (airline) return isAirlineIntroLeadVisual(asset);
   if (isRejectedIntroLeadVisual(asset)) return false;
   const blob = assetBlob(asset);
-  return /\b(face|faces|person|people|worried|shocked|portrait|close.?up|passenger|pilot|attendant|crew|flight attendant|cabin crew)\b/.test(blob)
+  return /\b(face|faces|person|people|worried|shocked|portrait|close.?up|passenger|pilot|attendant|crew|flight attendant|cabin crew|cockpit|flight deck)\b/.test(blob)
     || isBrightCabinInterior(asset);
 }
 
@@ -187,13 +218,18 @@ export function buildEditTimeline(project, options = {}) {
   const uniqueVideos = uniqueAssetsByUrl((project.media || []).filter((m) => m.type === 'video'));
   const totalDur = (project.script || []).reduce((sum, seg) => sum + (Number(seg.duration) || 0), 0);
   const coldEval = isEvalColdMode();
+  const topicIsAirline = isAirlineTopic(project.topic || '');
   const MAX_BODY_CUT_SEC = 1.25;
   const MAX_BODY_CUT_THIN_SEC = 2.0;
   const RECENT_URL_WINDOW = 4;
-  // Keep requested cut for pacing. Dynamic hard-cap: at least 3, at most 6 —
-  // never climb to 9–12×. Thin pools lengthen cuts up to 2s instead.
-  const HARD_MAX_REUSE_FLOOR = 3;
-  const HARD_MAX_REUSE_CEIL = 6;
+  // Keep requested cut for pacing. Dynamic hard-cap: generic topics top out at
+  // 6; airline stories are stricter and lengthen cuts rather than looping.
+  const HARD_MAX_REUSE_CEIL = topicIsAirline && coldEval && uniqueVideos.length >= 20
+    ? 2
+    : topicIsAirline
+      ? 3
+      : 6;
+  const HARD_MAX_REUSE_FLOOR = Math.min(3, HARD_MAX_REUSE_CEIL);
   let effectiveMaxReuse = maxReusePerUrl;
   let hardMaxReuse = HARD_MAX_REUSE_FLOOR;
   let effectiveCut = cut;
@@ -204,7 +240,7 @@ export function buildEditTimeline(project, options = {}) {
       HARD_MAX_REUSE_CEIL,
       Math.max(HARD_MAX_REUSE_FLOOR, Math.ceil(clipsNeeded / uniqueVideos.length)),
     );
-    if (coldEval && uniqueVideos.length >= 20) {
+    if (!topicIsAirline && coldEval && uniqueVideos.length >= 20) {
       hardMaxReuse = Math.min(4, hardMaxReuse);
     }
     if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
@@ -220,10 +256,10 @@ export function buildEditTimeline(project, options = {}) {
   }
   const topicIsHousing = !coldEval && isHousingTopic(project.topic || '');
   const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
-  const topicIsAirline = isAirlineTopic(project.topic || '');
   const beatSheet = project.visualBeatSheet;
   const beatsBySeg = new Map();
   const recentTimelineUrls = [];
+  let airlineLimitedClusterUseTotal = 0;
   let previousTimelineUrl = null;
   let previousTimelineCluster = null;
   for (const b of beatSheet?.beats || []) {
@@ -302,10 +338,10 @@ export function buildEditTimeline(project, options = {}) {
       if (/\b(black and white|b&w|monochrome|grayscale)\b/.test(blob)) return -6;
       // Intro must lead with faces / bright cabin — not distant runway silhouettes.
       if (isIntro) {
-        if (isIntroLeadVisual(a)) {
+        if (isIntroLeadVisual(a, { airline: topicIsAirline })) {
           reusePenalty += 6;
         }
-        if (isRejectedIntroLeadVisual(a)) {
+        if (isRejectedIntroLeadVisual(a, { airline: topicIsAirline })) {
           return -12;
         }
       }
@@ -318,6 +354,10 @@ export function buildEditTimeline(project, options = {}) {
       if (isBackViewDeadAir(a)) return -14;
       if (/microphone|podcast|recording studio|asmr|rode|sequin|fashion runway|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -5;
       if (/camcorder|handheld camcorder|person holding camera|holding camcorder|vintage camera|filming with phone|dslr camera/i.test(blob)) return -4;
+      const airlineLimitedCluster = visualSubjectCluster(a);
+      if (topicIsAirline && AIRLINE_LIMITED_CLUSTERS.has(airlineLimitedCluster)) {
+        reusePenalty -= airlineLimitedClusterUseTotal > 0 ? 30 : 12;
+      }
       // Demote dark/muddy stock.
       if (/\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|black background|black frame)\b/i.test(blob)) {
         return -5;
@@ -453,7 +493,7 @@ export function buildEditTimeline(project, options = {}) {
         if (!candidate) return false;
         const key = urlKey(candidate);
         if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-        if (introLeadWindow && !isIntroLeadVisual(candidate)) return false;
+        if (introLeadWindow && !isIntroLeadVisual(candidate, { airline: topicIsAirline })) return false;
         if (key && recentTimelineUrls.includes(key)) return false;
         if (violatesConsecutiveCluster(candidate)) return false;
         const uses = reuseCountFor(key, introOutroReuse);
@@ -467,6 +507,15 @@ export function buildEditTimeline(project, options = {}) {
           && uses >= 1
         ) {
           return false;
+        }
+        if (topicIsAirline) {
+          const airlineLimitedCluster = visualSubjectCluster(candidate);
+          if (
+            AIRLINE_LIMITED_CLUSTERS.has(airlineLimitedCluster)
+            && airlineLimitedClusterUseTotal >= 1
+          ) {
+            return false;
+          }
         }
         return true;
       };
@@ -561,6 +610,9 @@ export function buildEditTimeline(project, options = {}) {
         if (isIntro || isOutro) {
           segmentUrlUse.set(lastUrl, (segmentUrlUse.get(lastUrl) || 0) + 1);
         }
+      }
+      if (topicIsAirline && AIRLINE_LIMITED_CLUSTERS.has(lastCluster)) {
+        airlineLimitedClusterUseTotal += 1;
       }
       t = end;
       ai += 1;

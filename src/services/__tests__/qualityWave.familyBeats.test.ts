@@ -14,6 +14,23 @@ describe('topic family + impact beats', () => {
     expect(qs.some((q) => /hospital|records|nurse|server/i.test(q))).toBe(true);
   });
 
+  it('resolves airline family to safe stock-provider query anchors', async () => {
+    const { isSafeStockProviderQuery, resolveTopicFamily, stockProviderQueriesForTopic } = await import(
+      '../topicFamilyQueries'
+    );
+    const topic =
+      'Meet Captain Sarah Jenkins Mesa Airlines How a regional airline hid recurring cabin-pressure failures from passengers';
+    const qs = stockProviderQueriesForTopic(topic, 6);
+
+    expect(resolveTopicFamily(topic)).toBe('airline');
+    expect(qs).toContain('oxygen mask deploy airplane cabin');
+    expect(qs.every(isSafeStockProviderQuery)).toBe(true);
+    expect(qs.every((q) => !/captain sarah|sarah jenkins|mesa airlines|how a regional airline/i.test(q))).toBe(
+      true,
+    );
+    expect(isSafeStockProviderQuery(topic)).toBe(false);
+  });
+
   it('resolves nursing abuse family separately from hospital breach', async () => {
     const { resolveTopicFamily, topicFamilyQueries } = await import('../topicFamilyQueries');
     const topic = 'The nursing home cameras that recorded abuse for years';

@@ -3192,6 +3192,19 @@ async function concatenateAudio(audioFiles, outputFile) {
   return concatAudio(audioFiles, outputFile);
 }
 
+function buildNarrationTimingsFromAudioFiles(audioFiles) {
+  const timings = [];
+  let cursor = 0;
+  for (const audio of audioFiles) {
+    const duration = Math.max(0, Number(audio.duration) || 0);
+    if (audio.subtitleFile && duration > 0) {
+      timings.push({ start: cursor, end: cursor + duration });
+    }
+    cursor += duration;
+  }
+  return timings;
+}
+
 /** FFmpeg assembly path: TTS + clip concat (skips canvas preload / frame loop). */
 async function runFfmpegAssemblyRender(project) {
   log('info', '\n🎬 FFmpeg assembly mode — skipping canvas preload and frame loop');
@@ -3270,10 +3283,12 @@ async function runFfmpegAssemblyRender(project) {
   } catch (err) {
     log('warn', `  ⚠ Audio concat for ffmpeg assembly: ${err.message}`);
   }
+  const narrationTimings = buildNarrationTimingsFromAudioFiles(audioFiles);
   const ffResult = await renderViaFfmpegAssembly(project, OUTPUT_FILE, {
     devServer: process.env.DEV_SERVER_URL || 'http://localhost:5173',
     cutIntervalSec: cutInterval,
     mixedAudioPath: existsSync(mixedAudio) ? mixedAudio : null,
+    narrationTimings,
   });
   if (!ffResult.ok) {
     throw new Error(ffResult.error || 'ffmpeg assembly render failed');

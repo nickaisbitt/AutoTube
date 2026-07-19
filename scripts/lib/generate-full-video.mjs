@@ -36,6 +36,7 @@ import {
   loadFrozenProject,
 } from './keep-best.mjs';
 import {
+  airlineSoftPassMotionFailureReason,
   filterAssetsByRelevance,
   evaluateHarvestVolume,
   evaluateHarvestVolumeWithSoftPass,
@@ -583,6 +584,7 @@ async function fetchArchiveVideoResults(devServer, query) {
 async function fetchPexelsVideos(query, perPage = 8) {
   const key = resolvePexelsKey();
   if (!key) return [];
+  if (!isSafeStockMotionQuery(query)) return [];
   try {
     const url = `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${perPage}&size=medium`;
     const res = await fetch(url, { headers: { Authorization: key } });
@@ -621,6 +623,7 @@ async function fetchPexelsVideos(query, perPage = 8) {
 async function fetchPixabayVideos(query, perPage = 8) {
   const key = resolvePixabayKey();
   if (!key) return [];
+  if (!isSafeStockMotionQuery(query)) return [];
   try {
     const url = `https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(query)}&per_page=${perPage}`;
     const res = await fetch(url);
@@ -662,7 +665,10 @@ const AIRLINE_TRUSTED_QUERY_RE =
   /\b(oxygen\s*mask|cockpit|hangar|runway|tarmac|cabin\s*(interior|pressure|passengers?)|airplane|aircraft|fuselage|flight\s*attendant|pilot\s*(cockpit|headset|face)|boarding|jet\s*bridge|pressure\s*gauge|faa\s*report|maintenance\s*hangar|airplane\s*cabin)\b/i;
 /** Never OK on airline stories — keyword miss from faceSeek / long topic harvest. */
 const AIRLINE_OFF_TOPIC_RE =
-  /\b(football|soccer|nfl|athlete|jersey|stadium|basketball|tennis|hockey|golf|baseball|sports?\s*player|cheerleader|astronaut|space\s*suit|spacewalk|nasa|space\s*station|galaxy|nebula|hospital\s*patient|icu\b|surgery|surgeon|operating\s*room|nurse\s*station|ambulance\s*stretcher|iv\s*drip|hospital\s*bed|garage|auto\s*repair|car\s*engine|crying\s*(woman|girl|man)|emotional\s*portrait|stock\s*reaction|yoga|gym\s*workout|fashion\s*runway)\b/i;
+  /\b(football|soccer|nfl|athlete|jersey|stadium|basketball|tennis|hockey|golf|baseball|sports?|sports?\s*player|cheerleader|mail\s*box|mailbox|u\.?s\.?\s*mail|postal|magnifying\s*glass|financial\s*reports?|stock\s*documents?\s*desk|astronaut|space\s*suit|spacewalk|nasa|space\s*station|galaxy|nebula|patient|medical\s*attention|medical\s*patient|hospital|icu\b|surgery|surgeon|operating\s*room|nurse|nurse\s*station|ambulance\s*stretcher|stretcher|iv\s*drip|hospital\s*bed|garage|auto\s*repair|car\s*engine|crying\s*(woman|girl|man)|emotional\s*portrait|stock\s*reaction|yoga|gym\s*workout|fashion|fashion\s*runway)\b/i;
+const TRUSTED_AIRLINE_QUERY_MAX_LENGTH = 72;
+const AIRLINE_DISCONNECTED_PAD_RE =
+  /\b(u\.?\s*s\.?\s*mail|usps|postal|post\s*office|mailbox|letterbox|mail\s*(truck|carrier|delivery|bag|slot)|magnifying\s*glass|financial\s*(report|chart|graph|statement)|stock\s*(chart|market|ticker)|bar\s*chart|line\s*chart|spreadsheet|accounting\s*desk|hospital|patient|medical|icu|doctor|nurse|oxygen\s*(tank|cylinder|therapy|patient|hospital)|nasal\s*cannula)\b/i;
 
 const AIRLINE_RELEVANCE_RE = AIRLINE_STRONG_RE;
 
@@ -685,6 +691,25 @@ const AIRLINE_MEGA_CARRIER_PATTERNS = [
 
 function mentionsMegaCarrier(blob = '') {
   return AIRLINE_MEGA_CARRIER_PATTERNS.some((re) => re.test(blob || ''));
+}
+
+const STOCK_QUERY_ESSAY_RE =
+  /\b(?:meet|according|how\s+a|how\s+an|how\s+the|why\s+a|why\s+an|why\s+the|federal\s+aviation\s+administration|captain\s+[a-z]+|hid\s+recurring|recurring\s+failures)\b/i;
+
+function stockQueryWords(query) {
+  return String(query || '')
+    .trim()
+    .replace(/[-/]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function isSafeStockMotionQuery(query) {
+  const normalized = String(query || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return false;
+  if (normalized.length > 64) return false;
+  if (stockQueryWords(normalized).length > 6) return false;
+  return !STOCK_QUERY_ESSAY_RE.test(normalized);
 }
 
 /**
@@ -728,21 +753,31 @@ function airlineClipSearchQuery(clip = {}) {
   return m ? m[1].trim() : '';
 }
 
+function hasAirlineCompatibleVisualEvidence(evidence = '') {
+  const blob = String(evidence || '').trim();
+  return !blob || AIRLINE_STRONG_RE.test(blob) || (AIRLINE_WEAK_RE.test(blob) && AIRLINE_WEAK_CONTEXT_RE.test(blob));
+}
+
+function isTrustedAirlineSearchQuery(query = '') {
+  const text = String(query || '').trim();
+  return Boolean(
+    text.length > 0
+      && text.length <= TRUSTED_AIRLINE_QUERY_MAX_LENGTH
+      && !/\bhow a\b|\bhid\b|\bfailures\b/i.test(text)
+      && !/\bCaptain\s+[A-Z][a-z]+\b/.test(text)
+      && AIRLINE_TRUSTED_QUERY_RE.test(text)
+      && !AIRLINE_OFF_TOPIC_RE.test(text),
+  );
+}
+
 function isAirlineRelevantClip(clip = {}, topicBlob = '') {
-  const full = `${clip.alt || ''} ${clip.query || ''} ${clip.url || ''} ${clip.source || ''}`.toLowerCase();
-  if (AIRLINE_OFF_TOPIC_RE.test(full)) return false;
   const evidence = airlineVisualEvidenceBlob(clip);
+  if (AIRLINE_OFF_TOPIC_RE.test(evidence)) return false;
   if (AIRLINE_STRONG_RE.test(evidence)) return true;
   if (AIRLINE_WEAK_RE.test(evidence) && AIRLINE_WEAK_CONTEXT_RE.test(evidence)) return true;
   // Echo-only alts: allow only short, controlled aviation search queries (not topic essays).
   const query = airlineClipSearchQuery(clip);
-  if (
-    query.length > 0
-    && query.length <= 72
-    && !/\bhow a\b|\bhid\b|\bfailures\b/i.test(query)
-    && AIRLINE_TRUSTED_QUERY_RE.test(query)
-    && !AIRLINE_OFF_TOPIC_RE.test(query)
-  ) {
+  if (isTrustedAirlineSearchQuery(query) && hasAirlineCompatibleVisualEvidence(evidence)) {
     return true;
   }
   return false;
@@ -1272,6 +1307,7 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
 /** Exported for unit tests (bright / anti-HUD / nursing query proof). */
 export {
   stockMotionQueries,
+  isSafeStockMotionQuery,
   isNursingHomeTopic,
   isHealthcareTopic,
   isJunkStockClip,
@@ -1306,7 +1342,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const queries = stockMotionQueries(topicBlob, cyberTopic, {
     faceSeek: options.faceSeek === true,
     preferBright: options.preferBright === true,
-  });
+  }).filter(isSafeStockMotionQuery);
 
   for (const q of queries.slice(0, 18)) {
     const fromPexels = await fetchPexelsVideos(q, 10);
@@ -1342,12 +1378,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Vision gate on stock thumbs (keywords miss off-brand junk).
       const thumb = clip.thumbnailUrl || clip.image || '';
       const apiKey = resolveOpenRouterKey();
-      const visionBudget = isAirlineTopic(topicBlob) ? 14 : 6;
+      const visionBudget = isAirlineTopic(topicBlob) ? 24 : 6;
       if (thumb && apiKey && (report.visionStockChecked || 0) < visionBudget) {
         report.visionStockChecked = (report.visionStockChecked || 0) + 1;
         const verdict = await visionRejectOffBrandStock(thumb, apiKey, topicBlob);
         if (verdict.reject) {
           report.visionStockRejected = (report.visionStockRejected || 0) + 1;
+          report.visionStockRejectedThumbs = report.visionStockRejectedThumbs || [];
+          report.visionStockRejectedThumbs.push({ thumbnailUrl: thumb, reason: verdict.reason || '' });
           report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
           continue;
         }
@@ -1446,7 +1484,19 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|open plan office|coworking/i.test(blob)) return -4;
     if (isAirlineTopic(topicBlob)) {
       if (AIRLINE_OFF_TOPIC_RE.test(blob)) return -20;
+      if (AIRLINE_DISCONNECTED_PAD_RE.test(blob)) return -20;
       if (!isAirlineRelevantClip(clip, topicBlob)) return -20;
+      if (
+        /\b(daylight|sunny|bright|well.?lit)\b/i.test(blob)
+        && /\b(airplane|aircraft|plane)?\s*cabin|aisle\b/i.test(blob)
+        && /\b(face|faces|passengers?|people|crew|attendant)\b/i.test(blob)
+      ) {
+        return 8;
+      }
+      if (/\bpilot\b.{0,40}\bcockpit\b.{0,40}\bheadset\b|\bcockpit\b.{0,40}\bheadset\b.{0,40}\bpilot\b/i.test(blob)) return 8;
+      if (/\boxygen\s*mask\b/i.test(blob) && /\b(cabin|airplane|aircraft|plane|passenger)\b/i.test(blob)) return 8;
+      if (/\b(hangar|maintenance|mechanic)\b/i.test(blob) && /\b(aircraft|airplane|plane|jet|fuselage)\b/i.test(blob)) return 7;
+      if (/\b(runway|tarmac)\b/i.test(blob) && /\b(plane|aircraft|airplane|jet)\b/i.test(blob)) return 7;
       if (/airplane cabin passenger|pilot cockpit|flight attendant airplane|oxygen mask|cabin pressure|pressure gauge|mechanic tools|maintenance hangar|redacted|faa report|paperwork|documents/i.test(blob)) return 5;
       if (/airline|aircraft|airplane|aviation|cabin|cockpit|passenger|pilot|attendant|flight|mechanic|hangar|faa|oxygen/i.test(blob)) return 3;
       if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
@@ -1472,7 +1522,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const key = clip.url.split('?')[0];
     if (!key || used.has(key)) return false;
     const isIntro = seg.type === 'intro' || seg === segments[0];
-    if (isIntro && faceScore(clip) < 0) return false;
+    const score = faceScore(clip);
+    if (isAirlineTopic(topicBlob) && score <= -20) return false;
+    if (isIntro && score < 0) return false;
     const ok = await canFetch(clip.url, { timeoutMs: 10000, minBytes: 2048, expectVideo: true });
     if (!ok) {
       report.videoTopUpFailed = report.videoTopUpFailed || [];
@@ -2490,9 +2542,12 @@ export async function generateFullVideo(options) {
           const volume2 = evaluateHarvestVolume(project, loopMinAssets);
           mediaReport.harvestQuality = volume2;
           mediaReport.volumePass = volume2.pass;
-          const soft2 = volume2.pass
-            ? { pass: true, reason: 'volume-hard-pass-after-repad' }
-            : evaluateHarvestVolumeWithSoftPass(mediaReport, project);
+          const airlineSoftFail = volume2.pass ? airlineSoftPassMotionFailureReason(project) : null;
+          const soft2 = airlineSoftFail
+            ? { pass: false, reason: airlineSoftFail }
+            : volume2.pass
+              ? { pass: true, reason: 'volume-hard-pass-after-repad' }
+              : evaluateHarvestVolumeWithSoftPass(mediaReport, project);
           if (soft2.pass) {
             log(`   ⚠️ Volume recovered after stock re-pad (${soft2.reason})`);
             mediaReport.volumePass = true;
@@ -2503,11 +2558,14 @@ export async function generateFullVideo(options) {
             const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
             const totalMedia = project.media?.length ?? 0;
             const segCount = project.script?.length ?? 0;
+            const failureSummary = failing.length
+              ? `${failing.length}/${segCount} segments below ${minPer} assets`
+              : `soft-pass rejected after re-pad (${soft2.reason || soft.reason || 'none'})`;
             fixState.reHarvestMedia = true;
             fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
             return {
               ok: false,
-              error: `HARVEST_VOLUME_FAIL: ${failing.length}/${segCount} segments below ${minPer} assets — ${detail || 'no segment detail'} (total=${totalMedia}, soft-pass=${soft2.reason || soft.reason || 'none'})`,
+              error: `HARVEST_VOLUME_FAIL: ${failureSummary} — ${detail || 'no segment detail'} (total=${totalMedia}, soft-pass=${soft2.reason || soft.reason || 'none'})`,
               harvestQualityFail: true,
               topic,
               outDir,

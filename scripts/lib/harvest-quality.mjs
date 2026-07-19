@@ -1,7 +1,7 @@
 /**
  * Harvest quality gates: topic/segment relevance + per-segment volume.
  */
-import { isCovidTopic, isHeistTopic, isHousingTopic, isNursingHomeTopic, isWorkplaceTopic } from './topic-family.mjs';
+import { isAirlineTopic, isCovidTopic, isHeistTopic, isHousingTopic, isNursingHomeTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
 
 const STOP_WORDS = new Set([
@@ -121,6 +121,33 @@ export const AIRPLANE_CABIN_WINDOW_RE =
 export const DARK_WINDOW_TONE_RE =
   /\b(night|dark|silhouette|black|shadowy|dim(?:ly)? lit|low light)\b/i;
 
+/** Airline paperwork that is explicitly aviation/safety related, not generic desk stock. */
+export const AIRLINE_DOCUMENT_EVIDENCE_RE =
+  /\b(faa|f\.a\.a\.|ntsb|n\.t\.s\.b\.|aviation|aircraft|airplane|aeroplane|airline|flight|cockpit|cabin(?:[-\s]?pressure)?|oxygen\s*mask|pressure\s*gauge|cabin\s+pressure\s+gauge|maintenance\s+log|aircraft\s+maintenance|aviation\s+maintenance|airworthiness|safety\s+report|incident\s+report|pilot|flight\s+attendant|hangar|tarmac|runway)\b/i;
+
+/** Mail and paperwork pads that routinely masquerade as airline investigation B-roll. */
+export const AIRLINE_MAIL_PAPERWORK_RE =
+  /\b(u\.?\s*s\.?\s*mail|usps|postal[-\s]+service|post(?:al)?[-\s]+office(?:[-\s]+box)?|p\.?\s*o\.?\s*box|mail[-\s]*box(?:es)?|mailbox(?:es)?|blue[-\s]+mailbox|letter[-\s]*box(?:es)?)\b/i;
+
+export const AIRLINE_MAGNIFYING_DOCUMENTS_RE =
+  /\b(?:magnifying[-\s]+glass|loupe)\b.{0,90}\b(documents?|paperwork|papers?|reports?|contracts?|files?|forms?|invoices?|financial|desk)\b|\b(documents?|paperwork|papers?|reports?|contracts?|files?|forms?|invoices?|financial|desk)\b.{0,90}\b(?:magnifying[-\s]+glass|loupe)\b/i;
+
+export const AIRLINE_FINANCIAL_PAPERWORK_RE =
+  /\b(financial\s+reports?|finance\s+reports?|financial\s+report\s+pads?|stock\s+(?:chart|charts|market\s+chart|market\s+charts|market\s+graph|market\s+graphs)|stock-chart|accounting\s+desk|accountant\s+desk|accounting\s+paperwork|balance\s+sheet|income\s+statement|profit\s+and\s+loss|p\s*&\s*l\s+statement|ledger|tax\s+forms?|invoice\s+paperwork|business\s+report\s+charts?|financial\s+(?:chart|charts|graph|graphs)|market\s+analysis\s+paperwork|calculator.{0,30}(?:paperwork|financial|reports?))\b/i;
+
+export const AIRLINE_GENERIC_DESK_PAPERWORK_RE =
+  /(?=.*\b(desk|desktop|office\s+table|tabletop|conference\s+table|clipboard|legal\s+pad|notepad)\b)(?=.*\b(paperwork|documents?|papers?|reports?|forms?|folders?|files?|contracts?|invoices?|spreadsheets?|charts?|report\s+pads?)\b).+/i;
+
+function airlinePaperworkJunkReason(haystack, contextText) {
+  if (!isAirlineTopic(contextText)) return null;
+  if (AIRLINE_MAIL_PAPERWORK_RE.test(haystack)) return 'generic mail/postal stock for airline';
+  if (AIRLINE_MAGNIFYING_DOCUMENTS_RE.test(haystack)) return 'generic magnifying-glass document stock for airline';
+  if (AIRLINE_FINANCIAL_PAPERWORK_RE.test(haystack)) return 'generic financial/report paperwork for airline';
+  if (AIRLINE_DOCUMENT_EVIDENCE_RE.test(haystack)) return null;
+  if (AIRLINE_GENERIC_DESK_PAPERWORK_RE.test(haystack)) return 'generic desk paperwork for airline';
+  return null;
+}
+
 /**
  * @param {string} haystack
  * @param {string} contextText
@@ -139,6 +166,8 @@ export function genericStockJunkReason(haystack, contextText = '') {
   if (AIRPLANE_CABIN_WINDOW_RE.test(h) && DARK_WINDOW_TONE_RE.test(h)) {
     return 'dark airplane/cabin-window stock';
   }
+  const airlinePaperworkJunk = airlinePaperworkJunkReason(h, ctx);
+  if (airlinePaperworkJunk) return airlinePaperworkJunk;
   if (MONOCHROME_STOCK_RE.test(h) && !MONOCHROME_STOCK_RE.test(ctx)) {
     return 'black-and-white/monochrome stock';
   }
@@ -517,6 +546,15 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   }).length;
   const uniqueTopicalVideos = videoCount - genericJunkVideos;
   const genericJunkRatio = videoCount ? genericJunkVideos / videoCount : 0;
+  const airlineSoftFail = airlineSoftPassMotionFailureReason(project, {
+    genericJunkRatio,
+    genericJunkVideos,
+    uniqueVideos,
+    videoCount,
+  });
+  if (airlineSoftFail) {
+    return { pass: false, reason: airlineSoftFail };
+  }
 
   // Soft-pass A: cyber stills + ≥1 video/seg
   if (cyber >= 6 && videosPerSeg >= 1) {
@@ -568,4 +606,98 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     return { pass: true, reason: `soft-pass-crime-heist(${media.length} assets/${segN} segs)` };
   }
   return { pass: false, reason: 'volume-hard-fail' };
+}
+
+const AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS = 12;
+const AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
+
+const AIRLINE_HARD_REJECT_PATTERNS = [
+  {
+    reason: 'medical-patient-nurse',
+    pattern:
+      /\b(hospital\s+patient|medical\s+patient|patient\s+(?:bed|ward|room|monitor|care)|nurses?|nursing\s+station|doctor|surgeon|surgery|icu|iv\s+drip|hospital\s+bed|ambulance\s+stretcher)\b/i,
+  },
+  {
+    reason: 'mail-mailbox',
+    pattern:
+      /\b(mailbox(?:es)?|mail\s+(?:carrier|truck|delivery|sorting|room|bag|slot)|postal\s+(?:worker|truck|service|delivery)|post\s+office|letters?\s+in\s+(?:a\s+)?mailbox)\b/i,
+  },
+  {
+    reason: 'financial-reports',
+    pattern:
+      /\b(financial\s+reports?|annual\s+reports?|quarterly\s+reports?|financial\s+statements?|spreadsheet\s+reports?)\b/i,
+  },
+];
+
+const AIRLINE_STRONG_CABIN_RE =
+  /\b(?:airplane|aircraft|plane|flight|airline)\s+cabin\b|\bcabin\s+(?:interior|pressure|altitude|crew|passengers?|oxygen|mask|overhead)\b/i;
+const AIRLINE_STRONG_COCKPIT_RE = /\bcockpit\b|\bflight\s+deck\b/i;
+const AIRLINE_STRONG_OXYGEN_RE = /\boxygen\s*masks?\b|\bdeployed\s+masks?\b/i;
+const AIRLINE_STRONG_AIRCRAFT_RE =
+  /\b(aircraft|airplane|aeroplane|plane|jet|airliner|fuselage|flight|aviation)\b/i;
+const AIRLINE_STRONG_HANGAR_RE = /\bhangar\b/i;
+const AIRLINE_STRONG_RUNWAY_RE = /\brunway\b|\btarmac\b/i;
+
+function uniqueVideoAssets(media = []) {
+  const uniqueVideos = [];
+  const seenVideoKeys = new Set();
+  for (const asset of media) {
+    if (!(asset.type === 'video' || /\.mp4/i.test(asset.url || ''))) continue;
+    const key = String(asset.url || asset.id || `${asset.segmentId || ''}:${asset.alt || ''}:${asset.query || ''}`).split('?')[0];
+    if (!key || seenVideoKeys.has(key)) continue;
+    seenVideoKeys.add(key);
+    uniqueVideos.push(asset);
+  }
+  return uniqueVideos;
+}
+
+function airlineVideoBlob(asset = {}) {
+  return `${asset.alt || ''} ${asset.title || ''} ${asset.source || ''} ${asset.sourceUrl || ''} ${asset.url || ''} ${asset.query || ''}`;
+}
+
+function airlineHardRejectReason(asset = {}) {
+  const blob = airlineVideoBlob(asset);
+  for (const { reason, pattern } of AIRLINE_HARD_REJECT_PATTERNS) {
+    if (pattern.test(blob)) return reason;
+  }
+  return null;
+}
+
+function isAirlineStrongVideo(asset = {}) {
+  const blob = airlineVideoBlob(asset);
+  if (airlineHardRejectReason(asset) || isGenericStockJunk(blob, 'airline cabin pressure')) return false;
+  if (AIRLINE_STRONG_CABIN_RE.test(blob)) return true;
+  if (AIRLINE_STRONG_COCKPIT_RE.test(blob)) return true;
+  if (AIRLINE_STRONG_OXYGEN_RE.test(blob)) return true;
+  if (AIRLINE_STRONG_HANGAR_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
+  if (AIRLINE_STRONG_RUNWAY_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
+  return false;
+}
+
+export function airlineSoftPassMotionFailureReason(project, stats = {}) {
+  const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
+  if (!isAirlineTopic(topicBlob)) return null;
+
+  const uniqueVideos = stats.uniqueVideos || uniqueVideoAssets(project?.media || []);
+  const videoCount = stats.videoCount ?? uniqueVideos.length;
+
+  for (const asset of uniqueVideos) {
+    const reason = airlineHardRejectReason(asset);
+    if (reason) return `soft-pass-motion-airline-junk(${reason})`;
+  }
+
+  const genericJunkVideos = stats.genericJunkVideos ?? uniqueVideos.filter((asset) => (
+    isGenericStockJunk(airlineVideoBlob(asset), topicBlob)
+  )).length;
+  const genericJunkRatio = stats.genericJunkRatio ?? (videoCount ? genericJunkVideos / videoCount : 0);
+  if (genericJunkRatio > AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX) {
+    return `soft-pass-motion-airline-generic-junk(${genericJunkVideos}/${videoCount} videos)`;
+  }
+
+  const strongVideos = uniqueVideos.filter(isAirlineStrongVideo).length;
+  if (strongVideos < AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS) {
+    return `soft-pass-motion-airline-aviation-strong-floor(${strongVideos}/${AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS} videos)`;
+  }
+
+  return null;
 }

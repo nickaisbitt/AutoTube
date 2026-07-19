@@ -15,6 +15,26 @@ describe('quality waves 2–5 helpers', () => {
       }
     }
   };
+  const airlineTopic = 'How a regional airline hid cabin pressure failures from passengers';
+  const airlineScript = () => Array.from({ length: 6 }, (_, i) => ({ id: `s${i + 1}` }));
+  const strongAirlineVideo = (i: number) => ({
+    type: 'video',
+    segmentId: `s${(i % 6) + 1}`,
+    url: `https://videos.pexels.com/airline-strong-${i}.mp4`,
+    alt: [
+      'airplane cabin passengers oxygen masks',
+      'pilot cockpit instruments aircraft',
+      'maintenance hangar aircraft mechanic',
+      'airport runway aircraft taking off',
+    ][i % 4],
+    query: 'airplane cabin pressure failure stock',
+    source: 'Pexels Videos',
+  });
+  const airlineMotionReport = (videoCount: number) => ({
+    volumePass: false,
+    pexelsFetched: videoCount,
+    videoTopUp: Array.from({ length: 6 }, (_, i) => i + 1),
+  });
 
   it('clearTopicPackaging resets hooks and mediaOffset', async () => {
     const { clearTopicPackaging } = await import('../../../scripts/lib/loop-state.mjs');
@@ -134,6 +154,97 @@ describe('quality waves 2–5 helpers', () => {
     } finally {
       restoreStockKeyEnv(saved);
     }
+  });
+
+  it.each([
+    {
+      label: 'medical patient/nurse',
+      alt: 'hospital patient nurse medical ward',
+      reason: 'soft-pass-motion-airline-junk(medical-patient-nurse)',
+    },
+    {
+      label: 'mail/mailbox',
+      alt: 'mailbox postal delivery mail carrier',
+      reason: 'soft-pass-motion-airline-junk(mail-mailbox)',
+    },
+    {
+      label: 'financial reports',
+      alt: 'financial reports spreadsheet office desk',
+      reason: 'soft-pass-motion-airline-junk(financial-reports)',
+    },
+  ])('airline soft-pass-motion rejects $label pads', async ({ alt, reason }) => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: [
+        ...Array.from({ length: 12 }, (_, i) => strongAirlineVideo(i)),
+        {
+          type: 'video',
+          segmentId: 's1',
+          url: 'https://videos.pexels.com/airline-bad-pad.mp4',
+          alt,
+          query: 'airline cabin pressure footage',
+          source: 'Pexels Videos',
+        },
+      ],
+    };
+
+    const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(project.media.length), project);
+    expect(soft.pass).toBe(false);
+    expect(soft.reason).toBe(reason);
+  });
+
+  it('airline soft-pass-motion requires at least twelve strong aviation videos', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: [
+        ...Array.from({ length: 11 }, (_, i) => strongAirlineVideo(i)),
+        ...Array.from({ length: 17 }, (_, i) => ({
+          type: 'video',
+          segmentId: `s${(i % 6) + 1}`,
+          url: `https://videos.pexels.com/airport-weak-${i}.mp4`,
+          alt: 'airport terminal passengers walking gate',
+          query: 'airline passenger reaction',
+          source: 'Pexels Videos',
+        })),
+      ],
+    };
+
+    const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(project.media.length), project);
+    expect(soft.pass).toBe(false);
+    expect(soft.reason).toBe('soft-pass-motion-airline-aviation-strong-floor(11/12 videos)');
+  });
+
+  it('airline soft-pass-motion uses a tighter generic-junk video ratio', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: [
+        ...Array.from({ length: 12 }, (_, i) => strongAirlineVideo(i)),
+        ...Array.from({ length: 5 }, (_, i) => ({
+          type: 'video',
+          segmentId: `s${(i % 6) + 1}`,
+          url: `https://videos.pexels.com/airline-generic-${i}.mp4`,
+          alt: 'corporate handshake empty office skyline timelapse',
+          query: 'stock footage loop',
+          source: 'Pexels Videos',
+        })),
+      ],
+    };
+
+    const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(project.media.length), project);
+    expect(soft.pass).toBe(false);
+    expect(soft.reason).toBe('soft-pass-motion-airline-generic-junk(5/17 videos)');
   });
 
   it('crime/heist topics use lower volume floor and aggregate soft-pass', async () => {
@@ -324,10 +435,13 @@ describe('quality waves 2–5 helpers', () => {
   it('preferBright fillers append after topical packs (not crowding subject queries)', async () => {
     const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
     const q = stockMotionQueries('bank fraud otp scam', true, { preferBright: true, faceSeek: true });
-    expect(q.some((x) => /bright office daylight/i.test(x))).toBe(true);
-    // Faces/topical must lead — generic bright/antiHud are late fillers only
+    // Office pads are banned; bright outdoor/news fillers trail faces+topic.
+    expect(q.some((x) => /city street pedestrians daylight|news interview worried person outdoor|sunny city street/i.test(x))).toBe(
+      true,
+    );
+    expect(q.every((x) => !/bright office daylight/i.test(x))).toBe(true);
     const faceIdx = q.findIndex((x) => /shocked person looking at phone/i.test(x));
-    const brightIdx = q.findIndex((x) => /bright office daylight/i.test(x));
+    const brightIdx = q.findIndex((x) => /city street pedestrians daylight|sunny city street/i.test(x));
     expect(faceIdx).toBeGreaterThanOrEqual(0);
     expect(brightIdx).toBeGreaterThan(faceIdx);
   });

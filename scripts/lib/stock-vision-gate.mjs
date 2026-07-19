@@ -41,8 +41,8 @@ export function visionPromptForTopic(topicBlob = '') {
     return [
       'You judge ONE stock thumbnail for an airline cabin-pressure / aviation safety investigation video.',
       'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
-      'reject=true if: football/soccer/athlete/sports, hospital patient/ICU/surgery, astronaut/space suit, crying stock portrait with no airplane, garage/auto mechanic, office coworking, random lifestyle, beetle/insect, puppet, cartoon, sci-fi HUD, blurry filler.',
-      'reject=false for: airplane cabin, cockpit, oxygen mask, airport runway/tarmac, hangar/aircraft maintenance, flight attendant or pilot in aircraft context, aviation paperwork.',
+      'reject=true if: US Mail/USPS/postal truck, mailbox/letterbox/post office box, magnifying glass on desk/search concept, financial report charts/spreadsheets/accounting desk paperwork, hospital oxygen/patient/ICU/medical bed, football/soccer/athlete/sports, astronaut/space suit, crying stock portrait with no airplane, black-and-white/B&W/monochrome stock unless an airplane cabin is clearly visible, garage/auto mechanic, office coworking, random lifestyle, beetle/insect, puppet, cartoon, sci-fi HUD, blurry filler.',
+      'reject=false and prefer if: daylight airplane cabin aisle with visible passenger/crew faces, cockpit pilot with headset, oxygen mask deployed in an airplane cabin, hangar maintenance with aircraft visible, runway/tarmac with a plane visible, flight attendant or pilot in aircraft context, FAA/NTSB reports, aircraft maintenance logs, cabin pressure gauge paperwork, redacted aviation documents with aviation tokens.',
     ].join(' ');
   }
   return OFF_BRAND_VISION_PROMPT;

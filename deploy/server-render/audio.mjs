@@ -44,7 +44,7 @@ const STATIC_MUSIC_PEAK_DB = -8;
 const DYNAMIC_MUSIC_DUCK_DB = -34;
 const DYNAMIC_MUSIC_PEAK_DB = -14;
 const YOUTUBE_DYNAMIC_MUSIC_DUCK_DB = -40;
-const YOUTUBE_DYNAMIC_MUSIC_PEAK_DB = -17;
+const YOUTUBE_DYNAMIC_MUSIC_PEAK_DB = -14;
 const STATIC_FALLBACK_MUSIC_DUCK_DB = -21;
 const YOUTUBE_STATIC_FALLBACK_MUSIC_DUCK_DB = -24;
 
@@ -555,6 +555,7 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
     statTimestamps = null,
     wordTimestamps = null,
     narrationTimings = [],
+    preDuckedBackground = false,
   } = options;
 
   console.log(`  🎵 Mixing background music at volume ${bgVolume.toFixed(3)} (${bgMusicPath})`);
@@ -592,7 +593,9 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
   // Dry voice-first mix. Old enableAudioFx path (compand + quoted amix weights)
   // crushed narration to ~-47 LUFS; loudnorm then amplified the noise bed into hiss.
   const voiceWeight = process.env.AUTOTUBE_YOUTUBE_MODE === '1' ? '1.8' : '1.6';
-  const bgWeight = Math.max(0.05, Math.min(0.35, Number(bgVolume) || 0.12)).toFixed(3);
+  const maxBgWeight = preDuckedBackground ? 0.8 : 0.35;
+  const defaultBgWeight = preDuckedBackground ? 0.65 : 0.12;
+  const bgWeight = Math.max(0.05, Math.min(maxBgWeight, Number(bgVolume) || defaultBgWeight)).toFixed(3);
   const filterParts = [
     `[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[narration]`,
     `[1:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=${bgWeight}[bg]`,
@@ -857,8 +860,11 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
       
       if (duckOk) {
         // Mix narration with ducked background music
-        const bgVolume = 1.0; // Ducking already applied, use unity gain
-        mixOk = mixNarrationWithBgMusic(narrationFile, duckedBgMusic, mixedAudio, bgVolume, mixOptions);
+        const bgVolume = 0.7; // Ducking already applied; preserve gap presence without masking VO.
+        mixOk = mixNarrationWithBgMusic(narrationFile, duckedBgMusic, mixedAudio, bgVolume, {
+          ...mixOptions,
+          preDuckedBackground: true,
+        });
         try { unlinkSync(duckedBgMusic); } catch {}
       }
     }

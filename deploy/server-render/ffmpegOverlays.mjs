@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
+import { hookOverlayWords, preserveHookWordBoundaries } from '../../scripts/lib/hook-overlay-text.mjs';
 import { buildImpactBeatsForTopic } from '../../scripts/lib/impactBeatsByTopic.mjs';
 import { impactBeatsMatchTopic, isAirlineTopic } from '../../scripts/lib/topic-family.mjs';
 
@@ -20,11 +21,34 @@ function escapeAss(text) {
   return String(text || '').replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}');
 }
 
+const MERGED_CAPTION_REPAIRS = [
+  // Defensive ASS-path repair for upstream word builders that emit typo-hook tokens.
+  [/\b(CABIN)(KEEP)\b/gi, '$1 $2'],
+];
+
 const WEAK_CAPTION_END_WORDS = new Set(['THE', 'A', 'AN', 'OF', 'TO', 'FOR', 'AND', 'WHAT', 'IS']);
 const PHRASE_END_RE = /[.?!,;]["')\]]*$/;
 
+export function repairMergedCaptionText(text) {
+  const original = String(text || '');
+  let repaired = preserveHookWordBoundaries(text)
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .replace(/([A-Za-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Za-z])/g, '$1 $2');
+
+  for (const [pattern, replacement] of MERGED_CAPTION_REPAIRS) {
+    repaired = repaired.replace(pattern, replacement);
+  }
+
+  repaired = repaired.replace(/\s+/g, ' ').trim();
+  if (/[A-Z]/.test(original) && !/[a-z]/.test(original)) {
+    return repaired.toUpperCase();
+  }
+  return repaired;
+}
+
 function normalizedCaptionWord(word) {
-  return String(word || '')
+  return repairMergedCaptionText(word)
     .toUpperCase()
     .replace(/^[^A-Z0-9']+|[^A-Z0-9']+$/g, '');
 }
@@ -129,13 +153,7 @@ export function overlayHookText(videoPath, project, options = {}) {
   const [wStr, hStr] = (probe.stdout || '1280,720').trim().split(',');
   const w = parseInt(wStr, 10) || 1280;
   const h = parseInt(hStr, 10) || 720;
-  const words = hookText
-    .trim()
-    .toUpperCase()
-    .replace(/:/g, ' ') // avoid ffmpeg drawtext option-separator footguns
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 8);
+  const words = hookOverlayWords(hookText, { maxWords: 8 });
   const { lines, fontSize } = layoutHookLines(words, w, h);
   const line1 = lines[0] || '';
   const line2 = lines[1] || '';
@@ -225,6 +243,7 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     // Yellow + black outline — white-on-light frames were unreadable on cold watches.
     `Style: Default,Arial Bold,${fontSize},&H0000FFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,${cm.strokePx},0,2,60,60,${cm.bottomPad},1`,
+    `Style: CTA,Arial Bold,${Math.round(fontSize * 1.12)},&H0000FFFF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,${Math.max(cm.strokePx + 1, 5)},1,5,90,90,0,1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -236,7 +255,11 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
   let lastCaptionEnd = 0;
   let lastCaptionText = '';
 
-  const captionTextFor = (words) => words.map((item) => item.word).join(' ').toUpperCase();
+  const captionTextFor = (words) => words
+    .map((item) => repairMergedCaptionText(item.word))
+    .filter(Boolean)
+    .join(' ')
+    .toUpperCase();
   const flush = (count = buffer.length) => {
     if (!buffer.length) return;
     const flushWords = buffer.slice(0, count);
@@ -302,7 +325,8 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
     const start = Math.max(lastCaptionEnd + 0.12, videoDuration - 3);
     const end = Math.min(videoDuration - 0.05, start + 2.4);
     if (end - start < 0.55) return null;
-    lines.push(`Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${escapeAss(ctaText.toUpperCase())}`);
+    const text = repairMergedCaptionText(ctaText).toUpperCase();
+    lines.push(`Dialogue: 1,${formatAssTime(start)},${formatAssTime(end)},CTA,,0,0,0,,${escapeAss(text)}`);
     return ctaText;
   };
 

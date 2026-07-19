@@ -72,6 +72,128 @@ describe('buildEditTimeline — anti-repetition', () => {
     }
   });
 
+  it('caps airline URL reuse at three and lengthens cuts before reusing more', () => {
+    const project = {
+      topic: 'airline cabin pressure safety cover-up',
+      script: [{ id: 's1', type: 'body', duration: 40, narration: 'story' }],
+      media: Array.from({ length: 8 }, (_, i) => ({
+        id: `airline-v${i}`,
+        segmentId: 's1',
+        type: 'video',
+        url: `https://videos.pexels.com/video-files/airline-${i}/airline-${i}.mp4`,
+        alt: i % 2 === 0 ? `passenger face cabin clip ${i}` : `pilot cockpit airline clip ${i}`,
+      })),
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    const uses = {};
+    for (const e of tl) uses[e.assetId] = (uses[e.assetId] || 0) + 1;
+    expect(Math.max(...Object.values(uses))).toBeLessThanOrEqual(3);
+    expect(Math.max(...tl.map((e) => e.endSec - e.startSec))).toBeGreaterThan(1);
+    expect(Math.max(...tl.map((e) => e.endSec))).toBeGreaterThanOrEqual(39.5);
+  });
+
+  it('caps cold/eval airline URL reuse at two when the video pool is broad', () => {
+    const prior = process.env.AUTOTUBE_EVAL_COLD;
+    process.env.AUTOTUBE_EVAL_COLD = '1';
+    try {
+      const project = {
+        topic: 'airline cabin pressure safety cover-up',
+        script: [{ id: 's1', type: 'body', duration: 100, narration: 'story' }],
+        media: Array.from({ length: 20 }, (_, i) => ({
+          id: `cold-airline-v${i}`,
+          segmentId: 's1',
+          type: 'video',
+          url: `https://videos.pexels.com/video-files/cold-airline-${i}/cold-airline-${i}.mp4`,
+          alt: i % 2 === 0 ? `passenger face cabin clip ${i}` : `pilot cockpit airline clip ${i}`,
+        })),
+      };
+      const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+      const uses = {};
+      for (const e of tl) uses[e.assetId] = (uses[e.assetId] || 0) + 1;
+      expect(Math.max(...Object.values(uses))).toBeLessThanOrEqual(2);
+      expect(Math.max(...tl.map((e) => e.endSec))).toBeGreaterThanOrEqual(99.5);
+    } finally {
+      if (prior === undefined) delete process.env.AUTOTUBE_EVAL_COLD;
+      else process.env.AUTOTUBE_EVAL_COLD = prior;
+    }
+  });
+
+  it('limits airline paperwork, mail, document, and financial cluster family to one global use', () => {
+    const project = {
+      topic: 'airline cabin pressure safety cover-up',
+      script: [{ id: 's1', type: 'body', duration: 12, narration: 'story' }],
+      media: [
+        {
+          id: 'mail-1',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/mail-1/mail-1.mp4',
+          alt: 'US Mail mailbox with letters',
+        },
+        {
+          id: 'mail-2',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/mail-2/mail-2.mp4',
+          alt: 'postal mailroom envelopes',
+        },
+        {
+          id: 'paperwork-1',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/paperwork-1/paperwork-1.mp4',
+          alt: 'paperwork forms on clipboard',
+        },
+        {
+          id: 'paperwork-2',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/paperwork-2/paperwork-2.mp4',
+          alt: 'stack of papers and file folder',
+        },
+        {
+          id: 'document-1',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/document-1/document-1.mp4',
+          alt: 'documents and records on desk',
+        },
+        {
+          id: 'document-2',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/document-2/document-2.mp4',
+          alt: 'contract case file close up',
+        },
+        {
+          id: 'financial-1',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/financial-1/financial-1.mp4',
+          alt: 'financial bank statement spreadsheet',
+        },
+        {
+          id: 'financial-2',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/financial-2/financial-2.mp4',
+          alt: 'invoice receipt tax form money',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 3 });
+    const mediaById = Object.fromEntries(project.media.map((asset) => [asset.id, asset]));
+    const clusterUses = {};
+    for (const entry of tl) {
+      const cluster = visualSubjectCluster(mediaById[entry.assetId]);
+      clusterUses[cluster] = (clusterUses[cluster] || 0) + 1;
+    }
+    const limitedClusterUses = ['paperwork', 'mail', 'document', 'financial']
+      .reduce((sum, cluster) => sum + (clusterUses[cluster] || 0), 0);
+    expect(limitedClusterUses).toBeLessThanOrEqual(1);
+    expect(Math.max(...tl.map((e) => e.endSec))).toBeGreaterThanOrEqual(11.5);
+  });
+
   it('hard-bans consecutive masked-human subject clusters', () => {
     const project = {
       topic: 'airline mask policy',
@@ -143,6 +265,20 @@ describe('buildEditTimeline — anti-repetition', () => {
           alt: 'distant plane on runway behind fence',
         },
         {
+          id: 'mailbox-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/mailbox-face/mailbox-face.mp4',
+          alt: 'person face beside US Mail mailbox',
+        },
+        {
+          id: 'paperwork',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/paperwork/paperwork.mp4',
+          alt: 'paperwork documents and financial forms',
+        },
+        {
           id: 'back-head',
           segmentId: 'intro',
           type: 'video',
@@ -176,6 +312,8 @@ describe('buildEditTimeline — anti-repetition', () => {
     const leadIds = tl.filter((e) => e.startSec < 3).map((e) => e.assetId);
     expect(leadIds.length).toBeGreaterThan(0);
     expect(leadIds).not.toContain('runway');
+    expect(leadIds).not.toContain('mailbox-face');
+    expect(leadIds).not.toContain('paperwork');
     expect(leadIds).not.toContain('back-head');
     expect(new Set(leadIds)).toEqual(new Set(['pilot-face', 'passenger-face', 'bright-cabin']));
   });

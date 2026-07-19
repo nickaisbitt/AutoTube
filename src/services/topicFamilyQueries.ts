@@ -19,10 +19,17 @@ export function topicFamilyTemplatesEnabled(): boolean {
 
 /**
  * @param {string} topic
- * @returns {'nursing_abuse'|'healthcare_cyber'|'heist_fraud'|'veterans_benefits'|'bank_scam'|'landlord'|'insurance_fraud'|'tickets'|'disaster'|'generic'}
+ * @returns {'airline'|'nursing_abuse'|'healthcare_cyber'|'heist_fraud'|'veterans_benefits'|'bank_scam'|'landlord'|'insurance_fraud'|'tickets'|'disaster'|'generic'}
  */
 export function resolveTopicFamily(topic: string): string {
   const t = String(topic || '').toLowerCase();
+  if (
+    /airline|cabin[-\s]?pressure|cabin\s*pressure|oxygen\s*mask|flight\s*attendant|cockpit/.test(t)
+    || (/\b(aircraft|aviation|airplane|aeroplane)\b/.test(t)
+      && /\b(fail|hid|scandal|cover.?up|pressure|mechanic|safety|crash|incident)\b/.test(t))
+  ) {
+    return 'airline';
+  }
   if (/landlord|tenant|evict|rent|lease|apartment|housing/.test(t)) return 'landlord';
   if (/insurance|car\s*crash|fake\s*crash|staged\s*crash|crash\s*video|whiplash|claim\s*fraud|dashcam\s*scam/.test(t)) {
     return 'insurance_fraud';
@@ -65,6 +72,14 @@ export function resolveTopicFamily(topic: string): string {
 
 /** @type {Record<string, string[]>} */
 export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
+  airline: [
+    'oxygen mask deploy airplane cabin',
+    'maintenance hangar night aircraft',
+    'mechanic tools aircraft hangar',
+    'FAA report paperwork close-up',
+    'cabin pressure gauge cockpit',
+    'airplane cabin passengers daylight',
+  ],
   nursing_abuse: [
     'security camera cctv hallway corridor',
     'nursing home elderly care facility',
@@ -154,4 +169,31 @@ export function topicFamilyQueries(topic: string, n = 4): string[] {
   if (!topicFamilyTemplatesEnabled()) return [];
   const family = resolveTopicFamily(topic);
   return (TOPIC_FAMILY_QUERIES[family] || TOPIC_FAMILY_QUERIES.generic).slice(0, n);
+}
+
+const STOCK_PROVIDER_ESSAY_RE =
+  /\b(?:meet|according|how\s+a|how\s+an|how\s+the|why\s+a|why\s+an|why\s+the|federal\s+aviation\s+administration|captain\s+[a-z]+|hid\s+recurring|recurring\s+failures)\b/i;
+
+function stockProviderQueryWords(query: string): string[] {
+  return String(query || '')
+    .trim()
+    .replace(/[-/]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+export function isSafeStockProviderQuery(query: string): boolean {
+  const normalized = String(query || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return false;
+  if (normalized.length > 64) return false;
+  if (stockProviderQueryWords(normalized).length > 6) return false;
+  return !STOCK_PROVIDER_ESSAY_RE.test(normalized);
+}
+
+export function stockProviderQueriesForTopic(topic: string, n = 4): string[] {
+  const family = resolveTopicFamily(topic);
+  if (family === 'generic') return [];
+  return (TOPIC_FAMILY_QUERIES[family] || [])
+    .filter(isSafeStockProviderQuery)
+    .slice(0, n);
 }

@@ -23,6 +23,7 @@ import { filterWatermarked } from './watermarkFilter';
 import { isProviderDisabled } from './disabledProviders';
 import { searchDDGLocal, searchDDGVideos, searchWikimedia, searchBingImages, searchGoogleImages, searchYandexImages, searchDuckDuckGoImages, searchStaticMap, searchBingVideos, searchGoogleVideos } from '../media';
 import { logger } from '../logger';
+import { isSafeStockProviderQuery } from '../topicFamilyQueries';
 
 // ---------------------------------------------------------------------------
 // Adapter wrappers for existing providers in media.ts
@@ -256,6 +257,10 @@ export function getAvailableProviders(config: AppConfig): SourceProvider[] {
   });
 }
 
+function isPexelsPixabayProvider(provider: SourceProvider): boolean {
+  return /^(Pexels|Pixabay)(?: Videos)?$/.test(provider.name);
+}
+
 export async function queryAllProviders(
   query: string,
   config: AppConfig,
@@ -265,6 +270,10 @@ export async function queryAllProviders(
 
   const results = await Promise.allSettled(
     available.map(async (provider) => {
+      if (isPexelsPixabayProvider(provider) && !isSafeStockProviderQuery(query)) {
+        logger.info('ProviderRegistry', `Skipping ${provider.name} for unsafe stock query "${query}"`);
+        return [] as MediaCandidate[];
+      }
       const providerConfig = mapAppConfigToProviderConfig(provider, config, signal);
 
       const providerSignal = signal
@@ -378,6 +387,16 @@ export async function queryAllProvidersWithHealth(
 
   const results = await Promise.allSettled(
     available.map(async (provider) => {
+      if (isPexelsPixabayProvider(provider) && !isSafeStockProviderQuery(query)) {
+        health.push({
+          name: provider.name,
+          status: 'skipped',
+          resultCount: 0,
+          durationMs: 0,
+          error: 'Unsafe stock query',
+        });
+        return [] as MediaCandidate[];
+      }
       const providerConfig = mapAppConfigToProviderConfig(provider, config, signal);
       const start = performance.now();
 

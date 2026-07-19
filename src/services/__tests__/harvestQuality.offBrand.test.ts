@@ -254,6 +254,125 @@ describe('generic stock junk harvest gate', () => {
   });
 });
 
+describe('airline generic paperwork junk', () => {
+  const airlineTopic = 'How a regional airline hid recurring cabin-pressure failures';
+
+  it('rejects generic mail, magnifier, financial, and desk paperwork for airline topics', async () => {
+    const {
+      genericStockJunkReason,
+      isGenericStockJunk,
+      AIRLINE_FINANCIAL_PAPERWORK_RE,
+      AIRLINE_GENERIC_DESK_PAPERWORK_RE,
+      AIRLINE_MAGNIFYING_DOCUMENTS_RE,
+      AIRLINE_MAIL_PAPERWORK_RE,
+    } = await import('../../../scripts/lib/harvest-quality.mjs');
+
+    expect(AIRLINE_MAIL_PAPERWORK_RE.test('U.S. Mail blue mail-box postal service')).toBe(true);
+    expect(AIRLINE_MAGNIFYING_DOCUMENTS_RE.test('magnifying-glass over documents on desk')).toBe(
+      true,
+    );
+    expect(AIRLINE_FINANCIAL_PAPERWORK_RE.test('financial reports pads and stock chart paperwork')).toBe(
+      true,
+    );
+    expect(AIRLINE_GENERIC_DESK_PAPERWORK_RE.test('generic desk paperwork documents on office table')).toBe(
+      true,
+    );
+
+    expect(genericStockJunkReason('U.S. Mail mailbox postal service post office box', airlineTopic)).toMatch(
+      /mail|postal/i,
+    );
+    expect(genericStockJunkReason('magnifying-glass over documents on office desk', airlineTopic)).toMatch(
+      /magnifying/i,
+    );
+    expect(
+      genericStockJunkReason(
+        'financial reports pads and stock chart paperwork on an accounting desk',
+        airlineTopic,
+      ),
+    ).toMatch(/financial|report/i);
+    expect(genericStockJunkReason('generic desk paperwork documents on office table', airlineTopic)).toMatch(
+      /desk paperwork/i,
+    );
+    expect(isGenericStockJunk('redacted documents desk with no safety label', airlineTopic)).toBe(
+      true,
+    );
+  });
+
+  it('allows aviation-specific airline paperwork', async () => {
+    const { genericStockJunkReason, isGenericStockJunk } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+
+    expect(genericStockJunkReason('FAA report paperwork close-up documents desk', airlineTopic)).toBeNull();
+    expect(genericStockJunkReason('NTSB incident report files on desk', airlineTopic)).toBeNull();
+    expect(genericStockJunkReason('aircraft maintenance log paperwork on clipboard', airlineTopic)).toBeNull();
+    expect(genericStockJunkReason('cabin pressure gauge paperwork close-up', airlineTopic)).toBeNull();
+    expect(genericStockJunkReason('redacted aviation documents on desk', airlineTopic)).toBeNull();
+    expect(isGenericStockJunk('redacted aviation documents on desk', airlineTopic)).toBe(false);
+  });
+
+  it('drops generic paperwork but keeps FAA paperwork in relevance filtering', async () => {
+    const { filterAssetsByRelevance } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const project = {
+      topic: airlineTopic,
+      script: [
+        {
+          id: 's1',
+          title: 'Hidden reports',
+          narration: 'FAA reports tracked cabin pressure oxygen failures and aircraft maintenance logs.',
+        },
+      ],
+      media: [],
+    };
+
+    const { media: kept, dropped } = filterAssetsByRelevance(
+      [
+        {
+          id: 'mail',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://example.com/mailbox.mp4',
+          alt: 'U.S. Mail blue mailbox postal service post office box',
+          query: 'redacted paperwork documents desk',
+        },
+        {
+          id: 'financial',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://example.com/financial.mp4',
+          alt: 'financial reports pads and stock chart paperwork on accounting desk',
+          query: 'redacted paperwork documents desk',
+        },
+        {
+          id: 'faa',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://example.com/faa.mp4',
+          alt: 'FAA report paperwork close-up documents desk',
+          query: 'FAA report cabin pressure',
+        },
+      ],
+      project,
+      { minScore: 0.2 },
+    );
+
+    expect(dropped.some((d: { url?: string; reason?: string }) => d.url?.includes('mailbox') && /mail|postal/i.test(d.reason || ''))).toBe(true);
+    expect(dropped.some((d: { url?: string; reason?: string }) => d.url?.includes('financial') && /financial|report/i.test(d.reason || ''))).toBe(true);
+    expect(kept.some((a: { id: string }) => a.id === 'faa')).toBe(true);
+    expect(kept.some((a: { id: string }) => a.id === 'mail')).toBe(false);
+    expect(kept.some((a: { id: string }) => a.id === 'financial')).toBe(false);
+  });
+
+  it('vision prompt rejects airline paperwork stock junk but allows aviation documents', async () => {
+    const { visionPromptForTopic } = await import('../../../scripts/lib/stock-vision-gate.mjs');
+    const prompt = visionPromptForTopic(airlineTopic);
+
+    expect(prompt).toMatch(/U\.S\. Mail|mailbox|postal service|post office box/i);
+    expect(prompt).toMatch(/magnifying-glass-over-documents|financial report charts|accounting desk/i);
+    expect(prompt).toMatch(/FAA\/NTSB reports|maintenance logs|cabin pressure gauge paperwork|redacted aviation documents/i);
+  });
+});
+
 describe('isJunkStockClip + faceSeek relevance', () => {
   it('isJunkStockClip rejects generic filler patterns', async () => {
     const { isJunkStockClip } = await import('../../../scripts/lib/generate-full-video.mjs');
@@ -279,8 +398,9 @@ describe('isJunkStockClip + faceSeek relevance', () => {
   });
 
   it('airline stock queries stay short and lead with faces when faceSeek is enabled', async () => {
-    const { stockMotionQueries } = await import('../../../scripts/lib/generate-full-video.mjs');
-    const topic = 'The regional airline cabin-pressure cover-up that hid oxygen mask failures';
+    const { stockMotionQueries, isSafeStockMotionQuery } = await import('../../../scripts/lib/generate-full-video.mjs');
+    const topic =
+      'Meet Captain Sarah Jenkins Mesa Airlines How a regional airline hid recurring cabin-pressure failures from passengers';
     const q = stockMotionQueries(topic, false, { preferBright: true, faceSeek: true });
     const wordCount = (query: string) => query.replace(/-/g, ' ').trim().split(/\s+/).length;
 
@@ -300,9 +420,14 @@ describe('isJunkStockClip + faceSeek relevance', () => {
       ]),
     );
     expect(q.every((query) => wordCount(query) >= 3 && wordCount(query) <= 6)).toBe(true);
+    expect(q.every((query) => query.length <= 64 && isSafeStockMotionQuery(query))).toBe(true);
     expect(q.every((query) => !query.toLowerCase().includes('regional airline cabin pressure cover up'))).toBe(
       true,
     );
+    expect(q.every((query) => !/captain sarah|sarah jenkins|mesa airlines|how a regional airline/i.test(query))).toBe(
+      true,
+    );
+    expect(isSafeStockMotionQuery(topic)).toBe(false);
     // Bare face queries without cabin/cockpit binding are banned (they return sports/hospital pads).
     expect(q.every((query) => !/^worried passenger face/i.test(query))).toBe(true);
   });
@@ -329,6 +454,31 @@ describe('isJunkStockClip + faceSeek relevance', () => {
     expect(isCyberRelevantClip({ alt: 'mechanic tools hangar aircraft maintenance' }, topic)).toBe(true);
     expect(isCyberRelevantClip({ alt: 'woman in red hat lifestyle travel portrait' }, topic)).toBe(false);
     expect(isCyberRelevantClip({ alt: 'back of head only tourist watching plane behind fence' }, topic)).toBe(false);
+
+    expect(
+      isAirlineRelevantClip(
+        { alt: 'oxygen, patient, medical attention, nurse', query: 'oxygen mask deploy airplane cabin' },
+        topic,
+      ),
+    ).toBe(false);
+    expect(
+      isJunkStockClip(
+        { alt: 'oxygen, patient, medical attention, nurse', query: 'oxygen mask deploy airplane cabin' },
+        topic,
+      ),
+    ).toBe(true);
+    expect(
+      isAirlineRelevantClip(
+        { alt: 'us mail mailbox', query: 'FAA report paperwork close-up' },
+        topic,
+      ),
+    ).toBe(false);
+    expect(
+      isJunkStockClip(
+        { alt: 'us mail mailbox', query: 'FAA report paperwork close-up' },
+        topic,
+      ),
+    ).toBe(true);
 
     // Echoed search query must NOT count as aviation proof (football/hospital pads).
     expect(
@@ -358,6 +508,15 @@ describe('isJunkStockClip + faceSeek relevance', () => {
     expect(
       isAirlineRelevantClip(
         {
+          alt: '',
+          query: 'oxygen mask deploy airplane cabin',
+        },
+        topic,
+      ),
+    ).toBe(true);
+    expect(
+      isAirlineRelevantClip(
+        {
           alt: 'Pexels video',
           query: 'airplane cabin passenger face worried',
         },
@@ -373,12 +532,61 @@ describe('isJunkStockClip + faceSeek relevance', () => {
         topic,
       ),
     ).toBe(false);
+    expect(
+      isAirlineRelevantClip(
+        {
+          alt: 'Pexels video',
+          query: 'Captain Sarah oxygen mask airplane cabin',
+        },
+        topic,
+      ),
+    ).toBe(false);
+    expect(
+      isAirlineRelevantClip(
+        {
+          alt: 'Pexels video',
+          query: 'oxygen mask airplane cabin because Captain Sarah discovers hidden failures in a long scene title',
+        },
+        topic,
+      ),
+    ).toBe(false);
   });
 
   it('visionPromptForTopic mentions blurry/staged/overexposed junk on nursing topics', async () => {
     const { visionPromptForTopic } = await import('../../../scripts/lib/stock-vision-gate.mjs');
     const prompt = visionPromptForTopic('The nursing home cameras that recorded abuse for years');
     expect(prompt).toMatch(/blurry|overexposed|staged reenactment|produce/i);
+  });
+
+  it('visionPromptForTopic rejects disconnected airline pads and prefers cabin/cockpit motion', async () => {
+    const { visionPromptForTopic } = await import('../../../scripts/lib/stock-vision-gate.mjs');
+    const prompt = visionPromptForTopic(
+      'The regional airline cabin-pressure cover-up that hid oxygen mask failures',
+    );
+
+    for (const rejectPattern of [
+      /US Mail|USPS/i,
+      /mailbox|letterbox/i,
+      /magnifying glass/i,
+      /financial report charts|spreadsheets/i,
+      /hospital oxygen|patient|ICU/i,
+      /football|soccer|sports/i,
+      /astronaut/i,
+      /crying stock portrait/i,
+      /black-and-white|monochrome/i,
+    ]) {
+      expect(prompt).toMatch(rejectPattern);
+    }
+
+    for (const preferPattern of [
+      /daylight airplane cabin aisle.*faces/i,
+      /cockpit pilot with headset/i,
+      /oxygen mask deployed in an airplane cabin/i,
+      /hangar maintenance with aircraft visible/i,
+      /runway\/tarmac with a plane visible/i,
+    ]) {
+      expect(prompt).toMatch(preferPattern);
+    }
   });
 });
 

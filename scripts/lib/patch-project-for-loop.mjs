@@ -4,6 +4,7 @@
 import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './stock-media-urls.mjs';
 import { buildImpactBeatsForTopic, buildShockHookLine, hookClashesWithTopic } from '../../e2e/openRouterMock.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
+import { hookOverlayWords, preserveHookWordBoundaries } from './hook-overlay-text.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
 import {
   isBankScamTopic,
@@ -110,19 +111,21 @@ function buildTensionOverlayFromHook(hookLine) {
     .trim();
   if (!firstSentence || isInstructionOverlay(firstSentence)) return null;
 
-  if (/^(why|how|what|who|when|where|did|does|could|would|will|can)\b/i.test(firstSentence)) {
-    return firstSentence.endsWith('?') ? firstSentence : `${firstSentence}?`;
-  }
+  const boundedFirstSentence = preserveHookWordBoundaries(firstSentence);
 
   const cabinPressure = /\bcabin\b.*\b(pressure|fail|failing|losing)\b|\bpressure\b.*\bcabin\b/i;
-  if (cabinPressure.test(firstSentence)) {
+  if (cabinPressure.test(boundedFirstSentence)) {
     return 'Why did the cabin keep failing?';
   }
 
-  const bridge = firstSentence.match(/\b(before|until|while|after)\b\s+(.+)$/i);
+  if (/^(why|how|what|who|when|where|did|does|could|would|will|can)\b/i.test(boundedFirstSentence)) {
+    return boundedFirstSentence.endsWith('?') ? boundedFirstSentence : `${boundedFirstSentence}?`;
+  }
+
+  const bridge = boundedFirstSentence.match(/\b(before|until|while|after)\b\s+(.+)$/i);
   if (bridge?.[0]) return bridge[0];
 
-  const concealed = firstSentence.match(/\b(?:they|officials|executives|the\s+\w+|a\s+\w+)\s+(?:hid|buried|erased|withheld|ignored|covered\s+up)\b\s+(.+)$/i);
+  const concealed = boundedFirstSentence.match(/\b(?:they|officials|executives|the\s+\w+|a\s+\w+)\s+(?:hid|buried|erased|withheld|ignored|covered\s+up)\b\s+(.+)$/i);
   if (concealed?.[0]) return concealed[0];
 
   return null;
@@ -140,11 +143,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   };
 
   const clampWords = (text) => {
-    const words = (text || '')
-      .toUpperCase()
-      .replace(/[^A-Z0-9\s:$%?]/g, ' ')
-      .split(/\s+/)
-      .filter(Boolean);
+    const words = hookOverlayWords(text, { allowColon: true });
     const clamped = trimDanglingTail(words.slice(0, maxWords));
     // Drop lone labels ("BREAKING:" / "URGENT:") with no payload.
     if (clamped.length === 1 && /[:]$/.test(clamped[0])) return '';

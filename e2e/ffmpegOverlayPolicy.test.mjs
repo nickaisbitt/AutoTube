@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildImpactBeatsForTopic } from '../scripts/lib/impactBeatsByTopic.mjs';
 import { promoteIntroFaceVideo } from '../scripts/lib/patch-project-for-loop.mjs';
-import { overlayTextPolicy } from '../deploy/server-render/ffmpegOverlays.mjs';
+import { overlayTextPolicy, repairMergedCaptionText } from '../deploy/server-render/ffmpegOverlays.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -34,6 +34,11 @@ describe('ffmpeg overlay policy — less text spam', () => {
     const beats = buildImpactBeatsForTopic('obscure widget factory scandal cover up');
     expect(beats[0]).toMatch(/EXPOSED/);
     expect(beats.join(' ')).not.toMatch(/WHY WIDGET|FOLLOW THE WIDGET|WIDGET HIDING/);
+  });
+
+  it('repairs merged caption words before ASS text is burned', () => {
+    expect(repairMergedCaptionText('CABINKEEP')).toBe('CABIN KEEP');
+    expect(repairMergedCaptionText('cabinKeep APIResponse 2026Update')).toBe('cabin Keep API Response 2026 Update');
   });
 });
 

@@ -176,6 +176,32 @@ describe('quality waves 2–5 helpers', () => {
     const { evaluateHarvestVolumeWithSoftPass } = await import(
       '../../../scripts/lib/harvest-quality.mjs'
     );
+    // Three hard-junk pads (> ratio / count thresholds) must fail closed.
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: [
+        ...Array.from({ length: 12 }, (_, i) => strongAirlineVideo(i)),
+        ...Array.from({ length: 3 }, (_, i) => ({
+          type: 'video',
+          segmentId: 's1',
+          url: `https://videos.pexels.com/airline-bad-pad-${i}.mp4`,
+          alt,
+          query: 'airline cabin pressure footage',
+          source: 'Pexels Videos',
+        })),
+      ],
+    };
+
+    const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(project.media.length), project);
+    expect(soft.pass).toBe(false);
+    expect(soft.reason).toBe(reason.replace(/\)$/, ':3/15)'));
+  });
+
+  it('airline soft-pass-motion tolerates one leftover junk pad in a strong pool', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
     const project = {
       topic: airlineTopic,
       script: airlineScript(),
@@ -184,20 +210,18 @@ describe('quality waves 2–5 helpers', () => {
         {
           type: 'video',
           segmentId: 's1',
-          url: 'https://videos.pexels.com/airline-bad-pad.mp4',
-          alt,
+          url: 'https://videos.pexels.com/airline-one-bad.mp4',
+          alt: 'hospital patient nurse bed',
           query: 'airline cabin pressure footage',
           source: 'Pexels Videos',
         },
       ],
     };
-
     const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(project.media.length), project);
-    expect(soft.pass).toBe(false);
-    expect(soft.reason).toBe(reason);
+    expect(soft.pass).toBe(true);
   });
 
-  it('airline soft-pass-motion requires at least twelve strong aviation videos', async () => {
+  it('airline soft-pass-motion requires at least eight strong aviation videos', async () => {
     const { evaluateHarvestVolumeWithSoftPass } = await import(
       '../../../scripts/lib/harvest-quality.mjs'
     );
@@ -205,7 +229,7 @@ describe('quality waves 2–5 helpers', () => {
       topic: airlineTopic,
       script: airlineScript(),
       media: [
-        ...Array.from({ length: 11 }, (_, i) => strongAirlineVideo(i)),
+        ...Array.from({ length: 7 }, (_, i) => strongAirlineVideo(i)),
         ...Array.from({ length: 17 }, (_, i) => ({
           type: 'video',
           segmentId: `s${(i % 6) + 1}`,
@@ -219,7 +243,7 @@ describe('quality waves 2–5 helpers', () => {
 
     const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(project.media.length), project);
     expect(soft.pass).toBe(false);
-    expect(soft.reason).toBe('soft-pass-motion-airline-aviation-strong-floor(11/12 videos)');
+    expect(soft.reason).toBe('soft-pass-motion-airline-aviation-strong-floor(7/8 videos)');
   });
 
   it('airline soft-pass-motion uses a tighter generic-junk video ratio', async () => {

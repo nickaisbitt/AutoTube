@@ -546,14 +546,20 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   }).length;
   const uniqueTopicalVideos = videoCount - genericJunkVideos;
   const genericJunkRatio = videoCount ? genericJunkVideos / videoCount : 0;
-  const airlineSoftFail = airlineSoftPassMotionFailureReason(project, {
-    genericJunkRatio,
-    genericJunkVideos,
-    uniqueVideos,
-    videoCount,
-  });
-  if (airlineSoftFail) {
-    return { pass: false, reason: airlineSoftFail };
+  if (isAirlineTopic(topicBlob)) {
+    const airlineSoftFail = airlineSoftPassMotionFailureReason(project, {
+      genericJunkRatio,
+      genericJunkVideos,
+      uniqueVideos,
+      videoCount,
+    });
+    if (airlineSoftFail) {
+      return { pass: false, reason: airlineSoftFail };
+    }
+    // Airline pools are judged by strong aviation + junk rules, not the generic 16-video floor.
+    if (videoCount >= AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS && (stockFetched > 0 || topUp >= segN || liveStockPresent)) {
+      return { pass: true, reason: `soft-pass-motion-airline(${videoCount}v/${segN}segs)` };
+    }
   }
 
   // Soft-pass A: cyber stills + ≥1 video/seg
@@ -608,8 +614,9 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   return { pass: false, reason: 'volume-hard-fail' };
 }
 
-const AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS = 12;
+const AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS = 8;
 const AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
+const AIRLINE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
 
 const AIRLINE_HARD_REJECT_PATTERNS = [
   {
@@ -671,6 +678,14 @@ function isAirlineStrongVideo(asset = {}) {
   if (AIRLINE_STRONG_OXYGEN_RE.test(blob)) return true;
   if (AIRLINE_STRONG_HANGAR_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
   if (AIRLINE_STRONG_RUNWAY_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
+  // Controlled search queries count as strong even when alt is a provider placeholder.
+  if (
+    /\b(airplane cabin|pilot cockpit|flight attendant airplane|passenger oxygen mask|oxygen mask deploy|maintenance hangar|mechanic tools aircraft|cabin pressure gauge|airport runway plane)\b/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -681,20 +696,28 @@ export function airlineSoftPassMotionFailureReason(project, stats = {}) {
   const uniqueVideos = stats.uniqueVideos || uniqueVideoAssets(project?.media || []);
   const videoCount = stats.videoCount ?? uniqueVideos.length;
 
-  for (const asset of uniqueVideos) {
-    const reason = airlineHardRejectReason(asset);
-    if (reason) return `soft-pass-motion-airline-junk(${reason})`;
+  const hardJunkVideos = uniqueVideos.filter((asset) => airlineHardRejectReason(asset));
+  const hardJunkRatio = videoCount ? hardJunkVideos.length / videoCount : 0;
+  // Fail closed on a junk-dominated pool, but don't nuke a clean top-up over 1–2 leftovers.
+  if (
+    hardJunkVideos.length >= 3
+    || (videoCount > 0 && hardJunkRatio > AIRLINE_SOFT_PASS_HARD_JUNK_RATIO_MAX)
+  ) {
+    const reason = airlineHardRejectReason(hardJunkVideos[0]) || 'hard-junk';
+    return `soft-pass-motion-airline-junk(${reason}:${hardJunkVideos.length}/${videoCount})`;
   }
 
-  const genericJunkVideos = stats.genericJunkVideos ?? uniqueVideos.filter((asset) => (
+  const cleanVideos = uniqueVideos.filter((asset) => !airlineHardRejectReason(asset));
+  const genericJunkVideos = stats.genericJunkVideos ?? cleanVideos.filter((asset) => (
     isGenericStockJunk(airlineVideoBlob(asset), topicBlob)
   )).length;
-  const genericJunkRatio = stats.genericJunkRatio ?? (videoCount ? genericJunkVideos / videoCount : 0);
+  const cleanCount = cleanVideos.length || videoCount;
+  const genericJunkRatio = stats.genericJunkRatio ?? (cleanCount ? genericJunkVideos / cleanCount : 0);
   if (genericJunkRatio > AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX) {
-    return `soft-pass-motion-airline-generic-junk(${genericJunkVideos}/${videoCount} videos)`;
+    return `soft-pass-motion-airline-generic-junk(${genericJunkVideos}/${cleanCount} videos)`;
   }
 
-  const strongVideos = uniqueVideos.filter(isAirlineStrongVideo).length;
+  const strongVideos = cleanVideos.filter(isAirlineStrongVideo).length;
   if (strongVideos < AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS) {
     return `soft-pass-motion-airline-aviation-strong-floor(${strongVideos}/${AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS} videos)`;
   }

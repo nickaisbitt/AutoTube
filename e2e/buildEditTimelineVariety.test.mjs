@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildEditTimeline } from '../scripts/lib/build-edit-timeline.mjs';
 
 describe('buildEditTimeline — anti-repetition', () => {
-  it('keeps requested cut interval instead of silently widening to 1.25s', () => {
+  it('hard-caps reuse and lengthens cuts instead of 12× looping thin pools', () => {
     const urls = Array.from({ length: 4 }, (_, i) => `https://videos.pexels.com/video-files/${i}/${i}.mp4`);
     const project = {
       topic: 'generic investigation topic',
@@ -16,11 +16,14 @@ describe('buildEditTimeline — anti-repetition', () => {
       })),
     };
     const tl = buildEditTimeline(project, { cutIntervalSec: 0.85, maxReusePerUrl: 1 });
-    const naiveClipCount = Math.ceil(40 / 0.85);
-    // Dense cuts preserved even when unique pool is thin (reuse may bump ≤2).
-    expect(tl.length).toBeGreaterThanOrEqual(naiveClipCount - 2);
+    const uses = {};
+    for (const e of tl) uses[e.assetId] = (uses[e.assetId] || 0) + 1;
+    // HARD_MAX_REUSE=3 — never climb to 9–12× on a thin pool.
+    expect(Math.max(...Object.values(uses))).toBeLessThanOrEqual(3);
     const spans = tl.map((e) => e.endSec - e.startSec);
-    expect(Math.max(...spans)).toBeLessThanOrEqual(0.9);
+    // May lengthen up to MAX_BODY_CUT_SEC (1.25) when unique pool is thin.
+    expect(Math.max(...spans)).toBeLessThanOrEqual(1.26);
+    expect(Math.max(...tl.map((e) => e.endSec))).toBeGreaterThanOrEqual(39.5);
   });
 
   it('prefers unused global URLs before over-reusing a single clip', () => {

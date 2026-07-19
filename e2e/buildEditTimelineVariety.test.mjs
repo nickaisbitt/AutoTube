@@ -18,8 +18,8 @@ describe('buildEditTimeline — anti-repetition', () => {
     const tl = buildEditTimeline(project, { cutIntervalSec: 0.85, maxReusePerUrl: 1 });
     const uses = {};
     for (const e of tl) uses[e.assetId] = (uses[e.assetId] || 0) + 1;
-    // HARD_MAX_REUSE=3 — never climb to 9–12× on a thin pool.
-    expect(Math.max(...Object.values(uses))).toBeLessThanOrEqual(3);
+    // HARD_MAX_REUSE_CEIL=6 — never climb to 9–12× on a thin pool.
+    expect(Math.max(...Object.values(uses))).toBeLessThanOrEqual(6);
     const spans = tl.map((e) => e.endSec - e.startSec);
     // May lengthen up to MAX_BODY_CUT_SEC (1.25) when unique pool is thin.
     expect(Math.max(...spans)).toBeLessThanOrEqual(1.26);

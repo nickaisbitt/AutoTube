@@ -20,6 +20,8 @@ import {
   pickStockImages,
   pickStockVideos,
   isJunkDemoVideoUrl,
+  isUnsafeMediaUrl,
+  isJunkWebVolumeStillUrl,
   topicalStockVideos,
   stockImagesForTopic,
 } from './stock-media-urls.mjs';
@@ -361,6 +363,7 @@ async function fetchImageSearchResults(devServer, endpoint, query) {
 async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
+  const airline = isAirlineTopic(topic);
   const usedGlobal = new Set(
     (project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean),
   );
@@ -374,6 +377,13 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
     '/api/search-archive',
   ];
 
+  // Airline cabin-pressure: NEVER scrape open-web image search (porn/Niagara/celeb pads).
+  // Motion top-up (Pexels/Pixabay) is the only pad path.
+  if (airline) {
+    report.imageVolumeSkipped = 'airline-motion-only';
+    return;
+  }
+
   for (const seg of segments) {
     const segAssets = (project.media || []).filter((m) => m.segmentId === seg.id);
     let uniqueCount = new Set(
@@ -385,7 +395,14 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
       const results = await fetchImageSearchResults(devServer, searchEndpoints[round], q);
       const candidates = results
         .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
-        .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+        .filter(
+          (r) =>
+            r.url
+            && isDirectImageCandidate(r.url)
+            && !isJunkHarvestUrl(r.url)
+            && !isUnsafeMediaUrl(r.url)
+            && !isJunkWebVolumeStillUrl(r.url),
+        );
 
       let added = false;
       for (const r of candidates) {
@@ -427,6 +444,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
         if (uniqueCount >= minPerSegment) break;
         const key = img.url.split('?')[0];
         if (usedGlobal.has(key)) continue;
+        if (isUnsafeMediaUrl(img.url) || isJunkWebVolumeStillUrl(img.url)) continue;
         project.media.push({
           id: `stock-topup-${seg.id}-${uniqueCount}`,
           segmentId: seg.id,
@@ -467,6 +485,7 @@ function stripJunkDemoVideos(project, report) {
     const url = asset.url || '';
     const junk =
       isJunkDemoVideoUrl(url)
+      || isUnsafeMediaUrl(url)
       || isJunkStockClip(asset, topicBlob)
       || (isAirlineTopic(topicBlob) && !isAirlineRelevantClip(asset, topicBlob))
       || isOffBrandVisual(`${asset.alt || ''} ${url} ${asset.query || ''}`, topicBlob)
@@ -475,7 +494,12 @@ function stripJunkDemoVideos(project, report) {
       report.junkVideoDropped = report.junkVideoDropped || [];
       report.junkVideoDropped.push({ url, reason: 'demo/off-topic/broken proxy clip' });
       const thumb = asset.thumbnailUrl;
-      if (thumb && !isJunkHarvestUrl(thumb) && isImageLikeUrl(thumb)) {
+      if (
+        thumb
+        && !isJunkHarvestUrl(thumb)
+        && !isUnsafeMediaUrl(thumb)
+        && isImageLikeUrl(thumb)
+      ) {
         kept.push({
           ...asset,
           type: 'image',
@@ -484,6 +508,43 @@ function stripJunkDemoVideos(project, report) {
           isFallback: false,
         });
       }
+      continue;
+    }
+    kept.push(asset);
+  }
+  project.media = kept;
+  stripUnsafeMediaAssets(project, report);
+}
+
+/**
+ * Drop adult CDNs and airline web volume-top-up stills (Niagara/celeb/porn scrapes).
+ */
+function stripUnsafeMediaAssets(project, report) {
+  if (!project?.media?.length) return;
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`;
+  const airline = isAirlineTopic(topicBlob);
+  const kept = [];
+  for (const asset of project.media) {
+    const url = asset.url || '';
+    const source = String(asset.source || '');
+    const webVolumeStill =
+      asset.type === 'image'
+      && /volume top-up/i.test(source)
+      && !/stock pool/i.test(source);
+    const drop =
+      isUnsafeMediaUrl(url)
+      || isJunkWebVolumeStillUrl(url)
+      || (airline && webVolumeStill);
+    if (drop) {
+      report.unsafeMediaDropped = report.unsafeMediaDropped || [];
+      report.unsafeMediaDropped.push({
+        url,
+        reason: isUnsafeMediaUrl(url)
+          ? 'unsafe/adult CDN'
+          : airline && webVolumeStill
+            ? 'airline web volume still'
+            : 'junk web still host',
+      });
       continue;
     }
     kept.push(asset);
@@ -1313,6 +1374,7 @@ export {
   isJunkStockClip,
   isCyberRelevantClip,
   isAirlineRelevantClip,
+  stripUnsafeMediaAssets,
 };
 
 /**
@@ -1598,10 +1660,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
 function isJunkHarvestUrl(url) {
   const u = (url || '').toLowerCase();
   return (
-    u.includes('gravatar.com/avatar') ||
-    /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
-    u.includes('/th/id/ovp.') ||
-    u.includes('th?id=ovp.')
+    isUnsafeMediaUrl(u)
+    || isJunkWebVolumeStillUrl(u)
+    || u.includes('gravatar.com/avatar')
+    || /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u)
+    || u.includes('/th/id/ovp.')
+    || u.includes('th?id=ovp.')
   );
 }
 

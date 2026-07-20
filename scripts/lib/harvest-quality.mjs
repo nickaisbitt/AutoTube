@@ -3,6 +3,7 @@
  */
 import { isAirlineTopic, isCovidTopic, isHeistTopic, isHousingTopic, isNursingHomeTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
+import { isJunkWebVolumeStillUrl, isUnsafeMediaUrl } from './stock-media-urls.mjs';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
@@ -312,6 +313,8 @@ export function extractKeywords(text, max = 14) {
 
 /** Volume padding from top-up passes — must not be stripped by post-top-up relevance. */
 export function isVolumePaddingAsset(asset) {
+  if (isUnsafeMediaUrl(asset?.url || '')) return false;
+  if (isJunkWebVolumeStillUrl(asset?.url || '')) return false;
   const blob = `${asset?.source || ''} ${asset?.query || ''} ${asset?.id || ''}`.toLowerCase();
   return /volume top-up|stock pool|stock-video|cyber-stock|stock video pool|topup-|stock-topup-/i.test(blob);
 }

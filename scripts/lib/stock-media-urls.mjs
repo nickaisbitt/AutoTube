@@ -419,8 +419,30 @@ export const STOCK_CYBER_IMAGES = [
 export const JUNK_VIDEO_HOST_RE =
   /(?:w3schools\.com|media\.w3\.org|samplelib\.com|filesamples\.com|interactive-examples\.mdn|commondatastorage\.googleapis\.com\/gtv-videos|googlevideo\.com\/videoplayback|forbigger|sintel|big.?buck.?bunny|flower\.mp4)/i;
 
+/** Adult / porn CDNs — never allow in harvest, timeline, or volume top-up. */
+export const UNSAFE_MEDIA_URL_RE =
+  /\b(rdtcdn|pornhub|xvideos|xhamster|xnxx|xnnx|onlyfans|spankbang|redtube|youporn|tube8|brazzers|x-cdn\.com|phncdn|ahcdn\.com|trafficjunky|exoclick|\/porn|\/xxx\/|nsfw|adult[-_]?cdn)\b/i;
+
+/**
+ * Tourism / celeb / album / random blog hosts that web volume-top-up scrapes into
+ * investigation videos (Niagara, Discogs, PurePeople, etc.).
+ */
+export const JUNK_WEB_STILL_HOST_RE =
+  /\b(niagara|audleytravel|wallpapers\.com|discogs|allmusic|purepeople|howtallis|storagereview|a-z-animals|ariasfriends|pinimg\.com|pinterest\.|lookaside\.fbsbx)\b/i;
+
 export function isJunkDemoVideoUrl(url = '') {
   return JUNK_VIDEO_HOST_RE.test(url || '');
+}
+
+/** Hard-ban adult CDNs and known porn thumbnail hosts. */
+export function isUnsafeMediaUrl(url = '') {
+  return UNSAFE_MEDIA_URL_RE.test(String(url || ''));
+}
+
+/** Web-scrape stills that must never pad airline / investigation timelines. */
+export function isJunkWebVolumeStillUrl(url = '') {
+  const u = String(url || '');
+  return isUnsafeMediaUrl(u) || JUNK_WEB_STILL_HOST_RE.test(u);
 }
 
 /** Archive.org (and similar) clips suitable for serious news / scam topics. */

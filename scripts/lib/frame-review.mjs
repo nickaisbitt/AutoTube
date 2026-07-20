@@ -15,14 +15,18 @@ import {
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { probeVideo } from '../../powers/video-watcher/src/analyze.mjs';
+import {
+  UNSAFE_MEDIA_URL_RE,
+  JUNK_WEB_STILL_HOST_RE,
+  isUnsafeMediaUrl,
+  isJunkWebVolumeStillUrl,
+} from './stock-media-urls.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = resolve(__dirname, '../..');
 
-const NSFW_URL_RE =
-  /\b(rdtcdn|pornhub|xvideos|xhamster|xnxx|xnnx|onlyfans|spankbang|redtube|youporn|tube8|brazzers|porn|xxx|nsfw|adult[-_]?cdn)\b/i;
-const OFFTOPIC_URL_RE =
-  /\b(niagara|discogs|allmusic|unsplash\.com\/photo|pinterest|pinimg|purepeople|howtallis|storagereview|audleytravel|wallpapers\.com|a-z-animals|ariasfriends)\b/i;
+const NSFW_URL_RE = UNSAFE_MEDIA_URL_RE;
+const OFFTOPIC_URL_RE = JUNK_WEB_STILL_HOST_RE;
 const AVIATION_RE =
   /\b(airplane|aircraft|aviation|airline|cabin|cockpit|hangar|runway|tarmac|airport|oxygen|pilot|fuselage|boarding)\b/i;
 
@@ -132,8 +136,14 @@ export function assetAtTime(timelineMap, t) {
 export function heuristicFlags(frameMeta = {}) {
   const flags = [];
   const blob = `${frameMeta.url || ''} ${frameMeta.query || ''} ${frameMeta.alt || ''} ${frameMeta.source || ''} ${frameMeta.sourceUrl || ''}`.toLowerCase();
-  if (NSFW_URL_RE.test(blob)) flags.push({ code: 'nsfw_url', severity: 'critical', note: 'Adult CDN / porn domain in media URL' });
-  if (OFFTOPIC_URL_RE.test(blob)) flags.push({ code: 'offtopic_url', severity: 'high', note: 'Known off-topic image host/path' });
+  if (isUnsafeMediaUrl(frameMeta.url || '') || NSFW_URL_RE.test(blob)) {
+    flags.push({ code: 'nsfw_url', severity: 'critical', note: 'Adult CDN / porn domain in media URL' });
+  }
+  if (isJunkWebVolumeStillUrl(frameMeta.url || '') || OFFTOPIC_URL_RE.test(blob)) {
+    if (!flags.some((f) => f.code === 'nsfw_url')) {
+      flags.push({ code: 'offtopic_url', severity: 'high', note: 'Known off-topic image host/path' });
+    }
+  }
   if (frameMeta.type === 'image' && /volume top-up|search \(volume/i.test(frameMeta.source || '')) {
     flags.push({ code: 'volume_still', severity: 'high', note: 'Volume top-up still (web scrape pad)' });
   }

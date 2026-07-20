@@ -1376,10 +1376,21 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         continue;
       }
       // Vision gate on stock thumbs (keywords miss off-brand junk).
+      // Skip for short trusted airline queries — vision was rejecting real cabin/cockpit faces
+      // and leaving only 3–4 hangar/runway pads (soft-pass thin → D-grade).
       const thumb = clip.thumbnailUrl || clip.image || '';
       const apiKey = resolveOpenRouterKey();
+      const trustedAirlineQuery =
+        isAirlineTopic(topicBlob)
+        && AIRLINE_TRUSTED_QUERY_RE.test(q)
+        && String(q).trim().length <= 72;
       const visionBudget = isAirlineTopic(topicBlob) ? 24 : 6;
-      if (thumb && apiKey && (report.visionStockChecked || 0) < visionBudget) {
+      if (
+        thumb
+        && apiKey
+        && !trustedAirlineQuery
+        && (report.visionStockChecked || 0) < visionBudget
+      ) {
         report.visionStockChecked = (report.visionStockChecked || 0) + 1;
         const verdict = await visionRejectOffBrandStock(thumb, apiKey, topicBlob);
         if (verdict.reject) {
@@ -1532,13 +1543,17 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       return false;
     }
     const n = (report.videoTopUp || []).length;
+    const airline = isAirlineTopic(topicBlob);
+    const safeQuery =
+      clip.query
+      || (airline ? 'airplane cabin passengers daylight' : `stock-video ${seg.title}`);
     project.media.push({
       id: `stock-video-${seg.id}-${tag}-${n}`,
       segmentId: seg.id,
       type: 'video',
       url: clip.url,
-      alt: clip.alt || seg.title,
-      query: clip.query || `stock-video ${seg.title}`,
+      alt: clip.alt || (airline ? 'stock aviation video' : seg.title),
+      query: safeQuery,
       source: clip.source || 'Stock video pool',
       duration: 8,
       isFallback: false,

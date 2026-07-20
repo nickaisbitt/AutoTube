@@ -221,6 +221,20 @@ describe('quality waves 2–5 helpers', () => {
     expect(soft.pass).toBe(true);
   });
 
+  it('airline soft-pass-motion rejects thin unique-video pools', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: Array.from({ length: 4 }, (_, i) => strongAirlineVideo(i)),
+    };
+    const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(4), project);
+    expect(soft.pass).toBe(false);
+    expect(soft.reason).toBe('soft-pass-motion-airline-thin(4/12 videos)');
+  });
+
   it('airline soft-pass-motion requires at least four strong aviation videos', async () => {
     const { evaluateHarvestVolumeWithSoftPass } = await import(
       '../../../scripts/lib/harvest-quality.mjs'

@@ -432,6 +432,14 @@ export function filterAssetsByRelevance(media, project, options = {}) {
     const score = scoreAssetRelevance(asset, seg, topic, topicKeywords);
     if (score >= minScore) {
       kept.push({ ...asset, relevanceScore: Math.round(score * 100) / 100 });
+    } else if (
+      isAirlineTopic(topic)
+      && /\b(airplane|aircraft|aviation|cabin|cockpit|oxygen\s*mask|hangar|runway|tarmac|boarding|flight\s*attendant|pilot\s*cockpit)\b/i.test(
+        haystack,
+      )
+    ) {
+      // Keyword essay matching still misses short aviation stock queries — keep them.
+      kept.push({ ...asset, relevanceScore: 0.35 });
     } else {
       dropped.push({
         url: asset.url,
@@ -572,8 +580,15 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     if (airlineSoftFail) {
       return { pass: false, reason: airlineSoftFail };
     }
-    // Airline pools are judged by strong aviation + junk rules, not the generic 16-video floor.
-    if (videoCount >= AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS && (stockFetched > 0 || topUp >= segN || liveStockPresent)) {
+    // Never soft-pass a slideshow pool — need enough unique motion for dense cuts.
+    const minAirlineVideos = Math.max(12, segN * 2);
+    if (videoCount < minAirlineVideos) {
+      return {
+        pass: false,
+        reason: `soft-pass-motion-airline-thin(${videoCount}/${minAirlineVideos} videos)`,
+      };
+    }
+    if (stockFetched > 0 || topUp >= segN || liveStockPresent) {
       return { pass: true, reason: `soft-pass-motion-airline(${videoCount}v/${segN}segs)` };
     }
   }

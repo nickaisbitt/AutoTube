@@ -28,6 +28,13 @@ import { isWatermarked } from './sourceProviders/watermarkFilter';
 import { determineLicense, isLicenseCompatible } from './licenseTracker';
 import { computePaletteBonus } from './qualityValidation/colorPalette';
 import { computeImageAHash, isSimilarToAny } from './perceptualHash';
+import { scoreCandidateAgainstBeat, rankCandidatesWithBeatVision, BEAT_VISION_MAX_PER_SEGMENT } from './beatRelevance';
+import type { VisualBeat } from './visualBeatSheet';
+import {
+  isSafeStockProviderQuery,
+  resolveTopicFamily,
+  stockProviderQueriesForTopic,
+} from './topicFamilyQueries';
 
 function isLoopFastMode(): boolean {
   return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
@@ -69,10 +76,22 @@ function loopHarvestContext(): { offset: number; nonce: number; exclude: Set<str
 }
 
 const LOOP_DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investigation', 'report', 'leaked', 'official'];
+const LOOP_CYBER_DIVERSITY_TOKENS = [
+  'cybersecurity',
+  'data breach',
+  'news footage',
+  'investigation',
+  'hospital records',
+  'security camera',
+  'official report',
+];
 
 function diversifyLoopQuery(query: string, ctx: { offset: number; nonce: number }): string {
   if (ctx.offset === 0 && ctx.nonce === 0) return query;
-  const token = LOOP_DIVERSITY_TOKENS[ctx.offset % LOOP_DIVERSITY_TOKENS.length];
+  const q = query.toLowerCase();
+  const cyberish = /hack|breach|ransom|cyber|hospital|patient|bank|fraud|scam|password|identity|leak|records?/.test(q);
+  const tokens = cyberish ? LOOP_CYBER_DIVERSITY_TOKENS : LOOP_DIVERSITY_TOKENS;
+  const token = tokens[ctx.offset % tokens.length];
   const variant = ctx.nonce > 0 ? ` take ${ctx.nonce}` : '';
   return `${query} ${token}${variant}`.trim();
 }
@@ -634,6 +653,68 @@ export function scoreCandidate(
   const entertainmentKeywords = ['celebrity', 'traitor', 'winner', 'crowned', 'reality tv', 'love island', 'big brother'];
   if (entertainmentKeywords.some(kw => meta.includes(kw)) && !c.query.toLowerCase().includes('celebrity')) {
     score -= 250;
+  }
+
+  // 8b. Off-brand visuals (puppets/cartoons/insects) — tank serious news B-roll
+  const offBrand =
+    /\b(puppet|muppet|marionette|sock\s*puppet|claymation|stop[\s-]?motion|cartoon|anime|animated\s+character|minecraft|fortnite|gameplay|macro\s*insect|beetle|dung\s*beetle|insect|bug\s+macro|larva|caterpillar|spider\s+macro|wildlife\s+macro|hud\s+graphic|sci[\s-]?fi\s+hud)\b/i;
+  if (offBrand.test(meta) && !offBrand.test(c.query)) {
+    score -= 400;
+  }
+
+  // 8b2. Nursing abuse topics: demote office/architecture, boost CCTV/care
+  const topicLower = `${_topicContext?.topic || ''} ${_topicContext?.resolvedTitle || ''} ${c.query || ''}`.toLowerCase();
+  const nursingTopic = /nursing\s*home|elder\s*abuse|care\s*home/.test(topicLower);
+  if (nursingTopic) {
+    if (/\b(office|corporate|skyline|architectural|conference room|business district|glass building)\b/i.test(meta)) {
+      score -= 350;
+    }
+    if (/\b(cctv|surveillance|camera|nursing|elderly|caregiver|care home|wheelchair|hallway)\b/i.test(meta)) {
+      score += 200;
+    }
+  }
+
+  // 8b3. Airline/aviation hooks need human stakes, not branded aircraft wallpaper.
+  const airlineTopic = /\b(airline|aviation|airport|aircraft|flight|cabin[-\s]?pressure|cabin\s*pressure)\b/i.test(topicLower);
+  if (airlineTopic) {
+    const airlineMeta = `${meta} ${c.query || ''} ${c.source || ''}`.toLowerCase();
+    const regionalTopic = /\b(regional|commuter|local|domestic|small\s+airline)\b/i.test(topicLower);
+
+    if (/\b(face|faces|passenger|passengers|traveler|traveller|pilot|flight attendant|cabin crew|oxygen|oxygen mask|worried|anxious|concerned|reaction)\b/i.test(airlineMeta)) {
+      score += 240;
+    }
+    if (/\b(hangar|maintenance|inspection|paperwork|documents?|report|safety report|clipboard|aircraft mechanic)\b/i.test(airlineMeta)) {
+      score += 170;
+    }
+
+    if (/\b(emirates|wizz|qatar|lufthansa)\b/i.test(airlineMeta)) {
+      score -= regionalTopic ? 420 : 260;
+    }
+    if (/\b(airline\s+logo|logo\s+close[-\s]?up|close[-\s]?up\s+of\s+.*logo|tail\s+logo|brand\s+logo|branded\s+livery)\b/i.test(airlineMeta)) {
+      score -= 320;
+    }
+    if (/\b(back\s+of\s+head|rear\s+view|from\s+behind|tourist|selfie|spotter|behind\s+fence|chain[-\s]?link\s+fence|observation\s+deck|corporate|office|conference\s+room|business\s+meeting|desk|stock\s+office)\b/i.test(airlineMeta)) {
+      score -= 260;
+    }
+  }
+
+  // 8c. Prefer bright B-roll when loop flagged muddy/dark frames
+  const preferBright =
+    (typeof sessionStorage !== 'undefined'
+      && sessionStorage.getItem('autotube_loop_prefer_bright') === 'true')
+    || (typeof process !== 'undefined'
+      && process.env?.AUTOTUBE_PREFER_BRIGHT_BROLL === '1');
+  if (preferBright) {
+    if (/\b(night|dark|silhouette|low.?light|underexposed|dimly|shadowy|black background)\b/i.test(meta)) {
+      score -= 180;
+    }
+    // Do not boost generic "office daylight" — that injects cowork pads on airline topics.
+    if (/\b(daylight|sunny|bright|well.?lit|window light|cabin daylight|airport|runway)\b/i.test(meta)) {
+      score += 80;
+    }
+    if (/\b(office daylight|open.?plan office|coworking|imac desk)\b/i.test(meta) && !/\b(office culture|coworking|remote work)\b/i.test(c.query || '')) {
+      score -= 120;
+    }
   }
 
   // 9. Picsum Penalty — generic random photos should NEVER outrank real DDG/Wikimedia results
@@ -2049,6 +2130,29 @@ async function harvestMediaWithSafetyNet(
   return { candidates: filteredScored, trace };
 }
 
+/**
+ * Best heuristic beat-relevance across a segment's beats.
+ * Used to demote/reject off-brand stock when VisualBeatSheet is active.
+ */
+export function bestBeatRelevanceForCandidate(
+  candidate: { alt?: string; url?: string; query?: string; source?: string },
+  beats?: VisualBeat[] | null,
+): { score: number; reject: boolean; reasons: string[] } | null {
+  if (!beats?.length) return null;
+  let best: { score: number; reject: boolean; reasons: string[] } | null = null;
+  for (const beat of beats) {
+    const r = scoreCandidateAgainstBeat(candidate, beat);
+    if (
+      !best
+      || (!r.reject && best.reject)
+      || (r.reject === best.reject && r.score > best.score)
+    ) {
+      best = r;
+    }
+  }
+  return best;
+}
+
 function rankShotCandidates(
   candidates: MediaCandidate[],
   shot: { concept: string; queries: string[]; vibe: string },
@@ -2056,6 +2160,7 @@ function rankShotCandidates(
   excludedUrls: Set<string>,
   preferredType?: MediaCandidate['type'],
   blockedUrls?: Set<string>,
+  beats?: VisualBeat[] | null,
 ): MediaCandidate[] {
   const shotMeta = `${shot.concept} ${shot.vibe} ${shot.queries.join(' ')}`.toLowerCase();
   const shotTerms = shotMeta.split(/\s+/).filter((word) => word.length > 2);
@@ -2083,6 +2188,16 @@ function rankShotCandidates(
       if (shot.concept.toLowerCase().includes('portrait') && /(portrait|speaker|interview|person|people)/i.test(meta)) score += 25;
       if (shot.vibe.toLowerCase().includes('urgent') && candidate.type === 'video') score += 15;
 
+      const beatRel = bestBeatRelevanceForCandidate(candidate, beats);
+      if (beatRel) {
+        if (beatRel.reject) {
+          // Heavy demotion — still allow fill if nothing else survives
+          score -= 450;
+        } else {
+          score += Math.round(beatRel.score * 140);
+        }
+      }
+
       return { candidate, score };
     })
     .filter((x): x is { candidate: MediaCandidate; score: number } => x != null)
@@ -2103,8 +2218,16 @@ async function pickDistinctShotCandidate(
   preferredType?: MediaCandidate['type'],
   blockedUrls?: Set<string>,
   signal?: AbortSignal,
+  beats?: VisualBeat[] | null,
+  visionCtx?: { apiKey?: string; budget?: { remaining: number } },
 ): Promise<MediaCandidate | undefined> {
-  const ranked = rankShotCandidates(candidates, shot, segmentIndex, excludedUrls, preferredType, blockedUrls);
+  let ranked = rankShotCandidates(candidates, shot, segmentIndex, excludedUrls, preferredType, blockedUrls, beats);
+  if (beats?.length && visionCtx?.apiKey && visionCtx.budget && visionCtx.budget.remaining > 0) {
+    ranked = await rankCandidatesWithBeatVision(ranked, beats, visionCtx.apiKey, {
+      signal,
+      budget: visionCtx.budget,
+    });
+  }
   for (const candidate of ranked) {
     if (signal?.aborted) return undefined;
     if (!isLoopFastMode()) return candidate;
@@ -2122,6 +2245,20 @@ async function pickDistinctShotCandidate(
 
 function buildSpecificQuery(baseQuery: string, topicContext: TopicContext): string {
   const topic = topicContext.topic || topicContext.coreSubject || '';
+  const family = resolveTopicFamily(topic);
+
+  // Airline cabin-pressure: never append the full topic essay / rocket "flight" modifiers.
+  // Long "Captain Chen … How a regional airline…" queries return mailboxes & random pads.
+  if (family === 'airline') {
+    const base = String(baseQuery || '').trim().replace(/\s+/g, ' ');
+    if (isSafeStockProviderQuery(base)) return base;
+    const safe = stockProviderQueriesForTopic(topic, 10);
+    if (!safe.length) return 'airplane cabin passengers daylight';
+    let hash = 0;
+    for (let i = 0; i < base.length; i += 1) hash = (hash + base.charCodeAt(i) * (i + 1)) % 997;
+    return safe[hash % safe.length];
+  }
+
   let query = baseQuery;
   if (topic) {
     const baseLower = baseQuery.toLowerCase();
@@ -2133,7 +2270,13 @@ function buildSpecificQuery(baseQuery: string, topicContext: TopicContext): stri
 
   // A+++ Strategy: Automatically append high-fidelity B-roll modifiers to search queries for key themes
   const qLower = query.toLowerCase();
-  if (qLower.includes('launch') || qLower.includes('rocket') || qLower.includes('spacex') || qLower.includes('starship') || qLower.includes('flight')) {
+  // Do NOT match bare "flight" — that turns airline cabin stories into rocket launch scrapes.
+  if (
+    qLower.includes('launch')
+    || qLower.includes('rocket')
+    || qLower.includes('spacex')
+    || qLower.includes('starship')
+  ) {
     query += ' launch footage archive';
   } else if (qLower.includes('presentation') || qLower.includes('ceo') || qLower.includes('keynote') || qLower.includes('unveil') || qLower.includes('office')) {
     query += ' keynote event stage';
@@ -2153,9 +2296,15 @@ export async function sourceSegmentMedia(
   config: AppConfig,
   signal?: AbortSignal,
   progressCallback?: (message: string, pct: number) => void,
+  beats?: VisualBeat[] | null,
 ): Promise<{ assets: Omit<MediaAsset, 'id' | 'segmentId'>[]; plan: SegmentVisualPlan; segmentId: string }> {
   try {
     const finalAssets: Omit<MediaAsset, 'id' | 'segmentId'>[] = [];
+    const segmentBeats = beats?.length ? beats : null;
+    const beatVisionBudget = { remaining: BEAT_VISION_MAX_PER_SEGMENT };
+    const visionCtx = config.openRouterKey
+      ? { apiKey: config.openRouterKey, budget: beatVisionBudget }
+      : undefined;
     const shotsToHarvest = plan.shots && plan.shots.length > 0
       ? plan.shots
       : [{ concept: plan.visualAction, queries: plan.queries, vibe: plan.visualConcept }];
@@ -2300,6 +2449,8 @@ export async function sourceSegmentMedia(
         i > 0 ? finalAssets[i - 1]?.type : undefined,
         blockedUrlsForPick(),
         signal,
+        segmentBeats,
+        visionCtx,
       );
 
       if (!best) {
@@ -2311,6 +2462,8 @@ export async function sourceSegmentMedia(
           undefined,
           blockedUrlsForPick(),
           signal,
+          segmentBeats,
+          visionCtx,
         );
       }
 
@@ -2350,6 +2503,8 @@ export async function sourceSegmentMedia(
                 undefined,
                 blockedUrlsForPick(),
                 signal,
+                segmentBeats,
+                visionCtx,
               );
               if (fallback) {
                 best = fallback;
@@ -2427,6 +2582,8 @@ export async function sourceSegmentMedia(
         undefined,
         blockedUrlsForPick(),
         signal,
+        segmentBeats,
+        visionCtx,
       );
       if (extra) {
         usedUrlsMap.set(extra.url, segmentIndex);
@@ -2503,6 +2660,8 @@ export async function sourceSegmentMedia(
           'video',
           blockedUrlsForPick(),
           signal,
+          segmentBeats,
+          visionCtx,
         );
         if (!videoPick || videoPick.type !== 'video') break;
         usedUrlsMap.set(videoPick.url, segmentIndex);
@@ -2553,6 +2712,8 @@ export async function sourceSegmentMedia(
             undefined,
             deduplicationRegistry.usedUrls,
             signal,
+            segmentBeats,
+            visionCtx,
           );
           if (replacement) {
             usedUrlsMap.set(replacement.url, segmentIndex);

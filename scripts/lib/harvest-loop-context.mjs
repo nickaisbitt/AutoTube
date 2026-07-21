@@ -3,6 +3,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isEvalColdMode } from './eval-flags.mjs';
 
 const DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investigation', 'report', 'leaked', 'official'];
 
@@ -11,10 +12,30 @@ const DIVERSITY_TOKENS = ['news', 'documentary', 'archive', 'footage', 'investig
  * @returns {{ harvestNonce: number, mediaOffset: number, excludeUrls: string[] }}
  */
 export function harvestContextFromFixState(fixState = {}) {
+  const visualBeatsOff =
+    process.env.AUTOTUBE_VISUAL_BEATS === '0'
+    || process.env.AUTOTUBE_VISUAL_BEATS === 'false';
+  const visualBeats =
+    !visualBeatsOff
+    && (
+      process.env.AUTOTUBE_VISUAL_BEATS === '1'
+      || process.env.AUTOTUBE_VISUAL_BEATS === 'true'
+      || fixState.visualBeats === true
+      || fixState.visualBeats !== false // default on unless explicitly false
+    );
+  const beatVision =
+    process.env.AUTOTUBE_BEAT_VISION === '1'
+    || process.env.AUTOTUBE_BEAT_VISION === 'true'
+    || fixState.beatVision === true
+    || (isEvalColdMode() && process.env.AUTOTUBE_BEAT_VISION !== '0');
   return {
     harvestNonce: fixState.harvestNonce || 0,
     mediaOffset: fixState.mediaOffset || 0,
     excludeUrls: Array.isArray(fixState.excludedUrls) ? fixState.excludedUrls : [],
+    preferBrightBroll: fixState.preferBrightBroll === true,
+    faceSeekBroll: fixState.faceSeekBroll === true,
+    visualBeats: Boolean(visualBeats),
+    beatVision: Boolean(beatVision),
   };
 }
 
@@ -23,11 +44,30 @@ export function harvestContextFromFixState(fixState = {}) {
  * @param {object} ctx
  */
 export function harvestSessionStoragePayload(ctx) {
-  return {
+  const visualBeatsOff =
+    process.env.AUTOTUBE_VISUAL_BEATS === '0'
+    || process.env.AUTOTUBE_VISUAL_BEATS === 'false';
+  const visualBeats =
+    !visualBeatsOff
+    && (ctx.visualBeats !== false); // default on
+  const beatVision =
+    process.env.AUTOTUBE_BEAT_VISION === '1'
+    || process.env.AUTOTUBE_BEAT_VISION === 'true'
+    || ctx.beatVision === true
+    || (isEvalColdMode() && process.env.AUTOTUBE_BEAT_VISION !== '0');
+  const payload = {
     autotube_loop_harvest_nonce: String(ctx.harvestNonce || 0),
     autotube_loop_media_offset: String(ctx.mediaOffset || 0),
     autotube_loop_exclude_urls: JSON.stringify((ctx.excludeUrls || []).slice(0, 300)),
+    autotube_loop_prefer_bright: ctx.preferBrightBroll ? 'true' : 'false',
+    autotube_loop_face_seek: ctx.faceSeekBroll ? 'true' : 'false',
+    autotube_visual_beats: visualBeats ? 'true' : 'false',
+    autotube_beat_vision: beatVision ? 'true' : 'false',
   };
+  if (isEvalColdMode()) {
+    payload.autotube_eval_cold = 'true';
+  }
+  return payload;
 }
 
 /**

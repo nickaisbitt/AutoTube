@@ -3,10 +3,11 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { clearKeepBest } from './keep-best.mjs';
 
 export const FIX_STATE_VERSION = 3;
 
-/** @typedef {'interval' | 'hard_cuts' | 'reharvest' | 'new_topic'} FixStrategy */
+/** @typedef {'interval' | 'hard_cuts' | 'reharvest' | 'polish' | 'new_topic'} FixStrategy */
 
 export const DEFAULT_FIX_STATE = {
   version: FIX_STATE_VERSION,
@@ -22,7 +23,7 @@ export const DEFAULT_FIX_STATE = {
   fixStrategy: 'interval',
   ffmpegHardCuts: true,
   topicRetryCount: 0,
-  maxRetriesPerTopic: 4,
+  maxRetriesPerTopic: 3,
   pendingTopic: null,
   iteration: 0,
   appliedFixes: [],
@@ -35,7 +36,35 @@ export const DEFAULT_FIX_STATE = {
   harvestVideoFirst: true,
   whisperAlign: false,
   brollPlacement: true,
+  faceSeekBroll: true,
+  karaokeCaptions: true,
+  preferBrightBroll: false,
+  rewriteScript: false,
+  maxReusePerUrl: 1,
+  keepBestMedia: false,
+  frozenProjectPath: null,
 };
+
+/**
+ * Clear topic-specific packaging so the next random topic does not inherit
+ * hooks, overlays, impact beats, or harvest offset from the previous topic.
+ * @param {object} state
+ * @returns {object}
+ */
+export function clearTopicPackaging(state) {
+  if (!state || typeof state !== 'object') return state;
+  delete state.hookLine;
+  delete state.hookOverlay;
+  delete state.impactBeats;
+  delete state.impactBeatIntervalSec;
+  state.hookLine = null;
+  state.mediaOffset = 0;
+  state.harvestNonce = 0;
+  state.rewriteScript = false;
+  // Keep preferBrightBroll / faceSeek as learned pipeline prefs across topics
+  clearKeepBest(state);
+  return state;
+}
 
 /**
  * @param {string} loopDir

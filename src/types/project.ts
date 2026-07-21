@@ -82,6 +82,20 @@ export interface VideoProject {
   };
   topicContext?: TopicContext;
   visualPlans?: Record<string, SegmentVisualPlan>;
+  /** Optional script-grounded beat sheet (AUTOTUBE_VISUAL_BEATS). */
+  visualBeatSheet?: {
+    topic: string;
+    beats: Array<{
+      id: string;
+      segmentId: string;
+      role: string;
+      searchableSubject: string;
+      narrationExcerpt: string;
+      evidence: string;
+    }>;
+    budget: { min: number; max: number; used: number };
+    warnings: string[];
+  };
   editPlan?: EditPlan;
   /** Loop/ffmpeg assembly B-roll placement timeline */
   editTimeline?: Array<{

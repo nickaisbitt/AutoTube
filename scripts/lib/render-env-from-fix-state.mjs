@@ -16,7 +16,6 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (base.projectPath) env.AUTOTUBE_PROJECT_PATH = base.projectPath;
   if (fixState.cutIntervalSec) env.AUTOTUBE_CUT_INTERVAL_SEC = String(fixState.cutIntervalSec);
   if (fixState.showKineticText) env.AUTOTUBE_KINETIC_TEXT = '1';
-  if (fixState.patternInterrupts) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
   if (fixState.useFastPacing) env.AUTOTUBE_FAST_PACING = '1';
   if (fixState.useFfmpegAssembly !== false) env.AUTOTUBE_RENDER_MODE = 'ffmpeg';
   if (fixState.harvestVideoFirst !== false) env.AUTOTUBE_HARVEST_VIDEO_FIRST = '1';
@@ -25,6 +24,23 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   if (fixState.whisperAlign || renderTier === 'full') env.AUTOTUBE_WHISPER_ALIGN = '1';
   if (fixState.hookOverlay) env.AUTOTUBE_HOOK_OVERLAY = fixState.hookOverlay;
   if (fixState.hookLine) env.AUTOTUBE_HOOK_LINE = fixState.hookLine;
+  if (fixState.preferBrightBroll) env.AUTOTUBE_PREFER_BRIGHT_BROLL = '1';
+  if (fixState.faceSeekBroll) env.AUTOTUBE_FACE_SEEK_BROLL = '1';
+  if (fixState.hookSceneCuts === true) env.AUTOTUBE_HOOK_SCENE_CUTS = '1';
+
+  // Solid-color flash frames get sampled by vision and tank pacing/variety scores
+  if (fixState.patternInterrupts === true) {
+    env.AUTOTUBE_PATTERN_INTERRUPTS = '1';
+  } else {
+    env.AUTOTUBE_PATTERN_INTERRUPTS = '0';
+  }
+
+  // Karaoke on by default (reduced captionMetrics size); set karaokeCaptions:false to skip
+  if (fixState.karaokeCaptions === false) {
+    env.AUTOTUBE_KARAOKE_CAPTIONS = '0';
+  } else {
+    env.AUTOTUBE_KARAOKE_CAPTIONS = '1';
+  }
 
   if (renderTier === 'full') {
     env.AUTOTUBE_RENDER_QUALITY = 'high';
@@ -53,5 +69,9 @@ export function renderEnvJournalSnapshot(fixState = {}) {
     minAssetsPerSegment: fixState.minAssetsPerSegment,
     useFfmpegAssembly: fixState.useFfmpegAssembly !== false,
     harvestVideoFirst: fixState.harvestVideoFirst !== false,
+    patternInterrupts: fixState.patternInterrupts === true,
+    karaokeCaptions: fixState.karaokeCaptions !== false,
+    preferBrightBroll: fixState.preferBrightBroll === true,
+    faceSeekBroll: fixState.faceSeekBroll === true,
   };
 }

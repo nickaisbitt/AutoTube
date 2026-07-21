@@ -3,33 +3,40 @@
  */
 
 export function isYouTubeExportMode(project) {
+  if (process.env.AUTOTUBE_YOUTUBE_MODE === '0' || process.env.AUTOTUBE_YOUTUBE_MODE === 'false') {
+    return false;
+  }
   if (process.env.AUTOTUBE_YOUTUBE_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === 'true') {
     return true;
   }
   const es = project?.exportSettings;
+  if (es?.youtubeMode === false) return false;
   if (es?.youtubeMode === true || es?.format === 'youtube') return true;
+  // Product default: YouTube-ready captions / hook / CTA / voice-first mix
+  if (es && es.youtubeMode === undefined) return true;
   const style = (project?.style || '').toLowerCase();
   return style === 'youtube_viral' || style === 'mr_beast' || style === 'business_insider';
 }
 
 export function captionMetrics(height, width) {
-  const basePx = Math.round(height * 0.078);
-  const currentPx = Math.round(height * 0.092);
-  const strokePx = Math.max(8, Math.round(height * 0.009));
-  const bottomPad = Math.round(height * 0.14);
-  return { basePx, currentPx, strokePx, bottomPad, maxWords: 4, barWidth: width * 0.94 };
+  // Mobile-first size: 0.052 read as "small captions" on cold near-misses (raw 6.8).
+  const basePx = Math.round(height * 0.058);
+  const currentPx = Math.round(height * 0.068);
+  const strokePx = Math.max(5, Math.round(height * 0.007));
+  const bottomPad = Math.round(height * 0.09);
+  return { basePx, currentPx, strokePx, bottomPad, maxWords: 4, barWidth: width * 0.92 };
 }
 
 export function hookFontPx(height) {
-  return Math.round(height * 0.09);
+  return Math.round(height * 0.11);
 }
 
 /** Max seconds before switching B-roll within a segment (YouTube retention). */
 export function assetCutIntervalSec(project) {
   if (!isYouTubeExportMode(project)) return null;
   const raw = process.env.AUTOTUBE_CUT_INTERVAL_SEC;
-  const parsed = raw ? parseFloat(raw) : 1.25;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.25;
+  const parsed = raw ? parseFloat(raw) : 1.0;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.0;
 }
 
 /**

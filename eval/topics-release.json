@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "description": "Frozen release set. Do not inspect or tune against these topics while iterating. Only run for release claims.",
+  "topics": [
+    { "id": "rel-01", "topic": "Why rural ambulance GPS routes send crews to demolished houses", "category": "infrastructure" },
+    { "id": "rel-02", "topic": "The university lab that published fake climate sensor calibrations", "category": "science" },
+    { "id": "rel-03", "topic": "How a regional airline hid recurring cabin-pressure failures", "category": "consumer" },
+    { "id": "rel-04", "topic": "The city zoning map that erased flood-risk neighborhoods", "category": "policy" },
+    { "id": "rel-05", "topic": "Why indie game studios are losing source code in cloud lockouts", "category": "culture" },
+    { "id": "rel-06", "topic": "The museum archive that mislabeled colonial artifacts for decades", "category": "history" },
+    { "id": "rel-07", "topic": "How a youth soccer league sold player biometric data to sponsors", "category": "sports" },
+    { "id": "rel-08", "topic": "The ferry schedule algorithm that stranded night-shift workers", "category": "infrastructure" },
+    { "id": "rel-09", "topic": "Why a popular language-learning app invented fake fluency certificates", "category": "consumer" },
+    { "id": "rel-10", "topic": "The wildlife refuge that quietly approved oil survey drones", "category": "science" },
+    { "id": "rel-11", "topic": "How a small-town newspaper leaked sealed juvenile court files", "category": "policy" },
+    { "id": "rel-12", "topic": "The concert venue that sold the same reserved seats twice", "category": "culture" },
+    { "id": "rel-13", "topic": "Why archival film reels dissolved after a botched climate-control upgrade", "category": "history" },
+    { "id": "rel-14", "topic": "The marathon timing chip vendor that falsified finish times", "category": "sports" },
+    { "id": "rel-15", "topic": "How a water utility billed residents for leaks it caused", "category": "infrastructure" },
+    { "id": "rel-16", "topic": "The astronomy observatory that delayed reporting a near-earth asteroid", "category": "science" },
+    { "id": "rel-17", "topic": "Why grocery loyalty cards tracked shoppers into insurance pricing", "category": "consumer" },
+    { "id": "rel-18", "topic": "The refugee housing lottery that was gamed by landlords", "category": "policy" },
+    { "id": "rel-19", "topic": "How a podcast network buried host misconduct settlements", "category": "culture" },
+    { "id": "rel-20", "topic": "The shipwreck diver who stole artifacts from a protected wreck", "category": "history" },
+    { "id": "rel-21", "topic": "Why an esports arena blackout coincided with betting market spikes", "category": "sports" },
+    { "id": "rel-22", "topic": "The bridge inspection contractor that photocopied old reports", "category": "infrastructure" },
+    { "id": "rel-23", "topic": "How a gene-therapy trial quietly excluded minority participants", "category": "science" },
+    { "id": "rel-24", "topic": "The appliance recall that never reached apartment renters", "category": "consumer" }
+  ]
+}

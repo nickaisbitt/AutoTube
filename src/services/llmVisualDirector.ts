@@ -2,10 +2,12 @@ import { TopicContext } from '../types';
 import { logger } from './logger';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { extractJson } from '../utils/extractJson';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { sanitiseTopic } from './llm/index';
+import { topicFamilyQueries } from './topicFamilyQueries';
 
 // Default model — matches the script generator for consistency.
-export const DEFAULT_VISUAL_MODEL = 'openai/gpt-5.4-mini';
+export const DEFAULT_VISUAL_MODEL = 'xiaomi/mimo-v2.5';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -127,6 +129,8 @@ export function validateVisualPlan(raw: unknown, fallbackTopic: string): LlmVisu
   }
 
   const queries = combinedQueries.length > 0 ? combinedQueries : [fallbackTopic];
+  const family = topicFamilyQueries(fallbackTopic, 3);
+  const mergedQueries = [...new Set([...queries, ...family])];
 
   // Extract classification if present and valid
   const validClassifications: ScriptLineClassification[] = ['personal', 'institutional', 'geopolitical', 'practical'];
@@ -135,7 +139,7 @@ export function validateVisualPlan(raw: unknown, fallbackTopic: string): LlmVisu
     ? (rawClassification as ScriptLineClassification)
     : undefined;
 
-  const plan: LlmVisualPlan = { intent, queries, visualConcept, shots };
+  const plan: LlmVisualPlan = { intent, queries: mergedQueries, visualConcept, shots };
   if (classification) {
     plan.classification = classification;
   }
@@ -153,11 +157,15 @@ export async function generateAIPlan(
   model = DEFAULT_VISUAL_MODEL,
   signal?: AbortSignal,
   segmentTitle?: string,
+  visualNote?: string,
 ): Promise<LlmVisualPlan> {
   const topic = sanitiseTopic(topicContext.resolvedTitle || topicContext.topic);
   const fallbackTopic = topic;
 
   const titleLine = segmentTitle ? `\nSEGMENT TITLE: ${segmentTitle}` : '';
+  const visualNoteLine = visualNote?.trim()
+    ? `\nSCRIPT VISUAL NOTE (treat as required intent — search this scene, do not invent unrelated B-roll): ${visualNote.trim()}`
+    : '';
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   const prompt = `You are a professional Creative Director and photo researcher.
 
@@ -168,14 +176,14 @@ IMPORTANT: Today is ${today}. The information in the following topic and narrati
 
 Plan TWO DISTINCT SHOTS for this specific video segment. Each shot must have MULTIPLE diverse search queries targeting different source types.
 
-TOPIC: ${topic}${titleLine}
+TOPIC: ${topic}${titleLine}${visualNoteLine}
 DESCRIPTION: ${topicContext.description}
 NARRATION: "${segmentText}"
 ${topicContext.recentNews && topicContext.recentNews.length > 0 ? `\nRECENT NEWS (live from web):\n${topicContext.recentNews.map((n, i) => `  ${i + 1}. [${n.source}] ${n.headline}${n.date ? ` (${n.date})` : ''} — ${n.snippet.substring(0, 200)}`).join('\n')}` : ''}
 ${topicContext.extract ? `\nWIKIPEDIA CONTEXT:\n${topicContext.extract.substring(0, 1000)}` : ''}
 
 CRITICAL:
-1. Your shots MUST be about the NARRATION above.
+1. Your shots MUST be about the NARRATION above${visualNote?.trim() ? ' AND honor the SCRIPT VISUAL NOTE' : ''}.
 2. Provide TWO distinct shots (Primary and Secondary) to maintain visual velocity.
 3. Your shots must be SPECIFIC and SEARCHABLE. Instead of "Establish visual context", say exactly what should be on screen: "Aerial shot of NCL Luna cruise ship at Port of Miami", "Close-up of Fincantieri shipyard construction".
 4. For EACH shot, provide 3-4 diverse search queries targeting different source types:
@@ -189,6 +197,7 @@ CRITICAL:
    - "geopolitical": Nation-state actors, global infrastructure, international conflict → use WIDE-CONTEXT visuals (maps, infrastructure, satellite imagery, government buildings, military)
    - "practical": Advice, protection steps, actionable tips → use CLEAR/INSTRUCTIONAL visuals (checklists, UI screenshots, step-by-step, clean graphics)
 6. Your shot choices MUST match the classification scale. Personal segments need intimate shots. Geopolitical segments need wide-context shots. When the story shifts scope, the visual language must shift too.
+7. Prefer concrete, searchable subjects grounded in the narration. NEVER use cartoon/puppet/insect/macro wildlife filler for serious topics.
 
 Return JSON:
 {
@@ -227,21 +236,33 @@ Return JSON:
 
     if (!response.ok) {
       logger.warn('VisualDirector', `AI Plan request failed (${response.status}), using fallback`);
-      return { intent: 'Fallback visual', queries: [fallbackTopic], visualConcept: 'Neutral documentary' };
+      return {
+        intent: 'Fallback visual',
+        queries: topicFamilyQueries(fallbackTopic, 4),
+        visualConcept: 'Neutral documentary',
+      };
     }
 
     const data = await response.json();
-    const rawContent: unknown = data?.choices?.[0]?.message?.content;
+    const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
 
-    if (typeof rawContent !== 'string' || !rawContent.trim()) {
+    if (!rawContent) {
       logger.warn('VisualDirector', 'AI Plan returned no content, using fallback');
-      return { intent: 'Fallback visual', queries: [fallbackTopic], visualConcept: 'Neutral documentary' };
+      return {
+        intent: 'Fallback visual',
+        queries: topicFamilyQueries(fallbackTopic, 4),
+        visualConcept: 'Neutral documentary',
+      };
     }
 
     const parsed = extractJson(rawContent);
     if (parsed === null) {
       logger.warn('VisualDirector', 'JSON extraction failed for AI Plan, using fallback');
-      return { intent: 'Fallback visual', queries: [fallbackTopic], visualConcept: 'Neutral documentary' };
+      return {
+        intent: 'Fallback visual',
+        queries: topicFamilyQueries(fallbackTopic, 4),
+        visualConcept: 'Neutral documentary',
+      };
     }
 
     const plan = validateVisualPlan(parsed, fallbackTopic);
@@ -249,6 +270,10 @@ Return JSON:
     return plan;
   } catch (error) {
     logger.error('VisualDirector', 'Exception during AI Plan generation', error);
-    return { intent: 'Fallback visual', queries: [fallbackTopic, segmentText.slice(0, 30)], visualConcept: 'Neutral documentary' };
+    return {
+      intent: 'Fallback visual',
+      queries: [...topicFamilyQueries(fallbackTopic, 3), segmentText.slice(0, 30)],
+      visualConcept: 'Neutral documentary',
+    };
   }
 }

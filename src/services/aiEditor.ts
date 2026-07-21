@@ -8,7 +8,9 @@ import type {
   AIEditOptions,
 } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
+import { DEFAULT_LLM_MODEL } from './llm/defaultModels';
 
 // ── Pan direction presets for Ken Burns variety ──────────────────────────────
 // Cycle through these to ensure consecutive assets get distinct motion.
@@ -35,39 +37,31 @@ function defaultKenBurns(assetIndex: number): KenBurnsParams {
   };
 }
 
+/** YouTube Hormozi-style caption cap (matches deploy/server-render/youtubeProfile.mjs). */
+export const YOUTUBE_CAPTION_MAX_WORDS = 4;
+
 /**
- * Computes default caption settings based on narration word count.
+ * Computes default caption settings for YouTube-ready exports.
  *
- * - >100 words → wordsPerWindow: 10
- * - ≤50 words → wordsPerWindow: 6
- * - otherwise → wordsPerWindow: 8
- *
- * displayDurationMs is derived from wordsPerWindow assuming ~3 words/sec reading pace.
+ * Always caps at {@link YOUTUBE_CAPTION_MAX_WORDS} words per on-screen window.
+ * displayDurationMs assumes ~3 words/sec reading pace.
  */
 export function defaultCaptionSettings(narrationText: string): CaptionSettings {
-  // Early return for empty/whitespace-only narration text — safe defaults
+  const wordsPerWindow = YOUTUBE_CAPTION_MAX_WORDS;
+  const displayDurationMs = Math.round((wordsPerWindow / 3) * 1000);
+
   if (!narrationText || narrationText.trim().length === 0) {
-    return { wordsPerWindow: 8, displayDurationMs: 2667, isFastPaced: false };
+    return { wordsPerWindow, displayDurationMs, isFastPaced: true };
   }
 
   const wordCount = narrationText.trim().split(/\s+/).filter(Boolean).length;
-
-  let wordsPerWindow: number;
-  if (wordCount > 100) {
-    wordsPerWindow = 10;
-  } else if (wordCount <= 50) {
-    wordsPerWindow = 6;
-  } else {
-    wordsPerWindow = 8;
-  }
-
-  // ~3 words/sec reading pace → ms per window
-  const displayDurationMs = Math.round((wordsPerWindow / 3) * 1000);
+  // Fast-paced when narration would outrun a 4-word window (~3 wps → ~1.3s/window)
+  const isFastPaced = wordCount > 40;
 
   return {
     wordsPerWindow,
     displayDurationMs,
-    isFastPaced: false,
+    isFastPaced,
   };
 }
 
@@ -624,7 +618,7 @@ You will receive the complete project data: script segments, media assets, narra
 2. **Timing Adjustments**: Adjust segment durations to match narration pacing. If a segment's narration duration differs from the segment duration by more than 1 second, set adjustedDuration to the narration duration plus 0.5s padding. If no narration clip exists, set adjustedDuration to null.
 3. **Transitions**: Select appropriate transitions between segments. Use "cut" for dramatic shifts, "crossfade" for smooth continuations, "dissolve" for emotional moments, "wipe" for topic changes. The first segment must have transition: null.${styleTransitionNote}
 4. **Ken Burns Effect**: Vary zoom and pan parameters per shot for visual variety. Ensure consecutive shots within a segment have distinct pan directions.
-5. **Caption Optimization**: Set wordsPerWindow based on narration word count: 8-12 for >100 words, 4-8 for ≤50 words, 6-10 otherwise. Flag segments as isFastPaced if narration exceeds 4 words/second.
+5. **Caption Optimization**: Always set wordsPerWindow to 4 (YouTube Hormozi-style short captions). Flag segments as isFastPaced if narration exceeds 4 words/second.
 6. **Media Replacement**: Flag assets with isFallback=true or low relevance scores (below 40) as replacement candidates. Provide at least 2 alternative search queries per suggestion.
 7. **Redundancy Trimming**: Scan all segment narrations for repeated themes, warnings, statistics, or phrases. If the same point appears in more than one segment:
    - Keep the FIRST occurrence at full strength
@@ -702,7 +696,7 @@ Analyze this project and return the EditPlan JSON.`;
 
 // ── OpenRouter configuration ────────────────────────────────────────────────
 const OPENROUTER_ENDPOINT = '/api/llm';
-const DEFAULT_EDIT_MODEL = 'openai/gpt-5.4-nano';
+const DEFAULT_EDIT_MODEL = DEFAULT_LLM_MODEL;
 
 /**
  * Runs the full AI editing pass on a VideoProject.
@@ -772,12 +766,12 @@ export async function runAIEditPass(
       editPlan = createDefaultEditPlan(project);
     } else {
       const data = await response.json();
-      const rawContent: unknown = data?.choices?.[0]?.message?.content;
+      const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
 
       // ── Phase 4: Evaluating media quality ──
       onProgress?.(70, 'Evaluating media quality...');
 
-      if (typeof rawContent !== 'string' || !rawContent.trim()) {
+      if (!rawContent) {
         logger.warn('AIEditor', 'LLM returned empty content, using default plan');
         editPlan = createDefaultEditPlan(project);
       } else {

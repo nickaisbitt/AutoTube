@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "description": "Small development set for debugging generator changes. Not used for release claims.",
+  "topics": [
+    {
+      "id": "dev-01",
+      "topic": "How school districts lost student mental-health records to ransomware",
+      "category": "infrastructure"
+    },
+    {
+      "id": "dev-02",
+      "topic": "The port strike that hid a container-tracking hack",
+      "category": "infrastructure"
+    },
+    {
+      "id": "dev-03",
+      "topic": "Why fertility clinic databases are being sold on Telegram",
+      "category": "consumer"
+    },
+    {
+      "id": "dev-04",
+      "topic": "The coral restoration project that quietly collapsed after funding cuts",
+      "category": "science"
+    },
+    {
+      "id": "dev-05",
+      "topic": "How a municipal library fine system trapped low-income families in debt",
+      "category": "policy"
+    },
+    {
+      "id": "dev-06",
+      "topic": "The Olympic coach who forged drug tests for an entire relay team",
+      "category": "sports"
+    }
+  ]
+}

@@ -392,7 +392,8 @@ export async function renderVideoToBlob(
         const audioBuffer = await bgAudioCtx.decodeAudioData(arrayBuffer);
 
         const hasNarration = readyClips.length > 0;
-        const bgVolume = computeBgMusicVolume(hasNarration);
+        const youtubeMode = project.exportSettings?.youtubeMode !== false;
+        const bgVolume = computeBgMusicVolume(hasNarration, false, youtubeMode);
 
         const gainNode = bgAudioCtx.createGain();
         bgGainNode = gainNode; // Store reference for fade-out

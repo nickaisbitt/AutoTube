@@ -125,7 +125,11 @@ export async function handleQualityCheck(
   // Spawn Python quality check script — pass key via env only (not argv)
   const args = [CHECK_SCRIPT, resolvedPath, "--json"];
   if (includeVision && apiKey) {
-    args.push("--model", "google/gemini-2.0-flash-001");
+    // 3-judge panel: mimo + DeepSeek (text) + Gemma 4 — see check_quality.py DEFAULT_JUDGES
+    args.push(
+      "--model",
+      "xiaomi/mimo-v2.5,deepseek/deepseek-v4-flash,google/gemma-4-31b-it",
+    );
   } else {
     args.push("--skip-vision");
   }
@@ -139,6 +143,24 @@ export async function handleQualityCheck(
       OPENROUTER_KEY: apiKey || "",
     },
   });
+
+  const QC_TIMEOUT_MS = Number(process.env.AUTOTUBE_QC_TIMEOUT_MS || 600_000);
+  const killTimer = setTimeout(() => {
+    if (!child.killed) {
+      try {
+        sendEvent({
+          type: "error",
+          message: `Quality check timed out after ${Math.round(QC_TIMEOUT_MS / 1000)}s`,
+        });
+      } catch {
+        /* stream may be closed */
+      }
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!child.killed) child.kill("SIGKILL");
+      }, 5000).unref?.();
+    }
+  }, QC_TIMEOUT_MS);
 
   let stdout = "";
   let stderr = "";
@@ -175,6 +197,7 @@ export async function handleQualityCheck(
 
   child.on("close", (code: number) => {
     clearInterval(heartbeat);
+    clearTimeout(killTimer);
 
     if (code !== 0) {
       sendEvent({
@@ -206,6 +229,7 @@ export async function handleQualityCheck(
 
   req.on("close", () => {
     clearInterval(heartbeat);
+    clearTimeout(killTimer);
     if (!child.killed) child.kill("SIGTERM");
   });
 }

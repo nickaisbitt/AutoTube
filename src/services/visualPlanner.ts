@@ -8,6 +8,7 @@ import {
 import { generateAIPlan } from './llmVisualDirector';
 import { logger } from './logger';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { topicFamilyQueries } from './topicFamilyQueries';
 
 // ---------------------------------------------------------------------------
 // Weak Hook Detection (Requirement 7.1, 7.2)
@@ -479,6 +480,11 @@ export function generateQueries(beat: NarrativeBeat, entities: string[], ctx: To
     ? segmentTitle.replace(/^(the|a|an)\s+/i, '').trim()
     : '';
 
+  // === STRATEGY 0: Topic-family anchors (healthcare/bank/landlord) ===
+  for (const q of topicFamilyQueries(ctx.topic || topicTitle, 4)) {
+    if (!queries.includes(q)) queries.push(q);
+  }
+
   // === STRATEGY 1: Core entity queries (bread & butter) ===
   if (cleanedTitle) queries.push(cleanedTitle);
   if (primaryEntity && !queries.includes(primaryEntity)) queries.push(primaryEntity);
@@ -798,7 +804,15 @@ export async function planSegmentVisuals(
     typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
 
   if (openRouterKey && !loopFastMode) {
-    const aiPlan = await generateAIPlan(segment.narration, topicContext, openRouterKey, undefined, signal, segment.title);
+    const aiPlan = await generateAIPlan(
+      segment.narration,
+      topicContext,
+      openRouterKey,
+      undefined,
+      signal,
+      segment.title,
+      segment.visualNote,
+    );
     // If AI returned a useful plan with shots, use it
     if (aiPlan.shots && aiPlan.shots.length > 0) {
       return {

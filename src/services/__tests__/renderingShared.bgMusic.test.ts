@@ -35,4 +35,14 @@ describe('computeBgMusicVolume', () => {
   it('returns 0.60 when no narration', () => {
     expect(computeBgMusicVolume(false)).toBe(0.60);
   });
+
+  it('uses YouTube voice-first ducking (-36 dB) when youtubeMode is on', () => {
+    const vol = computeBgMusicVolume(true, false, true);
+    expect(vol).toBeCloseTo(Math.pow(10, -36 / 20), 5);
+  });
+
+  it('uses YouTube gap level (-22 dB) when youtubeMode is on without narration', () => {
+    const vol = computeBgMusicVolume(false, false, true);
+    expect(vol).toBeCloseTo(Math.pow(10, -22 / 20), 5);
+  });
 });

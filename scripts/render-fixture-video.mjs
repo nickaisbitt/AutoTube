@@ -7,10 +7,13 @@ import { writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../server-render/pipelineReliability.mjs';
+import { STOCK_HEALTHCARE_IMAGES } from './lib/stock-media-urls.mjs';
 
 const ROOT = process.cwd();
 const OUT = join(ROOT, 'test-recordings', 'FINAL-OUTPUT.mp4');
 mkdirSync(join(ROOT, 'test-recordings'), { recursive: true });
+
+const stock = STOCK_HEALTHCARE_IMAGES;
 
 const project = {
   version: 1,
@@ -21,6 +24,7 @@ const project = {
   targetDuration: 180,
   status: 'ready',
   createdAt: new Date().toISOString(),
+  hookLine: 'Your medical files are already for sale',
   script: [
     {
       id: 'seg-intro',
@@ -55,31 +59,61 @@ const project = {
       id: 'm1',
       segmentId: 'seg-intro',
       type: 'image',
-      url: 'https://picsum.photos/id/10/1920/1080',
-      alt: 'Doctor using digital tablet',
+      url: stock[0].url,
+      alt: stock[0].alt,
       source: 'unsplash',
       concept: 'healthcare technology',
       score: 200,
     },
     {
+      id: 'm1b',
+      segmentId: 'seg-intro',
+      type: 'image',
+      url: stock[5].url,
+      alt: stock[5].alt,
+      source: 'unsplash',
+      concept: 'hospital corridor',
+      score: 195,
+    },
+    {
       id: 'm2',
       segmentId: 'seg-threat',
       type: 'image',
-      url: 'https://picsum.photos/id/11/1920/1080',
-      alt: 'Cybersecurity concept',
+      url: stock[1].url,
+      alt: stock[1].alt,
       source: 'unsplash',
       concept: 'cybersecurity',
       score: 190,
     },
     {
+      id: 'm2b',
+      segmentId: 'seg-threat',
+      type: 'image',
+      url: stock[2].url,
+      alt: stock[2].alt,
+      source: 'unsplash',
+      concept: 'medical research',
+      score: 188,
+    },
+    {
       id: 'm3',
       segmentId: 'seg-outro',
       type: 'image',
-      url: 'https://picsum.photos/id/20/1920/1080',
-      alt: 'Patient consultation',
+      url: stock[3].url,
+      alt: stock[3].alt,
       source: 'unsplash',
       concept: 'patient care',
       score: 185,
+    },
+    {
+      id: 'm3b',
+      segmentId: 'seg-outro',
+      type: 'image',
+      url: stock[4].url,
+      alt: stock[4].alt,
+      source: 'unsplash',
+      concept: 'healthcare data',
+      score: 180,
     },
   ],
   narration: [],
@@ -90,6 +124,8 @@ const project = {
     aspectRatio: '16:9',
     backgroundMusic: false,
     musicPreset: 'ambient',
+    youtubeMode: true,
+    hookLine: 'Your medical files are already for sale',
   },
 };
 
@@ -106,6 +142,12 @@ const result = spawnSync('node', ['server-render.mjs', OUT], {
     DEV_SERVER_URL: devServer,
     AUTOTUBE_FORCE_CPU: '1',
     AUTOTUBE_PROJECT_PATH: projectPath,
+    AUTOTUBE_YOUTUBE_MODE: '1',
+    AUTOTUBE_RENDER_MODE: 'ffmpeg',
+    AUTOTUBE_CUT_INTERVAL_SEC: '1.0',
+    AUTOTUBE_FFMPEG_HARD_CUTS: '1',
+    AUTOTUBE_FAST_PACING: '1',
+    AUTOTUBE_PATTERN_INTERRUPTS: '1',
   },
   encoding: 'utf8',
   timeout: 1_800_000,

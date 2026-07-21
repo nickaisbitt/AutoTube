@@ -12,7 +12,7 @@ export const DOMAIN_BLOCKLIST = new Map<string, string[]>([
   ['propaganda', ['sputniknews', 'sputnikglobe', 'presstv', 'cgtn', 'tass', 'xinhua', 'globalresearch', 'zerohedge', 'breitbart', 'infowars', 'newsmax', 'epochtimes', 'farsnews', 'alalam', 'almanar', 'cctv', 'informationclearinghouse', 'activistpost', 'beforeitsnews', 'naturalnews', 'prisonplanet']],
   ['watermarked-stock', ['shutterstock', 'gettyimages', 'istockphoto', '123rf', 'dreamstime', 'depositphotos', 'alamy']],
   ['low-quality', ['9gag', 'imgur', 'memegenerator', 'knowyourmeme', 'ifunny', 'cheezburger', 'buzzfeed']],
-  ['adult-content', ['pornhub', 'xvideos', 'xhamster', 'redtube', 'youporn']],
+  ['adult-content', ['pornhub', 'xvideos', 'xhamster', 'redtube', 'youporn', 'rdtcdn', 'onlyfans', 'spankbang', 'tube8', 'brazzers', 'phncdn', 'xnxx', 'xnnx']],
 ]);
 
 // ---------------------------------------------------------------------------

@@ -92,7 +92,30 @@ function hardCutsEnabled() {
     return true;
   }
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
-  return loopMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
+  const youtubeMode = process.env.AUTOTUBE_YOUTUBE_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === 'true';
+  // Hard cuts by default for retention pacing.
+  return loopMode || youtubeMode || process.env.AUTOTUBE_RENDER_MODE === 'ffmpeg';
+}
+
+function patternInterruptsEnabled() {
+  if (process.env.AUTOTUBE_PATTERN_INTERRUPTS === '0' || process.env.AUTOTUBE_PATTERN_INTERRUPTS === 'false') {
+    return false;
+  }
+  if (process.env.AUTOTUBE_PATTERN_INTERRUPTS === '1' || process.env.AUTOTUBE_PATTERN_INTERRUPTS === 'true') {
+    return true;
+  }
+  return false;
+}
+
+function hookSceneCutsEnabled() {
+  return process.env.AUTOTUBE_HOOK_SCENE_CUTS === '1'
+    || process.env.AUTOTUBE_HOOK_SCENE_CUTS === 'true';
+}
+
+function shouldApplyGentleZoomPunch(scheduleIndex, isHookSegment) {
+  const cutNumber = scheduleIndex + 1;
+  if (isHookSegment) return cutNumber % 7 === 3 || cutNumber % 11 === 0;
+  return cutNumber % 11 === 5;
 }
 
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
@@ -254,20 +277,25 @@ async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
   return { localSrc: null, asset };
 }
 
-function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0 }) {
+function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0, zoomPunch = false }) {
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
   const hardCuts = hardCutsEnabled();
   const frames = Math.max(1, Math.round(durationSec * FPS));
   let vf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
-  if (!isVideo && hardCuts) {
-    const drift = 0.08 + (clipIndex % 5) * 0.02;
-    vf = `zoompan=z='min(zoom+${drift.toFixed(3)},1.12)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
-  } else if (hardCuts && clipIndex > 0) {
-    const fadeOut = Math.max(0.04, durationSec - 0.04);
-    vf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${vf}`;
+  if (zoomPunch && frames > 2) {
+    // Pattern interrupt without blank flash frames.
+    const punchStart = 1.07 + (clipIndex % 3) * 0.01;
+    const punchEnd = 1.01 + (clipIndex % 2) * 0.01;
+    const punchDelta = punchStart - punchEnd;
+    vf = `scale=${Math.round(w * punchStart)}:${Math.round(h * punchStart)},zoompan=z='${punchStart.toFixed(3)}-${punchDelta.toFixed(3)}*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`;
+  } else if (!isVideo && hardCuts) {
+    const drift = 0.0012 + (clipIndex % 5) * 0.00025;
+    const maxZoom = 1.06 + (clipIndex % 4) * 0.01;
+    vf = `zoompan=z='min(zoom+${drift.toFixed(5)},${maxZoom.toFixed(2)})':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   } else if (!isVideo && !draft) {
     vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   }
+  // Never fade-to-black between cuts — that reads as title-card blinks at every boundary.
 
   let seekSec = isVideo ? Math.max(0, sourceStartSec || 0) : 0;
   if (isVideo) {
@@ -291,11 +319,7 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   if (r.status === 0 && existsSync(clipOut)) return true;
 
   if (!isVideo && hardCuts) {
-    let simpleVf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
-    if (clipIndex > 0) {
-      const fadeOut = Math.max(0.04, durationSec - 0.04);
-      simpleVf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${simpleVf}`;
-    }
+    const simpleVf = `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`;
     r = spawnSync(
       'ffmpeg',
       [
@@ -309,24 +333,32 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   return r.status === 0 && existsSync(clipOut);
 }
 
-const PLACEHOLDER_COLORS = ['0x1a1a2e', '0x16213e', '0x0f3460', '0x533483', '0xe94560', '0x2d4059', '0xea5455'];
-
-function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }) {
-  const color = PLACEHOLDER_COLORS[clipIdx % PLACEHOLDER_COLORS.length];
+/** Last-resort filler — prefer reuse; grain only if nothing else exists (and never near-black). */
+function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }, reusePath = null) {
+  if (reusePath && existsSync(reusePath)) {
+    const frames = Math.max(1, Math.round(durationSec * FPS));
+    const rReuse = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-i', reusePath, '-t', String(durationSec),
+        '-vf', `scale=${Math.round(w * 1.15)}:${Math.round(h * 1.15)},zoompan=z='1.15-0.15*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`,
+        '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p', '-an', clipOut,
+      ],
+      { encoding: 'utf8', timeout: 120_000 },
+    );
+    if (rReuse.status === 0 && existsSync(clipOut)) return true;
+  }
+  // Soft blue-gray motion pad — never pure black/near-black (title-card blinks).
   const r = spawnSync(
     'ffmpeg',
     [
       '-y',
-      '-f',
-      'lavfi',
-      '-i',
-      `color=c=${color}:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
-      '-c:v',
-      'libx264',
-      '-preset',
-      preset,
-      '-pix_fmt',
-      'yuv420p',
+      '-f', 'lavfi',
+      '-i', `color=c=0x9aa3b2:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
+      '-vf', `noise=alls=10:allf=t+u,eq=brightness=0.12:contrast=1.05:saturation=0.45`,
+      '-c:v', 'libx264',
+      '-preset', preset,
+      '-pix_fmt', 'yuv420p',
       '-an',
       clipOut,
     ],
@@ -335,7 +367,7 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }) 
   return r.status === 0 && existsSync(clipOut);
 }
 
-async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
+async function renderSegmentClips(segment, segMedia, project, outputPath, options, { isHookSegment = false } = {}) {
   const interval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
   const targetDuration = segment.duration || 20;
   const schedule = buildClipSchedule(segment, segMedia, interval, project);
@@ -358,7 +390,11 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const devServer = options.devServer || 'http://localhost:5173';
   let renderedDuration = 0;
   let clipIndex = 0;
-  let placeholderClipCount = 0;
+  // Only grain fillers count as placeholders.
+  let grainPlaceholderCount = 0;
+  let reuseClipCount = 0;
+  let lastSuccessfulClipPath = options.sharedLastGoodRef?.path || null;
+  const projectMedia = Array.isArray(project?.media) ? project.media : [];
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
@@ -376,19 +412,21 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     return offset;
   }
 
-  async function pushClip(asset, durationSec, label, hintOffset = 0) {
+  async function pushClip(asset, durationSec, label, hintOffset = 0, { zoomPunch = false } = {}) {
     const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
     clipIndex += 1;
-    const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
-    let ok = false;
-    if (!localSrc) {
-      console.log(`  [ffmpeg] ${label}: placeholder — asset fetch failed`);
-      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
-      if (ok) placeholderClipCount += 1;
-    } else {
+
+    const tryEncode = async (candidate, tag) => {
+      const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(
+        candidate,
+        segMedia,
+        devServer,
+        cacheDir,
+      );
+      if (!localSrc) return false;
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
-      ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
-        w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1,
+      let ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
+        w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1, zoomPunch,
       });
       if (!ok) {
         const thumb = resolvedAsset.thumbnailUrl;
@@ -397,21 +435,73 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
           const thumbLocal = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
           if (thumbLocal) {
             ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
-              w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1,
+              w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1, zoomPunch,
             });
-            if (ok) console.log(`  [ffmpeg] ${label}: video → thumbnail still`);
+            if (ok) console.log(`  [ffmpeg] ${label}: ${tag} → thumbnail still`);
           }
         }
       }
-      if (!ok) {
-        console.log(`  [ffmpeg] ${label}: encode failed — using placeholder`);
-        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
-        if (ok) placeholderClipCount += 1;
+      return ok;
+    };
+
+    let ok = await tryEncode(asset, 'primary');
+    if (!ok) {
+      // Try other segment assets before any synthetic filler.
+      const primaryKey = assetKey(asset);
+      for (const alt of segMedia) {
+        if (!alt || assetKey(alt) === primaryKey) continue;
+        ok = await tryEncode(alt, 'alt');
+        if (ok) {
+          console.log(`  [ffmpeg] ${label}: fell back to alternate segment asset`);
+          break;
+        }
       }
+    }
+    if (!ok && projectMedia.length) {
+      // Any project media beats grain/black blinks.
+      const primaryKey = assetKey(asset);
+      const tried = new Set(
+        [asset, ...segMedia].map((a) => assetKey(a)).filter(Boolean),
+      );
+      for (const alt of projectMedia) {
+        if (!alt) continue;
+        const k = assetKey(alt);
+        if (k === primaryKey || tried.has(k)) continue;
+        ok = await tryEncode(alt, 'project');
+        if (ok) {
+          console.log(`  [ffmpeg] ${label}: fell back to project media asset`);
+          break;
+        }
+      }
+    }
+    if (!ok) {
+      // Reuse last good clip with zoom before inventing grain (kills black blinks).
+      const sharedGood = options.sharedLastGoodClipPath;
+      const reuseCandidates = [
+        lastSuccessfulClipPath,
+        sharedGood,
+        ...[...clipPaths].reverse(),
+      ].filter((p, i, arr) => p && existsSync(p) && arr.indexOf(p) === i);
+      for (const reusePath of reuseCandidates) {
+        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, reusePath);
+        if (ok) {
+          console.log(`  [ffmpeg] ${label}: reused prior clip (no grain)`);
+          reuseClipCount += 1;
+          break;
+        }
+      }
+    }
+    if (!ok) {
+      // Only invent grain when we have literally nothing to reuse.
+      console.log(`  [ffmpeg] ${label}: bright grain placeholder — no usable asset`);
+      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset }, null);
+      if (ok) grainPlaceholderCount += 1;
     }
     if (!ok) {
       return false;
     }
+    lastSuccessfulClipPath = clipOut;
+    if (options.sharedLastGoodRef) options.sharedLastGoodRef.path = clipOut;
     clipPaths.push(clipOut);
     renderedDuration += durationSec;
     return true;
@@ -419,7 +509,12 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   for (let i = 0; i < schedule.length; i++) {
     const { asset, durationSec, sourceStartSec } = schedule[i];
-    await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0);
+    // Occasional mild punch, no blink/blank frames.
+    const zoomPunch =
+      ((isHookSegment && (patternInterruptsEnabled() || hookSceneCutsEnabled()))
+        || (!isHookSegment && hardCutsEnabled()))
+      && shouldApplyGentleZoomPunch(i, isHookSegment);
+    await pushClip(asset, durationSec, `clip ${i + 1}/${schedule.length}`, sourceStartSec || 0, { zoomPunch });
   }
 
   let fillerRound = 0;
@@ -453,7 +548,8 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   return {
     ok: true,
     clipCount: clipPaths.length,
-    placeholderClipCount,
+    placeholderClipCount: grainPlaceholderCount,
+    reuseClipCount,
     scheduleCount: schedule.length,
     intervalSec: interval,
     targetSec: segment.duration || 20,
@@ -476,6 +572,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const preset = ffmpegPreset();
 
   const mediaPool = project.media || [];
+  const sharedLastGoodRef = { path: null };
 
   for (let si = 0; si < (project.script || []).length; si++) {
     const seg = project.script[si];
@@ -487,7 +584,12 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
 
     console.log(`  [ffmpeg] segment ${si + 1}/${project.script.length}: ${seg.title} (${(seg.duration || 0).toFixed(1)}s)`);
     const segOut = join(workDir, `segment-${si}.mp4`);
-    const result = await renderSegmentClips(seg, segMedia, project, segOut, options);
+    const isHookSegment = si === 0 || seg.type === 'intro';
+    const result = await renderSegmentClips(seg, segMedia, project, segOut, {
+      ...options,
+      sharedLastGoodClipPath: sharedLastGoodRef.path,
+      sharedLastGoodRef,
+    }, { isHookSegment });
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };
     }
@@ -538,8 +640,10 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
 
   if (audioForMux && existsSync(audioForMux)) {
     muxVideoWithAudio(mergedVideo, audioForMux, outputPath, muxDurationSec, {
+      style: project.style || project.exportSettings?.style,
       backgroundMusic: project.exportSettings?.backgroundMusic !== false,
       musicPreset: project.exportSettings?.musicPreset,
+      narrationTimings: options.narrationTimings || [],
     });
   } else {
     spawnSync('ffmpeg', ['-y', '-i', mergedVideo, '-c', 'copy', outputPath], { encoding: 'utf8' });
@@ -552,7 +656,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
       [
         '-y', '-i', outputPath,
         '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11',
-        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k',
+        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
         normalizedOut,
       ],
       { encoding: 'utf8', timeout: 300_000 },

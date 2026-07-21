@@ -39,6 +39,60 @@ const MUSIC_PRESET_MAP = {
   ambient: 'bg-neutral.aac',
 };
 
+const STATIC_MUSIC_DUCK_DB = -18.4;
+const STATIC_MUSIC_PEAK_DB = -8;
+const DYNAMIC_MUSIC_DUCK_DB = -34;
+const DYNAMIC_MUSIC_PEAK_DB = -14;
+const YOUTUBE_DYNAMIC_MUSIC_DUCK_DB = -40;
+const YOUTUBE_DYNAMIC_MUSIC_PEAK_DB = -14;
+const STATIC_FALLBACK_MUSIC_DUCK_DB = -21;
+const YOUTUBE_STATIC_FALLBACK_MUSIC_DUCK_DB = -24;
+
+function dbToLinear(dbValue) {
+  return Math.pow(10, dbValue / 20);
+}
+
+function formatFfmpegNumber(value) {
+  return Number(value).toFixed(6).replace(/\.?0+$/, '');
+}
+
+function summarizeFfmpegFailure(result) {
+  return (result.stderr || result.error?.message || '').slice(-500);
+}
+
+function buildDuckingVolumeExpression(narrationTimings, options) {
+  const { duckingLevel, peakLevel, fadeDuration, lookAhead, totalDuration } = options;
+  const duckingLinear = formatFfmpegNumber(dbToLinear(duckingLevel));
+  const peakLinear = formatFfmpegNumber(dbToLinear(peakLevel));
+  const segments = [...narrationTimings]
+    .filter((segment) => Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.end > segment.start)
+    .sort((a, b) => a.start - b.start);
+
+  return segments.reduceRight((expression, segment) => {
+    const duckStart = Math.max(0, segment.start - lookAhead);
+    const duckEnd = Math.min(totalDuration, segment.end + lookAhead);
+    const fadeInStart = Math.max(0, duckStart - fadeDuration);
+    const fadeOutEnd = Math.min(totalDuration, duckEnd + fadeDuration);
+
+    let nextExpression = expression;
+    if (fadeOutEnd > duckEnd) {
+      const fadeOutLength = formatFfmpegNumber(fadeOutEnd - duckEnd);
+      const fadeOut = `${duckingLinear}+(${peakLinear}-${duckingLinear})*((t-${formatFfmpegNumber(duckEnd)})/${fadeOutLength})`;
+      nextExpression = `if(between(t,${formatFfmpegNumber(duckEnd)},${formatFfmpegNumber(fadeOutEnd)}),${fadeOut},${nextExpression})`;
+    }
+
+    nextExpression = `if(between(t,${formatFfmpegNumber(duckStart)},${formatFfmpegNumber(duckEnd)}),${duckingLinear},${nextExpression})`;
+
+    if (duckStart > fadeInStart) {
+      const fadeInLength = formatFfmpegNumber(duckStart - fadeInStart);
+      const fadeIn = `${peakLinear}-(${peakLinear}-${duckingLinear})*((t-${formatFfmpegNumber(fadeInStart)})/${fadeInLength})`;
+      nextExpression = `if(between(t,${formatFfmpegNumber(fadeInStart)},${formatFfmpegNumber(duckStart)}),${fadeIn},${nextExpression})`;
+    }
+
+    return nextExpression;
+  }, peakLinear);
+}
+
 /**
  * Resolves the background music file path for a given video style and/or preset.
  * musicPreset takes priority over style when provided.
@@ -190,11 +244,11 @@ export function convertAudioFormat(inputFile, outputFile, options = {}) {
  * @returns {number} Linear volume multiplier (0.0–1.0).
  */
 export function computeBgMusicVolume(hasNarration, options = {}) {
-  const { duckingLevel = -18.4, peakLevel = -8 } = options;
+  const { duckingLevel = STATIC_MUSIC_DUCK_DB, peakLevel = STATIC_MUSIC_PEAK_DB } = options;
 
   // Convert dB to linear scale: linear = 10^(dB/20)
   const dbValue = hasNarration ? duckingLevel : peakLevel;
-  return Math.pow(10, dbValue / 20);
+  return dbToLinear(dbValue);
 }
 
 /**
@@ -213,64 +267,33 @@ export function computeBgMusicVolume(hasNarration, options = {}) {
  */
 export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, totalDuration, options = {}) {
   const yt = process.env.AUTOTUBE_YOUTUBE_MODE === '1';
-  const { duckingLevel = yt ? -36 : -32, peakLevel = yt ? -22 : -18, fadeDuration = 0.35, lookAhead = 0.1 } = options;
+  const {
+    duckingLevel = yt ? YOUTUBE_DYNAMIC_MUSIC_DUCK_DB : DYNAMIC_MUSIC_DUCK_DB,
+    peakLevel = yt ? YOUTUBE_DYNAMIC_MUSIC_PEAK_DB : DYNAMIC_MUSIC_PEAK_DB,
+    fadeDuration = 0.28,
+    lookAhead = 0.15,
+  } = options;
 
-  console.log(`  🎚️ Applying dynamic ducking envelope (${narrationTimings.length} narration segments)...`);
+  console.log(
+    `  🎚️ Applying dynamic ducking envelope (${narrationTimings.length} narration segments, ${duckingLevel}dB under voice / ${peakLevel}dB gaps)...`,
+  );
 
-  // Build volume automation filter string
-  // Format: volume=enable='between(t,start,end)':volume=value
-  const duckingLinear = Math.pow(10, duckingLevel / 20);
-  const peakLinear = Math.pow(10, peakLevel / 20);
-
-  // Start at peak level
-  let filterParts = [`volume=${peakLinear}:eval=frame`];
-
-  // Apply ducking during each narration segment with fade transitions
-  narrationTimings.forEach((segment, idx) => {
-    const { start, end } = segment;
-
-    // Fade down before narration starts with look-ahead
-    const fadeStart = Math.max(0, start - fadeDuration - lookAhead);
-    filterParts.push(
-      `volume=${duckingLinear}:enable='between(t,${fadeStart},${end + lookAhead})'`
-    );
-
-    // Fade up after narration ends
-    if (idx < narrationTimings.length - 1) {
-      const nextStart = narrationTimings[idx + 1].start;
-      const gapDuration = nextStart - end;
-      if (gapDuration > fadeDuration * 2) {
-        // Enough room for fade up and hold at peak
-        filterParts.push(
-          `volume=${peakLinear}:enable='between(t,${end + fadeDuration},${nextStart - fadeDuration})'`
-        );
-      }
-    } else {
-      // Last segment: fade up to end or total duration
-      const fadeEnd = Math.min(totalDuration, end + fadeDuration + 2);
-      filterParts.push(
-        `volume=${peakLinear}:enable='between(t,${end + fadeDuration},${fadeEnd})'`
-      );
-    }
+  // A single absolute gain expression preserves music movement in gaps. Chained
+  // volume filters multiply gains together and made the bed flat and too quiet.
+  const volumeExpression = buildDuckingVolumeExpression(narrationTimings, {
+    duckingLevel,
+    peakLevel,
+    fadeDuration,
+    lookAhead,
+    totalDuration,
   });
-
-  // Intro hook: first 3s at 5% volume (let the hook breathe)
-  const introLinear = 0.05 / peakLinear;
-  filterParts.push(`volume=${introLinear}:enable='between(t,0,3)':eval=frame`);
-
-  // Outro: last 5s at 30% volume (build to ending)
-  const outroLinear = 0.3 / peakLinear;
-  filterParts.push(`volume=${outroLinear}:enable='between(t,${Math.max(0, totalDuration - 5)},${totalDuration})':eval=frame`);
-
-  // Combine filter parts with commas
-  const fullFilter = filterParts.join(',');
 
   const result = spawnSync('ffmpeg', [
     '-y',
     '-stream_loop', '-1',
     '-i', bgMusicPath,
     '-t', String(totalDuration),
-    '-filter_complex', `[0:a]aresample=48000:async=1,${fullFilter}[ducked]`,
+    '-filter_complex', `[0:a]aresample=48000:async=1,volume='${volumeExpression}':eval=frame[ducked]`,
     '-map', '[ducked]',
     '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
     outputFile,
@@ -308,9 +331,57 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
     return convertAudioFormat(audioFiles[0].file, outputFile);
   }
 
-  console.log(`  🔗 Concatenating ${audioFiles.length} audio segments with ${crossfadeDuration}s crossfades...`);
+  console.log(
+    crossfadeDuration > 0.05
+      ? `  🔗 Concatenating ${audioFiles.length} audio segments with ${crossfadeDuration}s crossfades...`
+      : `  🔗 Concatenating ${audioFiles.length} audio segments (WAV normalize + concat)...`,
+  );
 
-  // First, normalize all input files to consistent format
+  // Zero/near-zero crossfade: normalize to PCM WAV then concat demuxer.
+  // AAC concat demuxer over mixed edge-tts (mp3/24k) + silence pads produced
+  // near-silent / corrupt mixes; WAV concat after 48k stereo normalize is reliable.
+  if (!(crossfadeDuration > 0.05)) {
+    const wavFiles = [];
+    for (let i = 0; i < audioFiles.length; i++) {
+      const wavPath = join(tmpdir(), `autotube-concat-wav-${Date.now()}-${i}.wav`);
+      const wavOk = spawnSync('ffmpeg', [
+        '-y', '-i', audioFiles[i].file,
+        '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le',
+        wavPath,
+      ], { encoding: 'utf8', timeout: 60_000 });
+      if (wavOk.status !== 0 || !existsSync(wavPath)) {
+        console.warn(`  ⚠ Failed to normalize segment ${i} to WAV`);
+        wavFiles.forEach(f => { try { unlinkSync(f); } catch {} });
+        return false;
+      }
+      wavFiles.push(wavPath);
+    }
+    const wavList = join(tmpdir(), `autotube-wav-list-${Date.now()}.txt`);
+    writeFileSync(wavList, wavFiles.map(f => `file '${f}'`).join('\n'));
+    const outIsWav = /\.wav$/i.test(outputFile);
+    const concatOut = outIsWav ? outputFile : join(tmpdir(), `autotube-concat-${Date.now()}.wav`);
+    const simple = spawnSync('ffmpeg', [
+      '-y', '-f', 'concat', '-safe', '0',
+      '-i', wavList,
+      '-c:a', 'pcm_s16le',
+      concatOut,
+    ], { encoding: 'utf8', timeout: 120000 });
+    let success = simple.status === 0 && existsSync(concatOut);
+    if (success && !outIsWav) {
+      success = convertAudioFormat(concatOut, outputFile);
+      try { unlinkSync(concatOut); } catch {}
+    }
+    wavFiles.forEach(f => { try { unlinkSync(f); } catch {} });
+    try { unlinkSync(wavList); } catch {}
+    if (success && existsSync(outputFile)) {
+      console.log('  ✓ Audio concatenated (WAV normalize + concat)');
+      return true;
+    }
+    console.warn('  ⚠ Simple concat failed:', (simple.stderr || '').slice(0, 240));
+    return false;
+  }
+
+  // First, normalize all input files to consistent format (crossfade path)
   const normalizedFiles = [];
   for (let i = 0; i < audioFiles.length; i++) {
     const normalizedPath = join(tmpdir(), `autotube-norm-${Date.now()}-${i}.aac`);
@@ -474,11 +545,21 @@ export function generateAmbientBedForStyle(style, duration, outputPath) {
 }
 
 export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, bgVolume, options = {}) {
-  const { normalize = true, targetLUFS = -16, style = 'documentary', enableAudioFx = true, enableAmbient = false, enableSubBass = false, enableDucking = false, statTimestamps = null, wordTimestamps = null, narrationTimings = [] } = options;
+  const {
+    normalize = true,
+    targetLUFS = -16,
+    style = 'documentary',
+    enableAmbient = false,
+    enableSubBass = false,
+    enableDucking = false,
+    statTimestamps = null,
+    wordTimestamps = null,
+    narrationTimings = [],
+    preDuckedBackground = false,
+  } = options;
 
   console.log(`  🎵 Mixing background music at volume ${bgVolume.toFixed(3)} (${bgMusicPath})`);
 
-  // Generate ambient bed if enabled (Task 44)
   let ambientFile = null;
   if (enableAmbient && style) {
     ambientFile = join(tmpdir(), `ambient-${Date.now()}.aac`);
@@ -486,71 +567,46 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
     if (!ambientOk) {
       console.warn('  ⚠ Ambient bed generation failed, continuing without ambient');
       ambientFile = null;
-    } else {
-      console.log(`  🎵 Generated ambient bed`);
     }
   }
 
-  // Generate sub-bass rumble on stats (Task 41)
   let subBassFile = null;
   if (enableSubBass && statTimestamps && statTimestamps.length > 0) {
     subBassFile = join(tmpdir(), `subbass-${Date.now()}.aac`);
-    const subBassOk = generateSubBassTrack(statTimestamps, options.totalDuration || 120, subBassFile);
-    if (!subBassOk) {
+    if (!generateSubBassTrack(statTimestamps, options.totalDuration || 120, subBassFile)) {
       subBassFile = null;
-    } else {
-      console.log(`  🎵 Generated sub-bass rumble for ${statTimestamps.length} stat moments`);
     }
   }
 
-  // Generate transient ducking track (Task 43)
   let duckingFile = null;
   if (enableDucking && wordTimestamps && wordTimestamps.length > 0) {
-    const impactWords = ['boom', 'crash', 'slam', 'hit', 'drop', 'blast', 'strike', 'explode', 'shatter', 'break', 'massive', 'stunning', 'incredible', 'shocking'];
+    const impactWords = ['boom', 'crash', 'slam', 'hit', 'drop', 'blast', 'strike', 'explode', 'shatter', 'power', 'massive', 'stunning', 'incredible', 'shocking'];
     duckingFile = join(tmpdir(), `ducking-${Date.now()}.aac`);
-    const duckOk = generateTransientDuckingTrack(wordTimestamps, impactWords, options.totalDuration || 120, duckingFile);
-    if (!duckOk) {
+    if (!generateTransientDuckingTrack(wordTimestamps, impactWords, options.totalDuration || 120, duckingFile)) {
       duckingFile = null;
-    } else {
-      console.log(`  🎵 Generated transient ducking track`);
     }
   }
 
-  // Build filter chain with audio FX
-  const narrationFilter = [
-    '[0:a]aresample=48000:async=1:min_hard_comp=0.100000',
-    'highpass=f=100',
-    'lowpass=f=12000',
-    'compand=attacks=0.05:decays=0.2:points=-25/-25|-12/-8|0/-2|20/-5',
-    'equalizer=f=2500:t=q:w=1.2:g=4',
-    'equalizer=f=180:t=q:w=0.8:g=-2',
-  ].join(',');
+  const totalDur = options.totalDuration || 120;
+  const fadeDuration = 2;
+  const fadeStart = Math.max(0, totalDur - fadeDuration);
+  // Dry voice-first mix. Old enableAudioFx path (compand + quoted amix weights)
+  // crushed narration to ~-47 LUFS; loudnorm then amplified the noise bed into hiss.
+  const voiceWeight = process.env.AUTOTUBE_YOUTUBE_MODE === '1' ? '1.8' : '1.6';
+  const maxBgWeight = preDuckedBackground ? 0.8 : 0.35;
+  const defaultBgWeight = preDuckedBackground ? 0.65 : 0.12;
+  const bgWeight = Math.max(0.05, Math.min(maxBgWeight, Number(bgVolume) || defaultBgWeight)).toFixed(3);
   const filterParts = [
-    `${narrationFilter}[narration]`,
-    `[1:a]aresample=48000:async=1,equalizer=f=3000:t=q:w=2:g=-6,volume=${bgVolume.toFixed(4)}[bg]`,
+    `[0:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=1.0[narration]`,
+    `[1:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=${bgWeight}[bg]`,
   ];
 
-  // Generate room tone file for the duration
-  const roomToneFile = join(tmpdir(), `roomtone-${Date.now()}.aac`);
-  const totalDur = options.totalDuration || 120;
-  const rtResult = spawnSync('ffmpeg', [
-    '-y', '-f', 'lavfi', '-i', 'anoisesrc=d=1:c=pink:r=48000',
-    '-t', String(totalDur),
-    '-af', 'volume=0.003',
-    '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
-    roomToneFile,
-  ], { encoding: 'utf8', timeout: 30000 });
-  const enableRoomTone = process.env.AUTOTUBE_ROOM_TONE === '1';
-  const hasRoomTone = enableRoomTone && rtResult.status === 0 && existsSync(roomToneFile);
-
-  // Build input list for ffmpeg
   const inputFiles = [narrationFile, bgMusicPath];
   let inputIdx = 2;
   const extraInputs = [];
 
   if (ambientFile) {
-    const ambientVol = computeAmbientVolume(options.pacingScore || 3);
-    extraInputs.push({ file: ambientFile, label: 'ambient', vol: ambientVol });
+    extraInputs.push({ file: ambientFile, label: 'ambient', vol: computeAmbientVolume(options.pacingScore || 3) });
   }
   if (subBassFile) {
     extraInputs.push({ file: subBassFile, label: 'subbass', vol: 0.12 });
@@ -558,59 +614,42 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
   if (duckingFile) {
     extraInputs.push({ file: duckingFile, label: 'ducking', vol: 0.08 });
   }
-  if (hasRoomTone) {
-    extraInputs.push({ file: roomToneFile, label: 'roomtone', vol: 1.0 });
-  }
 
   for (const extra of extraInputs) {
-    filterParts.push(`[${inputIdx}:a]aresample=48000:async=1,volume=${extra.vol}[${extra.label}]`);
+    filterParts.push(
+      `[${inputIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=${extra.vol}[${extra.label}]`,
+    );
     inputFiles.push(extra.file);
-    inputIdx++;
+    inputIdx += 1;
   }
 
-  // Add transition noise bursts between narration segments
-  const noiseCount = narrationTimings ? Math.max(0, narrationTimings.length - 1) : 0;
   const noiseLabels = [];
-  if (noiseCount > 0) {
-    for (let i = 0; i < noiseCount; i++) {
+  const allowNoiseBursts =
+    process.env.AUTOTUBE_TRANSITION_NOISE === '1'
+    && Array.isArray(narrationTimings)
+    && narrationTimings.length > 1;
+  if (allowNoiseBursts) {
+    for (let i = 0; i < narrationTimings.length - 1; i += 1) {
       const transTime = narrationTimings[i].end;
       filterParts.push(
-        `anoisesrc=d=0.3:c=white:r=48000[ns${i}]`,
-        `[ns${i}]adelay=${Math.round(transTime * 1000)}|${Math.round(transTime * 1000)},volume=0.05[tn${i}]`
+        `anoisesrc=d=0.05:c=pink:r=48000[ns${i}]`,
+        `[ns${i}]adelay=${Math.round(transTime * 1000)}|${Math.round(transTime * 1000)},volume=0.02[tn${i}]`,
       );
       noiseLabels.push(`tn${i}`);
     }
   }
 
-  // Mix all tracks together
-  const mixLabels = ['narration_fx', 'bg_fx', ...extraInputs.map(e => e.label), ...noiseLabels];
-  const mixInputs = mixLabels.map(l => `[${l}]`).join('');
-  const inputCount = mixLabels.length;
-
-  const actualDuration = totalDur;
-  const fadeDuration = 2;
-  const fadeStart = Math.max(0, actualDuration - fadeDuration);
-
-  if (enableAudioFx) {
-    // Dry voice-first mix — reverb was muddying narration on laptop speakers
-    filterParts.push('[narration]aresample=48000:async=1[narration_fx]');
-    
-    const panDirection = style === 'warfront' ? 'left-to-right' : style === 'cyber' ? 'right-to-left' : 'center';
-    if (panDirection !== 'center') {
-      const panFilter = computeStereoPanFilter(panDirection, 10);
-      filterParts.push(`[bg]${panFilter}[bg_fx]`);
-    } else {
-      filterParts.push('[bg]aresample=48000:async=1[bg_fx]');
-    }
-    
-    const bgWeight = process.env.AUTOTUBE_YOUTUBE_MODE === '1' ? '0.12' : '0.22';
-    const weights = ['1.8', bgWeight, ...extraInputs.map(() => '0.06'), ...noiseLabels.map(() => '0.04')].join(' ');
-    filterParts.push(`${mixInputs}amix=inputs=${inputCount}:duration=first:dropout_transition=3:weights="${weights}",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);
-  } else {
-    filterParts.push(`[narration][bg]amix=inputs=2:duration=first:dropout_transition=3:weights="1.6 0.22",alimiter=limit=0.891:attack=0.1:release=10,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`);
-  }
-
-  const filterChain = filterParts.join(';');
+  const mixLabels = ['narration', 'bg', ...extraInputs.map((e) => e.label), ...noiseLabels];
+  const mixInputs = mixLabels.map((l) => `[${l}]`).join('');
+  const weightList = [
+    voiceWeight,
+    '1',
+    ...extraInputs.map(() => '0.06'),
+    ...noiseLabels.map(() => '0.02'),
+  ];
+  filterParts.push(
+    `${mixInputs}amix=inputs=${mixLabels.length}:duration=first:dropout_transition=2:weights=${weightList.join('|')},alimiter=limit=0.89:attack=5:release=50,afade=t=out:st=${fadeStart}:d=${fadeDuration}[out]`,
+  );
 
   const result = spawnSync('ffmpeg', [
     '-y',
@@ -620,36 +659,29 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
       args.push('-i', f);
       return args;
     }),
-    '-filter_complex', filterChain,
+    '-filter_complex', filterParts.join(';'),
     '-map', '[out]',
     '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
-    '-dither_method', 'triangular_hp',
     outputFile,
   ], { encoding: 'utf8', timeout: 120000 });
 
   if (result.status !== 0) {
-    console.warn('  ⚠ Initial mix failed:', result.stderr);
+    console.warn('  ⚠ Initial mix failed:', (result.stderr || '').slice(-500));
     try { if (ambientFile && existsSync(ambientFile)) unlinkSync(ambientFile); } catch {}
     try { if (subBassFile && existsSync(subBassFile)) unlinkSync(subBassFile); } catch {}
     try { if (duckingFile && existsSync(duckingFile)) unlinkSync(duckingFile); } catch {}
-    try { if (hasRoomTone && existsSync(roomToneFile)) unlinkSync(roomToneFile); } catch {}
     return false;
   }
-  
-  // Clean up generated files after successful mix
+
   try { if (ambientFile && existsSync(ambientFile)) unlinkSync(ambientFile); } catch {}
   try { if (subBassFile && existsSync(subBassFile)) unlinkSync(subBassFile); } catch {}
   try { if (duckingFile && existsSync(duckingFile)) unlinkSync(duckingFile); } catch {}
-  try { if (hasRoomTone && existsSync(roomToneFile)) unlinkSync(roomToneFile); } catch {}
 
-  // Apply EBU R128 normalization if requested
   if (normalize) {
     console.log(`  📊 Applying final mix normalization to ${targetLUFS} LUFS...`);
     const normalizedOutput = join(tmpdir(), `autotube-finalnorm-${Date.now()}.aac`);
     const normResult = normalizeAudioEBUR128(outputFile, normalizedOutput, { targetLUFS });
-    
     if (normResult.success) {
-      // Replace original with normalized version
       try {
         unlinkSync(outputFile);
         spawnSync('mv', [normalizedOutput, outputFile]);
@@ -666,26 +698,6 @@ export function mixNarrationWithBgMusic(narrationFile, bgMusicPath, outputFile, 
   return true;
 }
 
-/**
- * Create an audio track from background music only (no narration).
- * Used when all narration clips are unavailable.
- * Loops the track seamlessly and trims to the video duration.
- *
- * Enhanced features:
- * - Smooth fade-in at start (500ms) and fade-out at end (2s)
- * - EBU R128 normalization to -16 LUFS for consistent loudness
- * - Proper stereo upmixing from mono sources
- *
- * @param {string} bgMusicPath   Path to the background music file.
- * @param {string} outputFile    Path for the output audio.
- * @param {number} duration      Target duration in seconds.
- * @param {number} bgVolume      Volume level for background music (0.0–1.0).
- * @param {object} [options]     Optional parameters.
- * @param {number} [options.fadeIn=0.5] Fade-in duration in seconds.
- * @param {number} [options.fadeOut=2.0] Fade-out duration in seconds.
- * @param {boolean} [options.normalize=true] Whether to apply EBU R128 normalization.
- * @returns {boolean} True if creation succeeded.
- */
 export function createBgMusicOnlyTrack(bgMusicPath, outputFile, duration, bgVolume, options = {}) {
   const { fadeIn = 0.5, fadeOut = 2.0, normalize = true } = options;
 
@@ -848,15 +860,21 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
       
       if (duckOk) {
         // Mix narration with ducked background music
-        const bgVolume = 1.0; // Ducking already applied, use unity gain
-        mixOk = mixNarrationWithBgMusic(narrationFile, duckedBgMusic, mixedAudio, bgVolume, mixOptions);
+        const bgVolume = 0.7; // Ducking already applied; preserve gap presence without masking VO.
+        mixOk = mixNarrationWithBgMusic(narrationFile, duckedBgMusic, mixedAudio, bgVolume, {
+          ...mixOptions,
+          preDuckedBackground: true,
+        });
         try { unlinkSync(duckedBgMusic); } catch {}
       }
     }
 
     // Fallback to static volume mixing if dynamic ducking not available or failed
     if (!mixOk) {
-      const bgVolume = computeBgMusicVolume(true); // Ducking level (-18dB)
+      const fallbackDuckingDb = process.env.AUTOTUBE_YOUTUBE_MODE === '1'
+        ? YOUTUBE_STATIC_FALLBACK_MUSIC_DUCK_DB
+        : STATIC_FALLBACK_MUSIC_DUCK_DB;
+      const bgVolume = computeBgMusicVolume(true, { duckingLevel: fallbackDuckingDb });
       mixOk = mixNarrationWithBgMusic(narrationFile, bgMusicPath, mixedAudio, bgVolume, mixOptions);
     }
 
@@ -875,6 +893,9 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
       ], { encoding: 'utf8', timeout: 300000 });
       
       try { unlinkSync(mixedAudio); } catch {}
+      if (mux.status !== 0) {
+        console.warn('  ⚠ Final mux with mixed audio failed:', summarizeFfmpegFailure(mux));
+      }
       return mux.status === 0;
     }
   }
@@ -899,6 +920,9 @@ export function muxVideoWithAudio(videoFile, narrationFile, outputFile, videoDur
   ], { encoding: 'utf8', timeout: 300000 });
   
   try { unlinkSync(normalizedNarration); } catch {}
+  if (mux.status !== 0) {
+    console.warn('  ⚠ Final mux with narration failed:', summarizeFfmpegFailure(mux));
+  }
   return mux.status === 0;
 }
 

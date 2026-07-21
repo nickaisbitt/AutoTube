@@ -5,6 +5,7 @@
 import type { MediaCandidate } from './media';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { extractJson } from '../utils/extractJson';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ export interface VisionCheckResult {
 // ---------------------------------------------------------------------------
 
 const OPENROUTER_ENDPOINT = '/api/llm';
-const VISION_MODEL = 'openai/gpt-5.4-mini';
+const VISION_MODEL = 'xiaomi/mimo-v2.5';
 const VISION_TIMEOUT_MS = 20_000;
 const VISION_MAX_RETRIES = 2;
 
@@ -55,12 +56,14 @@ export function buildVisionCheckPrompt(imageUrl: string): {
     '  8. Meme format or image macros',
     '  9. Image is mostly text on a plain background (slide, document, tweet)',
     ' 10. Image contains state media branding (RT, Sputnik, CGTN, Xinhua logos)',
+    ' 11. Cartoon, anime, puppet, claymation, stop-motion character, or macro insect/bug photography (unless the topic is explicitly about that)',
     '',
     'PASS the image if it is:',
-    '  - A sharp, clear photograph suitable for a video background',
+    '  - A sharp, clear real-world photograph suitable for a video background',
     '  - Professional editorial or news photography',
     '  - High resolution with good lighting and composition',
     '  - An official press image, product shot, or institutional photo',
+    '  - NOT an illustration, puppet, or animal-macro filler',
     '',
     'Scoring guide:',
     '  quality_score 10: Perfect — crisp, well-composed, professional, high-res',
@@ -177,8 +180,8 @@ export async function checkCandidateVision(
     }
 
     const data = await response.json();
-    const content: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
+    const content = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!content) {
       logger.warn('VisionCheck', 'API returned empty content in response');
       return null;
     }

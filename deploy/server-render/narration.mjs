@@ -913,7 +913,10 @@ export async function generateNarration(segments, outputDir, options = {}) {
         const align = spawnSync(
           'python3',
           [alignScript, audioFile, subtitleFile, '--model', whisperModel, '--json-sidecar', sidecar],
-          { encoding: 'utf8', timeout: 300_000 },
+          {
+            encoding: 'utf8',
+            timeout: Number(process.env.AUTOTUBE_WHISPER_ALIGN_TIMEOUT_MS || 300_000),
+          },
         );
         if (align.status !== 0) {
           console.warn(`  ⚠ whisper align failed for segment ${i + 1}, using estimated VTT`);

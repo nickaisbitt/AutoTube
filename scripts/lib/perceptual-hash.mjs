@@ -49,9 +49,9 @@ export function aHashFromImage(imagePathOrUrl, workDir = join(tmpdir(), 'autotub
  * @param {string|null} hash
  * @param {string[]} registry
  */
-export function isSimilarToRegistry(hash, registry) {
+export function isSimilarToRegistry(hash, registry, maxDistance = VISUAL_DUP_MAX_DISTANCE) {
   if (!hash) return false;
-  return registry.some((h) => hamming(hash, h) <= VISUAL_DUP_MAX_DISTANCE);
+  return registry.some((h) => hamming(hash, h) <= maxDistance);
 }
 
 /**
@@ -63,6 +63,7 @@ export function dedupeMediaByPHash(media, options = {}) {
   const registry = [];
   const kept = [];
   const devServer = options.devServer || 'http://localhost:5173';
+  const maxDistance = options.maxDistance ?? VISUAL_DUP_MAX_DISTANCE;
 
   for (const asset of media) {
     const thumb = asset.thumbnailUrl || (asset.type === 'image' ? asset.url : null);
@@ -77,8 +78,8 @@ export function dedupeMediaByPHash(media, options = {}) {
         ? `${devServer}${thumb.startsWith('/') ? '' : '/'}${thumb}`
         : thumb;
     const hash = aHashFromImage(src);
-    if (hash && isSimilarToRegistry(hash, registry)) {
-      options.onDrop?.(asset, `pHash dup (≤${VISUAL_DUP_MAX_DISTANCE} bits)`);
+    if (hash && isSimilarToRegistry(hash, registry, maxDistance)) {
+      options.onDrop?.(asset, `pHash dup (≤${maxDistance} bits)`);
       continue;
     }
     if (hash) registry.push(hash);

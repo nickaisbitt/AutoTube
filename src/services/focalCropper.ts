@@ -4,6 +4,7 @@
 
 import { extractJson } from '../utils/extractJson';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 
 // ---------------------------------------------------------------------------
@@ -42,7 +43,7 @@ export const ASPECT_RATIO_MAX = 1.9;
 export const TARGET_ASPECT_RATIO = 16 / 9;
 
 const OPENROUTER_ENDPOINT = '/api/llm';
-const VISION_MODEL = 'rekaai/reka-edge';
+const VISION_MODEL = 'xiaomi/mimo-v2.5';
 const FOCAL_TIMEOUT_MS = 5_000;
 const FOCAL_MAX_RETRIES = 1;
 
@@ -217,8 +218,8 @@ export async function detectFocalPoint(
     }
 
     const data = await response.json();
-    const content: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
+    const content = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!content) {
       logger.warn('FocalCropper', 'API returned empty content');
       return null;
     }

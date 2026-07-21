@@ -20,21 +20,154 @@
  * | script-default   | (fallback)                                                            | unknown / malformed requests |
  */
 
+import { isSchoolEducationTopic, isFertilityClinicTopic } from '../scripts/lib/topic-family.mjs';
+
 const LONG_NARRATION_BLOCK =
   'Hospitals paid billions after hackers exploited one weakness — and your medical records were already in the blast radius. Your identity, credit lines, and family safety depend on understanding how clinics adopt automation, where data leaks happen, and which guardrails regulators enforce across Epic, UnitedHealth, Mayo Clinic, and regional providers nationwide.';
 
-/** Shock hook — no year opener (YouTube retention). */
-export function buildShockHookLine(topic, override) {
-  if (override?.trim()) return override.trim();
-  const t = (topic || 'this story').replace(/\.$/, '');
-  const templates = [
-    `${t} — and almost nobody saw it coming.`,
-    `This ${t.toLowerCase()} could affect you by tomorrow.`,
-    `Billions lost overnight: ${t}.`,
-    `They tried to hide ${t.toLowerCase()} — here's the proof.`,
-  ];
-  return templates[Math.floor(Math.random() * templates.length)];
+/** True when an override clashes with the topic (e.g. bank hook on landlord video). */
+export function hookClashesWithTopic(topic, hook) {
+  const tl = String(topic || '').toLowerCase();
+  const ol = String(hook || '').toLowerCase();
+  if (!tl || !ol) return false;
+  const topicLandlord = /landlord|tenant|evict|rent/.test(tl);
+  const topicBank = /bank|fraud|scam|voice.?clone|hack|identity|password/.test(tl)
+    && !/nursing\s*home|elder|abuse|veteran|benefits|landlord|tenant|evict/.test(tl);
+  const topicTicket = /ticket|bot|scalp|concert|fan/.test(tl);
+  const topicCare = /nursing\s*home|elder|abuse|veteran|benefits|patient|hospital/.test(tl);
+  const topicHealthcareCyber =
+    /hospital|healthcare|patient|hipaa|medical|clinic|records?\b/.test(tl)
+    && /hack|breach|ransom|leak|data|cyber|expos|stolen/.test(tl);
+  const topicHeist =
+    /\b(heist|diamond|jewel|vault)\b/.test(tl)
+    || (/\bfake\b/.test(tl) && /\bairport\b/.test(tl));
+  const hookBank = /bank account|drained|voice clone|transfer|emptied real bank|vanish before you hang/.test(ol);
+  const hookLandlord = /evict|landlord|tenant|rent|lease|ai already filed/.test(ol);
+  const hookTicket = /ticket|bot|scalp|concert/.test(ol);
+  const hookHealthcare =
+    /medical chart|patient record|breach dump|hipaa|hospital hack|charts stolen|patient data/.test(ol);
+  const hookHeist = /runway|diamond|vault|jewels|fake airport/.test(ol);
+  const hookVeterans = /benefits file|veterans benefits|dark web broker/.test(ol);
+  if (topicLandlord && (hookBank || hookHealthcare || hookHeist || hookVeterans) && !hookLandlord) return true;
+  if (topicHealthcareCyber && (hookLandlord || hookBank || hookHeist || hookVeterans) && !hookHealthcare) {
+    return true;
+  }
+  if (topicHeist && (hookLandlord || hookBank || hookHealthcare) && !hookHeist) return true;
+  if (hookHealthcare && !topicHealthcareCyber && !/nursing\s*home|elder|abuse/.test(tl)) return true;
+  if (topicTicket && (hookBank || hookLandlord) && !hookTicket) return true;
+  if (topicCare && hookBank && !/veteran|benefit|patient|hospital|record/.test(ol)) return true;
+  if (!topicBank && hookBank && (topicLandlord || topicTicket || topicCare)) return true;
+  return false;
 }
+
+/** Topic-matched shock hook — no year opener (YouTube retention). */
+export function buildShockHookLine(topic, override) {
+  const t = (topic || 'this story').replace(/\.$/, '');
+  const tl = t.toLowerCase();
+
+  if (override?.trim()) {
+    const o = override.trim();
+    // Reject weak openers and cross-topic leftovers (bank line on landlord topic)
+    if (
+      !hookClashesWithTopic(t, o)
+      && !/^(why|how|what|the)\b/i.test(o)
+      && o.length > 12
+    ) {
+      return o;
+    }
+  }
+
+  // Topic-specific openers beat generic hash templates (hash once picked bank for landlords)
+  if (/landlord|tenant|evict|rent/.test(tl)) {
+    return 'AI already filed your eviction — before you knew.';
+  }
+  if (/nursing\s*home|elder\s*abuse|care\s*home/.test(tl)) {
+    return 'The cameras kept rolling while staff hurt them.';
+  }
+  if (/veteran|va\s+benefits|dark\s*web.*broker|benefits\s+data/.test(tl)) {
+    return 'Your benefits file was already for sale.';
+  }
+  if (/insurance|car\s*crash|fake\s*crash|crash\s*video/.test(tl) && !(/loyalty|shopper|grocery|pricing/.test(tl) && !/crash|staged/.test(tl))) {
+    return 'That car crash was staged for the insurance payout.';
+  }
+  if (
+    /\b(heist|diamond|jewel|vault|antwerp|notarbartolo)\b/.test(tl)
+    || (/\bfake\b/.test(tl) && /\bairport\b/.test(tl))
+    || (/\bmuseum\b/.test(tl) && /\b(heist|theft|stolen|robbery)\b/.test(tl))
+  ) {
+    return 'The runway was fake — the diamonds were already gone.';
+  }
+  if (/hospital|patient|healthcare|hipaa/.test(tl) && /hack|breach|leak|records?|data|cyber/.test(tl)) {
+    return 'Your medical chart was already in the breach dump.';
+  }
+  if (
+    isSchoolEducationTopic(tl)
+    && /hack|ransom|breach|cyber|leak|data|records/.test(tl)
+  ) {
+    return 'Student counseling files were already stolen.';
+  }
+  if (
+    isFertilityClinicTopic(tl)
+    && /telegram|dark\s*web|sold|broker|leak|data|hack/.test(tl)
+  ) {
+    return 'Your fertility file was already listed for sale.';
+  }
+  if (
+    /port|strike|container|shipping|supply\s*chain|cargo|dock|freight|maritime/.test(tl)
+    && /hack|breach|track|cyber|ransom/.test(tl)
+  ) {
+    return 'The strike was cover — the tracking system was already hacked.';
+  }
+  if (/bank|fraud|scam|voice.?clone|otp|phish|wire\s*transfer|password\s*breach|identity\s*theft/.test(tl)) {
+    return 'This already emptied real bank accounts.';
+  }
+  if (/ticket|bot|scalp|concert|fan/.test(tl)) {
+    return 'Bots bought every ticket before you could click.';
+  }
+  if (/nuclear|radiation|meltdown|plant/.test(tl)) {
+    return 'They hid the radiation risk until it was too late.';
+  }
+  // Zoning / flood-risk MAP is a policy cover-up — not a weather-disaster hook.
+  if (/zoning|flood[-\s]?risk|flood\s*map|erased\s*flood/.test(tl)) {
+    return 'They erased the flood zones before the next storm hit.';
+  }
+  if (
+    /tornado|hurricane|wildfire|earthquake/.test(tl)
+    || (/\bflood\b/.test(tl) && !/zoning|map|neighborhood|risk/.test(tl))
+  ) {
+    return 'The warning came after people were already trapped.';
+  }
+  if (/ambulance|gps\s*route|demolished|paramedic|911\s*dispatch/.test(tl)) {
+    return 'GPS sent the ambulance to a house that was already gone.';
+  }
+  if (/airline|cabin[-\s]?pressure|cabin\s*pressure/.test(tl)) {
+    return 'The cabin kept losing pressure — and they hid every report.';
+  }
+  if (/indie\s*game|source\s*code|cloud\s*lockout/.test(tl)) {
+    return 'The studio woke up locked out of its own source code.';
+  }
+  if (/climate\s*sensor|sensor\s*calibrat|fake\s*climate|university\s*lab/.test(tl)) {
+    return 'The lab published calibrations that never matched the sensors.';
+  }
+  if (/museum\s*archive|mislabeled|colonial\s*artifact/.test(tl)) {
+    return 'The archive labels were wrong for decades on purpose.';
+  }
+
+  const short = t.replace(/^(why|how|what)\s+/i, '').trim();
+  const templates = [
+    `Billions lost overnight: ${short}.`,
+    `They tried to hide this — here's the proof.`,
+    `This is bigger than the headlines admit.`,
+    `Ordinary people are already paying the price.`,
+  ];
+  // Stable pick from topic hash so loop retries stay consistent
+  let hash = 0;
+  for (let i = 0; i < t.length; i += 1) hash = (hash + t.charCodeAt(i) * (i + 1)) % templates.length;
+  return templates[hash];
+}
+
+/** ≤3-word mid-video impact cards matched to topic (not bank defaults on every video). */
+export { buildImpactBeatsForTopic } from '../scripts/lib/impactBeatsByTopic.mjs';
 
 function buildTopicBody(topic, hookLine) {
   const t = topic || 'the story';
@@ -363,7 +496,7 @@ export function resolveOpenRouterMockContent(messages, segments = MOCK_SCRIPT_SE
  * @param {string} [model]
  * @returns {string}
  */
-export function openRouterCompletionBody(content, model = 'openai/gpt-5.4-nano') {
+export function openRouterCompletionBody(content, model = 'xiaomi/mimo-v2.5') {
   return JSON.stringify({
     id: `mock-${Date.now()}`,
     model,
@@ -378,6 +511,6 @@ export function openRouterCompletionBody(content, model = 'openai/gpt-5.4-nano')
  */
 export function mockOpenRouterHttpBody(post, segments = MOCK_SCRIPT_SEGMENTS) {
   const content = resolveOpenRouterMockContent(post?.messages, segments);
-  const model = post?.model ?? 'openai/gpt-5.4-nano';
+  const model = post?.model ?? 'xiaomi/mimo-v2.5';
   return openRouterCompletionBody(content, model);
 }

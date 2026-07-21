@@ -10,8 +10,22 @@ import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pip
 import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
 import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
-import { dedupeMediaByPHash } from './perceptual-hash.mjs';
-import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
+import { dedupeMediaByPHash, VISUAL_DUP_MAX_DISTANCE } from './perceptual-hash.mjs';
+import {
+  STOCK_HEALTHCARE_IMAGES,
+  STOCK_VIDEO_POOL,
+  STOCK_HOUSING_VIDEOS,
+  STOCK_CYBER_IMAGES,
+  MIXKIT_VIDEO_POOL,
+  pickStockImages,
+  pickStockVideos,
+  isJunkDemoVideoUrl,
+  isUnsafeMediaUrl,
+  isJunkWebVolumeStillUrl,
+  topicalStockVideos,
+  stockImagesForTopic,
+} from './stock-media-urls.mjs';
+import { curatedPacksEnabled, keepBestEnabled, isEvalColdMode } from './eval-flags.mjs';
 import {
   accumulateExcludedUrls,
   harvestContextFromFixState,
@@ -20,15 +34,54 @@ import {
 } from './harvest-loop-context.mjs';
 import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-env-from-fix-state.mjs';
 import {
+  applyFrozenMediaToProject,
+  loadFrozenProject,
+} from './keep-best.mjs';
+import {
+  airlineSoftPassMotionFailureReason,
   filterAssetsByRelevance,
   evaluateHarvestVolume,
+  evaluateHarvestVolumeWithSoftPass,
+  isOffBrandVisual,
+  isGenericStockJunk,
+  isVolumePaddingAsset,
+  mergeVolumePadding,
 } from './harvest-quality.mjs';
+import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
+import {
+  isAirlineTopic,
+  isBankScamTopic,
+  isHealthcareCyberTopic,
+  isHealthcareTopic,
+  isHeistTopic,
+  isHousingTopic,
+  isInsuranceFraudTopic,
+  isNursingHomeTopic,
+  isSchoolEducationTopic,
+  isVeteransBenefitsTopic,
+  isWorkplaceTopic,
+} from './topic-family.mjs';
+import {
+  isScriptComplete,
+  detectScriptActivity,
+  sawFreshActivity,
+  chooseRecoveryAction,
+  isDeadScriptGeneration,
+} from './script-wait-policy.mjs';
 
 export function resolveOpenRouterKey() {
   return (
     process.env.OPENROUTER_API_KEY ||
     process.env.VITE_OPENROUTER_KEY ||
     process.env.OPENROUTER_KEY ||
+    ''
+  ).trim();
+}
+
+export function resolveAutotubeApiKey() {
+  return (
+    process.env.AUTOTUBE_API_KEY ||
+    process.env.VITE_AUTOTUBE_API_KEY ||
     ''
   ).trim();
 }
@@ -41,7 +94,123 @@ export function resolvePixabayKey() {
   return (process.env.PIXABAY_API_KEY || process.env.VITE_PIXABAY_KEY || '').trim();
 }
 
-async function clickPipelineButton(page, locator, { settleMs = 2000, timeout = 120_000 } = {}) {
+/** Dismiss z-[200] onboarding overlay so it cannot steal clicks mid-pipeline. */
+async function dismissOnboarding(page) {
+  await page
+    .evaluate(() => {
+      localStorage.setItem('autotube_onboarding_seen', 'true');
+    })
+    .catch(() => {});
+  if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 800 }).catch(() => false)) {
+    await page.getByTestId('onboarding-skip').click({ timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+}
+
+/** Wait for topic field (onboarding / crash can leave it missing). */
+async function fillTopicInput(page, topic, { attempts = 5 } = {}) {
+  for (let i = 1; i <= attempts; i += 1) {
+    await dismissOnboarding(page);
+    // Close stray overlays that steal clicks / hide the topic field.
+    await page.keyboard.press('Escape').catch(() => {});
+    await page
+      .evaluate(() => {
+        localStorage.setItem('autotube_onboarding_seen', 'true');
+        document.querySelectorAll('[data-testid="onboarding-modal"]').forEach((el) => {
+          el.style.display = 'none';
+        });
+      })
+      .catch(() => {});
+    const input = page.getByTestId('topic-input');
+    try {
+      await input.waitFor({ state: 'visible', timeout: 60_000 });
+      await input.scrollIntoViewIfNeeded().catch(() => {});
+      await input.click({ timeout: 10_000 }).catch(() => {});
+      await input.fill('');
+      await input.fill(topic, { timeout: 45_000 });
+      const got = await input.inputValue().catch(() => '');
+      if (got.trim() === String(topic).trim()) return;
+      // Fallback: set value via DOM when Playwright fill races React.
+      await page
+        .evaluate((value) => {
+          const el = document.querySelector('[data-testid="topic-input"]');
+          if (!el) return false;
+          const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+          proto?.set?.call(el, value);
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return el.value === value;
+        }, topic)
+        .catch(() => false);
+      const got2 = await input.inputValue().catch(() => '');
+      if (got2.trim() === String(topic).trim()) return;
+      throw new Error(`topic-input value mismatch (got "${got2.slice(0, 40)}")`);
+    } catch (err) {
+      if (i === attempts) throw err;
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {});
+      await page.waitForTimeout(800);
+      await dismissOnboarding(page);
+    }
+  }
+}
+
+/** Read autotube_project wrapper (project + stepStatuses) from localStorage. */
+async function readProjectSnapshot(page) {
+  return page
+    .evaluate(() => {
+      try {
+        const raw = localStorage.getItem('autotube_project');
+        if (!raw) {
+          return { scriptLen: 0, mediaLen: 0, scriptStep: '', mediaStep: '', projectStatus: '' };
+        }
+        const stored = JSON.parse(raw);
+        const proj = stored.project || {};
+        return {
+          scriptLen: Array.isArray(proj.script) ? proj.script.length : 0,
+          mediaLen: Array.isArray(proj.media) ? proj.media.length : 0,
+          scriptStep: stored.stepStatuses?.script || '',
+          mediaStep: stored.stepStatuses?.media || '',
+          projectStatus: proj.status || '',
+        };
+      } catch {
+        return { scriptLen: 0, mediaLen: 0, scriptStep: '', mediaStep: '', projectStatus: '' };
+      }
+    })
+    .catch(() => ({ scriptLen: 0, mediaLen: 0, scriptStep: '', mediaStep: '', projectStatus: '' }));
+}
+
+/**
+ * Read live script-generation signals straight from the DOM.
+ *
+ * The project (and its stepStatuses) is only written to localStorage AFTER the
+ * whole script pipeline completes, so `readProjectSnapshot` is blind while the
+ * script is still being generated. The Script step, however, renders a distinct
+ * "Generating Script" UI (rotating status + "N% complete") that lets us tell an
+ * actively-generating run apart from one that never started / is stuck.
+ */
+async function readScriptProgress(page) {
+  return page
+    .evaluate(() => {
+      const bodyText = document.body?.innerText || '';
+      const rotatingEl = document.querySelector('[data-testid="rotating-status"]');
+      const cancelBtn = document.querySelector('[data-testid="cancel-script-button"]');
+      const generating =
+        Boolean(rotatingEl)
+        || Boolean(cancelBtn)
+        || /Generating Script/i.test(bodyText);
+      const pctMatch = bodyText.match(/(\d+)%\s*complete/i);
+      return {
+        generating,
+        rotating: (rotatingEl?.textContent || '').trim(),
+        pct: pctMatch ? Number(pctMatch[1]) : null,
+        onTopicStep: Boolean(document.querySelector('[data-testid="generate-script-only"]')),
+      };
+    })
+    .catch(() => ({ generating: false, rotating: '', pct: null, onTopicStep: false }));
+}
+
+async function clickPipelineButton(page, locator, { settleMs = 2000, timeout = 180_000 } = {}) {
+  await dismissOnboarding(page);
   await locator.waitFor({ state: 'visible', timeout });
   if (settleMs > 0) await page.waitForTimeout(settleMs);
   try {
@@ -179,7 +348,10 @@ function isDirectImageCandidate(url = '') {
 
 async function fetchImageSearchResults(devServer, endpoint, query) {
   try {
-    const res = await fetch(`${devServer}${endpoint}?q=${encodeURIComponent(query)}`);
+    const headers = {};
+    const apiKey = resolveAutotubeApiKey();
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    const res = await fetch(`${devServer}${endpoint}?q=${encodeURIComponent(query)}`, { headers });
     if (!res.ok) return [];
     const data = await res.json();
     return data.results || [];
@@ -191,6 +363,7 @@ async function fetchImageSearchResults(devServer, endpoint, query) {
 async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
+  const airline = isAirlineTopic(topic);
   const usedGlobal = new Set(
     (project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean),
   );
@@ -200,7 +373,16 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
     '/api/search-duckduckgo-images',
     '/api/search-hybrid',
     '/api/search-unsplash',
+    '/api/search-nasa',
+    '/api/search-archive',
   ];
+
+  // Airline cabin-pressure: NEVER scrape open-web image search (porn/Niagara/celeb pads).
+  // Motion top-up (Pexels/Pixabay) is the only pad path.
+  if (airline) {
+    report.imageVolumeSkipped = 'airline-motion-only';
+    return;
+  }
 
   for (const seg of segments) {
     const segAssets = (project.media || []).filter((m) => m.segmentId === seg.id);
@@ -213,7 +395,14 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
       const results = await fetchImageSearchResults(devServer, searchEndpoints[round], q);
       const candidates = results
         .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
-        .filter((r) => r.url && isDirectImageCandidate(r.url) && !isJunkHarvestUrl(r.url));
+        .filter(
+          (r) =>
+            r.url
+            && isDirectImageCandidate(r.url)
+            && !isJunkHarvestUrl(r.url)
+            && !isUnsafeMediaUrl(r.url)
+            && !isJunkWebVolumeStillUrl(r.url),
+        );
 
       let added = false;
       for (const r of candidates) {
@@ -244,16 +433,1279 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
         report.volumeTopUpMiss.push({ segmentId: seg.id, count: uniqueCount, need: minPerSegment });
       }
     }
+
+    // Last-resort Unsplash pad when Pexels is unavailable.
+    if (uniqueCount < minPerSegment) {
+      const offset = (report.stockTopUpOffset || 0) + uniqueCount;
+      const need = minPerSegment - uniqueCount;
+      const stockPool = stockImagesForTopic(topic);
+      const stock = pickStockImages(need + 4, offset, stockPool);
+      for (const img of stock) {
+        if (uniqueCount >= minPerSegment) break;
+        const key = img.url.split('?')[0];
+        if (usedGlobal.has(key)) continue;
+        if (isUnsafeMediaUrl(img.url) || isJunkWebVolumeStillUrl(img.url)) continue;
+        project.media.push({
+          id: `stock-topup-${seg.id}-${uniqueCount}`,
+          segmentId: seg.id,
+          type: 'image',
+          url: img.url,
+          alt: img.alt || `${seg.title} ${topic}`,
+          query: `stock-pool ${seg.title}`,
+          source: 'Stock pool (volume top-up)',
+          duration: 5,
+          isFallback: false,
+        });
+        usedGlobal.add(key);
+        uniqueCount += 1;
+        report.volumeTopUp = report.volumeTopUp || [];
+        report.volumeTopUp.push({ segmentId: seg.id, url: img.url, endpoint: 'stock-pool' });
+      }
+      report.stockTopUpOffset = offset + need;
+    }
+  }
+}
+
+function isSeriousNewsTopic(topicBlob = '') {
+  return /bank|hack|stolen|identity|tornado|disaster|death|war|ransom|voice\s*clone|fraud|scam|warning|kill|phish|cyber|breach|heist|diamond|jewel|vault|airport|museum|robbery/i.test(
+    topicBlob || '',
+  );
+}
+
+/** Drop demo/cartoon/broken proxy clips so top-up can inject topical motion. */
+function stripJunkDemoVideos(project, report) {
+  if (!project?.media?.length) return;
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
+  const kept = [];
+  for (const asset of project.media) {
+    if (asset.type !== 'video') {
+      kept.push(asset);
+      continue;
+    }
+    const url = asset.url || '';
+    const junk =
+      isJunkDemoVideoUrl(url)
+      || isUnsafeMediaUrl(url)
+      || isJunkStockClip(asset, topicBlob)
+      || (isAirlineTopic(topicBlob) && !isAirlineRelevantClip(asset, topicBlob))
+      || isOffBrandVisual(`${asset.alt || ''} ${url} ${asset.query || ''}`, topicBlob)
+      || (/\/api\/download-clip/i.test(url) && /youtube\.com|youtu\.be|tiktok\.com/i.test(url));
+    if (junk) {
+      report.junkVideoDropped = report.junkVideoDropped || [];
+      report.junkVideoDropped.push({ url, reason: 'demo/off-topic/broken proxy clip' });
+      const thumb = asset.thumbnailUrl;
+      if (
+        thumb
+        && !isJunkHarvestUrl(thumb)
+        && !isUnsafeMediaUrl(thumb)
+        && isImageLikeUrl(thumb)
+      ) {
+        kept.push({
+          ...asset,
+          type: 'image',
+          url: thumb,
+          source: `${asset.source || 'Video'} still`,
+          isFallback: false,
+        });
+      }
+      continue;
+    }
+    kept.push(asset);
+  }
+  project.media = kept;
+  stripUnsafeMediaAssets(project, report);
+}
+
+/**
+ * Drop adult CDNs and airline web volume-top-up stills (Niagara/celeb/porn scrapes).
+ */
+function stripUnsafeMediaAssets(project, report) {
+  if (!project?.media?.length) return;
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`;
+  const airline = isAirlineTopic(topicBlob);
+  const kept = [];
+  for (const asset of project.media) {
+    const url = asset.url || '';
+    const source = String(asset.source || '');
+    const webVolumeStill =
+      asset.type === 'image'
+      && /volume top-up/i.test(source)
+      && !/stock pool/i.test(source);
+    const drop =
+      isUnsafeMediaUrl(url)
+      || isJunkWebVolumeStillUrl(url)
+      || (airline && webVolumeStill);
+    if (drop) {
+      report.unsafeMediaDropped = report.unsafeMediaDropped || [];
+      report.unsafeMediaDropped.push({
+        url,
+        reason: isUnsafeMediaUrl(url)
+          ? 'unsafe/adult CDN'
+          : airline && webVolumeStill
+            ? 'airline web volume still'
+            : 'junk web still host',
+      });
+      continue;
+    }
+    kept.push(asset);
+  }
+  project.media = kept;
+}
+
+/**
+ * Prefetch curated human/phone/security stills; keep usable motion clips.
+ */
+function injectCyberStockStills(project, report, mediaOffset = 0) {
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
+  // Never pad airline cabin-pressure with cyber stills (and don't let bare "ai" match "airline").
+  if (isAirlineTopic(topicBlob)) {
+    report.cyberStockSkipped = 'airline-motion-only';
+    return;
+  }
+  if (
+    !/bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password|\bai\b|hospital|patient|healthcare|records?/i.test(
+      topicBlob,
+    )
+  ) {
+    return;
+  }
+  const segments = project.script || [];
+  if (!segments.length) return;
+
+  // Keep Mixkit / archive / Pexels motion; drop junk harvest images
+  const rebuilt = [];
+  for (const asset of project.media || []) {
+    if (asset.type === 'video' && !isJunkDemoVideoUrl(asset.url || '')) {
+      rebuilt.push(asset);
+    }
+  }
+  const stockMotion = rebuilt.filter((a) =>
+    /pexels|pixabay|mixkit|archive\.org/i.test(`${a.url} ${a.source || ''}`),
+  ).length;
+  const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
+  const motionOk = hasStockKeys && stockMotion >= Math.max(6, segments.length * 2);
+  const pool = [...STOCK_CYBER_IMAGES];
+  const picks = pickStockImages(pool.length, mediaOffset % Math.max(pool.length, 1), pool);
+  let added = 0;
+
+  // Motion-ok: skip cyber still pads (they tank visualVariety).
+  if (motionOk) {
+    const videos = rebuilt.filter((a) => a.type === 'video');
+    project.media = videos;
+    report.cyberStockSkipped = `motion-ok (${stockMotion} stock videos; no still pad)`;
+    return;
+  }
+
+  for (let s = 0; s < segments.length; s += 1) {
+    const seg = segments[s];
+    // Intro/hook: motion only.
+    if (seg.type === 'intro' || s === 0) continue;
+    const perSeg = 1;
+    for (let i = 0; i < perSeg; i += 1) {
+      const img = picks[(s * 7 + i + mediaOffset) % picks.length];
+      if (!img) continue;
+      rebuilt.push({
+        id: `cyber-stock-${seg.id}-${i}`,
+        segmentId: seg.id,
+        type: 'image',
+        url: img.url,
+        alt: img.alt,
+        query: `cyber-stock ${seg.title || ''}`,
+        source: 'Curated cyber stock',
+        isFallback: false,
+      });
+      added += 1;
+    }
+  }
+  // Prefer motion assets first in the media array.
+  const videos = rebuilt.filter((a) => a.type === 'video');
+  const stills = rebuilt.filter((a) => a.type !== 'video');
+  project.media = [...videos, ...stills];
+  if (added) {
+    report.cyberStockInjected = added;
+  }
+}
+
+async function fetchArchiveVideoResults(devServer, query) {
+  try {
+    const headers = {};
+    const apiKey = resolveAutotubeApiKey();
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    const res = await fetch(`${devServer}/api/search-archive?q=${encodeURIComponent(query)}`, { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.results || [])
+      .map((r) => ({
+        url: r.url,
+        alt: r.title || r.alt || query,
+        source: 'Archive.org live',
+      }))
+      .filter((r) => r.url && /\.mp4(?:[?#]|$)/i.test(r.url));
+  } catch {
+    return [];
+  }
+}
+
+/** Direct Pexels Videos API (no UI harvest required). */
+async function fetchPexelsVideos(query, perPage = 8) {
+  const key = resolvePexelsKey();
+  if (!key) return [];
+  if (!isSafeStockMotionQuery(query)) return [];
+  try {
+    const url = `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${perPage}&size=medium`;
+    const res = await fetch(url, { headers: { Authorization: key } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const out = [];
+    for (const video of data.videos || []) {
+      if (!video?.video_files?.length) continue;
+      if ((video.duration || 0) > 45) continue;
+      const landscape =
+        video.video_files
+          .filter((f) => (f.width || 0) >= 1280 && (f.width || 0) >= (f.height || 0))
+          .sort((a, b) => (b.width || 0) - (a.width || 0))[0]
+        || video.video_files
+          .filter((f) => (f.width || 0) >= (f.height || 0))
+          .sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+      if (!landscape?.link) continue;
+      out.push({
+        url: landscape.link,
+        // Do not echo the search query into alt — that launders irrelevant clips as "aviation".
+        alt: 'Pexels video',
+        query,
+        source: 'Pexels Videos',
+        sourceUrl: video.url,
+        thumbnailUrl: video.image,
+        duration: video.duration,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** Direct Pixabay Videos API. */
+async function fetchPixabayVideos(query, perPage = 8) {
+  const key = resolvePixabayKey();
+  if (!key) return [];
+  if (!isSafeStockMotionQuery(query)) return [];
+  try {
+    const url = `https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(query)}&per_page=${perPage}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const out = [];
+    for (const hit of data.hits || []) {
+      const videos = hit.videos || {};
+      const pick = videos.large || videos.medium || videos.small;
+      if (!pick?.url) continue;
+      out.push({
+        url: pick.url,
+        // Prefer real Pixabay tags as visual evidence; never fall back to query echo.
+        alt: hit.tags || 'Pixabay video',
+        query,
+        source: 'Pixabay Videos',
+        sourceUrl: hit.pageURL,
+        thumbnailUrl: hit.userImageURL || undefined,
+        duration: hit.duration,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** Pixabay/Pexels often match topic words literally (piggy bank, wash hands, rotate phone). */
+/** Prefer phone/bank/security motion for cyber topics — deny lifestyle pets/nature filler. */
+/** Strong aviation evidence — must appear in real visual metadata, not just the search query echo. */
+const AIRLINE_STRONG_RE =
+  /\b(airline|aircraft|airplane|aeroplane|aviation|cockpit|oxygen\s*mask|runway|hangar|airport|fuselage|tarmac|jet\s*bridge|boarding|cabin\s*(interior|pressure|passengers?)|pressure\s*gauge|flight\s*attendant|faa|bombardier|embraer|q400|regional\s*jet)\b/i;
+/** Weak tokens alone are not enough (passenger/pilot/flight match hospital & sports stock). */
+const AIRLINE_WEAK_RE = /\b(passenger|pilot|plane|jet|flight|mechanic|attendant)\b/i;
+const AIRLINE_WEAK_CONTEXT_RE =
+  /\b(cabin|cockpit|airplane|aircraft|airport|seat|aisle|galley|headset|yoke|throttle|hangar|tarmac|runway|oxygen|fuselage)\b/i;
+/** Queries we trust when API alt is just an echo of the search string. */
+const AIRLINE_TRUSTED_QUERY_RE =
+  /\b(oxygen\s*mask|cockpit|hangar|runway|tarmac|cabin\s*(interior|pressure|passengers?)|airplane|aircraft|fuselage|flight\s*attendant|pilot\s*(cockpit|headset|face)|boarding|jet\s*bridge|pressure\s*gauge|faa\s*report|maintenance\s*hangar|airplane\s*cabin)\b/i;
+/** Never OK on airline stories — keyword miss from faceSeek / long topic harvest. */
+const AIRLINE_OFF_TOPIC_RE =
+  /\b(football|soccer|nfl|athlete|jersey|stadium|basketball|tennis|hockey|golf|baseball|sports?|sports?\s*player|cheerleader|mail\s*box|mailbox|u\.?s\.?\s*mail|postal|magnifying\s*glass|financial\s*reports?|stock\s*documents?\s*desk|astronaut|space\s*suit|spacewalk|nasa|space\s*station|galaxy|nebula|patient|medical\s*attention|medical\s*patient|hospital|icu\b|surgery|surgeon|operating\s*room|nurse|nurse\s*station|ambulance\s*stretcher|stretcher|iv\s*drip|hospital\s*bed|garage|auto\s*repair|car\s*engine|crying\s*(woman|girl|man)|emotional\s*portrait|stock\s*reaction|yoga|gym\s*workout|fashion|fashion\s*runway)\b/i;
+const TRUSTED_AIRLINE_QUERY_MAX_LENGTH = 72;
+const AIRLINE_DISCONNECTED_PAD_RE =
+  /\b(u\.?\s*s\.?\s*mail|usps|postal|post\s*office|mailbox|letterbox|mail\s*(truck|carrier|delivery|bag|slot)|magnifying\s*glass|financial\s*(report|chart|graph|statement)|stock\s*(chart|market|ticker)|bar\s*chart|line\s*chart|spreadsheet|accounting\s*desk|hospital|patient|medical|icu|doctor|nurse|oxygen\s*(tank|cylinder|therapy|patient|hospital)|nasal\s*cannula)\b/i;
+
+const AIRLINE_RELEVANCE_RE = AIRLINE_STRONG_RE;
+
+const AIRLINE_MEGA_CARRIER_PATTERNS = [
+  /\bemirates\b/i,
+  /\bwizz\s*air\b|\bwizzair\b/i,
+  /\bqatar\s*airways\b|\bqatar\b/i,
+  /\blufthansa\b/i,
+  /\bryan\s*air\b|\bryanair\b/i,
+  /\bunited\s*airlines?\b|\bunited-airlines\b/i,
+  /\bdelta\s*air\b|\bdelta-airlines\b/i,
+  /\bamerican\s*airlines?\b/i,
+  /\bbritish\s*airways\b/i,
+  /\bair\s*france\b/i,
+  /\bk\s*l\s*m\b|\bklm\b/i,
+  /\beasyjet\b|\beasy\s*jet\b/i,
+  /\bsouthwest\s*airlines?\b/i,
+  /\bjetblue\b/i,
+];
+
+function mentionsMegaCarrier(blob = '') {
+  return AIRLINE_MEGA_CARRIER_PATTERNS.some((re) => re.test(blob || ''));
+}
+
+const STOCK_QUERY_ESSAY_RE =
+  /\b(?:meet|according|how\s+a|how\s+an|how\s+the|why\s+a|why\s+an|why\s+the|federal\s+aviation\s+administration|captain\s+[a-z]+|hid\s+recurring|recurring\s+failures)\b/i;
+
+function stockQueryWords(query) {
+  return String(query || '')
+    .trim()
+    .replace(/[-/]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function isSafeStockMotionQuery(query) {
+  const normalized = String(query || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return false;
+  if (normalized.length > 64) return false;
+  if (stockQueryWords(normalized).length > 6) return false;
+  return !STOCK_QUERY_ESSAY_RE.test(normalized);
+}
+
+/**
+ * Visual evidence for airline relevance — strip echoed search/topic text so
+ * "Pexels: worried passenger face" cannot launder a hospital/football clip.
+ */
+function airlineVisualEvidenceBlob(clip = {}) {
+  const query = String(clip.query || '').trim().toLowerCase();
+  const rawAlt = String(clip.alt || '').trim();
+  let alt = rawAlt.toLowerCase();
+  const providerEcho = /^(pexels|pixabay)(?:\s+video)?:\s*/i.test(rawAlt)
+    || /^(pexels|pixabay)\s+video$/i.test(rawAlt);
+  alt = alt
+    .replace(/^pexels:\s*/i, '')
+    .replace(/^pixabay:\s*/i, '')
+    .replace(/^pexels video:\s*/i, '')
+    .replace(/^(pexels|pixabay)\s+video$/i, '');
+  if (query && alt.includes(query.slice(0, Math.min(48, query.length)))) {
+    alt = alt.replace(query, ' ');
+  }
+  // Provider echo / placeholder alts are not visual proof — only real tags/URLs count.
+  if (providerEcho) {
+    alt = '';
+  }
+  // UI/stock harvest often sets alt = topic sentence — not visual proof.
+  if (
+    /regional airline|cabin[-\s]?pressure|cabin pressure fail|how a .+\bhid\b/i.test(alt)
+    || alt.length > 90
+  ) {
+    alt = '';
+  }
+  return `${alt} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''}`.toLowerCase();
+}
+
+/** Resolve the search string used to fetch this clip (field or legacy provider-echo alt). */
+function airlineClipSearchQuery(clip = {}) {
+  const direct = String(clip.query || '').trim();
+  if (direct) return direct;
+  const rawAlt = String(clip.alt || '').trim();
+  const m = rawAlt.match(/^(?:pexels|pixabay)(?:\s+video)?:\s*(.+)$/i);
+  return m ? m[1].trim() : '';
+}
+
+function hasAirlineCompatibleVisualEvidence(evidence = '') {
+  const blob = String(evidence || '').trim();
+  return !blob || AIRLINE_STRONG_RE.test(blob) || (AIRLINE_WEAK_RE.test(blob) && AIRLINE_WEAK_CONTEXT_RE.test(blob));
+}
+
+function isTrustedAirlineSearchQuery(query = '') {
+  const text = String(query || '').trim();
+  return Boolean(
+    text.length > 0
+      && text.length <= TRUSTED_AIRLINE_QUERY_MAX_LENGTH
+      && !/\bhow a\b|\bhid\b|\bfailures\b/i.test(text)
+      && !/\bCaptain\s+[A-Z][a-z]+\b/.test(text)
+      && AIRLINE_TRUSTED_QUERY_RE.test(text)
+      && !AIRLINE_OFF_TOPIC_RE.test(text),
+  );
+}
+
+function isAirlineRelevantClip(clip = {}, topicBlob = '') {
+  const evidence = airlineVisualEvidenceBlob(clip);
+  if (AIRLINE_OFF_TOPIC_RE.test(evidence)) return false;
+  if (AIRLINE_STRONG_RE.test(evidence)) return true;
+  if (AIRLINE_WEAK_RE.test(evidence) && AIRLINE_WEAK_CONTEXT_RE.test(evidence)) return true;
+  // Echo-only alts: allow only short, controlled aviation search queries (not topic essays).
+  const query = airlineClipSearchQuery(clip);
+  if (isTrustedAirlineSearchQuery(query) && hasAirlineCompatibleVisualEvidence(evidence)) {
+    return true;
+  }
+  // Archive.org titles are often opaque (identifiers / news dumps). When the search
+  // query itself is a short trusted aviation string and the title isn't off-topic,
+  // trust the query — otherwise keyless cold eval starves at ~6 hangar pads.
+  if (
+    isTrustedAirlineSearchQuery(query)
+    && /Archive\.org/i.test(String(clip.source || ''))
+    && !AIRLINE_OFF_TOPIC_RE.test(`${clip.alt || ''} ${clip.url || ''}`)
+    && !AIRLINE_DISCONNECTED_PAD_RE.test(`${clip.alt || ''} ${clip.url || ''}`)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isCyberRelevantClip(clip = {}, topicBlob = '') {
+  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
+  if (/beetle|dung beetle|insect swarm|macro insect|bug macro|wildlife macro|spider macro/.test(blob)) {
+    return false;
+  }
+  if (isNursingHomeTopic(topicBlob)) {
+    return /nursing|elder|care\s*home|cctv|camera|surveillance|caregiver|wheelchair|hallway|corridor|abuse|family|visit/.test(
+      blob,
+    );
+  }
+  if (isHousingTopic(topicBlob)) {
+    return /apartment|evict|rent|landlord|tenant|lease|keys|packing|boxes|notice|letter|for rent|door|couple|worried/.test(
+      blob,
+    );
+  }
+  if (isInsuranceFraudTopic(topicBlob)) {
+    return /crash|car|dashcam|wreck|damage|insurance|claim|adjuster|injury|whiplash|accident|road|highway|driver/.test(
+      blob,
+    );
+  }
+  if (isVeteransBenefitsTopic(topicBlob)) {
+    return /veteran|military|benefits|ssn|identity|credit|paperwork|document|government|broker|phone|worried|letter|dog tag/.test(
+      blob,
+    );
+  }
+  if (isHeistTopic(topicBlob)) {
+    return /airport|runway|terminal|vault|safe|security|diamond|jewel|cargo|guard|heist|plane|aviation|warehouse|jewelry|investigation|documentary|news/.test(
+      blob,
+    );
+  }
+  if (isAirlineTopic(topicBlob)) {
+    if (isJunkStockClip(clip, topicBlob)) return false;
+    return isAirlineRelevantClip(clip, topicBlob);
+  }
+  if (isSchoolEducationTopic(topicBlob)) {
+    return /school|student|classroom|teacher|campus|library|counseling|laptop|computer|server|data|cyber|worried|parent|records|phone|document|district/.test(
+      blob,
+    );
+  }
+  if (isHealthcareCyberTopic(topicBlob)) {
+    return /hospital|patient|medical|records|nurse|doctor|server|data|rack|workstation|hipaa|breach|laptop|corridor|waiting/.test(
+      blob,
+    );
+  }
+  const topical =
+    /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|worried|shock|texting|ransom|leak|breach|records?/.test(
+      blob,
+    );
+  // Office/business/architecture alone is not cyber-relevant.
+  if (topical) return true;
+  if (isHealthcareTopic(topicBlob) && /hospital|patient|clinic|nurse|doctor|medical|corridor|ward/.test(blob)) {
+    return true;
+  }
+  return false;
+}
+
+function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
+  const preferBright =
+    options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
+  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''} ${clip.query || ''}`.toLowerCase();
+  const topicText = String(topicBlob || '').toLowerCase();
+  if (isOffBrandVisual(blob, topicBlob)) return true;
+  if (isGenericStockJunk(blob, topicBlob)) return true;
+  const covidTopic = /\b(covid|coronavirus|pandemic|mask mandate|face masks?|surgical masks?|n95)\b/.test(topicText);
+  if (
+    !covidTopic
+    && /(?:covid|coronavirus|pandemic|surgical masks?|face masks?|medical masks?|protective masks?).{0,40}\b(couple|people|man and woman|woman and man)\b|\b(couple|people|man and woman|woman and man)\b.{0,40}(?:covid|coronavirus|pandemic|surgical masks?|face masks?|medical masks?|protective masks?)/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
+  if (isAirlineTopic(topicText)) {
+    if (AIRLINE_OFF_TOPIC_RE.test(blob)) return true;
+    const topicMentionsMegaCarrier = mentionsMegaCarrier(topicText);
+    if (!topicMentionsMegaCarrier && mentionsMegaCarrier(`${clip.alt || ''} ${clip.sourceUrl || ''} ${clip.url || ''}`)) {
+      return true;
+    }
+    if (/\bred\s+hat\b.{0,40}\b(lifestyle|tourist|travel|walking|portrait|fashion)\b|\b(lifestyle|tourist|travel|walking|portrait|fashion)\b.{0,40}\bred\s+hat\b/i.test(blob)) {
+      return true;
+    }
+    if (/\b(back of head only|back of (?:a )?(?:head|person|woman|man)|from behind|rear view)\b/i.test(blob)) {
+      return true;
+    }
+    if (/\b(chain.?link fence|airport fence|behind (?:a )?fence|tourist fence|plane spotter|plane spotting|watching planes)\b/i.test(blob)) {
+      return true;
+    }
+    // Generic crying/reaction portraits are not cabin-pressure B-roll.
+    if (
+      /\b(crying|tears|emotional|distressed)\b/i.test(blob)
+      && !AIRLINE_STRONG_RE.test(airlineVisualEvidenceBlob(clip))
+      && !AIRLINE_TRUSTED_QUERY_RE.test(String(clip.query || ''))
+    ) {
+      return true;
+    }
+  }
+  // Office/cowork pads are never OK on non-workplace stories (airline, nursing, etc.).
+  if (
+    !isWorkplaceTopic(topicBlob)
+    && /\b(office|coworking|open.?plan|imac|boardroom|conference room|startup office|corporate handshake|bright office daylight)\b/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
+  // Junk titles that slip past URL host filters.
+  if (
+    /#fyp|#tiktok|#disney|sofia the first|encerr[oó]|maleta|minecraft|fortnite|roblox|gacha|asmr|mukbang|\belmo\b|sesame street|muppet|cookie monster|big bird|peppa pig|cocomelon/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
+  // TikTok/proxy harvest often injects psychology cards, HUD, off-story text screens.
+  if (/tiktok\.com|\/api\/download-clip\?url=.*tiktok/i.test(`${clip.url || ''} ${blob}`)) {
+    return true;
+  }
+  if (
+    /\b(psychology textbook|textbook page|powerpoint slide|presentation slide|sci-?fi (cockpit|hud)|spaceship|nebula|galaxy stock|hud overlay|holographic ui)\b/i.test(
+      blob,
+    )
+  ) {
+    return true;
+  }
+  // Dark airplane-window vignettes read as black title cards under hook text.
+  if (
+    /\b(airplane window|plane window|cabin window)\b/i.test(blob)
+    && /\b(night|dark|silhouette|black|dim|underexposed)\b/i.test(blob)
+  ) {
+    return true;
+  }
+  if (/\b(black and white|b&w|monochrome|grayscale)\b/i.test(blob) && preferBright) {
+    return true;
+  }
+  const lifestyleJunk =
+    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
+      blob,
+    );
+  if (lifestyleJunk) {
+    const aviationRunway = isAirlineTopic(topicText) && /\brunway\b/i.test(blob) && AIRLINE_STRONG_RE.test(blob);
+    if (!aviationRunway) return true;
+  }
+  // Reject muddy/night/overexposed stock when preferBright is on.
+  if (
+    preferBright
+    && /\b(night|dark|silhouette|low.?light|underexposed|muddy|dimly|shadowy|overexposed|blown.?out|washed.?out)\b/i.test(blob)
+    && !(isAirlineTopic(topicText) && /\bmaintenance hangar night\b|\bhangar\b.{0,30}\bnight\b/i.test(blob))
+  ) {
+    return true;
+  }
+  // Surgical/hygiene hospital stills are junk unless the topic is healthcare cyber.
+  if (/surgery|surgical|operating room/.test(blob) && !isHealthcareTopic(topicBlob)) return true;
+  if (
+    /hospital/.test(blob)
+    && !isHealthcareTopic(topicBlob)
+    && !isNursingHomeTopic(topicBlob)
+    && !/hack|breach|ransom|data|cyber|records?/.test(blob)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
+  // Pixabay: short query tokens only (long topics match noise).
+  const faceFirst = options.faceSeek === true;
+  const preferBright = options.preferBright === true;
+  const nursing = isNursingHomeTopic(topicBlob);
+  const housing = isHousingTopic(topicBlob);
+  const insurance = isInsuranceFraudTopic(topicBlob);
+  const veterans = isVeteransBenefitsTopic(topicBlob);
+  const school = isSchoolEducationTopic(topicBlob);
+  const healthcareCyber = isHealthcareCyberTopic(topicBlob) && cyberTopic;
+  const heist = isHeistTopic(topicBlob);
+  const airline = isAirlineTopic(topicBlob);
+  const brightBoost = preferBright
+    ? nursing
+      ? ['bright care home corridor day', 'well lit nursing home hallway', 'daylight elderly care room']
+      : housing
+        ? ['bright apartment interior daylight', 'sunny porch house exterior', 'well lit kitchen table worried']
+        : insurance
+          ? ['daylight car crash dashcam footage', 'bright highway traffic accident news', 'well lit insurance paperwork desk']
+          : veterans
+          ? ['bright government office daylight', 'well lit desk paperwork documents', 'daylight veteran portrait worried']
+          : healthcareCyber
+            ? ['well lit hospital corridor day', 'bright hospital waiting room', 'daylight medical records desk']
+            : airline
+              ? ['bright airplane cabin daylight', 'sunny airport runway plane', 'daylight cockpit instruments']
+              : heist
+                ? ['bright airport terminal daylight', 'sunny runway plane exterior', 'daylight security vault door']
+                : ['news interview worried person outdoor', 'sunny city street pedestrians', 'daylight documentary handheld']
+    : [];
+  // Anti-HUD fillers after topical packs. Avoid "handheld camera" (camcorder loops).
+  const antiHud = nursing
+    ? ['documentary care home footage people', 'real surveillance hallway footage', 'authentic news interview elderly care']
+    : housing
+      ? ['real apartment building exterior footage', 'documentary eviction notice tenant worried']
+      : insurance
+        ? ['real dashcam car crash footage', 'documentary insurance claim investigation']
+        : veterans
+        ? ['real veteran portrait worried', 'documentary government office paperwork']
+        : healthcareCyber
+          ? ['real hospital corridor footage people', 'documentary nurse workstation']
+          : airline
+            ? ['real airplane cabin passengers daylight', 'documentary airport runway plane']
+            : ['news interview worried person', 'city street pedestrians daylight', 'person reading news phone outdoor'];
+  /** Topic + faces first; bright/antiHud only as late fillers. */
+  const withFillers = (base) => [...base, ...brightBoost.slice(0, 2), ...antiHud.slice(0, 2)];
+  // Airline: aviation bright fillers only — never append generic office pads.
+  const withAirlineFillers = (base) => [
+    ...base,
+    'bright airplane cabin daylight',
+    'sunny airport runway plane',
+    'daylight cockpit instruments',
+    'real airplane cabin passengers daylight',
+  ];
+  // Housing+"AI": avoid podcast-mic / cyber B-roll.
+  if (housing) {
+    const faces = [
+      'worried couple reading letter home',
+      'stressed family apartment interior',
+      'person holding eviction notice paper',
+      'tenant packing boxes apartment',
+      'shocked face close up phone',
+      'couple arguing bills kitchen table',
+    ];
+    const topical = [
+      'apartment building exterior city',
+      'for rent sign house porch',
+      'keys lock apartment door',
+      'eviction notice paper hands close up',
+      'landlord house door knock',
+      'court documents paperwork close up',
+      'worried tenant reading letter kitchen',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  if (insurance) {
+    const faces = [
+      'shocked driver looking at phone car',
+      'worried couple insurance paperwork',
+      'person reviewing dashcam footage laptop',
+      'injured person holding neck whiplash',
+    ];
+    const topical = [
+      'car crash dashcam footage highway',
+      'damaged car accident scene daylight',
+      'insurance adjuster inspecting car damage',
+      'traffic accident news footage',
+      'car bumper damage close up',
+      'police accident scene road',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  // Nursing abuse/CCTV: never hospital-breach stock.
+  if (nursing) {
+    const faces = [
+      'worried family elderly care visit',
+      'shocked caregiver face close up',
+      'elderly person care home room',
+      'family looking at security footage',
+    ];
+    const topical = [
+      'security camera cctv hallway corridor',
+      'nursing home corridor wheelchair',
+      'surveillance monitor security footage',
+      'care worker elderly patient room',
+      'elderly care facility hallway',
+      'cctv camera ceiling close up',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  // Veterans/dark-web: not bank OTP / voice-clone stock.
+  if (isVeteransBenefitsTopic(topicBlob)) {
+    const faces = [
+      'veteran looking at phone worried',
+      'shocked person reading letter documents',
+      'worried couple looking at paperwork',
+      'person checking credit report laptop',
+    ];
+    const topical = [
+      'government office paperwork documents',
+      'military dog tags close up',
+      'identity theft paperwork hands',
+      'laptop social security form',
+      'person calling phone worried face',
+      'credit freeze documents desk',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  if (
+    /port|strike|container|shipping|cargo|dock|freight|supply\s*chain|maritime/.test(topicBlob)
+    && /hack|breach|track|cyber|ransom/.test(topicBlob)
+  ) {
+    const faces = [
+      'worried dock worker looking at phone',
+      'shocked logistics manager tablet',
+      'person reading shipping notice worried',
+    ];
+    const topical = [
+      'shipping container port crane',
+      'cargo ship dock workers',
+      'container yard logistics trucks',
+      'port strike workers picket line',
+      'warehouse forklift shipping boxes',
+      'tracking screen logistics map',
+    ];
+    const brightPort = preferBright
+      ? ['bright container port daylight', 'sunny cargo ship dock', 'daylight warehouse shipping boxes']
+      : [];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return [...base, ...brightPort, ...antiHud.slice(0, 1)];
+  }
+  if (school && /hack|ransom|breach|cyber|leak|data|records/.test(topicBlob)) {
+    const faces = [
+      'worried parent reading letter school',
+      'student laptop classroom worried',
+      'teacher shocked looking at computer',
+      'parent child homework worried kitchen',
+    ];
+    const topical = [
+      'school hallway students walking',
+      'classroom laptop student desk',
+      'school computer lab students',
+      'school office paperwork desk',
+      'library students studying laptops',
+      'server room data center school',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  if (isHealthcareTopic(topicBlob) && cyberTopic) {
+    const faces = [
+      'worried patient looking at phone',
+      'stressed nurse looking at computer',
+      'doctor shocked at laptop screen',
+      'family worried hospital waiting room',
+      'person reading medical bill phone',
+    ];
+    const topical = [
+      'hospital corridor empty hallway',
+      'medical records laptop paperwork',
+      'hospital computer workstation',
+      'server room data center racks',
+      'hands typing medical keyboard',
+      ...(preferBright ? ['hospital exterior building day'] : ['hospital exterior building night']),
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
+    return withFillers(base);
+  }
+  if (airline) {
+    // Face queries MUST bind to cabin/cockpit — bare "worried face" returns football/hospital/astronaut.
+    const faces = [
+      'airplane cabin passenger face worried',
+      'pilot cockpit headset face close-up',
+      'flight attendant airplane cabin face',
+      'passenger oxygen mask airplane cabin',
+    ];
+    const topical = [
+      'oxygen mask deploy airplane cabin',
+      'maintenance hangar night aircraft',
+      'mechanic tools aircraft hangar',
+      'cabin pressure gauge cockpit',
+      'airplane cabin passengers daylight',
+      'cockpit instruments close-up',
+      'aircraft maintenance hangar',
+      'airport runway plane takeoff',
+      'boarding airplane jet bridge',
+      'airplane cabin aisle daylight',
+      // Short archive.org-friendly queries (long cabin phrases often return 0–1 MP4s).
+      'airplane',
+      'aircraft hangar',
+      'airport runway',
+      'cockpit',
+      'airplane takeoff',
+      'airplane landing',
+      'commercial aircraft',
+      'jet aircraft',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withAirlineFillers(base);
+  }
+  // Heist/airport fraud: not bank OTP stock.
+  if (heist) {
+    const faces = [
+      'investigator reviewing documents worried',
+      'shocked person reading news phone',
+      'security guard looking at monitor',
+      'person examining diamond jewelry close up',
+    ];
+    const topical = [
+      'airport runway cargo plane exterior',
+      'airport terminal security checkpoint',
+      'bank vault safe door security',
+      'diamond jewelry close up macro',
+      'cargo warehouse logistics forklift',
+      'jewelry store display diamonds',
+      'surveillance camera airport terminal',
+      'investigation news documentary footage',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
+    return withFillers(base);
+  }
+  if (cyberTopic) {
+    const faces = [
+      'shocked person looking at phone',
+      'worried couple looking at phone',
+      'person on phone call scared face',
+      'woman crying looking at phone',
+      'man reaction shock close up',
+      'elderly person phone call worried',
+    ];
+    // Mic/podcast studio only as late filler.
+    const topical = [
+      'credit card payment laptop hands',
+      'hacker typing computer dark',
+      'fingerprint biometric unlock',
+      'bank building exterior city',
+      'lock padlock security close up',
+      'smartphone banking app hands',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
+    return withFillers(base);
+  }
+  if (/tornado|storm|disaster/i.test(topicBlob) && !/zoning|flood[-\s]?risk|flood\s*map/i.test(topicBlob)) {
+    return withFillers(['tornado storm damage news', 'severe weather radar', 'emergency news footage', 'people sheltering storm']);
+  }
+  // Cold-eval topic packs that otherwise get weak 4-word joins.
+  if (/ambulance|gps\s*route|demolished|paramedic|911\s*dispatch/i.test(topicBlob)) {
+    const faces = [
+      'paramedic looking at phone worried',
+      'ambulance driver stressed face',
+      'emergency dispatcher headset worried',
+    ];
+    const topical = [
+      'ambulance racing rural highway',
+      'demolished house rubble exterior',
+      'gps navigation map phone close up',
+      'emt crew stretcher emergency',
+      'abandoned house collapsed porch',
+      '911 dispatch center monitors',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  if (/zoning|flood[-\s]?risk|flood\s*map|neighborhood/i.test(topicBlob)) {
+    const faces = [
+      'worried homeowner reading zoning notice',
+      'couple looking at flood map worried',
+      'city planner pointing at map desk',
+    ];
+    const topical = [
+      'flood risk zoning map close up',
+      'city planning map documents desk',
+      'neighborhood houses street daylight',
+      'flooded street residential area',
+      'municipal office paperwork maps',
+      'homeowner porch looking at papers',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  if (/climate\s*sensor|sensor\s*calibrat|fake\s*climate|university\s*lab/i.test(topicBlob)) {
+    const faces = [
+      'scientist looking at laptop worried',
+      'lab researcher pipette shocked face',
+      'professor reviewing charts desk',
+    ];
+    const topical = [
+      'university science lab instruments',
+      'climate sensor weather station',
+      'scientist pipette test tubes lab',
+      'data charts laptop research desk',
+      'laboratory calibration equipment',
+      'weather sensor outdoor close up',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  if (/indie\s*game|source\s*code|cloud\s*lockout/i.test(topicBlob)) {
+    const faces = [
+      'game developer shocked at laptop',
+      'worried programmer looking at screen',
+      'indie studio team stressed office',
+    ];
+    const topical = [
+      'coding laptop source code screen',
+      'game development workstation desk',
+      'cloud lockout error laptop screen',
+      'keyboard typing code close up',
+      'small office developers computers',
+      'person slamming laptop frustrated',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  if (/museum\s*archive|mislabeled|colonial\s*artifact/i.test(topicBlob)) {
+    const faces = [
+      'curator examining artifact worried',
+      'archivist reading label documents',
+      'museum visitor looking at exhibit',
+    ];
+    const topical = [
+      'museum archive shelves artifacts',
+      'colonial artifact display case',
+      'archivist gloves handling object',
+      'museum storage boxes labels',
+      'old document catalog close up',
+      'museum gallery exhibit hall',
+    ];
+    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    return withFillers(base);
+  }
+  const words = String(topicBlob || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 3)
+    .slice(0, 4);
+  const base = words.length ? [words.join(' '), ...words.slice(0, 2)] : ['people using technology'];
+  const withFaces = faceFirst
+    ? ['person reacting to news phone', 'shocked face close up', ...base]
+    : base;
+  return withFillers(withFaces);
+}
+
+/** Exported for unit tests (bright / anti-HUD / nursing query proof). */
+export {
+  stockMotionQueries,
+  isSafeStockMotionQuery,
+  isNursingHomeTopic,
+  isHealthcareTopic,
+  isJunkStockClip,
+  isCyberRelevantClip,
+  isAirlineRelevantClip,
+  stripUnsafeMediaAssets,
+  injectCyberStockStills,
+};
+
+/**
+ * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
+ * No Pexels/Pixabay keys required.
+ */
+async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '', options = {}) {
+  const segments = project.script || [];
+  if (!segments.length) return;
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
+  const seriousTopic = isSeriousNewsTopic(topicBlob);
+  const housingTopic = isHousingTopic(topicBlob);
+  // Bare "AI" matched landlord topics and pulled podcast-mic stock.
+  const schoolCyber =
+    isSchoolEducationTopic(topicBlob)
+    && /hack|ransom|breach|cyber|leak|data|records/.test(topicBlob);
+  const cyberTopic =
+    !housingTopic
+    && !isNursingHomeTopic(topicBlob)
+    && !isVeteransBenefitsTopic(topicBlob)
+    && !isHeistTopic(topicBlob)
+    && (isBankScamTopic(topicBlob) || isHealthcareCyberTopic(topicBlob) || schoolCyber);
+
+  stripJunkDemoVideos(project, report);
+
+  const liveClips = [];
+  const hasStockKeysEarly = Boolean(resolvePexelsKey() || resolvePixabayKey());
+  // Without Pexels/Pixabay, airline soft-pass still needs ≥12 unique motion clips —
+  // lean harder on archive.org (keyless) instead of stopping at the tiny non-stock cap.
+  const airlineKeyless = isAirlineTopic(topicBlob) && !hasStockKeysEarly;
+  const queries = stockMotionQueries(topicBlob, cyberTopic, {
+    faceSeek: options.faceSeek === true,
+    preferBright: options.preferBright === true,
+  }).filter(isSafeStockMotionQuery);
+
+  const queryCap = airlineKeyless ? 28 : 18;
+  const liveCap = airlineKeyless ? 120 : 80;
+  const perQueryCap = airlineKeyless ? 8 : 5;
+  for (const q of queries.slice(0, queryCap)) {
+    const fromPexels = await fetchPexelsVideos(q, 10);
+    const fromPixabay = await fetchPixabayVideos(q, 10);
+    // Skip archive.org for cyber topics when stock API keys exist.
+    const fromArchive =
+      !cyberTopic || !hasStockKeysEarly
+        ? (devServer ? await fetchArchiveVideoResults(devServer, q) : [])
+        : [];
+    let addedForQuery = 0;
+    for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
+      if (liveClips.length >= liveCap || addedForQuery >= perQueryCap) break;
+      if (isJunkStockClip(clip, topicBlob, { preferBright: options.preferBright === true })) {
+        report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+        continue;
+      }
+      if (
+        (
+          cyberTopic
+          || housingTopic
+          || isNursingHomeTopic(topicBlob)
+          || isVeteransBenefitsTopic(topicBlob)
+          || isHealthcareCyberTopic(topicBlob)
+          || schoolCyber
+          || isHeistTopic(topicBlob)
+          || isAirlineTopic(topicBlob)
+        )
+        && !isCyberRelevantClip(clip, topicBlob)
+      ) {
+        report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+        continue;
+      }
+      // Vision gate on stock thumbs (keywords miss off-brand junk).
+      // Skip for short trusted airline queries — vision was rejecting real cabin/cockpit faces
+      // and leaving only 3–4 hangar/runway pads (soft-pass thin → D-grade).
+      const thumb = clip.thumbnailUrl || clip.image || '';
+      const apiKey = resolveOpenRouterKey();
+      const trustedAirlineQuery =
+        isAirlineTopic(topicBlob)
+        && AIRLINE_TRUSTED_QUERY_RE.test(q)
+        && String(q).trim().length <= 72;
+      const visionBudget = isAirlineTopic(topicBlob) ? 24 : 6;
+      if (
+        thumb
+        && apiKey
+        && !trustedAirlineQuery
+        && (report.visionStockChecked || 0) < visionBudget
+      ) {
+        report.visionStockChecked = (report.visionStockChecked || 0) + 1;
+        const verdict = await visionRejectOffBrandStock(thumb, apiKey, topicBlob);
+        if (verdict.reject) {
+          report.visionStockRejected = (report.visionStockRejected || 0) + 1;
+          report.visionStockRejectedThumbs = report.visionStockRejectedThumbs || [];
+          report.visionStockRejectedThumbs.push({ thumbnailUrl: thumb, reason: verdict.reason || '' });
+          report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+          continue;
+        }
+      }
+      if (liveClips.some((c) => c.url === clip.url)) continue;
+      liveClips.push({ ...clip, query: q });
+      addedForQuery += 1;
+    }
+  }
+  report.archiveLiveFetched = liveClips.filter((c) => /Archive/i.test(c.source || '')).length;
+  report.pexelsFetched = liveClips.filter((c) => /Pexels/i.test(c.source || '')).length;
+  report.pixabayFetched = liveClips.filter((c) => /Pixabay/i.test(c.source || '')).length;
+  if (options.faceSeek) report.faceSeekQueries = queries.slice(0, 6);
+
+  let pool = [
+    ...liveClips,
+    ...(housingTopic && curatedPacksEnabled() ? STOCK_HOUSING_VIDEOS : []),
+    ...(cyberTopic ? MIXKIT_VIDEO_POOL : []),
+    ...(seriousTopic ? topicalStockVideos(topicBlob, STOCK_VIDEO_POOL) : STOCK_VIDEO_POOL.filter((v) => !(v.tags || []).includes('filler'))),
+  ];
+  // Dedupe by URL; drop junk tags.
+  const seenPool = new Set();
+  pool = pool.filter((v) => {
+    const key = (v.url || '').split('?')[0];
+    if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key) || isJunkStockClip(v, topicBlob, { preferBright: options.preferBright === true })) return false;
+    if (isAirlineTopic(topicBlob) && !isCyberRelevantClip(v, topicBlob)) return false;
+    seenPool.add(key);
+    return true;
+  });
+  // Round-robin by query so one shot doesn't dominate.
+  const byQuery = new Map();
+  for (const clip of pool) {
+    const q = clip.query || clip.source || 'pool';
+    if (!byQuery.has(q)) byQuery.set(q, []);
+    byQuery.get(q).push(clip);
+  }
+  const interleaved = [];
+  const buckets = [...byQuery.values()];
+  let bi = 0;
+  while (interleaved.length < pool.length) {
+    let progressed = false;
+    for (let b = 0; b < buckets.length; b += 1) {
+      const bucket = buckets[(bi + b) % buckets.length];
+      if (bucket.length) {
+        interleaved.push(bucket.shift());
+        progressed = true;
+      }
+    }
+    bi += 1;
+    if (!progressed) break;
+  }
+  pool = interleaved.length ? interleaved : pool;
+
+  if (!pool.length) {
+    report.videoTopUpSkipped = 'no-motion-pool';
+    return;
+  }
+
+  const usableVideos = (project.media || []).filter(
+    (a) => a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
+  );
+  const stockApiVideos = usableVideos.filter((a) => /pexels|pixabay|mixkit|archive\.org/i.test(`${a.url} ${a.source || ''}`));
+  const videoCount = usableVideos.length;
+  // With stock API keys, require real stock motion (not harvest proxies).
+  const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
+  const airlineTopic = isAirlineTopic(topicBlob);
+  // Airline soft-pass floor is max(12, segN*2). Without Pexels/Pixabay, still chase that
+  // via archive — do not stop at the generic keyless cap of 6 (ships HARVEST_VOLUME_FAIL).
+  const minVideos = hasStockKeys
+    ? Math.min(
+      28,
+      Math.max(
+        16,
+        segments.length * 4,
+        Math.ceil(
+          (segments.reduce((s, seg) => s + (Number(seg.duration) || 15), 0)
+            / (options.cutIntervalSec || 1.25)) * 0.75,
+        ),
+      ),
+    )
+    : airlineTopic
+      ? Math.max(12, segments.length * 2)
+      : Math.min(segments.length * 2, 6);
+  const stockNeed = hasStockKeys
+    ? Math.max(0, Math.max(16, segments.length * 4) - stockApiVideos.length)
+    : airlineTopic
+      ? Math.max(0, Math.max(12, segments.length * 2) - stockApiVideos.length)
+      : 0;
+  if (videoCount >= minVideos && stockNeed <= 0) return;
+
+  const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+  let need = Math.max(minVideos - videoCount, stockNeed);
+  const faceScore = (clip) => {
+    const blob = `${clip.query || ''} ${clip.alt || ''}`.toLowerCase();
+    if (isGenericStockJunk(blob, topicBlob)) return -4;
+    if (
+      !isWorkplaceTopic(topicBlob)
+      && /\b(office|coworking|open.?plan|imac|boardroom|conference room|bright office daylight)\b/i.test(blob)
+    ) {
+      return -20;
+    }
+    if (/microphone|podcast|recording studio|asmr|rode|press conference|news desk/i.test(blob)) return -3;
+    if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|open plan office|coworking/i.test(blob)) return -4;
+    if (isAirlineTopic(topicBlob)) {
+      if (AIRLINE_OFF_TOPIC_RE.test(blob)) return -20;
+      if (AIRLINE_DISCONNECTED_PAD_RE.test(blob)) return -20;
+      if (!isAirlineRelevantClip(clip, topicBlob)) return -20;
+      if (
+        /\b(daylight|sunny|bright|well.?lit)\b/i.test(blob)
+        && /\b(airplane|aircraft|plane)?\s*cabin|aisle\b/i.test(blob)
+        && /\b(face|faces|passengers?|people|crew|attendant)\b/i.test(blob)
+      ) {
+        return 8;
+      }
+      if (/\bpilot\b.{0,40}\bcockpit\b.{0,40}\bheadset\b|\bcockpit\b.{0,40}\bheadset\b.{0,40}\bpilot\b/i.test(blob)) return 8;
+      if (/\boxygen\s*mask\b/i.test(blob) && /\b(cabin|airplane|aircraft|plane|passenger)\b/i.test(blob)) return 8;
+      if (/\b(hangar|maintenance|mechanic)\b/i.test(blob) && /\b(aircraft|airplane|plane|jet|fuselage)\b/i.test(blob)) return 7;
+      if (/\b(runway|tarmac)\b/i.test(blob) && /\b(plane|aircraft|airplane|jet)\b/i.test(blob)) return 7;
+      if (/airplane cabin passenger|pilot cockpit|flight attendant airplane|oxygen mask|cabin pressure|pressure gauge|mechanic tools|maintenance hangar|redacted|faa report|paperwork|documents/i.test(blob)) return 5;
+      if (/airline|aircraft|airplane|aviation|cabin|cockpit|passenger|pilot|attendant|flight|mechanic|hangar|faa|oxygen/i.test(blob)) return 3;
+      if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
+    }
+    if (
+      (options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1')
+      && /\b(night|dark|silhouette|low.?light|muddy|underexposed|overexposed|blown.?out|washed.?out)\b/i.test(blob)
+    ) {
+      return -2;
+    }
+    if (/nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) return 3;
+    if (/airport|runway|vault|diamond|jewel|cargo|security|heist|jewelry/i.test(blob)) return 2;
+    if (/face|person|people|couple|worried|shocked|reaction|crying|tenant|family|evict/i.test(blob)) return 2;
+    if (/apartment|rent|keys|notice|letter|packing|boxes/i.test(blob)) return 1;
+    if (/\b(daylight|sunny|bright|well.?lit|documentary|handheld|cctv|surveillance)\b/i.test(blob)) return 1;
+    return 0;
+  };
+  const picks = pickStockVideos(need + segments.length * 8, mediaOffset, pool)
+    .slice()
+    .sort((a, b) => faceScore(b) - faceScore(a));
+  let vi = 0;
+  const injectClip = async (seg, clip, tag) => {
+    const key = clip.url.split('?')[0];
+    if (!key || used.has(key)) return false;
+    const isIntro = seg.type === 'intro' || seg === segments[0];
+    const score = faceScore(clip);
+    if (isAirlineTopic(topicBlob) && score <= -20) return false;
+    if (isIntro && score < 0) return false;
+    const ok = await canFetch(clip.url, { timeoutMs: 10000, minBytes: 2048, expectVideo: true });
+    if (!ok) {
+      report.videoTopUpFailed = report.videoTopUpFailed || [];
+      report.videoTopUpFailed.push({ url: clip.url, reason: 'probe failed' });
+      return false;
+    }
+    const n = (report.videoTopUp || []).length;
+    const airline = isAirlineTopic(topicBlob);
+    const safeQuery =
+      clip.query
+      || (airline ? 'airplane cabin passengers daylight' : `stock-video ${seg.title}`);
+    project.media.push({
+      id: `stock-video-${seg.id}-${tag}-${n}`,
+      segmentId: seg.id,
+      type: 'video',
+      url: clip.url,
+      alt: clip.alt || (airline ? 'stock aviation video' : seg.title),
+      query: safeQuery,
+      source: clip.source || 'Stock video pool',
+      duration: 8,
+      isFallback: false,
+    });
+    used.add(key);
+    need -= 1;
+    report.videoTopUp = report.videoTopUp || [];
+    report.videoTopUp.push({ segmentId: seg.id, url: clip.url, source: clip.source || 'pool' });
+    return true;
+  };
+
+  for (const seg of segments) {
+    if (need <= 0) break;
+    const segVideos = (project.media || []).filter(
+      (a) => a.segmentId === seg.id && a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
+    ).length;
+    const isIntro = seg.type === 'intro' || seg === segments[0];
+    // Per-seg floor; variety drain below fills up to minVideos (≤28).
+    const perSegTarget = hasStockKeys ? (isIntro ? 6 : 5) : 2;
+    const want = Math.max(0, perSegTarget - segVideos);
+    if (isIntro) {
+      picks.sort((a, b) => faceScore(b) - faceScore(a));
+      vi = 0;
+    }
+    for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1, vi += 1) {
+      await injectClip(seg, picks[vi], `s${i}`);
+    }
+  }
+
+  // Variety drain: keep assigning unused pool URLs until minVideos is met.
+  let drainGuard = 0;
+  while (need > 0 && vi < picks.length && drainGuard < picks.length * 2) {
+    drainGuard += 1;
+    const clip = picks[vi];
+    vi += 1;
+    if (!clip?.url || used.has(clip.url.split('?')[0])) continue;
+    const seg = segments[drainGuard % segments.length];
+    await injectClip(seg, clip, `d${drainGuard}`);
   }
 }
 
 function isJunkHarvestUrl(url) {
   const u = (url || '').toLowerCase();
   return (
-    u.includes('gravatar.com/avatar') ||
-    /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u) ||
-    u.includes('/th/id/ovp.') ||
-    u.includes('th?id=ovp.')
+    isUnsafeMediaUrl(u)
+    || isJunkWebVolumeStillUrl(u)
+    || u.includes('gravatar.com/avatar')
+    || /tse\d\.mm\.bing\.net\/th[/?]id=ovp/i.test(u)
+    || u.includes('/th/id/ovp.')
+    || u.includes('th?id=ovp.')
   );
 }
 
@@ -290,7 +1742,7 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
 
 async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}) {
   const loopMode = options.loopMode === true;
-  const minPerSegment = Math.max(3, options.minAssetsPerSegment || 6);
+  const minPerSegment = Math.max(2, options.minAssetsPerSegment || 6);
   const report = {
     before: project.media?.length || 0,
     after: 0,
@@ -311,7 +1763,13 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
 
   for (const asset of project.media) {
-    if (isJunkHarvestUrl(asset.url) || isJunkHarvestUrl(asset.thumbnailUrl)) {
+    // Videos: junk-check clip URL only (thumbs are often placeholders).
+    if (asset.type === 'video') {
+      if (isJunkHarvestUrl(asset.url) && !isProxiedClipUrl(asset.url) && !asset.url?.includes('youtube.com') && !asset.url?.includes('youtu.be') && !asset.url?.includes('vimeo.com')) {
+        report.dropped.push({ url: asset.url, reason: 'junk URL (avatar/video-thumb placeholder)' });
+        continue;
+      }
+    } else if (isJunkHarvestUrl(asset.url) || isJunkHarvestUrl(asset.thumbnailUrl)) {
       report.dropped.push({ url: asset.url, reason: 'junk URL (avatar/video-thumb placeholder)' });
       continue;
     }
@@ -387,7 +1845,9 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
   }
 
-  const relevance = filterAssetsByRelevance(validated, project);
+  const relevance = filterAssetsByRelevance(validated, project, {
+    minScore: isEvalColdMode() ? 0.28 : 0.25,
+  });
   report.relevanceDropped = relevance.dropped;
   if (relevance.dropped.length) {
     report.beforeRelevance = validated.length;
@@ -396,6 +1856,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
 
   const deduped = dedupeMediaByPHash(relevance.media, {
     devServer,
+    maxDistance: loopMode ? 9 : VISUAL_DUP_MAX_DISTANCE,
     onDrop: (item, reason) => report.phashDropped.push({ url: item.url, reason }),
   });
   project.media = [...deduped.media];
@@ -428,7 +1889,28 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   report.after = project.media.length;
 
   if (loopMode) {
-    await topUpHarvestVolume(project, devServer, minPerSegment, report);
+    const videoRich =
+      (project.media || []).filter((a) => a.type === 'video').length >=
+      Math.max(6, (project.script || []).length * 2);
+    if (!videoRich) {
+      await topUpHarvestVolume(project, devServer, minPerSegment, report);
+    } else {
+      report.imageVolumeSkipped = 'motion-rich';
+    }
+    await topUpVideoBroll(project, report, options.mediaOffset || 0, devServer, {
+      faceSeek: options.faceSeek === true,
+      preferBright: options.preferBright === true,
+      cutIntervalSec: options.cutIntervalSec,
+    });
+    injectCyberStockStills(project, report, options.mediaOffset || 0);
+    // Re-gate after top-up (can reintroduce junk).
+    stripJunkDemoVideos(project, report);
+    const paddingBeforeFilter = (project.media || []).filter(isVolumePaddingAsset);
+    const afterTopUp = filterAssetsByRelevance(project.media || [], project, {
+      minScore: isEvalColdMode() ? 0.26 : 0.22,
+    });
+    report.relevanceDroppedAfterTopUp = afterTopUp.dropped;
+    project.media = mergeVolumePadding(afterTopUp.media, paddingBeforeFilter, project);
     report.afterTopUp = project.media.length;
   }
 
@@ -455,15 +1937,17 @@ export async function generateFullVideo(options) {
   if (!topic?.trim()) throw new Error('topic is required');
 
   const fixState = { ...(options.fixState || {}) };
-  if (fixState.reHarvestMedia) {
+  if (fixState.reHarvestMedia && !fixState.keepBestMedia) {
     fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
     fixState.reHarvestMedia = false;
     if (!options.quiet) {
       console.log(`   🔄 Re-harvest requested — nonce ${fixState.harvestNonce}, offset ${fixState.mediaOffset || 0}`);
     }
+  } else if (fixState.reHarvestMedia && fixState.keepBestMedia) {
+    fixState.reHarvestMedia = false;
   }
   const priorUrls = loadLastProjectUrls(process.cwd());
-  // Never seed excludes from stale last-project during re-harvest (nonce > 0) — that starves harvest.
+  // Re-harvest (nonce > 0): don't seed excludes from stale last-project.
   if (
     priorUrls.length &&
     (!fixState.excludedUrls || fixState.excludedUrls.length === 0) &&
@@ -500,6 +1984,100 @@ export async function generateFullVideo(options) {
   };
   const loopMinAssets = Math.max(2, Math.min(8, fixState.minAssetsPerSegment || 6));
 
+  // Fast path: polish a frozen cut.
+  if (keepBestEnabled() && fixState.keepBestMedia && fixState.frozenProjectPath) {
+    const frozen = loadFrozenProject(fixState.frozenProjectPath);
+    if (frozen?.media?.length && frozen?.script?.length) {
+      log(`\n🎬 Generate (keep-best polish): ${topic}`);
+      log(`   Mode: reuse frozen media — skip Playwright harvest`);
+      log(`   Out: ${outDir}\n`);
+      const project = JSON.parse(JSON.stringify(frozen));
+      project.topic = topic;
+      project.title = topic;
+      patchProjectForLoop(project, topic, { ...fixState, forceRealStock: false }, { skipMediaPatch: true });
+      const timelineReport = validateEditTimeline(project, {
+        cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+        maxReusePerUrl: fixState.maxReusePerUrl ?? 1,
+      });
+      if (timelineReport.rebuilt) {
+        log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips)`);
+      }
+      const projectPath = `/tmp/autotube-project.json`;
+      writeFileSync(projectPath, JSON.stringify(project, null, 2));
+      writeFileSync(join(outDir, 'project.json'), JSON.stringify(project, null, 2));
+      writeFileSync(join(root, 'test-recordings', 'last-project.json'), JSON.stringify(project, null, 2));
+      const scriptText =
+        project.script?.map((s) => s.narration).filter(Boolean).join('\n\n') || '';
+      const mp4Out = join(outDir, 'final-video.mp4');
+      log(`🎥 Render → ${mp4Out}`);
+      const renderEnv = buildRenderEnvFromFixState(fixState, { devServer, projectPath });
+      const renderSnapshot = renderEnvJournalSnapshot(fixState);
+      writeFileSync(join(outDir, 'render-env.json'), JSON.stringify(renderSnapshot, null, 2));
+      const render = spawnSync('node', ['server-render.mjs', mp4Out], {
+        cwd: root,
+        env: renderEnv,
+        encoding: 'utf8',
+        timeout: 1_800_000,
+        stdio: ['inherit', 'pipe', 'pipe'],
+      });
+      writeFileSync(join(outDir, 'render.log'), `${render.stdout || ''}\n${render.stderr || ''}`);
+      if (render.status !== 0 && render.status !== null) {
+        return {
+          ok: false,
+          error: `keep-best render failed: exit ${render.status}`,
+          topic,
+          outDir,
+          fixState,
+        };
+      }
+      const finalMp4 = mp4Out.replace('.mp4', '-final.mp4');
+      const produced = existsSync(finalMp4) ? finalMp4 : existsSync(mp4Out) ? mp4Out : null;
+      if (!produced) {
+        return { ok: false, error: 'keep-best: No output MP4', topic, outDir, fixState };
+      }
+      const gate = validateOutput(produced, 'Render output', { minBytes: MIN_RENDER_OUTPUT_BYTES });
+      if (!gate.valid) {
+        return { ok: false, error: gate.error, topic, outDir, fixState };
+      }
+      copyFileSync(produced, join(outDir, 'FINAL-VIDEO-final.mp4'));
+      spawnSync('node', ['scripts/finalize-ship-artifacts.mjs'], {
+        cwd: root,
+        env: {
+          ...process.env,
+          AUTOTUBE_LOOP_MODE: '1',
+          AUTOTUBE_FINALIZE_SOURCE: produced,
+          MIN_DURATION_SEC: process.env.MIN_DURATION_SEC || '30',
+          REAL_PASS_FIXTURE: '1',
+        },
+        stdio: options.quiet ? 'pipe' : 'inherit',
+      });
+      const probe = spawnSync(
+        'ffprobe',
+        ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', produced],
+        { encoding: 'utf8' },
+      );
+      const durationSec = probe.stdout ? parseFloat(probe.stdout.trim()) : NaN;
+      return {
+        ok: true,
+        topic,
+        outDir,
+        projectPath,
+        videoPath: produced,
+        canonicalPath: join(root, 'test-recordings', 'FINAL-VIDEO-final.mp4'),
+        scriptText,
+        durationSec,
+        sizeMb: (gate.size / 1024 / 1024).toFixed(2),
+        realHarvest: false,
+        fixState,
+        renderEnv: renderSnapshot,
+        harvestNonce: fixState.harvestNonce || 0,
+        keepBestPolish: true,
+      };
+    }
+    log('⚠️ Keep-best frozen project unusable — falling back to full generate');
+    fixState.keepBestMedia = false;
+  }
+
   if (!(await checkDevServer(devServer))) {
     return { ok: false, error: `Dev server not reachable at ${devServer}`, topic, outDir };
   }
@@ -529,14 +2107,16 @@ export async function generateFullVideo(options) {
   const pixabayKey = resolvePixabayKey();
 
   const harvestStorage = harvestSessionStoragePayload(harvestCtx);
+  const autotubeApiKey = resolveAutotubeApiKey();
   await browserContext.addInitScript(
-    ({ key, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
+    ({ key, autotubeKey, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
       localStorage.setItem('autotube_onboarding_seen', 'true');
       localStorage.removeItem('autotube_project');
       sessionStorage.setItem(
         'autotube_config_session',
         JSON.stringify({
           openRouterKey: key,
+          autotubeApiKey: autotubeKey || '',
           sourceType: rawFirst ? 'raw' : 'stock',
           pexelsKey: pexels,
           pixabayKey: pixabay,
@@ -554,6 +2134,7 @@ export async function generateFullVideo(options) {
     },
     {
       key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline',
+      autotubeKey: autotubeApiKey,
       minAssets: loopMinAssets,
       pexels: pexelsKey,
       pixabay: pixabayKey,
@@ -677,7 +2258,15 @@ export async function generateFullVideo(options) {
   const gotoDevServer = async () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
+        await page.addInitScript(() => {
+          try {
+            localStorage.setItem('autotube_onboarding_seen', 'true');
+          } catch {
+            /* ignore */
+          }
+        });
         await page.goto(devServer, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+        await dismissOnboarding(page);
         return;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -695,97 +2284,301 @@ export async function generateFullVideo(options) {
     }
   };
 
+  // Soft wait for Source Media; extend to hard cap while script gen is active.
   const scriptTimeoutMs = realHarvest ? 240_000 : 180_000;
+  const scriptHardCapMs = realHarvest ? 600_000 : 240_000;
   const mediaTimeoutMs = realHarvest ? 1_200_000 : 300_000;
   const narrationTimeoutMs = realHarvest ? 900_000 : 600_000;
 
   try {
   // networkidle hangs when dev server is serving long harvest API streams
     await gotoDevServer();
-    if (await page.getByTestId('onboarding-modal').isVisible({ timeout: 3000 }).catch(() => false)) {
-      await page.getByTestId('onboarding-skip').click();
-    }
+    await dismissOnboarding(page);
 
-    await page.getByTestId('topic-input').fill(topic);
+    await fillTopicInput(page, topic);
     await page.getByTestId('duration-select').selectOption('3').catch(() => {});
+    await dismissOnboarding(page);
     await page.getByTestId('generate-script-only').click();
     log('⏳ Script (live OpenRouter — fast loop mode)...');
+
+    const sourceMediaBtn = () =>
+      page.getByTestId('source-media-next').or(page.getByRole('button', { name: /Source Media/i }));
+
+    const triggerScriptGeneration = async () => {
+      await dismissOnboarding(page);
+      await fillTopicInput(page, topic);
+      await page.getByTestId('duration-select').selectOption('3').catch(() => {});
+      await dismissOnboarding(page);
+      await page.getByTestId('generate-script-only').click();
+    };
+
+    const scriptWaitStartedAt = Date.now();
+    let lastGeneratingAt = 0;
+    let everSawGenerating = false;
+    const noteScriptSignals = (prog = {}) => {
+      if (prog.generating || prog.pct != null) {
+        lastGeneratingAt = Date.now();
+        everSawGenerating = true;
+      }
+    };
+    const waitForScriptReady = async (timeoutMs, { hardCapMs = timeoutMs, waitStartedAt = scriptWaitStartedAt } = {}) => {
+      const startedAt = Date.now();
+      const hardDeadline = waitStartedAt + hardCapMs;
+      let deadline = startedAt + timeoutMs;
+      let lastDump = 0;
+      let lastActivityAt = startedAt;
+      let prev = { scriptLen: 0, pct: null, rotating: '' };
+      while (Date.now() < deadline && Date.now() < hardDeadline) {
+        await dismissOnboarding(page);
+        if (await sourceMediaBtn().isVisible({ timeout: 2_000 }).catch(() => false)) return { ok: true };
+        const snap = await readProjectSnapshot(page);
+        const prog = await readScriptProgress(page);
+        noteScriptSignals(prog);
+        const body = await page
+          .evaluate(() => document.body?.innerText?.slice(0, 800) || '')
+          .catch(() => '');
+
+        if (isScriptComplete(snap)) {
+          await page.waitForTimeout(1500);
+          if (await sourceMediaBtn().isVisible({ timeout: 5_000 }).catch(() => false)) return { ok: true };
+        }
+        // Hard key errors abort; soft LLM/JSON failures recover via reclick.
+        if (/API key required|OpenRouter API key/i.test(body)) {
+          throw new Error(
+            `SCRIPT_UI_ERROR: ${body.slice(0, 200)} (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'unknown'})`,
+          );
+        }
+        const idleMs = lastGeneratingAt > 0 ? Date.now() - lastGeneratingAt : 0;
+        if (
+          /AI script generation failed|Script generation failed|Unexpected end of JSON|invalid structure|empty response/i.test(
+            body,
+          )
+          && Number(snap.scriptLen) === 0
+        ) {
+          return {
+            ok: false,
+            active: false,
+            onTopicStep: prog.onTopicStep || true,
+            recentlyGenerating: false,
+            everSawGenerating: true,
+            idleMs: Math.max(idleMs, 90_000),
+            bodyText: body,
+            scriptLen: 0,
+            deadAfterStart: true,
+          };
+        }
+
+        // Extend soft deadline only while generation is actively progressing.
+        const active = detectScriptActivity(snap, prog);
+        if (active && sawFreshActivity(snap, prog, prev)) {
+          lastActivityAt = Date.now();
+        }
+        prev = { scriptLen: snap.scriptLen, pct: prog.pct, rotating: prog.rotating };
+        if (active && Date.now() - lastActivityAt < 120_000) {
+          deadline = Math.min(hardDeadline, Date.now() + 60_000);
+        }
+        if (
+          isDeadScriptGeneration({
+            everSawGenerating,
+            active,
+            idleMs,
+            bodyText: body,
+            scriptLen: snap.scriptLen,
+          })
+        ) {
+          return {
+            ok: false,
+            active: false,
+            onTopicStep: prog.onTopicStep,
+            recentlyGenerating: false,
+            everSawGenerating,
+            idleMs,
+            bodyText: body,
+            scriptLen: snap.scriptLen,
+            deadAfterStart: true,
+          };
+        }
+
+        if (Date.now() - lastDump > 60_000) {
+          lastDump = Date.now();
+          log(
+            `   …still waiting for Source Media (${Math.round((deadline - Date.now()) / 1000)}s soft / ${Math.round((hardDeadline - Date.now()) / 1000)}s hard left, scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || (prog.generating ? 'generating' : 'idle')}, pct=${prog.pct ?? 'n/a'})`,
+          );
+        }
+        await page.waitForTimeout(3_000);
+      }
+      const snap = await readProjectSnapshot(page);
+      const prog = await readScriptProgress(page);
+      noteScriptSignals(prog);
+      const body = await page
+        .evaluate(() => document.body?.innerText?.slice(0, 800) || '')
+        .catch(() => '');
+      const idleMs = lastGeneratingAt > 0 ? Date.now() - lastGeneratingAt : 0;
+      return {
+        ok: false,
+        active: detectScriptActivity(snap, prog),
+        onTopicStep: prog.onTopicStep,
+        recentlyGenerating: lastGeneratingAt > 0 && Date.now() - lastGeneratingAt < 300_000,
+        everSawGenerating,
+        idleMs,
+        bodyText: body,
+        scriptLen: snap.scriptLen,
+        deadAfterStart: isDeadScriptGeneration({
+          everSawGenerating,
+          active: detectScriptActivity(snap, prog),
+          idleMs,
+          bodyText: body,
+          scriptLen: snap.scriptLen,
+        }),
+      };
+    };
+
     try {
-      await page.getByRole('button', { name: /Source Media/i }).waitFor({ state: 'visible', timeout: scriptTimeoutMs });
+      let result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+      if (!result.ok) {
+        const action = chooseRecoveryAction(result);
+        if (action === 'grace') {
+          log('⚠ Script still generating at soft cap — granting grace window (no reload)…');
+          result = await waitForScriptReady(120_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+        } else if (action === 'reclick') {
+          log(
+            result.deadAfterStart || result.everSawGenerating
+              ? '⚠ Script generation died after start — re-triggering (no hard-cap burn)…'
+              : '⚠ Still on topic step — re-triggering script generation (click likely missed)…',
+          );
+          await triggerScriptGeneration();
+          everSawGenerating = false;
+          lastGeneratingAt = Date.now();
+          result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: Date.now() });
+        } else {
+          log('⚠ Script wait stuck — reloading once and retrying…');
+          await gotoDevServer();
+          await triggerScriptGeneration();
+          everSawGenerating = false;
+          lastGeneratingAt = Date.now();
+          result = await waitForScriptReady(scriptTimeoutMs, { hardCapMs: scriptHardCapMs, waitStartedAt: Date.now() });
+        }
+      }
+      if (!result.ok) {
+        const action2 = chooseRecoveryAction(result);
+        if (action2 === 'reclick' || result.deadAfterStart) {
+          log('⚠ Script wait final fallback — one more generate click + wait…');
+          await triggerScriptGeneration();
+          everSawGenerating = false;
+          lastGeneratingAt = Date.now();
+          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: Date.now() });
+        } else if (action2 === 'grace') {
+          log('⚠ Script still pending — final grace wait…');
+          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: scriptWaitStartedAt });
+        } else {
+          log('⚠ Script wait final fallback — one more generate click + wait…');
+          await triggerScriptGeneration();
+          lastGeneratingAt = Date.now();
+          result = await waitForScriptReady(180_000, { hardCapMs: scriptHardCapMs, waitStartedAt: Date.now() });
+        }
+      }
+      if (!result.ok) {
+        const snap = await readProjectSnapshot(page);
+        throw new Error(
+          `SCRIPT_TIMEOUT: Source Media never appeared after ${Math.round(scriptHardCapMs / 1000)}s (scriptLen=${snap.scriptLen}, scriptStep=${snap.scriptStep || 'idle'}, projectStatus=${snap.projectStatus || 'unknown'})`,
+        );
+      }
     } catch (err) {
       writeFileSync(join(outDir, 'browser-events.json'), JSON.stringify(browserEvents, null, 2));
+      const snap = await readProjectSnapshot(page);
       const uiState = await page.evaluate(() => ({
         bodyText: document.body?.innerText?.slice(0, 4000) || '',
         projectRawLength: localStorage.getItem('autotube_project')?.length || 0,
         configRawLength: sessionStorage.getItem('autotube_config_session')?.length || 0,
         fastMode: sessionStorage.getItem('autotube_loop_fast_mode'),
       })).catch((e) => ({ error: e.message }));
-      writeFileSync(join(outDir, 'ui-state-on-script-timeout.json'), JSON.stringify(uiState, null, 2));
+      writeFileSync(
+        join(outDir, 'ui-state-on-script-timeout.json'),
+        JSON.stringify({ ...uiState, projectSnapshot: snap }, null, 2),
+      );
       await page.screenshot({ path: join(outDir, 'script-timeout.png'), fullPage: true }).catch(() => {});
       throw err;
     }
 
-    await page.getByRole('button', { name: /Source Media Assets/i }).click();
+    await dismissOnboarding(page);
+    await sourceMediaBtn().click({ timeout: 30_000 }).catch(async () => {
+      await dismissOnboarding(page);
+      await sourceMediaBtn().click({ force: true, timeout: 30_000 });
+    });
     log(`⏳ Media (${realHarvest ? 'live harvest' : 'mock harvest'})...`);
+
+    const mediaNextBtn = () =>
+      page.getByTestId('media-step-next').or(page.getByRole('button', { name: /Prepare Narration/i }));
 
     const mediaDeadline = Date.now() + mediaTimeoutMs;
     const mediaStart = Date.now();
     let mediaReady = false;
     let lastLogMin = -1;
     while (Date.now() < mediaDeadline) {
+      await dismissOnboarding(page);
       try {
-        mediaReady = await page
-          .getByRole('button', { name: /Prepare Narration/i })
-          .isVisible({ timeout: 10_000 });
+        mediaReady = await mediaNextBtn().isVisible({ timeout: 10_000 });
       } catch {
         mediaReady = false;
+      }
+      if (!mediaReady) {
+        const snap = await readProjectSnapshot(page);
+        if (snap.mediaStep === 'complete' && snap.mediaLen > 0) {
+          await page.waitForTimeout(1500);
+          mediaReady = await mediaNextBtn().isVisible({ timeout: 5_000 }).catch(() => false);
+        }
       }
       if (mediaReady) break;
       const elapsedMin = Math.floor((Date.now() - mediaStart) / 60000);
       if (elapsedMin >= 1 && elapsedMin !== lastLogMin && elapsedMin % 2 === 0) {
         lastLogMin = elapsedMin;
         const msg = await page.locator('[data-testid="dynamic-message"]').textContent().catch(() => '');
-        const progress = await page.evaluate(() => {
-          const raw = localStorage.getItem('autotube_project');
-          if (!raw) return { media: 0, segments: 0 };
-          try {
-            const p = JSON.parse(raw).project;
-            return { media: p?.media?.length ?? 0, segments: p?.script?.length ?? 0 };
-          } catch {
-            return { media: 0, segments: 0 };
-          }
-        }).catch(() => ({ media: 0, segments: 0 }));
-        log(`   … ${elapsedMin}min media harvest (${progress.media} assets / ${progress.segments} segments) ${msg ? `— ${msg.slice(0, 60)}` : ''}`);
+        const snap = await readProjectSnapshot(page);
+        log(
+          `   … ${elapsedMin}min media harvest (${snap.mediaLen} assets / ${snap.scriptLen} segments, mediaStep=${snap.mediaStep || 'processing'}) ${msg ? `— ${msg.slice(0, 60)}` : ''}`,
+        );
       }
       await page.waitForTimeout(5000);
     }
 
     if (!mediaReady) {
       writeFileSync(join(outDir, 'browser-events.json'), JSON.stringify(browserEvents, null, 2));
+      const snap = await readProjectSnapshot(page);
       const uiState = await page.evaluate(() => ({
         bodyText: document.body?.innerText?.slice(0, 4000) || '',
         projectRawLength: localStorage.getItem('autotube_project')?.length || 0,
-        mediaCount: (() => {
-          try {
-            return JSON.parse(localStorage.getItem('autotube_project') || '{}').project?.media?.length ?? 0;
-          } catch {
-            return 0;
-          }
-        })(),
         stepText: document.body?.innerText?.match(/Step \d+ — \w+/)?.[0] || '',
       })).catch((e) => ({ error: e.message }));
-      writeFileSync(join(outDir, 'ui-state-on-media-timeout.json'), JSON.stringify(uiState, null, 2));
+      writeFileSync(
+        join(outDir, 'ui-state-on-media-timeout.json'),
+        JSON.stringify({ ...uiState, projectSnapshot: snap }, null, 2),
+      );
       await page.screenshot({ path: join(outDir, 'media-timeout.png'), fullPage: true }).catch(() => {});
-      throw new Error(`Media harvest timed out after ${Math.round(mediaTimeoutMs / 60000)}min waiting for Prepare Narration`);
+      throw new Error(
+        `MEDIA_TIMEOUT: Prepare Narration never appeared after ${Math.round(mediaTimeoutMs / 60000)}min (mediaLen=${snap.mediaLen}, mediaStep=${snap.mediaStep || 'unknown'})`,
+      );
     }
 
-    await clickPipelineButton(
-      page,
-      page.getByTestId('media-step-next').or(page.locator('button:has-text("Prepare Narration")').first()),
-    );
+    await clickPipelineButton(page, mediaNextBtn());
     log('⏳ Narration...');
+    await dismissOnboarding(page);
     await page.getByTestId('skip-ai-edit-button').waitFor({ timeout: narrationTimeoutMs });
-    await page.getByTestId('skip-ai-edit-button').click();
+    if (fixState.rewriteScript === true) {
+      log('✍️ rewriteScript lever ON — running AI edit instead of skip');
+      const runAi = page.getByTestId('run-ai-edit-button').or(page.locator('button:has-text("Run AI Edit")').first());
+      const hasRunAi = await runAi.isVisible().catch(() => false);
+      if (hasRunAi) {
+        await clickPipelineButton(page, runAi, { timeout: Math.max(180_000, narrationTimeoutMs / 2) });
+        await page.waitForTimeout(2000);
+      } else {
+        await dismissOnboarding(page);
+        await page.getByTestId('skip-ai-edit-button').click();
+      }
+      fixState.rewriteScript = false;
+    } else {
+      await dismissOnboarding(page);
+      await page.getByTestId('skip-ai-edit-button').click();
+    }
     await page.waitForTimeout(500);
 
     const project = await page.evaluate(() => {
@@ -801,13 +2594,55 @@ export async function generateFullVideo(options) {
     await browser.close().catch(() => {});
     browser = null;
 
-    patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
-    if (realHarvest) {
+    // Keep-best: reuse frozen media/timeline.
+    const frozenPath = fixState.frozenProjectPath;
+    if (keepBestEnabled() && fixState.keepBestMedia && frozenPath) {
+      const frozen = loadFrozenProject(frozenPath);
+      const applied = applyFrozenMediaToProject(project, frozen);
+      if (applied.ok) {
+        log(
+          `❄️ Keep-best polish: reused ${applied.mediaCount} frozen assets / ${applied.timelineCount} timeline cuts (no reharvest lottery)`,
+        );
+        fixState.reHarvestMedia = false;
+      } else {
+        log('⚠️ Keep-best: frozen project missing/invalid — falling back to live media');
+        fixState.keepBestMedia = false;
+      }
+    }
+
+    patchProjectForLoop(project, topic, fixState, {
+      skipMediaPatch: realHarvest || fixState.keepBestMedia === true,
+    });
+    if (realHarvest && !fixState.keepBestMedia) {
       const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, {
         loopMode: true,
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
+        mediaOffset: fixState.mediaOffset || 0,
+        faceSeek: fixState.faceSeekBroll === true || fixState.harvestVideoFirst !== false,
+        preferBright: fixState.preferBrightBroll === true,
+        cutIntervalSec: fixState.cutIntervalSec ?? 0.85,
       });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
+      if (mediaReport.videoTopUp?.length) {
+        log(`   🎬 Video top-up: +${mediaReport.videoTopUp.length} motion clips`);
+      }
+      if (mediaReport.pexelsFetched || mediaReport.pixabayFetched || mediaReport.archiveLiveFetched) {
+        log(
+          `   📡 Live motion sources: pexels=${mediaReport.pexelsFetched || 0} pixabay=${mediaReport.pixabayFetched || 0} archive=${mediaReport.archiveLiveFetched || 0}`,
+        );
+      }
+      if (mediaReport.junkVideoDropped?.length) {
+        log(`   🗑️ Junk demo videos dropped: ${mediaReport.junkVideoDropped.length}`);
+      }
+      if (mediaReport.junkStockSkipped) {
+        log(`   🚫 Junk stock skipped: ${mediaReport.junkStockSkipped}`);
+      }
+      if (mediaReport.cyberStockInjected) {
+        log(`   🛡️ Cyber stock stills: +${mediaReport.cyberStockInjected}`);
+      }
+      if (mediaReport.cyberStockSkipped) {
+        log(`   🎬 Cyber stills: ${mediaReport.cyberStockSkipped}`);
+      }
       if (mediaReport.relevanceDropped?.length) {
         log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
       }
@@ -815,23 +2650,73 @@ export async function generateFullVideo(options) {
         log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
       }
       if (mediaReport.volumePass === false) {
-        const failing = mediaReport.harvestQuality?.failing || [];
-        const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
-        fixState.reHarvestMedia = true;
-        fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
-        return {
-          ok: false,
-          error: `Harvest volume gate FAIL — ${detail}`,
-          harvestQualityFail: true,
-          topic,
-          outDir,
-          fixState,
-        };
+        const soft = evaluateHarvestVolumeWithSoftPass(mediaReport, project);
+        if (soft.pass) {
+          log(`   ⚠️ Volume ${soft.reason}`);
+          mediaReport.volumePass = true;
+          mediaReport.volumeSoftPass = soft.reason;
+        } else {
+          // Last chance: pad thin segments, then re-check soft-pass.
+          await topUpHarvestVolume(project, devServer, Math.max(4, Math.floor(loopMinAssets * 0.75)), mediaReport);
+          const volume2 = evaluateHarvestVolume(project, loopMinAssets);
+          mediaReport.harvestQuality = volume2;
+          mediaReport.volumePass = volume2.pass;
+          const airlineSoftFail = volume2.pass ? airlineSoftPassMotionFailureReason(project) : null;
+          const soft2 = airlineSoftFail
+            ? { pass: false, reason: airlineSoftFail }
+            : volume2.pass
+              ? { pass: true, reason: 'volume-hard-pass-after-repad' }
+              : evaluateHarvestVolumeWithSoftPass(mediaReport, project);
+          if (soft2.pass) {
+            log(`   ⚠️ Volume recovered after stock re-pad (${soft2.reason})`);
+            mediaReport.volumePass = true;
+            mediaReport.volumeSoftPass = soft2.reason;
+          } else {
+            const failing = mediaReport.harvestQuality?.failing || [];
+            const minPer = mediaReport.harvestQuality?.minPerSegment ?? loopMinAssets;
+            const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
+            const totalMedia = project.media?.length ?? 0;
+            const segCount = project.script?.length ?? 0;
+            const failureSummary = failing.length
+              ? `${failing.length}/${segCount} segments below ${minPer} assets`
+              : `soft-pass rejected after re-pad (${soft2.reason || soft.reason || 'none'})`;
+            fixState.reHarvestMedia = true;
+            fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+            return {
+              ok: false,
+              error: `HARVEST_VOLUME_FAIL: ${failureSummary} — ${detail || 'no segment detail'} (total=${totalMedia}, soft-pass=${soft2.reason || soft.reason || 'none'})`,
+              harvestQualityFail: true,
+              topic,
+              outDir,
+              fixState,
+            };
+          }
+        }
       }
+      // Re-assert shock hook + overlay after media mutations.
+      patchProjectForLoop(project, topic, { ...fixState, forceRealStock: false }, { skipMediaPatch: true });
     }
-    const timelineReport = validateEditTimeline(project, { cutIntervalSec: fixState.cutIntervalSec ?? 1.25 });
+    const timelineReport = validateEditTimeline(project, {
+      cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+      maxReusePerUrl: fixState.maxReusePerUrl ?? 1,
+    });
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
+    }
+    if (process.env.AUTOTUBE_BROLL_PLACEMENT === '1' && fixState.brollPlacement !== false && !fixState.keepBestMedia) {
+      try {
+        const { buildBrollPlacementPlanNode } = await import('./broll-placement.mjs');
+        const plan = await buildBrollPlacementPlanNode(project, {
+          cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+          apiKey: resolveOpenRouterKey(),
+        });
+        if (plan.entries?.length) {
+          project.editTimeline = plan.entries;
+          log(`   📐 B-roll placement (${plan.source}): ${plan.entries.length} clips`);
+        }
+      } catch (e) {
+        log(`   ⚠️ B-roll placement skipped: ${e.message}`);
+      }
     }
     accumulateExcludedUrls(fixState, project);
 

@@ -276,26 +276,35 @@ export function getBackgroundMusicPath(style: string): string | null {
   return BG_MUSIC_MAP[style as VideoProject['style']] ?? null;
 }
 
+/** Linear gain from dB: 10^(dB/20). */
+export function linearGainFromDb(db: number): number {
+  return Math.pow(10, db / 20);
+}
+
 /**
  * Computes the background music volume level.
  *
- * - During narration: duck by 8dB (factor 0.158) for clear speech
- * - During transitions (no narration): boost by 3dB (factor 1.413)
- * - Base volume when no narration: 0.60
+ * Default (preview / non-YouTube):
+ * - During narration: ~0.15 (~-16 dB relative to full scale)
+ * - During transitions: boost by 3dB from 0.60 base
  *
- * dB conversion: 10^(dB/20) → -8dB = 0.158, +3dB = 1.413
+ * YouTube mode (matches deploy/server-render/audio.mjs ducking):
+ * - During narration: -36 dB (~0.016) — voice-first
+ * - Gaps / transitions: -22 dB (~0.079)
  */
 export function computeBgMusicVolume(
   hasNarration: boolean,
   isTransition?: boolean,
+  youtubeMode = false,
 ): number {
+  if (youtubeMode) {
+    if (hasNarration) return linearGainFromDb(-36);
+    return linearGainFromDb(-22);
+  }
   if (hasNarration) {
-    // Duck music during narration for clear speech
     return 0.15;
   }
-  // No narration — music is primary
   if (isTransition) {
-    // Boost by 3dB for more impactful transitions
     return 0.60 * 1.413; // ≈ 0.848
   }
   return 0.60;

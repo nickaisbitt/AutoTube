@@ -4,11 +4,13 @@
 
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { withRetry } from '../../utils/withRetry';
+import { openRouterMessageText } from '../../utils/openRouterMessageText';
 import { logger } from '../logger';
 import { trackOpenRouterCost } from '../costTracker';
+import { DEFAULT_LLM_MODEL } from './defaultModels';
 
 const DEFAULT_ENDPOINT = '/api/llm';
-const DEFAULT_MODEL = 'openai/gpt-5.4-nano';
+const DEFAULT_MODEL = DEFAULT_LLM_MODEL;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 3;
 
@@ -85,13 +87,12 @@ export async function callLLM<T = string>(
       }
 
       const data = await response.json();
-      const rawContent: unknown = data?.choices?.[0]?.message?.content;
+      const content = openRouterMessageText(data?.choices?.[0]?.message);
 
-      if (typeof rawContent !== 'string' || !rawContent.trim()) {
+      if (!content) {
         throw new Error('LLM returned empty response');
       }
 
-      const content = rawContent.trim();
       const parsed: T = parser ? parser(content) : (content as unknown as T);
 
       const usage = data?.usage

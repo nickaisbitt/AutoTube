@@ -20,7 +20,7 @@ nixPkgs = [
 # Symlink before npm ci — survives if scripts/ is omitted from the image
 cmds = [
   "if [ -d deploy/server-render ] && [ ! -e server-render ]; then ln -sfn deploy/server-render server-render; fi",
-  "pip install --break-system-packages edge-tts==7.0.2",
+  "pip install --break-system-packages edge-tts==7.0.2 scenedetect faster-whisper",
   "npm ci"
 ]
 # Don't cache node_modules — avoids huge stale layers on snapshot upload

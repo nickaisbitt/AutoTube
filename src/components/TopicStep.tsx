@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import type { TopicConfig } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
+import { extractJson } from '../utils/extractJson';
 
 interface TopicStepProps {
   config: TopicConfig;
@@ -37,8 +39,6 @@ function getIconForCategory(category: string) {
   return CATEGORY_ICONS[category] || Lightbulb;
 }
 
-import { extractJson } from '../utils/extractJson';
-
 async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -55,7 +55,7 @@ async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
         'X-Title': 'AutoTube AI Generator',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-5.4-nano',
+        model: 'xiaomi/mimo-v2.5',
         messages: [
           {
             role: 'system',
@@ -75,7 +75,7 @@ async function generateTopicIdeas(apiKey: string): Promise<SuggestedTopic[]> {
   if (!response.ok) throw new Error(`API error: ${response.status}`);
 
   const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
+  const content = openRouterMessageText(data?.choices?.[0]?.message);
   if (!content) throw new Error('Empty response');
 
   let parsed = extractJson(content);

@@ -24,6 +24,13 @@ import {
 } from '../../services/media';
 import { resolveTopicContext, planSegmentVisuals } from '../../services/visualPlanner';
 import {
+  buildVisualBeatSheetFromScript,
+  queriesFromBeatSheet,
+  visualBeatsEnabled,
+} from '../../services/visualBeatSheet';
+import { gateProjectMediaAgainstBeats } from '../../services/beatEvidenceGate';
+import { logger } from '../../services/logger';
+import {
   generateAIScript,
   reviewAndImproveScript,
   refineScriptMultiPass,
@@ -36,6 +43,8 @@ import {
 } from '../../services/llm/index';
 import { generateTitleVariants } from '../../services/llm/titleGenerator';
 import { assignSceneLayouts, scheduleRetentionBeats } from '../../services/renderingShared';
+import { hasWeakHookOpener, validateHook } from '../../services/hookValidator';
+import { HOOK_STAKES_KEYWORDS } from '../../services/videoQualityChecklist';
 import { QUALITY_PRESETS, renderVideoToBlob } from '../../services/renderer';
 import type { RenderResult } from '../../services/renderer/encoding';
 import { trackVideoGeneration } from '../../services/analytics';
@@ -44,7 +53,6 @@ import { CHART_KEYWORDS } from '../../services/captionUtils';
 import { runAIEditPass } from '../../services/aiEditor';
 import { resolveProjectHookLine, syncIntroNarrationToHook } from '../../services/seoTitles';
 import { prepareThumbnailConcepts } from '../../services/thumbnail';
-import { logger } from '../../services/logger';
 import { runBlindReview } from '../../services/blindReview';
 import { generateGrokTts, generateMeloTts } from '../../services/tts';
 import { CURRENT_PROJECT_VERSION } from '../../services/projectMigrations';
@@ -86,8 +94,14 @@ export async function executeGenerateScript(
     segments = await generateAIScript(config, appConfig.openRouterKey, undefined, signal);
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
-      logger.info('Store', 'Script generation cancelled by user');
-      return null;
+      // Per-attempt fetch timeouts also surface as AbortError — only treat as
+      // user cancel when the caller's AbortSignal was actually aborted.
+      if (signal?.aborted) {
+        logger.info('Store', 'Script generation cancelled by user');
+        return null;
+      }
+      logger.error('Store', 'Script generation timed out (AbortError without user cancel)', err);
+      throw err;
     }
     logger.error('Store', 'AI script generation failed', err);
     throw err;
@@ -283,6 +297,33 @@ export async function executeSourceMedia(
     visualPlans[seg.id] = await planSegmentVisuals(seg, topicContext, appConfig.openRouterKey, signal);
   }
 
+  // Optional: merge bounded script-grounded beat queries (feature-flagged)
+  let beatSheet = null;
+  if (visualBeatsEnabled()) {
+    beatSheet = buildVisualBeatSheetFromScript(activeProject.topic, activeProject.script);
+    logger.info(
+      'Store',
+      `VisualBeatSheet: ${beatSheet.beats.length} beats (warnings=${beatSheet.warnings.join(',') || 'none'})`,
+    );
+    for (const seg of activeProject.script) {
+      const plan = visualPlans[seg.id];
+      if (!plan) continue;
+      const beatQueries = queriesFromBeatSheet(beatSheet, seg.id);
+      if (!beatQueries.length) continue;
+      plan.queries = [...new Set([...(beatQueries || []), ...(plan.queries || [])])];
+      for (const q of beatQueries) {
+        if (!plan.concepts.some((c) => c.description === q)) {
+          plan.concepts.unshift({
+            description: q,
+            queries: [q],
+            priority: 120,
+            visualType: 'concept',
+          });
+        }
+      }
+    }
+  }
+
   // STEP 3: harvest images for each plan
   const media: MediaAsset[] = [];
   const usedUrls = new Set<string>();
@@ -296,6 +337,7 @@ export async function executeSourceMedia(
     setProcessingProgress(15 + Math.round((i / activeProject.script.length) * 80));
     setProcessingMessage(`[${beatLabel}] ${conceptLabel} — harvesting…`);
 
+    const segmentBeats = beatSheet?.beats.filter((b) => b.segmentId === segment.id) || null;
     const sourced = await sourceSegmentMedia(segment, plan, topicContext, usedUrls, i, appConfig, signal,
       (message: string, pct: number) => {
         const segmentStart = 15 + Math.round((i / activeProject.script.length) * 80);
@@ -304,6 +346,7 @@ export async function executeSourceMedia(
         setProcessingProgress(Math.min(mappedPct, 95));
         setProcessingMessage(message);
       },
+      segmentBeats,
     );
 
     if (sourced.assets.length === 0) {
@@ -362,7 +405,19 @@ export async function executeSourceMedia(
     media,
     topicContext,
     visualPlans,
-  };
+    ...(beatSheet ? { visualBeatSheet: beatSheet } : {}),
+  } as VideoProject;
+
+  if (beatSheet) {
+    const gated = gateProjectMediaAgainstBeats(updatedProject);
+    updatedProject = gated.project;
+    if (gated.dropped || gated.demoted) {
+      logger.info(
+        'Store',
+        `BeatEvidenceGate: dropped=${gated.dropped} demoted=${gated.demoted}`,
+      );
+    }
+  }
 
   const loopFastMode = isLoopFastMode();
   if (!loopFastMode) {
@@ -689,6 +744,25 @@ export async function executeAssembleVideo(
   // Deep-clone the project so the render operates on an immutable snapshot
   const renderSnapshot = structuredClone(activeProject);
 
+  // Optional LLM B-roll timeline when loop flag is set (otherwise leave project timeline alone)
+  const loopBroll =
+    (typeof sessionStorage !== 'undefined' &&
+      sessionStorage.getItem('autotube_loop_broll_placement') === 'true') ||
+    (typeof process !== 'undefined' && process.env?.AUTOTUBE_BROLL_PLACEMENT === '1');
+  if (loopBroll) {
+    try {
+      const { buildBrollPlacementPlan } = await import('../../services/brollPlacement');
+      const apiKey =
+        (typeof localStorage !== 'undefined' && localStorage.getItem('openRouterKey')) || undefined;
+      const plan = await buildBrollPlacementPlan(renderSnapshot, apiKey || undefined, 1.25);
+      if (plan.entries?.length) {
+        renderSnapshot.editTimeline = plan.entries;
+      }
+    } catch {
+      /* keep existing timeline */
+    }
+  }
+
   const quality = exportOptions?.quality || 'high';
   const format = exportOptions?.format || 'mp4';
   const preset = QUALITY_PRESETS[quality];
@@ -770,7 +844,7 @@ export async function executeAssembleVideo(
         isStreaming: isServerRender,
         serverVideoUrl: isServerRender ? url : projectToRender.exportSettings?.serverVideoUrl,
         hookLine: projectToRender.hookLine ?? projectToRender.exportSettings?.hookLine,
-        youtubeMode: projectToRender.exportSettings?.youtubeMode,
+        youtubeMode: projectToRender.exportSettings?.youtubeMode !== false,
       },
     };
 
@@ -1129,35 +1203,46 @@ function evaluateScriptPhase(
   const script = project.script;
   if (!script || script.length === 0) return;
 
-  // Check hook quality: first segment should open with personal stakes
+  // Check hook quality: ban year/filler/generic openers; require pattern + stakes
   const intro = script.find((s) => s.type === 'intro') || script[0];
   if (intro) {
-    const narration = intro.narration.toLowerCase();
-    const genericPhrases = [
-      'in today\'s video', 'welcome back', 'hey guys',
-      'what\'s up', 'in this video', 'let me tell you',
-    ];
-    const isGenericHook = genericPhrases.some((p) => narration.includes(p));
-    if (isGenericHook) {
+    const narration = intro.narration || '';
+    const weak = hasWeakHookOpener(narration);
+    if (weak.weak) {
       warnings.push({
         dimension: 'hook',
-        message: 'Opening uses generic YouTube phrasing instead of personal-stakes hook',
+        message: weak.reason ?? 'Opening uses weak/generic YouTube phrasing',
         severity: 'critical',
       });
       recommendations.push({
         action: 'rewrite_hook',
-        reason: 'Hook scores below threshold — replace generic opening with concrete personal risk',
+        reason: 'Hook opener fails Video Watcher / checklist bans — rewrite with concrete personal risk',
         affectedSegments: [intro.id],
       });
     }
 
-    // Check for concrete risk indicators in hook
-    const riskIndicators = ['money', 'files', 'identity', 'account', 'password', 'bank', 'stolen', 'hacked', 'lost', 'locked'];
-    const hasConcreteRisk = riskIndicators.some((r) => narration.includes(r));
+    const hookResult = validateHook(intro);
+    if (!weak.weak && !hookResult.hasHook) {
+      warnings.push({
+        dimension: 'hook',
+        message: 'Opening lacks a detectable hook pattern (stat, question, personal stakes, or twist)',
+        severity: 'critical',
+      });
+      recommendations.push({
+        action: 'rewrite_hook',
+        reason: 'Hook scores below threshold — open with stakes, a number, or a provocative question',
+        affectedSegments: [intro.id],
+      });
+    }
+
+    const lower = narration.toLowerCase();
+    const hasConcreteRisk =
+      HOOK_STAKES_KEYWORDS.some((r) => lower.includes(r)) ||
+      /\b(you|your|you're|you've)\b/i.test(narration);
     if (!hasConcreteRisk) {
       warnings.push({
         dimension: 'hook',
-        message: 'Hook lacks concrete personal risk — add money, identity, or account stakes in the first 15 seconds',
+        message: 'Hook lacks concrete personal risk — add money, identity, account stakes, or direct you/your language in the first 15 seconds',
         severity: 'critical',
       });
       recommendations.push({
@@ -1209,11 +1294,16 @@ function evaluateMediaPhase(
   if (!media || media.length === 0) return;
 
   // Placeholder / low-quality volume gate (aligned with loop MAX_PLACEHOLDER_PCT ≈ 10%)
-  const placeholderCount = media.filter(
-    (a) =>
-      a.isFallback ||
-      (typeof a.url === 'string' && /placeholder|picsum|via\.placeholder/i.test(a.url)),
-  ).length;
+  const PLACEHOLDER_URL_RE =
+    /placeholder|picsum|via\.placeholder|placehold\.|dummyimage|lorempixel|example\.com|localhost|\/fixtures?\/|mock[-_/]?media|blob:mock/i;
+  const placeholderCount = media.filter((a) => {
+    if (a.isFallback) return true;
+    const source = (a.source || '').toLowerCase();
+    if (source === 'mock' || source === 'fixture' || source === 'placeholder') return true;
+    const url = typeof a.url === 'string' ? a.url : '';
+    const thumb = typeof a.thumbnailUrl === 'string' ? a.thumbnailUrl : '';
+    return PLACEHOLDER_URL_RE.test(url) || PLACEHOLDER_URL_RE.test(thumb);
+  }).length;
   const placeholderPct = (placeholderCount / media.length) * 100;
   if (placeholderPct > 10) {
     warnings.push({

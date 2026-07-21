@@ -20,6 +20,19 @@ Use when the user says a rendered video looks bad, wants review, retention audit
 
 Set `OPENROUTER_API_KEY` in Cursor → Settings → MCP → video-watcher → env for automated vision scores.
 
+## Frame-by-frame forensic review (preferred for NSFW / random pads)
+
+When the user asks to **pull the video apart**, review **frame by frame**, or catch unsafe/off-topic stills:
+
+```bash
+npm run review:frames -- path/to/final-video-final.mp4
+# optional: --interval 0.5 --project path/to/project.json --vision
+```
+
+Then open `test-recordings/frame-review-*/index.html`, press **`f`** for flagged-only, step with ←/→.
+
+See `docs/FRAME_REVIEW.md`. Outputs: `REVIEW.md`, `FRAMES.jsonl`, `SUMMARY.json`, dense `frames/`.
+
 ## Improvement loop (generate + review + repeat)
 
 ```bash

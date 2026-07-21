@@ -5,6 +5,7 @@
 import type { MediaCandidate } from './media';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { repairTruncatedJson } from '../utils/jsonRepair';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 import {
   GENERIC_HOOK_PHRASES,
@@ -48,7 +49,7 @@ export interface QualityScorerResult {
 // ---------------------------------------------------------------------------
 
 const OPENROUTER_ENDPOINT = '/api/llm';
-const VISION_MODEL = 'rekaai/reka-edge';
+const VISION_MODEL = 'xiaomi/mimo-v2.5';
 const QUALITY_TIMEOUT_MS = 20_000;
 const QUALITY_MAX_RETRIES = 2;
 const DEFAULT_CONCURRENCY = 3;
@@ -275,8 +276,8 @@ export async function scoreImageQuality(
     }
 
     const data = await response.json();
-    const content: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
+    const content = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!content) {
       logger.warn('QualityScorer', 'API returned empty content');
       return null;
     }

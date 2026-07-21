@@ -1,5 +1,6 @@
 import type { QualityReport, VideoProject } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { logger } from './logger';
 
 // ── Frame Extraction ──
@@ -296,7 +297,7 @@ export function buildBlindReviewPrompt(
 // ── API Call ──
 
 const OPENROUTER_ENDPOINT = '/api/llm';
-const BLIND_REVIEW_MODEL = 'openai/gpt-5.4-nano';
+const BLIND_REVIEW_MODEL = 'xiaomi/mimo-v2.5';
 const BLIND_REVIEW_TIMEOUT_MS = 60_000;
 const BLIND_REVIEW_MAX_RETRIES = 2;
 
@@ -357,8 +358,8 @@ export async function callBlindReviewAPI(
     }
 
     const data = await response.json();
-    const content: unknown = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
+    const content = openRouterMessageText(data?.choices?.[0]?.message);
+    if (!content) {
       logger.warn('BlindReview', 'API returned empty content in response');
       return null;
     }

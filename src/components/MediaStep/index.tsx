@@ -62,6 +62,7 @@ export default function MediaStep({
   if (status === 'processing') {
     return (
       <ProcessingView
+        data-testid="media-step-processing"
         progress={progress}
         message={message}
         statusMessageIndex={statusMessageIndex}

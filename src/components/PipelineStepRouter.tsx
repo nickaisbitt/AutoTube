@@ -108,6 +108,8 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
       fileName: clonedProject.exportSettings?.fileName ?? 'video.mp4',
       backgroundMusic: bgMusic,
       musicPreset: options?.musicPreset,
+      // Default on so server-render gets YT captions / hook / CTA / -36 dB duck
+      youtubeMode: clonedProject.exportSettings?.youtubeMode !== false,
     };
     setCurrentStep('assembly');
     await assembleVideo({ quality: selectedQuality }, clonedProject);

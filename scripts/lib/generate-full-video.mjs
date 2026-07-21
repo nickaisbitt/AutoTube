@@ -557,8 +557,13 @@ function stripUnsafeMediaAssets(project, report) {
  */
 function injectCyberStockStills(project, report, mediaOffset = 0) {
   const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
+  // Never pad airline cabin-pressure with cyber stills (and don't let bare "ai" match "airline").
+  if (isAirlineTopic(topicBlob)) {
+    report.cyberStockSkipped = 'airline-motion-only';
+    return;
+  }
   if (
-    !/bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password|ai|hospital|patient|healthcare|records?/i.test(
+    !/bank|hack|stolen|identity|ransom|voice|clone|fraud|scam|phish|cyber|data|password|\bai\b|hospital|patient|healthcare|records?/i.test(
       topicBlob,
     )
   ) {
@@ -1375,6 +1380,7 @@ export {
   isCyberRelevantClip,
   isAirlineRelevantClip,
   stripUnsafeMediaAssets,
+  injectCyberStockStills,
 };
 
 /**
@@ -1401,22 +1407,29 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   stripJunkDemoVideos(project, report);
 
   const liveClips = [];
+  const hasStockKeysEarly = Boolean(resolvePexelsKey() || resolvePixabayKey());
+  // Without Pexels/Pixabay, airline soft-pass still needs ≥12 unique motion clips —
+  // lean harder on archive.org (keyless) instead of stopping at the tiny non-stock cap.
+  const airlineKeyless = isAirlineTopic(topicBlob) && !hasStockKeysEarly;
   const queries = stockMotionQueries(topicBlob, cyberTopic, {
     faceSeek: options.faceSeek === true,
     preferBright: options.preferBright === true,
   }).filter(isSafeStockMotionQuery);
 
-  for (const q of queries.slice(0, 18)) {
+  const queryCap = airlineKeyless ? 28 : 18;
+  const liveCap = airlineKeyless ? 120 : 80;
+  const perQueryCap = airlineKeyless ? 8 : 5;
+  for (const q of queries.slice(0, queryCap)) {
     const fromPexels = await fetchPexelsVideos(q, 10);
     const fromPixabay = await fetchPixabayVideos(q, 10);
     // Skip archive.org for cyber topics when stock API keys exist.
     const fromArchive =
-      !cyberTopic || !(resolvePexelsKey() || resolvePixabayKey())
+      !cyberTopic || !hasStockKeysEarly
         ? (devServer ? await fetchArchiveVideoResults(devServer, q) : [])
         : [];
     let addedForQuery = 0;
     for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
-      if (liveClips.length >= 80 || addedForQuery >= 5) break;
+      if (liveClips.length >= liveCap || addedForQuery >= perQueryCap) break;
       if (isJunkStockClip(clip, topicBlob, { preferBright: options.preferBright === true })) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
@@ -1524,6 +1537,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const videoCount = usableVideos.length;
   // With stock API keys, require real stock motion (not harvest proxies).
   const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
+  const airlineTopic = isAirlineTopic(topicBlob);
+  // Airline soft-pass floor is max(12, segN*2). Without Pexels/Pixabay, still chase that
+  // via archive — do not stop at the generic keyless cap of 6 (ships HARVEST_VOLUME_FAIL).
   const minVideos = hasStockKeys
     ? Math.min(
       28,
@@ -1536,10 +1552,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         ),
       ),
     )
-    : Math.min(segments.length * 2, 6);
+    : airlineTopic
+      ? Math.max(12, segments.length * 2)
+      : Math.min(segments.length * 2, 6);
   const stockNeed = hasStockKeys
     ? Math.max(0, Math.max(16, segments.length * 4) - stockApiVideos.length)
-    : 0;
+    : airlineTopic
+      ? Math.max(0, Math.max(12, segments.length * 2) - stockApiVideos.length)
+      : 0;
   if (videoCount >= minVideos && stockNeed <= 0) return;
 
   const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));

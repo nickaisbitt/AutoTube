@@ -548,7 +548,11 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const videoCount = uniqueVideos.length;
   const videosPerSeg = videoCount / segN;
   const cyber = mediaReport.cyberStockInjected || 0;
-  const stockFetched = (mediaReport.pexelsFetched || 0) + (mediaReport.pixabayFetched || 0);
+  // Archive.org is a first-class keyless motion source (airline cold eval without Pexels).
+  const stockFetched =
+    (mediaReport.pexelsFetched || 0)
+    + (mediaReport.pixabayFetched || 0)
+    + (mediaReport.archiveLiveFetched || 0);
   const topUp = mediaReport.videoTopUp?.length || 0;
   const volume = mediaReport.harvestQuality;
   const minPer = volume?.minPerSegment ?? 6;
@@ -565,7 +569,9 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   );
   const liveStockPresent =
     stockFetched > 0
-    || uniqueVideos.some((a) => /pexels|pixabay/i.test(`${a.source || ''} ${a.url || ''}`));
+    || uniqueVideos.some((a) =>
+      /pexels|pixabay|archive\.org|Archive\.org live/i.test(`${a.source || ''} ${a.url || ''}`),
+    );
   const stockKeyMotionAvailable = hasStockKeys || liveStockPresent;
   const genericJunkVideos = uniqueVideos.filter((asset) => {
     const blob = `${asset.alt || ''} ${asset.query || ''} ${asset.source || ''} ${asset.title || ''} ${asset.url || ''}`;

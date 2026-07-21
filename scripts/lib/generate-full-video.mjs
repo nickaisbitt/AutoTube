@@ -846,6 +846,17 @@ function isAirlineRelevantClip(clip = {}, topicBlob = '') {
   if (isTrustedAirlineSearchQuery(query) && hasAirlineCompatibleVisualEvidence(evidence)) {
     return true;
   }
+  // Archive.org titles are often opaque (identifiers / news dumps). When the search
+  // query itself is a short trusted aviation string and the title isn't off-topic,
+  // trust the query — otherwise keyless cold eval starves at ~6 hangar pads.
+  if (
+    isTrustedAirlineSearchQuery(query)
+    && /Archive\.org/i.test(String(clip.source || ''))
+    && !AIRLINE_OFF_TOPIC_RE.test(`${clip.alt || ''} ${clip.url || ''}`)
+    && !AIRLINE_DISCONNECTED_PAD_RE.test(`${clip.alt || ''} ${clip.url || ''}`)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -1222,6 +1233,15 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'airport runway plane takeoff',
       'boarding airplane jet bridge',
       'airplane cabin aisle daylight',
+      // Short archive.org-friendly queries (long cabin phrases often return 0–1 MP4s).
+      'airplane',
+      'aircraft hangar',
+      'airport runway',
+      'cockpit',
+      'airplane takeoff',
+      'airplane landing',
+      'commercial aircraft',
+      'jet aircraft',
     ];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return withAirlineFillers(base);

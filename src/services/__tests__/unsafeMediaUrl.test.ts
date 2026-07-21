@@ -116,4 +116,30 @@ describe('unsafe media URL bans', () => {
     expect(report.cyberStockSkipped).toBe('airline-motion-only');
     expect(project.media).toHaveLength(1);
   });
+
+  it('trusts Archive.org clips from short aviation queries even with opaque titles', async () => {
+    const { isAirlineRelevantClip } = await import('../../../scripts/lib/generate-full-video.mjs');
+    expect(
+      isAirlineRelevantClip(
+        {
+          query: 'airplane',
+          alt: 'tributeskyking',
+          source: 'Archive.org live',
+          url: 'https://archive.org/download/x/clip.mp4',
+        },
+        'airline cabin pressure',
+      ),
+    ).toBe(true);
+    expect(
+      isAirlineRelevantClip(
+        {
+          query: 'airplane',
+          alt: 'football stadium crowd',
+          source: 'Archive.org live',
+          url: 'https://archive.org/download/x/clip.mp4',
+        },
+        'airline cabin pressure',
+      ),
+    ).toBe(false);
+  });
 });

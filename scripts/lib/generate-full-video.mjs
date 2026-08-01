@@ -33,6 +33,7 @@ import {
   loadLastProjectUrls,
 } from './harvest-loop-context.mjs';
 import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-env-from-fix-state.mjs';
+import { applyEnvLocalToProcess } from './railway-prod-env.mjs';
 import {
   applyFrozenMediaToProject,
   loadFrozenProject,
@@ -2029,6 +2030,10 @@ export async function generateFullVideo(options) {
   const topic = options.topic;
   if (!topic?.trim()) throw new Error('topic is required');
 
+  // Shell wrappers source .env.local; a bare `npm run generate:video` does not,
+  // and without AUTOTUBE_API_KEY every /api/* call is rejected by the gate.
+  applyEnvLocalToProcess();
+
   const fixState = { ...(options.fixState || {}) };
   if (fixState.reHarvestMedia && !fixState.keepBestMedia) {
     fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
@@ -2201,6 +2206,9 @@ export async function generateFullVideo(options) {
 
   const harvestStorage = harvestSessionStoragePayload(harvestCtx);
   const autotubeApiKey = resolveAutotubeApiKey();
+  if (!autotubeApiKey && !options.quiet) {
+    console.log('   ⚠️  No AUTOTUBE_API_KEY / VITE_AUTOTUBE_API_KEY — /api/* calls will be rejected by the API gate');
+  }
   await browserContext.addInitScript(
     ({ key, autotubeKey, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
       localStorage.setItem('autotube_onboarding_seen', 'true');

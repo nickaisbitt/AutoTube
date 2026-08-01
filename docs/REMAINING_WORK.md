@@ -1,6 +1,6 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-01** — branch `cursor/fix-audit-blockers-b466` @ Wave 5 tip (`64f261d`).
+Last updated: **2026-08-01** — branch `cursor/fix-audit-blockers-b466` @ Wave 5/6 tip (proof pack + KEYS_BLOCKED).
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 
@@ -57,18 +57,19 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | `npm run generate:video` | **PASS** | `FINAL-VIDEO-final.mp4` ~94.8 s / ~45.3 MB; `pexels=0 pixabay=0 archive=45`; soft-pass `15v/7segs`; exit **0** |
 | `npm run watch:video` | **PASS (fail-closed)** | Exit **1**; brutal raw **2.6**/10; upload-ready **NO**; criticals YES |
 
-**Wave 5** — cold healthcare topic, Archive-only harvest (post narration-fix commits):
+**Wave 5 proof pack** (post hang/volume-gate fixes; stock keys still MISSING):
 
-| Step | Status | Evidence |
-|------|--------|----------|
-| `npm run generate:video` | **FAIL** | Exit **1**; `HARVEST_VOLUME_FAIL` — only 4/6 assets per segment after junk filters; keyless Archive exhausted |
-| `npm run watch:video` | **NOT RUN** | No MP4 produced |
+| Topic | Generate | Watch | Notes |
+|-------|----------|-------|-------|
+| Airline — cabin-pressure failures | Exit **0** · 62.8s · ~24.6 MB | Exit **1** · raw **3.4**/10 · upload-ready **NO** | soft-pass-motion-airline; hang closed past Narration |
+| Housing — crash they said never happen | Exit **0** · 81.9s · ~58 MB | Exit **1** · raw **4.6**/10 · upload-ready **NO** | soft-pass-aggregate after re-pad |
+| Healthcare — Why AI will change healthcare | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (4/6 assets/seg after junk filters) |
 
-Watcher honesty is working: low/failing scores are reported and generate exits non-zero. Both outcomes are **expected** without stock API keys. Harvest floors have **not** been lowered.
+Watcher honesty is working: raw &lt;7 → exit 1; thin keyless harvest → non-zero generate. Floors have **not** been lowered.
 
-Local proof notes (gitignored): `test-recordings/dod-proof/airline-RESULT.txt`, `airline-WATCH_REPORT.md`, generate/watch logs.
+Local proof (gitignored): `test-recordings/dod-proof/{airline,housing,healthcare}/` + `SUMMARY.txt`.
 
-**Not done:** upload-ready YES, brutal raw ≥7, 3-topic proof pack, prod deploy currency. Do not claim these from fixture/mock harvest, keyless Archive runs, or pre-sweep recordings on other branches.
+**Not done:** upload-ready YES, brutal raw ≥7, keyed 3-topic green pack, prod deploy currency. Do not claim these from fixture/mock harvest, keyless Archive runs, or pre-sweep recordings on other branches.
 
 ---
 
@@ -90,8 +91,8 @@ Without at least one of `PEXELS_API_KEY` / `VITE_PEXELS_KEY` or `PIXABAY_API_KEY
 | Bar | Status | Unblock |
 |-----|--------|---------|
 | **Upload-ready YES** | **KEYS_BLOCKED** | Add stock keys per [`ENV_DOD.md`](ENV_DOD.md), restart Vite, regenerate + `watch:video` exit 0 |
-| **Brutal raw ≥ 7** | **KEYS_BLOCKED** | Same; Wave F keyless raw was **2.6**; Wave 5 healthcare: generate exit 1 — do not lower floors |
-| **3-topic proof pack** | **KEYS_BLOCKED** | Only after upload-ready + raw ≥7 green on three cold topics under `test-recordings/dod-proof/` |
+| **Brutal raw ≥ 7** | **KEYS_BLOCKED** | Same; Wave 5 keyless raws **3.4** (airline) / **4.6** (housing); healthcare generate exit 1 — do not lower floors |
+| **3-topic proof pack** | **KEYS_BLOCKED** | Keyless pack attempted under `test-recordings/dod-proof/`; green (≥7 ×3) only after stock keys |
 | **9.3 stretch** | **OPEN** (after ≥7) | `npm run loop:video -- --until-score 9.3` on cold topics |
 
 ---

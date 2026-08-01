@@ -3286,6 +3286,38 @@ function assertNarrationPresent(audioFiles, label = 'render') {
   );
 }
 
+const AV_DRIFT_TOLERANCE_SEC = 0.75;
+
+/**
+ * A/V drift policy for the muxed output. Drift beyond the tolerance means the
+ * narration was truncated or padded against the video timeline, so the render
+ * must fail instead of shipping an out-of-sync video. Escape hatch:
+ * AUTOTUBE_ALLOW_AV_DRIFT=1.
+ */
+function evaluateAvDrift(videoStreamSec, audioStreamSec, options = {}) {
+  const toleranceSec = Number.isFinite(options.toleranceSec) ? options.toleranceSec : AV_DRIFT_TOLERANCE_SEC;
+  const env = options.env || process.env;
+  const allowed = env.AUTOTUBE_ALLOW_AV_DRIFT === '1' || env.AUTOTUBE_ALLOW_AV_DRIFT === 'true';
+  if (!Number.isFinite(videoStreamSec) || !Number.isFinite(audioStreamSec)) {
+    return { measured: false, driftSec: null, toleranceSec, exceeded: false, allowed, message: '' };
+  }
+  const driftSec = videoStreamSec - audioStreamSec;
+  const exceeded = Math.abs(driftSec) > toleranceSec;
+  return {
+    measured: true,
+    driftSec,
+    toleranceSec,
+    exceeded,
+    allowed,
+    message: exceeded
+      ? `A/V duration drift ${driftSec.toFixed(2)}s exceeds ${toleranceSec}s `
+        + `(video ${videoStreamSec.toFixed(2)}s, audio ${audioStreamSec.toFixed(2)}s) — `
+        + 'narration is truncated or padded against the video timeline. '
+        + 'Set AUTOTUBE_ALLOW_AV_DRIFT=1 to ship anyway.'
+      : '',
+  };
+}
+
 /** FFmpeg assembly path: TTS + clip concat (skips canvas preload / frame loop). */
 async function runFfmpegAssemblyRender(project) {
   log('info', '\n🎬 FFmpeg assembly mode — skipping canvas preload and frame loop');
@@ -5233,6 +5265,9 @@ async function render() {
 
   // Final A/V sync validation: the muxed audio stream must span the video stream.
   // A short audio stream means narration was truncated at the mux (timeline drift).
+  // Thrown outside the try so a real drift failure is not swallowed by the
+  // "validation skipped" catch (which only covers ffprobe being unusable).
+  let avDriftFailure = '';
   try {
     const probeStream = (selector) => {
       const p = spawnSync('ffprobe', [
@@ -5245,17 +5280,22 @@ async function render() {
     };
     const videoStreamSec = probeStream('v:0');
     const audioStreamSec = probeStream('a:0');
-    if (videoStreamSec !== null && audioStreamSec !== null) {
-      const avDriftSec = videoStreamSec - audioStreamSec;
-      log('info', `  🎚️ A/V stream durations: video ${videoStreamSec.toFixed(2)}s, audio ${audioStreamSec.toFixed(2)}s (drift ${avDriftSec.toFixed(2)}s)`);
-      if (Math.abs(avDriftSec) > 0.75) {
-        log('warn', `  ⚠ A/V duration drift ${avDriftSec.toFixed(2)}s exceeds 0.75s — narration may be truncated or padded (check gap/hold timeline sync)`);
+    const avVerdict = evaluateAvDrift(videoStreamSec, audioStreamSec);
+    if (avVerdict.measured) {
+      log('info', `  🎚️ A/V stream durations: video ${videoStreamSec.toFixed(2)}s, audio ${audioStreamSec.toFixed(2)}s (drift ${avVerdict.driftSec.toFixed(2)}s)`);
+      if (avVerdict.exceeded && avVerdict.allowed) {
+        log('warn', `  ⚠ ${avVerdict.message} Continuing because AUTOTUBE_ALLOW_AV_DRIFT=1.`);
+      } else if (avVerdict.exceeded) {
+        avDriftFailure = avVerdict.message;
       }
     } else if (audioFiles.length > 0 && audioStreamSec === null) {
       log('warn', '  ⚠ Final output has no audio stream despite generated narration');
     }
   } catch (avErr) {
     log('warn', `  ⚠ A/V duration validation skipped: ${avErr.message}`);
+  }
+  if (avDriftFailure) {
+    throw new Error(avDriftFailure);
   }
 
   if (renderPassed && finalMp4File) {
@@ -5627,6 +5667,8 @@ export function validateUrlSafety(urlString) {
 }
 
 export {
+  evaluateAvDrift,
+  AV_DRIFT_TOLERANCE_SEC,
   fetchProject,
   fetchImage,
   imageCache,

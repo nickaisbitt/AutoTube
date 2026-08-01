@@ -101,6 +101,33 @@ export function resolveVisionUnverifiedMax(env = process.env) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+export function isVisionBudgetSoft(env = process.env) {
+  const raw = env?.AUTOTUBE_VISION_BUDGET_SOFT;
+  return raw === '1' || raw === 'true';
+}
+
+/**
+ * Admission policy for one stock clip at the vision gate.
+ *
+ * Once the per-run vision budget is spent, remaining clips are skipped rather
+ * than admitted unverified — a budget cap must not become a silent bypass.
+ * AUTOTUBE_VISION_BUDGET_SOFT=1 restores the old fail-open behaviour.
+ */
+export function decideStockVisionGate({
+  hasThumb = false,
+  hasApiKey = false,
+  trustedVisualEvidence = false,
+  checked = 0,
+  budget = 0,
+  env = process.env,
+} = {}) {
+  if (!hasThumb || !hasApiKey) return { action: 'admit', reason: 'vision-unavailable' };
+  if (trustedVisualEvidence) return { action: 'admit', reason: 'trusted-visual-evidence' };
+  if (checked < budget) return { action: 'check', reason: 'within-budget' };
+  if (isVisionBudgetSoft(env)) return { action: 'admit', reason: 'budget-exhausted-soft' };
+  return { action: 'skip', reason: 'budget-exhausted' };
+}
+
 export function recordVisionStockUnverified(report = {}, verdict = {}, { thumbnailUrl = '', env = process.env } = {}) {
   if (verdict?.ran !== false) {
     return { unverified: false, skip: false, max: resolveVisionUnverifiedMax(env) };
@@ -876,6 +903,18 @@ function isTrustedAirlineSearchQuery(query = '') {
   );
 }
 
+/**
+ * Trusted airline queries may bypass the vision gate, but only for clips that
+ * already carry their own visual evidence. Opaque alts (provider echoes,
+ * archive identifiers) never qualify — the query alone proves nothing.
+ */
+function airlineQueryVisionBypass(clip = {}, query = '', topicBlob = '') {
+  if (!isAirlineTopic(topicBlob)) return false;
+  if (!isTrustedAirlineSearchQuery(query)) return false;
+  if (!hasAirlineCompatibleVisualEvidence(airlineVisualEvidenceBlob(clip))) return false;
+  return isAirlineRelevantClip(clip, topicBlob);
+}
+
 function isAirlineRelevantClip(clip = {}, topicBlob = '') {
   const evidence = airlineVisualEvidenceBlob(clip);
   if (AIRLINE_OFF_TOPIC_RE.test(evidence)) return false;
@@ -1428,6 +1467,7 @@ export {
   isJunkStockClip,
   isCyberRelevantClip,
   isAirlineRelevantClip,
+  airlineQueryVisionBypass,
   stripUnsafeMediaAssets,
   injectCyberStockStills,
 };
@@ -1500,21 +1540,30 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         continue;
       }
       // Vision gate on stock thumbs (keywords miss off-brand junk).
-      // Skip for short trusted airline queries — vision was rejecting real cabin/cockpit faces
-      // and leaving only 3–4 hangar/runway pads (soft-pass thin → D-grade).
+      // Short trusted airline queries skip vision only when the clip carries its own
+      // visual evidence — vision was rejecting real cabin/cockpit faces and leaving
+      // only 3–4 hangar/runway pads (soft-pass thin → D-grade), but an opaque alt
+      // never buys a free pass.
       const thumb = clip.thumbnailUrl || clip.image || '';
       const apiKey = resolveOpenRouterKey();
-      const trustedAirlineQuery =
-        isAirlineTopic(topicBlob)
-        && AIRLINE_TRUSTED_QUERY_RE.test(q)
-        && String(q).trim().length <= 72;
+      const trustedAirlineQuery = airlineQueryVisionBypass(clip, q, topicBlob);
       const visionBudget = isAirlineTopic(topicBlob) ? 24 : 6;
-      if (
-        thumb
-        && apiKey
-        && !trustedAirlineQuery
-        && (report.visionStockChecked || 0) < visionBudget
-      ) {
+      const gate = decideStockVisionGate({
+        hasThumb: Boolean(thumb),
+        hasApiKey: Boolean(apiKey),
+        trustedVisualEvidence: trustedAirlineQuery,
+        checked: report.visionStockChecked || 0,
+        budget: visionBudget,
+      });
+      if (gate.action === 'skip') {
+        report.visionStockBudgetSkipped = (report.visionStockBudgetSkipped || 0) + 1;
+        report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+        continue;
+      }
+      if (gate.reason === 'budget-exhausted-soft') {
+        report.visionStockBudgetSoftAdmitted = (report.visionStockBudgetSoftAdmitted || 0) + 1;
+      }
+      if (gate.action === 'check') {
         report.visionStockChecked = (report.visionStockChecked || 0) + 1;
         const verdict = await visionRejectOffBrandStock(thumb, apiKey, topicBlob);
         if (verdict.ran === false) {
@@ -1795,6 +1844,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     visionStockUnverifiedSkipped: 0,
     visionStockUnverifiedAllowed: 0,
     visionStockUnverifiedMax: resolveVisionUnverifiedMax(),
+    visionStockBudgetSkipped: 0,
+    visionStockBudgetSoftAdmitted: 0,
   };
   if (!project.media?.length) {
     writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
@@ -2682,9 +2733,9 @@ export async function generateFullVideo(options) {
       if (mediaReport.junkStockSkipped) {
         log(`   🚫 Junk stock skipped: ${mediaReport.junkStockSkipped}`);
       }
-      if (mediaReport.visionStockChecked || mediaReport.visionStockUnverified) {
+      if (mediaReport.visionStockChecked || mediaReport.visionStockUnverified || mediaReport.visionStockBudgetSkipped) {
         log(
-          `   👁️ Stock vision: checked=${mediaReport.visionStockChecked || 0} rejected=${mediaReport.visionStockRejected || 0} unverified=${mediaReport.visionStockUnverified || 0} skipped-unverified=${mediaReport.visionStockUnverifiedSkipped || 0} max-unverified=${mediaReport.visionStockUnverifiedMax || 0}`,
+          `   👁️ Stock vision: checked=${mediaReport.visionStockChecked || 0} rejected=${mediaReport.visionStockRejected || 0} unverified=${mediaReport.visionStockUnverified || 0} skipped-unverified=${mediaReport.visionStockUnverifiedSkipped || 0} max-unverified=${mediaReport.visionStockUnverifiedMax || 0} skipped-over-budget=${mediaReport.visionStockBudgetSkipped || 0} soft-admitted=${mediaReport.visionStockBudgetSoftAdmitted || 0}`,
         );
       }
       if (mediaReport.cyberStockInjected) {

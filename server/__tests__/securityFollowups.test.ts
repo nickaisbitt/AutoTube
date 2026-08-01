@@ -108,6 +108,29 @@ describe("security audit follow-ups", () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "http://10.0.0.1/video.mp4",
+    "https://youtube.com.attacker.example/watch",
+  ])("rejects private or lookalike yt-dlp host %s", async (targetUrl) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(dns, "lookup").mockImplementation((_hostname, options, callback) => {
+      const cb = typeof options === "function" ? options : callback as any;
+      cb(null, [{ address: "8.8.8.8", family: 4 }] as any);
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const req = streamReq(
+      `/api/download-clip?url=${encodeURIComponent(targetUrl)}`,
+    );
+    const res = mockRes();
+
+    await handleDownloadClip(req, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it.each([handleSaveProject, handleExportProject])(
     "rejects project IDs that would collide after sanitization",
     async (handler) => {

@@ -15,6 +15,37 @@ import crypto from "crypto";
 
 const MAX_CACHE_SIZE = 100;
 
+// yt-dlp performs its own DNS lookups and may follow extractor-specific URLs,
+// so public-IP validation alone cannot prevent DNS rebinding. Limit it to the
+// media providers used by AutoTube; subdomains are allowed, lookalike domains
+// such as youtube.com.attacker.example are not.
+const YT_DLP_ALLOWED_HOST_SUFFIXES = [
+  "archive.org",
+  "dai.ly",
+  "dailymotion.com",
+  "giphy.com",
+  "googlevideo.com",
+  "pexels.com",
+  "pixabay.com",
+  "tiktok.com",
+  "vimeo.com",
+  "youtu.be",
+  "youtube.com",
+] as const;
+
+function isAllowedYtDlpUrl(urlString: string): boolean {
+  try {
+    const hostname = new URL(urlString).hostname
+      .toLowerCase()
+      .replace(/\.$/, "");
+    return YT_DLP_ALLOWED_HOST_SUFFIXES.some(
+      (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`),
+    );
+  } catch {
+    return false;
+  }
+}
+
 interface ClipCacheEntry {
   path: string;
   lastAccessed: number;
@@ -99,6 +130,15 @@ export async function handleDownloadClip(
     return;
   }
   const validatedVideoUrl = urlSafety.finalUrl!;
+  if (!isAllowedYtDlpUrl(validatedVideoUrl)) {
+    console.warn("[Clip Download] Blocked URL outside the media host allowlist");
+    res.statusCode = 403;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({
+      error: "URL blocked for security: Media host is not allowed",
+    }));
+    return;
+  }
 
   // Cache key based on URL + duration
   const hash = crypto

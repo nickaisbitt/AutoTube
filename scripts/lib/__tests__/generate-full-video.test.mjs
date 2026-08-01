@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  airlineQueryVisionBypass,
+  decideStockVisionGate,
   isAirlineRelevantClip,
+  isVisionBudgetSoft,
   recordVisionStockUnverified,
   resolveVisionUnverifiedMax,
   spawnSyncFailureReason,
@@ -33,6 +36,95 @@ describe('isAirlineRelevantClip', () => {
         'airline cabin pressure safety investigation',
       ),
     ).toBe(true);
+  });
+});
+
+describe('airlineQueryVisionBypass', () => {
+  const topic = 'airline cabin pressure safety investigation';
+
+  it('never bypasses vision for opaque alts on a trusted query', () => {
+    expect(
+      airlineQueryVisionBypass(
+        {
+          source: 'Archive.org live',
+          query: 'airplane cabin',
+          alt: 'opaque-newsreel-identifier',
+          url: 'https://archive.org/download/random_collection/random_clip.mp4',
+        },
+        'airplane cabin',
+        topic,
+      ),
+    ).toBe(false);
+  });
+
+  it('never bypasses vision for provider-echo alts', () => {
+    expect(
+      airlineQueryVisionBypass(
+        { source: 'Pexels', query: 'airplane cabin', alt: 'Pexels video', url: 'https://videos.pexels.com/1234.mp4' },
+        'airplane cabin',
+        topic,
+      ),
+    ).toBe(false);
+  });
+
+  it('bypasses vision only when the clip carries its own visual evidence', () => {
+    expect(
+      airlineQueryVisionBypass(
+        {
+          source: 'Pexels',
+          query: 'airplane cabin',
+          alt: 'airplane cabin interior with passengers and oxygen mask drop',
+          url: 'https://videos.pexels.com/1234.mp4',
+        },
+        'airplane cabin',
+        topic,
+      ),
+    ).toBe(true);
+  });
+
+  it('does not bypass vision on non-airline topics', () => {
+    expect(
+      airlineQueryVisionBypass(
+        { query: 'airplane cabin', alt: 'airplane cabin interior with passengers' },
+        'airplane cabin',
+        'bank scam call center fraud',
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('decideStockVisionGate', () => {
+  const base = { hasThumb: true, hasApiKey: true, checked: 0, budget: 6, env: {} };
+
+  it('checks clips while the budget lasts', () => {
+    expect(decideStockVisionGate({ ...base, checked: 5 }).action).toBe('check');
+  });
+
+  it('skips instead of admitting unverified clips once the budget is spent', () => {
+    expect(decideStockVisionGate({ ...base, checked: 6 })).toEqual({
+      action: 'skip',
+      reason: 'budget-exhausted',
+    });
+  });
+
+  it('fails open past the budget only with AUTOTUBE_VISION_BUDGET_SOFT=1', () => {
+    expect(
+      decideStockVisionGate({ ...base, checked: 6, env: { AUTOTUBE_VISION_BUDGET_SOFT: '1' } }),
+    ).toEqual({ action: 'admit', reason: 'budget-exhausted-soft' });
+    expect(isVisionBudgetSoft({ AUTOTUBE_VISION_BUDGET_SOFT: '1' })).toBe(true);
+    expect(isVisionBudgetSoft({})).toBe(false);
+  });
+
+  it('admits clips with their own visual evidence without spending budget', () => {
+    expect(decideStockVisionGate({ ...base, checked: 99, trustedVisualEvidence: true })).toEqual({
+      action: 'admit',
+      reason: 'trusted-visual-evidence',
+    });
+  });
+
+  it('admits when vision cannot run at all (no thumb or no key)', () => {
+    expect(decideStockVisionGate({ ...base, hasThumb: false }).reason).toBe('vision-unavailable');
+    expect(decideStockVisionGate({ ...base, hasApiKey: false }).reason).toBe('vision-unavailable');
   });
 });
 

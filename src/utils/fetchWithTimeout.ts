@@ -6,7 +6,7 @@
  * tts.ts, and llmVisualDirector.ts with a single configurable function.
  */
 
-import { apiHeaders } from './apiClient';
+import { apiHeaders, isPrivilegedApiUrl } from './apiClient';
 
 export interface FetchWithTimeoutOptions {
   /** Per-attempt timeout in milliseconds. Default: 30000 */
@@ -98,10 +98,9 @@ export async function fetchWithTimeout(
     }
 
     try {
-      const isApi =
-        typeof url === 'string' &&
-        (url.startsWith('/api/') || url.includes('/api/'));
-      const headers = isApi
+      // Only same-origin /api/* requests get the key — never third-party
+      // hosts that happen to have an /api/ path (openrouter.ai/api/v1, ...).
+      const headers = isPrivilegedApiUrl(url)
         ? apiHeaders(options.headers)
         : options.headers;
 

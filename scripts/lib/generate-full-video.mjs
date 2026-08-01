@@ -106,8 +106,8 @@ export function resolvePixabayKey() {
  * Which motion path this run is on.
  *
  * `keyed` = Pexels/Pixabay available, so topical face/cabin/apartment stock can be
- * pulled aggressively. `keyless` = Archive.org is the only motion source, so yield
- * has to come from query diversity + real item metadata instead of API volume.
+ * pulled aggressively. `keyless` = no stock API keys; web-video search and
+ * Archive.org still provide motion without provider credentials.
  */
 export function resolveStockKeyMode(env = process.env) {
   const pexels = Boolean((env?.PEXELS_API_KEY || env?.VITE_PEXELS_KEY || '').trim());
@@ -355,6 +355,21 @@ function isProxiedClipUrl(url = '') {
   return (url || '').includes('/api/download-clip');
 }
 
+/** Keep proxy clips distinct by their decoded target, not the shared route path. */
+function motionUrlKey(url = '') {
+  const raw = String(url || '');
+  if (isProxiedClipUrl(raw)) {
+    try {
+      const target = new URL(raw, 'http://autotube.local').searchParams.get('url');
+      if (target) return `download-clip:${target}`;
+    } catch {
+      // Fall back to the full wrapper; never collapse every proxy to one key.
+    }
+    return raw;
+  }
+  return raw.split('?')[0];
+}
+
 function resolveVideoDownloadUrl(asset, devServer) {
   const pageUrl = asset.sourceUrl || asset.url;
   if (asset.url?.startsWith('/api/download-clip')) {
@@ -393,17 +408,24 @@ function isImageLikeUrl(url = '') {
     || /(?:th\.bing\.com|tse\d*\.mm\.bing\.net|i\.vimeocdn\.com|images\.|img\.|cdn\.)/i.test(url);
 }
 
-async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = false } = {}) {
+async function canFetch(url, {
+  timeoutMs = 6000,
+  minBytes = 256,
+  expectVideo = false,
+  apiKey = '',
+} = {}) {
   if (!url || !/^https?:\/\//i.test(url)) return false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers = {
+      range: 'bytes=0-16383',
+      'user-agent': 'Mozilla/5.0 AutoTube media validator',
+    };
+    if (apiKey) headers['X-API-Key'] = apiKey;
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: {
-        range: 'bytes=0-16383',
-        'user-agent': 'Mozilla/5.0 AutoTube media validator',
-      },
+      headers,
     });
     if (!res.ok) return false;
     const contentType = res.headers.get('content-type') || '';
@@ -620,7 +642,7 @@ function isSeriousNewsTopic(topicBlob = '') {
   );
 }
 
-/** Drop demo/cartoon/broken proxy clips so top-up can inject topical motion. */
+/** Drop known demo/cartoon/adult/off-topic clips while preserving real web motion. */
 function stripJunkDemoVideos(project, report) {
   if (!project?.media?.length) return;
   const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
@@ -636,8 +658,7 @@ function stripJunkDemoVideos(project, report) {
       || isUnsafeMediaUrl(url)
       || isJunkStockClip(asset, topicBlob)
       || (isAirlineTopic(topicBlob) && !isAirlineRelevantClip(asset, topicBlob))
-      || isOffBrandVisual(`${asset.alt || ''} ${url} ${asset.query || ''}`, topicBlob)
-      || (/\/api\/download-clip/i.test(url) && /youtube\.com|youtu\.be|tiktok\.com/i.test(url));
+      || isOffBrandVisual(`${asset.alt || ''} ${url} ${asset.query || ''}`, topicBlob);
     if (junk) {
       report.junkVideoDropped = report.junkVideoDropped || [];
       report.junkVideoDropped.push({ url, reason: 'demo/off-topic/broken proxy clip' });
@@ -1047,6 +1068,108 @@ async function fetchArchiveVideoResults(devServer, query, { topicBlob = '' } = {
   }
 }
 
+const WEB_VIDEO_PROVIDERS = [
+  { key: 'bing', endpoint: '/api/search-bing-videos', source: 'Bing web video' },
+  { key: 'google', endpoint: '/api/search-google-videos', source: 'Google web video' },
+  { key: 'ddg', endpoint: '/api/search-videos', source: 'DuckDuckGo web video' },
+];
+
+const WEB_VIDEO_DOWNLOAD_HOSTS = [
+  'archive.org',
+  'dai.ly',
+  'dailymotion.com',
+  'giphy.com',
+  'googlevideo.com',
+  'pexels.com',
+  'pixabay.com',
+  'tiktok.com',
+  'vimeo.com',
+  'youtu.be',
+  'youtube.com',
+];
+
+function downloadableWebVideoUrl(rawUrl = '') {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:') return '';
+    const host = parsed.hostname.toLowerCase();
+    if (!WEB_VIDEO_DOWNLOAD_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) {
+      return '';
+    }
+    return parsed.href;
+  } catch {
+    return '';
+  }
+}
+
+function webVideoDurationSeconds(raw) {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : Infinity;
+  const text = String(raw || '').trim();
+  if (!text) return 0;
+  if (/^\d+(?::\d+){0,2}$/.test(text)) {
+    return text.split(':').map(Number).reduce((seconds, part) => seconds * 60 + part, 0);
+  }
+  const hours = Number(text.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i)?.[1] || 0);
+  const minutes = Number(text.match(/(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i)?.[1] || 0);
+  const seconds = Number(text.match(/(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i)?.[1] || 0);
+  return hours || minutes || seconds ? hours * 3600 + minutes * 60 + seconds : 0;
+}
+
+/**
+ * Fetch one keyless web-video route and turn its results into re-encoded local
+ * download URLs. Provider titles are retained as evidence; the query is never
+ * copied into alt/title, so an off-topic result cannot qualify by query echo.
+ */
+export async function fetchWebVideoResults(
+  devServer,
+  providerKey,
+  query,
+  { topicBlob = '', limit = 10 } = {},
+) {
+  const provider = WEB_VIDEO_PROVIDERS.find(({ key }) => key === providerKey);
+  if (!provider || !devServer || !isSafeStockMotionQuery(query)) return [];
+  try {
+    const headers = {};
+    const apiKey = resolveAutotubeApiKey();
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    const res = await fetch(`${devServer}${provider.endpoint}?q=${encodeURIComponent(query)}`, {
+      headers,
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const results = Array.isArray(data) ? data : data?.results;
+    if (!Array.isArray(results)) return [];
+
+    return results
+      .map((result) => {
+        const sourceUrl = downloadableWebVideoUrl(result?.content || result?.url || result?.embed_url || '');
+        if (!sourceUrl || isUnsafeMediaUrl(sourceUrl) || isJunkDemoVideoUrl(sourceUrl)) return null;
+        const duration = webVideoDurationSeconds(result?.duration);
+        if (duration > 10 * 60) return null;
+        const metadata = providerEvidenceText(
+          `${result?.title || ''} ${result?.description || ''}`,
+          { query, topicBlob },
+        );
+        if (!metadata) return null;
+        return {
+          url: `${devServer}/api/download-clip?url=${encodeURIComponent(sourceUrl)}&duration=10`,
+          alt: metadata,
+          title: metadata,
+          query,
+          source: provider.source,
+          sourceUrl,
+          thumbnailUrl: result?.thumbnailUrl || result?.images?.large || result?.image || undefined,
+          duration: duration || undefined,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, Math.max(0, limit));
+  } catch {
+    return [];
+  }
+}
+
 /** Direct Pexels Videos API (no UI harvest required). */
 async function fetchPexelsVideos(query, perPage = 8, page = 1) {
   const key = resolvePexelsKey();
@@ -1386,10 +1509,8 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   ) {
     return true;
   }
-  // TikTok/proxy harvest often injects psychology cards, HUD, off-story text screens.
-  if (/tiktok\.com|\/api\/download-clip\?url=.*tiktok/i.test(`${clip.url || ''} ${blob}`)) {
-    return true;
-  }
+  // TikTok is a transport, not a verdict. Its known #fyp/#tiktok/cartoon junk is
+  // rejected above, while topical clips remain usable after local re-encoding.
   if (
     /\b(psychology textbook|textbook page|powerpoint slide|presentation slide|sci-?fi (cockpit|hud)|spaceship|nebula|galaxy stock|hud overlay|holographic ui)\b/i.test(
       blob,
@@ -1985,6 +2106,28 @@ export function archiveTopicSubjectQueries(topicBlob = '', limit = 8) {
 }
 
 /**
+ * Descriptive web-video searches. They come only from the topic-specific motion
+ * pack and literal topic subjects; provider titles remain the admission evidence.
+ */
+export function webMotionQueryVariants(topicBlob = '', baseQueries = [], limit = 12) {
+  const literalSubjects = archiveTopicSubjectQueries(topicBlob, 6);
+  const ordered = [
+    ...baseQueries.filter((query) => stockQueryWords(query).length >= 2),
+    ...literalSubjects,
+  ];
+  const out = [];
+  const seen = new Set();
+  for (const query of ordered) {
+    const key = String(query || '').trim().toLowerCase();
+    if (!key || seen.has(key) || !isSafeStockMotionQuery(key)) continue;
+    seen.add(key);
+    out.push(key);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
  * Archive sweeps re-rank a subject the way archivists label material: raw "footage",
  * an instructional "film", a period "newsreel". Each suffix surfaces a different slice
  * of the same subject, which is recall — the evidence gate is untouched.
@@ -2004,12 +2147,13 @@ export function withArchiveSweepSuffix(query, suffix = '') {
  * Motion query plan for this run's key mode.
  *
  * Keyed runs lead with the story's own faces then hammer the keyed topical pack.
- * Keyless runs lead with short Archive.org-friendly subjects (the descriptive
- * scene queries that Pexels loves return 0–1 MP4s on Archive.org).
+ * Keyless runs lead with descriptive web-video searches, then short
+ * Archive.org-friendly subjects. Both remain tied to the topic-specific pack.
  */
 export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   const keyed = options.stockKeyed === true;
   const base = stockMotionQueries(topicBlob, cyberTopic, options).filter(isSafeStockMotionQuery);
+  const webQueries = webMotionQueryVariants(topicBlob, base);
   const airline = isAirlineTopic(topicBlob);
   const housing = isHousingTopic(topicBlob);
   let boost;
@@ -2025,11 +2169,11 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   boost = boost.filter(isSafeStockMotionQuery);
 
   // Keyed: keep the face head, then the aggressive topical pack, then base fillers.
-  // Keyless: short subjects first, then base (which archive mostly cannot answer).
+  // Keyless: web-friendly scenes first, then short Archive subjects and remaining base.
   const headCount = keyed ? Math.min(4, base.length) : 0;
   const ordered = keyed
     ? [...base.slice(0, headCount), ...boost, ...base.slice(headCount)]
-    : [...boost, ...base];
+    : [...webQueries, ...boost, ...base];
 
   const queries = [];
   const seen = new Set();
@@ -2043,6 +2187,7 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
     mode: keyed ? 'keyed' : 'keyless',
     keyed,
     queries,
+    webQueries,
     boostCount: boost.length,
     baseCount: base.length,
   };
@@ -2149,8 +2294,8 @@ export function resolveMotionVolumeTargets({
       aggressive,
     };
   }
-  // Keyless: Archive.org only. Chase more than the soft-pass floor so a denser cut is
-  // possible, but never treat the target as evidence — the evidence gate still rules.
+  // Keyless: raw web + Archive.org. Chase more than the soft-pass floor so a denser
+  // cut is possible, but never treat the target as evidence — admission gates still rule.
   const keylessFloor = airline
     ? Math.max(16, segN * 3)
     : housing
@@ -2169,9 +2314,8 @@ export function resolveMotionVolumeTargets({
 /**
  * One-line motion summary for run logs, written so the two paths never read alike.
  *
- * Keyed lines are about provider volume (who returned what, how deep we paged).
- * Keyless lines are about Archive.org recall and the evidence gate: how many subjects
- * were asked, how many were dead ends, and how many items proved what they show.
+ * Both paths report raw-web and archive contributions; keyed runs additionally
+ * report stock providers, while keyless runs expose Archive.org evidence recall.
  */
 export function formatMotionPathLog(report = {}) {
   const mode = report.motionKeyMode || 'unknown';
@@ -2180,11 +2324,16 @@ export function formatMotionPathLog(report = {}) {
   const tail =
     `clip-pool=${report.motionPoolSize || 0}`
     + ` injected=${(report.videoTopUp || []).length}/${report.motionTargetVideos || 0}`;
+  const web =
+    `bing=${report.bingWebVideoFetched || 0}`
+    + ` google=${report.googleWebVideoFetched || 0}`
+    + ` ddg=${report.ddgWebVideoFetched || 0}`
+    + ` archive=${report.archiveLiveFetched || 0}`;
 
   if (mode === 'keyed') {
     const providers =
       `pexels=${report.pexelsFetched || 0} pixabay=${report.pixabayFetched || 0}`
-      + ` archive=${report.archiveLiveFetched || 0}`;
+      + ` | web ${web}`;
     const archive = report.archiveQueriesTried
       ? ` | archive-queries=${report.archiveQueriesTried} evidence-rejected=${report.archiveEvidenceRejected || 0}`
       : '';
@@ -2206,10 +2355,10 @@ export function formatMotionPathLog(report = {}) {
     + ` evidence-cached=${report.archiveEvidenceCacheHits || 0}`
     + ` evidence-enriched=${report.archiveEvidenceEnriched || 0}`
     + ` evidence-rejected=${report.archiveEvidenceRejected || 0}`;
-  const why = mode === 'keyless' ? ' (no stock API keys — Archive.org only)' : '';
+  const why = mode === 'keyless' ? ' (no stock API keys — web + Archive.org)' : '';
   return (
     `Motion path: ${mode}${why}`
-    + ` — archive=${report.archiveLiveFetched || 0}`
+    + ` — web ${web}`
     + ` | ${queries}`
     + ` | ${archive}`
     + ` | ${tail}`
@@ -2226,12 +2375,13 @@ export {
   isCyberRelevantClip,
   isAirlineRelevantClip,
   airlineQueryVisionBypass,
+  stripJunkDemoVideos,
   stripUnsafeMediaAssets,
   injectCyberStockStills,
 };
 
 /**
- * Inject topical motion: live archive.org search + Mixkit free MP4s + static pool.
+ * Inject topical motion: raw web video + live archive.org + stock/static pools.
  * No Pexels/Pixabay keys required.
  */
 async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '', options = {}) {
@@ -2285,9 +2435,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   report.motionQueryBoost = plan.boostCount;
   report.motionTargetVideos = targets.minVideos;
 
-  // Keyed: two providers, wide per-query pages, topical face/cabin/apartment pack.
-  // Keyless: Archive.org only, so recall comes from more distinct subjects plus extra
-  // sweeps of the same subjects — never from relaxing the evidence gate below.
+  // Keyed: stock providers plus additive raw-web motion.
+  // Keyless: raw web is the primary credential-free path, with Archive.org recall
+  // from distinct subjects and sweeps — never from relaxing evidence gates below.
   const aggressiveTopic = airlineTopicEarly || housingTopic;
   const queryCap = hasStockKeysEarly
     ? (aggressiveTopic ? 30 : 20)
@@ -2305,17 +2455,33 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   // wider keyless plan is fetched in parallel batches instead of one query at a time.
   const fetchBatchSize = 4;
   const deadline = Date.now() + resolveMotionFetchBudgetMs(hasStockKeysEarly);
-  const usedUrls = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+  const usedUrls = new Set((project.media || []).map((a) => motionUrlKey(a.url)).filter(Boolean));
   const deadSubjects = new Set();
   const fetchCandidates = async ({ query: q, sweep: suffix, page }) => {
-    const fromPexels = suffix ? [] : await fetchPexelsVideos(q, perProviderPage, page);
-    const fromPixabay = suffix ? [] : await fetchPixabayVideos(q, perProviderPage, page);
     // Skip archive.org for cyber topics when stock API keys exist, and don't re-ask
     // archive for page 2 — the proxy only ever returns one page of items per subject.
-    let fromArchive =
+    const archivePromise =
       (!cyberTopic || !hasStockKeysEarly) && devServer && page === 1
-        ? await fetchArchiveVideoResults(devServer, q, { topicBlob })
-        : [];
+        ? fetchArchiveVideoResults(devServer, q, { topicBlob })
+        : Promise.resolve([]);
+    const webPromises = !suffix && devServer && page === 1
+      ? WEB_VIDEO_PROVIDERS.map(({ key }) =>
+        fetchWebVideoResults(devServer, key, q, { topicBlob, limit: perProviderPage }))
+      : WEB_VIDEO_PROVIDERS.map(() => Promise.resolve([]));
+    const [
+      fromPexels,
+      fromPixabay,
+      initialArchive,
+      fromBing,
+      fromGoogle,
+      fromDdg,
+    ] = await Promise.all([
+      suffix ? Promise.resolve([]) : fetchPexelsVideos(q, perProviderPage, page),
+      suffix ? Promise.resolve([]) : fetchPixabayVideos(q, perProviderPage, page),
+      archivePromise,
+      ...webPromises,
+    ]);
+    let fromArchive = initialArchive;
     const archiveRaw = fromArchive.length;
     if (archiveRaw) {
       report.archiveQueriesTried = (report.archiveQueriesTried || 0) + 1;
@@ -2333,11 +2499,22 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         report,
       });
     }
+    const interleavedProviders = [];
+    const providerLists = [fromBing, fromGoogle, fromDdg, fromPexels, fromPixabay];
+    const maxProviderResults = Math.max(0, ...providerLists.map((items) => items.length));
+    for (let i = 0; i < maxProviderResults; i += 1) {
+      for (const items of providerLists) {
+        if (items[i]) interleavedProviders.push(items[i]);
+      }
+    }
     return {
       query: q,
       sweep: suffix,
       archiveRaw,
-      candidates: [...fromPexels, ...fromPixabay, ...fromArchive],
+      candidates: [
+        ...interleavedProviders,
+        ...fromArchive,
+      ],
     };
   };
 
@@ -2385,7 +2562,10 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           continue;
         }
       }
-      if (isJunkStockClip(clip, topicBlob, { preferBright: options.preferBright === true })) {
+      const isWebClip = /web video/i.test(clip.source || '');
+      // Search text asks the question; it is not evidence for a web result.
+      const evidenceClip = isWebClip ? { ...clip, query: '' } : clip;
+      if (isJunkStockClip(evidenceClip, topicBlob, { preferBright: options.preferBright === true })) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
@@ -2400,7 +2580,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           || isHeistTopic(topicBlob)
           || isAirlineTopic(topicBlob)
         )
-        && !isCyberRelevantClip(clip, topicBlob)
+        && !isCyberRelevantClip(evidenceClip, topicBlob)
       ) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
@@ -2453,6 +2633,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     }
   }
   report.archiveLiveFetched = liveClips.filter((c) => /Archive/i.test(c.source || '')).length;
+  report.bingWebVideoFetched = liveClips.filter((c) => /Bing web video/i.test(c.source || '')).length;
+  report.googleWebVideoFetched = liveClips.filter((c) => /Google web video/i.test(c.source || '')).length;
+  report.ddgWebVideoFetched = liveClips.filter((c) => /DuckDuckGo web video/i.test(c.source || '')).length;
   report.pexelsFetched = liveClips.filter((c) => /Pexels/i.test(c.source || '')).length;
   report.pixabayFetched = liveClips.filter((c) => /Pixabay/i.test(c.source || '')).length;
   if (options.faceSeek) report.faceSeekQueries = queries.slice(0, 6);
@@ -2466,7 +2649,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   // Dedupe by URL; drop junk tags.
   const seenPool = new Set();
   pool = pool.filter((v) => {
-    const key = (v.url || '').split('?')[0];
+    const key = motionUrlKey(v.url);
     if (!key || seenPool.has(key) || isJunkDemoVideoUrl(key) || isJunkStockClip(v, topicBlob, { preferBright: options.preferBright === true })) return false;
     if (isAirlineTopic(topicBlob) && !isCyberRelevantClip(v, topicBlob)) return false;
     seenPool.add(key);
@@ -2502,7 +2685,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     return;
   }
 
-  // With stock API keys, keep chasing real stock motion (not harvest proxies).
+  // Keep chasing the configured motion floor after preserving raw harvest clips.
   const videoCount = existingVideos.length;
   const { minVideos, stockNeed } = targets;
   if (videoCount >= minVideos && stockNeed <= 0) return;
@@ -2557,13 +2740,18 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     .sort((a, b) => faceScore(b) - faceScore(a));
   let vi = 0;
   const injectClip = async (seg, clip, tag) => {
-    const key = clip.url.split('?')[0];
+    const key = motionUrlKey(clip.url);
     if (!key || used.has(key)) return false;
     const isIntro = seg.type === 'intro' || seg === segments[0];
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
     if (isIntro && score < 0) return false;
-    const ok = await canFetch(clip.url, { timeoutMs: 10000, minBytes: 2048, expectVideo: true });
+    const ok = await canFetch(clip.url, {
+      timeoutMs: 120000,
+      minBytes: 2048,
+      expectVideo: true,
+      apiKey: isProxiedClipUrl(clip.url) ? resolveAutotubeApiKey() : '',
+    });
     if (!ok) {
       report.videoTopUpFailed = report.videoTopUpFailed || [];
       report.videoTopUpFailed.push({ url: clip.url, reason: 'probe failed' });
@@ -2583,7 +2771,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       segmentId: seg.id,
       type: 'video',
       url: clip.url,
-      alt: clip.alt || providerMeta || (airline ? `${clip.source || 'Stock'} clip` : seg.title),
+      alt:
+        clip.alt
+        || providerMeta
+        || (airline || /web video/i.test(clip.source || '')
+          ? `${clip.source || 'Video'} clip`
+          : seg.title),
       ...(providerMeta ? { title: providerMeta } : {}),
       query: safeQuery,
       source: clip.source || 'Stock video pool',
@@ -2621,7 +2814,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     drainGuard += 1;
     const clip = picks[vi];
     vi += 1;
-    if (!clip?.url || used.has(clip.url.split('?')[0])) continue;
+    if (!clip?.url || used.has(motionUrlKey(clip.url))) continue;
     const seg = segments[drainGuard % segments.length];
     await injectClip(seg, clip, `d${drainGuard}`);
   }
@@ -2695,6 +2888,11 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     visionStockBudgetSoftAdmitted: 0,
   };
   if (!project.media?.length) {
+    const volume = evaluateHarvestVolume(project, minPerSegment);
+    report.harvestQuality = volume;
+    report.volumePass = false;
+    report.after = 0;
+    writeFileSync(join(outDir, 'harvest-quality.json'), JSON.stringify(volume, null, 2));
     writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
     return report;
   }
@@ -3613,11 +3811,16 @@ export async function generateFullVideo(options) {
       if (mediaReport.motionKeyMode) {
         log(`   🔑 ${formatMotionPathLog(mediaReport)}`);
       }
-      // Keyless runs already say "Archive.org only" above; repeating pexels=0 pixabay=0
-      // reads like a provider failure rather than the absence of keys.
-      if (mediaReport.motionKeyMode === 'keyed' && (mediaReport.pexelsFetched || mediaReport.pixabayFetched || mediaReport.archiveLiveFetched)) {
+      if (
+        mediaReport.pexelsFetched
+        || mediaReport.pixabayFetched
+        || mediaReport.archiveLiveFetched
+        || mediaReport.bingWebVideoFetched
+        || mediaReport.googleWebVideoFetched
+        || mediaReport.ddgWebVideoFetched
+      ) {
         log(
-          `   📡 Live motion sources: pexels=${mediaReport.pexelsFetched || 0} pixabay=${mediaReport.pixabayFetched || 0} archive=${mediaReport.archiveLiveFetched || 0}`,
+          `   📡 Live motion sources: bing=${mediaReport.bingWebVideoFetched || 0} google=${mediaReport.googleWebVideoFetched || 0} ddg=${mediaReport.ddgWebVideoFetched || 0} archive=${mediaReport.archiveLiveFetched || 0} pexels=${mediaReport.pexelsFetched || 0} pixabay=${mediaReport.pixabayFetched || 0}`,
         );
       }
       if (mediaReport.junkVideoDropped?.length) {

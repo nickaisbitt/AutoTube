@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   airlineQueryVisionBypass,
   archiveEvidenceLookupBudget,
@@ -7,6 +7,7 @@ import {
   archiveShortQueryVariants,
   archiveTopicSubjectQueries,
   decideStockVisionGate,
+  fetchWebVideoResults,
   formatMotionPathLog,
   isAirlineRelevantClip,
   isJunkStockClip,
@@ -21,6 +22,8 @@ import {
   resolveStockKeyMode,
   resolveVisionUnverifiedMax,
   spawnSyncFailureReason,
+  stripJunkDemoVideos,
+  webMotionQueryVariants,
   withArchiveSweepSuffix,
 } from '../generate-full-video.mjs';
 
@@ -370,15 +373,22 @@ describe('motionQueryPlan', () => {
     expect(plan.queries.every(isSafeStockMotionQuery)).toBe(true);
   });
 
-  it('leads keyless airline runs with short Archive.org subjects', () => {
+  it('leads keyless airline runs with web-friendly scenes before Archive subjects', () => {
     const plan = motionQueryPlan(AIRLINE_TOPIC, false, { faceSeek: true, stockKeyed: false });
     expect(plan.mode).toBe('keyless');
     expect(plan.queries.slice(0, 4)).toEqual([
+      'airplane cabin passenger face worried',
+      'pilot cockpit headset face close-up',
+      'flight attendant airplane cabin face',
+      'passenger oxygen mask airplane cabin',
+    ]);
+    expect(plan.webQueries).toEqual(plan.queries.slice(0, plan.webQueries.length));
+    expect(plan.queries).toEqual(expect.arrayContaining([
       'airliner cabin',
       'aircraft cabin interior',
       'cabin pressurization',
       'oxygen mask demonstration',
-    ]);
+    ]));
     // Diversity, not looser gating: every keyless subject is concrete aviation.
     expect(plan.boostCount).toBeGreaterThanOrEqual(16);
     expect(plan.queries.length).toBeGreaterThan(plan.baseCount);
@@ -410,7 +420,14 @@ describe('motionQueryPlan', () => {
       expect.arrayContaining(['apartment kitchen interior daylight', 'apartment building hallway doors']),
     );
     const keyless = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
-    expect(keyless.queries.slice(0, 3)).toEqual(['apartment building', 'apartment interior', 'public housing']);
+    expect(keyless.queries.slice(0, 3)).toEqual([
+      'apartment building exterior city',
+      'for rent sign house porch',
+      'worried couple reading letter home',
+    ]);
+    expect(keyless.queries).toEqual(
+      expect.arrayContaining(['apartment building', 'apartment interior', 'public housing']),
+    );
   });
 
   it('derives short archive subjects for topics without a curated pack', () => {
@@ -432,6 +449,144 @@ describe('motionQueryPlan', () => {
       expect(plan.queries.every((q) => q.length <= 64)).toBe(true);
       expect(new Set(plan.queries).size).toBe(plan.queries.length);
     }
+  });
+});
+
+describe('webMotionQueryVariants', () => {
+  it('uses vetted scene queries and literal topic subjects without generic laundering terms', () => {
+    const queries = webMotionQueryVariants(
+      'The county water plant that dumped lead into the supply',
+      ['water treatment plant pipes', 'shocked face close up', ''],
+    );
+    expect(queries[0]).toBe('water treatment plant pipes');
+    expect(queries).toContain('water plant');
+    expect(queries.every(isSafeStockMotionQuery)).toBe(true);
+    expect(queries.some((query) => /unrelated|viral|trending/i.test(query))).toBe(false);
+  });
+});
+
+describe('fetchWebVideoResults', () => {
+  it('uses authenticated server routes and emits distinct local download wrappers', async () => {
+    const previousFetch = globalThis.fetch;
+    const previousKey = process.env.AUTOTUBE_API_KEY;
+    process.env.AUTOTUBE_API_KEY = 'test-api-key';
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes('/api/search-videos')) {
+        return {
+          ok: true,
+          json: async () => ({
+            results: [{
+              content: 'https://vimeo.com/12345',
+              title: 'Airliner cabin oxygen equipment training film',
+              images: { large: 'https://example.com/ddg.jpg' },
+              duration: '2:10',
+            }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          results: [{
+            url: `https://www.youtube.com/watch?v=${String(url).includes('google') ? 'google' : 'bing'}`,
+            title: 'Airliner cabin oxygen equipment training film',
+            thumbnailUrl: 'https://example.com/web.jpg',
+            duration: '2:10',
+          }],
+        }),
+      };
+    });
+
+    try {
+      const clips = await Promise.all(
+        ['bing', 'google', 'ddg'].map((provider) =>
+          fetchWebVideoResults('http://localhost:5173', provider, 'airliner cabin', {
+            topicBlob: AIRLINE_TOPIC,
+          })),
+      );
+      expect(clips.flat()).toHaveLength(3);
+      expect(new Set(clips.flat().map((clip) => clip.url)).size).toBe(3);
+      for (const clip of clips.flat()) {
+        expect(clip.url).toContain('http://localhost:5173/api/download-clip?url=');
+        expect(clip.alt).toContain('oxygen equipment training film');
+      }
+      for (const [, options] of globalThis.fetch.mock.calls) {
+        expect(options.headers['X-API-Key']).toBe('test-api-key');
+      }
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKey === undefined) delete process.env.AUTOTUBE_API_KEY;
+      else process.env.AUTOTUBE_API_KEY = previousKey;
+    }
+  });
+
+  it('does not turn the query echo into provider evidence', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        results: [{
+          url: 'https://www.youtube.com/watch?v=echo',
+          title: 'airliner cabin',
+          duration: '1:00',
+        }],
+      }),
+    }));
+    try {
+      const clips = await fetchWebVideoResults('http://localhost:5173', 'bing', 'airliner cabin', {
+        topicBlob: AIRLINE_TOPIC,
+      });
+      expect(clips).toEqual([]);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+});
+
+describe('stripJunkDemoVideos', () => {
+  it('keeps topical YouTube/TikTok wrappers but still removes demo and adult clips', () => {
+    const wrap = (url) => `/api/download-clip?url=${encodeURIComponent(url)}&duration=10`;
+    const project = {
+      topic: AIRLINE_TOPIC,
+      media: [
+        {
+          id: 'youtube',
+          type: 'video',
+          url: wrap('https://www.youtube.com/watch?v=cabin'),
+          sourceUrl: 'https://www.youtube.com/watch?v=cabin',
+          source: 'Bing web video',
+          alt: 'Airliner cabin oxygen mask safety demonstration',
+          query: 'airliner cabin',
+        },
+        {
+          id: 'tiktok',
+          type: 'video',
+          url: wrap('https://www.tiktok.com/@aviation/video/123'),
+          sourceUrl: 'https://www.tiktok.com/@aviation/video/123',
+          source: 'DuckDuckGo web video',
+          alt: 'Aircraft cabin pressurization training demonstration',
+          query: 'cabin pressurization',
+        },
+        {
+          id: 'demo',
+          type: 'video',
+          url: wrap('https://samplelib.com/lib/preview/mp4/sample-5s.mp4'),
+          alt: 'Airliner cabin safety demonstration',
+        },
+        {
+          id: 'adult',
+          type: 'video',
+          url: wrap('https://www.xvideos.com/video123/example'),
+          alt: 'Airliner cabin safety demonstration',
+        },
+      ],
+    };
+    const report = {};
+
+    stripJunkDemoVideos(project, report);
+
+    expect(project.media.map(({ id }) => id)).toEqual(['youtube', 'tiktok']);
+    expect(report.junkVideoDropped).toHaveLength(2);
   });
 });
 
@@ -568,6 +723,9 @@ describe('formatMotionPathLog', () => {
       pexelsFetched: 22,
       pixabayFetched: 4,
       archiveLiveFetched: 1,
+      bingWebVideoFetched: 5,
+      googleWebVideoFetched: 3,
+      ddgWebVideoFetched: 2,
       motionQueriesTried: 24,
       motionQueryPoolSize: 30,
       motionPoolSize: 41,
@@ -576,6 +734,7 @@ describe('formatMotionPathLog', () => {
     });
     expect(line).toContain('Motion path: keyed');
     expect(line).toContain('pexels=22');
+    expect(line).toContain('bing=5 google=3 ddg=2 archive=1');
     expect(line).toContain('queries-tried=24 query-pack=30');
     expect(line).toContain('injected=27/30');
   });
@@ -601,6 +760,9 @@ describe('formatMotionPathLog', () => {
     const line = formatMotionPathLog({
       motionKeyMode: 'keyless',
       archiveLiveFetched: 19,
+      bingWebVideoFetched: 12,
+      googleWebVideoFetched: 8,
+      ddgWebVideoFetched: 6,
       archiveQueriesTried: 33,
       archiveSweepQueries: 12,
       archiveEvidenceLookups: 40,
@@ -612,6 +774,7 @@ describe('formatMotionPathLog', () => {
       videoTopUp: new Array(16),
     });
     expect(line).toContain('Motion path: keyless');
+    expect(line).toContain('bing=12 google=8 ddg=6 archive=19');
     expect(line).not.toContain('pexels=0 pixabay=0 archive=');
     expect(line).toContain('sweep-queries=12');
     expect(line).toContain('evidence-rejected=21');
@@ -629,7 +792,7 @@ describe('formatMotionPathLog', () => {
       motionTargetVideos: 18,
       videoTopUp: new Array(16),
     });
-    expect(line).toContain('Archive.org only');
+    expect(line).toContain('web + Archive.org');
     expect(line).toContain('dead-subjects=7');
     expect(line).toContain('raw-hits=214');
     expect(line).toContain('evidence-cached=26');

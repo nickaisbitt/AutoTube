@@ -791,6 +791,49 @@ export function keylessArchiveHumanPortraitScore(asset, segment, topicBlob) {
 }
 
 /**
+ * Web-native motion sources — the PRIMARY harvest supply for this pipeline.
+ *
+ * Raw web harvest (search-engine video, social video hosts, scraper proxies and
+ * Archive.org) is where motion comes from; Pexels/Pixabay stock APIs are an
+ * optional nicety, not a requirement. A pool built from these sources is
+ * first-class live motion, exactly like keyed stock video.
+ */
+export const WEB_NATIVE_MOTION_SOURCE_RE =
+  /\b(?:bing|google|duck\s*duck\s*go|duckduckgo|ddg|startpage|vimeo|dailymotion|giphy|hybrid\s*scraper|hybrid|deep\s*harvest|deepharvest|archive\.org)\b/i;
+
+/** URL fingerprints for web-native motion (our clip proxy + social/video hosts). */
+export const WEB_NATIVE_MOTION_URL_RE =
+  /\/api\/download-clip|(?:^|[./])vimeo(?:cdn)?\.com|(?:^|[./])dailymotion\.com|(?:^|[./])dmcdn\.net|(?:^|[./])giphy\.com|(?:^|[./])media\d*\.giphy\.com|(?:^|[./])archive\.org/i;
+
+/**
+ * Is this asset raw web-harvest motion (as opposed to Pexels/Pixabay stock)?
+ * @param {object} asset
+ */
+export function isWebNativeMotionSource(asset = {}) {
+  const source = String(asset?.source || '');
+  const url = String(asset?.url || '');
+  // Pexels/Pixabay stay classified as optional stock, never as web-native motion.
+  if (/\bpexels\b|\bpixabay\b/i.test(`${source} ${url}`)) return false;
+  return WEB_NATIVE_MOTION_SOURCE_RE.test(source) || WEB_NATIVE_MOTION_URL_RE.test(url);
+}
+
+/**
+ * Evidence blob for web-native clips. Unlike stock providers (which echo the
+ * search query back into `alt`), raw web search results carry real page titles,
+ * and the operator has opted in to letting the harvest query itself count as a
+ * signal. This is the web-clip parallel to Archive.org's evidence verdict.
+ *
+ * @param {object} asset
+ * @returns {string}
+ */
+export function webNativeEvidenceBlob(asset = {}) {
+  return `${asset?.alt || ''} ${asset?.title || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''} ${asset?.url || ''}`
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * A segment-level relevance score for motion coverage. This deliberately uses
  * the same visual-evidence and junk gates as the harvest filter: query-only
  * matches, airline medical/carrier/ticker junk, and unsafe URLs cannot pad a
@@ -947,10 +990,13 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
 }
 
 /**
- * Soft-pass when curated cyber stills or stock-API motion filled a thin harvest.
- * Requires motion-rich timelines (enough videos per segment), not stills alone.
+ * Soft-pass when curated cyber stills, raw web-harvest motion, or stock-API motion
+ * filled a thin harvest. Requires motion-rich timelines (enough videos per segment),
+ * not stills alone. Web-native motion (Bing/Google/DuckDuckGo video, Vimeo,
+ * Dailymotion, Giphy, /api/download-clip, HybridScraper, DeepHarvest, Archive.org)
+ * is first-class live motion, so a web-video-rich pool can pass with no Pexels/Pixabay.
  *
- * @param {{ volumePass?: boolean, cyberStockInjected?: number, pexelsFetched?: number, pixabayFetched?: number, videoTopUp?: unknown[] }} mediaReport
+ * @param {{ volumePass?: boolean, cyberStockInjected?: number, pexelsFetched?: number, pixabayFetched?: number, archiveLiveFetched?: number, videoTopUp?: unknown[] }} mediaReport
  * @param {object} project
  * @returns {{ pass: boolean, reason?: string }}
  */
@@ -1016,6 +1062,14 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     || uniqueVideos.some((a) =>
       /pexels|pixabay|archive\.org|Archive\.org live/i.test(`${a.source || ''} ${a.url || ''}`),
     );
+  // Raw web harvest (search-engine video, Vimeo/Dailymotion/Giphy, /api/download-clip,
+  // HybridScraper, DeepHarvest, Archive.org) is the primary motion supply. Any of it
+  // counts as first-class live motion even when no Pexels/Pixabay stock exists.
+  const webNativeMotionVideos = uniqueVideos.filter(isWebNativeMotionSource);
+  const webNativeMotionCount = webNativeMotionVideos.length;
+  const liveMotionPresent = liveStockPresent || webNativeMotionCount > 0;
+  // The stock anti-slideshow floor stays tied to actual stock (keys or stock/archive
+  // motion) — web-native motion has its own floors below and must not be gated by it.
   const stockKeyMotionAvailable = hasStockKeys || liveStockPresent;
   const genericJunkVideos = uniqueVideos.filter((asset) => {
     const blob = `${asset.alt || ''} ${asset.query || ''} ${asset.source || ''} ${asset.title || ''} ${asset.url || ''}`;
@@ -1062,7 +1116,9 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
         };
       }
     }
-    if (stockFetched > 0 || topUp >= segN || liveStockPresent) {
+    // Web-native motion (raw web harvest) counts as live motion here, so a
+    // web-video-rich pool passes without any Pexels/Pixabay/Archive stock.
+    if (stockFetched > 0 || topUp >= segN || liveMotionPresent) {
       return { pass: true, reason: `soft-pass-motion-airline(${videoCount}v/${segN}segs)` };
     }
     // Airline harvests are judged by the airline gate alone — falling through to the
@@ -1096,6 +1152,18 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
       };
     }
     return { pass: true, reason: `soft-pass-motion(${videoCount}v/${segN}segs)` };
+  }
+  // Soft-pass B2: raw web harvest motion (no Pexels/Pixabay/top-up needed).
+  // Web-native video is the primary supply, so a web-video-rich pool passes on its
+  // own — but it still has to clear the same unique-topical-video floor (16) so a
+  // thin slideshow cannot sneak through. Thin web pools fall through to the
+  // aggregate/cold floors below rather than hard-failing here.
+  const webMotionRich = videosPerSeg >= motionMinPerSeg && webNativeMotionCount > 0;
+  if (webMotionRich && uniqueTopicalVideos >= 16) {
+    return {
+      pass: true,
+      reason: `soft-pass-web-motion(${webNativeMotionCount}web/${videoCount}v/${segN}segs)`,
+    };
   }
   // Soft-pass C: uneven but adequate
   const aggregateOk =
@@ -1242,8 +1310,14 @@ function isAirlineStrongVideo(asset = {}, topicBlob = '') {
   ) {
     return false;
   }
-  // …but aviation proof has to come from the media, not the string we searched with.
-  const blob = visualEvidenceBlob(asset);
+  // …but aviation proof has to come from the media, not the string we searched with —
+  // except for web-native clips (raw web harvest), where real page titles/alts and the
+  // deliberate harvest query are all legitimate evidence (parallel to Archive.org's
+  // evidence verdict). Stock clips still prove themselves visually only.
+  const visualBlob = visualEvidenceBlob(asset);
+  const blob = isWebNativeMotionSource(asset)
+    ? `${visualBlob} ${webNativeEvidenceBlob(asset)}`.replace(/\s+/g, ' ').trim()
+    : visualBlob;
   if (!blob) return false;
   if (AIRLINE_STRONG_CABIN_RE.test(blob)) return true;
   if (AIRLINE_STRONG_COCKPIT_RE.test(blob)) return true;

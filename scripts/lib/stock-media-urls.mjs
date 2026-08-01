@@ -417,7 +417,7 @@ export const STOCK_CYBER_IMAGES = [
 
 /** Demo / cartoon / CDN sample hosts that tank brutal visualVariety on news topics. */
 export const JUNK_VIDEO_HOST_RE =
-  /(?:w3schools\.com|media\.w3\.org|samplelib\.com|filesamples\.com|interactive-examples\.mdn|commondatastorage\.googleapis\.com\/gtv-videos|googlevideo\.com\/videoplayback|forbigger|sintel|big.?buck.?bunny|flower\.mp4)/i;
+  /(?:w3schools\.com|media\.w3\.org|samplelib\.com|filesamples\.com|interactive-examples\.mdn|commondatastorage\.googleapis\.com\/gtv-videos|forbigger|sintel|big.?buck.?bunny|flower\.mp4)/i;
 
 /**
  * Adult / porn CDNs — never allow in harvest, timeline, or volume top-up.
@@ -431,7 +431,7 @@ export const UNSAFE_MEDIA_URL_RE =
  * investigation videos (Niagara, Discogs, PurePeople, etc.).
  */
 export const JUNK_WEB_STILL_HOST_RE =
-  /\b(niagara|audleytravel|wallpapers\.com|discogs|allmusic|purepeople|howtallis|storagereview|a-z-animals|ariasfriends|pinimg\.com|pinterest\.|lookaside\.fbsbx|dmcdn\.net|dailymotion\.com|filo-question-diagrams|askfilo\.com)\b/i;
+  /\b(niagara|audleytravel|wallpapers\.com|discogs|allmusic|purepeople|howtallis|storagereview|a-z-animals|ariasfriends|pinimg\.com|pinterest\.|lookaside\.fbsbx|filo-question-diagrams|askfilo\.com)\b/i;
 
 export function isJunkDemoVideoUrl(url = '') {
   return JUNK_VIDEO_HOST_RE.test(url || '');

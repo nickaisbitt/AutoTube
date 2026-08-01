@@ -6,7 +6,6 @@ export interface FeatureFlag {
 
 const DEFAULT_FLAGS: Record<string, FeatureFlag> = {
   batchRender: { name: 'batchRender', enabled: true, rolloutPercentage: 100 },
-  socialUpload: { name: 'socialUpload', enabled: false, rolloutPercentage: 100 },
   videoComparison: { name: 'videoComparison', enabled: true, rolloutPercentage: 100 },
   analytics: { name: 'analytics', enabled: true, rolloutPercentage: 100 },
 };

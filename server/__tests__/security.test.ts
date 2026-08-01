@@ -1,6 +1,24 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import dns from "dns";
+
+const undiciMocks = vi.hoisted(() => ({
+  fetch: vi.fn(),
+  agentOptions: [] as unknown[],
+}));
+
+vi.mock("undici", () => ({
+  Agent: class {
+    close = vi.fn().mockResolvedValue(undefined);
+
+    constructor(options: unknown) {
+      undiciMocks.agentOptions.push(options);
+    }
+  },
+  fetch: undiciMocks.fetch,
+}));
+
 import {
+  fetchPinnedURL,
   isPrivateIP,
   readResponseBodyWithLimit,
   ResponseSizeLimitError,
@@ -9,7 +27,11 @@ import {
 } from "../utils/security.js";
 
 describe("Security & SSRF Utilities", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    undiciMocks.fetch.mockReset();
+    undiciMocks.agentOptions.length = 0;
+  });
 
   describe("isPrivateIP", () => {
     it("identifies private IPv4 addresses", () => {
@@ -57,6 +79,9 @@ describe("Security & SSRF Utilities", () => {
 
       const result = await validateURL("https://google.com/search");
       expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.addresses).toEqual([{ address: "8.8.8.8", family: 4 }]);
+      }
       spy.mockRestore();
     });
 
@@ -92,13 +117,88 @@ describe("Security & SSRF Utilities", () => {
     });
   });
 
+  describe("fetchPinnedURL", () => {
+    it("pins the socket lookup to the address returned by validation", async () => {
+      let dnsCallCount = 0;
+      const dnsSpy = vi.spyOn(dns, "lookup").mockImplementation(
+        (_hostname, options, callback) => {
+          const cb = typeof options === "function" ? options : callback as any;
+          dnsCallCount++;
+          cb(null, [{
+            address: dnsCallCount === 1 ? "8.8.8.8" : "127.0.0.1",
+            family: 4,
+          }] as any);
+        },
+      );
+      undiciMocks.fetch.mockResolvedValue(new Response("ok"));
+
+      const validation = await validateURL("https://example.com/image.png");
+      expect(validation.valid).toBe(true);
+      if (!validation.valid) throw new Error(validation.error);
+
+      await fetchPinnedURL("https://example.com/image.png", validation);
+
+      expect(dnsSpy).toHaveBeenCalledTimes(1);
+      expect(undiciMocks.fetch).toHaveBeenCalledWith(
+        "https://example.com/image.png",
+        expect.objectContaining({
+          redirect: "manual",
+          dispatcher: expect.anything(),
+        }),
+      );
+
+      const agentOptions = undiciMocks.agentOptions[0] as {
+        connect: {
+          lookup: (
+            hostname: string,
+            options: { all: boolean; family: number },
+            callback: (
+              error: NodeJS.ErrnoException | null,
+              address: string,
+              family: number,
+            ) => void,
+          ) => void;
+        };
+      };
+      const pinnedAddress = await new Promise<{ address: string; family: number }>(
+        (resolve, reject) => {
+          agentOptions.connect.lookup(
+            "example.com",
+            { all: false, family: 4 },
+            (error, address, family) => {
+              if (error) reject(error);
+              else resolve({ address, family });
+            },
+          );
+        },
+      );
+      expect(pinnedAddress).toEqual({ address: "8.8.8.8", family: 4 });
+    });
+
+    it("rejects a validation result for a different URL", async () => {
+      vi.spyOn(dns, "lookup").mockImplementation(
+        (_hostname, options, callback) => {
+          const cb = typeof options === "function" ? options : callback as any;
+          cb(null, [{ address: "8.8.8.8", family: 4 }] as any);
+        },
+      );
+      const validation = await validateURL("https://example.com/allowed");
+      if (!validation.valid) throw new Error(validation.error);
+
+      await expect(
+        fetchPinnedURL("https://example.com/different", validation),
+      ).rejects.toThrow("does not match");
+      expect(undiciMocks.fetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe("validateURLRedirects", () => {
     it("follows redirects manually and returns the validated final URL", async () => {
       vi.spyOn(dns, "lookup").mockImplementation((_hostname, options, callback) => {
         const cb = typeof options === "function" ? options : callback as any;
         cb(null, [{ address: "8.8.8.8", family: 4 }] as any);
       });
-      const fetchSpy = vi.spyOn(globalThis, "fetch")
+      const fetchSpy = undiciMocks.fetch
         .mockResolvedValueOnce(new Response(null, {
           status: 302,
           headers: { Location: "https://cdn.example/video.mp4" },
@@ -119,7 +219,7 @@ describe("Security & SSRF Utilities", () => {
         const cb = typeof options === "function" ? options : callback as any;
         cb(null, [{ address: "8.8.8.8", family: 4 }] as any);
       });
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      const fetchSpy = undiciMocks.fetch.mockResolvedValue(
         new Response(null, {
           status: 302,
           headers: { Location: "http://127.0.0.1/admin" },

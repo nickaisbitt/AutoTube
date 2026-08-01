@@ -26,6 +26,35 @@ import { logger } from '../logger';
 import { isSafeStockProviderQuery } from '../topicFamilyQueries';
 
 // ---------------------------------------------------------------------------
+// Server proxy helper — Pexels & Pixabay
+// ---------------------------------------------------------------------------
+
+/**
+ * Calls a server-side stock media proxy endpoint.
+ * Returns MediaCandidate[] when the server handled the request (key configured),
+ * or null when the server is not configured (503) so the caller can fall back to BYOK.
+ */
+async function tryStockServerProxy(
+  endpoint: string,
+  query: string,
+  type: 'photos' | 'videos',
+  signal?: AbortSignal,
+): Promise<MediaCandidate[] | null> {
+  try {
+    const url = `${endpoint}?q=${encodeURIComponent(query)}&type=${type}`;
+    const res = await fetch(url, { signal });
+    if (res.status === 503) return null; // server has no key configured — fall back to BYOK
+    if (!res.ok) return []; // server had key but upstream error — don't fall back
+    const data = await res.json() as { results?: MediaCandidate[] };
+    return Array.isArray(data.results) ? data.results : [];
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') throw err;
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    return null; // network error — fall back to BYOK
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Adapter wrappers for existing providers in media.ts
 // ---------------------------------------------------------------------------
 
@@ -187,29 +216,39 @@ class GoogleVideosAdapter implements SourceProvider {
 
 class PixabayAdapter implements SourceProvider {
   readonly name = 'Pixabay';
-  readonly requiresKey = true;
+  // Server proxy (/api/search-pixabay) is always available; BYOK key activates direct calls too
+  readonly requiresKey = false;
 
-  isAvailable(config: SourceProviderConfig): boolean {
-    return Boolean(config.apiKey);
+  isAvailable(): boolean {
+    return true;
   }
 
   async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
-    const provider = new PixabayProvider();
-    return provider.search(query, config);
+    // Prefer server proxy (uses PIXABAY_API_KEY server-side; no VITE_* secret in browser)
+    const serverResult = await tryStockServerProxy('/api/search-pixabay', query, 'photos', config.signal);
+    if (serverResult !== null) return serverResult;
+    // BYOK fallback: VITE_PIXABAY_KEY set locally — call Pixabay directly
+    if (!config.apiKey) return [];
+    return new PixabayProvider().search(query, config);
   }
 }
 
 class PexelsAdapter implements SourceProvider {
   readonly name = 'Pexels';
-  readonly requiresKey = true;
+  // Server proxy (/api/search-pexels) is always available; BYOK key activates direct calls too
+  readonly requiresKey = false;
 
-  isAvailable(config: SourceProviderConfig): boolean {
-    return Boolean(config.apiKey);
+  isAvailable(): boolean {
+    return true;
   }
 
   async search(query: string, config: SourceProviderConfig): Promise<MediaCandidate[]> {
-    const provider = new PexelsProvider();
-    return provider.search(query, config);
+    // Prefer server proxy (uses PEXELS_API_KEY server-side; no VITE_* secret in browser)
+    const serverResult = await tryStockServerProxy('/api/search-pexels', query, 'photos', config.signal);
+    if (serverResult !== null) return serverResult;
+    // BYOK fallback: VITE_PEXELS_KEY set locally — call Pexels directly
+    if (!config.apiKey) return [];
+    return new PexelsProvider().search(query, config);
   }
 }
 
@@ -233,8 +272,30 @@ const allProviders: SourceProvider[] = [
   new GovPressProvider(),
   new PixabayAdapter(),
   new PexelsAdapter(),
-  new PexelsVideoProvider(),
-  new PixabayVideoProvider(),
+  // Video providers: server proxy preferred (PIXABAY_API_KEY / PEXELS_API_KEY server-side);
+  // BYOK VITE_* key falls back to direct calls when server is not configured.
+  {
+    name: 'Pexels Videos' as const,
+    requiresKey: false,
+    isAvailable: () => true,
+    search: async (query: string, config: SourceProviderConfig) => {
+      const serverResult = await tryStockServerProxy('/api/search-pexels', query, 'videos', config.signal);
+      if (serverResult !== null) return serverResult;
+      if (!config.apiKey) return [];
+      return new PexelsVideoProvider().search(query, config);
+    },
+  } satisfies SourceProvider,
+  {
+    name: 'Pixabay Videos' as const,
+    requiresKey: false,
+    isAvailable: () => true,
+    search: async (query: string, config: SourceProviderConfig) => {
+      const serverResult = await tryStockServerProxy('/api/search-pixabay', query, 'videos', config.signal);
+      if (serverResult !== null) return serverResult;
+      if (!config.apiKey) return [];
+      return new PixabayVideoProvider().search(query, config);
+    },
+  } satisfies SourceProvider,
   new NasaProvider(),
   new VimeoProvider(),
   new DailymotionProvider(),

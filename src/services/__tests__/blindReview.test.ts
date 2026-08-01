@@ -395,28 +395,52 @@ describe('parseQualityReport', () => {
   });
 
   it('parses a JSON string with markdown fences', () => {
-    const raw = '```json\n{"scores":{"visualQuality":7},"feedback":{},"summary":"Good."}\n```';
+    const raw = '```json\n{"scores":{"visualQuality":7,"pacing":6,"narrativeClarity":8},"feedback":{},"summary":"Good."}\n```';
     const report = parseQualityReport(raw);
     expect(report).not.toBeNull();
     expect(report!.scores.visualQuality).toBe(7);
-    // Individual missing scores still default to 5 when the response is otherwise usable
-    expect(report!.scores.pacing).toBe(5);
+    // Individual missing scores still default to 5 when a majority is present
+    expect(report!.scores.thumbnailEffectiveness).toBe(5);
     expect(report!.summary).toBe('Good.');
   });
 
   it('fills individually missing scores with default value of 5', () => {
-    const raw = { scores: { visualQuality: 8 }, feedback: {}, summary: '' };
+    const raw = { scores: { visualQuality: 8, pacing: 7, narrativeClarity: 9 }, feedback: {}, summary: '' };
     const report = parseQualityReport(raw);
     expect(report).not.toBeNull();
     expect(report!.scores.visualQuality).toBe(8);
-    expect(report!.scores.pacing).toBe(5);
-    expect(report!.scores.narrativeClarity).toBe(5);
+    expect(report!.scores.pacing).toBe(7);
+    expect(report!.scores.narrativeClarity).toBe(9);
     expect(report!.scores.thumbnailEffectiveness).toBe(5);
     expect(report!.scores.overallProductionValue).toBe(5);
   });
 
+  it('accepts a bare majority of score categories', () => {
+    // 3 of 5 categories present → majority → usable
+    const raw = { scores: { visualQuality: 4, pacing: 5, narrativeClarity: 6 }, feedback: {}, summary: 'OK.' };
+    const report = parseQualityReport(raw);
+    expect(report).not.toBeNull();
+    expect(report!.scores.thumbnailEffectiveness).toBe(5);
+    expect(report!.scores.overallProductionValue).toBe(5);
+  });
+
+  it('returns null when fewer than a majority of scores are present', () => {
+    // Only 2 of 5 categories → below majority → fail closed
+    expect(
+      parseQualityReport({ scores: { visualQuality: 8, pacing: 7 }, feedback: {}, summary: 'Looks fine.' }),
+    ).toBeNull();
+    // A single stray score must never be padded into a full report
+    expect(
+      parseQualityReport({ scores: { visualQuality: 8 }, feedback: {}, summary: 'Looks fine.' }),
+    ).toBeNull();
+  });
+
   it('fills missing feedback with "No feedback provided."', () => {
-    const raw = { scores: { visualQuality: 4 }, feedback: { visualQuality: 'Nice.' }, summary: '' };
+    const raw = {
+      scores: { visualQuality: 4, pacing: 5, narrativeClarity: 6 },
+      feedback: { visualQuality: 'Nice.' },
+      summary: '',
+    };
     const report = parseQualityReport(raw)!;
     expect(report.feedback.visualQuality).toBe('Nice.');
     expect(report.feedback.pacing).toBe('No feedback provided.');
@@ -426,17 +450,22 @@ describe('parseQualityReport', () => {
   });
 
   it('fills empty feedback strings with default', () => {
-    const raw = { scores: { visualQuality: 4 }, feedback: { visualQuality: '', pacing: '   ' }, summary: '' };
+    const raw = {
+      scores: { visualQuality: 4, pacing: 5, narrativeClarity: 6 },
+      feedback: { visualQuality: '', pacing: '   ' },
+      summary: '',
+    };
     const report = parseQualityReport(raw)!;
     expect(report.feedback.visualQuality).toBe('No feedback provided.');
     expect(report.feedback.pacing).toBe('No feedback provided.');
   });
 
   it('fills missing/empty summary with default', () => {
-    const report1 = parseQualityReport({ scores: { visualQuality: 4 }, feedback: {} })!;
+    const scores = { visualQuality: 4, pacing: 5, narrativeClarity: 6 };
+    const report1 = parseQualityReport({ scores, feedback: {} })!;
     expect(report1.summary).toBe('No feedback provided.');
 
-    const report2 = parseQualityReport({ scores: { visualQuality: 4 }, feedback: {}, summary: '' })!;
+    const report2 = parseQualityReport({ scores, feedback: {}, summary: '' })!;
     expect(report2.summary).toBe('No feedback provided.');
   });
 
@@ -456,14 +485,18 @@ describe('parseQualityReport', () => {
 
   it('truncates feedback to 500 chars', () => {
     const longFeedback = 'x'.repeat(600);
-    const raw = { scores: { visualQuality: 4 }, feedback: { visualQuality: longFeedback }, summary: '' };
+    const raw = {
+      scores: { visualQuality: 4, pacing: 5, narrativeClarity: 6 },
+      feedback: { visualQuality: longFeedback },
+      summary: '',
+    };
     const report = parseQualityReport(raw)!;
     expect(report.feedback.visualQuality.length).toBeLessThanOrEqual(500);
   });
 
   it('truncates summary to 1000 chars', () => {
     const longSummary = 'y'.repeat(1500);
-    const raw = { scores: { visualQuality: 4 }, feedback: {}, summary: longSummary };
+    const raw = { scores: { visualQuality: 4, pacing: 5, narrativeClarity: 6 }, feedback: {}, summary: longSummary };
     const report = parseQualityReport(raw)!;
     expect(report.summary.length).toBeLessThanOrEqual(1000);
   });
@@ -522,7 +555,11 @@ describe('parseQualityReport', () => {
   });
 
   it('handles feedback as non-object gracefully', () => {
-    const report = parseQualityReport({ scores: { visualQuality: 4 }, feedback: 123, summary: '' })!;
+    const report = parseQualityReport({
+      scores: { visualQuality: 4, pacing: 5, narrativeClarity: 6 },
+      feedback: 123,
+      summary: '',
+    })!;
     expect(report.feedback.visualQuality).toBe('No feedback provided.');
   });
 });
@@ -939,7 +976,7 @@ describe('PBT Properties', () => {
   });
 
   // Feature: blind-video-review, Property 8: Missing field defaults
-  it('Property 8: For any raw response object with an arbitrary subset of score and feedback fields omitted, parseQualityReport(raw) either fails closed (no score at all) or produces a complete QualityReport where every missing score is 5 and every missing feedback is "No feedback provided."', () => {
+  it('Property 8: For any raw response object with an arbitrary subset of score and feedback fields omitted, parseQualityReport(raw) either fails closed (fewer than a majority of scores) or produces a complete QualityReport where every missing score is 5 and every missing feedback is "No feedback provided."', () => {
     // **Validates: Requirements 7.2**
     const categories = [
       'visualQuality',
@@ -978,8 +1015,9 @@ describe('PBT Properties', () => {
         const raw = { scores, feedback, summary: 'Test summary.' };
         const maybeReport = parseQualityReport(raw);
 
-        // With no usable score at all, the parser must fail closed
-        if (Object.keys(scores).length === 0) {
+        // Fewer than a majority of the 5 categories → the parser must fail closed
+        const requiredScoreCount = Math.ceil(categories.length / 2);
+        if (Object.keys(scores).length < requiredScoreCount) {
           expect(maybeReport).toBeNull();
           return;
         }

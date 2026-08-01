@@ -348,7 +348,7 @@ function validateTransition(
  * - For each segment entry: validates segmentId exists in the project,
  *   validates shotOrder contains exactly the same asset IDs as the segment's media,
  *   clamps Ken Burns zoom values to [1.0, 1.25], validates transition types,
- *   and validates caption settings ranges.
+ *   and fills caption settings from renderer defaults (LLM values are ignored).
  * - Merges valid fields with defaults for missing fields (partial JSON support).
  * - Adds default entries for project segments not covered by the raw response.
  * - Returns the validated/merged EditPlan with isDefault: false.
@@ -552,7 +552,7 @@ export function buildEditPrompt(project: VideoProject): { system: string; user: 
       '\n- For segments with beat type "event" or "data", prefer "cut" transitions for immediacy and impact.';
   }
 
-  const system = `You are a professional video editor reviewing a fully assembled video plan. Your job is to make creative editing decisions that improve pacing, visual flow, transitions, camera motion, caption readability, and media quality.
+  const system = `You are a professional video editor reviewing a fully assembled video plan. Your job is to make creative editing decisions that improve pacing, visual flow, transitions, camera motion, and media quality.
 
 You will receive the complete project data: script segments, media assets, narration clips, and visual plans. Analyze the material and return a single JSON object conforming to the EditPlan schema below.
 

@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import {
+  fetchPinnedURL,
   readResponseBodyWithLimit,
   validateURL,
 } from "../utils/security.js";
@@ -54,7 +55,7 @@ async function fetchPage(
         return null;
       }
 
-      const response = await fetch(currentUrl, {
+      const response = await fetchPinnedURL(currentUrl, urlSafety, {
         headers: getStealthHeaders(),
         redirect: "manual",
         signal: AbortSignal.timeout(15000),

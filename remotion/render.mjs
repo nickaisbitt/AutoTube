@@ -63,6 +63,24 @@ async function main() {
     segments.reduce((sum, s) => sum + s.duration, 0) * fps
   );
 
+  // Flatten the per-segment beats the pipeline attached into the top-level
+  // shape ProjectProps expects. Beat text is dropped unless it carries real
+  // copy — placeholders like '...' must never reach an overlay.
+  const retentionBeats = (project.script || []).flatMap((seg, i) =>
+    (seg.retentionBeats || [])
+      .filter(beat => beat && typeof beat.time === 'number' && beat.type)
+      .map(beat => {
+        const text = typeof beat.text === 'string' ? beat.text.trim() : '';
+        const hasText = /[\p{L}\p{N}]/u.test(text);
+        return {
+          type: beat.type,
+          time: beat.time,
+          segmentIndex: i,
+          ...(hasText ? { text } : {}),
+        };
+      })
+  );
+
   // Optional background music: served by REMOTION_SERVE_URL (the dev server that
   // hosts public/audio). Only enabled when the project opts in and a serve URL is
   // available; otherwise the render stays narration-only.
@@ -93,7 +111,7 @@ async function main() {
       particleStyle: project.style || 'documentary',
     },
     editPlan: [],
-    retentionBeats: [],
+    retentionBeats,
     totalDurationFrames,
     fps,
     width,

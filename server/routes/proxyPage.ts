@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import {
+  fetchPinnedURL,
   readResponseBodyWithLimit,
   ResponseSizeLimitError,
   validateURL,
@@ -40,7 +41,7 @@ export async function handleProxyPage(
         return;
       }
 
-      pageRes = await fetch(currentUrl, {
+      pageRes = await fetchPinnedURL(currentUrl, urlSafety, {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -93,6 +94,7 @@ export async function handleProxyPage(
     }
 
     if (!pageRes.ok) {
+      await pageRes.body?.cancel().catch(() => undefined);
       res.statusCode = 502;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ 

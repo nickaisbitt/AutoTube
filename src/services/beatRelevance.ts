@@ -297,10 +297,12 @@ export async function rankCandidatesWithBeatVision<T extends { alt?: string; url
         );
       }
 
+      // Vision is the authoritative signal when it ran: a confident vision
+      // reject stands on its own, without needing the heuristic to also reject.
       const combined = vision
         ? {
             score: vision.reject ? vision.score * 0.3 : (best.score * 0.35 + vision.score * 0.65),
-            reject: vision.reject && best.reject,
+            reject: vision.reject,
           }
         : best;
 

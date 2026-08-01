@@ -9,7 +9,6 @@ import {
   Shuffle,
   Clock,
   Film,
-  Type,
   ImageOff,
 } from 'lucide-react';
 import type { VideoProject, StepStatus } from '../types';
@@ -264,12 +263,6 @@ export default function AIEditStep({
                           {entry.shotOrder.length} shots
                         </span>
                       )}
-                      {entry.captionSettings.isFastPaced && (
-                        <span className="inline-flex items-center gap-1 bg-surface-800 border-2 border-amber-500 px-2 py-0.5 text-[10px] font-mono text-amber-300">
-                          <Type className="h-2.5 w-2.5" />
-                          Fast-paced
-                        </span>
-                      )}
                       {hasReplacements && (
                         <span className="inline-flex items-center gap-1 bg-surface-800 border-2 border-red-500 px-2 py-0.5 text-[10px] font-mono text-red-300">
                           <ImageOff className="h-2.5 w-2.5" />
@@ -308,7 +301,7 @@ export default function AIEditStep({
           <p className="text-lg font-semibold text-white">AI Video Editor</p>
           <p className="mt-1 text-sm text-surface-400">
             The AI editor analyzes your script, media, and narration to optimize shot ordering,
-            transitions, timing, Ken Burns effects, and caption placement for a more polished result.
+            transitions, timing, and Ken Burns effects for a more polished result.
           </p>
         </div>
         <div className="flex flex-col items-center gap-3">

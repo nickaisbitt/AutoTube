@@ -1,50 +1,47 @@
 # AutoTube — Remaining Work (numbered)
 
-Last updated: 2026-06-06. Use item numbers in chat ("fix 3", "do 7").
+Last updated: 2026-08-01 on branch `cursor/fix-audit-blockers-b466`. Use item numbers in chat ("fix 3", "do 7").
 
-## A — Deploy / prod (blocking latest code)
+## A — Multi-model audit fix sweep — DONE on this branch
 
-1. **Prod is behind local HEAD** — after `98b671d` on master, wait for GitHub Actions **GHCR image** (auto on push to master), then from Mac with `RAILWAY_API_TOKEN` in `.env.local`:
-   ```bash
-   gh run watch --exit-status   # wait for GHCR image workflow
-   npm run deploy:railway:registry:pull
-   npm run railway:completion-check
-   ```
-2. **Railpack `npm run deploy:railway` still hangs** at Railway "uploading snapshot" after Vite. Use GHCR path (item 1) until Railway fixes Metal/snapshot.
-3. **Rotate Railway API token** if it was ever pasted in chat; update Cursor secret `RAILWAY_API_TOKEN`.
+Landed 2026-08-01 in `c3d8dbe`, `2a525e3`, `bd72324`, `5055c41`:
 
-## B — Codebase bug sweep (15 items) — DONE
+1. **Harvest fail-closed** — no query-laundering through quality gates; fallback harvest filtered; Picsum inject dropped; NSFW CDN bans kept at domain parity between client and server.
+2. **A/V sync** — narration gaps propagate into video/captions/ducking; empty narration and killed renders now fail instead of shipping silent output.
+3. **Watcher honesty** — brutal/upload-ready gates no longer inflate scores. `npm run watch:video -- <mp4>` exit semantics (`scripts/watch-video.mjs`): exit 0 **only** when `uploadReady === true`, or when `--min-score N` is given and the raw brutal score ≥ N with no critical issues; exit 1 otherwise (including vision-skipped or failed reviews).
+4. **Security** — fail-closed API auth; tighter SSRF/proxy limits; LLM/render bounds; `downloadClip` redirect hardening; production error masking; lossy project-ID collisions rejected; `VITE_*` browser-secret exposure documented in `.env.example`.
+5. **Deploy drift** — stale unauthenticated `deploy/server` tree deleted; CI guard blocks revival (`.github/workflows/ci.yml`); `npm run check:server-render` detects root↔deploy monolith drift.
+6. **Audio** — background-music multi-root resolve; Remotion audio offset; Kokoro SSML strip.
+7. **CI** — GHCR image publishes only after green CI; Playwright `forbidOnly`; script discovery fixed.
+8. **Sprawl** — dead services/components and mock social uploads quarantined; unused TypeScript FX mirrors deleted (canonical path is `deploy/server-render/*.mjs`).
+9. **Eval honesty** — eval chain exits non-zero on failed release bars; aggregation defaults to the latest wave. Note: artifacts in `test-recordings/` (incl. 2026-07-21 eval-release runs) predate these honesty fixes — their scores must not be cited as DoD evidence.
 
-4. All 15 bugs in `.kiro/specs/codebase-bug-sweep/bugfix.md` are fixed on master (store, PreviewStep, media, aiEditor, renderer). See store/orchestrator tests + `usePlayback.editPlan.test.ts`.
+## B — Script-enforceable DoD — `npm run dod:check`
 
-## C — Pipeline reliability (5 items) — MOSTLY DONE
+Fast, no keys required, exit 1 on any failure:
 
-5. **Narration scaling** — Browser-only path uses per-segment estimates + parallel Grok/Melo batches; Playwright uses 10–15 min timeouts (`generate-full-video.mjs`). Server TTS (edge-tts) is prod path for renders.
-6. **Assembly progress** — `orchestrator.ts` reports "Connecting to render server", per-image preload (`Preloading image N/M`), browser fallback messages.
-7. **Script step UI** — `ScriptStep.tsx` rotates `SCRIPT_STATUS_MESSAGES` every 3s while processing.
-8. **Media step UI** — `MediaStep/ProcessingView.tsx` shows beat labels, segment names, rotating status.
-9. **Remaining** — Record a fresh browser journey after prod deploy to confirm dead-frame % dropped.
+10. `deploy/server` / `deploy/server.mjs` must be absent (mirrors the CI guard).
+11. `deploy/server-render.mjs` must match root `server-render.mjs` (delegates to `scripts/sync-server-render-deploy.mjs --check`; fix with `npm run sync:server-render`).
+12. Optional slower bar: `node scripts/dod-check.mjs --unit` also runs the vitest suite (off by default to keep the check fast; CI runs the suite on every push).
+13. Typecheck stays separate: `npm run lint` (`tsc --noEmit`) — hinted by dod:check, not executed by it.
 
-## D — Video quality (225 checklist items) — OPEN
+## C — Product DoD — STILL OPEN (manual, needs keys; do NOT claim these are met)
 
-10. **Thumbnail / packaging** — Concepts exist in code; need real OpenRouter runs + human pick (not fixture-only).
-11. **Hook / retention** — `hookValidator`, shock hooks in YouTube mode; still need loop:video scores ≥7 on prod.
-12. **B-roll / harvest** — Real harvest works with keys; bad Vimeo/YouTube clips still need stricter pre-probe (partial fix in `generate-full-video.mjs` sanitization).
-13. **9.3 brutal watcher target** — `npm run loop:video -- --until-score 9.3` (needs `OPENROUTER_API_KEY` + dev server).
+14. **Real generate** — `npm run dev`, then `OPENROUTER_API_KEY=... npm run generate:video -- "<real topic>"` (needs ffmpeg). Must be re-run on this branch's code; pre-sweep artifacts don't count.
+15. **Watch ≥ 7** — `npm run watch:video -- <new-final.mp4> --min-score 7` exits 0 on the fresh real-topic artifact. OPEN.
+16. **Upload-ready** — `npm run watch:video -- <new-final.mp4>` exits 0 (`uploadReady === true`, vision enabled). OPEN.
+17. **9.3 stretch (optional)** — `OPENROUTER_API_KEY=... npm run loop:video -- --until-score 9.3` until `test-recordings/improvement-loop/TARGET_SCORE_REACHED.json` exists. OPEN.
 
-## E — Tests / CI
+## D — Deploy / prod
 
-14. **Audio module integration tests** — Skip when `ffmpeg`/`lavfi` unavailable (21 skipped on worker; full run needs ffmpeg). **Verified:** `npm run test:unit` → 1720 passed, 21 skipped.
-15. **MediaStep replace test** — Fixed (Introduction-specific buttons). **Verified** in isolation and full suite.
-16. **E2E smoke on worker** — Needs `npx playwright install chromium --with-deps` (libglib); CI job installs deps. Run on Mac or manual CI workflow.
-17. **E2E full pipeline** — `npm run test:e2e:full` (~30 min); run after prod deploy.
+18. **Prod currency** — `npm run railway:completion-check` exits 0 ⇔ prod deploy/image tag matches local `git rev-parse HEAD` (needs `RAILWAY_API_TOKEN`; also probes https://autotube-production.up.railway.app/api/health). Status from this VM: UNVERIFIED — no Railway token in this environment.
+19. **Ship path** — push to master → GHCR image workflow (`.github/workflows/ghcr-image.yml`, runs only after green CI) → from a machine holding the token: `npm run deploy:railway:registry:pull`, then `npm run railway:completion-check`. Railpack `npm run deploy:railway` still hangs at Railway "uploading snapshot"; use the GHCR path.
+20. **Token hygiene** — rotate the Railway API token if it was ever pasted in chat; update the Cursor secret `RAILWAY_API_TOKEN`.
 
-## F — Definition of done (103%)
+## E — Test / CI environment notes
 
-18. `npm run railway:completion-check` exit 0 (prod image tag = local `git rev-parse HEAD`). **Current:** FAIL — prod on `6c11d39`; GHCR image **built** for `14aad39` (auto workflow); needs `npm run deploy:railway:registry:pull` from Mac.
-19. `npm run railway:smoke` pass.
-20. `npm run test:unit` — **DONE** (1720 passed, 21 skipped without ffmpeg).
-21. `npm run test:e2e:smoke` — 3/3 (Mac or CI with Playwright deps).
-22. One real-topic video: `OPENROUTER_API_KEY=... npm run generate:video -- "Your topic"`.
-23. `npm run watch:video` — brutal ≥7, hook pass, upload-ready YES.
-24. Optional: `npm run loop:video -- --until-score 9.3`.
+21. **ffmpeg** — audio integration tests skip when ffmpeg/lavfi is unavailable (by design); full coverage needs ffmpeg installed.
+22. **E2E smoke** — `npm run test:e2e:smoke` needs `npx playwright install chromium --with-deps`; run on Mac or CI.
+23. **E2E full pipeline** — `npm run test:e2e:full` (~30 min); run after prod deploy.
+24. **Onboarding modal** — blocks UI clicks when `VITE_OPENROUTER_KEY` is unset; set it in `.env.local` (map `OPENROUTER_API_KEY` if needed) before E2E or manual testing, and restart the dev server.
+25. **Known-open unit failure (2026-08-01)** — `server/__tests__/routeHardening.test.ts` › "rejects an oversized image from Content-Length before buffering" fails on this branch (expects a 413 Content-Length pre-check in `server/routes/proxyImage.ts`); a fix is in flight in the security-hardening pass. `node scripts/dod-check.mjs --unit` stays red until it lands; the rest of the suite (2029 tests) passes.

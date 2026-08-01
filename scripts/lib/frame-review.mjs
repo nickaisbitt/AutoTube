@@ -155,6 +155,26 @@ export function heuristicFlags(frameMeta = {}) {
   return flags;
 }
 
+export function applyVisionFrameVerdict(flags = [], verdict = {}) {
+  if (verdict?.ran === false) {
+    flags.push({
+      code: 'vision_unverified',
+      severity: 'high',
+      note: `Vision unverified: ${verdict.reason || 'not run'}`,
+    });
+    return 'unverified';
+  }
+  if (verdict?.reject) {
+    flags.push({
+      code: 'vision_reject',
+      severity: 'high',
+      note: `Vision: ${verdict.reason || 'rejected'}`,
+    });
+    return 'reject';
+  }
+  return 'pass';
+}
+
 /**
  * Extract frames at a fixed interval (dense teardown).
  */
@@ -480,13 +500,7 @@ export async function reviewFrames({
       try {
         if (/^https?:/i.test(f.asset?.url || '')) {
           const verdict = await visionRejectOffBrandStock(f.asset.url, openRouterKey, topic);
-          if (verdict.reject) {
-            f.flags.push({
-              code: 'vision_reject',
-              severity: 'high',
-              note: `Vision: ${verdict.reason || 'rejected'}`,
-            });
-          }
+          applyVisionFrameVerdict(f.flags, verdict);
         }
       } catch {
         /* ignore vision errors */
@@ -508,6 +522,7 @@ export async function reviewFrames({
     poolNsfw: poolFlags.filter((p) => p.flags.some((x) => x.code === 'nsfw_url')).length,
     poolUnsafe: poolFlags.length,
     visionChecked,
+    visionUnverified: annotated.filter((f) => f.flags.some((x) => x.code === 'vision_unverified')).length,
     contactSheet: extracted.contactSheet,
     createdAt: new Date().toISOString(),
   };
@@ -545,6 +560,7 @@ export async function reviewFrames({
     `- **Critical flags (on timeline):** ${summary.critical} · **High:** ${summary.high} · **NSFW URL on timeline:** ${summary.nsfwUrlHits}`,
     `- **Volume stills on timeline:** ${summary.volumeStills}`,
     `- **Unsafe assets in media pool:** ${summary.poolUnsafe} (NSFW in pool: ${summary.poolNsfw})`,
+    `- **Vision checked:** ${summary.visionChecked} · **Unverified:** ${summary.visionUnverified}`,
     `- **Gallery:** [index.html](./index.html)`,
     `- **Contact sheet:** ${extracted.contactSheet ? '[contact-sheet.jpg](./frames/contact-sheet.jpg)' : '—'}`,
     '',

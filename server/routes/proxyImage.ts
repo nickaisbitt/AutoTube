@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import {
+  fetchPinnedURL,
   readResponseBodyWithLimit,
   ResponseSizeLimitError,
   validateURL,
@@ -48,7 +49,7 @@ export async function handleProxyImage(
         return;
       }
 
-      imgRes = await fetch(currentUrl, {
+      imgRes = await fetchPinnedURL(currentUrl, urlSafety, {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -103,6 +104,7 @@ export async function handleProxyImage(
     }
 
     if (!imgRes.ok) {
+      await imgRes.body?.cancel().catch(() => undefined);
       res.statusCode = 502; // Bad Gateway
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ 
@@ -119,6 +121,7 @@ export async function handleProxyImage(
     // Validate Content-Type is an image
     const lowerType = contentType.toLowerCase().trim();
     if (lowerType.includes('html') || lowerType.includes('text/html')) {
+      await imgRes.body?.cancel().catch(() => undefined);
       res.statusCode = 415; // Unsupported Media Type
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { X, ExternalLink, Settings, AlertTriangle, CheckCircle, AlertCircle, Mic2, Check, XCircle } from 'lucide-react';
 import { useVideoProject } from '../store/StoreContext';
 import { logger } from '../services/logger';
@@ -22,9 +22,25 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [status, setStatus] = useState<Record<string, 'idle' | 'testing' | 'valid' | 'invalid'>>({
     openRouter: 'idle',
   });
+  const [serverTtsCaps, setServerTtsCaps] = useState<{ grok: boolean; melo: boolean } | null>(null);
 
-  // TTS engine availability from env vars
-  const hasMeloKeys = useMemo(() => !!(import.meta.env.VITE_CF_ACCOUNT_ID && import.meta.env.VITE_CF_API_TOKEN), []);
+  // TTS engine availability: BYOK VITE_CF_* for local dev; server CF credentials for production
+  // (import.meta.env.VITE_CF_* is intentionally local BYOK only — prefer server env in prod)
+  const hasMeloKeys = useMemo(
+    () => !!(import.meta.env.VITE_CF_ACCOUNT_ID && import.meta.env.VITE_CF_API_TOKEN) || (serverTtsCaps?.melo ?? false),
+    [serverTtsCaps],
+  );
+  const hasGrokKeys = useMemo(
+    () => !!(import.meta.env.VITE_XAI_KEY) || (serverTtsCaps?.grok ?? false),
+    [serverTtsCaps],
+  );
+
+  const fetchTtsCaps = useCallback(async () => {
+    try {
+      const res = await fetch('/api/tts/capabilities');
+      if (res.ok) setServerTtsCaps(await res.json());
+    } catch { /* server unavailable */ }
+  }, []);
 
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -36,8 +52,9 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setFlickrVal(config.flickrKey || '');
       setPexelsVal(config.pexelsKey || '');
       setPixabayVal(config.pixabayKey || '');
+      fetchTtsCaps();
     }
-  }, [isOpen, config]);
+  }, [isOpen, config, fetchTtsCaps]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -311,26 +328,39 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                      </span>
                    </div>
                    <div className="flex items-center gap-2 text-[11px] font-mono">
+                     {hasGrokKeys ? (
+                       <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                     ) : (
+                       <XCircle className="h-3.5 w-3.5 text-surface-600 flex-shrink-0" />
+                     )}
+                     <span className={hasGrokKeys ? 'text-emerald-400' : 'text-surface-500'}>
+                       2. Grok TTS (xAI) — High quality
+                       {serverTtsCaps?.grok && <span className="ml-1 text-brand-400">[server]</span>}
+                     </span>
+                   </div>
+                   <div className="flex items-center gap-2 text-[11px] font-mono">
                      {hasMeloKeys ? (
                        <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
                      ) : (
-                       <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                       <XCircle className="h-3.5 w-3.5 text-surface-600 flex-shrink-0" />
                      )}
                      <span className={hasMeloKeys ? 'text-emerald-400' : 'text-surface-500'}>
-                       2. MeloTTS (Cloudflare) — Cheap fallback
+                       3. MeloTTS (Cloudflare) — Cheap fallback
+                       {serverTtsCaps?.melo && <span className="ml-1 text-brand-400">[server]</span>}
                      </span>
                    </div>
                    <div className="flex items-center gap-2 text-[11px] font-mono">
                      <Check className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
                      <span className="text-emerald-400">
-                       3. Browser TTS — Free fallback
+                       4. Browser TTS — Free fallback
                      </span>
                    </div>
                 </div>
               </div>
 
               <p className="text-[10px] font-mono text-surface-500">
-                Server-side renders use Kokoro-82M (local) → MeloTTS. Browser renders use built-in speech synthesis. All free, no API costs.
+                Server-side renders use Kokoro-82M → MeloTTS. Browser renders use Grok → MeloTTS → browser speech synthesis.
+                <span className="ml-1 text-brand-400">[server]</span> = key set server-side (XAI_API_KEY / CF_ACCOUNT_ID+CF_API_TOKEN) — no VITE_* needed in production.
               </p>
             </div>
           </div>

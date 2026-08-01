@@ -2571,6 +2571,15 @@ function drawTextWithHighlights(ctx, text, startY, w, font, baseColor, highlight
   ctx.restore();
 }
 
+// Kinetic overlays burn text into the frame, so placeholder copy ('...', '…',
+// stray punctuation) is unfixable once rendered. Only substantive strings pass.
+function hasSubstantiveOverlayText(text) {
+  if (typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /[\p{L}\p{N}]/u.test(trimmed);
+}
+
 // ── Draw a single frame ────────────────────────────────────────────────────
 async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress, segmentIndex, suppressSubtitles = false) {
   // Only skip assets explicitly marked fallback — picsum/placeholders are valid when they load.
@@ -2992,7 +3001,9 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   // Comment bait at exact midpoint frame (Task 56)
   if (globalFrameCounter === globalMidpointFrame && !DRAFT_MODE && project && project.script) {
     const baitText = selectCommentBait(project.topic || project.title || '', segmentIndex);
-    drawKineticOverlay(ctx, baitText, WIDTH / 2, HEIGHT * 0.6, 0.5, WIDTH, HEIGHT);
+    if (hasSubstantiveOverlayText(baitText)) {
+      drawKineticOverlay(ctx, baitText.trim(), WIDTH / 2, HEIGHT * 0.6, 0.5, WIDTH, HEIGHT);
+    }
   }
 
   // Retention beat visual effects (Task 85)
@@ -3005,8 +3016,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
         } else if (beat.type === 'visual_break') {
           drawChromaticAberration(ctx, WIDTH, HEIGHT, 3);
         }
-        if (beat.text) {
-          drawKineticOverlay(ctx, beat.text, WIDTH / 2, HEIGHT * 0.3, 0.8, WIDTH, HEIGHT);
+        if (hasSubstantiveOverlayText(beat.text)) {
+          drawKineticOverlay(ctx, beat.text.trim(), WIDTH / 2, HEIGHT * 0.3, 0.8, WIDTH, HEIGHT);
         }
       }
     }
@@ -3572,10 +3583,12 @@ async function render() {
         const types = ['text_slam', 'zoom', 'graphic_switch', 'sudden_silence', 'visual_break', 'stat_callout'];
         const beatInterval = seg.duration / 4;
         for (let b = 0; b < 4; b++) {
+          // Synthetic beats are timing/effect cues only. Never invent overlay
+          // copy here — placeholder text like '...' ships to the viewer.
           seg.retentionBeats.push({
             type: types[b % types.length],
             time: beatInterval * (b + 0.5),
-            text: b === 1 ? '...' : null
+            text: null
           });
         }
       }

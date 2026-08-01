@@ -160,4 +160,64 @@ describe('beatRelevance', () => {
       'Subject: Parent reading phone at kitchen table at night',
     );
   });
+
+  it('lets a confident vision reject stand alone when the heuristic accepts', async () => {
+    const beats: VisualBeat[] = [
+      {
+        ...beat,
+        id: 'parent',
+        segmentId: 's1',
+        sentenceIndex: 0,
+        role: 'human_story',
+        scale: 'personal',
+        sourcePreference: 'news',
+        evidence: 'parent narration',
+      },
+    ];
+
+    // Both candidates satisfy the heuristic; vision rejects only the first.
+    const rejected = { alt: 'Parent reading phone at kitchen table at night worried', url: 'https://example.com/reject.jpg' };
+    const accepted = { alt: 'Parent at kitchen table reading phone worried at night', url: 'https://example.com/keep.jpg' };
+    expect(scoreCandidateAgainstBeat(rejected, beats[0]).reject).toBe(false);
+    expect(scoreCandidateAgainstBeat(accepted, beats[0]).reject).toBe(false);
+
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      const imagePart = body.messages[1].content.find(
+        (p: { type: string; image_url?: { url: string } }) => p.type === 'image_url',
+      );
+      const url = imagePart?.image_url?.url ?? '';
+      const visionRejects = url.includes('reject.jpg');
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: visionRejects
+                  ? '{"relevant":false,"score":2,"reason":"wrong scene"}'
+                  : '{"relevant":true,"score":9,"reason":"matches beat"}',
+              },
+            },
+          ],
+        }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.AUTOTUBE_BEAT_VISION = '1';
+
+    const ranked = await rankCandidatesWithBeatVision(
+      [rejected, accepted],
+      beats,
+      'test-key',
+      { budget: { remaining: 2 }, topN: 2 },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Vision's reject alone (heuristic accepted it) demotes the candidate below
+    // the vision-accepted one, even though the heuristic never rejected it.
+    expect(ranked[0]).toBe(accepted);
+    expect(ranked[ranked.length - 1]).toBe(rejected);
+  });
 });

@@ -57,6 +57,74 @@ export async function generateNarration(
 
 export { generateGrokTts } from './grokEngine';
 
+/**
+ * Fetches which TTS engines are available server-side (boolean only — no key values).
+ * Returns null on network error (e.g. running without the dev server / offline).
+ */
+export async function fetchServerTtsCapabilities(): Promise<{ grok: boolean; melo: boolean } | null> {
+  try {
+    const res = await fetch('/api/tts/capabilities');
+    if (!res.ok) return null;
+    return (await res.json()) as { grok: boolean; melo: boolean };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Calls the server-side Grok TTS proxy (/api/tts/grok).
+ * Returns a blob URL on success, null when the server has no XAI_API_KEY or the call fails.
+ * Prefer this over a direct xAI call in production; BYOK VITE_XAI_KEY is the local fallback.
+ */
+export async function generateGrokTtsViaProxy(
+  text: string,
+  options?: { voice?: string; signal?: AbortSignal },
+): Promise<string | null> {
+  try {
+    const res = await fetch('/api/tts/grok', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice: options?.voice || 'Sal' }),
+      signal: options?.signal,
+    });
+    if (!res.ok) return null; // 503 = not configured; other = upstream error
+    const blob = await res.blob();
+    if (blob.size === 0) return null;
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') throw err;
+    logger.warn('GrokTTS', `Server proxy failed: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Calls the server-side MeloTTS proxy (/api/tts/melo).
+ * Returns a blob URL on success, null when the server has no CF credentials or the call fails.
+ * Prefer this over direct Cloudflare calls in production; BYOK VITE_CF_* is the local fallback.
+ */
+export async function generateMeloTtsViaProxy(
+  text: string,
+  options?: { signal?: AbortSignal },
+): Promise<string | null> {
+  try {
+    const res = await fetch('/api/tts/melo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: options?.signal,
+    });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (blob.size === 0) return null;
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') throw err;
+    logger.warn('MeloTTS', `Server proxy failed: ${(err as Error).message}`);
+    return null;
+  }
+}
+
 export async function generateMeloTts(
   text: string,
   accountId: string,

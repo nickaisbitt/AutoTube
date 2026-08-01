@@ -2,6 +2,18 @@ import dns from "dns";
 import { Readable } from "stream";
 import type { IncomingMessage, ServerResponse } from "http";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const undiciMocks = vi.hoisted(() => ({
+  fetch: vi.fn(),
+}));
+
+vi.mock("undici", () => ({
+  Agent: class {
+    close = vi.fn().mockResolvedValue(undefined);
+  },
+  fetch: undiciMocks.fetch,
+}));
+
 import { rateLimitMiddleware } from "../middleware/rateLimiter.js";
 import { handleLlmProxy } from "../routes/llmProxy.js";
 import { handleProxyImage } from "../routes/proxyImage.js";
@@ -51,6 +63,7 @@ const previousEnv = {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  undiciMocks.fetch.mockReset();
   for (const [name, value] of [
     ["NODE_ENV", previousEnv.nodeEnv],
     ["OPENROUTER_API_KEY", previousEnv.openRouterKey],
@@ -123,7 +136,7 @@ describe("security-sensitive route hardening", () => {
       const cb = typeof options === "function" ? options : callback as any;
       cb(null, [{ address: "8.8.8.8", family: 4 }] as any);
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    undiciMocks.fetch.mockResolvedValue(
       new Response("not consumed", {
         status: 200,
         headers: {

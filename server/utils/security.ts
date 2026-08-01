@@ -1,5 +1,34 @@
 import dns from "dns";
 import net from "net";
+import type { LookupFunction } from "net";
+import {
+  Agent,
+  fetch as undiciFetch,
+  type RequestInit as UndiciRequestInit,
+} from "undici";
+
+export type ResolvedAddress = {
+  address: string;
+  family: 4 | 6;
+};
+
+export type URLValidationResult =
+  | {
+      valid: true;
+      url: string;
+      addresses: readonly ResolvedAddress[];
+    }
+  | {
+      valid: false;
+      error: string;
+    };
+
+export type PinnedFetchInit = {
+  headers?: HeadersInit;
+  method?: "GET" | "HEAD";
+  redirect?: "manual";
+  signal?: AbortSignal | null;
+};
 
 export class ResponseSizeLimitError extends Error {
   readonly maxBytes: number;
@@ -70,13 +99,10 @@ export function isPrivateIP(ip: string): boolean {
 /**
  * Validates URL safety to prevent SSRF attacks.
  * Resolves the domain using DNS and verifies that all resolved IP addresses are
- * safe/public. Callers must re-run this for every redirect destination.
- *
- * Residual risk: fetch performs another DNS lookup when opening its socket, so
- * a narrow DNS-rebinding race remains without transport-level address pinning.
- * Production should also block private/metadata ranges at the egress layer.
+ * safe/public. The returned addresses must be passed to fetchPinnedURL so the
+ * socket cannot perform a second, attacker-controlled DNS lookup.
  */
-export async function validateURL(urlString: string): Promise<{ valid: boolean; error?: string }> {
+export async function validateURL(urlString: string): Promise<URLValidationResult> {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(urlString);
@@ -121,7 +147,14 @@ export async function validateURL(urlString: string): Promise<{ valid: boolean; 
   if (net.isIP(hostname)) {
     return isPrivateIP(hostname)
       ? { valid: false, error: `Access to private/internal IP is forbidden (${hostname})` }
-      : { valid: true };
+      : {
+          valid: true,
+          url: parsedUrl.toString(),
+          addresses: [{
+            address: hostname,
+            family: net.isIP(hostname) as 4 | 6,
+          }],
+        };
   }
 
   // Resolve hostname and check all IPs
@@ -132,16 +165,114 @@ export async function validateURL(urlString: string): Promise<{ valid: boolean; 
         return;
       }
 
+      const resolvedAddresses: ResolvedAddress[] = [];
       for (const addr of addresses) {
         if (isPrivateIP(addr.address)) {
           resolve({ valid: false, error: `Access to private/internal IP is forbidden (${addr.address})` });
           return;
         }
+        resolvedAddresses.push({
+          address: addr.address,
+          family: net.isIP(addr.address) as 4 | 6,
+        });
       }
       
-      resolve({ valid: true });
+      resolve({
+        valid: true,
+        url: parsedUrl.toString(),
+        addresses: resolvedAddresses,
+      });
     });
   });
+}
+
+function createPinnedLookup(
+  addresses: readonly ResolvedAddress[],
+): LookupFunction {
+  return (_hostname, options, callback) => {
+    const requestedFamily = options.family;
+    const candidates = requestedFamily === 4 || requestedFamily === 6
+      ? addresses.filter(({ family }) => family === requestedFamily)
+      : [...addresses];
+
+    if (candidates.length === 0) {
+      const error = new Error(
+        `No validated address is available for IPv${requestedFamily}`,
+      ) as NodeJS.ErrnoException;
+      error.code = "ENOTFOUND";
+      callback(error, "", 0);
+      return;
+    }
+
+    if (options.all) {
+      callback(null, candidates);
+      return;
+    }
+
+    const [selected] = candidates;
+    callback(null, selected.address, selected.family);
+  };
+}
+
+/**
+ * Fetches a URL through a one-request dispatcher whose DNS lookup can only
+ * return addresses from validateURL. Undici still uses the original URL as the
+ * HTTP Host / HTTP/2 authority and TLS SNI, so certificate checks are preserved.
+ *
+ * Redirects are deliberately manual: every destination needs a new validation
+ * result and dispatcher. Network-level egress filtering remains defense in depth
+ * for non-Node clients and unusual routing configurations.
+ */
+export async function fetchPinnedURL(
+  urlString: string,
+  validation: Extract<URLValidationResult, { valid: true }>,
+  init: PinnedFetchInit = {},
+): Promise<Response> {
+  let normalizedUrl: string;
+  try {
+    normalizedUrl = new URL(urlString).toString();
+  } catch {
+    throw new Error("Cannot fetch an invalid URL");
+  }
+
+  if (normalizedUrl !== validation.url) {
+    throw new Error("Pinned fetch validation does not match the requested URL");
+  }
+  const pinnedAddresses = validation.addresses.map(({ address, family }) => ({
+    address,
+    family,
+  }));
+  if (
+    pinnedAddresses.length === 0 ||
+    pinnedAddresses.some(
+      ({ address, family }) =>
+        isPrivateIP(address) || net.isIP(address) !== family,
+    )
+  ) {
+    throw new Error("Pinned fetch requires validated public addresses");
+  }
+
+  const dispatcher = new Agent({
+    autoSelectFamily: false,
+    maxCachedSessions: 0,
+    connect: {
+      lookup: createPinnedLookup(pinnedAddresses),
+    },
+  });
+
+  try {
+    const response = await undiciFetch(normalizedUrl, {
+      ...(init as UndiciRequestInit),
+      dispatcher,
+      redirect: "manual",
+    });
+    // close() waits for the active response body, then prevents socket reuse.
+    void dispatcher.close().catch(() => undefined);
+    return response as unknown as Response;
+  } catch (error) {
+    await dispatcher.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 export type RedirectValidationResult = {
@@ -165,7 +296,7 @@ export async function validateURLRedirects(
   for (let redirects = 0; redirects <= maxRedirects; redirects++) {
     let response: Response;
     try {
-      response = await fetch(currentUrl, {
+      response = await fetchPinnedURL(currentUrl, safety, {
         method: "GET",
         headers: { Range: "bytes=0-0" },
         redirect: "manual",

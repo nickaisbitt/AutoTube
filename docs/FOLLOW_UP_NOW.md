@@ -1,6 +1,8 @@
-# Follow-up plan (numbered) — 2026-06-03
+# Follow-up plan (numbered) — 2026-06-03, refreshed 2026-08-01
 
-Use this after the long PR/video-quality thread. **Master** is source of truth; **no GitHub Actions deploy**.
+Use this after the long PR/video-quality thread. **Master** is source of truth.
+
+> **2026-08-01 refresh:** the multi-model audit fix sweep is DONE (harvest fail-closed, A/V sync, watcher honesty, security, deploy-drift cleanup, CI, sprawl, eval honesty — see `docs/REMAINING_WORK.md` §A, the canonical remaining-work list). New fast gate: `npm run dod:check` (deploy/server absence + server-render sync drift; `--unit` adds vitest). Deploy automation note below is outdated: GHCR image publishing now runs via `.github/workflows/ghcr-image.yml` after green CI; Railway deploy from that image still needs `RAILWAY_API_TOKEN` (Phase 0). Product quality bars (Phase 2–3, Phase 5) remain OPEN and manual-with-keys — do not claim them met from mocks or pre-sweep artifacts.
 
 ---
 
@@ -82,9 +84,9 @@ Run anytime: `npm run deploy:status`
 
 ## Phase 5 — Definition of done
 
-16. **Deploy:** master pushed → Railway green → health commit matches local
-17. **Technical:** `npm run squad:gate:fixture` green
-18. **Quality:** Watcher brutal ≥ 7, hook pass, upload-ready YES on a **real topic** (not 8-image mock)
+16. **Script-enforceable (fast, no keys):** `npm run dod:check` exit 0 — deploy/server absent, server-render copies in sync (`--unit` adds vitest); plus `npm run lint` and `npm run squad:gate:fixture` green
+17. **Deploy (token):** master pushed → GHCR image built → `npm run deploy:railway:registry:pull` → `npm run railway:completion-check` exit 0 (prod commit/image tag matches local HEAD)
+18. **Quality (keys, real topic):** fresh `npm run generate:video` artifact, then `npm run watch:video -- <final.mp4> --min-score 7` exit 0 (raw brutal ≥ 7, no criticals) **and** `npm run watch:video -- <final.mp4>` exit 0 (upload-ready YES, hook pass) — not the 8-image mock, not pre-sweep recordings
 19. **YouTube:** You pick title + thumbnail; upload; read retention
 
 ---
@@ -100,5 +102,5 @@ Run anytime: `npm run deploy:status`
 ## Admin (done)
 
 23. PRs **#17–#19** closed; work merged to **master**
-24. GitHub Actions **deploy workflows removed** — only manual CI if you run it
+24. GitHub Actions **deploy workflows removed** — only manual CI if you run it. *(2026-08-01: superseded — `ghcr-image.yml` now publishes a GHCR image after green CI; deploy from the image is still manual/token-gated)*
 25. Plan docs: `docs/SHIP_PLAN_MASTER.md`, `docs/RAILWAY_WORKER_SECRETS.md`

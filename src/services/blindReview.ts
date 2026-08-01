@@ -476,9 +476,10 @@ const SUMMARY_MAX_LENGTH = 1000;
  * - Sets reviewedAt to current ISO timestamp
  *
  * Fails closed: returns `null` when the response cannot be parsed into an object,
- * or when it carries no recognised numeric score at all. A synthesised all-5s report
- * would look like a genuine mediocre-but-real review to the quality gate and to the
- * user, so an unusable response is reported as "no review" instead.
+ * or when it carries fewer than a majority of the expected numeric score
+ * categories. A mostly-synthesised report (only a stray score, the rest padded
+ * with 5s) would look like a genuine mediocre-but-real review to the quality
+ * gate and to the user, so an unusable response is reported as "no review" instead.
  *
  * Never throws.
  */
@@ -505,12 +506,19 @@ export function parseQualityReport(raw: unknown): QualityReport | null {
     ? (parsed.scores as Record<string, unknown>)
     : {};
 
-  // Fail closed unless the model actually returned at least one usable score.
-  const hasAnyScore = SCORE_CATEGORIES.some(
+  // Fail closed unless the model returned a majority of the expected score
+  // categories. A response with only a stray score would otherwise be padded
+  // out with defaults into a mostly-synthetic report that looks like a genuine
+  // (if mediocre) review to the quality gate and to the user.
+  const usableScoreCount = SCORE_CATEGORIES.filter(
     (c) => typeof rawScores[c] === 'number' && Number.isFinite(rawScores[c] as number),
-  );
-  if (!hasAnyScore) {
-    logger.warn('BlindReview', 'Blind review response contained no usable scores — discarding');
+  ).length;
+  const requiredScoreCount = Math.ceil(SCORE_CATEGORIES.length / 2);
+  if (usableScoreCount < requiredScoreCount) {
+    logger.warn(
+      'BlindReview',
+      `Blind review response had only ${usableScoreCount}/${SCORE_CATEGORIES.length} usable scores — discarding`,
+    );
     return null;
   }
 

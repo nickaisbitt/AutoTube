@@ -734,9 +734,9 @@ describe('validateEditPlanResponse', () => {
     });
   });
 
-  // Validates caption settings
-  describe('validates caption settings', () => {
-    it('clamps wordsPerWindow to valid range', () => {
+  // LLM captionSettings are ignored — renderer defaults are always used
+  describe('caption settings', () => {
+    it('ignores LLM wordsPerWindow and keeps renderer defaults', () => {
       const seg = makeSegment({ id: 'seg-1' });
       const project = makeProject([seg], []);
 
@@ -744,7 +744,7 @@ describe('validateEditPlanResponse', () => {
         segments: [
           {
             segmentId: 'seg-1',
-            captionSettings: { wordsPerWindow: 50, displayDurationMs: 3000, isFastPaced: false },
+            captionSettings: { wordsPerWindow: 50, displayDurationMs: 3000, isFastPaced: true },
           },
         ],
       };
@@ -752,10 +752,11 @@ describe('validateEditPlanResponse', () => {
       const result = validateEditPlanResponse(raw, project);
 
       expect(result).not.toBeNull();
-      expect(result!.segments[0].captionSettings.wordsPerWindow).toBeLessThanOrEqual(20);
+      expect(result!.segments[0].captionSettings.wordsPerWindow).toBe(4);
+      expect(result!.segments[0].captionSettings.isFastPaced).toBe(false);
     });
 
-    it('clamps displayDurationMs to valid range', () => {
+    it('ignores LLM displayDurationMs and keeps renderer defaults', () => {
       const seg = makeSegment({ id: 'seg-1' });
       const project = makeProject([seg], []);
 
@@ -763,7 +764,7 @@ describe('validateEditPlanResponse', () => {
         segments: [
           {
             segmentId: 'seg-1',
-            captionSettings: { wordsPerWindow: 8, displayDurationMs: 100, isFastPaced: false },
+            captionSettings: { wordsPerWindow: 8, displayDurationMs: 100, isFastPaced: true },
           },
         ],
       };
@@ -771,7 +772,8 @@ describe('validateEditPlanResponse', () => {
       const result = validateEditPlanResponse(raw, project);
 
       expect(result).not.toBeNull();
-      expect(result!.segments[0].captionSettings.displayDurationMs).toBeGreaterThanOrEqual(500);
+      expect(result!.segments[0].captionSettings.displayDurationMs).toBe(1333);
+      expect(result!.segments[0].captionSettings.isFastPaced).toBe(false);
     });
   });
 
@@ -884,6 +886,19 @@ describe('buildEditPrompt', () => {
 
     // The style-specific note about "event" or "data" beats preferring "cut" should not appear
     expect(system).not.toContain('prefer "cut" transitions for immediacy');
+  });
+
+  it('does not ask the LLM for captionSettings', () => {
+    const seg = makeSegment({ id: 'seg-1' });
+    const project = makeProject([seg], []);
+
+    const { system } = buildEditPrompt(project);
+
+    expect(system).not.toContain('captionSettings');
+    expect(system).not.toContain('wordsPerWindow');
+    expect(system).not.toContain('isFastPaced');
+    expect(system).not.toContain('caption readability');
+    expect(system).not.toContain('Caption Optimization');
   });
 });
 

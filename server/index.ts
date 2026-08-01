@@ -24,6 +24,8 @@ import { handleDocs } from "./routes/docs.js";
 import { handleErrors } from "./routes/errors.js";
 import { handleProxyPage } from "./routes/proxyPage.js";
 import { handleDeepHarvest } from "./routes/deepHarvest.js";
+import { handleTtsCapabilities, handleTtsGrok, handleTtsMelo } from "./routes/tts.js";
+import { handleSearchPexels, handleSearchPixabay } from "./routes/stockMedia.js";
 
 /**
  * Connect-compatible middleware that handles all /api/* routes.
@@ -119,6 +121,12 @@ export function apiMiddleware(
         await handleProxyPage(req, res);
       } else if (req.url!.startsWith("/api/deep-harvest")) {
         await handleDeepHarvest(req, res);
+      } else if (req.url!.startsWith("/api/tts/capabilities")) {
+        await handleTtsCapabilities(req, res);
+      } else if (req.url!.startsWith("/api/tts/grok")) {
+        await handleTtsGrok(req, res);
+      } else if (req.url!.startsWith("/api/tts/melo")) {
+        await handleTtsMelo(req, res);
       } else if (req.url!.startsWith("/api/render-progress")) {
         await handleRenderProgress(req, res);
       } else if (
@@ -191,6 +199,10 @@ export function apiMiddleware(
         await handleSearchBingNews(req, res);
       } else if (req.url!.startsWith("/api/search-hybrid")) {
         await handleSearchHybrid(req, res);
+      } else if (req.url!.startsWith("/api/search-pexels")) {
+        await handleSearchPexels(req, res);
+      } else if (req.url!.startsWith("/api/search-pixabay")) {
+        await handleSearchPixabay(req, res);
       } else if (req.url!.startsWith("/api/static-map")) {
         await handleStaticMap(req, res);
       } else if (req.url!.startsWith("/api/press-release")) {

@@ -600,20 +600,26 @@ describe('Feature: ai-editor-layer, Property 11: Caption Window Size Matches Wor
 
 describe('Feature: ai-editor-layer, Property 12: Fast-Paced Flagging', () => {
   /**
-   * **Validates: Requirements 7.5**
+   * **Validates: Requirements 7.5 (renderer defaults)**
    *
-   * For the default plan produced by createDefaultEditPlan, isFastPaced is
-   * always false. The actual fast-paced detection (>4 words/second) is
-   * performed by the LLM-generated plan. This property verifies the default
-   * plan behavior.
+   * Caption pacing flags are computed by defaultCaptionSettings for schema
+   * compatibility; the LLM is not asked to set them.
    */
-  it('default plan sets isFastPaced to false for all segments', () => {
+  it('default plan captionSettings always use renderer defaults', () => {
     fc.assert(
       fc.property(arbVideoProject, (project) => {
         const plan = createDefaultEditPlan(project);
 
         for (const entry of plan.segments) {
-          expect(entry.captionSettings.isFastPaced).toBe(false);
+          const segment = project.script.find((s) => s.id === entry.segmentId)!;
+          const narrationClip = project.narration.find((n) => n.segmentId === entry.segmentId);
+          const narrationText = narrationClip?.text ?? segment.narration ?? '';
+          const wordCount = narrationText.trim().split(/\s+/).filter(Boolean).length;
+          const expectedFastPaced =
+            !narrationText || narrationText.trim().length === 0 || wordCount > 40;
+
+          expect(entry.captionSettings.wordsPerWindow).toBe(4);
+          expect(entry.captionSettings.isFastPaced).toBe(expectedFastPaced);
         }
       }),
       { numRuns: 100 },

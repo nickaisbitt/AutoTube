@@ -94,6 +94,37 @@ export function resolvePixabayKey() {
   return (process.env.PIXABAY_API_KEY || process.env.VITE_PIXABAY_KEY || '').trim();
 }
 
+export function resolveVisionUnverifiedMax(env = process.env) {
+  const raw = env?.AUTOTUBE_VISION_UNVERIFIED_MAX;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 0;
+  const n = Number.parseInt(String(raw), 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function recordVisionStockUnverified(report = {}, verdict = {}, { thumbnailUrl = '', env = process.env } = {}) {
+  if (verdict?.ran !== false) {
+    return { unverified: false, skip: false, max: resolveVisionUnverifiedMax(env) };
+  }
+
+  const max = resolveVisionUnverifiedMax(env);
+  const count = (report.visionStockUnverified || 0) + 1;
+  const skip = count > max;
+  report.visionStockUnverified = count;
+  report.visionStockUnverifiedMax = max;
+  if (skip) {
+    report.visionStockUnverifiedSkipped = (report.visionStockUnverifiedSkipped || 0) + 1;
+  } else {
+    report.visionStockUnverifiedAllowed = (report.visionStockUnverifiedAllowed || 0) + 1;
+  }
+  report.visionStockUnverifiedThumbs = report.visionStockUnverifiedThumbs || [];
+  report.visionStockUnverifiedThumbs.push({
+    thumbnailUrl,
+    reason: verdict.reason || '',
+    action: skip ? 'skipped' : 'allowed',
+  });
+  return { unverified: true, skip, count, max };
+}
+
 /** Dismiss z-[200] onboarding overlay so it cannot steal clicks mid-pipeline. */
 async function dismissOnboarding(page) {
   await page
@@ -1487,8 +1518,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         report.visionStockChecked = (report.visionStockChecked || 0) + 1;
         const verdict = await visionRejectOffBrandStock(thumb, apiKey, topicBlob);
         if (verdict.ran === false) {
-          report.visionStockUnverified = (report.visionStockUnverified || 0) + 1;
-          if (isAirlineTopic(topicBlob)) {
+          const unverified = recordVisionStockUnverified(report, verdict, { thumbnailUrl: thumb });
+          if (unverified.skip) {
             report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
             continue;
           }
@@ -1758,6 +1789,12 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     relevanceDropped: [],
     volumePass: true,
     harvestQuality: null,
+    visionStockChecked: 0,
+    visionStockRejected: 0,
+    visionStockUnverified: 0,
+    visionStockUnverifiedSkipped: 0,
+    visionStockUnverifiedAllowed: 0,
+    visionStockUnverifiedMax: resolveVisionUnverifiedMax(),
   };
   if (!project.media?.length) {
     writeFileSync(join(outDir, 'media-sanitization.json'), JSON.stringify(report, null, 2));
@@ -2644,6 +2681,11 @@ export async function generateFullVideo(options) {
       }
       if (mediaReport.junkStockSkipped) {
         log(`   🚫 Junk stock skipped: ${mediaReport.junkStockSkipped}`);
+      }
+      if (mediaReport.visionStockChecked || mediaReport.visionStockUnverified) {
+        log(
+          `   👁️ Stock vision: checked=${mediaReport.visionStockChecked || 0} rejected=${mediaReport.visionStockRejected || 0} unverified=${mediaReport.visionStockUnverified || 0} skipped-unverified=${mediaReport.visionStockUnverifiedSkipped || 0} max-unverified=${mediaReport.visionStockUnverifiedMax || 0}`,
+        );
       }
       if (mediaReport.cyberStockInjected) {
         log(`   🛡️ Cyber stock stills: +${mediaReport.cyberStockInjected}`);

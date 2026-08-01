@@ -69,6 +69,10 @@ vi.mock('../../services/projectMigrations', () => ({
 vi.mock('../../services/tts', () => ({
   generateGrokTts: vi.fn(),
   generateMeloTts: vi.fn(),
+  generateGrokTtsViaProxy: vi.fn(),
+  generateMeloTtsViaProxy: vi.fn(),
+  // Returns null by default so tests skip server TTS and fall through to browser TTS
+  fetchServerTtsCapabilities: vi.fn(async () => null),
 }));
 
 vi.mock('../../services/media', () => ({

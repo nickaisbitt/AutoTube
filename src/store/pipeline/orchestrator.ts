@@ -54,7 +54,7 @@ import { runAIEditPass } from '../../services/aiEditor';
 import { resolveProjectHookLine, syncIntroNarrationToHook } from '../../services/seoTitles';
 import { prepareThumbnailConcepts } from '../../services/thumbnail';
 import { runBlindReview } from '../../services/blindReview';
-import { generateGrokTts, generateMeloTts } from '../../services/tts';
+import { generateGrokTts, generateMeloTts, generateGrokTtsViaProxy, generateMeloTtsViaProxy, fetchServerTtsCapabilities } from '../../services/tts';
 import { CURRENT_PROJECT_VERSION } from '../../services/projectMigrations';
 
 // LR-1 fix: use crypto.randomUUID() for guaranteed uniqueness
@@ -564,12 +564,17 @@ export async function executeGenerateNarration(
   setProcessingProgress(6);
   setProcessingMessage('Checking TTS options...');
 
-  const xaiKey = import.meta.env.VITE_XAI_KEY || '';
-  const cfAccountId = import.meta.env.VITE_CF_ACCOUNT_ID || '';
-  const cfApiToken = import.meta.env.VITE_CF_API_TOKEN || '';
+  // Prefer server-side keys (XAI_API_KEY / CF_ACCOUNT_ID+CF_API_TOKEN).
+  // Only read VITE_* when the server has no key configured — local BYOK fallback only.
+  const serverCaps = await fetchServerTtsCapabilities();
+  const xaiKey = !serverCaps?.grok ? (import.meta.env.VITE_XAI_KEY || '') : '';
+  const cfAccountId = !serverCaps?.melo ? (import.meta.env.VITE_CF_ACCOUNT_ID || '') : '';
+  const cfApiToken = !serverCaps?.melo ? (import.meta.env.VITE_CF_API_TOKEN || '') : '';
 
-  const hasGrok = !!xaiKey;
-  const hasMelo = !!cfAccountId && !!cfApiToken;
+  const hasGrokServer = serverCaps?.grok ?? false;
+  const hasMeloServer = serverCaps?.melo ?? false;
+  const hasGrok = hasGrokServer || !!xaiKey;
+  const hasMelo = hasMeloServer || (!!cfAccountId && !!cfApiToken);
 
   const supported = hasSpeechSupport();
   const voices = supported ? await loadSpeechVoices() : [];
@@ -604,12 +609,11 @@ export async function executeGenerateNarration(
     let engineUsed = 'browser';
     let status: NarrationClip['status'] = 'ready';
 
-    // Tier 1: Grok TTS
+    // Tier 1: Grok TTS — prefer server proxy; BYOK xaiKey only when server has no key
     if (hasGrok) {
-      const grokUrl = await generateGrokTts(segment.narration, xaiKey, {
-        voice: appConfig.ttsVoice,
-        signal,
-      });
+      const grokUrl = hasGrokServer
+        ? await generateGrokTtsViaProxy(segment.narration, { voice: appConfig.ttsVoice, signal })
+        : await generateGrokTts(segment.narration, xaiKey, { voice: appConfig.ttsVoice, signal });
       if (grokUrl) {
         audioUrl = grokUrl;
         voiceUsed = `Grok TTS (${appConfig.ttsVoice || 'Sal'})`;
@@ -627,9 +631,11 @@ export async function executeGenerateNarration(
       }
     }
 
-    // Tier 2: MeloTTS (Cloudflare)
+    // Tier 2: MeloTTS — prefer server proxy; BYOK CF keys only when server has no credentials
     if (!audioUrl && hasMelo) {
-      const meloUrl = await generateMeloTts(segment.narration, cfAccountId, cfApiToken, { signal });
+      const meloUrl = hasMeloServer
+        ? await generateMeloTtsViaProxy(segment.narration, { signal })
+        : await generateMeloTts(segment.narration, cfAccountId, cfApiToken, { signal });
       if (meloUrl) {
         audioUrl = meloUrl;
         voiceUsed = 'MeloTTS (Cloudflare)';

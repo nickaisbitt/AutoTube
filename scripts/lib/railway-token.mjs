@@ -8,11 +8,11 @@ import path from 'node:path';
 
 /** @type {readonly { env: string; label: string }[]} */
 export const TOKEN_ENV_CANDIDATES = [
+  { env: 'AUTOTUBE_RAILWAY_TOKEN', label: 'AUTOTUBE_RAILWAY_TOKEN' },
   { env: 'Railway', label: 'Railway (Cursor secret)' },
   { env: 'RAILWAY_API_TOKEN', label: 'RAILWAY_API_TOKEN' },
   { env: 'RAILWAY_TOKEN', label: 'RAILWAY_TOKEN' },
   { env: 'RAILWAY', label: 'RAILWAY' },
-  { env: 'AUTOTUBE_RAILWAY_TOKEN', label: 'AUTOTUBE_RAILWAY_TOKEN' },
 ];
 
 /** @type {string | null} */

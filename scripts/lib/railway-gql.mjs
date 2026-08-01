@@ -27,7 +27,16 @@ export async function railwayGql(token, query, variables = {}, retries = 3) {
         );
       }
       if (!res.ok || json.errors?.length) {
-        throw new Error(json.errors?.map((e) => e.message).join('; ') || res.statusText);
+        const msg = json.errors?.map((e) => e.message).join('; ') || res.statusText;
+        if (/not authorized/i.test(msg)) {
+          throw new Error(
+            'Railway GraphQL: Not Authorized.\n' +
+              '  The active token is a service/runtime credential and cannot call backboard.railway.app/graphql.\n' +
+              '  Fix: create a Personal or Team API token at https://railway.app/account/tokens\n' +
+              '  then set it as AUTOTUBE_RAILWAY_TOKEN (preferred) or RAILWAY_API_TOKEN in .env.local.',
+          );
+        }
+        throw new Error(msg);
       }
       return json.data;
     } catch (e) {

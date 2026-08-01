@@ -3620,49 +3620,94 @@ export async function generateFullVideo(options) {
     };
     const captureNarrationHang = async (reason) => {
       writeFileSync(join(outDir, 'browser-events.json'), JSON.stringify(browserEvents, null, 2));
-      const snap = await readProjectSnapshot(page);
-      const uiState = await page.evaluate(() => ({
-        bodyText: document.body?.innerText?.slice(0, 4000) || '',
-        projectRawLength: localStorage.getItem('autotube_project')?.length || 0,
-        stepText: document.body?.innerText?.match(/Step \d+ — \w+/)?.[0] || '',
-      })).catch((e) => ({ error: e.message }));
+      const browserAlive = browser?.isConnected();
+      const snap = browserAlive
+        ? await readProjectSnapshot(page)
+        : { error: 'Chromium disconnected before narration hang capture' };
+      const uiState = browserAlive
+        ? await page.evaluate(() => ({
+            bodyText: document.body?.innerText?.slice(0, 4000) || '',
+            projectRawLength: localStorage.getItem('autotube_project')?.length || 0,
+            stepText: document.body?.innerText?.match(/Step \d+ — \w+/)?.[0] || '',
+          })).catch((e) => ({ error: e.message }))
+        : { error: 'Chromium disconnected before narration hang capture' };
       writeFileSync(
         join(outDir, 'ui-state-on-narration-timeout.json'),
         JSON.stringify({ reason, ...uiState, projectSnapshot: snap }, null, 2),
       );
-      await page.screenshot({ path: join(outDir, 'narration-timeout.png'), fullPage: true }).catch(() => {});
+      if (browser?.isConnected()) {
+        await page
+          .screenshot({ path: join(outDir, 'narration-timeout.png'), fullPage: true, timeout: 5_000 })
+          .catch(() => {});
+      }
     };
     const pollNarrationCta = async ({ timeoutMs, skipOnly = false, label = 'narration CTAs' } = {}) => {
       const deadline = Date.now() + timeoutMs;
       let lastLog = 0;
+      const rethrowNarrationDisconnect = (err) => {
+        if (!browser?.isConnected() || isBrowserDisconnectError(err)) {
+          throw new Error('BROWSER_DISCONNECTED: Chromium gone during narration CTA polling');
+        }
+      };
       while (Date.now() < deadline) {
-        await dismissOnboarding(page).catch(() => {});
-        if (!skipOnly && (await continueAi.isVisible({ timeout: 500 }).catch(() => false))) return 'continue';
-        if (await skipAi.isVisible({ timeout: 500 }).catch(() => false)) return 'skip';
+        if (!browser?.isConnected()) {
+          throw new Error('BROWSER_DISCONNECTED: Chromium gone during narration CTA polling');
+        }
+        try {
+          await dismissOnboarding(page);
+        } catch (err) {
+          rethrowNarrationDisconnect(err);
+        }
+        try {
+          if (!skipOnly && (await continueAi.isVisible({ timeout: 500 }))) return 'continue';
+        } catch (err) {
+          rethrowNarrationDisconnect(err);
+        }
+        try {
+          if (await skipAi.isVisible({ timeout: 500 })) return 'skip';
+        } catch (err) {
+          rethrowNarrationDisconnect(err);
+        }
         // Loop-fast may have advanced past both buttons into assembly already.
-        const step = await page.evaluate(() => {
-          try {
-            const raw = localStorage.getItem('autotube_project');
-            if (!raw) return null;
-            const parsed = JSON.parse(raw);
-            return {
-              step: parsed?.currentStep || parsed?.project?.status || null,
-              narr: (parsed?.project?.narration || []).length,
-            };
-          } catch {
-            return null;
-          }
-        }).catch(() => null);
-        if (step?.narr > 0 && (await page.getByTestId('skip-ai-edit-button').count().catch(() => 0)) === 0) {
-          // Narration clips exist but AI-edit UI missed — force skip via store path.
-          const forced = await page.evaluate(() => {
-            const btn = document.querySelector('[data-testid="skip-ai-edit-button"]');
-            if (btn instanceof HTMLElement) {
-              btn.click();
-              return 'clicked';
+        let step = null;
+        try {
+          step = await page.evaluate(() => {
+            try {
+              const raw = localStorage.getItem('autotube_project');
+              if (!raw) return null;
+              const parsed = JSON.parse(raw);
+              return {
+                step: parsed?.currentStep || parsed?.project?.status || null,
+                narr: (parsed?.project?.narration || []).length,
+              };
+            } catch {
+              return null;
             }
-            return null;
-          }).catch(() => null);
+          });
+        } catch (err) {
+          rethrowNarrationDisconnect(err);
+        }
+        let skipAiCount = 0;
+        try {
+          skipAiCount = await page.getByTestId('skip-ai-edit-button').count();
+        } catch (err) {
+          rethrowNarrationDisconnect(err);
+        }
+        if (step?.narr > 0 && skipAiCount === 0) {
+          // Narration clips exist but AI-edit UI missed — force skip via store path.
+          let forced = null;
+          try {
+            forced = await page.evaluate(() => {
+              const btn = document.querySelector('[data-testid="skip-ai-edit-button"]');
+              if (btn instanceof HTMLElement) {
+                btn.click();
+                return 'clicked';
+              }
+              return null;
+            });
+          } catch (err) {
+            rethrowNarrationDisconnect(err);
+          }
           if (forced) return 'skip';
         }
         if (Date.now() - lastLog > 60_000) {
@@ -3671,7 +3716,11 @@ export async function generateFullVideo(options) {
             `   …still waiting for ${label} (${Math.round((deadline - Date.now()) / 1000)}s left, narration=${step?.narr ?? 'n/a'}, step=${step?.step || 'unknown'})`,
           );
         }
-        await page.waitForTimeout(1_000);
+        try {
+          await page.waitForTimeout(1_000);
+        } catch (err) {
+          rethrowNarrationDisconnect(err);
+        }
       }
       await captureNarrationHang(label);
       throw new Error(`NARRATION_TIMEOUT: no ${skipOnly ? 'skip' : 'continue/skip'} CTA after ${Math.round(timeoutMs / 60000)}min`);

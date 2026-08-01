@@ -34,16 +34,29 @@ the onboarding modal blocks the UI.
 
 ---
 
-## Required for upload-ready score ≥ 7 — stock media keys
+## Motion harvest — primary path (no stock keys required)
 
-`scripts/lib/generate-full-video.mjs` calls `resolveStockKeyMode()` to decide
-the stock-footage strategy:
+The product path for upload-ready ≥ 7 is **raw web harvest**, not stock APIs.
+`scripts/lib/generate-full-video.mjs` assembles motion from:
 
-- **`keyed` mode** (Pexels and/or Pixabay available) — topical face/cabin/
-  apartment clips are fetched aggressively; quality scores routinely reach
-  upload-ready.
-- **`keyless` mode** (neither key present) — Archive.org is the only motion
-  source; scores are systematically lower and upload-ready ≥ 7 is unlikely.
+- **Bing / Google / DuckDuckGo** — topical image and clip discovery
+- **Archive.org** — historical footage and stills
+- **yt-dlp** — direct clip download when a URL resolves to playable video
+
+These sources run in the default **keyless** pipeline. No Pexels or Pixabay
+keys are required to generate, score, or prove upload-ready quality.
+
+Current open bars on this VM are **web-motion gate recognition** (watcher
+honesty on web-harvest output), **CLI top-up diversity** (segment/asset floors
+without thin Archive-only pools), and **upload-ready ≥ 7 via web-harvest proof**
+— not “add stock keys.”
+
+### Optional stock keys (niceties, not DoD)
+
+Pexels and Pixabay are **optional** supplemental sources. When present,
+`resolveStockKeyMode()` returns `{ mode: 'keyed' }` and the pipeline may
+fetch additional topical face/cabin/apartment clips. When absent, harvest
+continues on the raw-web path above.
 
 | Variable | Where used | Fallback accepted |
 |---|---|---|
@@ -52,14 +65,8 @@ the stock-footage strategy:
 | `PIXABAY_API_KEY` | Server-side Pixabay proxy `/api/search-pixabay` | Yes — `VITE_PIXABAY_KEY` |
 | `VITE_PIXABAY_KEY` | Browser BYOK; local dev without full server | Yes — `PIXABAY_API_KEY` |
 
-At least one of `PEXELS_API_KEY` / `VITE_PEXELS_KEY` **or**
-`PIXABAY_API_KEY` / `VITE_PIXABAY_KEY` must be non-empty to enable keyed
-mode.
-
-> **⚠ MISSING on this VM.**  Neither `PEXELS_API_KEY` nor `PIXABAY_API_KEY`
-> (nor their `VITE_` variants) is set in `.env.local`.  `resolveStockKeyMode()`
-> returns `{ mode: 'keyless' }`.  Generated videos will fall back to
-> Archive.org only and will not reach upload-ready ≥ 7 without these keys.
+Neither Pexels nor Pixabay keys is set on this VM. That is expected for
+web-harvest proof runs; it does **not** block the DoD path.
 
 ---
 
@@ -78,10 +85,10 @@ mode.
 | Command | What it does | Keys needed |
 |---|---|---|
 | `npm run dod:check` | Checks structural DoD bars (stale-tree absence, server-render sync); exits 1 on failure | None |
-| `npm run generate:video -- "<topic>"` | Full video-generation pipeline | `OPENROUTER_API_KEY` (or `VITE_OPENROUTER_KEY`) + `AUTOTUBE_API_KEY` + dev server running + ffmpeg |
-| `npm run watch:video -- <final.mp4>` | Vision-judges a rendered video; exits 0 when upload-ready | `OPENROUTER_API_KEY` + `AUTOTUBE_API_KEY`; Pexels/Pixabay needed during generation for scores ≥ 7 |
+| `npm run generate:video -- "<topic>"` | Full video-generation pipeline (raw web harvest) | `OPENROUTER_API_KEY` (or `VITE_OPENROUTER_KEY`) + `AUTOTUBE_API_KEY` + dev server running + ffmpeg |
+| `npm run watch:video -- <final.mp4>` | Vision-judges a rendered video; exits 0 when upload-ready | `OPENROUTER_API_KEY` + `AUTOTUBE_API_KEY`; scores ≥ 7 require web-harvest motion quality, not stock keys |
 | `npm run dod:watch` | Alias for `watch:video` | Same as above |
-| `npm run railway:completion-check` | Verifies prod deploy matches HEAD | `RAILWAY_API_TOKEN` |
+| `npm run railway:completion-check` | Verifies prod deploy matches HEAD | `RAILWAY_API_TOKEN` (personal/team token — service credential fails) |
 
 > `dod:check` is fast and requires no API keys.  It does **not** enforce
 > quality bars — those require a real generated video evaluated by
@@ -100,14 +107,14 @@ not shown.
 | `VITE_OPENROUTER_KEY` | ✅ yes | Browser BYOK fallback |
 | `AUTOTUBE_API_KEY` | ✅ yes | API auth gate |
 | `VITE_AUTOTUBE_API_KEY` | ✅ yes | Browser auto-fill |
-| `PEXELS_API_KEY` | ❌ **MISSING** | Keyed stock footage (Pexels) |
-| `VITE_PEXELS_KEY` | ❌ **MISSING** | Keyed stock footage (Pexels, BYOK) |
-| `PIXABAY_API_KEY` | ❌ **MISSING** | Keyed stock footage (Pixabay) |
-| `VITE_PIXABAY_KEY` | ❌ **MISSING** | Keyed stock footage (Pixabay, BYOK) |
+| `PEXELS_API_KEY` | ❌ not set | Optional Pexels supplement (not required for DoD) |
+| `VITE_PEXELS_KEY` | ❌ not set | Optional Pexels BYOK (not required for DoD) |
+| `PIXABAY_API_KEY` | ❌ not set | Optional Pixabay supplement (not required for DoD) |
+| `VITE_PIXABAY_KEY` | ❌ not set | Optional Pixabay BYOK (not required for DoD) |
 | `RAILWAY_API_TOKEN` | ⚠️ present (wrong scope) | `railway:completion-check` (currently fails — Not Authorized) |
 | `VITE_CF_ACCOUNT_ID` / `VITE_CF_STREAM_TOKEN` | ⚠️ present (invalid) | Cloudflare Stream upload (skipped by code) |
 | `VITE_KOKORO_SERVER_URL` | ⚠️ present (404) | Kokoro TTS (falls back to espeak-ng) |
 
-> Add at least one Pexels or Pixabay key to `.env.local` and restart the dev
-> server to reach upload-ready ≥ 7.  Keys for both providers together give the
-> widest topical clip coverage.
+> Upload-ready ≥ 7 is proven with raw web harvest (Bing/Google/DDG/Archive/
+> yt-dlp), watcher exit 0, and honest brutal raw scores — not by adding
+> stock keys.

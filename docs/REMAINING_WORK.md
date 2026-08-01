@@ -1,6 +1,6 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-01** — branch `cursor/fix-audit-blockers-b466` @ Wave 5/6 tip (proof pack + KEYS_BLOCKED).
+Last updated: **2026-08-01** — branch `cursor/fix-audit-blockers-b466` @ Wave 5/6 tip (proof pack + web-harvest gates).
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 
@@ -48,16 +48,16 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Media → narration race fixed | `sanitize` + volume gate run before Narration starts; prevents race that produced silent/missing audio |
 | espeak-ng installed | VM now has `espeak-ng` for server-render TTS fallback when Kokoro is unreachable |
 
-### Wave F + Wave 5 — generate + watch proof (keyless)
+### Wave F + Wave 5 — generate + watch proof (web harvest)
 
-**Prior Wave F** — cold airline topic, Archive-only harvest:
+**Prior Wave F** — cold airline topic, raw web harvest (Archive-biased CLI; `pexels=0 pixabay=0`):
 
 | Step | Status | Evidence |
 |------|--------|----------|
 | `npm run generate:video` | **PASS** | `FINAL-VIDEO-final.mp4` ~94.8 s / ~45.3 MB; `pexels=0 pixabay=0 archive=45`; soft-pass `15v/7segs`; exit **0** |
 | `npm run watch:video` | **PASS (fail-closed)** | Exit **1**; brutal raw **2.6**/10; upload-ready **NO**; criticals YES |
 
-**Wave 5 proof pack** (post hang/volume-gate fixes; stock keys still MISSING):
+**Wave 5 proof pack** (post hang/volume-gate fixes; web-harvest / Archive-biased CLI):
 
 | Topic | Generate | Watch | Notes |
 |-------|----------|-------|-------|
@@ -69,39 +69,37 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 
 | Topic | Generate | Watch | Notes |
 |-------|----------|-------|-------|
-| Airline-v2 | Exit **0** · 70.9s · yellowPixels=31761 | Exit **1** · raw **4.4–5.4** · hook PASS on rewatch | KEYS_BLOCKED ceiling |
+| Airline-v2 | Exit **0** · 70.9s · yellowPixels=31761 | Exit **1** · raw **4.4–5.4** · hook PASS on rewatch | web-motion gate ceiling — watcher honest, raw &lt;7 |
 | Airline-v3 (reuse cap) | Exit **0** · 65.9s · yellowPixels=31749 | Exit **1** · raw **2.8–3.6** | thin Archive pool; OCR harden `e3a0642` |
-| Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs, keyless + junk/pHash) |
+| Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
-Watcher honesty is working: raw &lt;7 → exit 1; thin keyless harvest → non-zero generate. Floors have **not** been lowered.
+Watcher honesty is working: raw &lt;7 → exit 1; thin web harvest → non-zero generate. Floors have **not** been lowered. Scores reflect **web-harvest / Archive-biased CLI gate** failures (motion diversity, segment floors, watcher recognition) — not missing stock keys.
 
 Local proof (gitignored): `test-recordings/dod-proof/{airline,airline-v2,housing,healthcare}/` + `SUMMARY.txt`.
 
-**Not done:** upload-ready YES, brutal raw ≥7, keyed 3-topic green pack, prod deploy currency. Do not claim these from fixture/mock harvest, keyless Archive runs, or pre-sweep recordings on other branches.
+**Not done:** upload-ready YES, brutal raw ≥7, 3-topic web-harvest green pack, prod deploy currency. Do not claim these from fixture/mock harvest, thin Archive-only runs, or pre-sweep recordings on other branches.
 
 ---
 
-## §B — Blocked: stock keys → quality ≥7
+## §B — Open: web-harvest quality ≥7
 
-**Stock keys are MISSING on this VM.** Verified 2026-08-01:
+**Primary product path = raw web harvest** (Bing / Google / DDG / Archive.org /
+yt-dlp clip download). Pexels and Pixabay are **optional niceties** — not
+required for DoD. See [`docs/ENV_DOD.md`](ENV_DOD.md).
 
-```bash
-grep -E '^(PEXELS|PIXABAY|VITE_PEXELS|VITE_PIXABAY)' .env.local || echo "MISSING — stock keys not set"
-# → MISSING — stock keys not set
-```
-
-`.env.local` has OpenRouter + `AUTOTUBE_API_KEY` only. See [`docs/ENV_DOD.md`](ENV_DOD.md) for the full key table and restart rules.
-
-Without at least one of `PEXELS_API_KEY` / `VITE_PEXELS_KEY` or `PIXABAY_API_KEY` / `VITE_PIXABAY_KEY`, `resolveStockKeyMode()` returns **keyless** → Archive-only harvest → thin motion, `HARVEST_VOLUME_FAIL` on harder topics (proven: healthcare), and watcher raw scores stuck well below 7 even when generate succeeds.
-
-**Terminal status: `KEYS_BLOCKED`** — upload-ready ≥7 cannot be demonstrated on this VM without stock keys. Do not invent passing scores.
+Verified 2026-08-01: no Pexels/Pixabay keys in `.env.local`. That is fine for
+web-harvest proof. Open bars are pipeline and gate quality, not key absence:
 
 | Bar | Status | Unblock |
 |-----|--------|---------|
-| **Upload-ready YES** | **KEYS_BLOCKED** | Add stock keys per [`ENV_DOD.md`](ENV_DOD.md), restart Vite, regenerate + `watch:video` exit 0 |
-| **Brutal raw ≥ 7** | **KEYS_BLOCKED** | Keyless ceiling observed **~5.4** (airline-v2); Wave 5 raws **3.4** / **4.6**; do not lower floors |
-| **3-topic proof pack** | **KEYS_BLOCKED** | Keyless pack attempted under `test-recordings/dod-proof/`; green (≥7 ×3) only after stock keys |
+| **Web-motion gate recognition** | **OPEN** | Watcher must score web-harvest motion honestly; current raws **2.8–5.4** on Archive-biased CLI runs |
+| **CLI top-up diversity** | **OPEN** | Segment/asset floors without thin pools; `HARVEST_VOLUME_FAIL` on healthcare/housing-v2 |
+| **Upload-ready YES (≥7)** | **OPEN** | Regenerate + `watch:video` exit **0** on cold topics via web harvest — not stock-key injection |
+| **Brutal raw ≥ 7** | **OPEN** | Observed ceiling **~5.4** (airline-v2); Wave 5 raws **3.4** / **4.6**; do not lower floors |
+| **3-topic proof pack** | **OPEN** | Green (≥7 ×3) on web-harvest runs under `test-recordings/dod-proof/` |
 | **9.3 stretch** | **OPEN** (after ≥7) | `npm run loop:video -- --until-score 9.3` on cold topics |
+
+Do not invent passing scores. Do not claim ≥7 is blocked by missing stock keys.
 
 ---
 
@@ -195,7 +193,7 @@ npm run generate:video -- "The regional airline that hid cabin-pressure failures
 ls -lh test-recordings/FINAL-VIDEO-final.mp4
 ```
 
-Expected: MP4 exists, duration ≥ 60 s. Generate may succeed on Archive-only; that does **not** satisfy §B.
+Expected: MP4 exists, duration ≥ 60 s. Generate may succeed on web harvest; that alone does **not** satisfy §B.
 
 ### D3 — Watcher fail-closed (needs OpenRouter for vision)
 
@@ -205,7 +203,7 @@ npm run watch:video -- test-recordings/FINAL-VIDEO-final.mp4
 echo "exit=$?"
 ```
 
-Expected on keyless VM: exit **1**, upload-ready **NO**, raw brutal **< 7**.
+Expected until §B bars met: exit **1**, upload-ready **NO**, raw brutal **< 7**.
 
 `npm run dod:watch -- <mp4>` is the same gate. `generate:video`, `watch:video`, and `dod:watch` are plain `node …` npm scripts with **no `| tee` pipe**, so the npm exit code is the script's own.
 
@@ -216,11 +214,11 @@ npm run watch:video -- test-recordings/FINAL-VIDEO-final.mp4 --min-score 7
 echo "exit=$?"
 ```
 
-Expected until stock keys + iteration: exit **1**.
+Expected until web-harvest quality + iteration: exit **1**.
 
-### D4 — Quality bar ≥7 (needs Pexels and/or Pixabay)
+### D4 — Quality bar ≥7 (web-harvest proof)
 
-Add keys per [`docs/ENV_DOD.md`](ENV_DOD.md), restart dev server, then:
+No stock keys required. Iterate on raw web harvest until watcher passes:
 
 ```bash
 set -a && . ./.env.local && set +a

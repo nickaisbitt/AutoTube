@@ -629,6 +629,108 @@ export function mergeVolumePadding(media, padding, project = null) {
   return out;
 }
 
+/** @param {object} asset */
+function isVideoAsset(asset) {
+  return asset?.type === 'video' || /\.(?:mp4|webm|mov)(?:[?#]|$)/i.test(asset?.url || '');
+}
+
+/** @param {object} asset */
+function mediaAssetKey(asset) {
+  return String(asset?.url || '').split('?')[0];
+}
+
+/**
+ * A segment-level relevance score for motion coverage. This deliberately uses
+ * the same visual-evidence and junk gates as the harvest filter: query-only
+ * matches, airline medical/carrier/ticker junk, and unsafe URLs cannot pad a
+ * segment.
+ *
+ * @param {object} asset
+ * @param {object} segment
+ * @param {string} topicBlob
+ * @param {string[]} topicKeywords
+ */
+function topicalVideoScore(asset, segment, topicBlob, topicKeywords) {
+  if (!isVideoAsset(asset)) return 0;
+  if (isUnsafeMediaUrl(asset?.url || '') || isJunkWebVolumeStillUrl(asset?.url || '')) return 0;
+  return scoreAssetRelevance(asset, segment, topicBlob, topicKeywords);
+}
+
+/**
+ * Ensure every scripted segment owns at least one topical video. A verified
+ * video may be reused as bounded padding for an uncovered segment; global
+ * unique-video floors still dedupe by URL, so this cannot inflate motion-rich
+ * or airline strong-visual counts.
+ *
+ * @param {object} project
+ * @returns {{ padded: object[], missingBefore: string[], missing: string[] }}
+ */
+export function ensureTopicalVideoCoverage(project) {
+  const segments = Array.isArray(project?.script) ? project.script : [];
+  if (!segments.length || !project) {
+    return { padded: [], missingBefore: [], missing: [] };
+  }
+  if (!Array.isArray(project.media)) project.media = [];
+
+  const media = project.media;
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`;
+  const topicKeywords = extractKeywords(topicBlob, 12);
+  const topicalForSegment = (segment) => media.filter((asset) => (
+    asset?.segmentId === segment.id
+    && topicalVideoScore(asset, segment, topicBlob, topicKeywords) >= VOLUME_PADDING_MIN_RELEVANCE
+  ));
+  const missingBefore = segments.filter((segment) => topicalForSegment(segment).length === 0);
+  const padded = [];
+
+  for (const segment of missingBefore) {
+    const usedBySegment = new Set(
+      media.filter((asset) => asset?.segmentId === segment.id).map(mediaAssetKey).filter(Boolean),
+    );
+    const reuseCounts = new Map();
+    for (const asset of media) {
+      const key = mediaAssetKey(asset);
+      if (key) reuseCounts.set(key, (reuseCounts.get(key) || 0) + 1);
+    }
+    const candidates = media
+      .map((asset) => ({
+        asset,
+        key: mediaAssetKey(asset),
+        score: topicalVideoScore(asset, segment, topicBlob, topicKeywords),
+      }))
+      .filter(({ key, score }) => (
+        key
+        && !usedBySegment.has(key)
+        && score >= VOLUME_PADDING_MIN_RELEVANCE
+      ))
+      .sort((a, b) => (
+        (reuseCounts.get(a.key) || 0) - (reuseCounts.get(b.key) || 0)
+        || b.score - a.score
+      ));
+    const candidate = candidates[0];
+    if (!candidate) continue;
+
+    const clone = {
+      ...candidate.asset,
+      id: `topical-topup-${segment.id}-${padded.length}`,
+      segmentId: segment.id,
+      source: `${candidate.asset.source || 'Topical video pool'} (topical volume top-up)`,
+      relevanceScore: Math.round(candidate.score * 100) / 100,
+      topicalVideoPadding: true,
+    };
+    media.push(clone);
+    padded.push(clone);
+  }
+
+  const missing = segments
+    .filter((segment) => topicalForSegment(segment).length === 0)
+    .map((segment) => String(segment.id));
+  return {
+    padded,
+    missingBefore: missingBefore.map((segment) => String(segment.id)),
+    missing,
+  };
+}
+
 /**
  * @param {object} project
  * @param {number} minPerSegment
@@ -636,6 +738,8 @@ export function mergeVolumePadding(media, padding, project = null) {
 export function evaluateHarvestVolume(project, minPerSegment = 6) {
   const segments = project.script || [];
   const topicBlob = `${project.topic || ''} ${project.title || ''}`;
+  const topicKeywords = extractKeywords(topicBlob, 12);
+  const topicalCoverage = ensureTopicalVideoCoverage(project);
   const effectiveMin = isCrimeHeistTopic(topicBlob)
     ? Math.max(3, minPerSegment - 2)
     : minPerSegment;
@@ -649,13 +753,30 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
     perSegment[seg.id] = {
       title: seg.title,
       count: uniqueUrls.size,
-      videoCount: assets.filter((m) => m.type === 'video' || /\.mp4/i.test(m.url || '')).length,
+      videoCount: assets.filter(isVideoAsset).length,
+      topicalVideoCount: new Set(
+        assets
+          .filter((asset) => (
+            topicalVideoScore(asset, seg, topicBlob, topicKeywords) >= VOLUME_PADDING_MIN_RELEVANCE
+          ))
+          .map(mediaAssetKey)
+          .filter(Boolean),
+      ).size,
     };
   }
 
   const failing = Object.entries(perSegment)
-    .filter(([, v]) => v.count < effectiveMin)
-    .map(([id, v]) => ({ segmentId: id, ...v, need: effectiveMin }));
+    .filter(([, v]) => v.count < effectiveMin || v.topicalVideoCount < 1)
+    .map(([id, v]) => ({
+      segmentId: id,
+      ...v,
+      need: effectiveMin,
+      topicalVideoNeed: 1,
+      reasons: [
+        ...(v.count < effectiveMin ? ['asset-volume'] : []),
+        ...(v.topicalVideoCount < 1 ? ['topical-video-empty'] : []),
+      ],
+    }));
 
   return {
     pass: failing.length === 0,
@@ -663,6 +784,11 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
     minPerSegment: effectiveMin,
     requestedMinPerSegment: minPerSegment,
     crimeHeistTopic: isCrimeHeistTopic(topicBlob),
+    topicalVideoPadding: topicalCoverage.padded.map((asset) => ({
+      id: asset.id,
+      segmentId: asset.segmentId,
+      url: asset.url,
+    })),
     failing,
   };
 }
@@ -677,12 +803,26 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
  */
 export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const volumePass = mediaReport?.volumePass;
-  if (volumePass === true) {
-    return { pass: true, reason: 'volume-hard-pass' };
-  }
   if (volumePass !== false) {
+    if (volumePass === true) {
+      const topicalCoverage = ensureTopicalVideoCoverage(project);
+      if (topicalCoverage.missing.length) {
+        return {
+          pass: false,
+          reason: `volume-topical-video-empty(${topicalCoverage.missing.join(',')})`,
+        };
+      }
+      return { pass: true, reason: 'volume-hard-pass' };
+    }
     // A missing verdict is not a pass: without a volume check there is nothing to soft-pass.
     return { pass: false, reason: 'volume-unknown-fail-closed' };
+  }
+  const topicalCoverage = ensureTopicalVideoCoverage(project);
+  if (topicalCoverage.missing.length) {
+    return {
+      pass: false,
+      reason: `volume-topical-video-empty(${topicalCoverage.missing.join(',')})`,
+    };
   }
   const segments = project?.script || [];
   const segN = segments.length || 1;

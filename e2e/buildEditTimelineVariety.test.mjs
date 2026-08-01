@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildEditTimeline, visualSubjectCluster } from '../scripts/lib/build-edit-timeline.mjs';
+import {
+  buildEditTimeline,
+  introFaceTier,
+  isPassiveDeskIntroVisual,
+  visualSubjectCluster,
+} from '../scripts/lib/build-edit-timeline.mjs';
 
 describe('buildEditTimeline — anti-repetition', () => {
   it('hard-caps reuse and lengthens cuts instead of 12× looping thin pools', () => {
@@ -318,6 +323,134 @@ describe('buildEditTimeline — anti-repetition', () => {
     expect(new Set(leadIds)).toEqual(new Set(['pilot-face', 'passenger-face', 'bright-cabin']));
   });
 
+  it('classifies passive desk stock and readable-face tiers', () => {
+    expect(isPassiveDeskIntroVisual({ alt: 'hands shuffling paperwork on desk' })).toBe(true);
+    expect(isPassiveDeskIntroVisual({ alt: 'hands typing on a keyboard close up' })).toBe(true);
+    // A readable face holding the paperwork is a story beat, not passive desk.
+    expect(isPassiveDeskIntroVisual({ alt: 'worried tenant face holding eviction paperwork' })).toBe(false);
+    expect(isPassiveDeskIntroVisual({ alt: 'bright cabin interior aisle daylight' })).toBe(false);
+    expect(introFaceTier({ alt: 'worried passenger face close up airplane cabin' }, { airline: true })).toBe(2);
+    expect(introFaceTier({ alt: 'worried woman face close up' }, { airline: true })).toBe(1);
+    expect(introFaceTier({ alt: 'worried tenant couple face close up apartment' }, { housing: true })).toBe(2);
+    expect(introFaceTier({ alt: 'bright cabin interior aisle daylight' }, { airline: true })).toBe(0);
+  });
+
+  it('airline intro leads topical face, then any face, never passive paperwork', () => {
+    const project = {
+      topic: 'airline cabin pressure safety cover-up',
+      script: [{ id: 'intro', type: 'intro', duration: 5, narration: 'cabin pressure story' }],
+      media: [
+        {
+          id: 'passive-paperwork',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/passive-paperwork/passive-paperwork.mp4',
+          alt: 'hands shuffling paperwork on desk',
+        },
+        {
+          id: 'bright-cabin',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/bright-cabin/bright-cabin.mp4',
+          alt: 'bright cabin interior aisle daylight',
+        },
+        {
+          id: 'generic-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/generic-face/generic-face.mp4',
+          alt: 'worried woman face close up',
+        },
+        {
+          id: 'topical-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/topical-face/topical-face.mp4',
+          alt: 'worried passenger face close up airplane cabin',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    const leadIds = tl.filter((e) => e.startSec < 3).map((e) => e.assetId);
+    expect(tl[0].assetId).toBe('topical-face');
+    expect(tl[1].assetId).toBe('generic-face');
+    expect(leadIds).not.toContain('passive-paperwork');
+    for (const id of leadIds) {
+      expect(['topical-face', 'generic-face', 'bright-cabin']).toContain(id);
+    }
+  });
+
+  it('housing intro leads a readable tenant face, never passive paperwork or beetles', () => {
+    const project = {
+      topic: 'How landlords use AI to evict tenants faster',
+      script: [{ id: 'intro', type: 'intro', duration: 5, narration: 'landlords evict tenants with AI' }],
+      media: [
+        {
+          id: 'desk-paperwork',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/desk-paperwork/desk-paperwork.mp4',
+          alt: 'hands signing eviction paperwork on desk',
+        },
+        {
+          id: 'apartment-ext',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/apartment-ext/apartment-ext.mp4',
+          alt: 'apartment building exterior daylight',
+        },
+        {
+          id: 'beetle',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/beetle/beetle.mp4',
+          alt: 'macro beetle insect crawling',
+        },
+        {
+          id: 'generic-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/generic-face/generic-face.mp4',
+          alt: 'shocked person face portrait close up',
+        },
+        {
+          id: 'tenant-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/tenant-face/tenant-face.mp4',
+          alt: 'worried tenant couple face close up apartment',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    const leadIds = tl.filter((e) => e.startSec < 3).map((e) => e.assetId);
+    expect(tl[0].assetId).toBe('tenant-face');
+    expect(leadIds).not.toContain('desk-paperwork');
+    expect(leadIds).not.toContain('apartment-ext');
+    // Banned subjects stay banned everywhere, not just in the lead window.
+    expect(tl.map((e) => e.assetId)).not.toContain('beetle');
+  });
+
+  it('still covers a housing intro when passive paperwork is the only asset', () => {
+    const project = {
+      topic: 'How landlords use AI to evict tenants faster',
+      script: [{ id: 'intro', type: 'intro', duration: 5, narration: 'eviction story' }],
+      media: [
+        {
+          id: 'only-paperwork',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/only-paperwork/only-paperwork.mp4',
+          alt: 'hands shuffling eviction paperwork forms on desk',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    expect(tl.length).toBeGreaterThan(0);
+    expect(tl.every((e) => e.assetId === 'only-paperwork')).toBe(true);
+    expect(Math.max(...tl.map((e) => e.endSec))).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('opens an airline intro on a face, not an empty cabin or a carrier', () => {
     const project = {
       topic: 'How a regional airline hid recurring cabin-pressure failures',
@@ -349,6 +482,72 @@ describe('buildEditTimeline — anti-repetition', () => {
     const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
     expect(tl[0].assetId).toBe('passenger-face');
     expect(tl.filter((e) => e.startSec < 3).map((e) => e.assetId)).not.toContain('carrier');
+  });
+
+  it('uses at least three unique URLs for a 12s body with four videos', () => {
+    const project = {
+      topic: 'generic investigation topic',
+      script: [{ id: 's1', type: 'body', duration: 12, narration: 'story' }],
+      media: Array.from({ length: 4 }, (_, i) => ({
+        id: `v${i}`,
+        segmentId: 's1',
+        type: 'video',
+        url: `https://videos.pexels.com/video-files/b3-variety-${i}/b3-variety-${i}.mp4`,
+        alt: `person face clip ${i}`,
+      })),
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    const uniqueIds = new Set(tl.map((e) => e.assetId));
+    expect(uniqueIds.size).toBeGreaterThanOrEqual(3);
+    const spans = tl.map((e) => e.endSec - e.startSec);
+    expect(Math.max(...spans)).toBeLessThanOrEqual(2.51);
+    expect(Math.max(...tl.map((e) => e.endSec))).toBeGreaterThanOrEqual(11.5);
+  });
+
+  it('caps body hold time and avoids two-clip ping-pong when three or more URLs are usable', () => {
+    const project = {
+      topic: 'generic investigation topic',
+      script: [{ id: 's1', type: 'body', duration: 12, narration: 'story' }],
+      media: [
+        {
+          id: 'v0',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/ping-0/ping-0.mp4',
+          alt: 'person face worried close up',
+        },
+        {
+          id: 'v1',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/ping-1/ping-1.mp4',
+          alt: 'person face shocked reaction',
+        },
+        {
+          id: 'v2',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/ping-2/ping-2.mp4',
+          alt: 'couple family worried face portrait',
+        },
+        {
+          id: 'office',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/ping-office/ping-office.mp4',
+          alt: 'office conference room corporate',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    const ids = tl.map((e) => e.assetId);
+    expect(new Set(ids).size).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...tl.map((e) => e.endSec - e.startSec))).toBeLessThanOrEqual(2.51);
+    const usableIds = new Set(['v0', 'v1', 'v2']);
+    const usableOnly = ids.filter((id) => usableIds.has(id));
+    if (usableOnly.length >= 4) {
+      expect(new Set(usableOnly).size).toBeGreaterThanOrEqual(3);
+    }
   });
 
   it('prefers unused global URLs before over-reusing a single clip', () => {

@@ -1,8 +1,10 @@
 # Follow-up plan (numbered) — 2026-06-03, refreshed 2026-08-01
 
-Use this after the long PR/video-quality thread. **Master** is source of truth.
+**DoD authority:** [`docs/REMAINING_WORK.md`](REMAINING_WORK.md) — keys, proof-pack commands (§E), and what is proven vs still open (§B–§D). This file is operational context only; do not treat Phase 5 or any section here as overriding REMAINING_WORK.
 
-> **2026-08-01 refresh:** the multi-model audit fix sweep is DONE (harvest fail-closed, A/V sync, watcher honesty, security, deploy-drift cleanup, CI, sprawl, eval honesty — see `docs/REMAINING_WORK.md` §A, the canonical remaining-work list). New fast gate: `npm run dod:check` (deploy/server absence + server-render sync drift; `--unit` adds vitest). Deploy automation note below is outdated: GHCR image publishing now runs via `.github/workflows/ghcr-image.yml` after green CI; Railway deploy from that image still needs `RAILWAY_API_TOKEN` (Phase 0). Product quality bars (Phase 2–3, Phase 5) remain OPEN and manual-with-keys — do not claim them met from mocks or pre-sweep artifacts.
+Use this after the long PR/video-quality thread. **Master** is source of truth for code.
+
+> **2026-08-01 refresh:** audit code fixes are shipped (see `docs/REMAINING_WORK.md` §A). Fast gate: `npm run dod:check`. Product quality (upload-ready, brutal ≥7) and deploy currency remain **OPEN** per REMAINING_WORK §D — add Pexels/Pixabay keys before claiming ≥7. GHCR image publishing runs via `.github/workflows/ghcr-image.yml` after green CI; Railway deploy from that image still needs `RAILWAY_API_TOKEN` (Phase 0).
 
 ---
 

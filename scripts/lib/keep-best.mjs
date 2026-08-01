@@ -2,12 +2,24 @@
  * Keep-best: freeze a good cut instead of reharvest lottery.
  * When raw ≥ KEEP_BEST_RAW_FLOOR (or upload-ready), next iter polishes
  * overlays/pacing on the same media/timeline rather than pulling new stock.
+ *
+ * Strong-topical freeze: when a generate produces ≥1 strong topical video
+ * asset, the project is frozen so the next iteration can reuse those assets
+ * without a full reharvest.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { countAirlineStrongVideos } from './harvest-quality.mjs';
+import { isAirlineTopic } from './topic-family.mjs';
 
 /** Raw overall at/above this (no critical issues) → freeze media. */
 export const KEEP_BEST_RAW_FLOOR = 7.4;
+
+/**
+ * Minimum relevance score for a non-airline video asset to count as
+ * "strong topical" when deciding whether to freeze the project.
+ */
+export const STRONG_TOPICAL_RELEVANCE_MIN = 0.5;
 
 /**
  * @param {object} watch — watchVideo() result
@@ -22,6 +34,51 @@ export function shouldKeepBest(watch) {
     return true;
   }
   return false;
+}
+
+/**
+ * Count unique video assets that carry real topical visual evidence.
+ *
+ * For airline topics the aviation-specific strong-video check is used
+ * (cabin/cockpit/oxygen-mask/runway+aircraft). For other topics a video
+ * must have `relevanceScore >= STRONG_TOPICAL_RELEVANCE_MIN` (set by
+ * filterAssetsByRelevance during harvest).
+ *
+ * @param {object} project
+ * @param {string} [topic]
+ * @returns {number}
+ */
+export function countStrongTopicalVideos(project, topic) {
+  const topicText = topic || project?.topic || project?.title || '';
+  const media = project?.media || [];
+  const videoAssets = media.filter(
+    (a) => a.type === 'video' || /\.(mp4|webm|mov)/i.test(a?.url || ''),
+  );
+  if (!videoAssets.length) return 0;
+
+  if (isAirlineTopic(topicText)) {
+    return countAirlineStrongVideos(videoAssets, topicText);
+  }
+  return videoAssets.filter(
+    (a) => typeof a.relevanceScore === 'number' && a.relevanceScore >= STRONG_TOPICAL_RELEVANCE_MIN,
+  ).length;
+}
+
+/**
+ * Returns true when the project has ≥1 strong topical video asset and the
+ * watch result does not carry critical issues. Does NOT require a score
+ * floor — the intent is to preserve good media even on a draft-tier pass.
+ *
+ * @param {object|null} watch — watchVideo() result
+ * @param {object|null} project — project object (with .media array)
+ * @param {string} [topic]
+ * @returns {boolean}
+ */
+export function shouldFreezeOnTopicalAssets(watch, project, topic) {
+  if (!watch) return false;
+  if (watch.brutal?.hasCriticalIssues) return false;
+  if (!project || !Array.isArray(project.media) || !project.media.length) return false;
+  return countStrongTopicalVideos(project, topic) >= 1;
 }
 
 /**
@@ -91,14 +148,16 @@ export function applyFrozenMediaToProject(project, frozen) {
       continue;
     }
     const segIdx = Math.min(frozenSegIdx, script.length - 1);
-    const seg = script[segIdx] || script[0];
+    const seg = script[segIdx];
     if (!seg) {
+      // This branch is unreachable when script is non-empty (segIdx is always in range),
+      // but guard explicitly so orphans are never silently assigned to segment 0.
       droppedOrphanMediaIds.push(m.id || m.url || `frozen-${i}`);
       continue;
     }
     media.push({
       ...m,
-      segmentId: seg?.id || m.segmentId,
+      segmentId: seg.id,
       id: m.id || `frozen-${i}`,
     });
   }

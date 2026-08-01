@@ -18,7 +18,7 @@ import { loadFixState, saveFixState, clearTopicPackaging } from './lib/loop-stat
 import { applyFixesFromWatch, formatFixReport } from './lib/apply-watch-fixes.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
 import { isBrutalHardFail } from './lib/brutal-gate.mjs';
-import { shouldKeepBest, saveFrozenProject, enterPolishMode } from './lib/keep-best.mjs';
+import { shouldKeepBest, saveFrozenProject, enterPolishMode, shouldFreezeOnTopicalAssets } from './lib/keep-best.mjs';
 import { keepBestEnabled } from './lib/eval-flags.mjs';
 
 const ROOT = process.cwd();
@@ -494,6 +494,30 @@ async function main() {
             applied,
           );
           fixesApplied = applied;
+        }
+      } else if (keepBestEnabled() && !fixState.keepBestMedia) {
+        // Freeze when harvest produced ≥1 strong topical video asset, even before the score floor.
+        // Lets the next iteration polish overlays/pacing without re-harvesting good media.
+        let topicalProjectObj = null;
+        if (existsSync(projectForFreeze)) {
+          try {
+            topicalProjectObj = JSON.parse(readFileSync(projectForFreeze, 'utf8'));
+          } catch { /* ignore */ }
+        }
+        if (shouldFreezeOnTopicalAssets(watch, topicalProjectObj, currentTopic || topic)) {
+          const frozen = saveFrozenProject(LOOP_DIR, projectForFreeze, {
+            rawOverall: watch.brutal?.rawOverall ?? brutalScore,
+            videoPath,
+            topic: currentTopic || topic,
+          });
+          if (frozen) {
+            enterPolishMode(
+              fixState,
+              { frozenProjectPath: frozen, rawOverall: watch.brutal?.rawOverall ?? brutalScore },
+              applied,
+            );
+            fixesApplied = applied;
+          }
         }
       }
 

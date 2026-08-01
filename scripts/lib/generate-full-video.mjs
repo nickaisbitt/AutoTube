@@ -98,6 +98,20 @@ export function resolvePixabayKey() {
   return (process.env.PIXABAY_API_KEY || process.env.VITE_PIXABAY_KEY || '').trim();
 }
 
+/**
+ * Which motion path this run is on.
+ *
+ * `keyed` = Pexels/Pixabay available, so topical face/cabin/apartment stock can be
+ * pulled aggressively. `keyless` = Archive.org is the only motion source, so yield
+ * has to come from query diversity + real item metadata instead of API volume.
+ */
+export function resolveStockKeyMode(env = process.env) {
+  const pexels = Boolean((env?.PEXELS_API_KEY || env?.VITE_PEXELS_KEY || '').trim());
+  const pixabay = Boolean((env?.PIXABAY_API_KEY || env?.VITE_PIXABAY_KEY || '').trim());
+  const keyed = pexels || pixabay;
+  return { keyed, keyless: !keyed, pexels, pixabay, mode: keyed ? 'keyed' : 'keyless' };
+}
+
 export function resolveVisionUnverifiedMax(env = process.env) {
   const raw = env?.AUTOTUBE_VISION_UNVERIFIED_MAX;
   if (raw === undefined || raw === null || String(raw).trim() === '') return 0;
@@ -697,7 +711,182 @@ function injectCyberStockStills(project, report, mediaOffset = 0) {
   }
 }
 
-async function fetchArchiveVideoResults(devServer, query) {
+const PROVIDER_EVIDENCE_MAX_CHARS = 240;
+/**
+ * Per-run ceiling on Archive.org item-metadata lookups (one throttled network call
+ * each, ~0.5s under concurrency), spent only on clips that lack evidence so far.
+ */
+const ARCHIVE_EVIDENCE_LOOKUP_BUDGET = 96;
+const EVIDENCE_STOPWORDS = new Set([
+  'that', 'this', 'with', 'from', 'they', 'them', 'then', 'than', 'their', 'there', 'were', 'what',
+  'when', 'where', 'which', 'while', 'about', 'after', 'been', 'have', 'into', 'over', 'your',
+  'video', 'videos', 'clip', 'clips', 'stock', 'footage', 'film', 'movie', 'archive', 'download',
+  'free', 'full', 'part', 'reel', 'copy', 'file', 'mp4',
+]);
+
+/** Lowercase word soup: markup gone, punctuation flattened, so echoes can be matched. */
+function normalizeEvidenceText(raw) {
+  return String(raw || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&[a-z]+;|&#\d+;/gi, ' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Drop runs of ≥minRun consecutive words that the text shares with `echo`.
+ * A story sentence copied into an item title is removed; an incidental phrase
+ * ("cabin pressure") survives, because a real item title is allowed to name the subject.
+ */
+function stripEchoRuns(words, echo, minRun = 4) {
+  const echoWords = normalizeEvidenceText(echo).split(' ').filter(Boolean);
+  if (!echoWords.length) return words;
+  const kept = [];
+  let i = 0;
+  while (i < words.length) {
+    let longest = 0;
+    for (let e = 0; e < echoWords.length; e += 1) {
+      let run = 0;
+      while (i + run < words.length && e + run < echoWords.length && words[i + run] === echoWords[e + run]) {
+        run += 1;
+      }
+      if (run > longest) longest = run;
+    }
+    if (longest >= minRun) {
+      i += longest;
+      continue;
+    }
+    kept.push(words[i]);
+    i += 1;
+  }
+  return kept;
+}
+
+/**
+ * Provider-supplied metadata (Archive.org item title/subject/description, Pixabay tags)
+ * that may be used as visual evidence — or '' when it is only an echo of us.
+ *
+ * The test is what is left after removing the query we sent and any sentence copied
+ * from the topic: metadata that adds nothing of its own proves nothing about the media.
+ * Metadata that passes is returned whole, subject words included, because the provider
+ * (not this pipeline) is the one claiming the clip shows them.
+ */
+export function providerEvidenceText(raw, { query = '', topicBlob = '', max = PROVIDER_EVIDENCE_MAX_CHARS } = {}) {
+  const text = normalizeEvidenceText(raw);
+  if (!text) return '';
+  let residual = text;
+  const q = normalizeEvidenceText(query);
+  if (q && residual.includes(q)) residual = residual.split(q).join(' ');
+  const residualWords = stripEchoRuns(residual.split(/\s+/).filter(Boolean), topicBlob);
+  const meaningful = residualWords.filter((w) => w.length >= 3 && !EVIDENCE_STOPWORDS.has(w));
+  if (residualWords.length < 2 || !meaningful.length) return '';
+  return text.slice(0, max).trim();
+}
+
+/** Meaningful tokens of provider metadata (used to prove overlap with what we searched for). */
+function evidenceTokens(text) {
+  return [
+    ...new Set(
+      String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 4 && !EVIDENCE_STOPWORDS.has(w)),
+    ),
+  ];
+}
+
+export function archiveIdentifierFromUrl(url = '') {
+  const m = String(url || '').match(/archive\.org\/(?:download|details|embed|services\/img)\/([^/?#]+)/i);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+/**
+ * Does an Archive.org clip prove, from its own item metadata, that it shows what we
+ * asked for? Yield is raised by asking more (and shorter) questions — never by
+ * accepting an opaque identifier because the query happened to be topical.
+ */
+export function archiveEvidenceVerdict(clip = {}, { query = '', topicBlob = '' } = {}) {
+  const evidence = providerEvidenceText(`${clip.title || ''} ${clip.alt || ''}`, {
+    query: query || clip.query || '',
+    topicBlob,
+  });
+  if (!evidence) return { ok: false, reason: 'no-provider-metadata', evidence: '', matched: [] };
+  const wanted = new Set([
+    ...evidenceTokens(query || clip.query || ''),
+    ...evidenceTokens(topicBlob),
+  ]);
+  if (!wanted.size) return { ok: true, reason: 'no-subject-to-match', evidence, matched: [] };
+  // Prefix matching absorbs plurals and "airline"/"airliner", but not "cabin"/"cabinetry".
+  const sameSubject = (token, want) =>
+    token === want
+    || (Math.abs(token.length - want.length) <= 3 && (token.startsWith(want) || want.startsWith(token)));
+  const matched = evidenceTokens(evidence).filter((token) => [...wanted].some((want) => sameSubject(token, want)));
+  if (!matched.length) {
+    return { ok: false, reason: 'metadata-off-subject', evidence, matched: [] };
+  }
+  return { ok: true, reason: 'metadata-subject-match', evidence, matched };
+}
+
+/**
+ * Pull real item metadata (title / description / subject) for one Archive.org item.
+ * The search proxy only returns a title, and plenty of aviation items carry their
+ * proof in the description or subject tags instead.
+ */
+async function fetchArchiveItemEvidence(identifier, { timeoutMs = 6000 } = {}) {
+  if (!identifier) return '';
+  try {
+    const res = await fetch(`https://archive.org/metadata/${encodeURIComponent(identifier)}/metadata`, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { 'user-agent': 'Mozilla/5.0 AutoTube media validator', accept: 'application/json' },
+    });
+    if (!res.ok) return '';
+    const data = await res.json();
+    const meta = data?.result ?? data ?? {};
+    const parts = [meta.title, meta.subject, meta.description]
+      .flatMap((part) => (Array.isArray(part) ? part : [part]))
+      .filter((part) => typeof part === 'string');
+    return parts.join(' ').trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Enrich Archive.org candidates with their own item metadata so evidence-gated
+ * clips are judged on what the item says it shows, not on the query we typed.
+ */
+async function enrichArchiveEvidence(clips, { topicBlob = '', limit = 0, report = {}, concurrency = 6 } = {}) {
+  if (limit <= 0) return clips;
+  const pending = clips.filter(
+    (clip) =>
+      /Archive/i.test(clip.source || '')
+      && !archiveEvidenceVerdict(clip, { query: clip.query || '', topicBlob }).ok,
+  );
+  const batch = pending.slice(0, limit);
+  for (let i = 0; i < batch.length; i += concurrency) {
+    const slice = batch.slice(i, i + concurrency);
+    const found = await Promise.all(
+      slice.map((clip) => fetchArchiveItemEvidence(archiveIdentifierFromUrl(clip.url))),
+    );
+    slice.forEach((clip, idx) => {
+      report.archiveEvidenceLookups = (report.archiveEvidenceLookups || 0) + 1;
+      const enriched = providerEvidenceText(`${clip.title || ''} ${found[idx] || ''}`, {
+        query: clip.query || '',
+        topicBlob,
+      });
+      if (enriched && enriched !== clip.title) {
+        clip.title = enriched;
+        report.archiveEvidenceEnriched = (report.archiveEvidenceEnriched || 0) + 1;
+      }
+    });
+  }
+  return clips;
+}
+
+async function fetchArchiveVideoResults(devServer, query, { topicBlob = '' } = {}) {
   try {
     const headers = {};
     const apiKey = resolveAutotubeApiKey();
@@ -706,11 +895,17 @@ async function fetchArchiveVideoResults(devServer, query) {
     if (!res.ok) return [];
     const data = await res.json();
     return (data.results || [])
-      .map((r) => ({
-        url: r.url,
-        alt: r.title || r.alt || query,
-        source: 'Archive.org live',
-      }))
+      .map((r) => {
+        // Never fall back to the query for alt/title: an echo is not evidence.
+        const meta = providerEvidenceText(r.title || r.alt || '', { query, topicBlob });
+        return {
+          url: r.url,
+          alt: meta,
+          title: meta,
+          query,
+          source: 'Archive.org live',
+        };
+      })
       .filter((r) => r.url && /\.mp4(?:[?#]|$)/i.test(r.url));
   } catch {
     return [];
@@ -792,14 +987,14 @@ async function fetchPixabayVideos(query, perPage = 8) {
 /** Prefer phone/bank/security motion for cyber topics — deny lifestyle pets/nature filler. */
 /** Strong aviation evidence — must appear in real visual metadata, not just the search query echo. */
 const AIRLINE_STRONG_RE =
-  /\b(airline|aircraft|airplane|aeroplane|aviation|cockpit|oxygen\s*mask|runway|hangar|airport|fuselage|tarmac|jet\s*bridge|boarding|cabin\s*(interior|pressure|passengers?)|pressure\s*gauge|flight\s*attendant|faa|bombardier|embraer|q400|regional\s*jet)\b/i;
+  /\b(airline|airliner|jetliner|turboprop|aircraft|airplane|aeroplane|aviation|cockpit|flight\s*deck|oxygen\s*mask|runway|hangar|airport|fuselage|tarmac|jet\s*bridge|boarding|cabin\s*(interior|pressure|pressuri[sz](?:ation|ed)|altitude|passengers?)|pressure\s*gauge|flight\s*attendant|faa|bombardier|embraer|q400|regional\s*jet)\b/i;
 /** Weak tokens alone are not enough (passenger/pilot/flight match hospital & sports stock). */
 const AIRLINE_WEAK_RE = /\b(passenger|pilot|plane|jet|flight|mechanic|attendant)\b/i;
 const AIRLINE_WEAK_CONTEXT_RE =
   /\b(cabin|cockpit|airplane|aircraft|airport|seat|aisle|galley|headset|yoke|throttle|hangar|tarmac|runway|oxygen|fuselage)\b/i;
 /** Queries we trust when API alt is just an echo of the search string. */
 const AIRLINE_TRUSTED_QUERY_RE =
-  /\b(oxygen\s*mask|cockpit|hangar|runway|tarmac|cabin\s*(interior|pressure|passengers?)|airplane|aircraft|fuselage|flight\s*attendant|pilot\s*(cockpit|headset|face)|boarding|jet\s*bridge|pressure\s*gauge|faa\s*report|maintenance\s*hangar|airplane\s*cabin)\b/i;
+  /\b(oxygen\s*mask|cockpit|flight\s*deck|hangar|runway|tarmac|cabin\s*(interior|pressure|pressuri[sz](?:ation|ed)|passengers?)|airplane|airliner|jetliner|turboprop|aircraft|fuselage|flight\s*attendant|pilot\s*(cockpit|headset|face)|boarding|jet\s*bridge|pressure\s*gauge|faa\s*report|maintenance\s*hangar|airplane\s*cabin)\b/i;
 /** Never OK on airline stories — keyword miss from faceSeek / long topic harvest. */
 const AIRLINE_OFF_TOPIC_RE =
   /\b(football|soccer|nfl|athlete|jersey|stadium|basketball|tennis|hockey|golf|baseball|sports?|sports?\s*player|cheerleader|mail\s*box|mailbox|u\.?s\.?\s*mail|postal|magnifying\s*glass|financial\s*reports?|stock\s*documents?\s*desk|astronaut|space\s*suit|spacewalk|nasa|space\s*station|galaxy|nebula|patient|medical\s*attention|medical\s*patient|hospital|icu\b|surgery|surgeon|operating\s*room|nurse|nurse\s*station|ambulance\s*stretcher|stretcher|iv\s*drip|hospital\s*bed|garage|auto\s*repair|car\s*engine|crying\s*(woman|girl|man)|emotional\s*portrait|stock\s*reaction|yoga|gym\s*workout|fashion|fashion\s*runway)\b/i;
@@ -878,7 +1073,13 @@ function airlineVisualEvidenceBlob(clip = {}) {
   ) {
     alt = '';
   }
-  return `${alt} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''}`.toLowerCase();
+  // Provider metadata (Archive.org item title/subject/description, Pixabay tags) is
+  // real visual proof — it is sanitised of query/topic echoes when it is written.
+  let providerMeta = providerEvidenceText(clip.title || '', { query });
+  if (/regional airline|cabin pressure fail|how a .+\bhid\b/i.test(providerMeta)) {
+    providerMeta = '';
+  }
+  return `${alt} ${providerMeta} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''}`.toLowerCase();
 }
 
 /** Resolve the search string used to fetch this clip (field or legacy provider-echo alt). */
@@ -938,7 +1139,7 @@ function isAirlineRelevantClip(clip = {}, topicBlob = '') {
 }
 
 function isCyberRelevantClip(clip = {}, topicBlob = '') {
-  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
+  const blob = `${clip.alt || ''} ${clip.title || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.query || ''}`.toLowerCase();
   if (/beetle|dung beetle|insect swarm|macro insect|bug macro|wildlife macro|spider macro/.test(blob)) {
     return false;
   }
@@ -996,7 +1197,7 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
 function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   const preferBright =
     options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
-  const blob = `${clip.alt || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''} ${clip.query || ''}`.toLowerCase();
+  const blob = `${clip.alt || ''} ${clip.title || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''} ${clip.query || ''}`.toLowerCase();
   const topicText = String(topicBlob || '').toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
   if (isGenericStockJunk(blob, topicBlob)) return true;
@@ -1467,6 +1668,238 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   return withFillers(withFaces);
 }
 
+/**
+ * Keyed packs: Pexels/Pixabay reward descriptive 4–6 word scene queries, so ask for
+ * the shots the story actually needs (faces bound to cabin/cockpit, apartments).
+ */
+const KEYED_AIRLINE_MOTION_QUERIES = [
+  'airplane cabin passengers seated aisle',
+  'nervous passenger airplane window seat',
+  'flight attendant cabin service aisle',
+  'pilot hands cockpit controls close-up',
+  'two pilots flight deck instruments',
+  'cabin crew briefing airplane galley',
+  'passenger fastening seatbelt airplane cabin',
+  'oxygen mask hanging airplane cabin',
+  'aircraft mechanic hangar inspection',
+  'aircraft engine inspection mechanic hands',
+  'airplane fuselage exterior tarmac',
+  'jet bridge boarding passengers airport',
+  'cockpit instrument panel dials close-up',
+  'airplane taxiing runway daylight',
+];
+
+const KEYED_HOUSING_MOTION_QUERIES = [
+  'apartment building hallway doors',
+  'apartment kitchen interior daylight',
+  'moving boxes empty apartment room',
+  'for rent sign apartment window',
+  'apartment door key lock close-up',
+  'worried woman apartment window daylight',
+  'man reading letter kitchen worried',
+  'couple looking at bills laptop',
+  'family carrying boxes apartment hallway',
+  'landlord tenant doorway conversation',
+  'rent payment app phone hands',
+  'apartment lease paperwork signing hands',
+];
+
+/**
+ * Keyless packs: Archive.org is full-text ranked over item metadata, so short concrete
+ * subject phrases return items where long scene descriptions return nothing. Diversity
+ * of subject — not looser gating — is what raises yield here.
+ */
+const ARCHIVE_AIRLINE_MOTION_QUERIES = [
+  'airliner cabin',
+  'aircraft cabin interior',
+  'cabin pressurization',
+  'oxygen mask demonstration',
+  'airline safety film',
+  'aviation safety film',
+  'flight attendant demonstration',
+  'airline pilot cockpit',
+  'flight deck instruments',
+  'aircraft maintenance hangar',
+  'aircraft inspection mechanic',
+  'jet airliner takeoff',
+  'commercial airliner landing',
+  'passenger boarding aircraft',
+  'airport tarmac aircraft',
+  'turboprop airliner',
+  'regional airliner',
+  'high altitude flight',
+  'aviation accident investigation',
+  'aircraft crew training',
+];
+
+const ARCHIVE_HOUSING_MOTION_QUERIES = [
+  'apartment building',
+  'apartment interior',
+  'public housing',
+  'tenant eviction',
+  'rent strike',
+  'housing inspection',
+  'moving house boxes',
+  'city housing project',
+  'landlord tenant hearing',
+  'family kitchen home',
+];
+
+const ARCHIVE_VARIANT_LEAD_STOPWORDS =
+  /^(?:worried|shocked|stressed|nervous|scared|crying|real|documentary|authentic|news|bright|sunny|daylight|well|person|people|couple|man|woman|elderly|family|close)\b/i;
+
+/**
+ * Short 2-word subject variants of a descriptive query, for Archive.org full-text
+ * recall. Only the topical head survives — reaction/lighting adjectives lead to
+ * opaque matches, so they are dropped rather than searched for.
+ */
+export function archiveShortQueryVariants(queries = []) {
+  const out = [];
+  for (const query of queries) {
+    const words = String(query || '').trim().split(/\s+/).filter(Boolean);
+    if (words.length < 3) continue;
+    if (ARCHIVE_VARIANT_LEAD_STOPWORDS.test(query)) continue;
+    const variant = words.slice(0, 2).join(' ').replace(/[^a-z0-9\s'-]/gi, '').trim();
+    if (variant.split(/\s+/).some((w) => w.length < 3)) continue;
+    out.push(variant.toLowerCase());
+  }
+  return [...new Set(out)];
+}
+
+const ARCHIVE_SWEEP_SUFFIXES = ['footage', 'film'];
+
+/** A second/third archive sweep re-ranks the same subject; over-long queries are skipped. */
+export function withArchiveSweepSuffix(query, suffix = '') {
+  const base = String(query || '').trim();
+  if (!suffix) return isSafeStockMotionQuery(base) ? base : '';
+  if (new RegExp(`\\b${suffix}\\b`, 'i').test(base)) return '';
+  const next = `${base} ${suffix}`;
+  return isSafeStockMotionQuery(next) && stockQueryWords(next).length <= 5 ? next : '';
+}
+
+/**
+ * Motion query plan for this run's key mode.
+ *
+ * Keyed runs lead with the story's own faces then hammer the keyed topical pack.
+ * Keyless runs lead with short Archive.org-friendly subjects (the descriptive
+ * scene queries that Pexels loves return 0–1 MP4s on Archive.org).
+ */
+export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
+  const keyed = options.stockKeyed === true;
+  const base = stockMotionQueries(topicBlob, cyberTopic, options).filter(isSafeStockMotionQuery);
+  const airline = isAirlineTopic(topicBlob);
+  const housing = isHousingTopic(topicBlob);
+  let boost;
+  if (keyed) {
+    boost = airline ? KEYED_AIRLINE_MOTION_QUERIES : housing ? KEYED_HOUSING_MOTION_QUERIES : [];
+  } else {
+    boost = airline
+      ? ARCHIVE_AIRLINE_MOTION_QUERIES
+      : housing
+        ? ARCHIVE_HOUSING_MOTION_QUERIES
+        : archiveShortQueryVariants(base);
+  }
+  boost = boost.filter(isSafeStockMotionQuery);
+
+  // Keyed: keep the face head, then the aggressive topical pack, then base fillers.
+  // Keyless: short subjects first, then base (which archive mostly cannot answer).
+  const headCount = keyed ? Math.min(4, base.length) : 0;
+  const ordered = keyed
+    ? [...base.slice(0, headCount), ...boost, ...base.slice(headCount)]
+    : [...boost, ...base];
+
+  const queries = [];
+  const seen = new Set();
+  for (const query of ordered) {
+    const key = query.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    queries.push(query);
+  }
+  return {
+    mode: keyed ? 'keyed' : 'keyless',
+    keyed,
+    queries,
+    boostCount: boost.length,
+    baseCount: base.length,
+  };
+}
+
+/**
+ * How much motion to chase, and how hard, for this key mode.
+ *
+ * These are top-up targets, not admission floors: raising them only makes the
+ * pipeline attempt more clips, never makes a thin pool pass.
+ */
+export function resolveMotionVolumeTargets({
+  segmentCount = 1,
+  segmentDurationSec = 0,
+  hasStockKeys = false,
+  topicBlob = '',
+  cutIntervalSec = 1.25,
+  stockApiVideoCount = 0,
+} = {}) {
+  const segN = Math.max(1, segmentCount);
+  const airline = isAirlineTopic(topicBlob);
+  const housing = isHousingTopic(topicBlob);
+  if (hasStockKeys) {
+    const aggressive = airline || housing;
+    const stockFloor = Math.max(aggressive ? 20 : 16, segN * (aggressive ? 5 : 4));
+    const minVideos = Math.min(
+      aggressive ? 36 : 28,
+      Math.max(
+        stockFloor,
+        Math.ceil((segmentDurationSec / (cutIntervalSec || 1.25)) * 0.75),
+      ),
+    );
+    return {
+      mode: 'keyed',
+      minVideos,
+      stockNeed: Math.max(0, stockFloor - stockApiVideoCount),
+      perSegTarget: aggressive ? 6 : 5,
+      introTarget: aggressive ? 7 : 6,
+      aggressive,
+    };
+  }
+  // Keyless: Archive.org only. Chase more than the soft-pass floor so a denser cut is
+  // possible, but never treat the target as evidence — the evidence gate still rules.
+  const keylessFloor = airline
+    ? Math.max(14, segN * 3)
+    : housing
+      ? Math.max(10, segN * 2)
+      : Math.min(segN * 2, 6);
+  return {
+    mode: 'keyless',
+    minVideos: keylessFloor,
+    stockNeed: airline || housing ? Math.max(0, keylessFloor - stockApiVideoCount) : 0,
+    perSegTarget: airline || housing ? 3 : 2,
+    introTarget: airline || housing ? 4 : 2,
+    aggressive: false,
+  };
+}
+
+/** One-line keyed/keyless motion summary for run logs. */
+export function formatMotionPathLog(report = {}) {
+  const mode = report.motionKeyMode || 'unknown';
+  const providers = mode === 'keyed'
+    ? `pexels=${report.pexelsFetched || 0} pixabay=${report.pixabayFetched || 0} archive=${report.archiveLiveFetched || 0}`
+    : `archive=${report.archiveLiveFetched || 0}`;
+  const archive =
+    `archive-queries=${report.archiveQueriesTried || 0}`
+    + ` sweep-queries=${report.archiveSweepQueries || 0}`
+    + ` evidence-lookups=${report.archiveEvidenceLookups || 0}`
+    + ` evidence-enriched=${report.archiveEvidenceEnriched || 0}`
+    + ` evidence-rejected=${report.archiveEvidenceRejected || 0}`;
+  return (
+    `Motion path: ${mode} (keys pexels=${report.motionKeyPexels ? 'yes' : 'no'}`
+    + ` pixabay=${report.motionKeyPixabay ? 'yes' : 'no'}) — ${providers}`
+    + ` | queries-tried=${report.motionQueriesTried || 0} query-pack=${report.motionQueryPoolSize || 0}`
+    + ` | ${archive}`
+    + ` | clip-pool=${report.motionPoolSize || 0}`
+    + ` injected=${(report.videoTopUp || []).length}/${report.motionTargetVideos || 0}`
+  );
+}
+
 /** Exported for unit tests (bright / anti-HUD / nursing query proof). */
 export {
   stockMotionQueries,
@@ -1504,30 +1937,120 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
 
   stripJunkDemoVideos(project, report);
 
+  const keyMode = resolveStockKeyMode();
+  const hasStockKeysEarly = keyMode.keyed;
+  const airlineTopicEarly = isAirlineTopic(topicBlob);
+  const existingVideos = (project.media || []).filter(
+    (a) => a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
+  );
+  const existingStockVideos = existingVideos.filter((a) =>
+    /pexels|pixabay|mixkit|archive\.org/i.test(`${a.url} ${a.source || ''}`),
+  );
+  const targets = resolveMotionVolumeTargets({
+    segmentCount: segments.length,
+    segmentDurationSec: segments.reduce((s, seg) => s + (Number(seg.duration) || 15), 0),
+    hasStockKeys: hasStockKeysEarly,
+    topicBlob,
+    cutIntervalSec: options.cutIntervalSec,
+    stockApiVideoCount: existingStockVideos.length,
+  });
+
   const liveClips = [];
-  const hasStockKeysEarly = Boolean(resolvePexelsKey() || resolvePixabayKey());
-  // Without Pexels/Pixabay, archive.org is the only motion source — widen its caps so the
-  // keyless airline floor (and its aviation-evidence majority) is reachable.
-  const airlineKeyless = isAirlineTopic(topicBlob) && !hasStockKeysEarly;
-  const queries = stockMotionQueries(topicBlob, cyberTopic, {
+  const plan = motionQueryPlan(topicBlob, cyberTopic, {
     faceSeek: options.faceSeek === true,
     preferBright: options.preferBright === true,
-  }).filter(isSafeStockMotionQuery);
+    stockKeyed: hasStockKeysEarly,
+  });
+  const queries = plan.queries;
+  report.motionKeyMode = keyMode.mode;
+  report.motionKeyPexels = keyMode.pexels;
+  report.motionKeyPixabay = keyMode.pixabay;
+  report.motionQueryPoolSize = queries.length;
+  report.motionQueryBoost = plan.boostCount;
+  report.motionTargetVideos = targets.minVideos;
 
-  const queryCap = airlineKeyless ? 28 : 18;
-  const liveCap = airlineKeyless ? 120 : 80;
-  const perQueryCap = airlineKeyless ? 8 : 5;
-  for (const q of queries.slice(0, queryCap)) {
-    const fromPexels = await fetchPexelsVideos(q, 10);
-    const fromPixabay = await fetchPixabayVideos(q, 10);
+  // Keyed: two providers, wide per-query pages, topical face/cabin/apartment pack.
+  // Keyless: Archive.org only, so recall comes from more distinct subjects plus extra
+  // sweeps of the same subjects — never from relaxing the evidence gate below.
+  const aggressiveTopic = airlineTopicEarly || housingTopic;
+  const queryCap = hasStockKeysEarly
+    ? (aggressiveTopic ? 30 : 20)
+    : (airlineTopicEarly ? 36 : housingTopic ? 30 : 24);
+  const liveCap = hasStockKeysEarly ? 160 : 140;
+  const perQueryCap = hasStockKeysEarly ? 6 : 10;
+  const perProviderPage = hasStockKeysEarly && aggressiveTopic ? 14 : 10;
+  const liveTarget = Math.min(liveCap, Math.max(targets.minVideos * 2, targets.minVideos + 8));
+  const attemptQueries = queries.slice(0, queryCap);
+  // Keyless runs get extra archive sweeps before giving up: the same subject re-ranked
+  // ("... footage", "... film") surfaces different items, and a thin first pass is normal.
+  const sweeps = hasStockKeysEarly ? [''] : ['', ...ARCHIVE_SWEEP_SUFFIXES];
+  const attempts = [];
+  const plannedQueries = new Set();
+  for (const suffix of sweeps) {
+    for (const rawQuery of attemptQueries) {
+      const q = withArchiveSweepSuffix(rawQuery, suffix);
+      const key = q.toLowerCase();
+      if (!q || plannedQueries.has(key)) continue;
+      plannedQueries.add(key);
+      attempts.push({ query: q, sweep: suffix });
+    }
+  }
+  // One Archive.org query costs ~10s (the proxy resolves item metadata per hit), so the
+  // wider keyless plan is fetched in parallel batches instead of one query at a time.
+  const fetchBatchSize = hasStockKeysEarly ? 2 : 4;
+  const fetchCandidates = async ({ query: q, sweep: suffix }) => {
+    const fromPexels = suffix ? [] : await fetchPexelsVideos(q, perProviderPage);
+    const fromPixabay = suffix ? [] : await fetchPixabayVideos(q, perProviderPage);
     // Skip archive.org for cyber topics when stock API keys exist.
-    const fromArchive =
-      !cyberTopic || !hasStockKeysEarly
-        ? (devServer ? await fetchArchiveVideoResults(devServer, q) : [])
+    let fromArchive =
+      (!cyberTopic || !hasStockKeysEarly) && devServer
+        ? await fetchArchiveVideoResults(devServer, q, { topicBlob })
         : [];
-    let addedForQuery = 0;
-    for (const clip of [...fromPexels, ...fromPixabay, ...fromArchive]) {
-      if (liveClips.length >= liveCap || addedForQuery >= perQueryCap) break;
+    if (fromArchive.length) {
+      report.archiveQueriesTried = (report.archiveQueriesTried || 0) + 1;
+      // Keyed runs get their volume from Pexels/Pixabay, so they spend far less of the
+      // metadata budget on archive; keyless runs need every item they can qualify.
+      fromArchive = await enrichArchiveEvidence(fromArchive, {
+        topicBlob,
+        limit: Math.min(
+          hasStockKeysEarly ? 2 : 8,
+          (hasStockKeysEarly ? 32 : ARCHIVE_EVIDENCE_LOOKUP_BUDGET) - (report.archiveEvidenceLookups || 0),
+        ),
+        report,
+      });
+    }
+    return { query: q, sweep: suffix, candidates: [...fromPexels, ...fromPixabay, ...fromArchive] };
+  };
+
+  const batches = [];
+  for (let i = 0; i < attempts.length; i += fetchBatchSize) {
+    batches.push(attempts.slice(i, i + fetchBatchSize));
+  }
+  for (const batch of batches) {
+    // Extra sweeps run only while the pool is still short of target.
+    if (batch.every((a) => a.sweep) && liveClips.length >= liveTarget) break;
+    if (liveClips.length >= liveCap) break;
+    for (const attempt of batch) {
+      if (attempt.sweep) report.archiveSweepQueries = (report.archiveSweepQueries || 0) + 1;
+      report.motionQueriesTried = (report.motionQueriesTried || 0) + 1;
+    }
+    const fetched = await Promise.all(batch.map(fetchCandidates));
+    const addedPerQuery = new Map();
+    for (const { query: q, clip } of fetched.flatMap(({ query, candidates }) =>
+      candidates.map((candidate) => ({ query, clip: candidate })),
+    )) {
+      const addedForQuery = addedPerQuery.get(q) || 0;
+      if (liveClips.length >= liveCap || addedForQuery >= perQueryCap) continue;
+      // Archive.org items must say what they show. A topical query plus an opaque
+      // identifier is exactly the laundering this gate exists to stop.
+      if (/Archive/i.test(clip.source || '')) {
+        const verdict = archiveEvidenceVerdict(clip, { query: q, topicBlob });
+        if (!verdict.ok) {
+          report.archiveEvidenceRejected = (report.archiveEvidenceRejected || 0) + 1;
+          report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+          continue;
+        }
+      }
       if (isJunkStockClip(clip, topicBlob, { preferBright: options.preferBright === true })) {
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
@@ -1592,7 +2115,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       }
       if (liveClips.some((c) => c.url === clip.url)) continue;
       liveClips.push({ ...clip, query: q });
-      addedForQuery += 1;
+      addedPerQuery.set(q, addedForQuery + 1);
     }
   }
   report.archiveLiveFetched = liveClips.filter((c) => /Archive/i.test(c.source || '')).length;
@@ -1639,47 +2162,21 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   }
   pool = interleaved.length ? interleaved : pool;
 
+  report.motionPoolSize = pool.length;
   if (!pool.length) {
     report.videoTopUpSkipped = 'no-motion-pool';
     return;
   }
 
-  const usableVideos = (project.media || []).filter(
-    (a) => a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
-  );
-  const stockApiVideos = usableVideos.filter((a) => /pexels|pixabay|mixkit|archive\.org/i.test(`${a.url} ${a.source || ''}`));
-  const videoCount = usableVideos.length;
-  // With stock API keys, require real stock motion (not harvest proxies).
-  const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
-  const airlineTopic = isAirlineTopic(topicBlob);
-  // Keyless airline soft-passes at max(8, segN) motion clips, but keep chasing the keyed
-  // target via archive — a fuller pool cuts denser and clears the aviation-evidence majority.
-  const minVideos = hasStockKeys
-    ? Math.min(
-      28,
-      Math.max(
-        16,
-        segments.length * 4,
-        Math.ceil(
-          (segments.reduce((s, seg) => s + (Number(seg.duration) || 15), 0)
-            / (options.cutIntervalSec || 1.25)) * 0.75,
-        ),
-      ),
-    )
-    : airlineTopic
-      ? Math.max(12, segments.length * 2)
-      : Math.min(segments.length * 2, 6);
-  const stockNeed = hasStockKeys
-    ? Math.max(0, Math.max(16, segments.length * 4) - stockApiVideos.length)
-    : airlineTopic
-      ? Math.max(0, Math.max(12, segments.length * 2) - stockApiVideos.length)
-      : 0;
+  // With stock API keys, keep chasing real stock motion (not harvest proxies).
+  const videoCount = existingVideos.length;
+  const { minVideos, stockNeed } = targets;
   if (videoCount >= minVideos && stockNeed <= 0) return;
 
   const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
   let need = Math.max(minVideos - videoCount, stockNeed);
   const faceScore = (clip) => {
-    const blob = `${clip.query || ''} ${clip.alt || ''}`.toLowerCase();
+    const blob = `${clip.query || ''} ${clip.alt || ''} ${clip.title || ''}`.toLowerCase();
     if (isGenericStockJunk(blob, topicBlob)) return -4;
     if (
       !isWorkplaceTopic(topicBlob)
@@ -1743,12 +2240,17 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const safeQuery =
       clip.query
       || (airline ? 'airplane cabin passengers daylight' : `stock-video ${seg.title}`);
+    // Provider metadata travels with the asset so downstream evidence gates judge the
+    // clip on what it shows. Nothing aviation-flavoured is invented for empty alts —
+    // a clip with no metadata must fail the relevance gate, not borrow a label.
+    const providerMeta = providerEvidenceText(clip.title || '', { query: safeQuery, topicBlob });
     project.media.push({
       id: `stock-video-${seg.id}-${tag}-${n}`,
       segmentId: seg.id,
       type: 'video',
       url: clip.url,
-      alt: clip.alt || (airline ? 'stock aviation video' : seg.title),
+      alt: clip.alt || providerMeta || (airline ? `${clip.source || 'Stock'} clip` : seg.title),
+      ...(providerMeta ? { title: providerMeta } : {}),
       query: safeQuery,
       source: clip.source || 'Stock video pool',
       duration: 8,
@@ -1767,8 +2269,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       (a) => a.segmentId === seg.id && a.type === 'video' && !isJunkDemoVideoUrl(a.url || ''),
     ).length;
     const isIntro = seg.type === 'intro' || seg === segments[0];
-    // Per-seg floor; variety drain below fills up to minVideos (≤28).
-    const perSegTarget = hasStockKeys ? (isIntro ? 6 : 5) : 2;
+    // Per-seg floor; variety drain below fills up to the key-mode motion target.
+    const perSegTarget = isIntro ? targets.introTarget : targets.perSegTarget;
     const want = Math.max(0, perSegTarget - segVideos);
     if (isIntro) {
       picks.sort((a, b) => faceScore(b) - faceScore(a));
@@ -2750,6 +3252,9 @@ export async function generateFullVideo(options) {
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
       if (mediaReport.videoTopUp?.length) {
         log(`   🎬 Video top-up: +${mediaReport.videoTopUp.length} motion clips`);
+      }
+      if (mediaReport.motionKeyMode) {
+        log(`   🔑 ${formatMotionPathLog(mediaReport)}`);
       }
       if (mediaReport.pexelsFetched || mediaReport.pixabayFetched || mediaReport.archiveLiveFetched) {
         log(

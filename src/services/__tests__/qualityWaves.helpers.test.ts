@@ -114,7 +114,11 @@ describe('quality waves 2–5 helpers', () => {
     ).toBe(false);
 
     const motionProject = {
-      script: [{ id: 'a' }, { id: 'b' }],
+      topic: 'Why rural ambulance GPS routes send crews to demolished houses',
+      script: [
+        { id: 'a', title: 'Dispatch', narration: 'ambulance GPS route dispatch' },
+        { id: 'b', title: 'Rural response', narration: 'paramedic rural road demolished house' },
+      ],
       media: Array.from({ length: 16 }, (_, i) => ({
         type: 'video',
         segmentId: i < 8 ? 'a' : 'b',
@@ -192,6 +196,97 @@ describe('quality waves 2–5 helpers', () => {
     } finally {
       restoreStockKeyEnv(saved);
     }
+  });
+
+  it('volume evaluation pads an uncovered segment from the topical video pool', async () => {
+    const { evaluateHarvestVolume } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const project = {
+      topic: 'How school districts lost student records to ransomware',
+      script: [
+        { id: 's1', title: 'School breach', narration: 'student records ransomware breach' },
+        { id: 's2', title: 'Stolen records', narration: 'school student records were stolen' },
+      ],
+      media: [
+        {
+          id: 'topical-video',
+          type: 'video',
+          segmentId: 's1',
+          url: 'https://videos.example.com/school-ransomware.mp4',
+          alt: 'school student records ransomware breach',
+          source: 'Pexels Videos',
+        },
+        { id: 's1-still', type: 'image', segmentId: 's1', url: 'https://images.example.com/s1.jpg' },
+        { id: 's2-still-a', type: 'image', segmentId: 's2', url: 'https://images.example.com/s2-a.jpg' },
+        { id: 's2-still-b', type: 'image', segmentId: 's2', url: 'https://images.example.com/s2-b.jpg' },
+      ],
+    };
+
+    const volume = evaluateHarvestVolume(project, 2);
+    expect(volume.pass).toBe(true);
+    expect(volume.perSegment.s2.topicalVideoCount).toBe(1);
+    expect(volume.topicalVideoPadding).toEqual([
+      expect.objectContaining({ segmentId: 's2', url: 'https://videos.example.com/school-ransomware.mp4' }),
+    ]);
+    expect(project.media.some((asset) => (
+      asset.segmentId === 's2' && asset.topicalVideoPadding === true
+    ))).toBe(true);
+  });
+
+  it('hard and soft volume passes reject a segment with no topical video candidate', async () => {
+    const {
+      evaluateHarvestVolume,
+      evaluateHarvestVolumeWithSoftPass,
+    } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const project = {
+      topic: 'City services investigation',
+      script: [
+        { id: 's1', title: 'Emergency dispatch', narration: 'ambulance paramedic dispatch response' },
+        { id: 's2', title: 'Flood zoning', narration: 'zoning flood maps erased neighborhoods' },
+      ],
+      media: [
+        ...Array.from({ length: 15 }, (_, i) => ({
+          id: `dispatch-${i}`,
+          type: 'video',
+          segmentId: 's1',
+          url: `https://videos.example.com/ambulance-${i}.mp4`,
+          alt: 'ambulance paramedic emergency dispatch response',
+          source: 'Topical video pool',
+        })),
+        {
+          id: 's2-junk',
+          type: 'video',
+          segmentId: 's2',
+          url: 'https://videos.example.com/office.mp4',
+          alt: 'corporate handshake empty office skyline timelapse',
+          source: 'Stock video pool',
+        },
+        { id: 's2-still', type: 'image', segmentId: 's2', url: 'https://images.example.com/zoning.jpg' },
+      ],
+    };
+
+    const volume = evaluateHarvestVolume(project, 2);
+    expect(volume.pass).toBe(false);
+    expect(volume.perSegment.s1.topicalVideoCount).toBe(15);
+    expect(volume.perSegment.s2.topicalVideoCount).toBe(0);
+    expect(volume.failing).toEqual([
+      expect.objectContaining({ segmentId: 's2', reasons: ['topical-video-empty'] }),
+    ]);
+    expect(evaluateHarvestVolumeWithSoftPass({ volumePass: true }, project)).toEqual({
+      pass: false,
+      reason: 'volume-topical-video-empty(s2)',
+    });
+
+    await withoutStockKeys(() => {
+      expect(
+        evaluateHarvestVolumeWithSoftPass(
+          { volumePass: false, videoTopUp: [1, 2] },
+          project,
+        ),
+      ).toEqual({
+        pass: false,
+        reason: 'volume-topical-video-empty(s2)',
+      });
+    });
   });
 
   it.each([
@@ -450,15 +545,30 @@ describe('quality waves 2–5 helpers', () => {
         { id: 's3', title: 'Escape' },
       ],
       media: [
-        { segmentId: 's1', url: 'https://x/1.jpg' },
+        {
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://x/1.mp4',
+          alt: 'airport runway cargo plane used in diamond heist',
+        },
         { segmentId: 's1', url: 'https://x/2.jpg' },
         { segmentId: 's1', url: 'https://x/3.jpg' },
         { segmentId: 's1', url: 'https://x/4.jpg' },
-        { segmentId: 's2', url: 'https://x/5.jpg' },
+        {
+          segmentId: 's2',
+          type: 'video',
+          url: 'https://x/5.mp4',
+          alt: 'diamond vault safe security heist',
+        },
         { segmentId: 's2', url: 'https://x/6.jpg' },
         { segmentId: 's2', url: 'https://x/7.jpg' },
         { segmentId: 's2', url: 'https://x/8.jpg' },
-        { segmentId: 's3', url: 'https://x/9.jpg' },
+        {
+          segmentId: 's3',
+          type: 'video',
+          url: 'https://x/9.mp4',
+          alt: 'airport cargo escape plane after diamond heist',
+        },
         { segmentId: 's3', url: 'https://x/10.jpg' },
         { segmentId: 's3', url: 'https://x/11.jpg' },
         { segmentId: 's3', url: 'https://x/12.jpg' },

@@ -12,7 +12,7 @@ export const E2E_OPENROUTER_KEY = 'sk-or-v1-e2e-test-key-not-real';
 export const E2E_AUTOTUBE_API_KEY = (
   process.env.AUTOTUBE_API_KEY ||
   process.env.VITE_AUTOTUBE_API_KEY ||
-  ''
+  'autotube-e2e-api-key'
 ).trim();
 
 export { MOCK_SCRIPT_SEGMENTS, MOCK_LONG_SCRIPT_SEGMENTS };
@@ -69,11 +69,19 @@ export async function installOpenRouterMock(
   // The app talks to OpenRouter through the same-origin /api/llm proxy, which
   // uses the server's key — without this route the mock is bypassed whenever
   // OPENROUTER_API_KEY is present in the dev server environment.
-  await page.route('**/api/llm', fulfilWithMock);
+  await page.route(/\/api\/llm(?:\?.*)?$/, fulfilWithMock);
 }
 
 /** Fast media / Wikipedia / image mocks (from user-journey.spec.ts). */
 export async function installMediaMocks(page: Page): Promise<void> {
+  await page.route(/\/api\/tts\/capabilities(?:\?.*)?$/, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ grok: false, melo: false }),
+    });
+  });
+
   await page.route(/\/api\/(?:search|search-bing-images|search-google-images|search-bing-videos|search-google-videos|search-videos|static-map|press-release|search-bing-news|proxy-page).*/, async (route) => {
     const url = route.request().url();
     if (url.includes('static-map')) {

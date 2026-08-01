@@ -28,6 +28,8 @@ jobs:
             exit 1
           fi
       - run: node scripts/sync-server-render-deploy.mjs --check
+      - name: DoD gate
+        run: npm run dod:check
       - run: npm run lint
       - run: npm run test:unit
 

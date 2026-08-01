@@ -108,11 +108,27 @@ function isBackViewDeadAir(asset) {
   return /\b(back of head|from behind|rear view|backs? to camera|looking through (a )?window|looking out (the )?window|staring out (the )?window)\b/.test(blob);
 }
 
+/**
+ * Passive desk-and-paper stock (paperwork piles, hands shuffling forms,
+ * anonymous typing) reads as dead air in the hook. Only frames without a
+ * readable face count as passive — a worried tenant holding an eviction
+ * notice is a story beat, a stack of forms is not.
+ */
+const PASSIVE_DESK_INTRO_RE = /\b(paperwork|documents?|forms?|folders?|clipboard|invoices?|receipts?|bank statements?|tax forms?|ledgers?|spreadsheets?|stacks? of papers?|paper stacks?|shuffling papers?|signing papers?|hands? (?:on|at|over) (?:a |the )?desk|hands? typing|typing on (?:a |the )?keyboard|writing at (?:a |the )?desk|desk close.?up)\b/;
+
+export function isPassiveDeskIntroVisual(asset) {
+  return PASSIVE_DESK_INTRO_RE.test(assetBlob(asset)) && !hasReadableFaceVisual(asset);
+}
+
 function isRejectedIntroLeadVisual(asset, { airline = false } = {}) {
   const blob = assetBlob(asset);
   if (/\b(runway|tarmac|fence|sky|clouds?|aerial|from above|distant plane|distant aircraft|plane in (the )?sky|aircraft in (the )?sky|back of head|from behind|rear view|looking through (a )?window|looking out (the )?window|airplane window|plane window|cabin window)\b/.test(blob)) {
     return true;
   }
+  // Passive paperwork / hands-on-desk never leads the hook on any topic;
+  // scarcity fallbacks (relaxed tier / coverage) still admit it when the
+  // pool holds nothing else, so thin intros never render as a gap.
+  if (isPassiveDeskIntroVisual(asset)) return true;
   return airline && (
     /\b(mailbox|mail box|u\.?s\.?\s*mail|usps|postal|envelopes?|paperwork|documents?|financial|bank statement|invoice|receipt|tax form)\b/.test(blob)
     || AIRLINE_LIMITED_CLUSTERS.has(visualSubjectCluster(asset))
@@ -130,7 +146,22 @@ export function hasReadableFaceVisual(asset) {
   if (isBackViewDeadAir(asset)) return false;
   const blob = assetBlob(asset);
   return /\b(face|faces|portrait|close.?up|eyes|expression|reaction|worried|shocked|crying|smiling)\b/.test(blob)
-    && /\b(passengers?|pilots?|attendants?|crew|traveller?s?|person|people|woman|women|man|men|family|couple)\b/.test(blob);
+    && /\b(passengers?|pilots?|attendants?|crew|traveller?s?|person|people|woman|women|man|men|family|couple|tenants?|landlords?|residents?)\b/.test(blob);
+}
+
+const AIRLINE_TOPICAL_VISUAL_RE = /\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|jet|passenger|attendant|hangar|airport|pilot|plane|flight)\b/;
+const HOUSING_TOPICAL_VISUAL_RE = /\b(evict(?:ion|ed)?|landlords?|tenants?|lease|rent(?:al)?|notice|apartment|housing|home|house|keys|court|foreclos\w*)\b/;
+
+/**
+ * First-3s priority for airline/housing hooks: a readable human face on a
+ * topical frame (2) beats any readable face (1) beats other lead visuals (0).
+ */
+export function introFaceTier(asset, { airline = false, housing = false } = {}) {
+  if (!hasReadableFaceVisual(asset)) return 0;
+  const blob = assetBlob(asset);
+  const topical = (airline && AIRLINE_TOPICAL_VISUAL_RE.test(blob))
+    || (housing && HOUSING_TOPICAL_VISUAL_RE.test(blob));
+  return topical ? 2 : 1;
 }
 
 function isAirlineIntroLeadVisual(asset) {
@@ -246,6 +277,9 @@ export function buildEditTimeline(project, options = {}) {
   const topicIsAirline = isAirlineTopic(project.topic || '');
   const MAX_BODY_CUT_SEC = 1.25;
   const MAX_BODY_CUT_THIN_SEC = 2.0;
+  /** When ≥3 unique URLs exist, body cuts must not freeze longer than this. */
+  const MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC = 2.5;
+  const ENOUGH_URLS_FOR_SNAPPY_CUTS = 3;
   const RECENT_URL_WINDOW = 4;
   // The look-back must always leave candidates: with a 4-URL pool a 4-wide
   // window bans everything and the previous cut freezes for the whole segment.
@@ -278,7 +312,13 @@ export function buildEditTimeline(project, options = {}) {
     effectiveMaxReuse = Math.min(effectiveMaxReuse, hardMaxReuse);
     const maxSlots = uniqueVideos.length * hardMaxReuse;
     if (totalDur / Math.min(effectiveCut, MAX_BODY_CUT_SEC) > maxSlots) {
-      effectiveCut = Math.min(MAX_BODY_CUT_THIN_SEC, Math.max(cut, totalDur / maxSlots));
+      const holdCeiling = uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS
+        ? MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC
+        : MAX_BODY_CUT_THIN_SEC;
+      effectiveCut = Math.min(holdCeiling, Math.max(cut, totalDur / maxSlots));
+    }
+    if (uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS) {
+      effectiveCut = Math.min(effectiveCut, MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC);
     }
   } else {
     hardMaxReuse = HARD_MAX_REUSE_CEIL;
@@ -287,6 +327,10 @@ export function buildEditTimeline(project, options = {}) {
   const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
   const topicIsCameraStory = CAMERA_STORY_RE.test(project.topic || '');
   const introLeadOptions = { airline: topicIsAirline, cameraStory: topicIsCameraStory };
+  // Airline/housing hooks must open on a readable face when one exists —
+  // detected independently of cold-eval so the rule holds in every mode.
+  const faceTierOptions = { airline: topicIsAirline, housing: isHousingTopic(project.topic || '') };
+  const faceFirstIntroTopic = faceTierOptions.airline || faceTierOptions.housing;
   const beatSheet = project.visualBeatSheet;
   const beatsBySeg = new Map();
   const recentTimelineUrls = [];
@@ -417,8 +461,11 @@ export function buildEditTimeline(project, options = {}) {
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait|eyes/i.test(blob)) {
           score += !coldEval && /nursing|elderly|care\s*home|cctv|abuse/i.test(topicBlob) ? 1 : 4;
         }
-        // Airline hooks open on an empty cabin unless a readable face outranks it.
-        if (isIntro && topicIsAirline && hasReadableFaceVisual(a)) score += 4;
+        // Airline/housing hooks open on an empty establishing shot only when
+        // no readable face outranks it; topical faces outrank generic faces.
+        if (isIntro && faceFirstIntroTopic && hasReadableFaceVisual(a)) {
+          score += 4 + introFaceTier(a, faceTierOptions);
+        }
         // Cold intro: beat match outranks establishing stock.
         if (coldEval && isIntro && beatBoost > 0) score += beatBoost * 2;
         if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;
@@ -515,6 +562,13 @@ export function buildEditTimeline(project, options = {}) {
     const duration = seg.duration || 20;
     const interval = isIntro ? Math.min(effectiveCut, 0.65) : effectiveCut;
     const maxReuseThisSeg = isIntro || isOutro ? 1 : effectiveMaxReuse;
+    const usableBodyVideos = (!isIntro && !isOutro && videos.length)
+      ? uniqueAssetsByUrl(videos.filter((a) => scoreAsset(a) >= 0))
+      : [];
+    const segEnoughUrls = usableBodyVideos.length >= ENOUGH_URLS_FOR_SNAPPY_CUTS;
+    const segMaxBodyHoldSec = segEnoughUrls
+      ? MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC
+      : MAX_BODY_CUT_THIN_SEC;
     let t = 0;
     let ai = 0;
     let segmentEntryCount = 0;
@@ -532,6 +586,26 @@ export function buildEditTimeline(project, options = {}) {
         if (!previousTimelineCluster || cluster !== previousTimelineCluster) return false;
         const key = urlKey(candidate);
         return !(isHumanCluster(cluster) && key && key !== previousTimelineUrl);
+      };
+      const continuesTwoClipPingPong = (candidate) => {
+        if (!segEnoughUrls || isIntro || isOutro) return false;
+        const key = urlKey(candidate);
+        if (!key || !lastUrl || !previousTimelineUrl) return false;
+        const pair = new Set([lastUrl, previousTimelineUrl]);
+        if (pair.size < 2 || !pair.has(key)) return false;
+        const recent = recentTimelineUrls.slice(-Math.min(recentTimelineUrls.length, 4));
+        if (recent.length < 2 || !recent.every((u) => pair.has(u))) return false;
+        const escapePool = uniqueAssetsByUrl([...ordered, ...borrowPool]).filter((c) => {
+          const escapeKey = urlKey(c);
+          return escapeKey && !pair.has(escapeKey) && scoreAsset(c) >= 0;
+        });
+        return escapePool.some((c) => {
+          const escapeKey = urlKey(c);
+          if (!escapeKey || escapeKey === key) return false;
+          if (escapeKey === lastUrl) return false;
+          const uses = reuseCountFor(escapeKey, introOutroReuse);
+          return uses < hardMaxReuse;
+        });
       };
       const diversityScore = (candidate) => {
         let s = scoreAsset(candidate, activeBeat);
@@ -552,6 +626,7 @@ export function buildEditTimeline(project, options = {}) {
           if (introLeadWindow && !isIntroLeadVisual(candidate, introLeadOptions)) return false;
           if (key && recentTimelineUrls.includes(key)) return false;
           if (violatesConsecutiveCluster(candidate)) return false;
+          if (continuesTwoClipPingPong(candidate)) return false;
         }
         const uses = reuseCountFor(key, introOutroReuse);
         // Never exceed hard max — even as last resort (stops 9–12× loops).
@@ -581,6 +656,18 @@ export function buildEditTimeline(project, options = {}) {
           ? [...pool].sort((a, b) => diversityScore(b) - diversityScore(a))
           : pool;
         if (!rankedPool.length) return null;
+        // First 3s of airline/housing hooks: exhaust topical readable faces,
+        // then any readable face, before falling through to other lead
+        // visuals. Reuse caps and adjacency rules still apply at every tier.
+        if (!relaxed && introLeadWindow && faceFirstIntroTopic) {
+          for (const minTier of [2, 1]) {
+            for (let j = 0; j < rankedPool.length; j++) {
+              const candidate = rankedPool[(ai + j) % rankedPool.length];
+              if (introFaceTier(candidate, faceTierOptions) < minTier) continue;
+              if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
+            }
+          }
+        }
         for (let j = 0; j < rankedPool.length; j++) {
           const candidate = rankedPool[(ai + j) % rankedPool.length];
           if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
@@ -623,9 +710,15 @@ export function buildEditTimeline(project, options = {}) {
           .sort(leastUsedFirst)[0] || null;
       }
       if (!asset && segmentEntryCount > 0) {
-        entries[entries.length - 1].endSec = end;
-        t = end;
-        continue;
+        const prev = entries[entries.length - 1];
+        const capEnd = segEnoughUrls ? prev.startSec + segMaxBodyHoldSec : end;
+        const cappedEnd = Math.min(end, capEnd);
+        if (cappedEnd > prev.endSec + 0.01) {
+          entries[entries.length - 1].endSec = cappedEnd;
+          t = cappedEnd;
+          continue;
+        }
+        // Hold cap reached — fall through to coverage instead of extending further.
       }
       if (!asset) {
         // A segment with no cut at all renders as a gap, so cover it with the

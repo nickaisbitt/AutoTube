@@ -8,6 +8,7 @@ import {
 import { generateAIPlan } from './llmVisualDirector';
 import { logger } from './logger';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { apiFetch } from '../utils/apiClient';
 import { topicFamilyQueries } from './topicFamilyQueries';
 
 // ---------------------------------------------------------------------------
@@ -363,8 +364,8 @@ export async function enrichWithPressReleases(ctx: TopicContext, signal?: AbortS
     // Fetch press releases
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
     const [pressRes, newsRes] = await Promise.allSettled([
-      fetch(`${baseUrl}/api/press-release?q=${encodeURIComponent(ctx.coreSubject)}`, { signal }),
-      fetch(`${baseUrl}/api/search-bing-news?q=${encodeURIComponent(ctx.coreSubject)}`, { signal }),
+      apiFetch(`${baseUrl}/api/press-release?q=${encodeURIComponent(ctx.coreSubject)}`, { signal }),
+      apiFetch(`${baseUrl}/api/search-bing-news?q=${encodeURIComponent(ctx.coreSubject)}`, { signal }),
     ]);
 
     const allNews: { source: string; headline: string; snippet: string; url: string; date?: string }[] = [];

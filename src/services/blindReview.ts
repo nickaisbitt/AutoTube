@@ -1,5 +1,6 @@
 import type { QualityReport, VideoProject } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { apiFetch } from '../utils/apiClient';
 import { openRouterMessageText } from '../utils/openRouterMessageText';
 import { DEFAULT_VISION_MODEL } from './llm/defaultModels';
 import { logger } from './logger';
@@ -636,7 +637,7 @@ export async function runBlindReview(
         logger.warn('BlindReview', 'No rendered video available to review — skipping blind review');
         return null;
       }
-      const response = await fetch(videoUrl, signal ? { signal } : undefined);
+      const response = await apiFetch(videoUrl, signal ? { signal } : undefined);
       videoBlob = await response.blob();
     }
 

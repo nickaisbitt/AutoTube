@@ -3,6 +3,7 @@
  */
 import type { MediaAsset, ScriptSegment, VideoProject } from '../types';
 import { openRouterMessageText } from '../utils/openRouterMessageText';
+import { apiFetch } from '../utils/apiClient';
 import { logger } from './logger';
 
 export interface EditTimelineEntry {
@@ -99,7 +100,7 @@ export async function buildBrollPlacementPlan(
   ].join('\n');
 
   try {
-    const response = await fetch('/api/llm', {
+    const response = await apiFetch('/api/llm', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,

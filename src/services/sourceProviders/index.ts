@@ -23,6 +23,7 @@ import { filterWatermarked } from './watermarkFilter';
 import { isProviderDisabled } from './disabledProviders';
 import { searchDDGLocal, searchDDGVideos, searchWikimedia, searchBingImages, searchGoogleImages, searchYandexImages, searchDuckDuckGoImages, searchStaticMap, searchBingVideos, searchGoogleVideos } from '../media';
 import { logger } from '../logger';
+import { apiFetch } from '../../utils/apiClient';
 import { isSafeStockProviderQuery } from '../topicFamilyQueries';
 
 // ---------------------------------------------------------------------------
@@ -42,7 +43,7 @@ async function tryStockServerProxy(
 ): Promise<MediaCandidate[] | null> {
   try {
     const url = `${endpoint}?q=${encodeURIComponent(query)}&type=${type}`;
-    const res = await fetch(url, { signal });
+    const res = await apiFetch(url, { signal });
     if (res.status === 503) return null; // server has no key configured — fall back to BYOK
     if (!res.ok) return []; // server had key but upstream error — don't fall back
     const data = await res.json() as { results?: MediaCandidate[] };

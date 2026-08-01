@@ -1,5 +1,6 @@
 import type { VideoProject } from '../../types';
 import { logger } from '../logger';
+import { apiFetch } from '../../utils/apiClient';
 import type { ImgCache, RenderableImage } from './orchestrator';
 import { IMG_CACHE_MAX } from './orchestrator';
 
@@ -89,9 +90,11 @@ export function loadImage(url: string, alt: string, blobUrls: string[] = []): Pr
       const src = sources[index];
       const isSafe = isCanvasSafeSource(src);
 
-      // For proxy/safe sources: fetch as blob → object URL to guarantee canvas safety
-      if (isSafe && (src.startsWith('/api/proxy-image') || src.includes('weserv.nl') || src.includes('corsproxy'))) {
-        fetch(src)
+      // For proxy/safe sources: fetch as blob → object URL to guarantee canvas
+      // safety. Same-origin /api/* must go through fetch so apiFetch can attach
+      // X-API-Key — an <img> element cannot send headers and would get a 401.
+      if (isSafe && (src.startsWith('/api/') || src.includes('weserv.nl') || src.includes('corsproxy'))) {
+        apiFetch(src)
           .then(r => {
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             return r.blob();

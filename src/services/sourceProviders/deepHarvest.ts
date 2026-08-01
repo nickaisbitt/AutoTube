@@ -1,5 +1,6 @@
 import type { SourceProvider, SourceProviderConfig } from './types';
 import type { MediaCandidate } from '../media';
+import { apiFetch } from '../../utils/apiClient';
 
 export class DeepHarvestProvider implements SourceProvider {
   readonly name = 'Deep Web Harvest';
@@ -14,7 +15,7 @@ export class DeepHarvestProvider implements SourceProvider {
 
     try {
       const url = `/api/deep-harvest?q=${encodeURIComponent(query)}`;
-      const res = await fetch(url, { signal: config.signal });
+      const res = await apiFetch(url, { signal: config.signal });
 
       if (!res.ok) {
         console.warn(`[DeepHarvest] HTTP ${res.status} for "${query}"`);

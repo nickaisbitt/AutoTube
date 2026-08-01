@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { X, ExternalLink, Settings, AlertTriangle, CheckCircle, AlertCircle, Mic2, Check, XCircle } from 'lucide-react';
 import { useVideoProject } from '../store/StoreContext';
 import { logger } from '../services/logger';
+import { apiFetch } from '../utils/apiClient';
 import AssetTester from './AssetTester';
 
 interface SettingsModalProps {
@@ -37,7 +38,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const fetchTtsCaps = useCallback(async () => {
     try {
-      const res = await fetch('/api/tts/capabilities');
+      const res = await apiFetch('/api/tts/capabilities');
       if (res.ok) setServerTtsCaps(await res.json());
     } catch { /* server unavailable */ }
   }, []);

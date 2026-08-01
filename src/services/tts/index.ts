@@ -24,6 +24,7 @@ export {
 export type { AudioExportResult, NarrationTimingValidation } from './audioExport';
 
 import { logger } from '../logger';
+import { apiFetch } from '../../utils/apiClient';
 import { kokoroEngine } from './kokoroEngine';
 import type { TTSConfig } from './interface';
 import { browserEngine } from './browserEngine';
@@ -63,7 +64,7 @@ export { generateGrokTts } from './grokEngine';
  */
 export async function fetchServerTtsCapabilities(): Promise<{ grok: boolean; melo: boolean } | null> {
   try {
-    const res = await fetch('/api/tts/capabilities');
+    const res = await apiFetch('/api/tts/capabilities');
     if (!res.ok) return null;
     return (await res.json()) as { grok: boolean; melo: boolean };
   } catch {
@@ -81,7 +82,7 @@ export async function generateGrokTtsViaProxy(
   options?: { voice?: string; signal?: AbortSignal },
 ): Promise<string | null> {
   try {
-    const res = await fetch('/api/tts/grok', {
+    const res = await apiFetch('/api/tts/grok', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voice: options?.voice || 'Sal' }),
@@ -108,7 +109,7 @@ export async function generateMeloTtsViaProxy(
   options?: { signal?: AbortSignal },
 ): Promise<string | null> {
   try {
-    const res = await fetch('/api/tts/melo', {
+    const res = await apiFetch('/api/tts/melo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),

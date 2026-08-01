@@ -5,6 +5,7 @@
 import type { MediaCandidate } from '../media';
 import type { SourceProvider, SourceProviderConfig } from './types';
 import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
+import { apiFetch } from '../../utils/apiClient';
 import { logger } from '../logger';
 
 // ---------------------------------------------------------------------------
@@ -67,7 +68,7 @@ export class FlickrProvider implements SourceProvider {
   async scrapeSearch(query: string): Promise<MediaCandidate[]> {
     try {
       const apiUrl = `/api/search-flickr?q=${encodeURIComponent(query)}`;
-      const res = await fetch(apiUrl);
+      const res = await apiFetch(apiUrl);
       if (!res.ok) return [];
       const data = await res.json();
       const items: Array<{ url: string; thumbnailUrl?: string; title?: string; width?: number; height?: number }> = data.results ?? data;

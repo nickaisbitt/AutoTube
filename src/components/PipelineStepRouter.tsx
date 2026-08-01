@@ -76,9 +76,16 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
   const handleGenerateNarration = useCallback(async () => {
     if (!project) return;
     setCurrentStep('narration');
-    // Stay on narration after Prepare Narration so the user can review clips.
-    // Advancement to AI Edit is explicit via NarrationStep's Continue CTA.
     await generateNarration(project);
+    // Interactive UI stays on narration for review. Loop / generate:video
+    // (autotube_loop_fast_mode) must auto-advance or the harness hangs waiting
+    // for skip-ai-edit / continue CTA that never comes.
+    const loopFast =
+      typeof sessionStorage !== 'undefined' &&
+      sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
+    if (loopFast) {
+      setCurrentStep('ai_edit');
+    }
   }, [project, generateNarration, setCurrentStep]);
 
   const handleRunAIEdit = useCallback(async () => {

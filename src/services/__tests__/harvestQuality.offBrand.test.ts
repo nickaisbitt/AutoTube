@@ -916,9 +916,23 @@ describe('harvest relevance uses visual evidence, not the search query', () => {
       })),
     };
 
-    expect(airlineSoftPassMotionFailureReason(project)).toBe(
-      'soft-pass-motion-airline-aviation-strong-floor(0/4 videos)',
-    );
+    const prev = {
+      PEXELS_API_KEY: process.env.PEXELS_API_KEY,
+      VITE_PEXELS_KEY: process.env.VITE_PEXELS_KEY,
+      PIXABAY_API_KEY: process.env.PIXABAY_API_KEY,
+      VITE_PIXABAY_KEY: process.env.VITE_PIXABAY_KEY,
+    };
+    process.env.PEXELS_API_KEY = 'test-pexels';
+    try {
+      expect(airlineSoftPassMotionFailureReason(project)).toBe(
+        'soft-pass-motion-airline-aviation-strong-floor(0/4 videos)',
+      );
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 
   it('mergeVolumePadding drops off-topic padding instead of laundering it', async () => {

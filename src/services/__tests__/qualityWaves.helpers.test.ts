@@ -405,9 +405,11 @@ describe('quality waves 2–5 helpers', () => {
       ],
     };
 
-    const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(project.media.length), project);
-    expect(soft.pass).toBe(false);
-    expect(soft.reason).toBe('soft-pass-motion-airline-aviation-strong-floor(3/4 videos)');
+    await withStockKeys(() => {
+      const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(project.media.length), project);
+      expect(soft.pass).toBe(false);
+      expect(soft.reason).toBe('soft-pass-motion-airline-aviation-strong-floor(3/4 videos)');
+    });
   });
 
   it('airline soft-pass-motion uses a tighter generic-junk video ratio', async () => {

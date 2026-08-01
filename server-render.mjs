@@ -51,6 +51,7 @@ import {
 } from './server-render/youtubeProfile.mjs';
 import { renderViaFfmpegAssembly } from './server-render/ffmpegAssembly.mjs';
 import { buildEditTimeline } from './scripts/lib/build-edit-timeline.mjs';
+import { resolveHonestHookOverlay, spokenHookFromProject } from './scripts/lib/hook-overlay-text.mjs';
 
 const ZERO_RENDER_COST = Object.freeze({
   apiCostEstimate: 0,
@@ -4340,10 +4341,25 @@ async function render() {
   // 0–3s audit window instead of letting weak segment titles take over.
   const COLD_OPEN_HOOK_FRAMES = Math.max(1, Math.round((YOUTUBE_MODE ? 3.2 : 0.3) * FPS));
   const COLD_OPEN_BEAT_FRAMES = Math.max(1, Math.round(0.5 * FPS)); // ~5 beats in 2.5s
-  const explicitHook = project.hookLine || project.exportSettings?.hookLine;
-  const hookOverlay = project.exportSettings?.hookOverlay;
-  const hookText = hookOverlay
-    || explicitHook
+  // On-screen hook must match what the narration actually says: every claimed
+  // overlay (exportSettings, env, hook line) is validated against the topic and
+  // spoken hook; dishonest claims fall back to the spoken hook (no self-attest).
+  const { text: honestHookOverlay, rejected: rejectedHookClaims } = resolveHonestHookOverlay({
+    topic: [project.topic, project.title, project.exportSettings?.topic, project.exportSettings?.title]
+      .filter(Boolean).join(' '),
+    spokenHook: spokenHookFromProject(project),
+    candidates: [
+      { text: project.exportSettings?.hookOverlay, source: 'exportSettings.hookOverlay' },
+      { text: process.env.AUTOTUBE_HOOK_OVERLAY, source: 'env AUTOTUBE_HOOK_OVERLAY' },
+      { text: project.hookLine, source: 'project.hookLine' },
+      { text: process.env.AUTOTUBE_HOOK_LINE, source: 'env AUTOTUBE_HOOK_LINE' },
+      { text: project.exportSettings?.hookLine, source: 'exportSettings.hookLine' },
+    ],
+  });
+  for (const claim of rejectedHookClaims) {
+    log('warn', `  Hook overlay claim rejected (${claim.source}) — ${claim.reason}: "${String(claim.text).slice(0, 60)}"`);
+  }
+  const hookText = honestHookOverlay
     || (coldOpenSeg?.narration
       ? (YOUTUBE_MODE ? buildRetentionHook(coldOpenSeg.narration) : (coldOpenSeg.narration.match(/^[^.!?\n]+/) || [coldOpenSeg.narration.substring(0, 60)])[0].substring(0, 60))
       : 'Watch this!');

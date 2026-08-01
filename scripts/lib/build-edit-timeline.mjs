@@ -7,6 +7,7 @@
 import { scoreAssetRelevance, isOffBrandVisual, isGenericStockJunk } from './harvest-quality.mjs';
 import { isAirlineTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
+import { stillQualityTimelinePenalty } from './sanitize-media-quality.mjs';
 
 /**
  * @param {object} project
@@ -405,6 +406,7 @@ export function buildEditTimeline(project, options = {}) {
       let reusePenalty = 0;
       if (priorUses === 1) reusePenalty = -5;
       if (priorUses >= 2) reusePenalty = -25 - (priorUses - 2) * 12;
+      reusePenalty += stillQualityTimelinePenalty(a);
       if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (isGenericStockJunk(blob, topicBlob)) return -8;
       // Hard-ban office/cowork pads on non-workplace stories.
@@ -479,9 +481,9 @@ export function buildEditTimeline(project, options = {}) {
         if (preferBright && /\b(daylight|sunny|bright|well.?lit|window light)\b/i.test(blob)) score += 2;
         return score + beatBoost + reusePenalty;
       }
-      if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3 + beatBoost;
+      if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3 + beatBoost + reusePenalty;
       if (topicIsHousing && /beetle|insect|wildlife|macro|spider|bug|larva|caterpillar/i.test(blob)) return -10;
-      if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2 + beatBoost;
+      if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2 + beatBoost + reusePenalty;
       // Cold body: topic relevance + faces beat looping subject stock.
       if (coldEval) {
         const rel = scoreAssetRelevance(a, seg, project.topic || '');

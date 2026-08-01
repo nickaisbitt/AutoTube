@@ -72,6 +72,10 @@ import {
   chooseRecoveryAction,
   isDeadScriptGeneration,
 } from './script-wait-policy.mjs';
+import {
+  assessHarvestStillQuality,
+  decorateStillWithQuality,
+} from './sanitize-media-quality.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -423,6 +427,58 @@ async function canFetch(url, { timeoutMs = 6000, minBytes = 256, expectVideo = f
   }
 }
 
+function stillQualityReportEntry(asset, assessment) {
+  return {
+    url: asset?.url || '',
+    reason: assessment.reason,
+    width: assessment.width,
+    height: assessment.height,
+    laplacianVariance: assessment.laplacianVariance,
+    lumaStdDev: assessment.lumaStdDev,
+    flags: assessment.flags || [],
+  };
+}
+
+async function sanitizeStillQuality(asset, report, { devServer, cache } = {}) {
+  const assessment = await assessHarvestStillQuality(asset, { devServer, cache });
+  const entry = stillQualityReportEntry(asset, assessment);
+  if (assessment.action === 'reject') {
+    report.qualityStillRejected = report.qualityStillRejected || [];
+    report.qualityStillRejected.push(entry);
+    return null;
+  }
+  const decorated = decorateStillWithQuality(asset, assessment);
+  if (assessment.action === 'demote') {
+    report.qualityStillDemoted = report.qualityStillDemoted || [];
+    report.qualityStillDemoted.push(entry);
+  }
+  return decorated;
+}
+
+async function sanitizeProjectStillQuality(project, report, { devServer, cache } = {}) {
+  if (!project?.media?.length) return;
+  const kept = [];
+  for (const asset of project.media) {
+    if (asset.type === 'video' || /\.(mp4|webm|mov)(?:[?#]|$)/i.test(asset.url || '')) {
+      kept.push(asset);
+      continue;
+    }
+    if (asset.sanitizeQuality?.action && asset.sanitizeQuality.action !== 'reject') {
+      kept.push(asset);
+      continue;
+    }
+    const qualityAsset = await sanitizeStillQuality(asset, report, { devServer, cache });
+    if (!qualityAsset) {
+      report.dropped = report.dropped || [];
+      const reason = report.qualityStillRejected?.at(-1)?.reason || 'quality gate';
+      report.dropped.push({ url: asset.url, reason: `still quality rejected: ${reason}` });
+      continue;
+    }
+    kept.push(qualityAsset);
+  }
+  project.media = kept;
+}
+
 function isDirectImageCandidate(url = '') {
   const u = (url || '').toLowerCase();
   return (
@@ -445,10 +501,11 @@ async function fetchImageSearchResults(devServer, endpoint, query) {
   }
 }
 
-async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
+async function topUpHarvestVolume(project, devServer, minPerSegment, report, options = {}) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
   const airline = isAirlineTopic(topic);
+  const qualityCache = options.qualityCache || new Map();
   const usedGlobal = new Set(
     (project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean),
   );
@@ -493,9 +550,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
       for (const r of candidates) {
         const key = r.url.split('?')[0];
         if (usedGlobal.has(key)) continue;
-        if (!(await canFetch(r.url, { timeoutMs: 8000, minBytes: 512 }))) continue;
-
-        project.media.push({
+        const candidate = {
           id: `topup-${seg.id}-${uniqueCount}`,
           segmentId: seg.id,
           type: 'image',
@@ -505,7 +560,11 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
           source: `${r.source || 'Search'} (volume top-up)`,
           duration: 5,
           isFallback: false,
-        });
+        };
+        const qualityAsset = await sanitizeStillQuality(candidate, report, { devServer, cache: qualityCache });
+        if (!qualityAsset) continue;
+
+        project.media.push(qualityAsset);
         usedGlobal.add(key);
         uniqueCount += 1;
         added = true;
@@ -530,7 +589,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
         const key = img.url.split('?')[0];
         if (usedGlobal.has(key)) continue;
         if (isUnsafeMediaUrl(img.url) || isJunkWebVolumeStillUrl(img.url)) continue;
-        project.media.push({
+        const candidate = {
           id: `stock-topup-${seg.id}-${uniqueCount}`,
           segmentId: seg.id,
           type: 'image',
@@ -540,7 +599,11 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report) {
           source: 'Stock pool (volume top-up)',
           duration: 5,
           isFallback: false,
-        });
+        };
+        const qualityAsset = await sanitizeStillQuality(candidate, report, { devServer, cache: qualityCache });
+        if (!qualityAsset) continue;
+
+        project.media.push(qualityAsset);
         usedGlobal.add(key);
         uniqueCount += 1;
         report.volumeTopUp = report.volumeTopUp || [];
@@ -749,8 +812,17 @@ const PROVIDER_EVIDENCE_MAX_CHARS = 240;
 /**
  * Per-run ceiling on Archive.org item-metadata lookups (one throttled network call
  * each, ~0.5s under concurrency), spent only on clips that lack evidence so far.
+ *
+ * Keyless runs have no other motion source, and every lookup is a chance for a real
+ * item to prove what it shows, so they get a far bigger allowance than keyed runs
+ * (which fill the pool from Pexels/Pixabay and only dip into archive for variety).
  */
-const ARCHIVE_EVIDENCE_LOOKUP_BUDGET = 96;
+const ARCHIVE_EVIDENCE_LOOKUP_BUDGET_KEYED = 32;
+const ARCHIVE_EVIDENCE_LOOKUP_BUDGET_KEYLESS = 192;
+
+export function archiveEvidenceLookupBudget(keyed = false) {
+  return keyed ? ARCHIVE_EVIDENCE_LOOKUP_BUDGET_KEYED : ARCHIVE_EVIDENCE_LOOKUP_BUDGET_KEYLESS;
+}
 const EVIDENCE_STOPWORDS = new Set([
   'that', 'this', 'with', 'from', 'they', 'them', 'then', 'than', 'their', 'there', 'were', 'what',
   'when', 'where', 'which', 'while', 'about', 'after', 'been', 'have', 'into', 'over', 'your',
@@ -889,35 +961,64 @@ async function fetchArchiveItemEvidence(identifier, { timeoutMs = 6000 } = {}) {
 }
 
 /**
+ * Raw item metadata already pulled this run, keyed by Archive.org identifier.
+ *
+ * The same item comes back under many subjects and sweeps; re-fetching it would burn
+ * the lookup budget on questions already answered instead of on new items.
+ */
+const archiveItemEvidenceCache = new Map();
+
+/**
  * Enrich Archive.org candidates with their own item metadata so evidence-gated
  * clips are judged on what the item says it shows, not on the query we typed.
+ *
+ * Only real network lookups are charged to the budget: cached items and clips we have
+ * already qualified cost nothing, which is what lets a keyless run reach far more
+ * distinct items without loosening the gate they still have to pass.
  */
-async function enrichArchiveEvidence(clips, { topicBlob = '', limit = 0, report = {}, concurrency = 6 } = {}) {
+async function enrichArchiveEvidence(
+  clips,
+  { topicBlob = '', limit = 0, report = {}, concurrency = 6, skipUrls = null } = {},
+) {
   if (limit <= 0) return clips;
-  const pending = clips.filter(
-    (clip) =>
-      /Archive/i.test(clip.source || '')
-      && !archiveEvidenceVerdict(clip, { query: clip.query || '', topicBlob }).ok,
-  );
-  const batch = pending.slice(0, limit);
+  const pending = new Map();
+  for (const clip of clips) {
+    if (!/Archive/i.test(clip.source || '')) continue;
+    if (archiveEvidenceVerdict(clip, { query: clip.query || '', topicBlob }).ok) continue;
+    const identifier = archiveIdentifierFromUrl(clip.url);
+    if (!identifier) continue;
+    if (skipUrls?.has((clip.url || '').split('?')[0])) continue;
+    // Items answered earlier this run cost nothing; only unseen ones queue a lookup.
+    if (archiveItemEvidenceCache.has(identifier)) {
+      report.archiveEvidenceCacheHits = (report.archiveEvidenceCacheHits || 0) + 1;
+      applyArchiveEvidence(clip, archiveItemEvidenceCache.get(identifier), topicBlob, report);
+      continue;
+    }
+    if (!pending.has(identifier)) pending.set(identifier, []);
+    pending.get(identifier).push(clip);
+  }
+  const batch = [...pending.entries()].slice(0, limit);
   for (let i = 0; i < batch.length; i += concurrency) {
     const slice = batch.slice(i, i + concurrency);
-    const found = await Promise.all(
-      slice.map((clip) => fetchArchiveItemEvidence(archiveIdentifierFromUrl(clip.url))),
-    );
-    slice.forEach((clip, idx) => {
+    const found = await Promise.all(slice.map(([identifier]) => fetchArchiveItemEvidence(identifier)));
+    slice.forEach(([identifier, waiting], idx) => {
       report.archiveEvidenceLookups = (report.archiveEvidenceLookups || 0) + 1;
-      const enriched = providerEvidenceText(`${clip.title || ''} ${found[idx] || ''}`, {
-        query: clip.query || '',
-        topicBlob,
-      });
-      if (enriched && enriched !== clip.title) {
-        clip.title = enriched;
-        report.archiveEvidenceEnriched = (report.archiveEvidenceEnriched || 0) + 1;
-      }
+      archiveItemEvidenceCache.set(identifier, found[idx] || '');
+      for (const clip of waiting) applyArchiveEvidence(clip, found[idx] || '', topicBlob, report);
     });
   }
   return clips;
+}
+
+function applyArchiveEvidence(clip, rawMetadata, topicBlob, report) {
+  if (!rawMetadata) return;
+  const enriched = providerEvidenceText(`${clip.title || ''} ${rawMetadata}`, {
+    query: clip.query || '',
+    topicBlob,
+  });
+  if (!enriched || enriched === clip.title) return;
+  clip.title = enriched;
+  report.archiveEvidenceEnriched = (report.archiveEvidenceEnriched || 0) + 1;
 }
 
 async function fetchArchiveVideoResults(devServer, query, { topicBlob = '' } = {}) {
@@ -947,12 +1048,12 @@ async function fetchArchiveVideoResults(devServer, query, { topicBlob = '' } = {
 }
 
 /** Direct Pexels Videos API (no UI harvest required). */
-async function fetchPexelsVideos(query, perPage = 8) {
+async function fetchPexelsVideos(query, perPage = 8, page = 1) {
   const key = resolvePexelsKey();
   if (!key) return [];
   if (!isSafeStockMotionQuery(query)) return [];
   try {
-    const url = `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${perPage}&size=medium`;
+    const url = `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=${perPage}&page=${Math.max(1, page)}&size=medium`;
     const res = await fetch(url, { headers: { Authorization: key } });
     if (!res.ok) return [];
     const data = await res.json();
@@ -986,12 +1087,12 @@ async function fetchPexelsVideos(query, perPage = 8) {
 }
 
 /** Direct Pixabay Videos API. */
-async function fetchPixabayVideos(query, perPage = 8) {
+async function fetchPixabayVideos(query, perPage = 8, page = 1) {
   const key = resolvePixabayKey();
   if (!key) return [];
   if (!isSafeStockMotionQuery(query)) return [];
   try {
-    const url = `https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(query)}&per_page=${perPage}`;
+    const url = `https://pixabay.com/api/videos/?key=${encodeURIComponent(key)}&q=${encodeURIComponent(query)}&per_page=${perPage}&page=${Math.max(1, page)}`;
     const res = await fetch(url);
     if (!res.ok) return [];
     const data = await res.json();
@@ -1764,6 +1865,27 @@ const ARCHIVE_AIRLINE_MOTION_QUERIES = [
   'high altitude flight',
   'aviation accident investigation',
   'aircraft crew training',
+  // Archive.org indexes decades of aviation instruction and newsreel material under
+  // period vocabulary that modern stock terms never reach. Each line is a different
+  // real subject, so it buys new items rather than re-ranking the same ones.
+  'airline stewardess cabin',
+  'passenger cabin service',
+  'aircraft cabin altitude',
+  'explosive decompression test',
+  'altitude chamber training',
+  'pilot training film',
+  'cockpit crew procedures',
+  'airline ground crew',
+  'aircraft engine overhaul',
+  'airframe structural inspection',
+  'aircraft assembly plant',
+  'jet transport development',
+  'propeller airliner flight',
+  'airport terminal passengers',
+  'air traffic control tower',
+  'civil aviation authority',
+  'airline operations film',
+  'aircraft emergency evacuation',
 ];
 
 const ARCHIVE_HOUSING_MOTION_QUERIES = [
@@ -1777,6 +1899,16 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'city housing project',
   'landlord tenant hearing',
   'family kitchen home',
+  'slum clearance',
+  'urban renewal housing',
+  'tenement building',
+  'housing authority film',
+  'affordable housing program',
+  'city apartment street',
+  'family moving day',
+  'rent collection office',
+  'housing court hearing',
+  'neighborhood housing survey',
 ];
 
 const ARCHIVE_VARIANT_LEAD_STOPWORDS =
@@ -1800,7 +1932,64 @@ export function archiveShortQueryVariants(queries = []) {
   return [...new Set(out)];
 }
 
-const ARCHIVE_SWEEP_SUFFIXES = ['footage', 'film'];
+/** Words that describe our framing of the story, not anything an item could show. */
+const ARCHIVE_TOPIC_SUBJECT_STOPWORDS = new Set([
+  'about', 'after', 'again', 'against', 'almost', 'already', 'always', 'among', 'another', 'because',
+  'been', 'before', 'behind', 'being', 'between', 'billion', 'built', 'called', 'came', 'could',
+  'does', 'done', 'down', 'during', 'each', 'either', 'else', 'even', 'ever', 'every',
+  'exclusive', 'exposed', 'first', 'from', 'full', 'gone', 'happened', 'hidden', 'here', 'high',
+  'himself', 'into', 'inside', 'just', 'kept', 'know', 'last', 'like', 'made', 'make', 'many',
+  'million', 'more', 'most', 'much', 'must', 'need', 'never', 'next', 'nobody', 'noticed', 'only',
+  'other', 'over', 'really', 'said', 'same', 'secret', 'seen', 'shocking', 'should', 'since',
+  'some', 'still', 'story', 'such', 'take', 'than', 'that', 'their', 'them', 'then', 'there',
+  'these', 'they', 'thing', 'think', 'this', 'those', 'through', 'time', 'told', 'took', 'truth',
+  'under', 'until', 'very', 'were', 'what', 'when', 'where', 'which', 'while', 'whole', 'will',
+  'with', 'without', 'would', 'years', 'your',
+]);
+
+/**
+ * Concrete 1–2 word subjects taken straight from the topic, for keyless topics with no
+ * curated pack. Archive.org ranks full text over item metadata, so a handful of literal
+ * nouns from the story reaches items the descriptive stock phrasing never will.
+ *
+ * These are extra *questions*, not extra evidence: whatever comes back still has to
+ * prove itself through the item's own metadata.
+ */
+export function archiveTopicSubjectQueries(topicBlob = '', limit = 8) {
+  const words = String(topicBlob || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    // Past-tense verbs ("dumped", "recorded") describe the event, not a filmable thing.
+    .filter((w) => w.length >= 4 && !/ed$/.test(w) && !ARCHIVE_TOPIC_SUBJECT_STOPWORDS.has(w));
+  const out = [];
+  const seen = new Set();
+  const push = (query) => {
+    const key = query.trim();
+    if (!key || seen.has(key) || !isSafeStockMotionQuery(key)) return;
+    seen.add(key);
+    out.push(key);
+  };
+  for (let i = 0; i + 1 < words.length && out.length < limit; i += 1) {
+    push(`${words[i]} ${words[i + 1]}`);
+  }
+  // A one-word subject is a very broad question, so it is only worth asking when the
+  // topic did not yield enough concrete pairs to fill the plan.
+  if (out.length < 3) {
+    for (const word of words) {
+      if (out.length >= limit) break;
+      if (word.length >= 6) push(word);
+    }
+  }
+  return out.slice(0, limit);
+}
+
+/**
+ * Archive sweeps re-rank a subject the way archivists label material: raw "footage",
+ * an instructional "film", a period "newsreel". Each suffix surfaces a different slice
+ * of the same subject, which is recall — the evidence gate is untouched.
+ */
+const ARCHIVE_SWEEP_SUFFIXES = ['footage', 'film', 'newsreel'];
 
 /** A second/third archive sweep re-ranks the same subject; over-long queries are skipped. */
 export function withArchiveSweepSuffix(query, suffix = '') {
@@ -1831,7 +2020,7 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
       ? ARCHIVE_AIRLINE_MOTION_QUERIES
       : housing
         ? ARCHIVE_HOUSING_MOTION_QUERIES
-        : archiveShortQueryVariants(base);
+        : [...archiveShortQueryVariants(base), ...archiveTopicSubjectQueries(topicBlob, 10)];
   }
   boost = boost.filter(isSafeStockMotionQuery);
 
@@ -1859,6 +2048,71 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   };
 }
 
+/** How many of the leading (most topical) queries a keyed run re-asks on page 2. */
+const KEYED_SECOND_PAGE_QUERIES = 14;
+
+const MOTION_FETCH_BUDGET_MS_KEYED = 240000;
+const MOTION_FETCH_BUDGET_MS_KEYLESS = 360000;
+
+/**
+ * Wall-clock ceiling on the search phase. A keyless plan can be ~100 Archive.org
+ * queries at ~10s each, so the wider plan needs a stop that is not "ran out of
+ * subjects" — whatever has been gathered by then still goes through the same gates.
+ */
+export function resolveMotionFetchBudgetMs(keyed = false, env = process.env) {
+  const override = Number.parseInt(env?.AUTOTUBE_MOTION_FETCH_BUDGET_MS ?? '', 10);
+  if (Number.isFinite(override) && override > 0) return override;
+  return keyed ? MOTION_FETCH_BUDGET_MS_KEYED : MOTION_FETCH_BUDGET_MS_KEYLESS;
+}
+
+/**
+ * The ordered rounds of provider calls for this run.
+ *
+ * Round 0 asks every planned subject once. Later rounds are marked `extra` and only
+ * run while the clip pool is still short: keyed runs go deeper into the same topical
+ * subjects (provider page 2), keyless runs re-rank each subject the way Archive.org
+ * labels material ("… footage", "… film", "… newsreel").
+ */
+export function planMotionFetchRounds(queries = [], { keyed = false, queryCap = 24 } = {}) {
+  const capped = queries.slice(0, Math.max(0, queryCap));
+  const planned = new Set();
+  const rounds = [];
+  const addRound = (label, attempts) => {
+    const kept = [];
+    for (const attempt of attempts) {
+      const key = `${attempt.query.toLowerCase()}|${attempt.page}`;
+      if (!attempt.query || planned.has(key)) continue;
+      planned.add(key);
+      kept.push(attempt);
+    }
+    if (kept.length) rounds.push({ label, attempts: kept });
+  };
+
+  addRound(
+    'primary',
+    capped.map((query) => ({ query, subject: query, sweep: '', page: 1, extra: false })),
+  );
+  if (keyed) {
+    addRound(
+      'provider-page-2',
+      capped
+        .slice(0, KEYED_SECOND_PAGE_QUERIES)
+        .map((query) => ({ query, subject: query, sweep: '', page: 2, extra: true })),
+    );
+    return rounds;
+  }
+  for (const suffix of ARCHIVE_SWEEP_SUFFIXES) {
+    addRound(
+      `archive-sweep-${suffix}`,
+      capped
+        .map((subject) => ({ subject, query: withArchiveSweepSuffix(subject, suffix) }))
+        .filter(({ query }) => query)
+        .map(({ subject, query }) => ({ query, subject, sweep: suffix, page: 1, extra: true })),
+    );
+  }
+  return rounds;
+}
+
 /**
  * How much motion to chase, and how hard, for this key mode.
  *
@@ -1878,9 +2132,9 @@ export function resolveMotionVolumeTargets({
   const housing = isHousingTopic(topicBlob);
   if (hasStockKeys) {
     const aggressive = airline || housing;
-    const stockFloor = Math.max(aggressive ? 20 : 16, segN * (aggressive ? 5 : 4));
+    const stockFloor = Math.max(aggressive ? 24 : 16, segN * (aggressive ? 5 : 4));
     const minVideos = Math.min(
-      aggressive ? 36 : 28,
+      aggressive ? 42 : 28,
       Math.max(
         stockFloor,
         Math.ceil((segmentDurationSec / (cutIntervalSec || 1.25)) * 0.75),
@@ -1898,9 +2152,9 @@ export function resolveMotionVolumeTargets({
   // Keyless: Archive.org only. Chase more than the soft-pass floor so a denser cut is
   // possible, but never treat the target as evidence — the evidence gate still rules.
   const keylessFloor = airline
-    ? Math.max(14, segN * 3)
+    ? Math.max(16, segN * 3)
     : housing
-      ? Math.max(10, segN * 2)
+      ? Math.max(12, segN * 2)
       : Math.min(segN * 2, 6);
   return {
     mode: 'keyless',
@@ -1912,25 +2166,53 @@ export function resolveMotionVolumeTargets({
   };
 }
 
-/** One-line keyed/keyless motion summary for run logs. */
+/**
+ * One-line motion summary for run logs, written so the two paths never read alike.
+ *
+ * Keyed lines are about provider volume (who returned what, how deep we paged).
+ * Keyless lines are about Archive.org recall and the evidence gate: how many subjects
+ * were asked, how many were dead ends, and how many items proved what they show.
+ */
 export function formatMotionPathLog(report = {}) {
   const mode = report.motionKeyMode || 'unknown';
-  const providers = mode === 'keyed'
-    ? `pexels=${report.pexelsFetched || 0} pixabay=${report.pixabayFetched || 0} archive=${report.archiveLiveFetched || 0}`
-    : `archive=${report.archiveLiveFetched || 0}`;
+  const queries =
+    `queries-tried=${report.motionQueriesTried || 0} query-pack=${report.motionQueryPoolSize || 0}`;
+  const tail =
+    `clip-pool=${report.motionPoolSize || 0}`
+    + ` injected=${(report.videoTopUp || []).length}/${report.motionTargetVideos || 0}`;
+
+  if (mode === 'keyed') {
+    const providers =
+      `pexels=${report.pexelsFetched || 0} pixabay=${report.pixabayFetched || 0}`
+      + ` archive=${report.archiveLiveFetched || 0}`;
+    const archive = report.archiveQueriesTried
+      ? ` | archive-queries=${report.archiveQueriesTried} evidence-rejected=${report.archiveEvidenceRejected || 0}`
+      : '';
+    const keys = `keys pexels=${report.motionKeyPexels ? 'yes' : 'no'} pixabay=${report.motionKeyPixabay ? 'yes' : 'no'}`;
+    return (
+      `Motion path: keyed (${keys}) — ${providers}`
+      + ` | ${queries} page2-queries=${report.motionPageTwoQueries || 0}`
+      + archive
+      + ` | ${tail}`
+    );
+  }
+
   const archive =
     `archive-queries=${report.archiveQueriesTried || 0}`
     + ` sweep-queries=${report.archiveSweepQueries || 0}`
+    + ` dead-subjects=${report.archiveDeadSubjects || 0}`
+    + ` raw-hits=${report.archiveRawHits || 0}`
     + ` evidence-lookups=${report.archiveEvidenceLookups || 0}`
+    + ` evidence-cached=${report.archiveEvidenceCacheHits || 0}`
     + ` evidence-enriched=${report.archiveEvidenceEnriched || 0}`
     + ` evidence-rejected=${report.archiveEvidenceRejected || 0}`;
+  const why = mode === 'keyless' ? ' (no stock API keys — Archive.org only)' : '';
   return (
-    `Motion path: ${mode} (keys pexels=${report.motionKeyPexels ? 'yes' : 'no'}`
-    + ` pixabay=${report.motionKeyPixabay ? 'yes' : 'no'}) — ${providers}`
-    + ` | queries-tried=${report.motionQueriesTried || 0} query-pack=${report.motionQueryPoolSize || 0}`
+    `Motion path: ${mode}${why}`
+    + ` — archive=${report.archiveLiveFetched || 0}`
+    + ` | ${queries}`
     + ` | ${archive}`
-    + ` | clip-pool=${report.motionPoolSize || 0}`
-    + ` injected=${(report.videoTopUp || []).length}/${report.motionTargetVideos || 0}`
+    + ` | ${tail}`
   );
 }
 
@@ -2009,66 +2291,84 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const aggressiveTopic = airlineTopicEarly || housingTopic;
   const queryCap = hasStockKeysEarly
     ? (aggressiveTopic ? 30 : 20)
-    : (airlineTopicEarly ? 36 : housingTopic ? 30 : 24);
-  const liveCap = hasStockKeysEarly ? 160 : 140;
-  const perQueryCap = hasStockKeysEarly ? 6 : 10;
-  const perProviderPage = hasStockKeysEarly && aggressiveTopic ? 14 : 10;
+    : (airlineTopicEarly ? 44 : housingTopic ? 34 : 26);
+  const liveCap = hasStockKeysEarly ? 200 : 140;
+  const perQueryCap = hasStockKeysEarly ? 8 : 10;
+  const perProviderPage = hasStockKeysEarly && aggressiveTopic ? 16 : 10;
   const liveTarget = Math.min(liveCap, Math.max(targets.minVideos * 2, targets.minVideos + 8));
-  const attemptQueries = queries.slice(0, queryCap);
-  // Keyless runs get extra archive sweeps before giving up: the same subject re-ranked
-  // ("... footage", "... film") surfaces different items, and a thin first pass is normal.
-  const sweeps = hasStockKeysEarly ? [''] : ['', ...ARCHIVE_SWEEP_SUFFIXES];
-  const attempts = [];
-  const plannedQueries = new Set();
-  for (const suffix of sweeps) {
-    for (const rawQuery of attemptQueries) {
-      const q = withArchiveSweepSuffix(rawQuery, suffix);
-      const key = q.toLowerCase();
-      if (!q || plannedQueries.has(key)) continue;
-      plannedQueries.add(key);
-      attempts.push({ query: q, sweep: suffix });
-    }
-  }
+  // Keyed runs page deeper into the same topical subjects; keyless runs re-rank each
+  // subject with archive labels. Both extra rounds stop as soon as the pool is deep
+  // enough — recall is what widens here, never the gate the clips still have to pass.
+  const rounds = planMotionFetchRounds(queries, { keyed: hasStockKeysEarly, queryCap });
+  const evidenceBudget = archiveEvidenceLookupBudget(hasStockKeysEarly);
   // One Archive.org query costs ~10s (the proxy resolves item metadata per hit), so the
   // wider keyless plan is fetched in parallel batches instead of one query at a time.
-  const fetchBatchSize = hasStockKeysEarly ? 2 : 4;
-  const fetchCandidates = async ({ query: q, sweep: suffix }) => {
-    const fromPexels = suffix ? [] : await fetchPexelsVideos(q, perProviderPage);
-    const fromPixabay = suffix ? [] : await fetchPixabayVideos(q, perProviderPage);
-    // Skip archive.org for cyber topics when stock API keys exist.
+  const fetchBatchSize = 4;
+  const deadline = Date.now() + resolveMotionFetchBudgetMs(hasStockKeysEarly);
+  const usedUrls = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+  const deadSubjects = new Set();
+  const fetchCandidates = async ({ query: q, sweep: suffix, page }) => {
+    const fromPexels = suffix ? [] : await fetchPexelsVideos(q, perProviderPage, page);
+    const fromPixabay = suffix ? [] : await fetchPixabayVideos(q, perProviderPage, page);
+    // Skip archive.org for cyber topics when stock API keys exist, and don't re-ask
+    // archive for page 2 — the proxy only ever returns one page of items per subject.
     let fromArchive =
-      (!cyberTopic || !hasStockKeysEarly) && devServer
+      (!cyberTopic || !hasStockKeysEarly) && devServer && page === 1
         ? await fetchArchiveVideoResults(devServer, q, { topicBlob })
         : [];
-    if (fromArchive.length) {
+    const archiveRaw = fromArchive.length;
+    if (archiveRaw) {
       report.archiveQueriesTried = (report.archiveQueriesTried || 0) + 1;
+      report.archiveRawHits = (report.archiveRawHits || 0) + archiveRaw;
       // Keyed runs get their volume from Pexels/Pixabay, so they spend far less of the
       // metadata budget on archive; keyless runs need every item they can qualify.
       fromArchive = await enrichArchiveEvidence(fromArchive, {
         topicBlob,
         limit: Math.min(
-          hasStockKeysEarly ? 2 : 8,
-          (hasStockKeysEarly ? 32 : ARCHIVE_EVIDENCE_LOOKUP_BUDGET) - (report.archiveEvidenceLookups || 0),
+          hasStockKeysEarly ? 2 : 10,
+          evidenceBudget - (report.archiveEvidenceLookups || 0),
         ),
+        concurrency: hasStockKeysEarly ? 4 : 6,
+        skipUrls: usedUrls,
         report,
       });
     }
-    return { query: q, sweep: suffix, candidates: [...fromPexels, ...fromPixabay, ...fromArchive] };
+    return {
+      query: q,
+      sweep: suffix,
+      archiveRaw,
+      candidates: [...fromPexels, ...fromPixabay, ...fromArchive],
+    };
   };
 
   const batches = [];
-  for (let i = 0; i < attempts.length; i += fetchBatchSize) {
-    batches.push(attempts.slice(i, i + fetchBatchSize));
+  for (const round of rounds) {
+    for (let i = 0; i < round.attempts.length; i += fetchBatchSize) {
+      batches.push(round.attempts.slice(i, i + fetchBatchSize));
+    }
   }
-  for (const batch of batches) {
-    // Extra sweeps run only while the pool is still short of target.
-    if (batch.every((a) => a.sweep) && liveClips.length >= liveTarget) break;
-    if (liveClips.length >= liveCap) break;
+  for (const plannedBatch of batches) {
+    // A subject Archive.org has nothing for stays empty when it is re-labelled, so the
+    // remaining query budget goes to subjects that actually returned items.
+    const batch = plannedBatch.filter((a) => !a.extra || !deadSubjects.has(a.subject));
+    if (!batch.length) continue;
+    // Extra rounds (provider page 2, archive sweeps) run only while the pool is thin.
+    if (batch.every((a) => a.extra) && liveClips.length >= liveTarget) continue;
+    if (liveClips.length >= liveCap || Date.now() >= deadline) break;
     for (const attempt of batch) {
       if (attempt.sweep) report.archiveSweepQueries = (report.archiveSweepQueries || 0) + 1;
+      if (attempt.page > 1) report.motionPageTwoQueries = (report.motionPageTwoQueries || 0) + 1;
       report.motionQueriesTried = (report.motionQueriesTried || 0) + 1;
     }
     const fetched = await Promise.all(batch.map(fetchCandidates));
+    if (!hasStockKeysEarly) {
+      batch.forEach((attempt, idx) => {
+        if (fetched[idx].archiveRaw === 0 && !deadSubjects.has(attempt.subject)) {
+          deadSubjects.add(attempt.subject);
+          report.archiveDeadSubjects = (report.archiveDeadSubjects || 0) + 1;
+        }
+      });
+    }
     const addedPerQuery = new Map();
     for (const { query: q, clip } of fetched.flatMap(({ query, candidates }) =>
       candidates.map((candidate) => ({ query, clip: candidate })),
@@ -2207,7 +2507,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const { minVideos, stockNeed } = targets;
   if (videoCount >= minVideos && stockNeed <= 0) return;
 
-  const used = new Set((project.media || []).map((a) => (a.url || '').split('?')[0]).filter(Boolean));
+  const used = usedUrls;
   let need = Math.max(minVideos - videoCount, stockNeed);
   const faceScore = (clip) => {
     const blob = `${clip.query || ''} ${clip.alt || ''} ${clip.title || ''}`.toLowerCase();
@@ -2381,6 +2681,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     keptVideo: [],
     phashDropped: [],
     relevanceDropped: [],
+    qualityStillRejected: [],
+    qualityStillDemoted: [],
     volumePass: true,
     harvestQuality: null,
     visionStockChecked: 0,
@@ -2399,6 +2701,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
 
   const sanitized = [];
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
+  const qualityCache = new Map();
 
   for (const asset of project.media) {
     // Videos: junk-check clip URL only (thumbs are often placeholders).
@@ -2470,16 +2773,20 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     const key = asset.url.split('?')[0];
     if (validated.some((a) => a.url?.split('?')[0] === key)) continue;
 
-    let ok = urlOk.get(asset.url);
-    if (ok === undefined) {
-      ok = await canFetch(asset.url, { timeoutMs: 8000, minBytes: 512 });
-      urlOk.set(asset.url, ok);
+    let qualityAsset = urlOk.get(asset.url);
+    if (qualityAsset === undefined) {
+      qualityAsset = await sanitizeStillQuality(asset, report, { devServer, cache: qualityCache });
+      urlOk.set(asset.url, qualityAsset || null);
     }
-    if (ok) {
-      validated.push(asset);
-      reserve.push(asset);
+    if (qualityAsset) {
+      validated.push(qualityAsset);
+      reserve.push(qualityAsset);
     } else {
-      report.dropped.push({ url: asset.url, reason: 'image fetch failed pre-render' });
+      const qualityReason = report.qualityStillRejected?.at(-1)?.reason;
+      report.dropped.push({
+        url: asset.url,
+        reason: qualityReason ? `still quality rejected: ${qualityReason}` : 'image fetch failed pre-render',
+      });
     }
   }
 
@@ -2531,7 +2838,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       (project.media || []).filter((a) => a.type === 'video').length >=
       Math.max(6, (project.script || []).length * 2);
     if (!videoRich) {
-      await topUpHarvestVolume(project, devServer, minPerSegment, report);
+      await topUpHarvestVolume(project, devServer, minPerSegment, report, { qualityCache });
     } else {
       report.imageVolumeSkipped = 'motion-rich';
     }
@@ -2543,6 +2850,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     injectCyberStockStills(project, report, options.mediaOffset || 0);
     // Re-gate after top-up (can reintroduce junk).
     stripJunkDemoVideos(project, report);
+    await sanitizeProjectStillQuality(project, report, { devServer, cache: qualityCache });
     const paddingBeforeFilter = (project.media || []).filter(isVolumePaddingAsset);
     const afterTopUp = filterAssetsByRelevance(project.media || [], project, {
       minScore: isEvalColdMode() ? 0.26 : 0.22,
@@ -3462,7 +3770,9 @@ export async function generateFullVideo(options) {
       if (mediaReport.motionKeyMode) {
         log(`   🔑 ${formatMotionPathLog(mediaReport)}`);
       }
-      if (mediaReport.pexelsFetched || mediaReport.pixabayFetched || mediaReport.archiveLiveFetched) {
+      // Keyless runs already say "Archive.org only" above; repeating pexels=0 pixabay=0
+      // reads like a provider failure rather than the absence of keys.
+      if (mediaReport.motionKeyMode === 'keyed' && (mediaReport.pexelsFetched || mediaReport.pixabayFetched || mediaReport.archiveLiveFetched)) {
         log(
           `   📡 Live motion sources: pexels=${mediaReport.pexelsFetched || 0} pixabay=${mediaReport.pixabayFetched || 0} archive=${mediaReport.archiveLiveFetched || 0}`,
         );

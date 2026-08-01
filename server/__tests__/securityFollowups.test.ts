@@ -1,4 +1,3 @@
-import dns from "dns";
 import { EventEmitter } from "node:events";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,7 +5,10 @@ import { Readable } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const spawnMock = vi.hoisted(() => vi.fn());
+const { spawnMock, validateURLRedirectsMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  validateURLRedirectsMock: vi.fn(),
+}));
 
 vi.mock("child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("child_process")>();
@@ -17,8 +19,19 @@ vi.mock("child_process", async (importOriginal) => {
   };
 });
 
+vi.mock("../utils/security.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../utils/security.js")>();
+  return {
+    ...actual,
+    validateURLRedirects: validateURLRedirectsMock,
+  };
+});
+
 import { errorHandler } from "../middleware/errorHandler.js";
-import { handleDownloadClip } from "../routes/downloadClip.js";
+import {
+  handleDownloadClip,
+  isAllowedYtDlpUrl,
+} from "../routes/downloadClip.js";
 import { handleExportProject } from "../routes/exportProject.js";
 import { handleQualityCheck } from "../routes/qualityCheck.js";
 import { handleSaveProject } from "../routes/saveProject.js";
@@ -74,6 +87,11 @@ const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
 
 beforeEach(() => {
   spawnMock.mockReset();
+  validateURLRedirectsMock.mockReset();
+  validateURLRedirectsMock.mockImplementation(async (url: string) => ({
+    valid: true,
+    finalUrl: url,
+  }));
 });
 
 afterEach(() => {
@@ -87,39 +105,89 @@ afterEach(() => {
 describe("security audit follow-ups", () => {
   it("blocks a download-clip redirect to a private host before spawning yt-dlp", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.spyOn(dns, "lookup").mockImplementation((_hostname, options, callback) => {
-      const cb = typeof options === "function" ? options : callback as any;
-      cb(null, [{ address: "8.8.8.8", family: 4 }] as any);
+    validateURLRedirectsMock.mockResolvedValue({
+      valid: false,
+      error: "Unsafe redirect destination: private IP",
     });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(null, {
-        status: 302,
-        headers: { Location: "http://127.0.0.1/private.mp4" },
-      }),
-    );
     const req = streamReq(
-      `/api/download-clip?url=${encodeURIComponent("https://videos.example/watch")}`,
+      `/api/download-clip?url=${encodeURIComponent("https://youtube.com/watch?v=clip")}`,
     );
     const res = mockRes();
 
     await handleDownloadClip(req, res);
 
     expect(res.statusCode).toBe(403);
+    expect(validateURLRedirectsMock).toHaveBeenCalledOnce();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks a redirect from an allowed provider to an unallowlisted host", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    validateURLRedirectsMock.mockResolvedValue({
+      valid: true,
+      finalUrl: "https://attacker.example/video.mp4",
+    });
+    const req = streamReq(
+      `/api/download-clip?url=${encodeURIComponent("https://youtube.com/watch?v=clip")}`,
+    );
+    const res = mockRes();
+
+    await handleDownloadClip(req, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(validateURLRedirectsMock).toHaveBeenCalledOnce();
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it.each([
+    "https://archive.org/download/item/clip.mp4",
+    "https://dai.ly/clip",
+    "https://www.dailymotion.com/video/clip",
+    "https://media.giphy.com/media/id/giphy.mp4",
+    "https://rr1---sn.googlevideo.com/videoplayback?id=clip",
+    "https://videos.pexels.com/video-files/1/clip.mp4",
+    "https://cdn.pixabay.com/video/clip.mp4",
+    "https://www.tiktok.com/@creator/video/1",
+    "https://player.vimeo.com/video/1",
+    "https://youtu.be/clip",
+    "https://youtube.com/watch?v=clip",
+    "https://www.youtube.com/watch?v=clip",
+  ])("allows canonical media-provider URL %s", (targetUrl) => {
+    expect(isAllowedYtDlpUrl(targetUrl)).toBe(true);
+  });
+
+  it.each([
     "http://10.0.0.1/video.mp4",
+    "http://2130706433/video.mp4",
+    "http://0x7f000001/video.mp4",
+    "http://[::1]/video.mp4",
+    "http://youtube.com/watch",
     "https://youtube.com.attacker.example/watch",
-  ])("rejects private or lookalike yt-dlp host %s", async (targetUrl) => {
+    "https://notyoutube.com/watch",
+    "https://youtube.com./watch",
+    "https://foo..youtube.com/watch",
+    "https://_internal.youtube.com/watch",
+    "https://youtube。com/watch",
+    "https://youtubе.com/watch",
+    "https://youtube%2ecom/watch",
+    "https://youtube.com:8443/watch",
+    "https://user@youtube.com/watch",
+    "file://youtube.com/tmp/clip.mp4",
+    " https://youtube.com/watch",
+  ])("rejects private, non-canonical, or lookalike yt-dlp URL %s", (targetUrl) => {
+    expect(isAllowedYtDlpUrl(targetUrl)).toBe(false);
+  });
+
+  it.each([
+    "http://10.0.0.1/video.mp4",
+    "http://2130706433/video.mp4",
+    "http://[::1]/video.mp4",
+    "http://youtube.com/watch",
+    "https://youtube.com.attacker.example/watch",
+    "https://youtube。com/watch",
+    "https://youtube.com./watch",
+  ])("rejects unsafe yt-dlp URL %s before spawning", async (targetUrl) => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.spyOn(dns, "lookup").mockImplementation((_hostname, options, callback) => {
-      const cb = typeof options === "function" ? options : callback as any;
-      cb(null, [{ address: "8.8.8.8", family: 4 }] as any);
-    });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(null, { status: 200 }),
-    );
     const req = streamReq(
       `/api/download-clip?url=${encodeURIComponent(targetUrl)}`,
     );
@@ -128,6 +196,7 @@ describe("security audit follow-ups", () => {
     await handleDownloadClip(req, res);
 
     expect(res.statusCode).toBe(403);
+    expect(validateURLRedirectsMock).not.toHaveBeenCalled();
     expect(spawnMock).not.toHaveBeenCalled();
   });
 

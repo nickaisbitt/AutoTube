@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
+import { isIP } from "net";
 import { validateURLRedirects } from "../utils/security.js";
 import {
   existsSync,
@@ -33,11 +34,49 @@ const YT_DLP_ALLOWED_HOST_SUFFIXES = [
   "youtube.com",
 ] as const;
 
-function isAllowedYtDlpUrl(urlString: string): boolean {
+const DNS_HOSTNAME_PATTERN =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/**
+ * Fail-closed validation for the URL handed to yt-dlp.
+ *
+ * validateURLRedirects checks protocols, credentials, DNS results, and redirect
+ * destinations. This second gate deliberately repeats the URL-shape checks:
+ * yt-dlp performs fresh DNS lookups and supports many extractors, so it must
+ * only receive canonical URLs for media-provider domains controlled by us.
+ */
+export function isAllowedYtDlpUrl(urlString: string): boolean {
   try {
-    const hostname = new URL(urlString).hostname
-      .toLowerCase()
-      .replace(/\.$/, "");
+    if (/[\u0000-\u001f\u007f\\]/.test(urlString)) return false;
+
+    // Require the textual authority to already be canonical. WHATWG URL
+    // parsing otherwise normalizes odd forms such as encoded/full-width dots,
+    // integer IPv4 addresses, explicit default ports, and leading whitespace.
+    const authorityMatch =
+      /^[a-z][a-z0-9+.-]*:\/\/([^/?#\\]*)/i.exec(urlString);
+    if (!authorityMatch) return false;
+
+    const parsed = new URL(urlString);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.port ||
+      authorityMatch[1].includes("%") ||
+      authorityMatch[1].toLowerCase() !== parsed.host.toLowerCase()
+    ) {
+      return false;
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname.endsWith(".") ||
+      isIP(hostname.replace(/^\[|\]$/g, "")) !== 0 ||
+      !DNS_HOSTNAME_PATTERN.test(hostname)
+    ) {
+      return false;
+    }
+
     return YT_DLP_ALLOWED_HOST_SUFFIXES.some(
       (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`),
     );
@@ -121,6 +160,16 @@ export async function handleDownloadClip(
   // URLSearchParams has already decoded the query parameter. Resolve redirects
   // manually so yt-dlp starts from a destination that passed the SSRF checks.
   const decodedUrl = videoUrl;
+  if (!isAllowedYtDlpUrl(decodedUrl)) {
+    console.warn("[Clip Download] Blocked URL outside the media host allowlist");
+    res.statusCode = 403;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({
+      error: "URL blocked for security: Media host is not allowed",
+    }));
+    return;
+  }
+
   const urlSafety = await validateURLRedirects(decodedUrl);
   if (!urlSafety.valid) {
     console.warn(`[Clip Download] Blocked unsafe URL: ${urlSafety.error}`);

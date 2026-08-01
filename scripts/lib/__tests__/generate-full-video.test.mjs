@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   airlineQueryVisionBypass,
+  archiveEvidenceLookupBudget,
   archiveEvidenceVerdict,
   archiveIdentifierFromUrl,
   archiveShortQueryVariants,
+  archiveTopicSubjectQueries,
   decideStockVisionGate,
   formatMotionPathLog,
   isAirlineRelevantClip,
@@ -11,8 +13,10 @@ import {
   isSafeStockMotionQuery,
   isVisionBudgetSoft,
   motionQueryPlan,
+  planMotionFetchRounds,
   providerEvidenceText,
   recordVisionStockUnverified,
+  resolveMotionFetchBudgetMs,
   resolveMotionVolumeTargets,
   resolveStockKeyMode,
   resolveVisionUnverifiedMax,
@@ -381,6 +385,25 @@ describe('motionQueryPlan', () => {
     expect(plan.queries.every(isSafeStockMotionQuery)).toBe(true);
   });
 
+  it('asks many more distinct archive subjects than the keyless soft-pass floor needs', () => {
+    const airline = motionQueryPlan(AIRLINE_TOPIC, false, { stockKeyed: false, faceSeek: true });
+    expect(airline.boostCount).toBeGreaterThanOrEqual(32);
+    const housing = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
+    expect(housing.boostCount).toBeGreaterThanOrEqual(18);
+    for (const plan of [airline, housing]) {
+      expect(new Set(plan.queries).size).toBe(plan.queries.length);
+      expect(plan.queries.every(isSafeStockMotionQuery)).toBe(true);
+    }
+  });
+
+  it('adds literal topic subjects to keyless topics with no curated pack', () => {
+    const plan = motionQueryPlan('The county water plant that dumped lead into the supply', false, {
+      stockKeyed: false,
+    });
+    expect(plan.queries).toEqual(expect.arrayContaining(['water plant']));
+    expect(plan.queries.every(isSafeStockMotionQuery)).toBe(true);
+  });
+
   it('adds apartment-first packs for housing in both modes', () => {
     const keyed = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: true, faceSeek: true });
     expect(keyed.queries).toEqual(
@@ -425,6 +448,70 @@ describe('archiveShortQueryVariants', () => {
   });
 });
 
+describe('archiveTopicSubjectQueries', () => {
+  it('derives concrete subjects from the topic and drops story framing words', () => {
+    const subjects = archiveTopicSubjectQueries(
+      'The nursing home cameras that recorded abuse for years, and nobody noticed',
+    );
+    expect(subjects).toEqual(expect.arrayContaining(['nursing home', 'home cameras']));
+    expect(subjects.some((q) => /\b(nobody|noticed|years|that)\b/.test(q))).toBe(false);
+    expect(subjects.every(isSafeStockMotionQuery)).toBe(true);
+  });
+
+  it('returns nothing to search when the topic is all framing', () => {
+    expect(archiveTopicSubjectQueries('What they will never tell you about this')).toEqual([]);
+  });
+});
+
+describe('planMotionFetchRounds', () => {
+  const queries = ['airliner cabin', 'cabin pressurization', 'oxygen mask demonstration'];
+
+  it('gives keyed runs a second provider page over the leading topical subjects', () => {
+    const rounds = planMotionFetchRounds(queries, { keyed: true, queryCap: 3 });
+    expect(rounds.map((r) => r.label)).toEqual(['primary', 'provider-page-2']);
+    expect(rounds[0].attempts.every((a) => a.page === 1 && !a.extra)).toBe(true);
+    expect(rounds[1].attempts.every((a) => a.page === 2 && a.extra)).toBe(true);
+    expect(rounds[1].attempts.map((a) => a.query)).toEqual(queries);
+  });
+
+  it('gives keyless runs one archive sweep round per label, tied back to the subject', () => {
+    const rounds = planMotionFetchRounds(queries, { keyed: false, queryCap: 3 });
+    expect(rounds[0].label).toBe('primary');
+    expect(rounds.slice(1).map((r) => r.label)).toEqual([
+      'archive-sweep-footage',
+      'archive-sweep-film',
+      'archive-sweep-newsreel',
+    ]);
+    const sweep = rounds[1].attempts[0];
+    expect(sweep).toMatchObject({ query: 'airliner cabin footage', subject: 'airliner cabin', extra: true });
+    expect(rounds.slice(1).flatMap((r) => r.attempts).every((a) => a.extra && a.page === 1)).toBe(true);
+  });
+
+  it('never plans the same query twice and honours the query cap', () => {
+    const rounds = planMotionFetchRounds([...queries, 'airliner cabin', 'jet airliner takeoff'], {
+      keyed: false,
+      queryCap: 3,
+    });
+    const keys = rounds.flatMap((r) => r.attempts).map((a) => `${a.query}|${a.page}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.some((k) => k.startsWith('jet airliner takeoff'))).toBe(false);
+  });
+});
+
+describe('archive lookup and fetch budgets', () => {
+  it('spends far more archive metadata lookups when keyless', () => {
+    expect(archiveEvidenceLookupBudget(false)).toBeGreaterThan(archiveEvidenceLookupBudget(true) * 4);
+  });
+
+  it('gives the wider keyless search plan more wall-clock, overridable by env', () => {
+    expect(resolveMotionFetchBudgetMs(false, {})).toBeGreaterThan(resolveMotionFetchBudgetMs(true, {}));
+    expect(resolveMotionFetchBudgetMs(false, { AUTOTUBE_MOTION_FETCH_BUDGET_MS: '1000' })).toBe(1000);
+    expect(resolveMotionFetchBudgetMs(false, { AUTOTUBE_MOTION_FETCH_BUDGET_MS: 'nope' })).toBe(
+      resolveMotionFetchBudgetMs(false, {}),
+    );
+  });
+});
+
 describe('withArchiveSweepSuffix', () => {
   it('re-ranks a short subject without breaking query safety', () => {
     expect(withArchiveSweepSuffix('airliner cabin', 'footage')).toBe('airliner cabin footage');
@@ -441,7 +528,7 @@ describe('resolveMotionVolumeTargets', () => {
     const airline = resolveMotionVolumeTargets({ ...base, hasStockKeys: true, topicBlob: AIRLINE_TOPIC });
     expect(airline.mode).toBe('keyed');
     expect(airline.aggressive).toBe(true);
-    expect(airline.minVideos).toBeGreaterThanOrEqual(30);
+    expect(airline.minVideos).toBeGreaterThanOrEqual(40);
     expect(airline.perSegTarget).toBe(6);
     expect(airline.introTarget).toBe(7);
     const housing = resolveMotionVolumeTargets({ ...base, hasStockKeys: true, topicBlob: HOUSING_TOPIC });
@@ -493,6 +580,23 @@ describe('formatMotionPathLog', () => {
     expect(line).toContain('injected=27/30');
   });
 
+  it('reports how deep a keyed run paged, without keyless archive noise', () => {
+    const line = formatMotionPathLog({
+      motionKeyMode: 'keyed',
+      motionKeyPexels: true,
+      motionKeyPixabay: true,
+      pexelsFetched: 40,
+      pixabayFetched: 18,
+      motionPageTwoQueries: 14,
+      motionTargetVideos: 42,
+      videoTopUp: new Array(42),
+    });
+    expect(line).toContain('page2-queries=14');
+    expect(line).not.toContain('sweep-queries');
+    expect(line).not.toContain('dead-subjects');
+    expect(line).toContain('injected=42/42');
+  });
+
   it('names the keyless path with archive attempt and evidence counts', () => {
     const line = formatMotionPathLog({
       motionKeyMode: 'keyless',
@@ -512,6 +616,56 @@ describe('formatMotionPathLog', () => {
     expect(line).toContain('sweep-queries=12');
     expect(line).toContain('evidence-rejected=21');
     expect(line).toContain('injected=16/18');
+  });
+
+  it('says why a keyless run has no provider counts, and where archive recall went', () => {
+    const line = formatMotionPathLog({
+      motionKeyMode: 'keyless',
+      archiveLiveFetched: 19,
+      archiveQueriesTried: 33,
+      archiveRawHits: 214,
+      archiveDeadSubjects: 7,
+      archiveEvidenceCacheHits: 26,
+      motionTargetVideos: 18,
+      videoTopUp: new Array(16),
+    });
+    expect(line).toContain('Archive.org only');
+    expect(line).toContain('dead-subjects=7');
+    expect(line).toContain('raw-hits=214');
+    expect(line).toContain('evidence-cached=26');
+  });
+});
+
+describe('keyless archive subjects are questions, not evidence', () => {
+  it('rejects an opaque item returned under a widened archive subject', () => {
+    const subjects = motionQueryPlan(AIRLINE_TOPIC, false, { stockKeyed: false }).queries;
+    expect(subjects).toEqual(expect.arrayContaining(['explosive decompression test', 'airline stewardess cabin']));
+    for (const query of ['explosive decompression test', 'airline stewardess cabin']) {
+      const verdict = archiveEvidenceVerdict(
+        {
+          source: 'Archive.org live',
+          url: 'https://archive.org/download/reel_88/reel_88.mp4',
+          title: '',
+          query,
+        },
+        { query, topicBlob: AIRLINE_TOPIC },
+      );
+      expect(verdict.ok).toBe(false);
+      expect(verdict.reason).toBe('no-provider-metadata');
+    }
+  });
+
+  it('still admits an item whose own metadata names the widened subject', () => {
+    const verdict = archiveEvidenceVerdict(
+      {
+        source: 'Archive.org live',
+        url: 'https://archive.org/download/decomp58/decomp58.mp4',
+        title: 'explosive decompression of a pressurized airliner cabin, 1958 test flight',
+        query: 'explosive decompression test',
+      },
+      { query: 'explosive decompression test', topicBlob: AIRLINE_TOPIC },
+    );
+    expect(verdict.ok).toBe(true);
   });
 });
 

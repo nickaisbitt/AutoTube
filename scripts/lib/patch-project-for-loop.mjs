@@ -4,9 +4,15 @@
 import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './stock-media-urls.mjs';
 import { buildImpactBeatsForTopic, buildShockHookLine, hookClashesWithTopic } from '../../e2e/openRouterMock.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
-import { hookOverlayWords, preserveHookWordBoundaries } from './hook-overlay-text.mjs';
+import {
+  hookOverlayWords,
+  hookOverlayViolation,
+  isInstructionHookText,
+  preserveHookWordBoundaries,
+} from './hook-overlay-text.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
 import {
+  isAirlineTopic,
   isBankScamTopic,
   isHealthcareCyberTopic,
   isHeistTopic,
@@ -34,13 +40,8 @@ function topicKeywords(topic) {
     .slice(0, 4);
 }
 
-function isInstructionOverlay(text) {
-  const t = (text || '').trim();
-  return /^(replace|rewrite|start with|use|change|fix|try|make|update|swap)\b/i.test(t)
-    || /\brewrite\s+line\b/i.test(t)
-    || /\bas:\s*$/i.test(t)
-    || /^(line\s*1|first\s+line)\b/i.test(t);
-}
+// Shared with the render-side overlay gate — one definition of "instruction".
+const isInstructionOverlay = isInstructionHookText;
 
 /** Pull the suggested hook text from watcher "Replace X with Y" fixes. */
 export function extractOverlayFromVisionFix(visionFix) {
@@ -166,7 +167,9 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   ) {
     return clampWords('THIS WARNING CAME TOO LATE');
   }
-  if (/airline|cabin[-\s]?pressure|cabin\s*pressure/i.test(t)) {
+  // Airline family via the shared detector (cockpit / oxygen-mask / aviation
+  // safety phrasing included) — never a medical or other-family overlay here.
+  if (isAirlineTopic(topicOnly) || /airline|cabin[-\s]?pressure|cabin\s*pressure/i.test(t)) {
     return clampWords(buildTensionOverlayFromHook(hookLine) || 'WHY DID THE CABIN KEEP FAILING?');
   }
   if (/indie\s*game|source\s*code|cloud\s*lockout/i.test(t)) {
@@ -187,14 +190,17 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     const keys = keywords.map((k) => k.toLowerCase());
     const prefLower = preferred.toLowerCase();
     const overlapsTopic = keys.some((k) => k.length > 3 && prefLower.includes(k.toLowerCase()));
-    // Drop stale overlays from a previous topic.
-    if (overlapsTopic || options.forcePreferred === true) {
+    // Drop stale overlays from a previous topic. No force/self-attest bypass:
+    // a preferred overlay only survives when it genuinely matches this story.
+    if (overlapsTopic && !hookOverlayViolation(preferred, { topic: topicOnly, spokenHook: hookLine })) {
       return clampWords(preferred);
     }
   }
 
   const fromVision = extractOverlayFromVisionFix(options.visionFix);
-  if (fromVision) return clampWords(fromVision);
+  if (fromVision && !hookOverlayViolation(fromVision, { topic: topicOnly, spokenHook: hookLine })) {
+    return clampWords(fromVision);
+  }
 
   // Specific families before generic leak/expose catch-all.
   if (isInsuranceFraudTopic(topicOnly)) {
@@ -569,6 +575,13 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     });
   }
 
+  // Fix-state overlays are claims, not truth — validate before adopting so a
+  // stale overlay from a previous topic can't self-attest onto this video.
+  const fallbackHookLine = project.exportSettings?.hookLine ?? project.hookLine ?? fixState.hookLine ?? undefined;
+  const fixStateOverlay = fixState.hookOverlay
+    && !hookOverlayViolation(fixState.hookOverlay, { topic, spokenHook: fallbackHookLine || '' })
+    ? fixState.hookOverlay
+    : undefined;
   project.exportSettings = {
     ...(project.exportSettings || {}),
     quality: 'high',
@@ -578,8 +591,8 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     youtubeMode: true,
   // Karaoke on by default in loop.
   karaokeCaptions: fixState.karaokeCaptions !== false,
-    hookOverlay: project.exportSettings?.hookOverlay ?? fixState.hookOverlay ?? undefined,
-    hookLine: project.exportSettings?.hookLine ?? project.hookLine ?? fixState.hookLine ?? undefined,
+    hookOverlay: project.exportSettings?.hookOverlay ?? fixStateOverlay,
+    hookLine: fallbackHookLine,
   };
 
   return project;

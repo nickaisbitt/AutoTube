@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { repairMergedCaptionText } from '../deploy/server-render/ffmpegOverlays.mjs';
-import { hookOverlayWords } from '../scripts/lib/hook-overlay-text.mjs';
+import { repairMergedCaptionText, resolveRenderHookOverlay } from '../deploy/server-render/ffmpegOverlays.mjs';
+import {
+  hookOverlayWords,
+  hookOverlayViolation,
+  resolveHonestHookOverlay,
+  spokenHookFromProject,
+} from '../scripts/lib/hook-overlay-text.mjs';
 import { buildShortHookOverlay } from '../scripts/lib/patch-project-for-loop.mjs';
 import {
   rankStockImagesByTopic,
@@ -62,8 +67,21 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     }
   });
 
-  it('rejects a preferred overlay that is only a label', () => {
-    expect(buildShortHookOverlay('some topic', '', { preferredOverlay: 'BREAKING:', forcePreferred: true })).toBe('');
+  it('rejects a label-only preferred overlay even when a caller tries to force it', () => {
+    // forcePreferred was a self-attest bypass; it is no longer honored.
+    const overlay = buildShortHookOverlay('some topic', '', { preferredOverlay: 'BREAKING:', forcePreferred: true });
+    expect(overlay).not.toMatch(/BREAKING/);
+    expect(overlay.length).toBeGreaterThan(3);
+  });
+
+  it('never uses a forced cross-topic preferred overlay', () => {
+    const overlay = buildShortHookOverlay(
+      'Why grocery loyalty cards tracked shoppers into insurance pricing',
+      '',
+      { preferredOverlay: 'PATIENT RECORDS EXPOSED', forcePreferred: true },
+    );
+    expect(overlay).not.toBe('PATIENT RECORDS EXPOSED');
+    expect(overlay).toBe('LOYALTY CARDS SOLD YOU OUT');
   });
 
   it('honors a topic-overlapping preferred overlay', () => {
@@ -189,6 +207,93 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
   it('avoids URGENT keyword salad fallback for generic topics', () => {
     const overlay = buildShortHookOverlay('obscure municipal widget scandal', '');
     expect(overlay).not.toMatch(/^URGENT:/);
+  });
+});
+
+describe('hook overlay honesty — spoken hook must match on-screen text', () => {
+  const airlineTopic = 'How a regional airline hid recurring cabin-pressure failures';
+  const airlineHook = 'The cabin kept losing pressure — and they hid every report.';
+
+  it('bans a stale medical overlay on an airline topic', () => {
+    expect(
+      hookOverlayViolation('PATIENT RECORDS EXPOSED', { topic: airlineTopic, spokenHook: airlineHook }),
+    ).toBeTruthy();
+  });
+
+  it('rejects an overlay that shares no words with the spoken hook or topic', () => {
+    expect(
+      hookOverlayViolation('YOUR BANK ACCOUNT IS EMPTY', { topic: airlineTopic, spokenHook: airlineHook }),
+    ).toBeTruthy();
+  });
+
+  it('keeps the airline question overlay for the airline story', () => {
+    expect(
+      hookOverlayViolation('WHY DID THE CABIN KEEP FAILING?', { topic: airlineTopic, spokenHook: airlineHook }),
+    ).toBeNull();
+  });
+
+  it('allows medical words only when the airline story itself is medical (medevac)', () => {
+    const medevac = 'Why air ambulance patient transfer flights kept losing cabin pressure';
+    expect(hookOverlayViolation('PATIENT FLIGHTS KEPT FAILING', { topic: medevac, spokenHook: '' })).toBeNull();
+    expect(hookOverlayViolation('PATIENT RECORDS EXPOSED', { topic: airlineTopic, spokenHook: '' })).toBeTruthy();
+  });
+
+  it('rejects editor-instruction claims outright', () => {
+    expect(
+      hookOverlayViolation('Rewrite line 1 as: Why did the cabin keep failing?', {
+        topic: airlineTopic,
+        spokenHook: airlineHook,
+      }),
+    ).toBeTruthy();
+  });
+
+  it('resolveHonestHookOverlay falls back to the spoken hook when every claim is dishonest', () => {
+    const { text, rejected } = resolveHonestHookOverlay({
+      topic: airlineTopic,
+      spokenHook: airlineHook,
+      candidates: ['PATIENT RECORDS EXPOSED', 'YOUR BANK ACCOUNT IS EMPTY'],
+    });
+    expect(text).toBe(airlineHook);
+    expect(rejected).toHaveLength(2);
+  });
+
+  it('spokenHookFromProject prefers the narrated first sentence over declared claims', () => {
+    const project = {
+      hookLine: 'A stale hook claim from fix state.',
+      script: [{ narration: 'The cabin kept losing pressure. More body detail follows here.' }],
+    };
+    expect(spokenHookFromProject(project)).toBe('The cabin kept losing pressure.');
+  });
+
+  it('resolveRenderHookOverlay burns only overlays that match the narration', () => {
+    const project = {
+      topic: airlineTopic,
+      hookLine: airlineHook,
+      exportSettings: { hookOverlay: 'PATIENT RECORDS EXPOSED', hookLine: airlineHook },
+      script: [{ narration: `${airlineHook} Stay with me — this gets worse.` }],
+    };
+    const { text, rejected } = resolveRenderHookOverlay(project, {});
+    expect(text).not.toBe('PATIENT RECORDS EXPOSED');
+    expect(text).toBe(airlineHook);
+    expect(rejected.some((r) => r.source === 'exportSettings.hookOverlay')).toBe(true);
+  });
+
+  it('resolveRenderHookOverlay ignores a stale env overlay claim (no self-attest)', () => {
+    const project = {
+      topic: airlineTopic,
+      hookLine: airlineHook,
+      exportSettings: { hookOverlay: 'WHY DID THE CABIN KEEP FAILING?' },
+      script: [{ narration: `${airlineHook} Stay with me — this gets worse.` }],
+    };
+    const honest = resolveRenderHookOverlay(project, { AUTOTUBE_HOOK_OVERLAY: 'PATIENT RECORDS EXPOSED' });
+    expect(honest.text).toBe('WHY DID THE CABIN KEEP FAILING?');
+
+    const staleOnly = resolveRenderHookOverlay(
+      { ...project, exportSettings: {} },
+      { AUTOTUBE_HOOK_OVERLAY: 'PATIENT RECORDS EXPOSED' },
+    );
+    expect(staleOnly.text).toBe(airlineHook);
+    expect(staleOnly.rejected.some((r) => r.source === 'env AUTOTUBE_HOOK_OVERLAY')).toBe(true);
   });
 });
 

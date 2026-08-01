@@ -6,7 +6,12 @@ import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
 import { narrationSpeechIntervals } from './narration.mjs';
-import { hookOverlayWords, preserveHookWordBoundaries } from '../../scripts/lib/hook-overlay-text.mjs';
+import {
+  hookOverlayWords,
+  preserveHookWordBoundaries,
+  resolveHonestHookOverlay,
+  spokenHookFromProject,
+} from '../../scripts/lib/hook-overlay-text.mjs';
 import { buildImpactBeatsForTopic } from '../../scripts/lib/impactBeatsByTopic.mjs';
 import { impactBeatsMatchTopic, isAirlineTopic } from '../../scripts/lib/topic-family.mjs';
 
@@ -72,16 +77,30 @@ function formatAssTime(sec) {
 }
 
 /**
- * Burn hook overlay for first N seconds (watcher 0–3s audit).
- * @param {string} videoPath
+ * Pick the hook text to burn. Every candidate — exportSettings, env vars,
+ * declared hook lines — is validated against the topic and the spoken hook;
+ * dishonest claims fall through to the spoken hook itself (no self-attest).
  * @param {object} project
- * @param {{ durationSec?: number }} [options]
+ * @param {NodeJS.ProcessEnv} [env]
  */
-function isInstructionHookText(text) {
-  const t = String(text || '').trim();
-  return /^(replace|rewrite|start with|use|change|fix|try)\b/i.test(t)
-    || /\brewrite\s+line\b/i.test(t)
-    || /\bshock hook\b/i.test(t);
+export function resolveRenderHookOverlay(project, env = process.env) {
+  const topic = [
+    project?.topic,
+    project?.title,
+    project?.exportSettings?.topic,
+    project?.exportSettings?.title,
+  ].filter(Boolean).join(' ');
+  return resolveHonestHookOverlay({
+    topic,
+    spokenHook: spokenHookFromProject(project),
+    candidates: [
+      { text: project?.exportSettings?.hookOverlay, source: 'exportSettings.hookOverlay' },
+      { text: env.AUTOTUBE_HOOK_OVERLAY, source: 'env AUTOTUBE_HOOK_OVERLAY' },
+      { text: project?.hookLine, source: 'project.hookLine' },
+      { text: env.AUTOTUBE_HOOK_LINE, source: 'env AUTOTUBE_HOOK_LINE' },
+      { text: project?.exportSettings?.hookLine, source: 'exportSettings.hookLine' },
+    ],
+  });
 }
 
 /**
@@ -130,21 +149,22 @@ export function layoutHookLines(words, videoW, videoH) {
   return { lines, fontSize };
 }
 
+/**
+ * Burn hook overlay for first N seconds (watcher 0–3s audit).
+ * @param {string} videoPath
+ * @param {object} project
+ * @param {{ durationSec?: number }} [options]
+ */
 export function overlayHookText(videoPath, project, options = {}) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
 
-  let hookText =
-    project.exportSettings?.hookOverlay
-    || process.env.AUTOTUBE_HOOK_OVERLAY
-    || project.hookLine
-    || process.env.AUTOTUBE_HOOK_LINE
-    || project.exportSettings?.hookLine;
-  // Never burn editor instructions onto the frame.
-  if (hookText && isInstructionHookText(hookText)) {
-    hookText = project.hookLine || project.exportSettings?.hookLine || '';
-    if (isInstructionHookText(hookText)) hookText = '';
+  const { text: hookText, rejected: rejectedHookClaims } = resolveRenderHookOverlay(project);
+  for (const claim of rejectedHookClaims) {
+    console.warn(
+      `  [ffmpeg] hook overlay claim rejected (${claim.source}) — ${claim.reason}: "${claim.text.slice(0, 60)}"`,
+    );
   }
-  if (!hookText?.trim()) return { ok: false, error: 'no hook text' };
+  if (!hookText?.trim()) return { ok: false, error: 'no honest hook text (all overlay claims rejected)' };
 
   const probe = spawnSync(
     'ffprobe',

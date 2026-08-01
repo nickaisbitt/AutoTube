@@ -125,6 +125,14 @@ function isBrightCabinInterior(asset) {
     && /\b(bright|daylight|sunny|well.?lit|window light|interior)\b/.test(blob);
 }
 
+/** A human face the viewer can read, not a distant figure or a back-of-head shot. */
+export function hasReadableFaceVisual(asset) {
+  if (isBackViewDeadAir(asset)) return false;
+  const blob = assetBlob(asset);
+  return /\b(face|faces|portrait|close.?up|eyes|expression|reaction|worried|shocked|crying|smiling)\b/.test(blob)
+    && /\b(passengers?|pilots?|attendants?|crew|traveller?s?|person|people|woman|women|man|men|family|couple)\b/.test(blob);
+}
+
 function isAirlineIntroLeadVisual(asset) {
   if (isRejectedIntroLeadVisual(asset, { airline: true })) return false;
   const blob = assetBlob(asset);
@@ -409,6 +417,8 @@ export function buildEditTimeline(project, options = {}) {
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait|eyes/i.test(blob)) {
           score += !coldEval && /nursing|elderly|care\s*home|cctv|abuse/i.test(topicBlob) ? 1 : 4;
         }
+        // Airline hooks open on an empty cabin unless a readable face outranks it.
+        if (isIntro && topicIsAirline && hasReadableFaceVisual(a)) score += 4;
         // Cold intro: beat match outranks establishing stock.
         if (coldEval && isIntro && beatBoost > 0) score += beatBoost * 2;
         if (isOutro && /checklist|subscribe|relieved|direct.?camera|verify|call/i.test(blob)) score += 2;

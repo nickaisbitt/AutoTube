@@ -1,7 +1,7 @@
 /**
  * Harvest quality gates: topic/segment relevance + per-segment volume.
  */
-import { isAirlineTopic, isCovidTopic, isHeistTopic, isHousingTopic, isNursingHomeTopic, isWorkplaceTopic } from './topic-family.mjs';
+import { isAirlineTopic, isCovidTopic, isHealthcareTopic, isHeistTopic, isHousingTopic, isNursingHomeTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
 import { isJunkWebVolumeStillUrl, isUnsafeMediaUrl } from './stock-media-urls.mjs';
 
@@ -99,6 +99,120 @@ export const PORT_FERRY_LOOP_RE =
 export const CAMERA_PHONE_LOOP_RE =
   /\b(person filming with phone|filming with smartphone|holding phone recording|camera on tripod generic|dslr camera close up)\b/i;
 
+/**
+ * Medical clickbait thumbnails ("HIDDEN CAUSE OF 60% DEATHS", "doctors don't want
+ * you to know") — YouTube-style hook art scraped as if it were documentary B-roll.
+ */
+export const MEDICAL_CLICKBAIT_DEATH_STAT_RE =
+  /\b\d{1,3}\s*(?:%|percent)\s*(?:of\s+)?(?:all\s+)?(?:deaths?|mortality|fatalities|patients?|cases?)\b|\b(?:deaths?|dying|mortality|fatalities)\b[^.]{0,24}?\b\d{1,3}\s*(?:%|percent)/i;
+
+export const MEDICAL_CLICKBAIT_HOOK_RE =
+  /\b(?:hidden|secret|shocking|real|true|leading|number\s*(?:one|1)|no\.?\s*1|#\s*1)\s+(?:cause|causes|reason|killer)\b|\bsilent\s+killer\b|\bdoctors?\s+(?:don'?t|do\s+not|won'?t|will\s+not|never)\s+(?:want\s+you\s+to\s+)?(?:know|tell|say)\b|\bwhat\s+(?:doctors?|hospitals?)\s+(?:aren'?t|are\s+not|won'?t)\s+(?:telling|tell)\b|\bthis\s+(?:is\s+)?(?:killing|kills)\s+(?:you|millions|thousands)\b/i;
+
+/** Clickbait art only reads as "medical" when death/illness vocabulary is present. */
+export const MEDICAL_CLICKBAIT_CONTEXT_RE =
+  /\b(deaths?|dying|mortality|fatalities|hospitals?|patients?|doctors?|nurses?|clinic|medical|medicine|disease|diseases|cancer|stroke|heart\s+attack|diabetes|blood\s+pressure|symptoms?|diagnosis|surgery|icu)\b/i;
+
+const MEDICAL_CLICKBAIT_ANY_RE = new RegExp(
+  `${MEDICAL_CLICKBAIT_DEATH_STAT_RE.source}|${MEDICAL_CLICKBAIT_HOOK_RE.source}`,
+  'i',
+);
+
+/**
+ * @param {string} haystack
+ * @param {string} [contextText]
+ * @returns {string|null}
+ */
+export function medicalClickbaitReason(haystack, contextText = '') {
+  const h = String(haystack || '');
+  if (!h.trim()) return null;
+  const ctx = String(contextText || '');
+  // Health investigations may legitimately harvest mortality framing; other stories may not.
+  if (isHealthcareTopic(ctx)) return null;
+  if (!MEDICAL_CLICKBAIT_CONTEXT_RE.test(h)) return null;
+  if (MEDICAL_CLICKBAIT_DEATH_STAT_RE.test(h)) return 'medical death-stat clickbait thumbnail';
+  if (MEDICAL_CLICKBAIT_HOOK_RE.test(h)) return 'medical clickbait thumbnail';
+  return null;
+}
+
+/** Hospital/ICU stock on a civil-aviation story (oxygen *masks* stay allowed). */
+export const AIRLINE_MEDICAL_STOCK_RE =
+  /\b(hospitals?|hospital\s+(?:bed|corridor|room|ward)|patients?|icu|intensive\s*care|nurses?|nursing\s*station|doctors?|surgeons?|surgery|operating\s*room|ambulances?|stretcher|paramedics?|iv\s*drip|infusion|ventilator|defibrillator|nasal\s*cannula|heart\s*monitor|ecg|ekg|medical\s*(?:team|staff|equipment|monitor|attention)|oxygen\s*(?:tank|cylinder|therapy|concentrator))\b/i;
+
+/** Medical-aviation stories (medevac / air ambulance) legitimately mix the two. */
+const MEDICAL_AVIATION_TOPIC_RE =
+  /\b(medevac|air\s*ambulance|medical\s*(?:flight|evacuation|transport)|patient\s*transfer\s*flight)\b/i;
+
+/**
+ * Warships and military aviation are not civil-cabin B-roll. An aircraft carrier
+ * reads as "aviation" to every keyword gate ("aircraft", "flight deck", "runway"),
+ * so it has to be rejected before those tokens are scored.
+ */
+export const MILITARY_NAVAL_VISUAL_RE = new RegExp(
+  [
+    '\\baircraft\\s*carriers?\\b',
+    '\\bcarrier\\s*(?:deck|strike\\s*group|air\\s*wing|landing)\\b',
+    '\\b(?:war|battle)ships?\\b',
+    '\\bnaval\\b',
+    '\\bnavy\\b(?![-\\s]*blue)',
+    '\\bu\\.?s\\.?s\\.?\\s+[a-z]{3,}',
+    '\\b(?:frigate|destroyer|corvette|submarine)s?\\b',
+    '\\b(?:fighter\\s*jets?|jet\\s*fighters?|warplanes?|gunships?)\\b',
+    '\\bf\\/?a[-\\s]?18\\b',
+    '\\bf[-\\s]?(?:1[4-8]|2[12]|35)\\b',
+    '\\bmig[-\\s]?\\d+\\b',
+    '\\bair\\s*force\\s*(?:base|one|jet|plane|aircraft|cargo)\\b',
+    '\\bmilitary\\s*(?:aircraft|jets?|planes?|helicopter|transport|airfield|base|cargo)\\b',
+    '\\bmarine\\s*corps\\b',
+    '\\barmy\\s*aviation\\b',
+    '\\bmissile\\s*launch\\b',
+    '\\bcatapult\\s*launch\\b',
+  ].join('|'),
+  'i',
+);
+
+export const MILITARY_TOPIC_RE =
+  /\b(military|navy|naval|army|air\s*force|marine\s*corps|warship|warplane|aircraft\s*carrier|combat|wartime|squadron|pentagon|defen[cs]e\s*(?:department|ministry)|fighter\s*jet|troops?|soldiers?)\b/i;
+
+/**
+ * @param {string} haystack
+ * @param {string} [contextText]
+ * @returns {string|null}
+ */
+export function militaryNavalJunkReason(haystack, contextText = '') {
+  const h = String(haystack || '');
+  if (!h.trim()) return null;
+  if (MILITARY_TOPIC_RE.test(String(contextText || ''))) return null;
+  if (!MILITARY_NAVAL_VISUAL_RE.test(h)) return null;
+  return 'military/naval footage on a civil story';
+}
+
+/** Burned-in tickers and non-Latin captions fight our own overlays and read as scraped news. */
+export const FOREIGN_NEWS_TICKER_RE =
+  /\b(?:japanese|chinese|korean|arabic|thai|hindi|russian|cyrillic|hebrew|vietnamese|turkish)\s+(?:news|tv|television|broadcast|subtitles?|captions?|characters?|text|ticker|headlines?)\b|\bnews\s+(?:ticker|crawl)\b|\bticker\s+tape\s+news\b|\bscrolling\s+(?:headline|headlines|news|text|ticker)\b|\bchyron\b|\bburn(?:ed|t)[-\s]?in\s+(?:subtitles?|captions?|text)\b|\bforeign[-\s]language\s+(?:news|subtitles?|captions?|text)\b|\bunreadable\s+(?:text|overlay|caption|subtitles?)\b|\b(?:nhk|cgtn)\b/i;
+
+/** CJK / Cyrillic / Arabic / Thai glyphs in alt or title. */
+export const NON_LATIN_OVERLAY_SCRIPT_RE =
+  /[\u0400-\u04ff\u0600-\u06ff\u0e00-\u0e7f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/;
+
+/**
+ * @param {string} haystack
+ * @param {string} [contextText]
+ * @returns {string|null}
+ */
+export function unreadableOverlayReason(haystack, contextText = '') {
+  const h = String(haystack || '');
+  if (!h.trim()) return null;
+  const ctx = String(contextText || '');
+  if (NON_LATIN_OVERLAY_SCRIPT_RE.test(h) && !NON_LATIN_OVERLAY_SCRIPT_RE.test(ctx)) {
+    return 'non-Latin news overlay text';
+  }
+  if (FOREIGN_NEWS_TICKER_RE.test(h) && !FOREIGN_NEWS_TICKER_RE.test(ctx)) {
+    return 'foreign/unreadable news ticker overlay';
+  }
+  return null;
+}
+
 /** Monochrome stock unless the topic explicitly asks for it. */
 export const MONOCHROME_STOCK_RE =
   /\b(black[\s-]+and[\s-]+white|b\s*[&/]\s*w|monochrome|gr[ae]yscale)\b/i;
@@ -139,6 +253,13 @@ export const AIRLINE_FINANCIAL_PAPERWORK_RE =
 export const AIRLINE_GENERIC_DESK_PAPERWORK_RE =
   /(?=.*\b(desk|desktop|office\s+table|tabletop|conference\s+table|clipboard|legal\s+pad|notepad)\b)(?=.*\b(paperwork|documents?|papers?|reports?|forms?|folders?|files?|contracts?|invoices?|spreadsheets?|charts?|report\s+pads?)\b).+/i;
 
+function airlineOffBrandJunkReason(haystack, contextText) {
+  if (!isAirlineTopic(contextText)) return null;
+  if (MEDICAL_AVIATION_TOPIC_RE.test(contextText)) return null;
+  if (AIRLINE_MEDICAL_STOCK_RE.test(haystack)) return 'hospital/medical stock for airline';
+  return null;
+}
+
 function airlinePaperworkJunkReason(haystack, contextText) {
   if (!isAirlineTopic(contextText)) return null;
   if (AIRLINE_MAIL_PAPERWORK_RE.test(haystack)) return 'generic mail/postal stock for airline';
@@ -163,6 +284,14 @@ export function genericStockJunkReason(haystack, contextText = '') {
   if (BLURRY_LOW_QUALITY_RE.test(h)) return 'blurry/low-quality stock';
   if (OVEREXPOSED_STOCK_RE.test(h)) return 'overexposed/washed-out stock';
   if (AI_LOOKING_STOCK_RE.test(h)) return 'AI-looking/deepfake-ish stock';
+  const clickbait = medicalClickbaitReason(h, ctx);
+  if (clickbait) return clickbait;
+  const militaryNaval = militaryNavalJunkReason(h, ctx);
+  if (militaryNaval) return militaryNaval;
+  const unreadableOverlay = unreadableOverlayReason(h, ctx);
+  if (unreadableOverlay) return unreadableOverlay;
+  const airlineOffBrand = airlineOffBrandJunkReason(h, ctx);
+  if (airlineOffBrand) return airlineOffBrand;
   if (AIRLINE_SAFETY_DEMO_STOCK_RE.test(h)) return 'generic life-vest/safety-demo stock';
   if (AIRPLANE_CABIN_WINDOW_RE.test(h) && DARK_WINDOW_TONE_RE.test(h)) {
     return 'dark airplane/cabin-window stock';
@@ -628,7 +757,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     if (!hasStockKeys && videoCount < stockKeyAirlineVideos) {
       // A discounted pool is only earned by visual aviation evidence (alt/title/URL),
       // never by the query we searched with.
-      const strongVideos = countAirlineStrongVideos(uniqueVideos);
+      const strongVideos = countAirlineStrongVideos(uniqueVideos, topicBlob);
       const strongNeeded = Math.max(
         AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS,
         Math.ceil(videoCount / 2),
@@ -730,6 +859,16 @@ const AIRLINE_HARD_REJECT_PATTERNS = [
     pattern:
       /\b(financial\s+reports?|annual\s+reports?|quarterly\s+reports?|financial\s+statements?|spreadsheet\s+reports?)\b/i,
   },
+  {
+    reason: 'medical-clickbait',
+    pattern: MEDICAL_CLICKBAIT_ANY_RE,
+    requires: MEDICAL_CLICKBAIT_CONTEXT_RE,
+  },
+  {
+    reason: 'military-naval',
+    pattern: MILITARY_NAVAL_VISUAL_RE,
+    skipWhen: MILITARY_TOPIC_RE,
+  },
 ];
 
 const AIRLINE_STRONG_CABIN_RE =
@@ -758,19 +897,23 @@ function airlineVideoBlob(asset = {}) {
   return `${asset.alt || ''} ${asset.title || ''} ${asset.source || ''} ${asset.sourceUrl || ''} ${asset.url || ''} ${asset.query || ''}`;
 }
 
-function airlineHardRejectReason(asset = {}) {
+function airlineHardRejectReason(asset = {}, topicBlob = '') {
   const blob = airlineVideoBlob(asset);
-  for (const { reason, pattern } of AIRLINE_HARD_REJECT_PATTERNS) {
+  const ctx = String(topicBlob || '');
+  for (const { reason, pattern, requires, skipWhen } of AIRLINE_HARD_REJECT_PATTERNS) {
+    if (skipWhen && skipWhen.test(ctx)) continue;
+    if (requires && !requires.test(blob)) continue;
     if (pattern.test(blob)) return reason;
   }
   return null;
 }
 
-function isAirlineStrongVideo(asset = {}) {
+function isAirlineStrongVideo(asset = {}, topicBlob = '') {
+  const topic = String(topicBlob || '') || 'airline cabin pressure';
   // Rejections read the full blob (query included) so junk fails closed…
   if (
-    airlineHardRejectReason(asset)
-    || isGenericStockJunk(airlineVideoBlob(asset), 'airline cabin pressure')
+    airlineHardRejectReason(asset, topic)
+    || isGenericStockJunk(airlineVideoBlob(asset), topic)
   ) {
     return false;
   }
@@ -796,9 +939,10 @@ function isAirlineStrongVideo(asset = {}) {
  * Unique videos carrying real aviation visual evidence (hard-junk pads already excluded).
  *
  * @param {object[]} [uniqueVideos]
+ * @param {string} [topicBlob]
  */
-export function countAirlineStrongVideos(uniqueVideos = []) {
-  return uniqueVideos.filter(isAirlineStrongVideo).length;
+export function countAirlineStrongVideos(uniqueVideos = [], topicBlob = '') {
+  return uniqueVideos.filter((asset) => isAirlineStrongVideo(asset, topicBlob)).length;
 }
 
 export function airlineSoftPassMotionFailureReason(project, stats = {}) {
@@ -808,18 +952,18 @@ export function airlineSoftPassMotionFailureReason(project, stats = {}) {
   const uniqueVideos = stats.uniqueVideos || uniqueVideoAssets(project?.media || []);
   const videoCount = stats.videoCount ?? uniqueVideos.length;
 
-  const hardJunkVideos = uniqueVideos.filter((asset) => airlineHardRejectReason(asset));
+  const hardJunkVideos = uniqueVideos.filter((asset) => airlineHardRejectReason(asset, topicBlob));
   const hardJunkRatio = videoCount ? hardJunkVideos.length / videoCount : 0;
   // Fail closed on a junk-dominated pool, but don't nuke a clean top-up over 1–2 leftovers.
   if (
     hardJunkVideos.length >= 3
     || (videoCount > 0 && hardJunkRatio > AIRLINE_SOFT_PASS_HARD_JUNK_RATIO_MAX)
   ) {
-    const reason = airlineHardRejectReason(hardJunkVideos[0]) || 'hard-junk';
+    const reason = airlineHardRejectReason(hardJunkVideos[0], topicBlob) || 'hard-junk';
     return `soft-pass-motion-airline-junk(${reason}:${hardJunkVideos.length}/${videoCount})`;
   }
 
-  const cleanVideos = uniqueVideos.filter((asset) => !airlineHardRejectReason(asset));
+  const cleanVideos = uniqueVideos.filter((asset) => !airlineHardRejectReason(asset, topicBlob));
   const genericJunkVideos = stats.genericJunkVideos ?? cleanVideos.filter((asset) => (
     isGenericStockJunk(airlineVideoBlob(asset), topicBlob)
   )).length;
@@ -829,7 +973,7 @@ export function airlineSoftPassMotionFailureReason(project, stats = {}) {
     return `soft-pass-motion-airline-generic-junk(${genericJunkVideos}/${cleanCount} videos)`;
   }
 
-  const strongVideos = countAirlineStrongVideos(cleanVideos);
+  const strongVideos = countAirlineStrongVideos(cleanVideos, topicBlob);
   if (strongVideos < AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS) {
     return `soft-pass-motion-airline-aviation-strong-floor(${strongVideos}/${AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS} videos)`;
   }

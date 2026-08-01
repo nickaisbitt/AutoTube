@@ -318,6 +318,39 @@ describe('buildEditTimeline — anti-repetition', () => {
     expect(new Set(leadIds)).toEqual(new Set(['pilot-face', 'passenger-face', 'bright-cabin']));
   });
 
+  it('opens an airline intro on a face, not an empty cabin or a carrier', () => {
+    const project = {
+      topic: 'How a regional airline hid recurring cabin-pressure failures',
+      script: [{ id: 'intro', type: 'intro', duration: 5, narration: 'cabin pressure failures' }],
+      media: [
+        {
+          id: 'carrier',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/carrier/carrier.mp4',
+          alt: 'aircraft carrier flight deck navy jets launching',
+        },
+        {
+          id: 'empty-cabin',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/empty-cabin/empty-cabin.mp4',
+          alt: 'bright cabin interior aisle daylight empty seats',
+        },
+        {
+          id: 'passenger-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/passenger-face/passenger-face.mp4',
+          alt: 'worried passenger face close up airplane cabin',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    expect(tl[0].assetId).toBe('passenger-face');
+    expect(tl.filter((e) => e.startSec < 3).map((e) => e.assetId)).not.toContain('carrier');
+  });
+
   it('prefers unused global URLs before over-reusing a single clip', () => {
     const project = {
       topic: 'generic investigation topic',

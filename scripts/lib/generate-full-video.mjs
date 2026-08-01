@@ -46,7 +46,10 @@ import {
   isOffBrandVisual,
   isGenericStockJunk,
   isVolumePaddingAsset,
+  medicalClickbaitReason,
   mergeVolumePadding,
+  militaryNavalJunkReason,
+  unreadableOverlayReason,
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
 import {
@@ -919,6 +922,11 @@ function airlineQueryVisionBypass(clip = {}, query = '', topicBlob = '') {
 function isAirlineRelevantClip(clip = {}, topicBlob = '') {
   const evidence = airlineVisualEvidenceBlob(clip);
   if (AIRLINE_OFF_TOPIC_RE.test(evidence)) return false;
+  // Carriers/warships read as "aircraft" to every aviation keyword below, and
+  // clickbait hook art reads as documentary once the thumbnail is cropped.
+  if (militaryNavalJunkReason(evidence, topicBlob)) return false;
+  if (medicalClickbaitReason(evidence, topicBlob)) return false;
+  if (unreadableOverlayReason(evidence, topicBlob)) return false;
   if (AIRLINE_STRONG_RE.test(evidence)) return true;
   if (AIRLINE_WEAK_RE.test(evidence) && AIRLINE_WEAK_CONTEXT_RE.test(evidence)) return true;
   // Echo-only alts are not proof; trusted queries still need visual metadata.

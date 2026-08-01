@@ -373,6 +373,218 @@ describe('airline generic paperwork junk', () => {
   });
 });
 
+describe('airline medical clickbait + military/naval junk', () => {
+  const airlineTopic = 'How a regional airline hid recurring cabin-pressure failures';
+
+  it('rejects medical clickbait thumbnails on airline topics', async () => {
+    const { genericStockJunkReason, isGenericStockJunk, medicalClickbaitReason } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+
+    expect(genericStockJunkReason('HIDDEN CAUSE OF 60% DEATHS thumbnail', airlineTopic)).toMatch(
+      /clickbait/i,
+    );
+    expect(genericStockJunkReason('shocking: 40 percent of patients die', airlineTopic)).toMatch(
+      /clickbait/i,
+    );
+    expect(
+      genericStockJunkReason('what doctors are not telling you about this silent killer', airlineTopic),
+    ).toMatch(/clickbait/i);
+    expect(isGenericStockJunk('the #1 cause of death doctors hide', airlineTopic)).toBe(true);
+
+    // Hospital/ICU pads are not cabin-pressure B-roll either.
+    expect(genericStockJunkReason('hospital patient in icu bed with nurse', airlineTopic)).toMatch(
+      /hospital|medical/i,
+    );
+    expect(genericStockJunkReason('ambulance stretcher paramedics loading patient', airlineTopic)).toMatch(
+      /hospital|medical/i,
+    );
+
+    // Real cabin oxygen-mask footage must survive the medical gate.
+    expect(
+      genericStockJunkReason('airplane cabin oxygen masks deployed above passengers', airlineTopic),
+    ).toBeNull();
+    expect(genericStockJunkReason('pilot cockpit headset instruments close-up', airlineTopic)).toBeNull();
+
+    // Health investigations may legitimately carry mortality framing.
+    expect(
+      medicalClickbaitReason(
+        '60% of deaths linked to the outage',
+        'The hospital hack that exposed 10 million patient records',
+      ),
+    ).toBeNull();
+  });
+
+  it('rejects aircraft carriers and warships unless the topic is military', async () => {
+    const { genericStockJunkReason, militaryNavalJunkReason, MILITARY_NAVAL_VISUAL_RE } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+
+    expect(MILITARY_NAVAL_VISUAL_RE.test('us navy aircraft carrier flight deck')).toBe(true);
+    expect(MILITARY_NAVAL_VISUAL_RE.test('navy blue seat fabric close up')).toBe(false);
+
+    expect(genericStockJunkReason('aircraft carrier flight deck jets launching', airlineTopic)).toMatch(
+      /military|naval/i,
+    );
+    expect(genericStockJunkReason('navy warship at sea aerial', airlineTopic)).toMatch(/military|naval/i);
+    expect(genericStockJunkReason('f/a-18 fighter jet carrier landing', airlineTopic)).toMatch(
+      /military|naval/i,
+    );
+    expect(genericStockJunkReason('airplane cabin aisle passengers daylight', airlineTopic)).toBeNull();
+
+    // Military stories may show military aviation.
+    expect(
+      militaryNavalJunkReason(
+        'aircraft carrier flight deck jets launching',
+        'How the Navy hid cabin-pressure failures on military transport aircraft',
+      ),
+    ).toBeNull();
+  });
+
+  it('drops clickbait and carrier assets in filterAssetsByRelevance', async () => {
+    const { filterAssetsByRelevance } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const project = {
+      topic: airlineTopic,
+      script: [
+        {
+          id: 's1',
+          title: 'Cabin pressure failures',
+          narration: 'airline cabin pressure failure cockpit oxygen inspection',
+        },
+      ],
+      media: [],
+    };
+
+    const { media: kept, dropped } = filterAssetsByRelevance(
+      [
+        {
+          id: 'clickbait',
+          segmentId: 's1',
+          type: 'image',
+          url: 'https://images.example.com/clickbait.jpg',
+          alt: 'HIDDEN CAUSE OF 60% DEATHS hospital thumbnail',
+          query: 'airplane cabin pressure failure',
+        },
+        {
+          id: 'carrier',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.example.com/carrier.mp4',
+          alt: 'aircraft carrier flight deck navy jets',
+          query: 'aircraft hangar',
+        },
+        {
+          id: 'cabin',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.example.com/cabin.mp4',
+          alt: 'airplane cabin oxygen mask deployed above worried passengers',
+          query: 'oxygen mask deploy airplane cabin',
+        },
+      ],
+      project,
+      { minScore: 0.2 },
+    );
+
+    expect(
+      dropped.some((d: { url?: string; reason?: string }) => d.url?.includes('clickbait') && /clickbait/i.test(d.reason || '')),
+    ).toBe(true);
+    expect(
+      dropped.some((d: { url?: string; reason?: string }) => d.url?.includes('carrier') && /military|naval/i.test(d.reason || '')),
+    ).toBe(true);
+    expect(kept.map((a: { id: string }) => a.id)).toEqual(['cabin']);
+  });
+
+  it('fails the airline soft-pass on a carrier-dominated motion pool', async () => {
+    const { airlineSoftPassMotionFailureReason, countAirlineStrongVideos } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: Array.from({ length: 6 }, (_, i) => ({ id: `s${i + 1}` })),
+      media: Array.from({ length: 12 }, (_, i) => ({
+        type: 'video',
+        segmentId: `s${(i % 6) + 1}`,
+        url: `https://videos.example.com/carrier-${i}.mp4`,
+        alt: 'aircraft carrier flight deck navy jets launching',
+        source: 'Stock video pool',
+      })),
+    };
+
+    expect(airlineSoftPassMotionFailureReason(project)).toMatch(
+      /soft-pass-motion-airline-junk\(military-naval:/,
+    );
+    // "aircraft"/"flight deck" must not certify a carrier as strong aviation evidence.
+    expect(countAirlineStrongVideos(project.media, airlineTopic)).toBe(0);
+  });
+
+  it('rejects foreign news tickers and non-Latin overlays when detectable', async () => {
+    const { genericStockJunkReason, unreadableOverlayReason } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+
+    expect(genericStockJunkReason('japanese news broadcast with subtitles', airlineTopic)).toMatch(
+      /ticker|overlay/i,
+    );
+    expect(genericStockJunkReason('breaking news ticker chyron lower screen', airlineTopic)).toMatch(
+      /ticker|overlay/i,
+    );
+    expect(genericStockJunkReason('ニュース速報 airplane report', airlineTopic)).toMatch(
+      /non-latin|overlay/i,
+    );
+    expect(genericStockJunkReason('airplane cabin aisle passengers daylight', airlineTopic)).toBeNull();
+
+    // Stories that are about the foreign broadcast keep the footage.
+    expect(
+      unreadableOverlayReason(
+        'japanese news broadcast subtitles',
+        'How a japanese news broadcast exposed the airline cabin-pressure cover-up',
+      ),
+    ).toBeNull();
+  });
+
+  it('airline clip gates in the harvest pipeline reject carriers and clickbait art', async () => {
+    const { isAirlineRelevantClip, isJunkStockClip } = await import(
+      '../../../scripts/lib/generate-full-video.mjs'
+    );
+    const topic = 'The regional airline cabin-pressure cover-up that hid oxygen mask failures';
+
+    expect(
+      isAirlineRelevantClip(
+        { alt: 'aircraft carrier flight deck navy jets', query: 'aircraft hangar' },
+        topic,
+      ),
+    ).toBe(false);
+    expect(
+      isJunkStockClip(
+        { alt: 'aircraft carrier flight deck navy jets', query: 'aircraft hangar' },
+        topic,
+      ),
+    ).toBe(true);
+    expect(
+      isAirlineRelevantClip(
+        { alt: 'HIDDEN CAUSE OF 60% DEATHS hospital thumbnail', query: 'airplane cabin' },
+        topic,
+      ),
+    ).toBe(false);
+    expect(
+      isJunkStockClip(
+        { alt: 'HIDDEN CAUSE OF 60% DEATHS hospital thumbnail', query: 'airplane cabin' },
+        topic,
+      ),
+    ).toBe(true);
+    expect(
+      isAirlineRelevantClip(
+        {
+          alt: 'airplane cabin interior passengers seated aisle',
+          query: 'airplane cabin passenger face worried',
+        },
+        topic,
+      ),
+    ).toBe(true);
+  });
+});
+
 describe('isJunkStockClip + faceSeek relevance', () => {
   it('isJunkStockClip rejects generic filler patterns', async () => {
     const { isJunkStockClip } = await import('../../../scripts/lib/generate-full-video.mjs');

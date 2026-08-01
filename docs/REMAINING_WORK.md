@@ -1,5 +1,21 @@
 # AutoTube — Remaining Work (numbered)
 
+Last updated: 2026-08-01 (audit fix branch `cursor/fix-audit-blockers-b466`).
+
+## Status after multi-model audit fix sweep
+
+**Code/security/honesty gates:** largely DONE (see commits on this branch). `npm run dod:check` is green.
+
+**Product quality DoD (manual-with-keys):**
+- ✅ `generate:video` real airline topic produced MP4 (70.7s, 22.66 MB) with espeak fallback TTS and fail-closed harvest soft-pass.
+- ✅ `watch:video` exits 1 when not upload-ready (honesty works).
+- ❌ Upload-ready ≥7 not yet met on Archive-only keyless run (latest raw **5.4/10** — off-topic medical/carrier clips). Needs stock keys (Pexels/Pixabay) and/or further harvest relevance, then re-watch.
+
+
+---
+
+# AutoTube — Remaining Work (numbered)
+
 Last updated: 2026-08-01 on branch `cursor/fix-audit-blockers-b466`. Use item numbers in chat ("fix 3", "do 7").
 
 ## A — Multi-model audit fix sweep — DONE on this branch

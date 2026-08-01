@@ -76,15 +76,18 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
   const handleGenerateNarration = useCallback(async () => {
     if (!project) return;
     setCurrentStep('narration');
-    await generateNarration(project);
-    // Interactive UI stays on narration for review. Loop / generate:video
-    // (autotube_loop_fast_mode) must auto-advance or the harness hangs waiting
-    // for skip-ai-edit / continue CTA that never comes.
-    const loopFast =
-      typeof sessionStorage !== 'undefined' &&
-      sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
-    if (loopFast) {
-      setCurrentStep('ai_edit');
+    try {
+      await generateNarration(project);
+    } finally {
+      // Interactive UI stays on narration for review. Loop / generate:video
+      // (autotube_loop_fast_mode) must auto-advance even when TTS soft-fails,
+      // or the harness hangs waiting for skip-ai-edit / continue CTAs.
+      const loopFast =
+        typeof sessionStorage !== 'undefined' &&
+        sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
+      if (loopFast) {
+        setCurrentStep('ai_edit');
+      }
     }
   }, [project, generateNarration, setCurrentStep]);
 

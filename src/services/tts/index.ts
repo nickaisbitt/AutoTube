@@ -64,7 +64,11 @@ export { generateGrokTts } from './grokEngine';
  */
 export async function fetchServerTtsCapabilities(): Promise<{ grok: boolean; melo: boolean } | null> {
   try {
-    const res = await apiFetch('/api/tts/capabilities');
+    // Headless / flaky Vite must not hang the narration step forever — the
+    // generate harness waits on continue/skip CTAs that only appear after this.
+    const res = await apiFetch('/api/tts/capabilities', {
+      signal: AbortSignal.timeout(12_000),
+    });
     if (!res.ok) return null;
     return (await res.json()) as { grok: boolean; melo: boolean };
   } catch {

@@ -3209,13 +3209,55 @@ export async function generateFullVideo(options) {
     await dismissOnboarding(page);
     // Interactive UI may land on narration review (Continue to AI Edit). Loop
     // fast-mode auto-advances to AI Edit (skip-ai-edit). Accept either.
+    // Fail fast if Chromium dies mid-TTS — otherwise waitFor sits until 15min.
     const continueAi = page.getByTestId('continue-to-ai-edit-button');
     const skipAi = page.getByTestId('skip-ai-edit-button');
-    await Promise.race([
-      continueAi.waitFor({ timeout: narrationTimeoutMs }),
-      skipAi.waitFor({ timeout: narrationTimeoutMs }),
-    ]);
-    if (await continueAi.isVisible().catch(() => false)) {
+    const browserGone = new Promise((_, reject) => {
+      if (!browser?.isConnected()) {
+        reject(new Error('BROWSER_DISCONNECTED: Chromium gone before narration CTAs'));
+        return;
+      }
+      browser.once('disconnected', () => {
+        reject(new Error('BROWSER_DISCONNECTED: Chromium died during narration wait'));
+      });
+    });
+    const narrationReady = (async () => {
+      const deadline = Date.now() + narrationTimeoutMs;
+      while (Date.now() < deadline) {
+        if (await continueAi.isVisible().catch(() => false)) return 'continue';
+        if (await skipAi.isVisible().catch(() => false)) return 'skip';
+        // Loop-fast may have advanced past both buttons into assembly already.
+        const step = await page.evaluate(() => {
+          try {
+            const raw = localStorage.getItem('autotube_project');
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return {
+              step: parsed?.currentStep || parsed?.project?.status || null,
+              narr: (parsed?.project?.narration || []).length,
+            };
+          } catch {
+            return null;
+          }
+        }).catch(() => null);
+        if (step?.narr > 0 && (await page.getByTestId('skip-ai-edit-button').count().catch(() => 0)) === 0) {
+          // Narration clips exist but AI-edit UI missed — force skip via store path.
+          const forced = await page.evaluate(() => {
+            const btn = document.querySelector('[data-testid="skip-ai-edit-button"]');
+            if (btn instanceof HTMLElement) {
+              btn.click();
+              return 'clicked';
+            }
+            return null;
+          }).catch(() => null);
+          if (forced) return 'skip';
+        }
+        await page.waitForTimeout(500);
+      }
+      throw new Error(`NARRATION_TIMEOUT: no continue/skip CTA after ${Math.round(narrationTimeoutMs / 60000)}min`);
+    })();
+    const which = await Promise.race([narrationReady, browserGone]);
+    if (which === 'continue' || (await continueAi.isVisible().catch(() => false))) {
       await dismissOnboarding(page);
       await clickPipelineButton(page, continueAi, { timeout: 60_000 });
       await page.waitForTimeout(500);

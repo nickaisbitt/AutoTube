@@ -2663,7 +2663,20 @@ export async function generateFullVideo(options) {
     await clickPipelineButton(page, mediaNextBtn());
     log('⏳ Narration...');
     await dismissOnboarding(page);
-    await page.getByTestId('skip-ai-edit-button').waitFor({ timeout: narrationTimeoutMs });
+    // Interactive UI may land on narration review (Continue to AI Edit). Loop
+    // fast-mode auto-advances to AI Edit (skip-ai-edit). Accept either.
+    const continueAi = page.getByTestId('continue-to-ai-edit-button');
+    const skipAi = page.getByTestId('skip-ai-edit-button');
+    await Promise.race([
+      continueAi.waitFor({ timeout: narrationTimeoutMs }),
+      skipAi.waitFor({ timeout: narrationTimeoutMs }),
+    ]);
+    if (await continueAi.isVisible().catch(() => false)) {
+      await dismissOnboarding(page);
+      await clickPipelineButton(page, continueAi, { timeout: 60_000 });
+      await page.waitForTimeout(500);
+    }
+    await skipAi.waitFor({ timeout: Math.max(120_000, narrationTimeoutMs / 4) });
     if (fixState.rewriteScript === true) {
       log('✍️ rewriteScript lever ON — running AI edit instead of skip');
       const runAi = page.getByTestId('run-ai-edit-button').or(page.locator('button:has-text("Run AI Edit")').first());

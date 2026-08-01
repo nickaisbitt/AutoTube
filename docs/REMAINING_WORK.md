@@ -1,6 +1,6 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-01** — branch `cursor/fix-audit-blockers-b466` @ tip.
+Last updated: **2026-08-01** — branch `cursor/fix-audit-blockers-b466` @ Wave 5 tip (`64f261d`).
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 
@@ -36,16 +36,35 @@ Keyed vs keyless motion packs, topical per-segment floors, edit pacing, E2E auth
 | `npm run dod:check` | **PASS** — `deploy/server` absent; server-render sync OK |
 | `npm run lint` | **PASS** — `tsc --noEmit` exit 0 |
 
-### Wave F — generate + watch (keyless, prior proof)
+### Wave 5 — narration hang fixes (current tip)
 
-Cold airline topic on **Archive-only** harvest (no Pexels/Pixabay):
+Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d`):
+
+| Fix | Detail |
+|-----|--------|
+| Crashpad flags removed | `--disable-crash-reporter` / `--crashpad-handler-pid` flags dropped; headless_shell no longer killed |
+| Disconnect fail-fast | Browser `disconnected` event triggers immediate narration error instead of silent hang |
+| Invalid Melo BYOK skipped | Melo TTS BYOK path bypassed when server key is invalid; avoids hang before fallback |
+| Media → narration race fixed | `sanitize` + volume gate run before Narration starts; prevents race that produced silent/missing audio |
+| espeak-ng installed | VM now has `espeak-ng` for server-render TTS fallback when Kokoro is unreachable |
+
+### Wave F + Wave 5 — generate + watch proof (keyless)
+
+**Prior Wave F** — cold airline topic, Archive-only harvest:
 
 | Step | Status | Evidence |
 |------|--------|----------|
 | `npm run generate:video` | **PASS** | `FINAL-VIDEO-final.mp4` ~94.8 s / ~45.3 MB; `pexels=0 pixabay=0 archive=45`; soft-pass `15v/7segs`; exit **0** |
 | `npm run watch:video` | **PASS (fail-closed)** | Exit **1**; brutal raw **2.6**/10; upload-ready **NO**; criticals YES |
 
-Watcher honesty is working: low scores are reported and the process exits non-zero. That is the **expected** outcome without stock API keys.
+**Wave 5** — cold healthcare topic, Archive-only harvest (post narration-fix commits):
+
+| Step | Status | Evidence |
+|------|--------|----------|
+| `npm run generate:video` | **FAIL** | Exit **1**; `HARVEST_VOLUME_FAIL` — only 4/6 assets per segment after junk filters; keyless Archive exhausted |
+| `npm run watch:video` | **NOT RUN** | No MP4 produced |
+
+Watcher honesty is working: low/failing scores are reported and generate exits non-zero. Both outcomes are **expected** without stock API keys. Harvest floors have **not** been lowered.
 
 Local proof notes (gitignored): `test-recordings/dod-proof/airline-RESULT.txt`, `airline-WATCH_REPORT.md`, generate/watch logs.
 
@@ -64,13 +83,15 @@ grep -E '^(PEXELS|PIXABAY|VITE_PEXELS|VITE_PIXABAY)' .env.local || echo "MISSING
 
 `.env.local` has OpenRouter + `AUTOTUBE_API_KEY` only. See [`docs/ENV_DOD.md`](ENV_DOD.md) for the full key table and restart rules.
 
-Without at least one of `PEXELS_API_KEY` / `VITE_PEXELS_KEY` or `PIXABAY_API_KEY` / `VITE_PIXABAY_KEY`, `resolveStockKeyMode()` returns **keyless** → Archive/Mixkit-only harvest → thin motion, intermittent `HARVEST_VOLUME_FAIL`, and watcher raw scores stuck well below 7 even when generate succeeds.
+Without at least one of `PEXELS_API_KEY` / `VITE_PEXELS_KEY` or `PIXABAY_API_KEY` / `VITE_PIXABAY_KEY`, `resolveStockKeyMode()` returns **keyless** → Archive-only harvest → thin motion, `HARVEST_VOLUME_FAIL` on harder topics (proven: healthcare), and watcher raw scores stuck well below 7 even when generate succeeds.
+
+**Terminal status: `KEYS_BLOCKED`** — upload-ready ≥7 cannot be demonstrated on this VM without stock keys. Do not invent passing scores.
 
 | Bar | Status | Unblock |
 |-----|--------|---------|
-| **Upload-ready YES** | **BLOCKED (keys)** | Add stock keys per [`ENV_DOD.md`](ENV_DOD.md), restart Vite, regenerate + `watch:video` exit 0 |
-| **Brutal raw ≥ 7** | **BLOCKED (keys)** | Same; Wave F keyless raw was **2.6** — do not lower floors |
-| **3-topic proof pack** | **BLOCKED (keys)** | Only after upload-ready + raw ≥7 green on three cold topics under `test-recordings/dod-proof/` |
+| **Upload-ready YES** | **KEYS_BLOCKED** | Add stock keys per [`ENV_DOD.md`](ENV_DOD.md), restart Vite, regenerate + `watch:video` exit 0 |
+| **Brutal raw ≥ 7** | **KEYS_BLOCKED** | Same; Wave F keyless raw was **2.6**; Wave 5 healthcare: generate exit 1 — do not lower floors |
+| **3-topic proof pack** | **KEYS_BLOCKED** | Only after upload-ready + raw ≥7 green on three cold topics under `test-recordings/dod-proof/` |
 | **9.3 stretch** | **OPEN** (after ≥7) | `npm run loop:video -- --until-score 9.3` on cold topics |
 
 ---

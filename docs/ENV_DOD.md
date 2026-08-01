@@ -67,7 +67,9 @@ mode.
 
 | Variable | Purpose | Presence |
 |---|---|---|
-| `RAILWAY_API_TOKEN` | `npm run railway:completion-check` — verifies production deploy/image matches local HEAD | **PRESENT on this VM** |
+| `RAILWAY_API_TOKEN` | `npm run railway:completion-check` — verifies prod deploy/image matches local HEAD | **PRESENT** — cursor-worker *service* credential; rejected by backboard GQL (`Not Authorized`). Needs a Railway personal API token. |
+| `VITE_CF_ACCOUNT_ID` / `VITE_CF_STREAM_TOKEN` | Cloudflare Stream upload in browser | **PRESENT** — invalid/truncated; upload skipped by code guard |
+| `VITE_KOKORO_SERVER_URL` | Kokoro TTS server (external Docker) | **PRESENT** — host returns HTTP 404; TTS falls back to espeak-ng |
 
 ---
 
@@ -102,7 +104,9 @@ not shown.
 | `VITE_PEXELS_KEY` | ❌ **MISSING** | Keyed stock footage (Pexels, BYOK) |
 | `PIXABAY_API_KEY` | ❌ **MISSING** | Keyed stock footage (Pixabay) |
 | `VITE_PIXABAY_KEY` | ❌ **MISSING** | Keyed stock footage (Pixabay, BYOK) |
-| `RAILWAY_API_TOKEN` | ✅ yes | `railway:completion-check` |
+| `RAILWAY_API_TOKEN` | ⚠️ present (wrong scope) | `railway:completion-check` (currently fails — Not Authorized) |
+| `VITE_CF_ACCOUNT_ID` / `VITE_CF_STREAM_TOKEN` | ⚠️ present (invalid) | Cloudflare Stream upload (skipped by code) |
+| `VITE_KOKORO_SERVER_URL` | ⚠️ present (404) | Kokoro TTS (falls back to espeak-ng) |
 
 > Add at least one Pexels or Pixabay key to `.env.local` and restart the dev
 > server to reach upload-ready ≥ 7.  Keys for both providers together give the

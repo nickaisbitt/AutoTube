@@ -582,6 +582,17 @@ describe('airline medical clickbait + military/naval junk', () => {
         topic,
       ),
     ).toBe(true);
+
+    // Wave-2A off-topic stills: wildfire/Google/booking/false-pressure must fail closed.
+    for (const alt of [
+      "LA's Deadly Fires Triggered by Hidden Electrical Faults grid failures",
+      'SOME TERMINATED PROJECTS BY IT GIANT GOOGLE must watch failures hidden',
+      'How to book Allegiant Airline flight tickets',
+      'Calculate the final pressure of an ideal diatomic gas',
+    ]) {
+      expect(isAirlineRelevantClip({ alt, query: 'Hidden Failures' }, topic)).toBe(false);
+      expect(isJunkStockClip({ alt, query: 'Hidden Failures' }, topic)).toBe(true);
+    }
   });
 });
 
@@ -1095,6 +1106,9 @@ describe('airline harvest junk (wildfire/Google/booking/false-pressure)', () => 
       airlineHarvestJunkReason('Hugh Thompson Jr #shorts #viral hero pilot', airlineTopic),
     ).toMatch(/shorts|viral|clickbait/i);
     expect(
+      airlineHarvestJunkReason('Clinton Lynch tarmac meeting budget 2024', airlineTopic),
+    ).toMatch(/politics|budget/i);
+    expect(
       genericStockJunkReason('airplane cabin oxygen masks deployed above passengers', airlineTopic),
     ).toBeNull();
 
@@ -1142,6 +1156,69 @@ describe('airline harvest junk (wildfire/Google/booking/false-pressure)', () => 
     expect(dropped.some((d: { url?: string }) => d.url?.includes('dmcdn'))).toBe(true);
     expect(dropped.some((d: { url?: string }) => d.url?.includes('filo-question'))).toBe(true);
     expect(kept.map((a: { id: string }) => a.id)).toEqual(['cabin']);
+  });
+
+  it('exports locked regex constants for airline wave-2A junk patterns', async () => {
+    const {
+      AIRLINE_WILDFIRE_GRID_JUNK_RE,
+      AIRLINE_TECH_CLICKBAIT_JUNK_RE,
+      AIRLINE_BOOKING_PROMO_JUNK_RE,
+      AIRLINE_FALSE_PRESSURE_JUNK_RE,
+      AIRLINE_SOLAR_FUEL_PROMO_RE,
+      VIRAL_SHORTS_CLICKBAIT_RE,
+      AIRLINE_POLITICS_PAD_RE,
+    } = await import('../../../scripts/lib/harvest-quality.mjs');
+
+    expect(AIRLINE_WILDFIRE_GRID_JUNK_RE.test('deadly wildfires grid failures solar farms')).toBe(true);
+    expect(AIRLINE_TECH_CLICKBAIT_JUNK_RE.test('IT GIANT GOOGLE terminated projects must watch')).toBe(true);
+    expect(AIRLINE_BOOKING_PROMO_JUNK_RE.test('how to book airline flight tickets')).toBe(true);
+    expect(AIRLINE_FALSE_PRESSURE_JUNK_RE.test('ideal diatomic gas calculate the final pressure')).toBe(true);
+    expect(AIRLINE_SOLAR_FUEL_PROMO_RE.test('solar kerosene fuel made from sunlight')).toBe(true);
+    expect(VIRAL_SHORTS_CLICKBAIT_RE.test('hero pilot #shorts #viral')).toBe(true);
+    expect(AIRLINE_POLITICS_PAD_RE.test('clinton lynch tarmac meeting budget 2024')).toBe(true);
+  });
+
+  it('fails airline soft-pass on wildfire-dominated motion pools', async () => {
+    const { airlineSoftPassMotionFailureReason, countAirlineStrongVideos } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: Array.from({ length: 6 }, (_, i) => ({ id: `s${i + 1}` })),
+      media: Array.from({ length: 12 }, (_, i) => ({
+        type: 'video',
+        segmentId: `s${(i % 6) + 1}`,
+        url: `https://videos.example.com/wildfire-${i}.mp4`,
+        alt: "LA's Deadly Fires Triggered by Hidden Electrical Faults grid failures",
+        source: 'Stock video pool',
+      })),
+    };
+
+    expect(airlineSoftPassMotionFailureReason(project)).toMatch(
+      /soft-pass-motion-airline-junk\(wildfire-grid-solar:/,
+    );
+    expect(countAirlineStrongVideos(project.media, airlineTopic)).toBe(0);
+  });
+
+  it('fails airline soft-pass on false-pressure-dominated motion pools', async () => {
+    const { airlineSoftPassMotionFailureReason } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: Array.from({ length: 6 }, (_, i) => ({ id: `s${i + 1}` })),
+      media: Array.from({ length: 12 }, (_, i) => ({
+        type: 'video',
+        segmentId: `s${(i % 6) + 1}`,
+        url: `https://videos.example.com/physics-${i}.mp4`,
+        alt: 'Calculate the final pressure and temperature of an ideal diatomic gas',
+        source: 'Stock video pool',
+      })),
+    };
+
+    expect(airlineSoftPassMotionFailureReason(project)).toMatch(
+      /soft-pass-motion-airline-junk\(false-pressure:/,
+    );
   });
 
   it('does not score physics/game "pressure" stills via ambiguous topic words alone', async () => {

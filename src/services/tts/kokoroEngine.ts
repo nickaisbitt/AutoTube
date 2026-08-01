@@ -8,6 +8,7 @@
 
 import { logger } from '../logger';
 import type { TTSConfig, TTSEngine } from './interface';
+import { createTimeoutSignal, isCallerAbort } from './timeout';
 
 const KOKORO_TIMEOUT_MS = 10_000;
 const DEFAULT_VOICE = 'af_heart';
@@ -48,65 +49,56 @@ export const kokoroEngine: TTSEngine = {
 
     const selectedVoice = voice || DEFAULT_VOICE;
 
+    if (options?.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
+    const timeout = createTimeoutSignal(KOKORO_TIMEOUT_MS, options?.signal);
+
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), KOKORO_TIMEOUT_MS);
+      const endpoint = serverUrl.replace(/\/$/, '') + '/generate';
 
-      // Link external signal
-      if (options?.signal) {
-        if (options.signal.aborted) {
-          clearTimeout(timeoutId);
-          throw new DOMException('Aborted', 'AbortError');
-        }
-        options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text,
+          voice: selectedVoice,
+        }),
+        signal: timeout.signal,
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`Kokoro API returned ${response.status}: ${errText.substring(0, 200)}`);
       }
 
-      try {
-        const endpoint = serverUrl.replace(/\/$/, '') + '/generate';
-
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            text,
-            voice: selectedVoice,
-          }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          const errText = await response.text().catch(() => '');
-          throw new Error(`Kokoro API returned ${response.status}: ${errText.substring(0, 200)}`);
-        }
-
-        const audioBlob = await response.blob();
-        if (audioBlob.size === 0) {
-          throw new Error('Kokoro API returned empty audio response');
-        }
-
-        const blobUrl = URL.createObjectURL(audioBlob);
-        logger.success(
-          'KokoroTTS',
-          `Generated audio for "${text.substring(0, 40)}..." (${selectedVoice}, ${(audioBlob.size / 1024).toFixed(1)} KB)`,
-        );
-        return blobUrl;
-      } finally {
-        clearTimeout(timeoutId);
+      const audioBlob = await response.blob();
+      if (audioBlob.size === 0) {
+        throw new Error('Kokoro API returned empty audio response');
       }
+
+      const blobUrl = URL.createObjectURL(audioBlob);
+      logger.success(
+        'KokoroTTS',
+        `Generated audio for "${text.substring(0, 40)}..." (${selectedVoice}, ${(audioBlob.size / 1024).toFixed(1)} KB)`,
+      );
+      return blobUrl;
     } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        // Check if it was the external signal or our timeout
-        if (options?.signal?.aborted) {
-          throw err;
-        }
-        // Our timeout fired — server unreachable, return null for fallback
-        logger.warn('KokoroTTS', 'Server request timed out after 10 seconds');
+      if (timeout.timedOut()) {
+        // Server unreachable within the deadline — return null for fallback
+        logger.warn('KokoroTTS', `Server request timed out after ${KOKORO_TIMEOUT_MS / 1000} seconds`);
         return null;
+      }
+      if (isCallerAbort(err, options?.signal)) {
+        throw err;
       }
       logger.error('KokoroTTS', `TTS generation failed: ${(err as Error).message}`);
       return null;
+    } finally {
+      timeout.cleanup();
     }
   },
 };

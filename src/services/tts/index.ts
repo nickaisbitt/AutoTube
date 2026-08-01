@@ -29,7 +29,13 @@ import { kokoroEngine } from './kokoroEngine';
 import type { TTSConfig } from './interface';
 import { browserEngine } from './browserEngine';
 import { grokEngine } from './grokEngine';
-import { generateWithFallback } from './registry';
+import { describeTtsUnavailability, generateWithFallback } from './registry';
+import { createTimeoutSignal, isCallerAbort } from './timeout';
+
+/** Capability probe is a cheap GET — a slow one means the dev server is wedged. */
+const CAPABILITIES_TIMEOUT_MS = 12_000;
+/** Server TTS proxies synthesise a whole segment; generous but always bounded. */
+const PROXY_TIMEOUT_MS = 90_000;
 
 /** All available TTS engines (in priority order) — mirrors registry ENGINE_PRIORITY. */
 export const TTS_ENGINES = [kokoroEngine, grokEngine, browserEngine] as const;
@@ -49,8 +55,9 @@ export async function generateNarration(
   const result = await generateWithFallback(text, config, options);
 
   if (result === null) {
-    logger.error('TTS', `All TTS engines failed for text: "${text.substring(0, 50)}..."`);
-    throw new Error('All TTS engines failed to generate narration');
+    const reason = describeTtsUnavailability(config);
+    logger.error('TTS', `All TTS engines failed for text: "${text.substring(0, 50)}..." — ${reason}`);
+    throw new Error(`All TTS engines failed to generate narration (${reason})`);
   }
 
   return result;
@@ -63,16 +70,23 @@ export { generateGrokTts } from './grokEngine';
  * Returns null on network error (e.g. running without the dev server / offline).
  */
 export async function fetchServerTtsCapabilities(): Promise<{ grok: boolean; melo: boolean } | null> {
+  // Headless / flaky Vite must not hang the narration step forever — the
+  // generate harness waits on continue/skip CTAs that only appear after this.
+  const timeout = createTimeoutSignal(CAPABILITIES_TIMEOUT_MS);
   try {
-    // Headless / flaky Vite must not hang the narration step forever — the
-    // generate harness waits on continue/skip CTAs that only appear after this.
-    const res = await apiFetch('/api/tts/capabilities', {
-      signal: AbortSignal.timeout(12_000),
-    });
+    const res = await apiFetch('/api/tts/capabilities', { signal: timeout.signal });
     if (!res.ok) return null;
     return (await res.json()) as { grok: boolean; melo: boolean };
   } catch {
+    if (timeout.timedOut()) {
+      logger.warn(
+        'TTS',
+        `Server capability probe timed out after ${CAPABILITIES_TIMEOUT_MS / 1000}s — assuming no server TTS keys`,
+      );
+    }
     return null;
+  } finally {
+    timeout.cleanup();
   }
 }
 
@@ -83,23 +97,31 @@ export async function fetchServerTtsCapabilities(): Promise<{ grok: boolean; mel
  */
 export async function generateGrokTtsViaProxy(
   text: string,
-  options?: { voice?: string; signal?: AbortSignal },
+  options?: { voice?: string; signal?: AbortSignal; timeoutMs?: number },
 ): Promise<string | null> {
+  const timeoutMs = options?.timeoutMs ?? PROXY_TIMEOUT_MS;
+  const timeout = createTimeoutSignal(timeoutMs, options?.signal);
   try {
     const res = await apiFetch('/api/tts/grok', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voice: options?.voice || 'Sal' }),
-      signal: options?.signal,
+      signal: timeout.signal,
     });
     if (!res.ok) return null; // 503 = not configured; other = upstream error
     const blob = await res.blob();
     if (blob.size === 0) return null;
     return URL.createObjectURL(blob);
   } catch (err) {
-    if ((err as Error).name === 'AbortError') throw err;
+    if (timeout.timedOut()) {
+      logger.warn('GrokTTS', `Server proxy timed out after ${timeoutMs / 1000}s — falling back`);
+      return null;
+    }
+    if (isCallerAbort(err, options?.signal)) throw err;
     logger.warn('GrokTTS', `Server proxy failed: ${(err as Error).message}`);
     return null;
+  } finally {
+    timeout.cleanup();
   }
 }
 
@@ -110,23 +132,31 @@ export async function generateGrokTtsViaProxy(
  */
 export async function generateMeloTtsViaProxy(
   text: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; timeoutMs?: number },
 ): Promise<string | null> {
+  const timeoutMs = options?.timeoutMs ?? PROXY_TIMEOUT_MS;
+  const timeout = createTimeoutSignal(timeoutMs, options?.signal);
   try {
     const res = await apiFetch('/api/tts/melo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
-      signal: options?.signal,
+      signal: timeout.signal,
     });
     if (!res.ok) return null;
     const blob = await res.blob();
     if (blob.size === 0) return null;
     return URL.createObjectURL(blob);
   } catch (err) {
-    if ((err as Error).name === 'AbortError') throw err;
+    if (timeout.timedOut()) {
+      logger.warn('MeloTTS', `Server proxy timed out after ${timeoutMs / 1000}s — falling back`);
+      return null;
+    }
+    if (isCallerAbort(err, options?.signal)) throw err;
     logger.warn('MeloTTS', `Server proxy failed: ${(err as Error).message}`);
     return null;
+  } finally {
+    timeout.cleanup();
   }
 }
 
@@ -134,8 +164,10 @@ export async function generateMeloTts(
   text: string,
   accountId: string,
   apiToken: string,
-  options?: { signal?: AbortSignal }
+  options?: { signal?: AbortSignal; timeoutMs?: number }
 ): Promise<string | null> {
+  const timeoutMs = options?.timeoutMs ?? PROXY_TIMEOUT_MS;
+  const timeout = createTimeoutSignal(timeoutMs, options?.signal);
   try {
     // Model slug + request/response shape must match the server renderer
     // (deploy/server-render/narration.mjs): @cf/myshell-ai/melotts expects
@@ -148,7 +180,7 @@ export async function generateMeloTts(
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ prompt: text, lang: 'en' }),
-      signal: options?.signal
+      signal: timeout.signal
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -167,8 +199,15 @@ export async function generateMeloTts(
     }
     return URL.createObjectURL(blob);
   } catch (err) {
+    if (timeout.timedOut()) {
+      logger.warn('MeloTTS', `Cloudflare request timed out after ${timeoutMs / 1000}s — falling back`);
+      return null;
+    }
+    if (isCallerAbort(err, options?.signal)) throw err;
     logger.error('MeloTTS', `MeloTTS failed for text: "${text.substring(0, 40)}..."`, err);
     return null;
+  } finally {
+    timeout.cleanup();
   }
 }
 

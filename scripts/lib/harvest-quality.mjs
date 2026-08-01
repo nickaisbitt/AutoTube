@@ -57,6 +57,18 @@ export const BLURRY_LOW_QUALITY_RE =
 export const FOUND_FOOTAGE_AESTHETIC_RE =
   /\b(found[\s-]?footage|vhs|film grain|heavy grain|noisy footage|lo-?fi video|retro camcorder aesthetic)\b/i;
 
+/**
+ * Film-strip / reel graphics and film-leader countdowns — Archive.org wrapper
+ * art (sprocket borders, academy leaders, clapperboards) scraped as if it were
+ * documentary B-roll. Wave F watch report flagged these leaking into airline cuts.
+ */
+export const FILM_STRIP_GRAPHIC_RE =
+  /\b(film[\s-]?strips?|filmstrips?|film\s+reels?|movie\s+reels?|cinema\s+reels?|film\s+leader|academy\s+leader|countdown\s+leader|film\s+countdown|leader\s+countdown|sprocket\s+holes?|celluloid|clapper[\s-]?boards?|clapboards?|film\s+slate|(?:8|16|35)\s*mm\s+film|film\s+negative\s+strip|film\s+frames?\s+(?:border|overlay)|old[\s-]?film\s+(?:effect|overlay|border|frame))\b/i;
+
+/** Topics that legitimately show film strips/reels (film history, archives, cinema). */
+export const FILM_TOPIC_CONTEXT_RE =
+  /\b(films?|filmmaker|cinema|movies?|reels?|archival|projection(?:ist)?|hollywood|celluloid)\b/i;
+
 /** Washed-out / overexposed stock. */
 export const OVEREXPOSED_STOCK_RE =
   /\b(overexposed|blown.?out|washed.?out|high.?key white|bleached white|too bright)\b/i;
@@ -282,7 +294,7 @@ function airlinePaperworkJunkReason(haystack, contextText) {
 
 /** Wildfire / grid-failure news art scraped via "hidden failures" queries. */
 export const AIRLINE_WILDFIRE_GRID_JUNK_RE =
-  /\b(wildfires?|forest\s*fires?|deadly\s*fires?|grid\s*failures?|electrical\s*faults?|power\s*grid|solar\s*farms?|solar\s*panels?|photovoltaic)\b/i;
+  /\b(wildfires?|forest\s*fires?|deadly\s*fires?|grid\s*failures?|electrical\s*faults?|power\s*grid|solar\s*farms?|solar\s*panels?|photovoltaic|solar\s*(?:arrays?|cells?|energy|power(?:\s*plants?)?|installations?|rooftops?)|rooftop\s*solar)\b/i;
 
 /** Tech-giant clickbait and logo pads. */
 export const AIRLINE_TECH_CLICKBAIT_JUNK_RE =
@@ -298,7 +310,11 @@ export const AIRLINE_FALSE_PRESSURE_JUNK_RE =
 
 /** SAF / solar-kerosene marketing on a cabin-pressure investigation. */
 export const AIRLINE_SOLAR_FUEL_PROMO_RE =
-  /\b(solar\s+kerosene|fuel\s+made\s+from\s+sunlight|sustainable\s+aviation\s+fuel|\bsaf\b|sunlight.{0,40}airline|airline.{0,40}solar\s+fuel)\b/i;
+  /\b(solar\s+kerosene|fuel\s+made\s+from\s+sunlight|sustainable\s+aviation\s+fuels?|\be-?saf\b|\bsaf\b|sunlight.{0,40}airline|airline.{0,40}solar\s+fuel|solar\s+jet\s+fuel|sun[-\s]?to[-\s]?liquid|power[-\s]?to[-\s]?liquid|\bptl\s+fuels?\b|synthetic\s+(?:jet\s+)?fuels?|synfuels?|e[-\s]?fuels?|green\s+(?:jet\s+)?fuels?|carbon[-\s]?neutral\s+(?:jet\s+)?fuels?|bio[-\s]?jet\s+fuels?|aviation\s+biofuels?|solar\s+(?:reactor|refinery|fuel\s+plant)|synhelion)\b/i;
+
+/** Topics genuinely about SAF/solar fuel (exempt from the promo gate). */
+const AIRLINE_SOLAR_FUEL_TOPIC_RE =
+  /\b(solar\s*kerosene|sustainable\s+aviation|saf|sunlight\s+fuel|e-?fuel|synthetic\s+fuel|biofuel)\b/i;
 
 /** YouTube Shorts / viral clickbait packaging. */
 export const VIRAL_SHORTS_CLICKBAIT_RE =
@@ -333,7 +349,7 @@ export function airlineHarvestJunkReason(haystack, contextText = '') {
   if (AIRLINE_FALSE_PRESSURE_JUNK_RE.test(h)) {
     return 'false-pressure (game/physics/spacecraft) stock';
   }
-  if (AIRLINE_SOLAR_FUEL_PROMO_RE.test(h) && !/\b(solar\s*kerosene|sustainable\s+aviation|saf|sunlight\s+fuel)\b/i.test(ctx)) {
+  if (AIRLINE_SOLAR_FUEL_PROMO_RE.test(h) && !AIRLINE_SOLAR_FUEL_TOPIC_RE.test(ctx)) {
     return 'solar-fuel/SAF promo for cabin-pressure story';
   }
   if (VIRAL_SHORTS_CLICKBAIT_RE.test(h)) {
@@ -356,6 +372,9 @@ export function genericStockJunkReason(haystack, contextText = '') {
   if (!h.trim()) return null;
 
   if (FOUND_FOOTAGE_AESTHETIC_RE.test(h)) return 'grainy/found-footage stock';
+  if (FILM_STRIP_GRAPHIC_RE.test(h) && !FILM_TOPIC_CONTEXT_RE.test(ctx)) {
+    return 'film-strip/reel graphic wrapper';
+  }
   if (BLURRY_LOW_QUALITY_RE.test(h)) return 'blurry/low-quality stock';
   if (OVEREXPOSED_STOCK_RE.test(h)) return 'overexposed/washed-out stock';
   if (AI_LOOKING_STOCK_RE.test(h)) return 'AI-looking/deepfake-ish stock';
@@ -1115,7 +1134,12 @@ const AIRLINE_HARD_REJECT_PATTERNS = [
   {
     reason: 'solar-fuel-promo',
     pattern: AIRLINE_SOLAR_FUEL_PROMO_RE,
-    skipWhen: /\b(solar\s*kerosene|sustainable\s+aviation|saf|sunlight\s+fuel)\b/i,
+    skipWhen: AIRLINE_SOLAR_FUEL_TOPIC_RE,
+  },
+  {
+    reason: 'film-strip-graphic',
+    pattern: FILM_STRIP_GRAPHIC_RE,
+    skipWhen: FILM_TOPIC_CONTEXT_RE,
   },
   {
     reason: 'politics-pad',

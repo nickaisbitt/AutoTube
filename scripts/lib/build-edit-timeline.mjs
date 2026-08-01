@@ -327,13 +327,20 @@ export function buildEditTimeline(project, options = {}) {
   const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
   const topicIsCameraStory = CAMERA_STORY_RE.test(project.topic || '');
   const introLeadOptions = { airline: topicIsAirline, cameraStory: topicIsCameraStory };
-  // Airline/housing hooks must open on a readable face when one exists —
-  // detected independently of cold-eval so the rule holds in every mode.
+  // Hooks open on a readable face when one exists, on any topic — detected
+  // independently of cold-eval so the rule holds in every mode. Camera
+  // stories are the one exception: the surveillance frame is the intended
+  // lead subject there, so it competes with faces on score alone.
   const faceTierOptions = { airline: topicIsAirline, housing: isHousingTopic(project.topic || '') };
-  const faceFirstIntroTopic = faceTierOptions.airline || faceTierOptions.housing;
+  const faceFirstIntroTopic = !topicIsCameraStory;
   const beatSheet = project.visualBeatSheet;
   const beatsBySeg = new Map();
   const recentTimelineUrls = [];
+  // Full cross-segment pick history. The capped look-back window above
+  // shrinks to 1 with exactly 3 unique URLs (so it can leave candidates), so
+  // it cannot see an alternating pair on its own — ping-pong detection needs
+  // the uncapped trail of picked URLs.
+  const timelinePickUrlHistory = [];
   let airlineLimitedClusterUseTotal = 0;
   let previousTimelineUrl = null;
   let previousTimelineCluster = null;
@@ -587,17 +594,25 @@ export function buildEditTimeline(project, options = {}) {
         const key = urlKey(candidate);
         return !(isHumanCluster(cluster) && key && key !== previousTimelineUrl);
       };
+      // Block a candidate that would complete an A B A B alternation (…X, Y,
+      // X then Y again) when a usable third URL exists to cut to instead.
+      // With fewer than 3 usable URLs the escape pool is empty and the
+      // alternation is the best available coverage, so it stands.
       const continuesTwoClipPingPong = (candidate) => {
-        if (!segEnoughUrls || isIntro || isOutro) return false;
+        if (isIntro || isOutro) return false;
         const key = urlKey(candidate);
-        if (!key || !lastUrl || !previousTimelineUrl) return false;
-        const pair = new Set([lastUrl, previousTimelineUrl]);
-        if (pair.size < 2 || !pair.has(key)) return false;
-        const recent = recentTimelineUrls.slice(-Math.min(recentTimelineUrls.length, 4));
-        if (recent.length < 2 || !recent.every((u) => pair.has(u))) return false;
+        if (!key || timelinePickUrlHistory.length < 3) return false;
+        const back3 = timelinePickUrlHistory[timelinePickUrlHistory.length - 3];
+        const back2 = timelinePickUrlHistory[timelinePickUrlHistory.length - 2];
+        const back1 = timelinePickUrlHistory[timelinePickUrlHistory.length - 1];
+        if (back3 !== back1 || back2 === back1 || key !== back2) return false;
+        const pair = new Set([back1, back2]);
+        // Escape eligibility reads intrinsic fit (reuse ignored) — a third
+        // URL that has been used once is still a valid escape; the use-count
+        // ceiling is enforced separately below.
         const escapePool = uniqueAssetsByUrl([...ordered, ...borrowPool]).filter((c) => {
           const escapeKey = urlKey(c);
-          return escapeKey && !pair.has(escapeKey) && scoreAsset(c) >= 0;
+          return escapeKey && !pair.has(escapeKey) && scoreAsset(c, null, { ignoreReuse: true }) >= 0;
         });
         return escapePool.some((c) => {
           const escapeKey = urlKey(c);
@@ -711,7 +726,23 @@ export function buildEditTimeline(project, options = {}) {
       }
       if (!asset && segmentEntryCount > 0) {
         const prev = entries[entries.length - 1];
-        const capEnd = segEnoughUrls ? prev.startSec + segMaxBodyHoldSec : end;
+        // Cap the hold at ~2–3s only when coverage offers an intrinsically
+        // acceptable refresh (never-use and scorer-banned subjects — e.g.
+        // airline paperwork/mail clusters past their one global use — do not
+        // count). Otherwise holding the current clip beats cutting to a
+        // banned subject, and a truly thin pool must not render a gap.
+        const coveragePool = uniqueAssetsByUrl([
+          ...ordered,
+          ...(isIntro || isOutro ? bookendCandidates(globalPool) : globalPool),
+        ]);
+        const coverageHasAlternative = uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS
+          && coveragePool.some((c) => {
+            const key = urlKey(c);
+            if (c.id === lastAssetId || (key && key === lastUrl)) return false;
+            if (isNeverUseVisual(c)) return false;
+            return scoreAsset(c, activeBeat, { ignoreReuse: true }) >= 0;
+          });
+        const capEnd = coverageHasAlternative ? prev.startSec + segMaxBodyHoldSec : end;
         const cappedEnd = Math.min(end, capEnd);
         if (cappedEnd > prev.endSec + 0.01) {
           entries[entries.length - 1].endSec = cappedEnd;
@@ -759,6 +790,7 @@ export function buildEditTimeline(project, options = {}) {
         recentTimelineUrls.push(assetUrl);
         while (recentTimelineUrls.length > recentUrlWindow) recentTimelineUrls.shift();
       }
+      if (assetUrl) timelinePickUrlHistory.push(assetUrl);
       if (lastUrl) {
         // Always count globally so hardMax is timeline-wide, not per-segment.
         urlUseCount.set(lastUrl, (urlUseCount.get(lastUrl) || 0) + 1);

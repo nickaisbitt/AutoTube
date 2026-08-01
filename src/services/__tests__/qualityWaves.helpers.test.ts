@@ -532,6 +532,35 @@ describe('quality waves 2–5 helpers', () => {
     expect(soft.reason).toBe('soft-pass-motion-airline-generic-junk(5/17 videos)');
   });
 
+  it('airline soft-pass-motion fails closed on wildfire/Google/booking/false-pressure junk pools', async () => {
+    const { airlineSoftPassMotionFailureReason } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const junkAlts = [
+      "LA's Deadly Fires Triggered by Hidden Electrical Faults grid failures",
+      'SOME TERMINATED PROJECTS BY IT GIANT GOOGLE must watch failures hidden',
+      'How to book Allegiant Airline flight tickets',
+      'Calculate the final pressure of an ideal diatomic gas',
+    ];
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: Array.from({ length: 12 }, (_, i) => ({
+        type: 'video',
+        segmentId: `s${(i % 6) + 1}`,
+        url: `https://videos.pexels.com/airline-junk-${i}.mp4`,
+        alt: junkAlts[i % junkAlts.length],
+        query: 'Hidden Failures',
+        source: 'Pexels Videos',
+      })),
+    };
+
+    const reason = airlineSoftPassMotionFailureReason(project);
+    expect(reason).toMatch(
+      /soft-pass-motion-airline-junk\((wildfire-grid-solar|false-pressure|booking-promo|tech-clickbait):/,
+    );
+  });
+
   it('crime/heist topics use lower volume floor and aggregate soft-pass', async () => {
     const { evaluateHarvestVolume, evaluateHarvestVolumeWithSoftPass } = await import(
       '../../../scripts/lib/harvest-quality.mjs'

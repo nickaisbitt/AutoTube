@@ -9,9 +9,18 @@
  * The actual speech playback is handled by src/utils/speech.ts (speakText).
  * This engine's role is to validate availability and signal that browser
  * TTS should be used for a given segment.
+ *
+ * Headless/automated browsers expose the API without any voices, so this
+ * engine reports itself unavailable there rather than handing the pipeline a
+ * marker for audio that will never be produced.
  */
 
-import { hasSpeechSupport, loadSpeechVoices, pickPreferredVoice } from '../../utils/speech';
+import {
+  describeSpeechUnavailability,
+  isSpeechSynthesisUsable,
+  loadSpeechVoices,
+  pickPreferredVoice,
+} from '../../utils/speech';
 import { logger } from '../logger';
 import type { TTSConfig, TTSEngine } from './interface';
 
@@ -27,13 +36,13 @@ export const browserEngine: TTSEngine = {
   voices: BROWSER_VOICES,
 
   isAvailable(_config: TTSConfig): boolean {
-    return hasSpeechSupport();
+    return isSpeechSynthesisUsable();
   },
 
   async generate(
     text: string,
     voice: string,
-    _options?: {
+    options?: {
       signal?: AbortSignal;
       apiKey?: string;
       serverUrl?: string;
@@ -41,17 +50,26 @@ export const browserEngine: TTSEngine = {
       cloudflareApiToken?: string;
     },
   ): Promise<string | null> {
-    if (!hasSpeechSupport()) {
-      logger.warn('BrowserTTS', 'SpeechSynthesis not available in this environment');
+    if (options?.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
+    const unavailable = describeSpeechUnavailability();
+    if (unavailable) {
+      logger.warn('BrowserTTS', `Browser TTS unusable: ${unavailable}`);
       return null;
     }
 
-    // Verify we can load at least one voice
+    // Bounded by loadSpeechVoices' own timeout, and memoised after the first
+    // failed probe, so this cannot stall once per segment.
     const voices = await loadSpeechVoices();
     const selectedVoice = pickPreferredVoice(voices, voice || undefined);
 
     if (!selectedVoice) {
-      logger.warn('BrowserTTS', 'No speech synthesis voices available');
+      logger.warn(
+        'BrowserTTS',
+        `No speech synthesis voices available: ${describeSpeechUnavailability() ?? 'voice list empty'}`,
+      );
       return null;
     }
 

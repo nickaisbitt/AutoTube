@@ -4,6 +4,8 @@ import {
   shouldKeepBest,
   shouldFreezeOnTopicalAssets,
   countStrongTopicalVideos,
+  enterPolishMode,
+  clearKeepBest,
   KEEP_BEST_RAW_FLOOR,
   STRONG_TOPICAL_RELEVANCE_MIN,
 } from '../keep-best.mjs';
@@ -51,6 +53,15 @@ describe('shouldKeepBest', () => {
 
   it('returns false when rawOverall is missing and not uploadReady', () => {
     expect(shouldKeepBest({ brutal: { hasCriticalIssues: false } })).toBe(false);
+  });
+
+  it('returns true when watch has no brutal field but is uploadReady', () => {
+    // No brutal report at all should not block a known-upload-ready pass
+    expect(shouldKeepBest({ uploadReady: true })).toBe(true);
+  });
+
+  it('refuses when hasCriticalIssues is true with no other qualifying fields', () => {
+    expect(shouldKeepBest({ brutal: { hasCriticalIssues: true } })).toBe(false);
   });
 });
 
@@ -235,6 +246,20 @@ describe('shouldFreezeOnTopicalAssets', () => {
     };
     expect(shouldFreezeOnTopicalAssets(watch, project, 'housing eviction crisis')).toBe(false);
   });
+
+  it('returns true when watch has no brutal field and project has strong topical assets', () => {
+    // A watch result without a brutal report should not block the topical freeze;
+    // critical-issue gating is opt-in (hasCriticalIssues must be explicitly true).
+    const watch = { objectiveGate: { pass: true } };
+    expect(
+      shouldFreezeOnTopicalAssets(watch, { media: [cockpitVideo] }, airlineTopic),
+    ).toBe(true);
+  });
+
+  it('returns false for watch with hasCriticalIssues=true even without brutal.rawOverall', () => {
+    const watch = { brutal: { hasCriticalIssues: true } };
+    expect(shouldFreezeOnTopicalAssets(watch, { media: [cockpitVideo] }, airlineTopic)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -382,6 +407,116 @@ describe('applyFrozenMediaToProject', () => {
       media: [{ id: 'm1', segmentId: 's1', url: 'https://example.test/v.mp4' }],
     };
     expect(applyFrozenMediaToProject(project, frozen).ok).toBe(false);
+  });
+
+  it('returns ok:false and drops all items when every frozen media item is an orphan', () => {
+    // Every media item has a segmentId that does NOT appear in frozen.script.
+    // None should be silently dumped onto segment 0 of the new script.
+    const project = {
+      script: [{ id: 'new-a' }, { id: 'new-b' }],
+    };
+    const frozen = {
+      script: [{ id: 'f-0' }, { id: 'f-1' }],
+      media: [
+        { id: 'orphan-x', segmentId: 'ghost-1', url: 'https://example.test/x.mp4' },
+        { id: 'orphan-y', segmentId: 'ghost-2', url: 'https://example.test/y.mp4' },
+        { id: 'orphan-z', segmentId: 'ghost-3', url: 'https://example.test/z.mp4' },
+      ],
+    };
+
+    const result = applyFrozenMediaToProject(project, frozen);
+
+    expect(result.ok).toBe(false);
+    expect(result.mediaCount).toBe(0);
+    expect(result.orphanMediaCount).toBe(3);
+    expect(result.droppedOrphanMediaIds).toEqual(['orphan-x', 'orphan-y', 'orphan-z']);
+    // project.media must be untouched (not set) — no orphan on new-a or new-b
+    expect(project.media).toBeUndefined();
+  });
+
+  it('gracefully handles frozen with no editTimeline field', () => {
+    const project = {
+      script: [{ id: 'seg-1' }, { id: 'seg-2' }],
+    };
+    const frozen = {
+      script: [{ id: 'f-0' }, { id: 'f-1' }],
+      media: [
+        { id: 'm0', segmentId: 'f-0', type: 'video', url: 'https://example.test/0.mp4' },
+        { id: 'm1', segmentId: 'f-1', type: 'video', url: 'https://example.test/1.mp4' },
+      ],
+      // no editTimeline field
+    };
+
+    const result = applyFrozenMediaToProject(project, frozen);
+
+    expect(result.ok).toBe(true);
+    expect(result.mediaCount).toBe(2);
+    expect(result.timelineCount).toBe(0);
+    // project.editTimeline should not be set when frozen has none
+    expect(project.editTimeline).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// enterPolishMode — freeze invariants
+// ---------------------------------------------------------------------------
+describe('enterPolishMode', () => {
+  it('sets keepBestMedia, reHarvestMedia=false, fixStrategy=polish, rewriteScript=false', () => {
+    const state = { fixStrategy: 'reharvest', reHarvestMedia: true };
+    const applied = [];
+    enterPolishMode(state, { frozenProjectPath: '/tmp/FROZEN.json', rawOverall: 7.8 }, applied);
+
+    expect(state.keepBestMedia).toBe(true);
+    expect(state.reHarvestMedia).toBe(false);
+    expect(state.fixStrategy).toBe('polish');
+    expect(state.rewriteScript).toBe(false);
+    expect(state.frozenProjectPath).toBe('/tmp/FROZEN.json');
+    expect(state.keepBestRaw).toBe(7.8);
+    expect(applied.length).toBeGreaterThan(0);
+  });
+
+  it('preserves existing keepBestRaw when rawOverall is not provided', () => {
+    const state = { keepBestRaw: 7.5 };
+    enterPolishMode(state, {}, []);
+    expect(state.keepBestRaw).toBe(7.5);
+  });
+
+  it('does not set frozenProjectPath when none provided', () => {
+    const state = {};
+    enterPolishMode(state, {}, []);
+    expect(state.frozenProjectPath).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clearKeepBest — resets freeze state on topic change
+// ---------------------------------------------------------------------------
+describe('clearKeepBest', () => {
+  it('removes keepBestMedia, frozenProjectPath, keepBestRaw and resets polish strategy', () => {
+    const state = {
+      keepBestMedia: true,
+      frozenProjectPath: '/tmp/FROZEN.json',
+      keepBestRaw: 7.9,
+      fixStrategy: 'polish',
+    };
+    clearKeepBest(state);
+
+    expect(state.keepBestMedia).toBeUndefined();
+    expect(state.frozenProjectPath).toBeUndefined();
+    expect(state.keepBestRaw).toBeUndefined();
+    expect(state.fixStrategy).toBe('reharvest');
+  });
+
+  it('does not change fixStrategy when it is not polish', () => {
+    const state = { fixStrategy: 'interval', keepBestMedia: true };
+    clearKeepBest(state);
+    expect(state.fixStrategy).toBe('interval');
+  });
+
+  it('returns the state object unchanged when passed null or non-object', () => {
+    expect(clearKeepBest(null)).toBeNull();
+    expect(clearKeepBest(undefined)).toBeUndefined();
+    expect(clearKeepBest('string')).toBe('string');
   });
 });
 

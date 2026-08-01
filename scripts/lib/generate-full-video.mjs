@@ -2729,8 +2729,22 @@ export async function generateFullVideo(options) {
   if (realHarvest) log(`   Loop: ${loopMinAssets} assets/segment, ≤75s target`);
   log(`   Out: ${outDir}\n`);
 
+  const pexelsKey = resolvePexelsKey();
+  const pixabayKey = resolvePixabayKey();
+
+  const harvestStorage = harvestSessionStoragePayload(harvestCtx);
+  const autotubeApiKey = resolveAutotubeApiKey();
+  if (!autotubeApiKey && !options.quiet) {
+    console.log('   ⚠️  No AUTOTUBE_API_KEY / VITE_AUTOTUBE_API_KEY — /api/* calls will be rejected by the API gate');
+  }
+
+  const crashDumpDir = join(outDir, 'chromium-crash-dumps');
+  mkdirSync(crashDumpDir, { recursive: true });
   const launchArgs = [
     '--disable-dev-shm-usage',
+    `--crash-dumps-dir=${crashDumpDir}`,
+    '--enable-crash-reporter',
+    '--enable-crashpad',
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-gpu',
@@ -2742,56 +2756,59 @@ export async function generateFullVideo(options) {
     '--no-first-run',
     '--no-zygote',
   ];
-  let browser = await chromium.launch({ headless: true, args: launchArgs });
-  const browserContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-
-  const pexelsKey = resolvePexelsKey();
-  const pixabayKey = resolvePixabayKey();
-
-  const harvestStorage = harvestSessionStoragePayload(harvestCtx);
-  const autotubeApiKey = resolveAutotubeApiKey();
-  if (!autotubeApiKey && !options.quiet) {
-    console.log('   ⚠️  No AUTOTUBE_API_KEY / VITE_AUTOTUBE_API_KEY — /api/* calls will be rejected by the API gate');
-  }
-  await browserContext.addInitScript(
-    ({ key, autotubeKey, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
-      localStorage.setItem('autotube_onboarding_seen', 'true');
-      localStorage.removeItem('autotube_project');
-      sessionStorage.setItem(
-        'autotube_config_session',
-        JSON.stringify({
-          openRouterKey: key,
-          autotubeApiKey: autotubeKey || '',
-          sourceType: rawFirst ? 'raw' : 'stock',
-          pexelsKey: pexels,
-          pixabayKey: pixabay,
-          flickrKey: '',
-          ttsVoice: 'Leo',
-        }),
-      );
-      sessionStorage.setItem('autotube_loop_fast_mode', 'true');
-      sessionStorage.setItem('autotube_loop_min_assets', String(minAssets));
-      sessionStorage.setItem('autotube_loop_broll_placement', 'true');
-      if (rawFirst) sessionStorage.setItem('autotube_loop_video_first', 'true');
-      for (const [k, v] of Object.entries(hs || {})) {
-        sessionStorage.setItem(k, v);
-      }
-    },
-    {
-      key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline',
-      autotubeKey: autotubeApiKey,
-      minAssets: loopMinAssets,
-      pexels: pexelsKey,
-      pixabay: pixabayKey,
-      rawFirst: realHarvest,
-      harvestStorage,
-    },
-  );
 
   const browserEvents = [];
   const recordBrowserEvent = (type, detail) => {
     browserEvents.push({ at: new Date().toISOString(), type, detail: String(detail).slice(0, 1000) });
     if (browserEvents.length > 200) browserEvents.shift();
+  };
+  const isBrowserDisconnectError = (err) => {
+    const msg = err instanceof Error ? err.message : String(err || '');
+    return /browser.*(closed|disconnected)|target page.*closed|has been closed|crashed|detached|websocket is not open|protocol error/i.test(
+      msg,
+    );
+  };
+
+  let browser = null;
+  let browserContext = null;
+  let page = null;
+  let browserRelaunchUsed = false;
+
+  const configureBrowserContext = async (targetContext) => {
+    await targetContext.addInitScript(
+      ({ key, autotubeKey, minAssets, pexels, pixabay, rawFirst, harvestStorage: hs }) => {
+        localStorage.setItem('autotube_onboarding_seen', 'true');
+        localStorage.removeItem('autotube_project');
+        sessionStorage.setItem(
+          'autotube_config_session',
+          JSON.stringify({
+            openRouterKey: key,
+            autotubeApiKey: autotubeKey || '',
+            sourceType: rawFirst ? 'raw' : 'stock',
+            pexelsKey: pexels,
+            pixabayKey: pixabay,
+            flickrKey: '',
+            ttsVoice: 'Leo',
+          }),
+        );
+        sessionStorage.setItem('autotube_loop_fast_mode', 'true');
+        sessionStorage.setItem('autotube_loop_min_assets', String(minAssets));
+        sessionStorage.setItem('autotube_loop_broll_placement', 'true');
+        if (rawFirst) sessionStorage.setItem('autotube_loop_video_first', 'true');
+        for (const [k, v] of Object.entries(hs || {})) {
+          sessionStorage.setItem(k, v);
+        }
+      },
+      {
+        key: realHarvest ? openRouterKey : 'sk-or-v1-e2e-full-pipeline',
+        autotubeKey: autotubeApiKey,
+        minAssets: loopMinAssets,
+        pexels: pexelsKey,
+        pixabay: pixabayKey,
+        rawFirst: realHarvest,
+        harvestStorage,
+      },
+    );
   };
 
   const wireBrowserPage = async (targetPage) => {
@@ -2897,8 +2914,58 @@ export async function generateFullVideo(options) {
     );
   };
 
-  let page = await browserContext.newPage();
-  await wireBrowserPage(page);
+  const launchBrowserSession = async (reason = 'initial launch') => {
+    if (browserContext) await browserContext.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+    browserContext = null;
+    page = null;
+
+    browser = await chromium.launch({
+      headless: true,
+      args: launchArgs,
+      env: { ...process.env, CHROME_HEADLESS: '1' },
+    });
+    const launchedBrowser = browser;
+    recordBrowserEvent('browser.launch', `${reason}; crashDumps=${crashDumpDir}`);
+    launchedBrowser.once('disconnected', () => {
+      if (browser === launchedBrowser) recordBrowserEvent('browser.disconnected', reason);
+    });
+    browserContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await configureBrowserContext(browserContext);
+    page = await browserContext.newPage();
+    await wireBrowserPage(page);
+  };
+
+  const relaunchBrowserOnce = async (reason) => {
+    if (browserRelaunchUsed) {
+      throw new Error(`BROWSER_DISCONNECTED: ${reason} (browser relaunch already used)`);
+    }
+    browserRelaunchUsed = true;
+    recordBrowserEvent('browser.relaunch', reason);
+    log('⚠ Chromium disconnected — relaunching browser once…');
+    await launchBrowserSession(`relaunch after ${reason}`);
+  };
+
+  const withBrowserRelaunchOnDisconnect = async (label, operation) => {
+    try {
+      return await operation();
+    } catch (err) {
+      if (!isBrowserDisconnectError(err) && browser?.isConnected()) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      await relaunchBrowserOnce(`${label}: ${msg}`);
+      try {
+        return await operation();
+      } catch (err2) {
+        if (isBrowserDisconnectError(err2) || !browser?.isConnected()) {
+          const msg2 = err2 instanceof Error ? err2.message : String(err2);
+          throw new Error(`BROWSER_DISCONNECTED: ${label}: ${msg2} (after browser relaunch)`);
+        }
+        throw err2;
+      }
+    }
+  };
+
+  await launchBrowserSession();
 
   const gotoDevServer = async () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -2916,8 +2983,13 @@ export async function generateFullVideo(options) {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         recordBrowserEvent('goto.error', `attempt ${attempt}: ${msg}`);
-        const recoverable = /crashed|closed|detached/i.test(msg);
+        const browserDisconnected = isBrowserDisconnectError(err) && !browser?.isConnected();
+        const recoverable = /crashed|closed|detached/i.test(msg) || browserDisconnected;
         if (!recoverable || attempt === 3) throw err;
+        if (browserDisconnected) {
+          await relaunchBrowserOnce(`goto attempt ${attempt}: ${msg}`);
+          continue;
+        }
         try {
           await page.close();
         } catch {
@@ -2936,14 +3008,16 @@ export async function generateFullVideo(options) {
   const narrationTimeoutMs = realHarvest ? 900_000 : 600_000;
 
   try {
-  // networkidle hangs when dev server is serving long harvest API streams
-    await gotoDevServer();
-    await dismissOnboarding(page);
+    await withBrowserRelaunchOnDisconnect('initial script launch', async () => {
+      // networkidle hangs when dev server is serving long harvest API streams
+      await gotoDevServer();
+      await dismissOnboarding(page);
 
-    await fillTopicInput(page, topic);
-    await page.getByTestId('duration-select').selectOption('3').catch(() => {});
-    await dismissOnboarding(page);
-    await page.getByTestId('generate-script-only').click();
+      await fillTopicInput(page, topic);
+      await page.getByTestId('duration-select').selectOption('3').catch(() => {});
+      await dismissOnboarding(page);
+      await page.getByTestId('generate-script-only').click();
+    });
     log('⏳ Script (live OpenRouter — fast loop mode)...');
 
     const sourceMediaBtn = () =>
@@ -3209,23 +3283,59 @@ export async function generateFullVideo(options) {
     await dismissOnboarding(page);
     // Interactive UI may land on narration review (Continue to AI Edit). Loop
     // fast-mode auto-advances to AI Edit (skip-ai-edit). Accept either.
-    // Fail fast if Chromium dies mid-TTS — otherwise waitFor sits until 15min.
-    const continueAi = page.getByTestId('continue-to-ai-edit-button');
-    const skipAi = page.getByTestId('skip-ai-edit-button');
-    const browserGone = new Promise((_, reject) => {
-      if (!browser?.isConnected()) {
-        reject(new Error('BROWSER_DISCONNECTED: Chromium gone before narration CTAs'));
-        return;
-      }
-      browser.once('disconnected', () => {
-        reject(new Error('BROWSER_DISCONNECTED: Chromium died during narration wait'));
+    // Fail fast if Chromium dies mid-TTS — otherwise waits can sit until 15min.
+    const continueAi = page
+      .getByTestId('continue-to-ai-edit-button')
+      .or(page.getByRole('button', { name: /Continue to AI Edit/i }))
+      .first();
+    const skipAi = page
+      .getByTestId('skip-ai-edit-button')
+      .or(page.locator('button:has-text("Skip AI Edit")'))
+      .first();
+    const raceBrowserDisconnect = async (phase, task) => {
+      const targetBrowser = browser;
+      if (!targetBrowser?.isConnected()) throw new Error(`BROWSER_DISCONNECTED: Chromium gone before ${phase}`);
+      let onDisconnect = null;
+      const disconnected = new Promise((_, reject) => {
+        onDisconnect = () => reject(new Error(`BROWSER_DISCONNECTED: Chromium died during ${phase}`));
+        targetBrowser.once('disconnected', onDisconnect);
       });
-    });
-    const narrationReady = (async () => {
-      const deadline = Date.now() + narrationTimeoutMs;
+      try {
+        const activeTask = typeof task === 'function' ? task() : task;
+        return await Promise.race([activeTask, disconnected]);
+      } catch (err) {
+        if (isBrowserDisconnectError(err) && !targetBrowser?.isConnected()) {
+          throw new Error(`BROWSER_DISCONNECTED: Chromium died during ${phase}`);
+        }
+        throw err;
+      } finally {
+        if (onDisconnect) {
+          targetBrowser.off?.('disconnected', onDisconnect);
+          targetBrowser.removeListener?.('disconnected', onDisconnect);
+        }
+      }
+    };
+    const captureNarrationHang = async (reason) => {
+      writeFileSync(join(outDir, 'browser-events.json'), JSON.stringify(browserEvents, null, 2));
+      const snap = await readProjectSnapshot(page);
+      const uiState = await page.evaluate(() => ({
+        bodyText: document.body?.innerText?.slice(0, 4000) || '',
+        projectRawLength: localStorage.getItem('autotube_project')?.length || 0,
+        stepText: document.body?.innerText?.match(/Step \d+ — \w+/)?.[0] || '',
+      })).catch((e) => ({ error: e.message }));
+      writeFileSync(
+        join(outDir, 'ui-state-on-narration-timeout.json'),
+        JSON.stringify({ reason, ...uiState, projectSnapshot: snap }, null, 2),
+      );
+      await page.screenshot({ path: join(outDir, 'narration-timeout.png'), fullPage: true }).catch(() => {});
+    };
+    const pollNarrationCta = async ({ timeoutMs, skipOnly = false, label = 'narration CTAs' } = {}) => {
+      const deadline = Date.now() + timeoutMs;
+      let lastLog = 0;
       while (Date.now() < deadline) {
-        if (await continueAi.isVisible().catch(() => false)) return 'continue';
-        if (await skipAi.isVisible().catch(() => false)) return 'skip';
+        await dismissOnboarding(page).catch(() => {});
+        if (!skipOnly && (await continueAi.isVisible({ timeout: 500 }).catch(() => false))) return 'continue';
+        if (await skipAi.isVisible({ timeout: 500 }).catch(() => false)) return 'skip';
         // Loop-fast may have advanced past both buttons into assembly already.
         const step = await page.evaluate(() => {
           try {
@@ -3252,32 +3362,52 @@ export async function generateFullVideo(options) {
           }).catch(() => null);
           if (forced) return 'skip';
         }
-        await page.waitForTimeout(500);
+        if (Date.now() - lastLog > 60_000) {
+          lastLog = Date.now();
+          log(
+            `   …still waiting for ${label} (${Math.round((deadline - Date.now()) / 1000)}s left, narration=${step?.narr ?? 'n/a'}, step=${step?.step || 'unknown'})`,
+          );
+        }
+        await page.waitForTimeout(1_000);
       }
-      throw new Error(`NARRATION_TIMEOUT: no continue/skip CTA after ${Math.round(narrationTimeoutMs / 60000)}min`);
-    })();
-    const which = await Promise.race([narrationReady, browserGone]);
+      await captureNarrationHang(label);
+      throw new Error(`NARRATION_TIMEOUT: no ${skipOnly ? 'skip' : 'continue/skip'} CTA after ${Math.round(timeoutMs / 60000)}min`);
+    };
+    const which = await raceBrowserDisconnect(
+      'narration CTA polling',
+      () => pollNarrationCta({ timeoutMs: narrationTimeoutMs, label: 'narration CTAs' }),
+    );
     if (which === 'continue' || (await continueAi.isVisible().catch(() => false))) {
       await dismissOnboarding(page);
-      await clickPipelineButton(page, continueAi, { timeout: 60_000 });
-      await page.waitForTimeout(500);
+      await raceBrowserDisconnect('continue-to-AI-edit click', () => clickPipelineButton(page, continueAi, { timeout: 60_000 }));
+      await raceBrowserDisconnect('post-continue settle', () => page.waitForTimeout(500));
+      await raceBrowserDisconnect(
+        'AI edit skip CTA polling',
+        () => pollNarrationCta({
+          timeoutMs: Math.max(120_000, narrationTimeoutMs / 4),
+          skipOnly: true,
+          label: 'AI edit skip CTA',
+        }),
+      );
     }
-    await skipAi.waitFor({ timeout: Math.max(120_000, narrationTimeoutMs / 4) });
     if (fixState.rewriteScript === true) {
       log('✍️ rewriteScript lever ON — running AI edit instead of skip');
       const runAi = page.getByTestId('run-ai-edit-button').or(page.locator('button:has-text("Run AI Edit")').first());
       const hasRunAi = await runAi.isVisible().catch(() => false);
       if (hasRunAi) {
-        await clickPipelineButton(page, runAi, { timeout: Math.max(180_000, narrationTimeoutMs / 2) });
-        await page.waitForTimeout(2000);
+        await raceBrowserDisconnect(
+          'run AI edit click',
+          () => clickPipelineButton(page, runAi, { timeout: Math.max(180_000, narrationTimeoutMs / 2) }),
+        );
+        await raceBrowserDisconnect('post-AI-edit settle', () => page.waitForTimeout(2000));
       } else {
         await dismissOnboarding(page);
-        await page.getByTestId('skip-ai-edit-button').click();
+        await raceBrowserDisconnect('skip AI edit fallback click', () => clickPipelineButton(page, skipAi, { timeout: 60_000 }));
       }
       fixState.rewriteScript = false;
     } else {
       await dismissOnboarding(page);
-      await page.getByTestId('skip-ai-edit-button').click();
+      await raceBrowserDisconnect('skip AI edit click', () => clickPipelineButton(page, skipAi, { timeout: 60_000 }));
     }
     await page.waitForTimeout(500);
 

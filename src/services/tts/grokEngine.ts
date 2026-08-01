@@ -8,6 +8,7 @@
 import { withRetry } from '../../utils/withRetry';
 import { logger } from '../logger';
 import type { TTSConfig, TTSEngine } from './interface';
+import { createTimeoutSignal, isCallerAbort } from './timeout';
 
 const XAI_TTS_ENDPOINT = 'https://api.x.ai/v1/tts';
 const DEFAULT_VOICE = 'Sal';
@@ -49,20 +50,14 @@ export const grokEngine: TTSEngine = {
       return null;
     }
 
+    if (options?.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
     try {
       const result = await withRetry(
         async () => {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), TTS_TIMEOUT_MS);
-
-          // Link external signal
-          if (options?.signal) {
-            if (options.signal.aborted) {
-              clearTimeout(timeoutId);
-              throw new DOMException('Aborted', 'AbortError');
-            }
-            options.signal.addEventListener('abort', () => controller.abort(), { once: true });
-          }
+          const timeout = createTimeoutSignal(TTS_TIMEOUT_MS, options?.signal);
 
           try {
             const response = await fetch(XAI_TTS_ENDPOINT, {
@@ -81,7 +76,7 @@ export const grokEngine: TTSEngine = {
                 },
                 language: 'en',
               }),
-              signal: controller.signal,
+              signal: timeout.signal,
             });
 
             if (!response.ok) {
@@ -95,8 +90,13 @@ export const grokEngine: TTSEngine = {
             }
 
             return audioBlob;
+          } catch (err) {
+            if (timeout.timedOut()) {
+              throw new Error(`xAI TTS request timed out after ${TTS_TIMEOUT_MS / 1000}s`);
+            }
+            throw err;
           } finally {
-            clearTimeout(timeoutId);
+            timeout.cleanup();
           }
         },
         {
@@ -117,7 +117,7 @@ export const grokEngine: TTSEngine = {
       );
       return blobUrl;
     } catch (err) {
-      if ((err as Error).name === 'AbortError') {
+      if (isCallerAbort(err, options?.signal)) {
         throw err;
       }
       logger.error('GrokTTS', `TTS generation failed: ${(err as Error).message}`);

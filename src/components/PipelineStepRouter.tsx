@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useVideoProject } from '../store/StoreContext';
 import { TopicConfig } from '../types';
 
@@ -13,6 +13,19 @@ import BatchProcessor from './BatchProcessor';
 
 interface PipelineStepRouterProps {
   onOpenExport: () => void;
+}
+
+/**
+ * Loop / `generate:video` harness (autotube_loop_fast_mode) must never stall on
+ * the narration review screen — it has to reach the AI Edit step so the
+ * skip-ai-edit / ai_edit CTAs are clickable. Interactive users stay on
+ * narration for manual review, so this gate is off unless the flag is set.
+ */
+function isLoopFastMode(): boolean {
+  return (
+    typeof sessionStorage !== 'undefined' &&
+    sessionStorage.getItem('autotube_loop_fast_mode') === 'true'
+  );
 }
 
 class StepErrorBoundary extends React.Component<{children: React.ReactNode; stepName: string}, {hasError: boolean}> {
@@ -82,10 +95,7 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
       // Interactive UI stays on narration for review. Loop / generate:video
       // (autotube_loop_fast_mode) must auto-advance even when TTS soft-fails,
       // or the harness hangs waiting for skip-ai-edit / continue CTAs.
-      const loopFast =
-        typeof sessionStorage !== 'undefined' &&
-        sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
-      if (loopFast) {
+      if (isLoopFastMode()) {
         setCurrentStep('ai_edit');
       }
     }
@@ -127,6 +137,22 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
   const handleRetryAssemble = useCallback(async () => {
     await retryAssemble();
   }, [retryAssemble]);
+
+  // Belt-and-suspenders for loop-fast mode: no matter how the narration step is
+  // entered (fresh generation, resume, sidebar nav), once narration reaches a
+  // terminal state (complete, or soft-failed to 'error') we must move on to
+  // AI Edit so the harness always sees the skip-ai-edit / ai_edit CTAs. TTS
+  // soft-failures resolve to 'complete' (clips fall back / marked unavailable),
+  // so this covers the soft-fail case. Interactive review is never affected
+  // because the flag is off. 'processing'/'idle' are left alone; 'active'
+  // (user-cancelled) intentionally stays put.
+  useEffect(() => {
+    if (!isLoopFastMode()) return;
+    if (currentStep !== 'narration') return;
+    if (stepStatuses.narration === 'complete' || stepStatuses.narration === 'error') {
+      setCurrentStep('ai_edit');
+    }
+  }, [currentStep, stepStatuses.narration, setCurrentStep]);
 
   switch (currentStep) {
     case 'topic':

@@ -550,6 +550,193 @@ describe('buildEditTimeline — anti-repetition', () => {
     }
   });
 
+  it('breaks two-clip ping-pong across body cuts when a third URL exists anywhere in the project', () => {
+    // The third URL lives in another segment: the capped look-back window
+    // shrinks to 1 with exactly 3 unique URLs, so without a dedicated guard
+    // the body ping-pongs A B A B and never borrows the third clip.
+    const project = {
+      topic: 'generic investigation topic',
+      script: [
+        { id: 's1', type: 'body', duration: 8, narration: 'story' },
+        { id: 's2', type: 'body', duration: 4, narration: 'more' },
+      ],
+      media: [
+        {
+          id: 'a',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/pp-a/pp-a.mp4',
+          alt: 'worried person face close up',
+        },
+        {
+          id: 'b',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/pp-b/pp-b.mp4',
+          alt: 'shocked woman face reaction',
+        },
+        {
+          id: 'c',
+          segmentId: 's2',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/pp-c/pp-c.mp4',
+          alt: 'couple family worried face portrait',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    const ids = tl.filter((e) => e.segmentId === 's1').map((e) => e.assetId);
+    expect(new Set(ids).size).toBeGreaterThanOrEqual(3);
+    for (let i = 3; i < ids.length; i += 1) {
+      const window = ids.slice(i - 3, i + 1);
+      const alternating = window[0] === window[2] && window[1] === window[3] && window[0] !== window[1];
+      expect(alternating).toBe(false);
+    }
+    const s1 = tl.filter((e) => e.segmentId === 's1');
+    expect(Math.max(...s1.map((e) => e.endSec))).toBeGreaterThanOrEqual(7.95);
+  });
+
+  it('still covers a two-URL body by alternating when no third URL exists', () => {
+    // With only 2 unique URLs there is no escape clip — the ping-pong guard
+    // must stand down so the segment still renders full coverage.
+    const project = {
+      topic: 'generic investigation topic',
+      script: [{ id: 's1', type: 'body', duration: 6, narration: 'story' }],
+      media: [
+        {
+          id: 'a',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/two-a/two-a.mp4',
+          alt: 'worried person face close up',
+        },
+        {
+          id: 'b',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/two-b/two-b.mp4',
+          alt: 'shocked woman face reaction',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    expect(tl.length).toBeGreaterThanOrEqual(4);
+    expect(Math.max(...tl.map((e) => e.endSec))).toBeGreaterThanOrEqual(5.95);
+  });
+
+  it('caps body holds near 2–3s when reuse caps exhaust the segment pool but the project has three URLs', () => {
+    // s2 has a single local video and both alternates sit at the hard reuse
+    // cap: the timeline must cap the hold (~2s thin-pool ceiling) and refresh
+    // with the least-bad clip instead of freezing one frame for 4s.
+    const project = {
+      topic: 'generic investigation topic',
+      script: [
+        { id: 's1', type: 'body', duration: 8, narration: 'story' },
+        { id: 's2', type: 'body', duration: 4, narration: 'more' },
+      ],
+      media: [
+        {
+          id: 'a',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/hc-a/hc-a.mp4',
+          alt: 'worried person face close up',
+        },
+        {
+          id: 'b',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/hc-b/hc-b.mp4',
+          alt: 'shocked woman face reaction',
+        },
+        {
+          id: 'c',
+          segmentId: 's2',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/hc-c/hc-c.mp4',
+          alt: 'couple family worried face portrait',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    const s2 = tl.filter((e) => e.segmentId === 's2');
+    expect(Math.max(...tl.map((e) => e.endSec - e.startSec))).toBeLessThanOrEqual(2.51);
+    expect(new Set(s2.map((e) => e.assetId)).size).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...s2.map((e) => e.endSec))).toBeGreaterThanOrEqual(3.95);
+  });
+
+  it('opens a generic-topic hook on a readable face even when a beat-matched non-face lead outscores it', () => {
+    const project = {
+      topic: 'The city zoning map that erased flood-risk neighborhoods',
+      visualBeatSheet: {
+        beats: [
+          {
+            id: 'beat1',
+            segmentId: 'intro',
+            searchableSubject: 'city hall zoning map meeting room',
+            narrationExcerpt: 'zoning map erased flood risk neighborhoods',
+            sentenceIndex: 0,
+          },
+        ],
+      },
+      script: [
+        { id: 'intro', type: 'intro', duration: 5, narration: 'The zoning map erased flood risk neighborhoods overnight.' },
+      ],
+      media: [
+        {
+          id: 'map-meeting',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/map-meeting/map-meeting.mp4',
+          alt: 'people at city hall zoning map meeting room',
+        },
+        {
+          id: 'resident-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/resident-face/resident-face.mp4',
+          alt: 'worried resident woman face close up',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    expect(tl[0].assetId).toBe('resident-face');
+    const leadIds = tl.filter((e) => e.startSec < 3).map((e) => e.assetId);
+    expect(leadIds.length).toBeGreaterThan(0);
+    for (const id of leadIds) {
+      expect(['resident-face', 'map-meeting']).toContain(id);
+    }
+  });
+
+  it('keeps a surveillance lead on camera stories instead of forcing a face', () => {
+    // Camera stories are the one face-first exception: the CCTV frame is the
+    // subject of the story and outranks a generic worried face in the hook.
+    const project = {
+      topic: 'The nursing home cameras that recorded abuse for years',
+      script: [{ id: 'intro', type: 'intro', duration: 3, narration: 'cameras recorded nursing home abuse' }],
+      media: [
+        {
+          id: 'cctv',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/nh-cctv/nh-cctv.mp4',
+          alt: 'security camera cctv hallway nursing home',
+          query: 'security camera cctv hallway',
+        },
+        {
+          id: 'family-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://videos.pexels.com/video-files/nh-face/nh-face.mp4',
+          alt: 'worried family face portrait close up',
+          query: 'worried family portrait close up',
+        },
+      ],
+    };
+    const tl = buildEditTimeline(project, { cutIntervalSec: 1, maxReusePerUrl: 1 });
+    expect(tl[0].assetId).toBe('cctv');
+  });
+
   it('prefers unused global URLs before over-reusing a single clip', () => {
     const project = {
       topic: 'generic investigation topic',

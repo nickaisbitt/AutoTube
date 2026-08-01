@@ -7,6 +7,7 @@ import {
   decideStockVisionGate,
   formatMotionPathLog,
   isAirlineRelevantClip,
+  isJunkStockClip,
   isSafeStockMotionQuery,
   isVisionBudgetSoft,
   motionQueryPlan,
@@ -511,6 +512,33 @@ describe('formatMotionPathLog', () => {
     expect(line).toContain('sweep-queries=12');
     expect(line).toContain('evidence-rejected=21');
     expect(line).toContain('injected=16/18');
+  });
+});
+
+describe('airline off-topic still junk (wildfire/Google/booking/false-pressure)', () => {
+  it('isJunkStockClip rejects wave-2A airline scrape patterns', () => {
+    const topic = AIRLINE_TOPIC;
+    const cases = [
+      ["LA's Deadly Fires Triggered by Hidden Electrical Faults grid failures", 'wildfire'],
+      ['SOME TERMINATED PROJECTS BY IT GIANT GOOGLE must watch failures hidden', 'google'],
+      ['How to book Allegiant Airline flight tickets', 'booking'],
+      ['Calculate the final pressure of an ideal diatomic gas', 'false-pressure'],
+      ['Orion Pressure Vessel spacecraft capsule weld', 'false-pressure'],
+      ['flying with fuel made from sunlight solar kerosene swiss airline', 'solar'],
+    ];
+    for (const [alt] of cases) {
+      expect(isJunkStockClip({ alt, query: 'Hidden Failures' }, topic)).toBe(true);
+      expect(isAirlineRelevantClip({ alt, query: 'Hidden Failures' }, topic)).toBe(false);
+    }
+    expect(
+      isAirlineRelevantClip(
+        {
+          alt: 'airplane cabin oxygen masks deployed above worried passengers',
+          query: 'oxygen mask deploy airplane cabin',
+        },
+        topic,
+      ),
+    ).toBe(true);
   });
 });
 

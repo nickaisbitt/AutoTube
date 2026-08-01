@@ -69,7 +69,8 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 
 | Topic | Generate | Watch | Notes |
 |-------|----------|-------|-------|
-| Airline-v2 | Exit **0** · 70.9s · yellowPixels=31761 | Exit **1** · raw **4.4–5.4** · hook PASS on rewatch | still KEYS_BLOCKED; sim reuse addressed in `0bf74d7` |
+| Airline-v2 | Exit **0** · 70.9s · yellowPixels=31761 | Exit **1** · raw **4.4–5.4** · hook PASS on rewatch | KEYS_BLOCKED ceiling |
+| Airline-v3 (reuse cap) | Exit **0** · 65.9s · yellowPixels=31749 | Exit **1** · raw **2.8–3.6** | thin Archive pool; OCR harden `e3a0642` |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs, keyless + junk/pHash) |
 
 Watcher honesty is working: raw &lt;7 → exit 1; thin keyless harvest → non-zero generate. Floors have **not** been lowered.
@@ -98,7 +99,7 @@ Without at least one of `PEXELS_API_KEY` / `VITE_PEXELS_KEY` or `PIXABAY_API_KEY
 | Bar | Status | Unblock |
 |-----|--------|---------|
 | **Upload-ready YES** | **KEYS_BLOCKED** | Add stock keys per [`ENV_DOD.md`](ENV_DOD.md), restart Vite, regenerate + `watch:video` exit 0 |
-| **Brutal raw ≥ 7** | **KEYS_BLOCKED** | Same; Wave 5 keyless raws **3.4** (airline) / **4.6** (housing); healthcare generate exit 1 — do not lower floors |
+| **Brutal raw ≥ 7** | **KEYS_BLOCKED** | Keyless ceiling observed **~5.4** (airline-v2); Wave 5 raws **3.4** / **4.6**; do not lower floors |
 | **3-topic proof pack** | **KEYS_BLOCKED** | Keyless pack attempted under `test-recordings/dod-proof/`; green (≥7 ×3) only after stock keys |
 | **9.3 stretch** | **OPEN** (after ≥7) | `npm run loop:video -- --until-score 9.3` on cold topics |
 

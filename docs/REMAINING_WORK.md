@@ -112,18 +112,24 @@ Prod app may still be an **old container** (uptime days) until a fresh deploy fr
 
 ### Check run — 2026-08-01 @ branch `cursor/fix-audit-blockers-b466`
 
-Local HEAD: `4b84acde3aed65feb607b9c1fd3a43a80d228be4`
+Local HEAD: `ce8bc57a32b3d73efe25231ea5e074e99d2da7bc`
+
+Quality-wave commits since last §C snapshot: `70c1981` (harvest portrait boost), `4449589` (overlays fontfile), `de787b1` (watcher OCR recover), `e46c855` (Ken-Burns presets), `ce8bc57` (introFaceTier fallback).
 
 #### `npm run railway:completion-check` — **FAIL** (exit 1)
 
 ```
-Error: Not Authorized
-  at railwayGql (scripts/lib/railway-gql.mjs:30)
+Error: Railway GraphQL: Not Authorized.
+  The active token is a service/runtime credential and cannot call backboard.railway.app/graphql.
+  Fix: create a Personal or Team API token at https://railway.app/account/tokens
+  then set it as AUTOTUBE_RAILWAY_TOKEN (preferred) or RAILWAY_API_TOKEN in .env.local.
 ```
 
 Root cause: the `RAILWAY_API_TOKEN` injected by Railway's runtime is the cursor-worker **service credential**, not a personal/team API token. The `backboard.railway.app/graphql/v2` API requires a user-scoped personal token; the service token is rejected with `Not Authorized`. `env:debug-railway` confirms `RAILWAY_API_TOKEN: SET` (source: RAILWAY_API_TOKEN) but the token is scoped to the `cursor-self-hosted-worker` project, not AutoTube-Deploy.
 
-Unblock: create a Railway Personal API Token at `railway.app/account/tokens`, set it as `RAILWAY_API_TOKEN` or `AUTOTUBE_RAILWAY_TOKEN` in `.env.local`, and re-run.
+`railway-completion-check` now emits the above actionable message and still exits **1** (no fake PASS). Token resolution also prefers `AUTOTUBE_RAILWAY_TOKEN` before falling back to `RAILWAY_API_TOKEN`.
+
+Unblock: create a Railway Personal API Token at `railway.app/account/tokens`, set it as `AUTOTUBE_RAILWAY_TOKEN` (preferred) or `RAILWAY_API_TOKEN` in `.env.local`, and re-run.
 
 #### `npm run railway:smoke` — **PASS** (exit 0)
 
@@ -134,15 +140,15 @@ Health: {"status":"ok","uptime":1632901,"deploy":{"gitCommit":"3e6f62458c5464e3b
 Smoke passed.
 ```
 
-Prod is **live** but running a **stale image**: commit `3e6f6245` (≈18.9 days old, uptime 1 632 901 s). Local HEAD is `4b84acde`. Deploy parity is **NOT met** — prod has not been rebuilt from this branch.
+Prod is **live** but running a **stale image**: commit `3e6f6245` (≈18.9 days old, uptime 1 632 901 s). Local HEAD is `ce8bc57a`. Deploy parity is **NOT met** — prod has not been rebuilt from this branch.
 
 #### Summary
 
 | Check | Result | Detail |
 |-------|--------|--------|
-| `railway:completion-check` | **FAIL** | Runtime token not authorized for backboard GQL |
+| `railway:completion-check` | **FAIL** | Runtime token not authorized for backboard GQL; actionable error now printed |
 | `railway:smoke` | **PASS** | Prod live HTTP 200 |
-| SHA match (prod vs local HEAD) | **MISMATCH** | prod `3e6f6245` ≠ local `4b84acde` |
+| SHA match (prod vs local HEAD) | **MISMATCH** | prod `3e6f6245` ≠ local `ce8bc57a` |
 | Deploy currency | **OPEN** | Prod has not been rebuilt from this branch |
 
 ---

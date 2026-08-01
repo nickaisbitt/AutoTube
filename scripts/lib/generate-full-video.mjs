@@ -355,6 +355,35 @@ function isProxiedClipUrl(url = '') {
   return (url || '').includes('/api/download-clip');
 }
 
+/**
+ * Decide how an inject candidate's liveness is verified before it lands in segment
+ * media.
+ *
+ * Proxied `/api/download-clip` URLs (every Bing/Google/DDG web-motion clip) are
+ * downloaded and re-encoded on demand at render time. A full `expectVideo` probe here
+ * forces the proxy to transcode the whole clip just to answer a range request — slow,
+ * flaky, and rate-limited — so almost every web clip failed the probe and was dropped
+ * (injected≈1 from a 140-clip pool). The harvest keep-path already trusts proxied clips
+ * without probing (see `tryKeepVideoAsset` → "proxy clip (no probe)"); inject must be
+ * consistent or it silently prefers the handful of direct archive/stock URLs. Direct
+ * URLs still get the cheap probe because it is a real HTTP GET, not a transcode.
+ */
+export function resolveInjectClipProbe(url = '') {
+  if (isProxiedClipUrl(url)) return { probe: false, trust: 'proxy-clip' };
+  return { probe: true, trust: null };
+}
+
+/**
+ * Web clips carry provider-title evidence and already cleared the topical relevance
+ * gate before vision. When the vision budget is spent we fail OPEN for them rather than
+ * skipping into a near-empty inject — an aviation clip with strong title/query evidence
+ * is safer to keep than to drop, and dropping web clips over budget is exactly what
+ * starved segment media. Non-web (stock/archive) clips keep the strict skip.
+ */
+export function shouldFailOpenWebVisionSkip({ isWebClip = false, hasStrongEvidence = false } = {}) {
+  return Boolean(isWebClip && hasStrongEvidence);
+}
+
 /** Keep proxy clips distinct by their decoded target, not the shared route path. */
 function motionUrlKey(url = '') {
   const raw = String(url || '');
@@ -2365,6 +2394,38 @@ export function formatMotionPathLog(report = {}) {
   );
 }
 
+/**
+ * One-line drop funnel: fetched → after-junk → after-vision → after-relevance →
+ * injected. Explains where topical clips are lost between a rich pool and the handful
+ * that reach segment media, so an "injected=1/18 from clip-pool=140" run is diagnosable
+ * from the log alone.
+ */
+export function formatMotionDropFunnel(report = {}) {
+  const fetched = report.motionCandidatesSeen || 0;
+  const afterJunk = report.motionAfterJunk ?? 0;
+  const afterVision = report.motionAfterVision ?? (report.motionPoolSize || 0);
+  const relevanceDrop = (report.relevanceDroppedAfterTopUp || []).length;
+  const injected = (report.videoTopUp || []).length;
+  const drops =
+    `junk=${report.motionDroppedJunk || 0}`
+    + ` relevance=${report.motionDroppedRelevance || 0}`
+    + ` vision=${report.motionDroppedVision || 0}`
+    + ` web-fail-open=${report.visionWebFailOpen || 0}`;
+  const inject =
+    `probe-pass=${report.injectProbePassed || 0}`
+    + ` probe-fail=${report.injectProbeFailed || 0}`
+    + ` proxy-trusted=${report.injectProxyTrusted || 0}`;
+  return (
+    `Motion drop funnel: fetched=${fetched}`
+    + ` → after-junk=${afterJunk}`
+    + ` → after-vision=${afterVision}`
+    + ` → after-relevance=${Math.max(0, afterVision - relevanceDrop)}`
+    + ` → injected=${injected}`
+    + ` | drops(${drops})`
+    + ` | inject(${inject})`
+  );
+}
+
 /** Exported for unit tests (bright / anti-HUD / nursing query proof). */
 export {
   stockMotionQueries,
@@ -2552,6 +2613,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     )) {
       const addedForQuery = addedPerQuery.get(q) || 0;
       if (liveClips.length >= liveCap || addedForQuery >= perQueryCap) continue;
+      // Funnel accounting (fetched → after-junk → after-vision → injected): count every
+      // candidate that actually reaches the gates so drop reasons are explainable.
+      report.motionCandidatesSeen = (report.motionCandidatesSeen || 0) + 1;
       // Archive.org items must say what they show. A topical query plus an opaque
       // identifier is exactly the laundering this gate exists to stop.
       if (/Archive/i.test(clip.source || '')) {
@@ -2566,6 +2630,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Search text asks the question; it is not evidence for a web result.
       const evidenceClip = isWebClip ? { ...clip, query: '' } : clip;
       if (isJunkStockClip(evidenceClip, topicBlob, { preferBright: options.preferBright === true })) {
+        report.motionDroppedJunk = (report.motionDroppedJunk || 0) + 1;
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
@@ -2582,9 +2647,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         )
         && !isCyberRelevantClip(evidenceClip, topicBlob)
       ) {
+        report.motionDroppedRelevance = (report.motionDroppedRelevance || 0) + 1;
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
       }
+      report.motionAfterJunk = (report.motionAfterJunk || 0) + 1;
       // Vision gate on stock thumbs (keywords miss off-brand junk).
       // Short trusted airline queries skip vision only when the clip carries its own
       // visual evidence — vision was rejecting real cabin/cockpit faces and leaving
@@ -2602,9 +2669,22 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         budget: visionBudget,
       });
       if (gate.action === 'skip') {
-        report.visionStockBudgetSkipped = (report.visionStockBudgetSkipped || 0) + 1;
-        report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
-        continue;
+        // Fail open for web clips that already cleared the topical relevance gate on
+        // their own title/alt evidence — dropping them once the vision budget is spent
+        // is what starved inject to ~1. Stock/archive clips keep the strict skip.
+        const failOpen = shouldFailOpenWebVisionSkip({
+          isWebClip,
+          hasStrongEvidence: isCyberRelevantClip(evidenceClip, topicBlob),
+        });
+        if (failOpen) {
+          report.visionStockBudgetSoftAdmitted = (report.visionStockBudgetSoftAdmitted || 0) + 1;
+          report.visionWebFailOpen = (report.visionWebFailOpen || 0) + 1;
+        } else {
+          report.visionStockBudgetSkipped = (report.visionStockBudgetSkipped || 0) + 1;
+          report.motionDroppedVision = (report.motionDroppedVision || 0) + 1;
+          report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+          continue;
+        }
       }
       if (gate.reason === 'budget-exhausted-soft') {
         report.visionStockBudgetSoftAdmitted = (report.visionStockBudgetSoftAdmitted || 0) + 1;
@@ -2615,6 +2695,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         if (verdict.ran === false) {
           const unverified = recordVisionStockUnverified(report, verdict, { thumbnailUrl: thumb });
           if (unverified.skip) {
+            report.motionDroppedVision = (report.motionDroppedVision || 0) + 1;
             report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
             continue;
           }
@@ -2623,6 +2704,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           report.visionStockRejected = (report.visionStockRejected || 0) + 1;
           report.visionStockRejectedThumbs = report.visionStockRejectedThumbs || [];
           report.visionStockRejectedThumbs.push({ thumbnailUrl: thumb, reason: verdict.reason || '' });
+          report.motionDroppedVision = (report.motionDroppedVision || 0) + 1;
           report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
           continue;
         }
@@ -2632,6 +2714,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       addedPerQuery.set(q, addedForQuery + 1);
     }
   }
+  report.motionAfterVision = liveClips.length;
   report.archiveLiveFetched = liveClips.filter((c) => /Archive/i.test(c.source || '')).length;
   report.bingWebVideoFetched = liveClips.filter((c) => /Bing web video/i.test(c.source || '')).length;
   report.googleWebVideoFetched = liveClips.filter((c) => /Google web video/i.test(c.source || '')).length;
@@ -2746,16 +2829,24 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
     if (isIntro && score < 0) return false;
-    const ok = await canFetch(clip.url, {
-      timeoutMs: 120000,
-      minBytes: 2048,
-      expectVideo: true,
-      apiKey: isProxiedClipUrl(clip.url) ? resolveAutotubeApiKey() : '',
-    });
-    if (!ok) {
-      report.videoTopUpFailed = report.videoTopUpFailed || [];
-      report.videoTopUpFailed.push({ url: clip.url, reason: 'probe failed' });
-      return false;
+    const probePlan = resolveInjectClipProbe(clip.url);
+    if (probePlan.probe) {
+      const ok = await canFetch(clip.url, {
+        timeoutMs: 120000,
+        minBytes: 2048,
+        expectVideo: true,
+      });
+      if (!ok) {
+        report.videoTopUpFailed = report.videoTopUpFailed || [];
+        report.videoTopUpFailed.push({ url: clip.url, reason: 'probe failed' });
+        report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
+        return false;
+      }
+      report.injectProbePassed = (report.injectProbePassed || 0) + 1;
+    } else {
+      // Proxy clips are re-encoded on demand at render; trust them like the harvest
+      // keep-path does instead of forcing a full transcode just to answer a probe.
+      report.injectProxyTrusted = (report.injectProxyTrusted || 0) + 1;
     }
     const n = (report.videoTopUp || []).length;
     const airline = isAirlineTopic(topicBlob);
@@ -3842,6 +3933,9 @@ export async function generateFullVideo(options) {
       }
       if (mediaReport.relevanceDropped?.length) {
         log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
+      }
+      if (mediaReport.motionCandidatesSeen || mediaReport.motionPoolSize) {
+        log(`   📉 ${formatMotionDropFunnel(mediaReport)}`);
       }
       if (mediaReport.phashDropped?.length) {
         log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);

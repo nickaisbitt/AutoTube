@@ -8,6 +8,7 @@ import {
   archiveTopicSubjectQueries,
   decideStockVisionGate,
   fetchWebVideoResults,
+  formatMotionDropFunnel,
   formatMotionPathLog,
   isAirlineRelevantClip,
   isJunkStockClip,
@@ -17,10 +18,12 @@ import {
   planMotionFetchRounds,
   providerEvidenceText,
   recordVisionStockUnverified,
+  resolveInjectClipProbe,
   resolveMotionFetchBudgetMs,
   resolveMotionVolumeTargets,
   resolveStockKeyMode,
   resolveVisionUnverifiedMax,
+  shouldFailOpenWebVisionSkip,
   spawnSyncFailureReason,
   stripJunkDemoVideos,
   webMotionQueryVariants,
@@ -796,6 +799,67 @@ describe('formatMotionPathLog', () => {
     expect(line).toContain('dead-subjects=7');
     expect(line).toContain('raw-hits=214');
     expect(line).toContain('evidence-cached=26');
+  });
+});
+
+describe('resolveInjectClipProbe', () => {
+  it('trusts proxied /api/download-clip web clips without a full transcode probe', () => {
+    const plan = resolveInjectClipProbe(
+      'http://localhost:5173/api/download-clip?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc&duration=10',
+    );
+    expect(plan.probe).toBe(false);
+    expect(plan.trust).toBe('proxy-clip');
+  });
+
+  it('still probes direct archive/stock video URLs', () => {
+    expect(resolveInjectClipProbe('https://archive.org/download/reel/reel.mp4').probe).toBe(true);
+    expect(resolveInjectClipProbe('https://videos.pexels.com/video-files/1/clip.mp4').probe).toBe(true);
+    expect(resolveInjectClipProbe('').probe).toBe(true);
+  });
+});
+
+describe('shouldFailOpenWebVisionSkip', () => {
+  it('keeps a web clip that carries its own strong evidence when the vision budget is spent', () => {
+    expect(shouldFailOpenWebVisionSkip({ isWebClip: true, hasStrongEvidence: true })).toBe(true);
+  });
+
+  it('drops web clips without evidence and never fails open on stock/archive clips', () => {
+    expect(shouldFailOpenWebVisionSkip({ isWebClip: true, hasStrongEvidence: false })).toBe(false);
+    expect(shouldFailOpenWebVisionSkip({ isWebClip: false, hasStrongEvidence: true })).toBe(false);
+    expect(shouldFailOpenWebVisionSkip()).toBe(false);
+  });
+});
+
+describe('formatMotionDropFunnel', () => {
+  it('traces fetched → after-junk → after-vision → after-relevance → injected', () => {
+    const line = formatMotionDropFunnel({
+      motionCandidatesSeen: 180,
+      motionAfterJunk: 150,
+      motionAfterVision: 140,
+      motionPoolSize: 140,
+      motionDroppedJunk: 22,
+      motionDroppedRelevance: 8,
+      motionDroppedVision: 10,
+      visionWebFailOpen: 4,
+      injectProbePassed: 3,
+      injectProbeFailed: 1,
+      injectProxyTrusted: 14,
+      relevanceDroppedAfterTopUp: new Array(2),
+      videoTopUp: new Array(17),
+    });
+    expect(line).toContain('fetched=180');
+    expect(line).toContain('after-junk=150');
+    expect(line).toContain('after-vision=140');
+    expect(line).toContain('after-relevance=138');
+    expect(line).toContain('injected=17');
+    expect(line).toContain('junk=22 relevance=8 vision=10 web-fail-open=4');
+    expect(line).toContain('probe-pass=3 probe-fail=1 proxy-trusted=14');
+  });
+
+  it('falls back to the clip pool size when the after-vision counter is absent', () => {
+    const line = formatMotionDropFunnel({ motionPoolSize: 41, videoTopUp: new Array(1) });
+    expect(line).toContain('after-vision=41');
+    expect(line).toContain('injected=1');
   });
 });
 

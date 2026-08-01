@@ -19,6 +19,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Verify stale deploy/server tree is absent
+        run: |
+          if [ -e deploy/server ] || [ -e deploy/server.mjs ]; then
+            echo "ERROR: deploy/server or deploy/server.mjs must not exist."
+            echo "These paths held a stale, unauthenticated copy of server code."
+            echo "Production must boot from the repo root. Delete them and re-commit."
+            exit 1
+          fi
       - run: node scripts/sync-server-render-deploy.mjs --check
       - run: npm run lint
       - run: npm run test:unit

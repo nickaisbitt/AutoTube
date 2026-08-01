@@ -22,13 +22,13 @@ Cloud VMs often inject `OPENROUTER_API_KEY`; map it in `.env.local` as `VITE_OPE
 
 ### Server-render modules
 
-`server-render.mjs` imports from `./server-render/*.mjs`, but those files live under `deploy/server-render/` in this checkout (not at repo root). For server-side render APIs and Vitest suites that import `server-render.mjs`, create a local symlink once per VM:
+`server-render.mjs` imports from `./server-render/*.mjs`. The `server-render` symlink at the repo root points to `deploy/server-render/` and **is committed to the repo** (git mode 120000). It should resolve automatically after checkout — no manual symlink creation needed.
+
+If the symlink is missing on your machine (e.g. a checkout that did not preserve symlinks), recreate it with:
 
 ```bash
 ln -sf deploy/server-render server-render
 ```
-
-Do not commit the symlink; it is a workspace convenience.
 
 ### System dependencies
 
@@ -50,7 +50,7 @@ Do not commit the symlink; it is a workspace convenience.
 
 ### Gotchas
 
-- **Lint and unit tests** may report failures on a clean checkout (missing `server-render/` at root, pre-existing `tsc` errors in `server/`). CI expects `npm run lint` and `npm run test:unit` to pass on `master`; align with upstream if your branch differs.
+- **Lint and unit tests** may report failures on a clean checkout (pre-existing `tsc` errors in `server/`). CI expects `npm run lint` and `npm run test:unit` to pass on `master`; align with upstream if your branch differs. The `server-render` symlink is committed and should resolve automatically; if it is missing, run `ln -sf deploy/server-render server-render`.
 - **Onboarding modal** blocks clicks when `openRouterKey` is empty; set `VITE_OPENROUTER_KEY` or `localStorage.autotube_onboarding_seen` + config before E2E.
 - **`npm run docker:dev`** is referenced in docs but is not defined in `package.json`; use `docker compose up --build` for the optional TTS stack.
 - Dev server hot reload does not always pick up new native modules after `npm install`; restart `npm run dev` if canvas or server middleware misbehaves.

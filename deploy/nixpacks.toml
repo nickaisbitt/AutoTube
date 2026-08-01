@@ -1,30 +1,20 @@
-[phases.setup]
-nixPkgs = [
-  "ffmpeg",
-  "chromium",
-  "cairo",
-  "pango",
-  "libjpeg",
-  "giflib",
-  "librsvg",
-  "pkg-config",
-  "pixman",
-  "python3",
-  "python3Packages.pip"
-]
-
-[phases.install]
-cacheDirectories = [
-  "node_modules",
-  "~/.npm"
-]
-
-[phases.build]
-cmds = [
-  "pip install --break-system-packages edge-tts",
-  "npm run build"
-]
-
-[variables]
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
-CHROME_BIN = "/usr/bin/chromium"
+# ============================================================
+# DO NOT USE — Railway rootDirectory must be the repo ROOT, not deploy/
+#
+# This file is a stale remnant. The canonical nixpacks/system dependency
+# config lives at the repo root (nixpacks.toml). The Railway build must
+# run from the repo root so it picks up the authenticated server code.
+# ============================================================
+#
+# Commented-out original (kept for reference only):
+#
+# [phases.setup]
+# nixPkgs = ["ffmpeg","chromium","cairo","pango","libjpeg","giflib",
+#            "librsvg","pkg-config","pixman","python3","python3Packages.pip"]
+#
+# [phases.build]
+# cmds = ["pip install --break-system-packages edge-tts", "npm run build"]
+#
+# [variables]
+# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+# CHROME_BIN = "/usr/bin/chromium"

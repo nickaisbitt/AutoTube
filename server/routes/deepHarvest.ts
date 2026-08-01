@@ -1,5 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { validateURL } from "../utils/security.js";
+import {
+  readResponseBodyWithLimit,
+  validateURL,
+} from "../utils/security.js";
 import { fetchDDGImages } from "../utils/ddg.js";
 
 interface ExtractedImage {
@@ -21,6 +24,7 @@ const USER_AGENTS = [
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
 ];
+const MAX_HARVEST_PAGE_SIZE = 5 * 1024 * 1024;
 
 function getRandomUserAgent(): string {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
@@ -38,23 +42,53 @@ function getStealthHeaders(referer?: string) {
   };
 }
 
-async function fetchPage(url: string): Promise<string | null> {
+async function fetchPage(
+  url: string,
+): Promise<{ html: string; finalUrl: string } | null> {
   try {
-    const urlSafety = await validateURL(url);
-    if (!urlSafety.valid) {
-      console.warn(`[Deep Harvest] Blocked unsafe URL: ${urlSafety.error}`);
-      return null;
+    let currentUrl = url;
+    for (let redirects = 0; redirects <= 5; redirects++) {
+      const urlSafety = await validateURL(currentUrl);
+      if (!urlSafety.valid) {
+        console.warn(`[Deep Harvest] Blocked unsafe URL: ${urlSafety.error}`);
+        return null;
+      }
+
+      const response = await fetch(currentUrl, {
+        headers: getStealthHeaders(),
+        redirect: "manual",
+        signal: AbortSignal.timeout(15000),
+      });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location || redirects === 5) {
+          await response.body?.cancel().catch(() => undefined);
+          return null;
+        }
+        const redirectUrl = new URL(location, currentUrl).toString();
+        const redirectSafety = await validateURL(redirectUrl);
+        if (!redirectSafety.valid) {
+          await response.body?.cancel().catch(() => undefined);
+          console.warn(
+            `[Deep Harvest] Blocked unsafe redirect: ${redirectSafety.error}`,
+          );
+          return null;
+        }
+        await response.body?.cancel().catch(() => undefined);
+        currentUrl = redirectUrl;
+        continue;
+      }
+
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => undefined);
+        return null;
+      }
+      const html = (
+        await readResponseBodyWithLimit(response, MAX_HARVEST_PAGE_SIZE)
+      ).toString("utf8");
+      return html.length > 1000 ? { html, finalUrl: currentUrl } : null;
     }
-
-    const res = await fetch(url, {
-      headers: getStealthHeaders(),
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!res.ok) return null;
-    
-    const text = await res.text();
-    return text.length > 1000 ? text : null;
+    return null;
   } catch (err) {
     console.warn(`[Deep Harvest] Failed to fetch ${url}:`, err);
     return null;
@@ -253,7 +287,7 @@ export async function handleDeepHarvest(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const url = new URL(req.url!, `http://${req.headers.host}`);
+  const url = new URL(req.url!, "http://localhost");
   const query = url.searchParams.get("q");
 
   if (!query) {
@@ -286,34 +320,35 @@ export async function handleDeepHarvest(
 
     for (const articleUrl of articleUrls.slice(0, 3)) {
       console.log(`[Deep Harvest] Fetching: ${articleUrl}`);
-      const html = await fetchPage(articleUrl);
+      const fetchedPage = await fetchPage(articleUrl);
       
-      if (!html) {
+      if (!fetchedPage) {
         console.log(`[Deep Harvest] Failed to fetch ${articleUrl}`);
         continue;
       }
 
-      console.log(`[Deep Harvest] Extracting images from ${articleUrl} (${html.length} bytes)`);
+      const { html, finalUrl } = fetchedPage;
+      console.log(`[Deep Harvest] Extracting images from ${finalUrl} (${html.length} bytes)`);
 
-      const ogImage = extractOgImage(html, articleUrl);
+      const ogImage = extractOgImage(html, finalUrl);
       if (ogImage) {
         allImages.push(ogImage);
         console.log(`[Deep Harvest] Found og:image: ${ogImage.url}`);
       }
 
-      const jsonLdImages = extractJsonLdImages(html, articleUrl);
+      const jsonLdImages = extractJsonLdImages(html, finalUrl);
       allImages.push(...jsonLdImages);
       if (jsonLdImages.length > 0) {
         console.log(`[Deep Harvest] Found ${jsonLdImages.length} JSON-LD images`);
       }
 
-      const heroImage = extractHeroImage(html, articleUrl);
+      const heroImage = extractHeroImage(html, finalUrl);
       if (heroImage) {
         allImages.push(heroImage);
         console.log(`[Deep Harvest] Found hero image: ${heroImage.url}`);
       }
 
-      const inlineImages = extractInlineImages(html, articleUrl, query);
+      const inlineImages = extractInlineImages(html, finalUrl, query);
       allImages.push(...inlineImages);
       console.log(`[Deep Harvest] Found ${inlineImages.length} inline images`);
     }
@@ -335,13 +370,14 @@ export async function handleDeepHarvest(
     }));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
+    const isDev = process.env.NODE_ENV !== "production";
     console.error("[Deep Harvest] Error:", err);
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ 
       error: "Internal server error",
       code: "HARVEST_ERROR",
-      details: message
+      ...(isDev && { details: message }),
     }));
   }
 }

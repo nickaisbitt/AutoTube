@@ -350,6 +350,21 @@ function applyProsody(text, pacingScore) {
 }
 
 /**
+ * Strip SSML / prosody markup so plain-text engines (Kokoro) don't read the tags
+ * aloud. Kokoro's HTTP API and Python wrapper both expect raw text; SSML like
+ * `<prosody rate="110%">…</prosody>` would otherwise be spoken verbatim.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripSsml(text) {
+  return String(text)
+    .replace(/<break[^>]*\/?>/gi, ' ') // pauses → whitespace
+    .replace(/<[^>]+>/g, '') // any other SSML/XML tags
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Task 22: Detect emphasis from punctuation (!) and ALL CAPS words.
  * Returns true if text contains emphasis markers.
  * @param {string} text
@@ -564,6 +579,10 @@ export async function generateKokoroSegment(text, outputPath, options = {}) {
     processedText = applyProsody(processedText, options.pacingScore);
   }
 
+  // Kokoro is a plain-text engine — strip any SSML/prosody markup before
+  // synthesis so tags aren't spoken aloud. Pacing still applies via `speed`.
+  const kokoroText = stripSsml(processedText);
+
   // Task 19: Map emotion to speed AND pitch
   const emotion = options.emotion || null;
   let speed = options.speed || 1.0;
@@ -597,7 +616,7 @@ export async function generateKokoroSegment(text, outputPath, options = {}) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            text: processedText,
+            text: kokoroText,
             voice,
             speed,
           }),
@@ -626,7 +645,7 @@ export async function generateKokoroSegment(text, outputPath, options = {}) {
       // Create batch JSON
       const batchInput = join(tmpDir, 'batch.json');
       const config = {
-        segments: [{ id: 'current', text: processedText, speed }],
+        segments: [{ id: 'current', text: kokoroText, speed }],
         voice,
         output_dir: tmpDir,
       };
@@ -694,7 +713,7 @@ export async function generateKokoroSegment(text, outputPath, options = {}) {
       // Task 22: Apply emphasis from punctuation
       let finalPath = postPitchPath;
       const emphPath = join(tmpDir, 'emphasized.wav');
-      if (applyEmphasis(postPitchPath, emphPath, processedText)) {
+      if (applyEmphasis(postPitchPath, emphPath, kokoroText)) {
         finalPath = emphPath;
       }
 

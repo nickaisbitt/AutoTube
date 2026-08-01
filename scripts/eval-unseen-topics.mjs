@@ -2,6 +2,11 @@
 /**
  * Cold-start unseen-topic eval (first-pass only; blind watcher).
  * Usage: npm run eval:unseen -- --set dev|release --max N
+ *
+ * HONESTY: keep-best / frozen-media polish, floored (clamped) watcher scores,
+ * and stretches of known/benchmark topics are NOT cold proof. Only first-pass,
+ * cold (AUTOTUBE_EVAL_COLD=1), blind-watched runs on validated unseen topic
+ * sets count; summaries therefore report rawOverall, never flooredOverall.
  */
 import { mkdirSync, writeFileSync, existsSync, copyFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { generateFullVideo, checkDevServer, resolveOpenRouterKey } from './lib/generate-full-video.mjs';
 import { DEFAULT_FIX_STATE } from './lib/loop-state.mjs';
 import { loadEvalTopicSet, validateEvalTopicSet, findTopicLeak } from './lib/eval-topics.mjs';
-import { isEvalColdMode } from './lib/eval-flags.mjs';
+import { isEvalColdMode, summarizeWatch, buildEvalSummary } from './lib/eval-flags.mjs';
 import { watchVideo } from '../powers/video-watcher/src/analyze.mjs';
 import { resolveWatchModel, isIndependentWatchJudge } from '../powers/video-watcher/src/vision-brutal.mjs';
 import { validateLoopVideo } from './lib/validate-loop-video.mjs';
@@ -70,23 +75,6 @@ function coldFixState() {
     excludedUrls: [],
     hookLine: null,
     pendingTopic: null,
-  };
-}
-
-function summarizeWatch(watch) {
-  return {
-    uploadReady: watch.uploadReady === true,
-    rawOverall: watch.brutal?.rawOverall ?? null,
-    flooredOverall: watch.brutal?.flooredOverall ?? watch.brutal?.overall ?? null,
-    hasCriticalIssues: watch.brutal?.hasCriticalIssues === true,
-    scores: watch.brutal?.report?.scores || null,
-    topIssues: (watch.brutal?.report?.topIssues || []).slice(0, 5),
-    hookScriptPass: watch.hookScript?.pass ?? null,
-    hookVisionPass: watch.hookVision?.hookPass ?? null,
-    objectivePass: watch.objectiveGate?.pass === true,
-    objectiveScore: watch.objectiveQa?.score ?? null,
-    scenePass: watch.sceneQa?.pass === true,
-    longestSceneSec: watch.sceneQa?.longestSceneSec ?? null,
   };
 }
 
@@ -306,7 +294,11 @@ async function main() {
     if (cfg.delaySec > 0 && i < topics.length - 1) await sleep(cfg.delaySec * 1000);
   }
 
-  const summary = buildSummary(rows, cfg, outDir);
+  const summary = buildEvalSummary(rows, {
+    set: cfg.set,
+    outDir,
+    note: 'Baseline only — release thresholds set after calibration. First-pass, cold, blind.',
+  });
   writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
   writeFileSync(mdPath, formatSummaryMd(summary));
   console.log(`\n📋 Summary: ${summaryPath}`);
@@ -320,43 +312,6 @@ function unsetFlash() {
 function gitRev() {
   const r = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
   return (r.stdout || '').trim() || null;
-}
-
-function buildSummary(rows, cfg, outDir) {
-  const ok = rows.filter((r) => r.generateOk);
-  const watched = rows.filter((r) => r.watch && typeof r.watch.rawOverall === 'number');
-  const raws = watched.map((r) => r.watch.rawOverall).sort((a, b) => a - b);
-  const uploadReady = watched.filter((r) => r.watch.uploadReady).length;
-  const critical = watched.filter((r) => r.watch.hasCriticalIssues).length;
-  return {
-    set: cfg.set,
-    outDir,
-    n: rows.length,
-    generateSuccessRate: rows.length ? ok.length / rows.length : 0,
-    watched: watched.length,
-    uploadReadyRate: watched.length ? uploadReady / watched.length : null,
-    criticalRate: watched.length ? critical / watched.length : null,
-    raw: {
-      median: percentile(raws, 0.5),
-      p25: percentile(raws, 0.25),
-      p75: percentile(raws, 0.75),
-      mean: raws.length ? raws.reduce((a, b) => a + b, 0) / raws.length : null,
-      min: raws[0] ?? null,
-      max: raws[raws.length - 1] ?? null,
-    },
-    note: 'Baseline only — release thresholds set after calibration. First-pass, cold, blind.',
-  };
-}
-
-function percentile(sorted, p) {
-  if (!sorted.length) return null;
-  if (sorted.length === 1) return sorted[0];
-  const pos = p * (sorted.length - 1);
-  const lo = Math.floor(pos);
-  const hi = Math.ceil(pos);
-  if (lo === hi) return sorted[lo];
-  const w = pos - lo;
-  return sorted[lo] * (1 - w) + sorted[hi] * w;
 }
 
 function formatSummaryMd(s) {

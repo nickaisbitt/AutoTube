@@ -6,7 +6,7 @@ test.describe('Critical User Flows', () => {
     await installE2EFixtures(page);
   });
 
-  test('full pipeline — enter topic, generate script, advance pipeline state', async ({ page }) => {
+  test('script-stage smoke — enter topic, generate script, enable media step', async ({ page }) => {
     await page.goto('/');
 
     const modal = page.getByTestId('onboarding-modal');

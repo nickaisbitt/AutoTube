@@ -63,6 +63,24 @@ async function main() {
     segments.reduce((sum, s) => sum + s.duration, 0) * fps
   );
 
+  // Optional background music: served by REMOTION_SERVE_URL (the dev server that
+  // hosts public/audio). Only enabled when the project opts in and a serve URL is
+  // available; otherwise the render stays narration-only.
+  const MUSIC_PRESET_FILES = {
+    tense: 'bg-tense.aac',
+    uplifting: 'bg-uplifting.aac',
+    neutral: 'bg-neutral.aac',
+    ambient: 'bg-neutral.aac',
+  };
+  const serveUrl = process.env.REMOTION_SERVE_URL;
+  const musicEnabled = project.exportSettings?.backgroundMusic !== false;
+  const musicFile =
+    MUSIC_PRESET_FILES[project.exportSettings?.musicPreset] || 'bg-neutral.aac';
+  const backgroundMusicUrl =
+    serveUrl && musicEnabled
+      ? `${serveUrl.replace(/\/$/, '')}/audio/${musicFile}`
+      : undefined;
+
   const projectProps = {
     title: project.title || 'Untitled',
     topic: project.topic || '',
@@ -80,6 +98,7 @@ async function main() {
     fps,
     width,
     height,
+    backgroundMusicUrl,
   };
 
   console.log(`Rendering ${segments.length} segments, ${totalDurationFrames} frames at ${fps}fps...`);

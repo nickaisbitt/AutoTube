@@ -1,12 +1,20 @@
 #!/usr/bin/env node
 /**
- * Re-run topics that failed generate in recent eval dirs.
- * Usage: node scripts/retry-eval-failures.mjs [glob-prefix] [--dirs dir1,dir2]
+ * Re-run topics that failed generate in recent eval dirs (salvage pass).
+ * Usage: node scripts/retry-eval-failures.mjs [glob-prefix] [--dirs=dir1,dir2]
+ *
+ * HONESTY: retry output is NOT first-pass cold evidence — it exists to salvage
+ * infra flakes for merged/diagnostic views. Release bars must be computed from
+ * first-pass dirs only; keep-best polish, floored watcher scores, and
+ * known-topic stretches are never cold proof. Watch results are stored in the
+ * shared summarizeWatch shape (watch.rawOverall / watch.uploadReady /
+ * watch.hasCriticalIssues) so aggregate scripts can read retry rows too.
  */
 import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateFullVideo } from './lib/generate-full-video.mjs';
 import { applyEnvLocalToProcess } from './lib/railway-prod-env.mjs';
+import { summarizeWatch, buildEvalSummary } from './lib/eval-flags.mjs';
 import { watchVideo } from '../powers/video-watcher/src/analyze.mjs';
 
 const ROOT = process.cwd();
@@ -73,6 +81,7 @@ const jsonlPath = join(outDir, 'EVAL_REPORT.jsonl');
 
 console.log(`↻ Retrying ${failed.length} failed topic(s) → ${outDir}`);
 
+const records = [];
 for (const row of failed) {
   console.log(`\n========== RETRY ${row.topicId}: ${row.topic} ==========`);
   const fixState = coldFixState();
@@ -99,15 +108,29 @@ for (const row of failed) {
     const topicDir = join(outDir, row.topicId);
     mkdirSync(topicDir, { recursive: true });
     copyFileSync(record.videoPath, join(topicDir, 'final-video-final.mp4'));
-    record.watch = await watchVideo({
+    // watchVideo only knows quick/full; 'brutal' was never a real mode.
+    const watch = await watchVideo({
       video_path: record.videoPath,
-      mode: 'brutal',
+      mode: 'full',
       skip_vision: false,
       render_tier: 'full',
     });
+    if (watch.reportPath && existsSync(watch.reportPath)) {
+      copyFileSync(watch.reportPath, join(topicDir, 'WATCH_REPORT.md'));
+    }
+    record.watch = summarizeWatch(watch);
   }
+  records.push(record);
   writeFileSync(jsonlPath, `${JSON.stringify(record)}\n`, { flag: 'a' });
-  console.log(`→ ${row.topicId}: ok=${record.generateOk} raw=${record.watch?.brutal?.rawOverall ?? 'n/a'}`);
+  console.log(`→ ${row.topicId}: ok=${record.generateOk} raw=${record.watch?.rawOverall ?? 'n/a'}`);
 }
+
+const summary = buildEvalSummary(records, {
+  set: 'retry',
+  outDir,
+  note: 'RETRY pass — salvage of generate failures. NOT first-pass cold evidence; never counts toward release bars.',
+});
+summary.pass = 'retry-after-failure';
+writeFileSync(join(outDir, 'EVAL_SUMMARY.json'), JSON.stringify(summary, null, 2));
 
 console.log(`\n📋 Retry report: ${jsonlPath}`);

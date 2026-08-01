@@ -146,6 +146,19 @@ export function validateVisualPlan(raw: unknown, fallbackTopic: string): LlmVisu
   return plan;
 }
 
+/**
+ * Family templates are feature-flagged and family-specific, so they can come
+ * back empty. A fallback plan with no queries searches for nothing, so always
+ * keep the topic itself as an anchor.
+ */
+function fallbackPlanQueries(topic: string, extra?: string): string[] {
+  const queries = topicFamilyQueries(topic, 4).filter((q) => q.trim());
+  for (const candidate of [topic.trim(), extra?.trim()]) {
+    if (candidate && !queries.includes(candidate)) queries.push(candidate);
+  }
+  return queries.length ? queries : ['documentary b-roll'];
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -238,7 +251,7 @@ Return JSON:
       logger.warn('VisualDirector', `AI Plan request failed (${response.status}), using fallback`);
       return {
         intent: 'Fallback visual',
-        queries: topicFamilyQueries(fallbackTopic, 4),
+        queries: fallbackPlanQueries(fallbackTopic),
         visualConcept: 'Neutral documentary',
       };
     }
@@ -250,7 +263,7 @@ Return JSON:
       logger.warn('VisualDirector', 'AI Plan returned no content, using fallback');
       return {
         intent: 'Fallback visual',
-        queries: topicFamilyQueries(fallbackTopic, 4),
+        queries: fallbackPlanQueries(fallbackTopic),
         visualConcept: 'Neutral documentary',
       };
     }
@@ -260,7 +273,7 @@ Return JSON:
       logger.warn('VisualDirector', 'JSON extraction failed for AI Plan, using fallback');
       return {
         intent: 'Fallback visual',
-        queries: topicFamilyQueries(fallbackTopic, 4),
+        queries: fallbackPlanQueries(fallbackTopic),
         visualConcept: 'Neutral documentary',
       };
     }
@@ -272,7 +285,7 @@ Return JSON:
     logger.error('VisualDirector', 'Exception during AI Plan generation', error);
     return {
       intent: 'Fallback visual',
-      queries: [...topicFamilyQueries(fallbackTopic, 3), segmentText.slice(0, 30)],
+      queries: fallbackPlanQueries(fallbackTopic, segmentText.slice(0, 30)),
       visualConcept: 'Neutral documentary',
     };
   }

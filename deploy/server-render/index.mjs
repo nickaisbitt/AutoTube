@@ -6,8 +6,12 @@
  * deploy/server-render.mjs fork. Modules resolve via the postinstall symlink
  * server-render → deploy/server-render.
  *
+ * Spawn contract (must match server/routes/serverRender.ts):
+ *   - Project JSON: AUTOTUBE_PROJECT_PATH env var (absolute path).
+ *   - argv[2]: output .mp4 path (optional; the monolith picks a default).
+ *
  * Usage:
- *   node server-render/index.mjs [project.json] [output.mp4]
+ *   AUTOTUBE_PROJECT_PATH=/tmp/autotube-project.json node server-render/index.mjs [output.mp4]
  */
 
 import { dirname, join } from 'path';
@@ -31,6 +35,17 @@ if (!existsSync(monolith)) {
 console.log(`[server-render] Spawning canonical monolith: ${monolith}`);
 
 const args = process.argv.slice(2);
+
+// Refuse the legacy [project.json, output.mp4] order: argv[2] is the output
+// path, so a project file in that position would be overwritten by ffmpeg.
+if (args[0] && /\.json$/i.test(args[0])) {
+  console.error(
+    `[server-render] Refusing to treat "${args[0]}" as the output path. ` +
+      'Pass the project JSON via AUTOTUBE_PROJECT_PATH; argv[2] is the output .mp4 path.',
+  );
+  process.exit(1);
+}
+
 const child = spawn('node', [monolith, ...args], {
   cwd: repoRoot,
   stdio: 'inherit',

@@ -1,6 +1,18 @@
 import dns from "dns";
 import net from "net";
 
+export class ResponseSizeLimitError extends Error {
+  readonly maxBytes: number;
+  readonly receivedBytes: number;
+
+  constructor(maxBytes: number, receivedBytes: number) {
+    super(`Response exceeds the ${maxBytes} byte limit`);
+    this.name = "ResponseSizeLimitError";
+    this.maxBytes = maxBytes;
+    this.receivedBytes = receivedBytes;
+  }
+}
+
 /**
  * Checks if an IP address is loopback, private, multicast, link-local, or unique-local.
  * Supports IPv4, IPv6, and IPv4-mapped IPv6 addresses.
@@ -26,6 +38,8 @@ export function isPrivateIP(ip: string): boolean {
     if (p0 === 192 && p1 === 168) return true;
     // 169.254.0.0/16 (Link-Local)
     if (p0 === 169 && p1 === 254) return true;
+    // 100.64.0.0/10 (Carrier-grade NAT / Shared Address Space)
+    if (p0 === 100 && p1 >= 64 && p1 <= 127) return true;
     // 0.0.0.0/8 (Current network/Local)
     if (p0 === 0) return true;
     // 224.0.0.0/4 (Multicast) or 240.0.0.0/4 (Reserved)
@@ -39,13 +53,13 @@ export function isPrivateIP(ip: string): boolean {
     if (ip === "::1" || ip === "0:0:0:0:0:0:0:1") return true;
     // Unspecified address
     if (ip === "::" || ip === "0:0:0:0:0:0:0:0") return true;
+    const firstWord = Number.parseInt(ip.split(":")[0] || "0", 16);
     // Link-local: fe80::/10
-    if (ip.toLowerCase().startsWith("fe80:")) return true;
+    if ((firstWord & 0xffc0) === 0xfe80) return true;
     // Unique local: fc00::/7
-    const firstWord = ip.split(":")[0].toLowerCase();
-    if (firstWord.startsWith("fc") || firstWord.startsWith("fd")) return true;
+    if ((firstWord & 0xfe00) === 0xfc00) return true;
     // Multicast: ff00::/8
-    if (firstWord.startsWith("ff")) return true;
+    if ((firstWord & 0xff00) === 0xff00) return true;
     
     return false;
   }
@@ -55,13 +69,18 @@ export function isPrivateIP(ip: string): boolean {
 
 /**
  * Validates URL safety to prevent SSRF attacks.
- * Resolves the domain using DNS and verifies that all resolved IP addresses are safe/public.
+ * Resolves the domain using DNS and verifies that all resolved IP addresses are
+ * safe/public. Callers must re-run this for every redirect destination.
+ *
+ * Residual risk: fetch performs another DNS lookup when opening its socket, so
+ * a narrow DNS-rebinding race remains without transport-level address pinning.
+ * Production should also block private/metadata ranges at the egress layer.
  */
 export async function validateURL(urlString: string): Promise<{ valid: boolean; error?: string }> {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(urlString);
-  } catch (err) {
+  } catch {
     return { valid: false, error: "Invalid URL format" };
   }
 
@@ -70,7 +89,14 @@ export async function validateURL(urlString: string): Promise<{ valid: boolean; 
     return { valid: false, error: `Unsupported protocol: ${parsedUrl.protocol}` };
   }
 
-  const hostname = parsedUrl.hostname.toLowerCase();
+  if (parsedUrl.username || parsedUrl.password) {
+    return { valid: false, error: "URLs containing credentials are forbidden" };
+  }
+
+  const hostname = parsedUrl.hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
   
   // Fast path for loopback and local strings
   if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
@@ -85,8 +111,17 @@ export async function validateURL(urlString: string): Promise<{ valid: boolean; 
     "metadata.azure.com",
     "instance-data",
   ];
-  if (blockedSuffixes.some(suffix => hostname === suffix || hostname.endsWith(suffix))) {
+  if (blockedSuffixes.some(
+    (suffix) =>
+      hostname === suffix.replace(/^\./, "") || hostname.endsWith(suffix),
+  )) {
     return { valid: false, error: "Access to internal/metadata hosts is forbidden" };
+  }
+
+  if (net.isIP(hostname)) {
+    return isPrivateIP(hostname)
+      ? { valid: false, error: `Access to private/internal IP is forbidden (${hostname})` }
+      : { valid: true };
   }
 
   // Resolve hostname and check all IPs
@@ -107,4 +142,45 @@ export async function validateURL(urlString: string): Promise<{ valid: boolean; 
       resolve({ valid: true });
     });
   });
+}
+
+/**
+ * Reads an upstream response incrementally. Content-Length is rejected before
+ * reading when possible, while the streaming check handles absent or false
+ * headers and limits decompressed bytes.
+ */
+export async function readResponseBodyWithLimit(
+  response: Response,
+  maxBytes: number,
+): Promise<Buffer> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength && /^\d+$/.test(contentLength.trim())) {
+    const declaredBytes = Number(contentLength);
+    if (Number.isSafeInteger(declaredBytes) && declaredBytes > maxBytes) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new ResponseSizeLimitError(maxBytes, declaredBytes);
+    }
+  }
+
+  if (!response.body) return Buffer.alloc(0);
+
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new ResponseSizeLimitError(maxBytes, totalBytes);
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, totalBytes);
 }

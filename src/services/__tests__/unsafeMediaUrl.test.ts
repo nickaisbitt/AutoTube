@@ -147,8 +147,10 @@ describe('unsafe media URL bans', () => {
     expect(project.media).toHaveLength(1);
   });
 
-  it('trusts Archive.org clips from short aviation queries even with opaque titles', async () => {
+  it('does not trust Archive.org clips with opaque titles on the search query alone', async () => {
     const { isAirlineRelevantClip } = await import('../../../scripts/lib/generate-full-video.mjs');
+    // A short aviation query is not evidence of what the clip actually shows:
+    // laundering the query into relevance is how hangar pads shipped as cabin footage.
     expect(
       isAirlineRelevantClip(
         {
@@ -159,7 +161,7 @@ describe('unsafe media URL bans', () => {
         },
         'airline cabin pressure',
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isAirlineRelevantClip(
         {

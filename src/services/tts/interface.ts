@@ -35,7 +35,7 @@ export interface TTSEngine {
 
 export interface TTSConfig {
   /** Preferred engine to use */
-  engine: 'kokoro' | 'browser';
+  engine: 'kokoro' | 'grok' | 'browser';
 
   /** Cloudflare account ID for MeloTTS */
   cloudflareAccountId?: string;

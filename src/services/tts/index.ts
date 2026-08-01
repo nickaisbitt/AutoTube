@@ -27,10 +27,11 @@ import { logger } from '../logger';
 import { kokoroEngine } from './kokoroEngine';
 import type { TTSConfig } from './interface';
 import { browserEngine } from './browserEngine';
+import { grokEngine } from './grokEngine';
 import { generateWithFallback } from './registry';
 
-/** All available TTS engines (in priority order) */
-export const TTS_ENGINES = [kokoroEngine, browserEngine] as const;
+/** All available TTS engines (in priority order) — mirrors registry ENGINE_PRIORITY. */
+export const TTS_ENGINES = [kokoroEngine, grokEngine, browserEngine] as const;
 
 /**
  * Generate narration audio for the given text.
@@ -63,18 +64,34 @@ export async function generateMeloTts(
   options?: { signal?: AbortSignal }
 ): Promise<string | null> {
   try {
-    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/freetts/melo-tts`;
+    // Model slug + request/response shape must match the server renderer
+    // (deploy/server-render/narration.mjs): @cf/myshell-ai/melotts expects
+    // `{ prompt, lang }` and returns base64 audio in a JSON envelope.
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/myshell-ai/melotts`;
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ prompt: text, lang: 'en' }),
       signal: options?.signal
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
+
+    const contentType = res.headers.get('content-type') || '';
+    let blob: Blob;
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+      const base64Audio = data?.result?.audio;
+      if (!base64Audio) throw new Error('No audio in MeloTTS response');
+      const binary = atob(base64Audio);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      blob = new Blob([bytes], { type: 'audio/mpeg' });
+    } else {
+      blob = await res.blob();
+    }
     return URL.createObjectURL(blob);
   } catch (err) {
     logger.error('MeloTTS', `MeloTTS failed for text: "${text.substring(0, 40)}..."`, err);

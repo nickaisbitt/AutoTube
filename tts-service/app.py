@@ -1,9 +1,11 @@
 import os
 import io
+import asyncio
 import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from kokoro_onnx import Kokoro
 import soundfile as sf
 
@@ -16,6 +18,13 @@ app = FastAPI(title="AutoTube Kokoro ONNX TTS Service")
 # Paths to the model files
 MODEL_PATH = os.environ.get("KOKORO_MODEL_PATH", "kokoro-v0_19.onnx")
 VOICES_PATH = os.environ.get("KOKORO_VOICES_PATH", "voices.bin")
+
+# Synthesis is CPU-bound and blocking. Run it in a threadpool so the event loop
+# stays responsive, and bound concurrency so parallel requests can't exhaust CPU
+# or memory. Also cap request text length to avoid unbounded allocations.
+MAX_CONCURRENCY = max(1, int(os.environ.get("KOKORO_MAX_CONCURRENCY", "2")))
+MAX_TEXT_CHARS = max(1, int(os.environ.get("KOKORO_MAX_TEXT_CHARS", "5000")))
+_generation_semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 
 # Global placeholder for the Kokoro instance
 kokoro_engine = None
@@ -54,16 +63,26 @@ async def generate(request: TTSRequest):
         
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
-        
+
+    if len(request.text) > MAX_TEXT_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Text exceeds maximum length of {MAX_TEXT_CHARS} characters",
+        )
+
     try:
         logger.info(f"Generating speech for text: '{request.text[:40]}...' [voice={request.voice}, speed={request.speed}]")
-        
-        # Generate the audio samples and sample rate
-        samples, sample_rate = kokoro_engine.create(
-            text=request.text,
-            voice=request.voice,
-            speed=request.speed
-        )
+
+        # Offload the blocking synthesis to a worker thread, bounded by a
+        # semaphore so we never run more than MAX_CONCURRENCY generations at once.
+        async with _generation_semaphore:
+            samples, sample_rate = await run_in_threadpool(
+                lambda: kokoro_engine.create(
+                    text=request.text,
+                    voice=request.voice,
+                    speed=request.speed,
+                )
+            )
         
         # Write to in-memory bytes buffer as WAV
         buffer = io.BytesIO()

@@ -1,20 +1,18 @@
 import type { IncomingMessage, ServerResponse } from "http";
 
-/** Paths that remain public without an API key (exact prefix match on pathname). */
-const PUBLIC_PREFIXES = ["/api/health"];
+/** Paths that remain public without an API key. */
+const PUBLIC_PATHS = new Set(["/api/health"]);
 
 function pathnameOf(req: IncomingMessage): string {
   try {
-    return new URL(req.url || "/", `http://${req.headers.host || "localhost"}`).pathname;
+    return new URL(req.url || "/", "http://localhost").pathname;
   } catch {
     return (req.url || "/").split("?")[0];
   }
 }
 
 function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(p + "/"),
-  );
+  return PUBLIC_PATHS.has(pathname);
 }
 
 function extractApiKey(req: IncomingMessage): string {
@@ -33,9 +31,9 @@ function extractApiKey(req: IncomingMessage): string {
 /**
  * Shared API key gate for privileged /api/* routes.
  *
- * - Production (`NODE_ENV=production`): AUTOTUBE_API_KEY is required; missing
- *   env → 503. Wrong/missing client key → 401.
- * - Development: if AUTOTUBE_API_KEY is unset, auth is skipped (local DX).
+ * - AUTOTUBE_API_KEY is required by default in every environment.
+ * - Development may explicitly opt out with AUTOTUBE_DISABLE_AUTH=1.
+ * - Production always requires a key and ignores the opt-out.
  * - GET /api/health is always public.
  *
  * Returns true when the request was rejected (caller must return).
@@ -51,19 +49,24 @@ export function apiAuthMiddleware(
 
   const expected = (process.env.AUTOTUBE_API_KEY || "").trim();
   const isProd = process.env.NODE_ENV === "production";
+  const authDisabled =
+    !isProd &&
+    ["1", "true"].includes(
+      (process.env.AUTOTUBE_DISABLE_AUTH || "").trim().toLowerCase(),
+    );
+
+  if (authDisabled) return false;
 
   if (!expected) {
-    if (isProd) {
-      res.statusCode = 503;
-      res.setHeader("Content-Type", "application/json");
-      res.end(
-        JSON.stringify({
-          error: "Server misconfigured: AUTOTUBE_API_KEY is required in production",
-        }),
-      );
-      return true;
-    }
-    return false;
+    res.statusCode = 503;
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify({
+        error:
+          "Server misconfigured: AUTOTUBE_API_KEY is required (AUTOTUBE_DISABLE_AUTH=1 is for local development only)",
+      }),
+    );
+    return true;
   }
 
   const provided = extractApiKey(req);

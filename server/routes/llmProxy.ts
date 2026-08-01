@@ -1,13 +1,48 @@
 import type { IncomingMessage, ServerResponse } from "http";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const DEFAULT_SERVER_MODEL = "xiaomi/mimo-v2.5";
+const MAX_LLM_BODY_BYTES = 1024 * 1024;
+const MAX_SERVER_TOKENS = 8192;
+
+class RequestBodyTooLargeError extends Error {}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function allowedServerModels(): Set<string> {
+  const extra = (process.env.AUTOTUBE_ALLOWED_LLM_MODELS || "")
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean);
+  return new Set([
+    DEFAULT_SERVER_MODEL,
+    (process.env.OPENROUTER_MODEL || "").trim(),
+    ...extra,
+  ].filter(Boolean));
+}
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  const declaredLength = req.headers["content-length"];
+  if (
+    typeof declaredLength === "string" &&
+    /^\d+$/.test(declaredLength) &&
+    Number(declaredLength) > MAX_LLM_BODY_BYTES
+  ) {
+    throw new RequestBodyTooLargeError();
   }
-  const raw = Buffer.concat(chunks).toString("utf8");
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > MAX_LLM_BODY_BYTES) {
+      throw new RequestBodyTooLargeError();
+    }
+    chunks.push(buffer);
+  }
+  const raw = Buffer.concat(chunks, totalBytes).toString("utf8");
   if (!raw.trim()) return {};
   return JSON.parse(raw);
 }
@@ -32,10 +67,21 @@ export async function handleLlmProxy(
   let body: unknown;
   try {
     body = await readJsonBody(req);
-  } catch {
+  } catch (err) {
+    res.statusCode = err instanceof RequestBodyTooLargeError ? 413 : 400;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({
+      error: err instanceof RequestBodyTooLargeError
+        ? "Payload too large"
+        : "Invalid JSON body",
+    }));
+    return;
+  }
+
+  if (!isRecord(body)) {
     res.statusCode = 400;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ error: "Invalid JSON body" }));
+    res.end(JSON.stringify({ error: "JSON body must be an object" }));
     return;
   }
 
@@ -66,6 +112,40 @@ export async function handleLlmProxy(
     return;
   }
 
+  let upstreamBody: Record<string, unknown> = body;
+  if (serverKey) {
+    const requestedModel = body.model;
+    if (
+      requestedModel !== undefined &&
+      (typeof requestedModel !== "string" || !requestedModel.trim())
+    ) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "model must be a non-empty string" }));
+      return;
+    }
+    const defaultModel =
+      (process.env.OPENROUTER_MODEL || "").trim() || DEFAULT_SERVER_MODEL;
+    const model =
+      typeof requestedModel === "string" ? requestedModel.trim() : defaultModel;
+    if (!allowedServerModels().has(model)) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({
+        error: "Requested model is not allowed with the server key",
+      }));
+      return;
+    }
+    const requestedMaxTokens = body.max_tokens;
+    const maxTokens =
+      typeof requestedMaxTokens === "number" &&
+      Number.isFinite(requestedMaxTokens) &&
+      requestedMaxTokens > 0
+        ? Math.min(Math.floor(requestedMaxTokens), MAX_SERVER_TOKENS)
+        : MAX_SERVER_TOKENS;
+    upstreamBody = { ...body, model, max_tokens: maxTokens };
+  }
+
   try {
     const upstream = await fetch(OPENROUTER_URL, {
       method: "POST",
@@ -75,7 +155,7 @@ export async function handleLlmProxy(
         "HTTP-Referer": "https://autotube.video",
         "X-Title": "AutoTube AI Generator",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(upstreamBody),
       signal: AbortSignal.timeout(120_000),
     });
 

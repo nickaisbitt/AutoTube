@@ -8,11 +8,16 @@
 
 import { logger } from '../logger';
 import { browserEngine } from './browserEngine';
+import { grokEngine } from './grokEngine';
 import type { TTSConfig, TTSEngine } from './interface';
 import { kokoroEngine } from './kokoroEngine';
 
-/** Default engine priority order: Kokoro → Browser */
-const ENGINE_PRIORITY: TTSEngine[] = [kokoroEngine, browserEngine];
+/**
+ * Default engine priority order: Kokoro (local) → Grok (cloud) → Browser.
+ * Grok is only attempted when `xaiApiKey` is present (see grokEngine.isAvailable),
+ * so unconfigured setups fall back cleanly to Kokoro/Browser.
+ */
+const ENGINE_PRIORITY: TTSEngine[] = [kokoroEngine, grokEngine, browserEngine];
 
 /**
  * Get the ordered list of engines to try, starting with the preferred engine.
@@ -35,6 +40,7 @@ function buildEngineOptions(config: TTSConfig, signal?: AbortSignal) {
   return {
     signal,
     serverUrl: config.kokoroServerUrl,
+    apiKey: config.xaiApiKey,
   };
 }
 

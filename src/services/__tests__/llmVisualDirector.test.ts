@@ -297,10 +297,12 @@ describe('Property 12: Visual Director retry with backoff', () => {
           const plan = await generateAIPlan(segmentText, ctx, 'test-api-key');
 
           // The function sanitises the topic (strips backticks, quotes, backslashes)
-          // before using it as the fallback query.
+          // before anchoring the fallback queries on it. Topic family templates are
+          // optional, so the topic anchor is what keeps the plan searchable.
           const sanitised = topic.replace(/[`"\\]/g, '').slice(0, 200).trim();
 
           expect(plan).toBeDefined();
+          expect(isValidPlan(plan)).toBe(true);
           expect(plan.intent).toBe('Fallback visual');
           expect(plan.visualConcept).toBe('Neutral documentary');
           expect(plan.queries).toContain(sanitised);

@@ -1,9 +1,10 @@
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: process.env.PLAYWRIGHT_TEST_DIR ?? './e2e',
+  testMatch: '**/*.spec.ts',
   fullyParallel: false,
-  forbidOnly: false,
+  forbidOnly: Boolean(process.env.CI),
   retries: 1,
   workers: 1,
   reporter: 'list',

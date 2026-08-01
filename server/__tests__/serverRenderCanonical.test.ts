@@ -39,3 +39,37 @@ describe('canonical server-render for production', () => {
     expect(sha256(canonical)).toBe(sha256(deployCopy));
   });
 });
+
+/**
+ * Spawn contract (route → entrypoint → monolith):
+ *   - Project JSON is selected via the AUTOTUBE_PROJECT_PATH env var.
+ *   - argv[2] is the output .mp4 path only — never a project JSON path.
+ *     (The legacy [projectPath, outputMp4] order made the monolith treat the
+ *     project file as its output and fall back to the newest /tmp project.)
+ */
+describe('server-render spawn contract', () => {
+  const route = join(root, 'server', 'routes', 'serverRender.ts');
+
+  it('route passes the output mp4 as the only positional arg to the entrypoint', () => {
+    const src = readFileSync(route, 'utf8');
+    expect(src).toContain('[renderScript, outputMp4]');
+  });
+
+  it('route sets AUTOTUBE_PROJECT_PATH for project selection', () => {
+    const src = readFileSync(route, 'utf8');
+    expect(src).toContain('AUTOTUBE_PROJECT_PATH: projectPath');
+  });
+
+  it('monolith reads the project from AUTOTUBE_PROJECT_PATH and output from argv[2]', () => {
+    const src = readFileSync(canonical, 'utf8');
+    expect(src).toContain('process.env.AUTOTUBE_PROJECT_PATH');
+    expect(src).toMatch(/OUTPUT_FILE\s*=\s*cliOutputArg\s*\|\|/);
+  });
+
+  it('monolith and entrypoint refuse a .json output arg (legacy arg order)', () => {
+    for (const p of [canonical, entry]) {
+      const src = readFileSync(p, 'utf8');
+      expect(src).toContain('.json$/i.test');
+    }
+  });
+});

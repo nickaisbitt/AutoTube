@@ -1,11 +1,12 @@
 // ============================================================================
-// Quality Scorer — Multi-Factor Image Quality Assessment via Reka Edge
+// Quality Scorer — Multi-Factor Image Quality Assessment via a vision model
 // ============================================================================
 
 import type { MediaCandidate } from './media';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { repairTruncatedJson } from '../utils/jsonRepair';
 import { openRouterMessageText } from '../utils/openRouterMessageText';
+import { DEFAULT_VISION_MODEL } from './llm/defaultModels';
 import { logger } from './logger';
 import {
   GENERIC_HOOK_PHRASES,
@@ -49,14 +50,14 @@ export interface QualityScorerResult {
 // ---------------------------------------------------------------------------
 
 const OPENROUTER_ENDPOINT = '/api/llm';
-const VISION_MODEL = 'xiaomi/mimo-v2.5';
+const VISION_MODEL = DEFAULT_VISION_MODEL;
 const QUALITY_TIMEOUT_MS = 20_000;
 const QUALITY_MAX_RETRIES = 2;
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_TOP_N = 5;
 
-/** Domains that Reka Edge cannot fetch (hotlink-blocking, paywalled, etc.). */
-const REKA_UNFETCHABLE_DOMAINS = [
+/** Domains the vision model cannot fetch (hotlink-blocking, paywalled, etc.). */
+const VISION_UNFETCHABLE_DOMAINS = [
   'vecteezy.com', 'freepik.com', 'ftcdn.net', 'adobe.com',
   'usatoday.com', 'cnn.com', 'bbc.com', 'bbc.co.uk',
   'nytimes.com', 'sky.com', '365dm.com',
@@ -76,18 +77,12 @@ export const QUALITY_WEIGHTS = {
   relevance: 0.25,
 } as const;
 
-/** Default quality factors returned on parse failure. */
-const DEFAULT_FACTORS: QualityFactors = {
-  sharpness: 5,
-  lighting: 5,
-  composition: 5,
-  vibrancy: 5,
-  relevance: 5,
-  clarity: 5,
-  urgency: 5,
-  emotionalSpecificity: 5,
-  credibility: 5,
-};
+/**
+ * Neutral value used for individual factors the model omitted from an otherwise
+ * usable response. Never used to synthesise a whole result — see
+ * {@link parseQualityResponse}, which fails closed instead.
+ */
+const NEUTRAL_FACTOR = 5;
 
 // ---------------------------------------------------------------------------
 // Pure functions
@@ -110,20 +105,30 @@ export function computeCompositeScore(factors: QualityFactors): number {
 
 /**
  * Clamp a number to the integer range [0, 10].
+ * Values that are not finite numbers fall back to the neutral factor.
  */
 function clampFactor(value: unknown): number {
-  if (typeof value !== 'number' || isNaN(value)) return 5;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return NEUTRAL_FACTOR;
   return Math.max(0, Math.min(10, Math.round(value)));
 }
 
-/**
- * Parse the raw JSON response from Reka Edge into validated QualityFactors.
- * Clamps each factor to [0, 10]. Returns default factors (all 5) on parse failure.
- */
-export function parseQualityResponse(raw: unknown): QualityFactors {
-  try {
-    let obj: Record<string, unknown>;
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
 
+/**
+ * Parse the raw JSON response from the vision model into validated QualityFactors.
+ * Clamps each factor to [0, 10].
+ *
+ * Fails closed: returns `null` when the response cannot be parsed into an object,
+ * or when it carries no recognised numeric factor at all. Synthesising an all-5s
+ * result in those cases would hand every unscoreable candidate a mediocre-but-passing
+ * score, hiding the failure from the caller.
+ */
+export function parseQualityResponse(raw: unknown): QualityFactors | null {
+  let obj: Record<string, unknown>;
+
+  try {
     if (typeof raw === 'string') {
       // Strip markdown fences if present
       let cleaned = raw.trim();
@@ -140,25 +145,32 @@ export function parseQualityResponse(raw: unknown): QualityFactors {
     } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
       obj = raw as Record<string, unknown>;
     } else {
-      return { ...DEFAULT_FACTORS };
+      return null;
     }
-
-    return {
-      sharpness: clampFactor(obj.sharpness),
-      lighting: clampFactor(obj.lighting),
-      composition: clampFactor(obj.composition),
-      vibrancy: clampFactor(obj.vibrancy),
-      relevance: clampFactor(obj.relevance),
-      clarity: clampFactor(obj.clarity),
-      urgency: clampFactor(obj.urgency),
-      emotionalSpecificity: clampFactor(
-        obj.emotionalSpecificity ?? obj.emotional_specificity,
-      ),
-      credibility: clampFactor(obj.credibility),
-    };
   } catch {
-    return { ...DEFAULT_FACTORS };
+    return null;
   }
+
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+
+  const emotionalSpecificity = obj.emotionalSpecificity ?? obj.emotional_specificity;
+  const provided = [
+    obj.sharpness, obj.lighting, obj.composition, obj.vibrancy, obj.relevance,
+    obj.clarity, obj.urgency, emotionalSpecificity, obj.credibility,
+  ];
+  if (!provided.some(isFiniteNumber)) return null;
+
+  return {
+    sharpness: clampFactor(obj.sharpness),
+    lighting: clampFactor(obj.lighting),
+    composition: clampFactor(obj.composition),
+    vibrancy: clampFactor(obj.vibrancy),
+    relevance: clampFactor(obj.relevance),
+    clarity: clampFactor(obj.clarity),
+    urgency: clampFactor(obj.urgency),
+    emotionalSpecificity: clampFactor(emotionalSpecificity),
+    credibility: clampFactor(obj.credibility),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +191,7 @@ function cleanImageUrl(url: string): string {
 }
 
 /**
- * Build the Reka Edge prompt for multi-factor quality assessment.
+ * Build the vision-model prompt for multi-factor quality assessment.
  * Returns system + user message parts for the OpenRouter API call.
  */
 export function buildQualityScorerPrompt(
@@ -217,9 +229,9 @@ export function buildQualityScorerPrompt(
 // ---------------------------------------------------------------------------
 
 /**
- * Score a single candidate image using Reka Edge.
+ * Score a single candidate image using the vision model.
  * Makes one API call that evaluates all five factors simultaneously.
- * Returns null if the API is unavailable or fails.
+ * Returns null if the API is unavailable, fails, or returns an unparseable response.
  */
 export async function scoreImageQuality(
   imageUrl: string,
@@ -227,14 +239,14 @@ export async function scoreImageQuality(
   apiKey: string,
   options?: { signal?: AbortSignal },
 ): Promise<QualityScorerResult | null> {
-  // Skip URLs that Reka Edge cannot fetch
+  // Skip URLs the vision model cannot fetch
   const cleaned = cleanImageUrl(imageUrl);
   if (!cleaned.startsWith('http')) return null;
 
-  // Skip domains that Reka Edge cannot access (hotlink-blocking, paywalled, etc.)
+  // Skip domains the vision model cannot access (hotlink-blocking, paywalled, etc.)
   try {
     const hostname = new URL(cleaned).hostname.toLowerCase();
-    if (REKA_UNFETCHABLE_DOMAINS.some(d => hostname.includes(d))) return null;
+    if (VISION_UNFETCHABLE_DOMAINS.some(d => hostname.includes(d))) return null;
   } catch {
     return null;
   }
@@ -283,6 +295,10 @@ export async function scoreImageQuality(
     }
 
     const factors = parseQualityResponse(content);
+    if (!factors) {
+      logger.warn('QualityScorer', `Unparseable quality response for ${imageUrl} — discarding score`);
+      return null;
+    }
     const compositeScore = computeCompositeScore(factors);
 
     return { factors, compositeScore };
@@ -300,7 +316,7 @@ export async function scoreImageQuality(
 
 /**
  * Batch-score the top N candidates. Processes in parallel with concurrency limit.
- * Falls back to existing scoreCandidate() if Reka Edge is unavailable.
+ * Falls back to existing scoreCandidate() if the vision model is unavailable.
  */
 export async function batchScoreQuality(
   candidates: MediaCandidate[],

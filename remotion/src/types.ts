@@ -80,4 +80,10 @@ export interface ProjectProps {
   fps: number;
   width: number;
   height: number;
+  /**
+   * Optional URL for a background-music bed served by REMOTION_SERVE_URL
+   * (e.g. `${DEV_SERVER_URL}/audio/bg-neutral.aac`). When omitted, the Remotion
+   * renderer produces narration-only audio.
+   */
+  backgroundMusicUrl?: string;
 }

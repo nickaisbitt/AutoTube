@@ -1,9 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "http";
 
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",") || [
-  "http://localhost:5173",
-  "http://localhost:3000",
-];
+function allowedOrigins(): string[] {
+  return process.env.ALLOWED_ORIGINS?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean) || ["http://localhost:5173", "http://localhost:3000"];
+}
 
 /**
  * CORS middleware — sets safe headers for development and restricts origins in production.
@@ -16,7 +17,7 @@ export function cors(
   const origin = req.headers.origin;
 
   if (process.env.NODE_ENV === "production") {
-    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    if (origin && allowedOrigins().includes(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
     }
@@ -26,6 +27,9 @@ export function cors(
   }
 
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-API-Key",
+  );
   next();
 }

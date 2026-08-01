@@ -1,8 +1,16 @@
-[build]
-builder = "railpack"
-
-[deploy]
-startCommand = "npx tsx server.mjs"
-healthcheckPath = "/api/health"
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 10
+# ============================================================
+# DO NOT USE — Railway rootDirectory must be the repo ROOT, not deploy/
+#
+# This file is a stale remnant. The canonical Railway config lives at
+# the repo root (railway.toml). Booting from deploy/ would use deleted
+# server code and would lack all security middleware (apiAuth, rate limits).
+#
+# If you accidentally set rootDirectory = "deploy" in Railway, revert it
+# to the repo root immediately.
+# ============================================================
+#
+# [build]
+# builder = "railpack"
+#
+# [deploy]
+# startCommand = "npx tsx server.mjs"  ← server.mjs deleted; do not restore

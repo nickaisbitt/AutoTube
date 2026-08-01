@@ -1,5 +1,5 @@
 import React from 'react';
-import { Audio, useCurrentFrame, interpolate } from 'remotion';
+import { Audio, useCurrentFrame } from 'remotion';
 import { ProjectProps } from '../types';
 
 interface BackgroundMusicProps {
@@ -7,6 +7,8 @@ interface BackgroundMusicProps {
   segments: ProjectProps['segments'];
   fps: number;
   duckDuringNarration?: boolean; // default true
+  /** Frames the narration timeline is delayed by (cold open + title card). */
+  offsetFrames?: number;
 }
 
 export const BackgroundMusic: React.FC<BackgroundMusicProps> = ({
@@ -14,20 +16,25 @@ export const BackgroundMusic: React.FC<BackgroundMusicProps> = ({
   segments,
   fps,
   duckDuringNarration = true,
+  offsetFrames = 0,
 }) => {
   const frame = useCurrentFrame();
 
-  // Calculate narration presence per frame
+  // Narration segments start `offsetFrames` into the composition, so measure
+  // narration presence relative to that offset to keep ducking aligned.
+  const narrationFrame = frame - offsetFrames;
   let currentFrame = 0;
   let isNarrationActive = false;
 
-  for (const seg of segments) {
-    const segDuration = Math.round(seg.duration * fps);
-    if (frame >= currentFrame && frame < currentFrame + segDuration) {
-      isNarrationActive = true;
-      break;
+  if (narrationFrame >= 0) {
+    for (const seg of segments) {
+      const segDuration = Math.round(seg.duration * fps);
+      if (narrationFrame >= currentFrame && narrationFrame < currentFrame + segDuration) {
+        isNarrationActive = true;
+        break;
+      }
+      currentFrame += segDuration;
     }
-    currentFrame += segDuration;
   }
 
   // Volume: duck during narration, normal otherwise

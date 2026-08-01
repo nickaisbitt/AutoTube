@@ -41,7 +41,6 @@ import {
   measureAudioLoudness,
 } from './server-render/pipelineReliability.mjs';
 
-import { estimateRenderCost } from './src/services/costTracker.node.mjs';
 import {
   isYouTubeExportMode,
   captionMetrics,
@@ -52,6 +51,33 @@ import {
 } from './server-render/youtubeProfile.mjs';
 import { renderViaFfmpegAssembly } from './server-render/ffmpegAssembly.mjs';
 import { buildEditTimeline } from './scripts/lib/build-edit-timeline.mjs';
+
+const ZERO_RENDER_COST = Object.freeze({
+  apiCostEstimate: 0,
+  computeCostEstimate: 0,
+  storageCostEstimate: 0,
+  totalEstimate: 0,
+});
+
+/** Survives Railway shrink deleting `src/` — falls back to deploy copy or zeros. */
+async function loadEstimateRenderCost() {
+  const candidates = [
+    './src/services/costTracker.node.mjs',
+    './src/services/costTracker.mjs',
+    './deploy/src/services/costTracker.mjs',
+  ];
+  for (const spec of candidates) {
+    try {
+      const mod = await import(spec);
+      if (typeof mod.estimateRenderCost === 'function') {
+        return mod.estimateRenderCost;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return () => ({ ...ZERO_RENDER_COST });
+}
 
 let sharpModule = null;
 async function getSharp() {
@@ -101,7 +127,22 @@ const RENDER_DEBUG_OVERLAYS = false;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUTPUT_DIR = join(__dirname, 'test-recordings');
-const OUTPUT_FILE = process.argv[2] || join(OUTPUT_DIR, `server-render-${Date.now()}.mp4`);
+
+// CLI contract: argv[2] is the output .mp4 path only; the project JSON is
+// selected via AUTOTUBE_PROJECT_PATH (see fetchProject). Refuse a .json in
+// the output position — the legacy [project.json, output.mp4] order would
+// have ffmpeg overwrite the project file. Only enforced when run as the CLI
+// entry so module imports (tests) are unaffected.
+const cliOutputArg = process.argv[2];
+const isCliEntry = process.argv[1] === fileURLToPath(import.meta.url);
+if (isCliEntry && cliOutputArg && /\.json$/i.test(cliOutputArg)) {
+  console.error(
+    `[server-render] Refusing to treat "${cliOutputArg}" as the output file. ` +
+      'argv[2] is the output .mp4 path; pass the project JSON via AUTOTUBE_PROJECT_PATH.',
+  );
+  process.exit(1);
+}
+const OUTPUT_FILE = cliOutputArg || join(OUTPUT_DIR, `server-render-${Date.now()}.mp4`);
 
 /** Active ffmpeg child (module scope for cleanup on crash). */
 let activeFfmpeg = null;
@@ -3548,8 +3589,9 @@ async function render() {
     throw new Error('No media assets found. Run the pipeline (source media) first.');
   }
 
-  // ── Cost Estimation ──────────────────────────────────────────────────────
+  // ── Cost Estimation (dynamic import survives Railway shrink deleting src/) ─
   try {
+    const estimateRenderCost = await loadEstimateRenderCost();
     const costEst = estimateRenderCost(project);
     log('info', '\n💰 Estimated render costs:');
     log('info', `   API (LLM calls):     ~$${costEst.apiCostEstimate.toFixed(4)}`);

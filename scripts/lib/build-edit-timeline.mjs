@@ -43,6 +43,21 @@ function tokens(text) {
 
 const AIRLINE_LIMITED_CLUSTERS = new Set(['paperwork', 'mail', 'document', 'financial']);
 
+/** Subjects that must never carry a story, whatever the reuse pressure. */
+const NEVER_USE_SUBJECT_RE = /\b(puppet|beetle|insect|bug macro|macro bug|spider macro|larva|caterpillar|cartoon|animation still|minecraft)\b/;
+
+function isNeverUseVisual(asset) {
+  return NEVER_USE_SUBJECT_RE.test(assetBlob(asset));
+}
+
+const CAMERA_STORY_RE = /\b(cctv|surveillance|security camera|security cameras|cameras?|footage|body ?cam|dash ?cam)\b/i;
+
+function isSurveillanceVisual(asset) {
+  return /\b(cctv|surveillance|security camera|security cameras|camera footage|monitor wall|control room|monitoring station)\b/.test(
+    assetBlob(asset),
+  );
+}
+
 /** Coarse visual cluster so cold body cuts don't loop the same subject. */
 export function visualSubjectCluster(asset) {
   const blob = assetBlob(asset);
@@ -120,9 +135,11 @@ function isAirlineIntroLeadVisual(asset) {
   return hasCockpit || hasCabin || hasPassengerFace || isBrightCabinInterior(asset);
 }
 
-function isIntroLeadVisual(asset, { airline = false } = {}) {
+function isIntroLeadVisual(asset, { airline = false, cameraStory = false } = {}) {
   if (airline) return isAirlineIntroLeadVisual(asset);
   if (isRejectedIntroLeadVisual(asset)) return false;
+  // A surveillance frame is the subject on camera stories, not dead air.
+  if (cameraStory && isSurveillanceVisual(asset)) return true;
   const blob = assetBlob(asset);
   return /\b(face|faces|person|people|worried|shocked|portrait|close.?up|passenger|pilot|attendant|crew|flight attendant|cabin crew|cockpit|flight deck)\b/.test(blob)
     || isBrightCabinInterior(asset);
@@ -222,6 +239,10 @@ export function buildEditTimeline(project, options = {}) {
   const MAX_BODY_CUT_SEC = 1.25;
   const MAX_BODY_CUT_THIN_SEC = 2.0;
   const RECENT_URL_WINDOW = 4;
+  // The look-back must always leave candidates: with a 4-URL pool a 4-wide
+  // window bans everything and the previous cut freezes for the whole segment.
+  const uniqueUrlCount = new Set(globalPool.map((a) => urlKey(a)).filter(Boolean)).size;
+  const recentUrlWindow = Math.max(0, Math.min(RECENT_URL_WINDOW, uniqueUrlCount - 2));
   // Keep requested cut for pacing. Dynamic hard-cap: generic topics top out at
   // 6; airline stories are stricter and lengthen cuts rather than looping.
   const HARD_MAX_REUSE_CEIL = topicIsAirline && coldEval && uniqueVideos.length >= 20
@@ -256,6 +277,8 @@ export function buildEditTimeline(project, options = {}) {
   }
   const topicIsHousing = !coldEval && isHousingTopic(project.topic || '');
   const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
+  const topicIsCameraStory = CAMERA_STORY_RE.test(project.topic || '');
+  const introLeadOptions = { airline: topicIsAirline, cameraStory: topicIsCameraStory };
   const beatSheet = project.visualBeatSheet;
   const beatsBySeg = new Map();
   const recentTimelineUrls = [];
@@ -311,11 +334,13 @@ export function buildEditTimeline(project, options = {}) {
       }
       return globalUses;
     };
-    const scoreAsset = (a, activeBeat = null) => {
+    // `ignoreReuse` yields the intrinsic fit of a clip, so scarcity fallbacks can
+    // tell a banned pad from an on-topic clip that has simply been used already.
+    const scoreAsset = (a, activeBeat = null, { ignoreReuse = false } = {}) => {
       const blob = assetBlob(a);
       const key = urlKey(a);
       const introOutroReuse = isIntro || isOutro;
-      const priorUses = reuseCountFor(key, introOutroReuse);
+      const priorUses = ignoreReuse ? 0 : reuseCountFor(key, introOutroReuse);
       // Soft anti-reuse across the timeline (non-adjacent too): after 2 uses,
       // heavily prefer fresh perceived variety before the hard cap is reached.
       let reusePenalty = 0;
@@ -338,7 +363,7 @@ export function buildEditTimeline(project, options = {}) {
       if (/\b(black and white|b&w|monochrome|grayscale)\b/.test(blob)) return -6;
       // Intro must lead with faces / bright cabin — not distant runway silhouettes.
       if (isIntro) {
-        if (isIntroLeadVisual(a, { airline: topicIsAirline })) {
+        if (isIntroLeadVisual(a, introLeadOptions)) {
           reusePenalty += 6;
         }
         if (isRejectedIntroLeadVisual(a, { airline: topicIsAirline })) {
@@ -406,18 +431,35 @@ export function buildEditTimeline(project, options = {}) {
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(blob)) return 3 + beatBoost + reusePenalty;
       return beatBoost + reusePenalty;
     };
+    // Banned subjects stay out even when reuse penalties drag the on-topic
+    // clips negative, so scarcity can never promote a beetle into the cut.
+    const dropNeverUse = (pool) => {
+      const clean = pool.filter((a) => !isNeverUseVisual(a));
+      return [...(clean.length ? clean : pool)];
+    };
+    // Bookends carry the hook and the CTA: motion only when motion exists.
+    const bookendCandidates = (pool) => {
+      const motion = pool.filter((a) => a.type === 'video');
+      return dropNeverUse(motion.length ? motion : pool);
+    };
+    // Borrowing from other segments must not pull in clips the scorer bans
+    // outright (office pads, off-brand stock): repeating an on-topic clip a
+    // beat sooner reads better than cutting to a banned pad.
+    const borrowPool = (isIntro || isOutro ? bookendCandidates(globalPool) : [...globalPool])
+      .map((a) => ({ ...a, segmentId: seg.id }))
+      .filter((a) => scoreAsset(a) >= 0);
     // Intro/outro: motion only when videos exist. Body: mostly video.
     const ordered = preferVideo && videos.length
       ? (() => {
           if (isIntro || isOutro) {
-            const ranked = [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a));
+            const ranked = bookendCandidates(videos).sort((a, b) => scoreAsset(b) - scoreAsset(a));
             let usable = uniqueAssetsByUrl(ranked.filter((a) => scoreAsset(a) >= 0));
             if (!usable.length) usable = uniqueAssetsByUrl(ranked.slice(0, 1));
             // Borrow enough unique motion for dense intro cuts.
             const introSlotsNeeded = Math.max(4, Math.ceil((seg.duration || 20) / Math.min(cut, 0.65)));
             if (usable.length < introSlotsNeeded && globalPool.length) {
               const extras = uniqueAssetsByUrl(
-                [...globalPool]
+                bookendCandidates(globalPool)
                   .filter((a) => a.type === 'video' && !usable.some((u) => u.id === a.id || urlKey(u) === urlKey(a)))
                   .map((a) => ({ ...a, segmentId: seg.id }))
                   .sort((a, b) => scoreAsset(b) - scoreAsset(a))
@@ -427,7 +469,7 @@ export function buildEditTimeline(project, options = {}) {
             }
             return usable.length ? usable : uniqueAssetsByUrl(ranked.slice(0, 1));
           }
-          const ranked = [...videos].sort((a, b) => scoreAsset(b) - scoreAsset(a));
+          const ranked = dropNeverUse(videos).sort((a, b) => scoreAsset(b) - scoreAsset(a));
           const usable = uniqueAssetsByUrl(ranked.filter((a) => scoreAsset(a) >= 0));
           if (usable.length) return usable;
           const out = [];
@@ -465,6 +507,7 @@ export function buildEditTimeline(project, options = {}) {
     const maxReuseThisSeg = isIntro || isOutro ? 1 : effectiveMaxReuse;
     let t = 0;
     let ai = 0;
+    let segmentEntryCount = 0;
     let lastAssetId = null;
     let lastUrl = null;
     let lastCluster = null;
@@ -489,13 +532,17 @@ export function buildEditTimeline(project, options = {}) {
         }
         return s;
       };
-      const canUseCandidate = (candidate, { allowOverReuse = false } = {}) => {
+      // `relaxed` drops the look-back / lead-visual / cluster preferences only.
+      // Adjacent repeats and the hard reuse cap stay enforced at every tier.
+      const canUseCandidate = (candidate, { allowOverReuse = false, relaxed = false } = {}) => {
         if (!candidate) return false;
         const key = urlKey(candidate);
         if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-        if (introLeadWindow && !isIntroLeadVisual(candidate, { airline: topicIsAirline })) return false;
-        if (key && recentTimelineUrls.includes(key)) return false;
-        if (violatesConsecutiveCluster(candidate)) return false;
+        if (!relaxed) {
+          if (introLeadWindow && !isIntroLeadVisual(candidate, introLeadOptions)) return false;
+          if (key && recentTimelineUrls.includes(key)) return false;
+          if (violatesConsecutiveCluster(candidate)) return false;
+        }
         const uses = reuseCountFor(key, introOutroReuse);
         // Never exceed hard max — even as last resort (stops 9–12× loops).
         if (key && uses >= hardMaxReuse) return false;
@@ -519,18 +566,18 @@ export function buildEditTimeline(project, options = {}) {
         }
         return true;
       };
-      const pickFrom = (pool, { allowOverReuse = false } = {}) => {
-        const rankedPool = (activeBeat || (coldEval && !isIntro && !isOutro))
+      const pickFrom = (pool, { allowOverReuse = false, relaxed = false } = {}) => {
+        const rankedPool = (activeBeat || relaxed || (coldEval && !isIntro && !isOutro))
           ? [...pool].sort((a, b) => diversityScore(b) - diversityScore(a))
           : pool;
         if (!rankedPool.length) return null;
         for (let j = 0; j < rankedPool.length; j++) {
           const candidate = rankedPool[(ai + j) % rankedPool.length];
-          if (canUseCandidate(candidate, { allowOverReuse })) return candidate;
+          if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
         }
         if (!allowOverReuse) return null;
         // Last-resort: least-used under hardMax only.
-        const underCap = rankedPool.filter((candidate) => canUseCandidate(candidate, { allowOverReuse: true }));
+        const underCap = rankedPool.filter((candidate) => canUseCandidate(candidate, { allowOverReuse: true, relaxed }));
         if (!underCap.length) return null;
         return underCap.reduce((best, candidate) => {
           const key = urlKey(candidate);
@@ -545,43 +592,47 @@ export function buildEditTimeline(project, options = {}) {
         }, underCap[0]);
       };
 
+      const leastUsedFirst = (a, b) => {
+        const countDelta = reuseCountFor(urlKey(a), introOutroReuse) - reuseCountFor(urlKey(b), introOutroReuse);
+        if (countDelta !== 0) return countDelta;
+        return diversityScore(b) - diversityScore(a);
+      };
+
       // Prefer segment pool → unused global URLs → over-reuse last resort.
       let asset =
         pickFrom(ordered)
-        || (!isIntro && !isOutro ? pickFrom(globalPool) : null)
+        || (!isIntro && !isOutro ? pickFrom(borrowPool) : null)
         || pickFrom(ordered, { allowOverReuse: true })
-        || pickFrom(globalPool, { allowOverReuse: true });
-      let attempts = 0;
-
-      while (
-        asset
-        && attempts < Math.max(ordered.length, globalPool.length)
-        && !canUseCandidate(asset, { allowOverReuse: true })
-      ) {
-        asset =
-          pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool)
-          || pickFrom(isIntro || isOutro || ordered.length > 1 ? ordered : globalPool, {
-            allowOverReuse: true,
-          });
-        ai += 1;
-        attempts += 1;
+        || pickFrom(borrowPool, { allowOverReuse: true });
+      if (!asset) {
+        // Nothing satisfies the diversity preferences: take the best relaxed
+        // candidate under hardMax rather than freezing the previous cut.
+        const pool = uniqueAssetsByUrl([...ordered, ...borrowPool]);
+        asset = pool
+          .filter((c) => canUseCandidate(c, { allowOverReuse: true, relaxed: true }))
+          .sort(leastUsedFirst)[0] || null;
+      }
+      if (!asset && segmentEntryCount > 0) {
+        entries[entries.length - 1].endSec = end;
+        t = end;
+        continue;
       }
       if (!asset) {
-        // Absolute last resort under hardMax only; if capped, lengthen prior cut.
-        const pool = [...ordered, ...globalPool];
-        const ranked = pool
-          .filter((c) => canUseCandidate(c, { allowOverReuse: true }))
-          .sort((a, b) => {
-            const countDelta = reuseCountFor(urlKey(a), introOutroReuse) - reuseCountFor(urlKey(b), introOutroReuse);
-            if (countDelta !== 0) return countDelta;
-            return diversityScore(b) - diversityScore(a);
-          });
-        asset = ranked[0] || null;
-        if (!asset && entries.length && entries[entries.length - 1].segmentId === seg.id) {
-          entries[entries.length - 1].endSec = end;
-          t = end;
-          continue;
-        }
+        // A segment with no cut at all renders as a gap, so cover it with the
+        // best-fitting clip even when that means passing the reuse cap.
+        const coverage = uniqueAssetsByUrl([
+          ...ordered,
+          ...(isIntro || isOutro ? bookendCandidates(globalPool) : globalPool),
+        ]).filter((c) => c.id !== lastAssetId && !(urlKey(c) && urlKey(c) === lastUrl));
+        const clean = coverage.filter((c) => !isNeverUseVisual(c));
+        const base = clean.length ? clean : coverage;
+        const intrinsic = (c) => scoreAsset(c, activeBeat, { ignoreReuse: true });
+        const onBrand = base.filter((c) => intrinsic(c) >= 0);
+        asset = (onBrand.length ? onBrand : base).sort((a, b) => {
+          const fitDelta = intrinsic(b) - intrinsic(a);
+          if (fitDelta !== 0) return fitDelta;
+          return reuseCountFor(urlKey(a), introOutroReuse) - reuseCountFor(urlKey(b), introOutroReuse);
+        })[0] || null;
       }
       if (!asset) {
         t = end;
@@ -594,15 +645,16 @@ export function buildEditTimeline(project, options = {}) {
         assetId: asset.id,
         reason: activeBeat ? `beat:${activeBeat.id || activeBeat.searchableSubject || 'match'}` : reason,
       });
+      segmentEntryCount += 1;
       const assetUrl = urlKey(asset) || null;
       lastAssetId = asset.id;
       lastUrl = assetUrl;
       lastCluster = visualSubjectCluster(asset);
       previousTimelineUrl = assetUrl;
       previousTimelineCluster = lastCluster;
-      if (assetUrl) {
+      if (assetUrl && recentUrlWindow > 0) {
         recentTimelineUrls.push(assetUrl);
-        if (recentTimelineUrls.length > RECENT_URL_WINDOW) recentTimelineUrls.shift();
+        while (recentTimelineUrls.length > recentUrlWindow) recentTimelineUrls.shift();
       }
       if (lastUrl) {
         // Always count globally so hardMax is timeline-wide, not per-segment.

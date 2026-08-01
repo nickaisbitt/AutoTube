@@ -30,12 +30,15 @@ function mockRes(): ServerResponse & { statusCode: number; body: string } {
 describe("apiAuthMiddleware", () => {
   const prevKey = process.env.AUTOTUBE_API_KEY;
   const prevNode = process.env.NODE_ENV;
+  const prevDisableAuth = process.env.AUTOTUBE_DISABLE_AUTH;
 
   afterEach(() => {
     if (prevKey === undefined) delete process.env.AUTOTUBE_API_KEY;
     else process.env.AUTOTUBE_API_KEY = prevKey;
     if (prevNode === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = prevNode;
+    if (prevDisableAuth === undefined) delete process.env.AUTOTUBE_DISABLE_AUTH;
+    else process.env.AUTOTUBE_DISABLE_AUTH = prevDisableAuth;
   });
 
   it("allows /api/health without a key", () => {
@@ -66,11 +69,30 @@ describe("apiAuthMiddleware", () => {
     expect(blocked).toBe(false);
   });
 
-  it("skips auth in development when AUTOTUBE_API_KEY unset", () => {
+  it("fails closed in development when AUTOTUBE_API_KEY is unset", () => {
     delete process.env.AUTOTUBE_API_KEY;
+    delete process.env.AUTOTUBE_DISABLE_AUTH;
+    process.env.NODE_ENV = "development";
+    const res = mockRes();
+    expect(apiAuthMiddleware(mockReq({ url: "/api/search" }), res)).toBe(true);
+    expect(res.statusCode).toBe(503);
+  });
+
+  it("allows an explicit development opt-out", () => {
+    delete process.env.AUTOTUBE_API_KEY;
+    process.env.AUTOTUBE_DISABLE_AUTH = "1";
     process.env.NODE_ENV = "development";
     const res = mockRes();
     expect(apiAuthMiddleware(mockReq({ url: "/api/search" }), res)).toBe(false);
+  });
+
+  it("ignores the opt-out in production", () => {
+    delete process.env.AUTOTUBE_API_KEY;
+    process.env.AUTOTUBE_DISABLE_AUTH = "1";
+    process.env.NODE_ENV = "production";
+    const res = mockRes();
+    expect(apiAuthMiddleware(mockReq({ url: "/api/search" }), res)).toBe(true);
+    expect(res.statusCode).toBe(503);
   });
 });
 

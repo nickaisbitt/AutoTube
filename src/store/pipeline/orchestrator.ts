@@ -42,7 +42,7 @@ import {
   validateStoryArc,
 } from '../../services/llm/index';
 import { generateTitleVariants } from '../../services/llm/titleGenerator';
-import { assignSceneLayouts, scheduleRetentionBeats } from '../../services/renderingShared';
+import { assignSceneLayouts, scheduleRetentionBeats, type RetentionBeat } from '../../services/renderingShared';
 import { hasWeakHookOpener, validateHook } from '../../services/hookValidator';
 import { HOOK_STAKES_KEYWORDS } from '../../services/videoQualityChecklist';
 import { QUALITY_PRESETS, renderVideoToBlob } from '../../services/renderer';
@@ -64,6 +64,55 @@ function generateId(): string {
 
 function isLoopFastMode(): boolean {
   return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
+}
+
+/** Segment-local retention beat shape consumed by server-render (`time` = seconds into segment). */
+export interface SegmentRetentionBeat {
+  type: string;
+  time: number;
+  text?: string | null;
+}
+
+function estimateSegmentDuration(seg: ScriptSegment): number {
+  return seg.duration > 0
+    ? seg.duration
+    : Math.max(10, Math.ceil((seg.narration.split(/\s+/).length / 150) * 60));
+}
+
+/**
+ * Groups scheduler beats onto script segments using server field names.
+ * Converts absolute `timeOffsetSec` from the scheduler into per-segment `time`.
+ */
+export function attachRetentionBeatsToSegments(
+  segments: ScriptSegment[],
+  beats: RetentionBeat[],
+): void {
+  const segmentStarts: number[] = [];
+  let cumulativeTime = 0;
+  for (const seg of segments) {
+    segmentStarts.push(cumulativeTime);
+    cumulativeTime += estimateSegmentDuration(seg);
+  }
+
+  const beatsBySegment = new Map<number, SegmentRetentionBeat[]>();
+  for (const beat of beats) {
+    const segIdx = beat.segmentIndex;
+    if (segIdx < 0 || segIdx >= segments.length) continue;
+
+    const segDuration = estimateSegmentDuration(segments[segIdx]);
+    const segStart = segmentStarts[segIdx] ?? 0;
+    const localTime = Math.max(0, Math.min(segDuration, beat.timeOffsetSec - segStart));
+
+    const list = beatsBySegment.get(segIdx) ?? [];
+    list.push({ type: beat.type, time: localTime });
+    beatsBySegment.set(segIdx, list);
+  }
+
+  for (let i = 0; i < segments.length; i++) {
+    const attached = beatsBySegment.get(i) ?? [];
+    attached.sort((a, b) => a.time - b.time);
+    (segments[i] as ScriptSegment & { retentionBeats?: SegmentRetentionBeat[] }).retentionBeats = attached;
+  }
 }
 
 export interface ProgressCallbacks {
@@ -156,13 +205,14 @@ export async function executeGenerateScript(
     }
   }
 
-  // Schedule retention beats
+  // Schedule retention beats and attach to segments for server render
   const retentionBeats = scheduleRetentionBeats(
-    segments.map(seg => ({
-      duration: seg.duration > 0 ? seg.duration : Math.max(10, Math.ceil((seg.narration.split(/\s+/).length / 150) * 60)),
+    segments.map((seg) => ({
+      duration: estimateSegmentDuration(seg),
       narration: seg.narration,
-    }))
+    })),
   );
+  attachRetentionBeatsToSegments(segments, retentionBeats);
   for (const beat of retentionBeats) {
     logger.info('Store', `Retention beat: segment=${beat.segmentIndex} offset=${beat.timeOffsetSec.toFixed(1)}s type=${beat.type}`);
   }
@@ -811,6 +861,7 @@ export async function executeAssembleVideo(
     let resolvedFormat: 'webm' | 'mp4';
     let isServerRender = false;
     let fileSize = 0;
+    let renderedVideoBlob: Blob | undefined;
 
     if (renderResult && 'url' in renderResult && 'isServerRender' in renderResult) {
       const rr = renderResult as RenderResult;
@@ -821,6 +872,7 @@ export async function executeAssembleVideo(
       fileSize = projectToRender.script.reduce((s, seg) => s + seg.duration, 0) * 1024 * 1024;
     } else {
       const blob = renderResult as Blob;
+      renderedVideoBlob = blob;
       url = URL.createObjectURL(blob);
       mimeType = blob.type || 'video/webm';
       resolvedFormat = mimeType.includes('mp4') ? 'mp4' : 'webm';
@@ -868,6 +920,8 @@ export async function executeAssembleVideo(
     setProcessingMessage('Running blind quality review...');
     try {
       const report = await runBlindReview(updatedProject, appConfig.openRouterKey, {
+        videoBlob: renderedVideoBlob,
+        videoUrl: url,
         signal,
         onProgress: (pct, msg) => {
           const overallPct = 96 + Math.round(pct * 0.03);

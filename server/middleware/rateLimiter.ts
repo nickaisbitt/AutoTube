@@ -9,8 +9,8 @@ const rateLimitMap = new Map<string, RateLimitEntry>();
 
 const RENDER_LIMIT = 10;
 const RENDER_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const TTS_LIMIT = 50;
-const TTS_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const LLM_LIMIT = 50;
+const LLM_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const PROXY_LIMIT = 100;
 const PROXY_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const SEARCH_LIMIT = 50;
@@ -18,13 +18,41 @@ const SEARCH_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const MAX_SIZE = 10000;
 
 const RENDER_PATHS = ["/api/render-video", "/api/server-render"];
-const PROXY_PATHS = ["/api/proxy-image", "/api/proxy-page", "/api/download-clip"];
-const SEARCH_PATHS = ["/api/search-", "/api/search?", "/api/static-map", "/api/press-release", "/api/deep-harvest"];
+const LLM_PATHS = ["/api/llm", "/api/quality-check"];
+const PROXY_PATHS = [
+  "/api/proxy-image",
+  "/api/proxy-page",
+  "/api/download-clip",
+  "/api/render-output",
+];
+const SEARCH_PATHS = [
+  "/api/search",
+  "/api/static-map",
+  "/api/press-release",
+  "/api/deep-harvest",
+];
+
+function pathnameOf(req: IncomingMessage): string {
+  try {
+    return new URL(req.url || "/", "http://localhost").pathname;
+  } catch {
+    return (req.url || "/").split("?")[0];
+  }
+}
+
+function matchesAny(pathname: string, routes: string[]): boolean {
+  return routes.some((route) => pathname.startsWith(route));
+}
 
 function getClientIp(req: IncomingMessage): string {
   if (process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY === '1') {
     // Prefer the last hop (appended by the trusted edge) to reduce client spoofing.
-    const forwarded = (req.headers["x-forwarded-for"] as string)
+    const forwardedHeader = req.headers["x-forwarded-for"];
+    const forwarded = (
+      Array.isArray(forwardedHeader)
+        ? forwardedHeader.join(",")
+        : forwardedHeader || ""
+    )
       ?.split(",")
       .map((s) => s.trim())
       .filter(Boolean);
@@ -102,14 +130,15 @@ export function rateLimitMiddleware(
   _next: () => void,
 ): boolean {
   const ip = getClientIp(req);
+  const pathname = pathnameOf(req);
 
   // Bypass rate limiting for local development
-  if (isLocalhost(ip)) {
+  if (process.env.NODE_ENV !== "production" && isLocalhost(ip)) {
     return false;
   }
 
   // Check render rate limit
-  if (RENDER_PATHS.some((p) => req.url?.startsWith(p))) {
+  if (matchesAny(pathname, RENDER_PATHS)) {
     const result = checkLimit(`${ip}:render`, RENDER_LIMIT, RENDER_WINDOW_MS);
     if (!result.allowed) {
       const retryAfterSec = Math.ceil(result.retryAfterMs / 1000);
@@ -126,9 +155,9 @@ export function rateLimitMiddleware(
     }
   }
 
-  // Check TTS rate limit (legacy path — /api/tts is unimplemented)
-  if (req.url?.startsWith("/api/llm")) {
-    const result = checkLimit(`${ip}:llm`, TTS_LIMIT, TTS_WINDOW_MS);
+  // Check LLM and AI quality-check rate limits
+  if (matchesAny(pathname, LLM_PATHS)) {
+    const result = checkLimit(`${ip}:llm`, LLM_LIMIT, LLM_WINDOW_MS);
     if (!result.allowed) {
       const retryAfterSec = Math.ceil(result.retryAfterMs / 1000);
       res.statusCode = 429;
@@ -145,7 +174,7 @@ export function rateLimitMiddleware(
   }
 
   // Check proxy rate limit
-  if (PROXY_PATHS.some((p) => req.url?.startsWith(p))) {
+  if (matchesAny(pathname, PROXY_PATHS)) {
     const result = checkLimit(`${ip}:proxy`, PROXY_LIMIT, PROXY_WINDOW_MS);
     if (!result.allowed) {
       const retryAfterSec = Math.ceil(result.retryAfterMs / 1000);
@@ -163,7 +192,7 @@ export function rateLimitMiddleware(
   }
 
   // Check search rate limit
-  if (SEARCH_PATHS.some((p) => req.url?.startsWith(p))) {
+  if (matchesAny(pathname, SEARCH_PATHS)) {
     const result = checkLimit(`${ip}:search`, SEARCH_LIMIT, SEARCH_WINDOW_MS);
     if (!result.allowed) {
       const retryAfterSec = Math.ceil(result.retryAfterMs / 1000);

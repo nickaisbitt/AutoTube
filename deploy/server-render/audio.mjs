@@ -23,6 +23,42 @@ import { computeReverbFilter, computeStereoPanFilter, generateAmbientBed, comput
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..', '..');
 
+/**
+ * Directories to search for bundled background-music assets.
+ *
+ * This module is loaded from deploy/server-render (symlinked as server-render),
+ * so `PROJECT_ROOT` can resolve to the repo root OR land inside deploy/ depending
+ * on how the app is packaged. The bg-*.aac beds live at repo-root public/audio,
+ * but production images sometimes copy them under deploy/. Search several roots
+ * and layouts so the tracks are found regardless of where the process boots.
+ */
+function backgroundMusicSearchDirs() {
+  const roots = [
+    PROJECT_ROOT, // …/deploy/server-render → repo root (normal case)
+    join(__dirname, '..'), // deploy/ itself (when __dirname = deploy/server-render)
+    join(__dirname, '..', '..', '..'), // one level above repo root (deploy nested as app root)
+    process.cwd(), // process working directory (server route spawns with cwd = repo root)
+  ];
+  const layouts = [
+    ['public', 'audio'],
+    ['audio'],
+    ['deploy', 'public', 'audio'],
+    ['deploy', 'audio'],
+  ];
+  const dirs = [];
+  const seen = new Set();
+  for (const root of roots) {
+    for (const layout of layouts) {
+      const dir = join(root, ...layout);
+      if (!seen.has(dir)) {
+        seen.add(dir);
+        dirs.push(dir);
+      }
+    }
+  }
+  return dirs;
+}
+
 /** Style-to-filename mapping for background music tracks. */
 const BG_MUSIC_MAP = {
   business_insider: 'bg-neutral.aac',
@@ -116,9 +152,12 @@ export function resolveBackgroundMusicPath(style, musicPreset = null) {
 
   candidates.push('bg-neutral.aac');
 
+  const searchDirs = backgroundMusicSearchDirs();
   for (const filename of candidates) {
-    const filePath = join(PROJECT_ROOT, 'public', 'audio', filename);
-    if (existsSync(filePath)) return filePath;
+    for (const dir of searchDirs) {
+      const filePath = join(dir, filename);
+      if (existsSync(filePath)) return filePath;
+    }
   }
 
   return null;

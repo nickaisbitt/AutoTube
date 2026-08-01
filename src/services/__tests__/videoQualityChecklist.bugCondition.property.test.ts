@@ -255,6 +255,8 @@ describe('Property 1: Bug Condition — Pipeline Output Fails Quality Checklist 
       fc.assert(
         fc.property(qualityResponseArb, (response) => {
           const factors = parseQualityResponse(response);
+          expect(factors).not.toBeNull();
+          if (!factors) return;
 
           // Expected behavior: Quality factors should include content-level
           // dimensions for multi-dimensional validation:

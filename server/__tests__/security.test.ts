@@ -1,8 +1,15 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import dns from "dns";
-import { isPrivateIP, validateURL } from "../utils/security.js";
+import {
+  isPrivateIP,
+  readResponseBodyWithLimit,
+  ResponseSizeLimitError,
+  validateURL,
+} from "../utils/security.js";
 
 describe("Security & SSRF Utilities", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   describe("isPrivateIP", () => {
     it("identifies private IPv4 addresses", () => {
       expect(isPrivateIP("127.0.0.1")).toBe(true);
@@ -12,6 +19,7 @@ describe("Security & SSRF Utilities", () => {
       expect(isPrivateIP("192.168.1.100")).toBe(true);
       expect(isPrivateIP("169.254.169.254")).toBe(true);
       expect(isPrivateIP("0.0.0.0")).toBe(true);
+      expect(isPrivateIP("100.64.0.1")).toBe(true);
     });
 
     it("identifies public IPv4 addresses", () => {
@@ -23,6 +31,7 @@ describe("Security & SSRF Utilities", () => {
     it("identifies private/loopback IPv6 addresses", () => {
       expect(isPrivateIP("::1")).toBe(true);
       expect(isPrivateIP("fe80::1")).toBe(true);
+      expect(isPrivateIP("febf::1")).toBe(true);
       expect(isPrivateIP("fc00::")).toBe(true);
       expect(isPrivateIP("fdff::ffff")).toBe(true);
     });
@@ -79,6 +88,33 @@ describe("Security & SSRF Utilities", () => {
       expect(result.valid).toBe(false);
       expect(result.error).toContain("private/internal IP");
       spy.mockRestore();
+    });
+  });
+
+  describe("readResponseBodyWithLimit", () => {
+    it("rejects oversized Content-Length before buffering", async () => {
+      const response = new Response("small", {
+        headers: { "Content-Length": "100" },
+      });
+      await expect(readResponseBodyWithLimit(response, 10)).rejects.toBeInstanceOf(
+        ResponseSizeLimitError,
+      );
+      expect(response.bodyUsed).toBe(true);
+    });
+
+    it("enforces the limit on chunked bodies", async () => {
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(8));
+            controller.enqueue(new Uint8Array(8));
+            controller.close();
+          },
+        }),
+      );
+      await expect(readResponseBodyWithLimit(response, 10)).rejects.toMatchObject({
+        receivedBytes: 16,
+      });
     });
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { VideoProject } from '../../types';
 import {
   clampScore,
   computeFrameTimestamps,
@@ -10,6 +11,7 @@ import {
   truncateString,
   parseJSONResponse,
   parseQualityReport,
+  resolveVideoUrl,
   runBlindReview,
 } from '../blindReview';
 
@@ -395,25 +397,27 @@ describe('parseQualityReport', () => {
   it('parses a JSON string with markdown fences', () => {
     const raw = '```json\n{"scores":{"visualQuality":7},"feedback":{},"summary":"Good."}\n```';
     const report = parseQualityReport(raw);
-    expect(report.scores.visualQuality).toBe(7);
-    // Missing scores default to 5
-    expect(report.scores.pacing).toBe(5);
-    expect(report.summary).toBe('Good.');
+    expect(report).not.toBeNull();
+    expect(report!.scores.visualQuality).toBe(7);
+    // Individual missing scores still default to 5 when the response is otherwise usable
+    expect(report!.scores.pacing).toBe(5);
+    expect(report!.summary).toBe('Good.');
   });
 
-  it('fills missing scores with default value of 5', () => {
+  it('fills individually missing scores with default value of 5', () => {
     const raw = { scores: { visualQuality: 8 }, feedback: {}, summary: '' };
     const report = parseQualityReport(raw);
-    expect(report.scores.visualQuality).toBe(8);
-    expect(report.scores.pacing).toBe(5);
-    expect(report.scores.narrativeClarity).toBe(5);
-    expect(report.scores.thumbnailEffectiveness).toBe(5);
-    expect(report.scores.overallProductionValue).toBe(5);
+    expect(report).not.toBeNull();
+    expect(report!.scores.visualQuality).toBe(8);
+    expect(report!.scores.pacing).toBe(5);
+    expect(report!.scores.narrativeClarity).toBe(5);
+    expect(report!.scores.thumbnailEffectiveness).toBe(5);
+    expect(report!.scores.overallProductionValue).toBe(5);
   });
 
   it('fills missing feedback with "No feedback provided."', () => {
-    const raw = { scores: {}, feedback: { visualQuality: 'Nice.' }, summary: '' };
-    const report = parseQualityReport(raw);
+    const raw = { scores: { visualQuality: 4 }, feedback: { visualQuality: 'Nice.' }, summary: '' };
+    const report = parseQualityReport(raw)!;
     expect(report.feedback.visualQuality).toBe('Nice.');
     expect(report.feedback.pacing).toBe('No feedback provided.');
     expect(report.feedback.narrativeClarity).toBe('No feedback provided.');
@@ -422,17 +426,17 @@ describe('parseQualityReport', () => {
   });
 
   it('fills empty feedback strings with default', () => {
-    const raw = { scores: {}, feedback: { visualQuality: '', pacing: '   ' }, summary: '' };
-    const report = parseQualityReport(raw);
+    const raw = { scores: { visualQuality: 4 }, feedback: { visualQuality: '', pacing: '   ' }, summary: '' };
+    const report = parseQualityReport(raw)!;
     expect(report.feedback.visualQuality).toBe('No feedback provided.');
     expect(report.feedback.pacing).toBe('No feedback provided.');
   });
 
   it('fills missing/empty summary with default', () => {
-    const report1 = parseQualityReport({ scores: {}, feedback: {} });
+    const report1 = parseQualityReport({ scores: { visualQuality: 4 }, feedback: {} })!;
     expect(report1.summary).toBe('No feedback provided.');
 
-    const report2 = parseQualityReport({ scores: {}, feedback: {}, summary: '' });
+    const report2 = parseQualityReport({ scores: { visualQuality: 4 }, feedback: {}, summary: '' })!;
     expect(report2.summary).toBe('No feedback provided.');
   });
 
@@ -442,7 +446,7 @@ describe('parseQualityReport', () => {
       feedback: {},
       summary: 'Test.',
     };
-    const report = parseQualityReport(raw);
+    const report = parseQualityReport(raw)!;
     expect(report.scores.visualQuality).toBe(10);
     expect(report.scores.pacing).toBe(1);
     expect(report.scores.narrativeClarity).toBe(1);
@@ -452,15 +456,15 @@ describe('parseQualityReport', () => {
 
   it('truncates feedback to 500 chars', () => {
     const longFeedback = 'x'.repeat(600);
-    const raw = { scores: {}, feedback: { visualQuality: longFeedback }, summary: '' };
-    const report = parseQualityReport(raw);
+    const raw = { scores: { visualQuality: 4 }, feedback: { visualQuality: longFeedback }, summary: '' };
+    const report = parseQualityReport(raw)!;
     expect(report.feedback.visualQuality.length).toBeLessThanOrEqual(500);
   });
 
   it('truncates summary to 1000 chars', () => {
     const longSummary = 'y'.repeat(1500);
-    const raw = { scores: {}, feedback: {}, summary: longSummary };
-    const report = parseQualityReport(raw);
+    const raw = { scores: { visualQuality: 4 }, feedback: {}, summary: longSummary };
+    const report = parseQualityReport(raw)!;
     expect(report.summary.length).toBeLessThanOrEqual(1000);
   });
 
@@ -471,115 +475,205 @@ describe('parseQualityReport', () => {
       feedback: {},
       summary: '',
     };
-    expect(parseQualityReport(raw).letterGrade).toBe('A');
+    expect(parseQualityReport(raw)!.letterGrade).toBe('A');
   });
 
-  it('returns all defaults for null input', () => {
-    const report = parseQualityReport(null);
-    expect(report.scores.visualQuality).toBe(5);
-    expect(report.scores.pacing).toBe(5);
-    expect(report.scores.narrativeClarity).toBe(5);
-    expect(report.scores.thumbnailEffectiveness).toBe(5);
-    expect(report.scores.overallProductionValue).toBe(5);
-    expect(report.feedback.visualQuality).toBe('No feedback provided.');
-    expect(report.summary).toBe('No feedback provided.');
-    expect(report.letterGrade).toBe('C'); // mean of 5s = 5 → C
+  // Fail-closed: an unusable response must never be turned into an all-5s
+  // "mediocre pass" report — callers need to see that no review happened.
+  it('returns null for null input', () => {
+    expect(parseQualityReport(null)).toBeNull();
   });
 
-  it('returns all defaults for undefined input', () => {
-    const report = parseQualityReport(undefined);
-    expect(report.scores.visualQuality).toBe(5);
-    expect(report.letterGrade).toBe('C');
+  it('returns null for undefined input', () => {
+    expect(parseQualityReport(undefined)).toBeNull();
   });
 
-  it('returns all defaults for invalid string input', () => {
-    const report = parseQualityReport('not json at all');
-    expect(report.scores.visualQuality).toBe(5);
-    expect(report.letterGrade).toBe('C');
+  it('returns null for invalid string input', () => {
+    expect(parseQualityReport('not json at all')).toBeNull();
   });
 
-  it('returns all defaults for array input', () => {
-    const report = parseQualityReport([1, 2, 3]);
-    expect(report.scores.visualQuality).toBe(5);
+  it('returns null for a truncated JSON response', () => {
+    expect(parseQualityReport('{"scores": {"visualQuality": 8')).toBeNull();
   });
 
-  it('returns all defaults for number input', () => {
-    const report = parseQualityReport(42);
-    expect(report.scores.visualQuality).toBe(5);
+  it('returns null for array input', () => {
+    expect(parseQualityReport([1, 2, 3])).toBeNull();
   });
 
-  it('handles scores as non-object gracefully', () => {
-    const report = parseQualityReport({ scores: 'not an object', feedback: {}, summary: '' });
-    expect(report.scores.visualQuality).toBe(5);
+  it('returns null for number input', () => {
+    expect(parseQualityReport(42)).toBeNull();
+  });
+
+  it('returns null when scores is a non-object', () => {
+    expect(parseQualityReport({ scores: 'not an object', feedback: {}, summary: '' })).toBeNull();
+  });
+
+  it('returns null when scores is present but empty', () => {
+    expect(parseQualityReport({ scores: {}, feedback: {}, summary: 'Looks fine.' })).toBeNull();
+  });
+
+  it('returns null when every score is non-numeric', () => {
+    const raw = {
+      scores: { visualQuality: 'good', pacing: null, narrativeClarity: NaN },
+      feedback: {},
+      summary: '',
+    };
+    expect(parseQualityReport(raw)).toBeNull();
   });
 
   it('handles feedback as non-object gracefully', () => {
-    const report = parseQualityReport({ scores: {}, feedback: 123, summary: '' });
+    const report = parseQualityReport({ scores: { visualQuality: 4 }, feedback: 123, summary: '' })!;
     expect(report.feedback.visualQuality).toBe('No feedback provided.');
   });
 });
 
 // ── runBlindReview ──
 
+const VIDEO_EXPORT_SETTINGS = {
+  quality: 'high' as const,
+  format: 'mp4' as const,
+  width: 1920,
+  height: 1080,
+  mimeType: 'video/mp4',
+  fileName: 'test.mp4',
+};
+
+function makeRenderedProject(overrides: Partial<VideoProject> = {}): VideoProject {
+  return {
+    version: 1,
+    id: 'test',
+    title: 'Test',
+    topic: 'Test Topic',
+    style: 'business_insider' as const,
+    targetDuration: 60,
+    script: [{ id: '1', type: 'intro' as const, title: 'Intro', narration: 'Hello', visualNote: '', duration: 5 }],
+    media: [],
+    narration: [],
+    thumbnail: 'blob:http://localhost/video',
+    exportSettings: VIDEO_EXPORT_SETTINGS,
+    status: 'complete' as const,
+    createdAt: new Date(),
+    ...overrides,
+  } as VideoProject;
+}
+
+describe('resolveVideoUrl', () => {
+  it('prefers an explicitly supplied video URL', () => {
+    const project = makeRenderedProject();
+    expect(resolveVideoUrl(project, { videoUrl: 'blob:http://localhost/rendered' }))
+      .toBe('blob:http://localhost/rendered');
+  });
+
+  it('falls back to the server render URL before project.thumbnail', () => {
+    const project = makeRenderedProject({
+      exportSettings: { ...VIDEO_EXPORT_SETTINGS, serverVideoUrl: 'https://cdn.test/render.mp4' },
+    });
+    expect(resolveVideoUrl(project)).toBe('https://cdn.test/render.mp4');
+  });
+
+  it('uses project.thumbnail only when export settings confirm a video render', () => {
+    expect(resolveVideoUrl(makeRenderedProject())).toBe('blob:http://localhost/video');
+  });
+
+  it('returns null when project.thumbnail is a still image rather than the render', () => {
+    const project = makeRenderedProject({
+      thumbnail: 'blob:http://localhost/still.png',
+      exportSettings: { ...VIDEO_EXPORT_SETTINGS, mimeType: 'image/png' },
+    });
+    expect(resolveVideoUrl(project)).toBeNull();
+  });
+
+  it('returns null when the project has never been exported', () => {
+    const project = makeRenderedProject({ exportSettings: undefined });
+    expect(resolveVideoUrl(project)).toBeNull();
+  });
+});
+
 describe('runBlindReview', () => {
   it('returns null immediately when apiKey is empty', async () => {
-    const project = {
-      version: 1,
-      id: 'test',
-      title: 'Test',
-      topic: 'Test Topic',
-      style: 'business_insider' as const,
-      targetDuration: 60,
-      script: [{ id: '1', type: 'intro' as const, title: 'Intro', narration: 'Hello', visualNote: '', duration: 5 }],
-      media: [],
-      narration: [],
-      thumbnail: 'blob:http://localhost/video',
-      status: 'complete' as const,
-      createdAt: new Date(),
-    };
-
-    const result = await runBlindReview(project, '');
+    const result = await runBlindReview(makeRenderedProject(), '');
     expect(result).toBeNull();
   });
 
-  it('returns null when project.thumbnail is falsy', async () => {
-    const project = {
-      version: 1,
-      id: 'test',
-      title: 'Test',
-      topic: 'Test Topic',
-      style: 'business_insider' as const,
-      targetDuration: 60,
-      script: [{ id: '1', type: 'intro' as const, title: 'Intro', narration: 'Hello', visualNote: '', duration: 5 }],
-      media: [],
-      narration: [],
-      thumbnail: undefined,
-      status: 'complete' as const,
-      createdAt: new Date(),
-    };
+  it('returns null when no rendered video can be resolved', async () => {
+    const project = makeRenderedProject({ thumbnail: undefined, exportSettings: undefined });
+
+    const mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
 
     const result = await runBlindReview(project, 'sk-test-key');
     expect(result).toBeNull();
+    // Must not fetch anything when there is no video to review
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not treat a still thumbnail as the rendered video', async () => {
+    const project = makeRenderedProject({
+      thumbnail: 'blob:http://localhost/still.png',
+      exportSettings: { ...VIDEO_EXPORT_SETTINGS, mimeType: 'image/png' },
+    });
+
+    const mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await runBlindReview(project, 'sk-test-key');
+    expect(result).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('bails out when the resolved media is an image blob', async () => {
+    const project = makeRenderedProject();
+
+    const mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await runBlindReview(project, 'sk-test-key', {
+      videoBlob: new Blob(['png'], { type: 'image/png' }),
+    });
+    expect(result).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('uses the caller-supplied video blob without fetching', async () => {
+    const project = makeRenderedProject();
+
+    const mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+
+    // Frame extraction fails in jsdom, but the fetch must never happen
+    await runBlindReview(project, 'sk-test-key', {
+      videoBlob: new Blob(['video'], { type: 'video/webm' }),
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('fetches the caller-supplied video URL', async () => {
+    const project = makeRenderedProject();
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      blob: () => Promise.resolve(new Blob(['video'], { type: 'video/webm' })),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await runBlindReview(project, 'sk-test-key', { videoUrl: 'blob:http://localhost/rendered' });
+    expect(mockFetch).toHaveBeenCalledWith('blob:http://localhost/rendered', undefined);
+
+    vi.unstubAllGlobals();
   });
 
   it('re-throws AbortError when signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();
 
-    const project = {
-      version: 1,
-      id: 'test',
-      title: 'Test',
-      topic: 'Test Topic',
-      style: 'business_insider' as const,
-      targetDuration: 60,
-      script: [{ id: '1', type: 'intro' as const, title: 'Intro', narration: 'Hello', visualNote: '', duration: 5 }],
-      media: [],
-      narration: [],
-      thumbnail: 'blob:http://localhost/video',
-      status: 'complete' as const,
-      createdAt: new Date(),
-    };
+    const project = makeRenderedProject();
 
     // Mock fetch to return a blob
     const mockFetch = vi.fn().mockResolvedValue({
@@ -606,20 +700,7 @@ describe('runBlindReview', () => {
       progressCalls.push([pct, message]);
     };
 
-    const project = {
-      version: 1,
-      id: 'test',
-      title: 'Test',
-      topic: 'Test Topic',
-      style: 'business_insider' as const,
-      targetDuration: 60,
-      script: [{ id: '1', type: 'intro' as const, title: 'Intro', narration: 'Hello', visualNote: '', duration: 5 }],
-      media: [],
-      narration: [],
-      thumbnail: 'blob:http://localhost/video',
-      status: 'complete' as const,
-      createdAt: new Date(),
-    };
+    const project = makeRenderedProject();
 
     // Mock fetch for the blob URL
     const mockFetch = vi.fn().mockResolvedValue({
@@ -858,7 +939,7 @@ describe('PBT Properties', () => {
   });
 
   // Feature: blind-video-review, Property 8: Missing field defaults
-  it('Property 8: For any raw response object with an arbitrary subset of score and feedback fields omitted, parseQualityReport(raw) produces a complete QualityReport where every missing score is 5 and every missing feedback is "No feedback provided."', () => {
+  it('Property 8: For any raw response object with an arbitrary subset of score and feedback fields omitted, parseQualityReport(raw) either fails closed (no score at all) or produces a complete QualityReport where every missing score is 5 and every missing feedback is "No feedback provided."', () => {
     // **Validates: Requirements 7.2**
     const categories = [
       'visualQuality',
@@ -895,7 +976,16 @@ describe('PBT Properties', () => {
     fc.assert(
       fc.property(partialScores, partialFeedback, (scores, feedback) => {
         const raw = { scores, feedback, summary: 'Test summary.' };
-        const report = parseQualityReport(raw);
+        const maybeReport = parseQualityReport(raw);
+
+        // With no usable score at all, the parser must fail closed
+        if (Object.keys(scores).length === 0) {
+          expect(maybeReport).toBeNull();
+          return;
+        }
+
+        expect(maybeReport).not.toBeNull();
+        const report = maybeReport!;
 
         // All 5 score fields must be present in the output
         for (const cat of categories) {

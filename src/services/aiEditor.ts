@@ -189,27 +189,35 @@ export function applyEditPlan(project: VideoProject, plan: EditPlan): VideoProje
           result.script[idx].duration = Math.max(1, result.script[idx].duration * scaleFactor);
         }
 
-        // Second pass: the Math.max(1, ...) floor may have pushed the total
-        // above the target. Re-scale non-floored segments to compensate.
-        const postScaleTotal = result.script.reduce((s, seg) => s + seg.duration, 0);
-        if (postScaleTotal > maxAllowed || postScaleTotal < minAllowed) {
-          const flooredIndices = new Set(
-            adjustedSegmentIndices.filter((idx) => result.script[idx].duration === 1),
+        // The Math.max(1, ...) floor steals budget from the rescale, and each
+        // corrective pass can floor another segment — so redistribute until the
+        // total lands inside the bounds or every adjusted segment sits at 1s.
+        const BOUND_EPSILON = 1e-9;
+        for (let pass = 0; pass <= adjustedSegmentIndices.length; pass += 1) {
+          const postScaleTotal = result.script.reduce((s, seg) => s + seg.duration, 0);
+          if (
+            postScaleTotal <= maxAllowed + BOUND_EPSILON
+            && postScaleTotal >= minAllowed - BOUND_EPSILON
+          ) {
+            break;
+          }
+          const flooredIndices = adjustedSegmentIndices.filter(
+            (idx) => result.script[idx].duration <= 1,
           );
-          const nonFlooredIndices = adjustedSegmentIndices.filter((idx) => !flooredIndices.has(idx));
-          if (nonFlooredIndices.length > 0) {
-            const flooredTotal = flooredIndices.size; // each floored segment has duration 1
-            const nonFlooredTotal = nonFlooredIndices.reduce(
-              (s, idx) => s + result.script[idx].duration, 0,
-            );
-            const revisedTarget = (postScaleTotal > maxAllowed ? maxAllowed : minAllowed);
-            const revisedBudget = revisedTarget - unadjustedTotal - flooredTotal;
-            if (nonFlooredTotal > 0 && revisedBudget > 0) {
-              const revisedScale = revisedBudget / nonFlooredTotal;
-              for (const idx of nonFlooredIndices) {
-                result.script[idx].duration = Math.max(1, result.script[idx].duration * revisedScale);
-              }
-            }
+          const nonFlooredIndices = adjustedSegmentIndices.filter(
+            (idx) => result.script[idx].duration > 1,
+          );
+          if (nonFlooredIndices.length === 0) break;
+          const flooredTotal = flooredIndices.length; // each floored segment has duration 1
+          const nonFlooredTotal = nonFlooredIndices.reduce(
+            (s, idx) => s + result.script[idx].duration, 0,
+          );
+          const revisedTarget = postScaleTotal > maxAllowed ? maxAllowed : minAllowed;
+          const revisedBudget = revisedTarget - unadjustedTotal - flooredTotal;
+          if (nonFlooredTotal <= 0 || revisedBudget <= 0) break;
+          const revisedScale = revisedBudget / nonFlooredTotal;
+          for (const idx of nonFlooredIndices) {
+            result.script[idx].duration = Math.max(1, result.script[idx].duration * revisedScale);
           }
         }
       }
@@ -334,30 +342,6 @@ function validateTransition(
 }
 
 /**
- * Validates caption settings from raw LLM output.
- * Clamps wordsPerWindow to [1, 20] and displayDurationMs to [500, 10000].
- */
-function validateCaptionSettings(raw: unknown, fallback: CaptionSettings): CaptionSettings {
-  if (raw == null || typeof raw !== 'object') return fallback;
-  const obj = raw as Record<string, unknown>;
-
-  const wordsPerWindow =
-    typeof obj.wordsPerWindow === 'number'
-      ? clamp(Math.round(obj.wordsPerWindow), 1, 20)
-      : fallback.wordsPerWindow;
-
-  const displayDurationMs =
-    typeof obj.displayDurationMs === 'number'
-      ? clamp(obj.displayDurationMs, 500, 10000)
-      : fallback.displayDurationMs;
-
-  const isFastPaced =
-    typeof obj.isFastPaced === 'boolean' ? obj.isFastPaced : fallback.isFastPaced;
-
-  return { wordsPerWindow, displayDurationMs, isFastPaced };
-}
-
-/**
  * Validates raw LLM JSON output against the EditPlan schema.
  *
  * - Returns null if `raw` is not an object or has no `segments` array.
@@ -475,11 +459,8 @@ export function validateEditPlanResponse(
       kenBurns[assetId] = validateKenBurns(rawKenBurns[assetId], fallbackKB);
     }
 
-    // ── Validate caption settings ──
-    const captionSettings = validateCaptionSettings(
-      entry.captionSettings,
-      defaultEntry.captionSettings,
-    );
+    // Caption settings are not consumed by renderers — always keep schema defaults.
+    const captionSettings = defaultEntry.captionSettings;
 
     // ── Validate replacement suggestions ──
     let replacementSuggestions = defaultEntry.replacementSuggestions;
@@ -593,11 +574,6 @@ You will receive the complete project data: script segments, media assets, narra
           "panDirectionY": number
         }
       } — Ken Burns parameters keyed by asset ID,
-      "captionSettings": {
-        "wordsPerWindow": number,
-        "displayDurationMs": number,
-        "isFastPaced": boolean
-      },
       "replacementSuggestions": [
         {
           "assetId": "string",
@@ -618,9 +594,8 @@ You will receive the complete project data: script segments, media assets, narra
 2. **Timing Adjustments**: Adjust segment durations to match narration pacing. If a segment's narration duration differs from the segment duration by more than 1 second, set adjustedDuration to the narration duration plus 0.5s padding. If no narration clip exists, set adjustedDuration to null.
 3. **Transitions**: Select appropriate transitions between segments. Use "cut" for dramatic shifts, "crossfade" for smooth continuations, "dissolve" for emotional moments, "wipe" for topic changes. The first segment must have transition: null.${styleTransitionNote}
 4. **Ken Burns Effect**: Vary zoom and pan parameters per shot for visual variety. Ensure consecutive shots within a segment have distinct pan directions.
-5. **Caption Optimization**: Always set wordsPerWindow to 4 (YouTube Hormozi-style short captions). Flag segments as isFastPaced if narration exceeds 4 words/second.
-6. **Media Replacement**: Flag assets with isFallback=true or low relevance scores (below 40) as replacement candidates. Provide at least 2 alternative search queries per suggestion.
-7. **Redundancy Trimming**: Scan all segment narrations for repeated themes, warnings, statistics, or phrases. If the same point appears in more than one segment:
+5. **Media Replacement**: Flag assets with isFallback=true or low relevance scores (below 40) as replacement candidates. Provide at least 2 alternative search queries per suggestion.
+6. **Redundancy Trimming**: Scan all segment narrations for repeated themes, warnings, statistics, or phrases. If the same point appears in more than one segment:
    - Keep the FIRST occurrence at full strength
    - For the second occurrence: either (a) shorten to a brief callback like "As we saw earlier..." or (b) remove entirely and adjust duration
    - Flag trimmed content in the rationale field
@@ -633,7 +608,7 @@ You will receive the complete project data: script segments, media assets, narra
 - The total duration of all segments after adjustments MUST remain within 10% of the original total duration.
 - Every segment in the input MUST have a corresponding entry in the output segments array.
 - shotOrder arrays MUST contain exactly the same asset IDs as the input (same set, possibly reordered).
-- When trimming redundant content (dimension 7), the \`rationale\` field of each affected segment entry MUST document what was trimmed and why.
+- When trimming redundant content (dimension 6), the \`rationale\` field of each affected segment entry MUST document what was trimmed and why.
 
 Respond with ONLY the JSON object. No markdown fences, no commentary.`;
 

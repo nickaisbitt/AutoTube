@@ -1,6 +1,7 @@
 import type { QualityReport, VideoProject } from '../types';
 import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 import { openRouterMessageText } from '../utils/openRouterMessageText';
+import { DEFAULT_VISION_MODEL } from './llm/defaultModels';
 import { logger } from './logger';
 
 // ── Frame Extraction ──
@@ -297,12 +298,12 @@ export function buildBlindReviewPrompt(
 // ── API Call ──
 
 const OPENROUTER_ENDPOINT = '/api/llm';
-const BLIND_REVIEW_MODEL = 'xiaomi/mimo-v2.5';
+const BLIND_REVIEW_MODEL = DEFAULT_VISION_MODEL;
 const BLIND_REVIEW_TIMEOUT_MS = 60_000;
 const BLIND_REVIEW_MAX_RETRIES = 2;
 
 /**
- * Sends frames + script + thumbnail to Reka Edge via OpenRouter.
+ * Sends frames + script + thumbnail to the vision model via OpenRouter.
  * Uses fetchWithTimeout with 60s timeout and 2 retries.
  * Returns the raw response content string, or null on failure.
  * If signal is aborted, re-throws the AbortError.
@@ -469,16 +470,20 @@ const SUMMARY_MAX_LENGTH = 1000;
  * Parses raw LLM JSON output into a validated QualityReport.
  * - If raw is a string, parses it using parseJSONResponse (handles markdown fences)
  * - Clamps scores to integers in [1, 10]
- * - Fills missing scores with 5, missing text with "No feedback provided."
+ * - Fills individual missing scores with 5, missing text with "No feedback provided."
  * - Truncates feedback to 500 chars, summary to 1000 chars
  * - Derives letter grade from average scores
  * - Sets reviewedAt to current ISO timestamp
  *
- * Robust — handles any input without throwing. If the input is completely
- * invalid (not an object, null, etc.), returns a report with all defaults.
+ * Fails closed: returns `null` when the response cannot be parsed into an object,
+ * or when it carries no recognised numeric score at all. A synthesised all-5s report
+ * would look like a genuine mediocre-but-real review to the quality gate and to the
+ * user, so an unusable response is reported as "no review" instead.
+ *
+ * Never throws.
  */
-export function parseQualityReport(raw: unknown): QualityReport {
-  let parsed: Record<string, unknown> = {};
+export function parseQualityReport(raw: unknown): QualityReport | null {
+  let parsed: Record<string, unknown> | null = null;
 
   try {
     if (typeof raw === 'string') {
@@ -490,15 +495,24 @@ export function parseQualityReport(raw: unknown): QualityReport {
       parsed = raw as Record<string, unknown>;
     }
   } catch (err) {
-    if (process.env.NODE_ENV !== 'test') {
-      console.warn('Blind review analysis parse failed:', err);
-    }
-    // If parsing fails, use empty object — all defaults will apply
+    logger.warn('BlindReview', 'Blind review analysis parse failed', err);
+    return null;
   }
+
+  if (!parsed) return null;
 
   const rawScores = (parsed.scores && typeof parsed.scores === 'object' && !Array.isArray(parsed.scores))
     ? (parsed.scores as Record<string, unknown>)
     : {};
+
+  // Fail closed unless the model actually returned at least one usable score.
+  const hasAnyScore = SCORE_CATEGORIES.some(
+    (c) => typeof rawScores[c] === 'number' && Number.isFinite(rawScores[c] as number),
+  );
+  if (!hasAnyScore) {
+    logger.warn('BlindReview', 'Blind review response contained no usable scores — discarding');
+    return null;
+  }
 
   const rawFeedback = (parsed.feedback && typeof parsed.feedback === 'object' && !Array.isArray(parsed.feedback))
     ? (parsed.feedback as Record<string, unknown>)
@@ -547,12 +561,39 @@ export function parseQualityReport(raw: unknown): QualityReport {
 
 // ── Orchestration ──
 
+export interface BlindReviewVideoSource {
+  /** The rendered video itself, when the caller still holds it in memory. */
+  videoBlob?: Blob;
+  /** A URL the rendered video can be fetched from (blob: or server render URL). */
+  videoUrl?: string;
+}
+
+/**
+ * Picks the URL to fetch the rendered video from.
+ *
+ * `project.thumbnail` is overloaded by the assembly step to hold the rendered
+ * video URL, but on a project that has not been exported it really is a still
+ * image. Only trust it when `exportSettings.mimeType` confirms a video render;
+ * otherwise the caller must supply the source explicitly.
+ */
+export function resolveVideoUrl(
+  project: VideoProject,
+  source?: BlindReviewVideoSource,
+): string | null {
+  if (source?.videoUrl) return source.videoUrl;
+  if (project.exportSettings?.serverVideoUrl) return project.exportSettings.serverVideoUrl;
+  if (project.thumbnail && project.exportSettings?.mimeType?.startsWith('video/')) {
+    return project.thumbnail;
+  }
+  return null;
+}
+
 /**
  * Runs the full blind review pipeline:
  * 1. Check for API key
  * 2. Extract key frames from the rendered video blob
  * 3. Build script text from project segments
- * 4. Call Reka Edge via OpenRouter
+ * 4. Call the vision model via OpenRouter
  * 5. Parse and validate the response
  *
  * Returns QualityReport on success, null on failure.
@@ -562,7 +603,7 @@ export function parseQualityReport(raw: unknown): QualityReport {
 export async function runBlindReview(
   project: VideoProject,
   apiKey: string,
-  options?: {
+  options?: BlindReviewVideoSource & {
     signal?: AbortSignal;
     onProgress?: (pct: number, message: string) => void;
   },
@@ -578,12 +619,26 @@ export async function runBlindReview(
     // 2. Report progress: extracting frames
     onProgress?.(0, 'Extracting frames…');
 
-    // 3. Get the video blob from project.thumbnail (a blob URL string)
-    if (!project.thumbnail) {
+    // 3. Resolve the rendered video: prefer the blob the caller already holds,
+    //    then a video URL, and never review a still image as if it were video.
+    let videoBlob = options?.videoBlob ?? null;
+    if (!videoBlob) {
+      const videoUrl = resolveVideoUrl(project, options);
+      if (!videoUrl) {
+        logger.warn('BlindReview', 'No rendered video available to review — skipping blind review');
+        return null;
+      }
+      const response = await fetch(videoUrl, signal ? { signal } : undefined);
+      videoBlob = await response.blob();
+    }
+
+    if (videoBlob.type && !videoBlob.type.startsWith('video/')) {
+      logger.warn(
+        'BlindReview',
+        `Resolved media is "${videoBlob.type}", not a video — skipping blind review`,
+      );
       return null;
     }
-    const response = await fetch(project.thumbnail);
-    const videoBlob = await response.blob();
 
     // 4. Extract key frames from the video blob
     const frames = await extractKeyFrames(videoBlob, { signal });
@@ -605,8 +660,11 @@ export async function runBlindReview(
     // 9. Report progress: parsing results
     onProgress?.(80, 'Parsing results…');
 
-    // 10. Parse the response into a validated QualityReport
+    // 10. Parse the response into a validated QualityReport — null when unusable
     const report = parseQualityReport(rawResponse);
+    if (!report) {
+      return null;
+    }
 
     // 11. Report progress: complete
     onProgress?.(100, 'Review complete');

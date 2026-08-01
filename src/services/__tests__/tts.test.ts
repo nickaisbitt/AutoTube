@@ -3,9 +3,10 @@ import { TTS_ENGINES, generateNarration } from '../tts';
 
 describe('TTS module', () => {
   it('exports TTS_ENGINES array with all engine implementations', () => {
-    expect(TTS_ENGINES).toHaveLength(2);
+    expect(TTS_ENGINES).toHaveLength(3);
     const names = TTS_ENGINES.map((e) => e.name);
     expect(names).toContain('kokoro');
+    expect(names).toContain('grok');
     expect(names).toContain('browser');
   });
 

@@ -2,17 +2,6 @@ import { logger } from './logger';
 import type { ScriptSegment, VideoProject } from '../types';
 import { generateDetailedChapters } from './chapters';
 import { generateTitleOptions, optimizeTitleForSEO, extractDataPoints } from './seoTitles';
-import {
-  fetchYouTubeAnalytics,
-  analyzeRetentionCurve,
-  trackCTR,
-  analyzeCommentSentiment,
-  trackROI,
-  getStoredAnalytics,
-  getCTRSummary,
-  getStoredSentiment,
-  getROISummary,
-} from './youtubeAnalytics';
 
 interface YouTubeUploadConfig {
   title: string;
@@ -246,61 +235,6 @@ function formatInfoCardTimestamp(seconds: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-// ---------------------------------------------------------------------------
-// Task 142: YouTube Data API v3 upload (structured mock — OAuth required in production)
-// ---------------------------------------------------------------------------
-
-interface YouTubeUploadResult {
-  success: boolean;
-  videoId?: string;
-  uploadUrl?: string;
-  message: string;
-}
-
-/**
- * Uploads a video to YouTube using the Data API v3.
- * This is a structured mock — real uploads require OAuth 2.0 authentication.
- * Returns the structured request that would be sent to the API.
- */
-export async function uploadToYouTubeAPI(
-  videoFile: File | Blob,
-  metadata: {
-    title: string;
-    description: string;
-    tags: string[];
-    categoryId?: string;
-    privacyStatus?: 'private' | 'unlisted' | 'public';
-  },
-  apiKey: string,
-): Promise<YouTubeUploadResult> {
-  // Validate inputs
-  if (!videoFile || videoFile.size === 0) {
-    return { success: false, message: 'Video file is empty or missing' };
-  }
-  if (!apiKey) {
-    return { success: false, message: 'YouTube API key is required' };
-  }
-  if (!metadata.title) {
-    return { success: false, message: 'Video title is required' };
-  }
-
-  // Structured mock: in production this would use resumable upload endpoint
-  const mockVideoId = `mock_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-  const uploadUrl = `https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&key=${apiKey}`;
-
-  logger.info('YouTube API', `Upload request prepared for "${metadata.title}" (${(videoFile.size / 1024 / 1024).toFixed(1)}MB)`);
-  logger.info('YouTube API', `Privacy: ${metadata.privacyStatus || 'private'} | Category: ${metadata.categoryId || '22'}`);
-  logger.info('YouTube API', `Tags: ${metadata.tags.slice(0, 5).join(', ')}${metadata.tags.length > 5 ? '...' : ''}`);
-  logger.info('YouTube API', 'Note: Actual upload requires OAuth 2.0. Use openYouTubeUpload() for manual flow.');
-
-  return {
-    success: true,
-    videoId: mockVideoId,
-    uploadUrl,
-    message: `Upload prepared. Video ID: ${mockVideoId}. In production, this would initiate a resumable upload to YouTube.`,
-  };
-}
-
 /**
  * Generates optimized YouTube metadata from project data.
  *
@@ -497,76 +431,4 @@ export function generateYouTubeMetadata(
     chapterMarkers,
     titleOptions,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Task 159: YouTube Analytics integration
-// ---------------------------------------------------------------------------
-
-/**
- * Fetch analytics for a given YouTube video using the Data API.
- * Returns views, watch time, retention, CTR, subscriber gain.
- */
-export async function getYouTubeAnalytics(
-  videoId: string,
-  apiKey: string,
-) {
-  return fetchYouTubeAnalytics(videoId, apiKey);
-}
-
-/**
- * Analyze audience retention curve and correlate with script segments.
- */
-export function getRetentionAnalysis(
-  retentionData: Array<{ timestampPercent: number; audienceRetentionPercent: number }>,
-  scriptSegments: Array<{ title: string; startPercent: number; endPercent: number }>,
-) {
-  return analyzeRetentionCurve(retentionData, scriptSegments);
-}
-
-/**
- * Track CTR for a thumbnail/title combination.
- */
-export function trackVideoCTR(
-  videoId: string,
-  title: string,
-  thumbnailHash: string,
-  ctr: number,
-  impressions: number,
-) {
-  return trackCTR(videoId, title, thumbnailHash, ctr, impressions);
-}
-
-/**
- * Analyze sentiment of comments on a video.
- */
-export async function getCommentSentiment(
-  videoId: string,
-  youtubeApiKey: string,
-  llmApiKey: string,
-) {
-  return analyzeCommentSentiment(videoId, youtubeApiKey, llmApiKey);
-}
-
-/**
- * Track ROI for a video production.
- */
-export function trackVideoROI(
-  videoId: string,
-  title: string,
-  costs: { apiTokens: number; apiCostUSD: number; computeTimeMinutes: number; computeCostUSD: number; stockMediaCostUSD: number; totalCostUSD: number },
-  revenue: { adRevenueUSD: number; sponsorRevenueUSD: number; affiliateRevenueUSD: number; totalRevenueUSD: number },
-) {
-  return trackROI(videoId, title, costs, revenue);
-}
-
-/**
- * Get summary of all YouTube analytics data.
- */
-export function getYoutubeAnalyticsSummary() {
-  const analytics = getStoredAnalytics();
-  const ctrSummary = getCTRSummary();
-  const sentiment = getStoredSentiment();
-  const roi = getROISummary();
-  return { analytics, ctrSummary, sentiment, roi };
 }

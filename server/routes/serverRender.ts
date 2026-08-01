@@ -13,6 +13,30 @@ const PROJECT_ROOT = join(__dirname, "..", "..");
 /** Must match MIN_RENDER_OUTPUT_BYTES in deploy/server-render/pipelineReliability.mjs */
 const MIN_RENDER_OUTPUT_BYTES = 100_000;
 
+function configuredRenderOrigin(): string {
+  const configured = (process.env.DEV_SERVER_URL || "").trim();
+  if (configured) {
+    const parsed = new URL(configured);
+    if (
+      !["http:", "https:"].includes(parsed.protocol) ||
+      parsed.username ||
+      parsed.password
+    ) {
+      throw new Error("invalid renderer origin");
+    }
+    return parsed.origin;
+  }
+
+  const rawPort = process.env.PORT || "5173";
+  const port =
+    /^\d+$/.test(rawPort) &&
+    Number(rawPort) >= 1 &&
+    Number(rawPort) <= 65535
+      ? rawPort
+      : "5173";
+  return `http://127.0.0.1:${port}`;
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   return new Promise((resolve, reject) => {
@@ -52,6 +76,16 @@ export async function handleServerRender(
         error: "No project saved. Call /api/save-project first.",
       }),
     );
+    return;
+  }
+
+  let devServerUrl: string;
+  try {
+    devServerUrl = configuredRenderOrigin();
+  } catch {
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "DEV_SERVER_URL is invalid" }));
     return;
   }
 
@@ -105,11 +139,6 @@ export async function handleServerRender(
     /* .env.local may not exist */
   }
 
-  // Determine the dev server URL from the incoming request
-  const host = req.headers.host || 'localhost:5173';
-  const protocol = 'http';
-  const devServerUrl = `${protocol}://${host}`;
-
   // Prefer the full server-render pipeline (node-canvas + effects + AI review).
   // Remotion is opt-in via USE_REMOTION_RENDER=true — it lacks many quality features.
   const remotionPath = join(PROJECT_ROOT, "remotion", "render.mjs");
@@ -126,10 +155,18 @@ export async function handleServerRender(
     ? join("remotion", "render.mjs")
     : join("server-render", "index.mjs");
 
-  const child = spawn("node", [renderScript, projectPath, outputMp4], {
+  // Spawn contract for the server-render pipeline (server-render.mjs):
+  // the project JSON is passed via AUTOTUBE_PROJECT_PATH and argv[2] is the
+  // output .mp4 path only. remotion/render.mjs keeps its own
+  // [projectPath, outputMp4] positional order.
+  const renderArgs = useRemotion
+    ? [renderScript, projectPath, outputMp4]
+    : [renderScript, outputMp4];
+
+  const child = spawn("node", renderArgs, {
     cwd: PROJECT_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...envVars, DEV_SERVER_URL: devServerUrl, REMOTION_SERVE_URL: useRemotion ? devServerUrl : undefined },
+    env: { ...process.env, ...envVars, DEV_SERVER_URL: devServerUrl, AUTOTUBE_PROJECT_PATH: projectPath, REMOTION_SERVE_URL: useRemotion ? devServerUrl : undefined },
   });
 
   // Wall-clock timeout for hung TTS/ffmpeg (default 20 minutes)

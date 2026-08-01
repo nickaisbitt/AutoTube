@@ -12,6 +12,11 @@ export const FullVideo: React.FC<ProjectProps> = (props) => {
   const endScreenFrames = 96; // 4s at 24fps
   const mainFrames = props.totalDurationFrames - coldOpenFrames - titleCardFrames - endScreenFrames;
 
+  // Segment narration audio is timed relative to the start of MainVideo, but the
+  // visual timeline plays the cold open + title card first. Offset the audio layer
+  // by those frames so per-segment narration lands on its matching visual segment.
+  const narrationOffsetFrames = coldOpenFrames + titleCardFrames;
+
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
       {/* Visual layers */}
@@ -30,8 +35,8 @@ export const FullVideo: React.FC<ProjectProps> = (props) => {
         </Series.Sequence>
       </Series>
 
-      {/* Audio layer (narration) */}
-      <RenderAudio project={props} />
+      {/* Audio layer (narration + optional background music) */}
+      <RenderAudio project={props} offsetFrames={narrationOffsetFrames} />
     </AbsoluteFill>
   );
 };

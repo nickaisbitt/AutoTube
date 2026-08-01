@@ -1,5 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { validateURL } from "../utils/security.js";
+import {
+  readResponseBodyWithLimit,
+  ResponseSizeLimitError,
+  validateURL,
+} from "../utils/security.js";
 
 // Image proxy security constants
 const MAX_IMAGE_SIZE = 50 * 1024 * 1024; // 50 MB maximum
@@ -13,7 +17,7 @@ export async function handleProxyImage(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const url = new URL(req.url!, `http://${req.headers.host}`);
+  const url = new URL(req.url!, "http://localhost");
   const targetUrl = url.searchParams.get("url");
 
   if (!targetUrl) {
@@ -24,7 +28,8 @@ export async function handleProxyImage(
   }
 
   try {
-    const decodedUrl = decodeURIComponent(targetUrl);
+    // URLSearchParams already decodes the query value.
+    const decodedUrl = targetUrl;
     
     // Follow redirects manually to inspect each URL for SSRF safety
     let currentUrl = decodedUrl;
@@ -63,8 +68,20 @@ export async function handleProxyImage(
         if (!redirectLocation) {
           break;
         }
-        // Resolve relative redirects against current URL
-        currentUrl = new URL(redirectLocation, currentUrl).toString();
+        // Resolve and validate the redirect before making another request.
+        const redirectUrl = new URL(redirectLocation, currentUrl).toString();
+        const redirectSafety = await validateURL(redirectUrl);
+        if (!redirectSafety.valid) {
+          await imgRes.body?.cancel().catch(() => undefined);
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            error: `URL blocked for security: unsafe redirect destination (${redirectSafety.error})`,
+          }));
+          return;
+        }
+        await imgRes.body?.cancel().catch(() => undefined);
+        currentUrl = redirectUrl;
         redirectsCount++;
       } else {
         break;
@@ -100,7 +117,7 @@ export async function handleProxyImage(
     const contentType = imgRes.headers.get("Content-Type") || "image/jpeg";
     
     // Validate Content-Type is an image
-    const lowerType = contentType.toLowerCase();
+    const lowerType = contentType.toLowerCase().trim();
     if (lowerType.includes('html') || lowerType.includes('text/html')) {
       res.statusCode = 415; // Unsupported Media Type
       res.setHeader("Content-Type", "application/json");
@@ -111,11 +128,7 @@ export async function handleProxyImage(
       return;
     }
     
-    // Set headers (CORS handled by api middleware — no wildcard override)
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    
-    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    const buffer = await readResponseBodyWithLimit(imgRes, MAX_IMAGE_SIZE);
     
     // Validate file size
     if (buffer.length < MIN_IMAGE_SIZE) {
@@ -128,16 +141,10 @@ export async function handleProxyImage(
       return;
     }
     
-    if (buffer.length > MAX_IMAGE_SIZE) {
-      res.statusCode = 413; // Payload Too Large
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ 
-        error: `Image too large: ${(buffer.length / (1024 * 1024)).toFixed(2)}MB (maximum ${MAX_IMAGE_SIZE / (1024 * 1024)}MB)`,
-        size: buffer.length
-      }));
-      return;
-    }
-    
+    // Set headers only after type and size validation.
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.end(buffer);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
@@ -148,10 +155,12 @@ export async function handleProxyImage(
       res.end();
       return;
     }
-    res.statusCode = 500;
+    res.statusCode = err instanceof ResponseSizeLimitError ? 413 : 500;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ 
-      error: "Internal server error",
+      error: err instanceof ResponseSizeLimitError
+        ? `Image exceeds the ${MAX_IMAGE_SIZE / (1024 * 1024)}MB limit`
+        : "Internal server error",
       code: "PROXY_ERROR",
       ...(isDev && { details: message }) // Only leak details in development
     }));

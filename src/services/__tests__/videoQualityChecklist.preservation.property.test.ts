@@ -359,6 +359,8 @@ describe('Property 2: Preservation — Existing Pipeline Functionality Unchanged
       fc.assert(
         fc.property(qualityResponseObjectArb, (response) => {
           const factors = parseQualityResponse(response);
+          expect(factors).not.toBeNull();
+          if (!factors) return;
 
           // Must have exactly 5 factors
           const keys = Object.keys(factors);
@@ -395,6 +397,8 @@ describe('Property 2: Preservation — Existing Pipeline Functionality Unchanged
       fc.assert(
         fc.property(qualityResponseStringArb, (responseStr) => {
           const factors = parseQualityResponse(responseStr);
+          expect(factors).not.toBeNull();
+          if (!factors) return;
 
           expect(factors.sharpness).toBeGreaterThanOrEqual(0);
           expect(factors.sharpness).toBeLessThanOrEqual(10);
@@ -415,6 +419,8 @@ describe('Property 2: Preservation — Existing Pipeline Functionality Unchanged
       fc.assert(
         fc.property(qualityResponseFencedArb, (responseStr) => {
           const factors = parseQualityResponse(responseStr);
+          expect(factors).not.toBeNull();
+          if (!factors) return;
 
           expect(factors.sharpness).toBeGreaterThanOrEqual(0);
           expect(factors.sharpness).toBeLessThanOrEqual(10);
@@ -431,24 +437,21 @@ describe('Property 2: Preservation — Existing Pipeline Functionality Unchanged
       );
     });
 
-    it('returns default factors (all 5) for invalid/garbage input', () => {
+    it('fails closed (returns null) for invalid/garbage input instead of defaulting to all 5s', () => {
       fc.assert(
         fc.property(
-          fc.oneof(fc.constant(null), fc.constant(undefined), fc.constant(42), fc.constant([1, 2, 3]), fc.constant('not json at all')),
+          fc.oneof(
+            fc.constant(null),
+            fc.constant(undefined),
+            fc.constant(42),
+            fc.constant([1, 2, 3]),
+            fc.constant('not json at all'),
+            fc.constant('{}'),
+            fc.constant({}),
+            fc.constant({ sharpness: 'excellent' }),
+          ),
           (garbage) => {
-            const factors = parseQualityResponse(garbage);
-
-            // Should return defaults, still clamped to [0,10]
-            expect(factors.sharpness).toBeGreaterThanOrEqual(0);
-            expect(factors.sharpness).toBeLessThanOrEqual(10);
-            expect(factors.lighting).toBeGreaterThanOrEqual(0);
-            expect(factors.lighting).toBeLessThanOrEqual(10);
-            expect(factors.composition).toBeGreaterThanOrEqual(0);
-            expect(factors.composition).toBeLessThanOrEqual(10);
-            expect(factors.vibrancy).toBeGreaterThanOrEqual(0);
-            expect(factors.vibrancy).toBeLessThanOrEqual(10);
-            expect(factors.relevance).toBeGreaterThanOrEqual(0);
-            expect(factors.relevance).toBeLessThanOrEqual(10);
+            expect(parseQualityResponse(garbage)).toBeNull();
           },
         ),
         { numRuns: 20 },

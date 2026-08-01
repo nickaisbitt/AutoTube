@@ -8,7 +8,7 @@ A fully automated YouTube video generator that creates professional-quality vide
 
 - **AI Script Generation** - Uses OpenRouter (GPT-5.4-nano) to generate engaging, rapid-paced scripts
 - **Smart Media Sourcing** - Automatically finds relevant images via DuckDuckGo with AI-powered visual planning
-- **Text-to-Speech Narration** - Generates professional voiceover using OpenAI TTS
+- **Text-to-Speech Narration** - Generates voiceover with Kokoro-82M TTS, falling back to browser SpeechSynthesis
 - **Canvas Video Rendering** - Renders videos with Ken Burns effects, gradient overlays, and text captions
 - **Pipeline UI** - Step-by-step workflow with progress tracking and debug logging
 
@@ -27,7 +27,7 @@ A fully automated YouTube video generator that creates professional-quality vide
 
 - Node.js 18+
 - OpenRouter API key (for script generation)
-- OpenAI API key (for TTS narration)
+- Optional: Kokoro TTS service (`tts-service/`) for narration; browser SpeechSynthesis is used as fallback
 
 ### Installation
 
@@ -117,7 +117,7 @@ src/
 │   ├── llm.ts           # Script generation via OpenRouter
 │   ├── llmVisualDirector.ts  # AI visual planning
 │   ├── media.ts         # Image sourcing & scoring
-│   ├── tts.ts           # OpenAI TTS integration
+│   ├── tts/             # Kokoro-82M TTS with browser SpeechSynthesis fallback
 │   ├── videoRenderer.ts # Canvas-based video rendering
 │   └── visualPlanner.ts # Topic context resolution
 ├── utils/               # Utilities

@@ -14,10 +14,17 @@ const MODEL_COSTS_PER_TOKEN = {
   'deepseek/deepseek-v4-flash': { prompt: 0.00000009, completion: 0.00000018 },
   'google/gemma-4-31b-it': { prompt: 0.00000006, completion: 0.00000035 },
   'google/gemini-2.5-flash': { prompt: 0.0000003, completion: 0.0000025 },
+  'google/gemini-2.5-flash-lite': { prompt: 0.0000001, completion: 0.0000004 },
+  'anthropic/claude-3-haiku': { prompt: 0.00000025, completion: 0.00000125 },
   'openai/gpt-4o-mini': { prompt: 0.00000015, completion: 0.0000006 },
   'openai/gpt-4o': { prompt: 0.0000025, completion: 0.00001 },
+  'openai/gpt-5.4-nano': { prompt: 0.0000002, completion: 0.00000125 },
+  'openai/gpt-5.4-mini': { prompt: 0.00000075, completion: 0.0000045 },
+  'openai/gpt-5-nano': { prompt: 0.00000005, completion: 0.0000004 },
   'rekaai/reka-edge': { prompt: 0.0000001, completion: 0.0000001 },
 };
+
+const UNKNOWN_MODEL_COST_PER_TOKEN = 0.000001;
 
 function loadLog() {
   if (existsSync(COSTS_FILE)) {
@@ -47,7 +54,7 @@ export function trackCost(entry) {
     if (rates) {
       costUsd = entry.tokens.prompt * rates.prompt + entry.tokens.completion * rates.completion;
     } else {
-      costUsd = (entry.tokens.total || 0) * 1e-6;
+      costUsd = (entry.tokens.total || 0) * UNKNOWN_MODEL_COST_PER_TOKEN;
     }
   }
   const full = {

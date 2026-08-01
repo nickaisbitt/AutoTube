@@ -1,5 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { validateURL } from "../utils/security.js";
+import {
+  readResponseBodyWithLimit,
+  ResponseSizeLimitError,
+  validateURL,
+} from "../utils/security.js";
 
 const MAX_PAGE_SIZE = 10 * 1024 * 1024; // 10 MB maximum
 const MIN_PAGE_SIZE = 100; // 100 bytes minimum
@@ -8,7 +12,7 @@ export async function handleProxyPage(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const url = new URL(req.url!, `http://${req.headers.host}`);
+  const url = new URL(req.url!, "http://localhost");
   const targetUrl = url.searchParams.get("url");
 
   if (!targetUrl) {
@@ -19,7 +23,7 @@ export async function handleProxyPage(
   }
 
   try {
-    const decodedUrl = decodeURIComponent(targetUrl);
+    const decodedUrl = targetUrl;
     
     let currentUrl = decodedUrl;
     let redirectsCount = 0;
@@ -55,7 +59,19 @@ export async function handleProxyPage(
         if (!redirectLocation) {
           break;
         }
-        currentUrl = new URL(redirectLocation, currentUrl).toString();
+        const redirectUrl = new URL(redirectLocation, currentUrl).toString();
+        const redirectSafety = await validateURL(redirectUrl);
+        if (!redirectSafety.valid) {
+          await pageRes.body?.cancel().catch(() => undefined);
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            error: `URL blocked for security: unsafe redirect destination (${redirectSafety.error})`,
+          }));
+          return;
+        }
+        await pageRes.body?.cancel().catch(() => undefined);
+        currentUrl = redirectUrl;
         redirectsCount++;
       } else {
         break;
@@ -89,13 +105,7 @@ export async function handleProxyPage(
 
     const contentType = pageRes.headers.get("Content-Type") || "text/html";
     
-    res.setHeader("Content-Type", contentType);
-
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    
-    const buffer = Buffer.from(await pageRes.arrayBuffer());
+    const buffer = await readResponseBodyWithLimit(pageRes, MAX_PAGE_SIZE);
     
     if (buffer.length < MIN_PAGE_SIZE) {
       res.statusCode = 415;
@@ -107,16 +117,10 @@ export async function handleProxyPage(
       return;
     }
     
-    if (buffer.length > MAX_PAGE_SIZE) {
-      res.statusCode = 413;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ 
-        error: `Page too large: ${(buffer.length / (1024 * 1024)).toFixed(2)}MB (maximum ${MAX_PAGE_SIZE / (1024 * 1024)}MB)`,
-        size: buffer.length
-      }));
-      return;
-    }
-    
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
     res.end(buffer);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
@@ -126,10 +130,12 @@ export async function handleProxyPage(
       res.end();
       return;
     }
-    res.statusCode = 500;
+    res.statusCode = err instanceof ResponseSizeLimitError ? 413 : 500;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ 
-      error: "Internal server error",
+      error: err instanceof ResponseSizeLimitError
+        ? `Page exceeds the ${MAX_PAGE_SIZE / (1024 * 1024)}MB limit`
+        : "Internal server error",
       code: "PROXY_ERROR",
       ...(isDev && { details: message })
     }));

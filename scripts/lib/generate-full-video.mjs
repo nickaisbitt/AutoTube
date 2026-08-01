@@ -3046,13 +3046,8 @@ export async function generateFullVideo(options) {
     console.log('   ⚠️  No AUTOTUBE_API_KEY / VITE_AUTOTUBE_API_KEY — /api/* calls will be rejected by the API gate');
   }
 
-  const crashDumpDir = join(outDir, 'chromium-crash-dumps');
-  mkdirSync(crashDumpDir, { recursive: true });
   const launchArgs = [
     '--disable-dev-shm-usage',
-    `--crash-dumps-dir=${crashDumpDir}`,
-    '--enable-crash-reporter',
-    '--enable-crashpad',
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-gpu',
@@ -3234,7 +3229,7 @@ export async function generateFullVideo(options) {
       env: { ...process.env, CHROME_HEADLESS: '1' },
     });
     const launchedBrowser = browser;
-    recordBrowserEvent('browser.launch', `${reason}; crashDumps=${crashDumpDir}`);
+    recordBrowserEvent('browser.launch', reason);
     launchedBrowser.once('disconnected', () => {
       if (browser === launchedBrowser) recordBrowserEvent('browser.disconnected', reason);
     });

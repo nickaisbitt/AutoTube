@@ -15,6 +15,13 @@ nixPkgs = [
   "python3",
   "python3Packages.pip"
 ]
+# Bold sans fonts for ffmpeg drawtext burns — installed via apt so they land in
+# /usr/share/fonts where resolveDrawtextFontFile() probes (Nix-store fonts wouldn't).
+aptPkgs = [
+  "fonts-liberation",
+  "fonts-dejavu-core",
+  "fonts-freefont-ttf"
+]
 
 [phases.install]
 # Symlink before npm ci — survives if scripts/ is omitted from the image

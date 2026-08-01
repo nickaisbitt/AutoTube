@@ -2,7 +2,7 @@
  * Post-mux overlays for ffmpeg assembly (hook text + karaoke captions).
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
+import { existsSync, writeFileSync, unlinkSync, copyFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
 import { narrationSpeechIntervals } from './narration.mjs';
@@ -25,6 +25,121 @@ function escapeDrawtext(text) {
 
 function escapeAss(text) {
   return String(text || '').replace(/\\/g, '\\\\').replace(/\{/g, '\\{').replace(/\}/g, '\\}');
+}
+
+// Bold sans fonts we trust for drawtext burns, in priority order. drawtext with
+// no explicit fontfile silently produces empty (invisible) burns on hosts that
+// lack a fontconfig default, so we always resolve one of these and fail loudly
+// if none exist instead of shipping a caption-less final.
+const DRAWTEXT_FONT_CANDIDATES = ['LiberationSans-Bold.ttf', 'DejaVuSans-Bold.ttf', 'FreeSansBold.ttf'];
+const FONT_SEARCH_ROOTS = ['/usr/share/fonts', '/usr/local/share/fonts'];
+
+let cachedFontFile;
+
+function findFontFileByName(root, name) {
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    const full = join(root, entry.name);
+    if (entry.isDirectory()) {
+      const found = findFontFileByName(full, name);
+      if (found) return found;
+    } else if (entry.name === name) {
+      return full;
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve an explicit bold sans font file for drawtext burns.
+ * Probes {@link DRAWTEXT_FONT_CANDIDATES} under {@link FONT_SEARCH_ROOTS} in
+ * priority order. Returns the absolute path, or null when none are installed.
+ */
+export function resolveDrawtextFontFile() {
+  if (cachedFontFile !== undefined) return cachedFontFile;
+  for (const name of DRAWTEXT_FONT_CANDIDATES) {
+    for (const root of FONT_SEARCH_ROOTS) {
+      const found = findFontFileByName(root, name);
+      if (found) {
+        cachedFontFile = found;
+        return cachedFontFile;
+      }
+    }
+  }
+  cachedFontFile = null;
+  return cachedFontFile;
+}
+
+// drawtext parses ':' as an option separator and '\' as an escape; the value is
+// wrapped in single quotes, so a literal quote must break/rejoin the quoting.
+function escapeFontfile(path) {
+  return String(path || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/:/g, '\\:')
+    .replace(/'/g, "'\\''");
+}
+
+function parsePpm(buf) {
+  if (!buf || buf.length < 10 || buf[0] !== 0x50 || buf[1] !== 0x36) return null; // 'P6'
+  let pos = 2;
+  const isWs = (c) => c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d;
+  const readToken = () => {
+    while (pos < buf.length) {
+      const c = buf[pos];
+      if (c === 0x23) {
+        while (pos < buf.length && buf[pos] !== 0x0a) pos += 1;
+      } else if (isWs(c)) {
+        pos += 1;
+      } else {
+        break;
+      }
+    }
+    const start = pos;
+    while (pos < buf.length && !isWs(buf[pos])) pos += 1;
+    return buf.toString('ascii', start, pos);
+  };
+  const width = parseInt(readToken(), 10);
+  const height = parseInt(readToken(), 10);
+  const maxval = parseInt(readToken(), 10);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(maxval)) return null;
+  pos += 1; // single whitespace byte separating header from binary data
+  return { width, height, maxval, pixels: buf.subarray(pos) };
+}
+
+/**
+ * Verify the burned hook actually rendered visible yellow text in the hook band.
+ * Extracts a frame inside the hook window, crops the band where the hook lines
+ * sit (y≈0.26–0.38), and counts strongly-yellow pixels. Returns
+ * { ok, yellowPixels, sampled } — or { inconclusive: true } when the probe
+ * itself could not run (so a flaky probe never fails an otherwise-good burn).
+ */
+function verifyHookYellowPixels(videoPath) {
+  const bandTop = 0.2;
+  const bandHeight = 0.32; // spans both hook lines at y=h*0.26 and y=h*0.38
+  const ppm = spawnSync(
+    'ffmpeg',
+    [
+      '-y', '-ss', '0.8', '-i', videoPath,
+      '-vf', `crop=iw:ih*${bandHeight}:0:ih*${bandTop}`,
+      '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'ppm', '-',
+    ],
+    { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024, timeout: 60_000 },
+  );
+  if (ppm.status !== 0 || !ppm.stdout || !ppm.stdout.length) return { inconclusive: true };
+  const parsed = parsePpm(ppm.stdout);
+  if (!parsed) return { inconclusive: true };
+  const { width, height, pixels } = parsed;
+  let yellow = 0;
+  for (let i = 0; i + 2 < pixels.length; i += 3) {
+    if (pixels[i] > 160 && pixels[i + 1] > 160 && pixels[i + 2] < 110) yellow += 1;
+  }
+  const sampled = width * height || 1;
+  return { ok: yellow > Math.max(40, Math.round(sampled * 0.0002)), yellowPixels: yellow, sampled };
 }
 
 const MERGED_CAPTION_REPAIRS = [
@@ -166,6 +281,15 @@ export function overlayHookText(videoPath, project, options = {}) {
   }
   if (!hookText?.trim()) return { ok: false, error: 'no honest hook text (all overlay claims rejected)' };
 
+  const fontFile = resolveDrawtextFontFile();
+  if (!fontFile) {
+    return {
+      ok: false,
+      error: `no drawtext font found (looked for ${DRAWTEXT_FONT_CANDIDATES.join(', ')} under ${FONT_SEARCH_ROOTS.join(', ')})`,
+    };
+  }
+  const fontOpt = `fontfile='${escapeFontfile(fontFile)}':`;
+
   const probe = spawnSync(
     'ffprobe',
     ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', videoPath],
@@ -183,11 +307,11 @@ export function overlayHookText(videoPath, project, options = {}) {
   const durationSec = options.durationSec ?? 3.0;
   const border = Math.max(5, Math.round(fontSize * 0.08));
   const filters = [
-    `drawtext=text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.26:enable='between(t\\,0\\,${durationSec})'`,
+    `drawtext=${fontOpt}text='${escapeDrawtext(line1)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.26:enable='between(t\\,0\\,${durationSec})'`,
   ];
   if (line2) {
     filters.push(
-      `drawtext=text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
+      `drawtext=${fontOpt}text='${escapeDrawtext(line2)}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=h*0.38:enable='between(t\\,0\\,${durationSec})'`,
     );
   }
 
@@ -213,13 +337,29 @@ export function overlayHookText(videoPath, project, options = {}) {
     try { unlinkSync(tmpOut); } catch { /* ignore */ }
     return { ok: false, error: 'hook overlay produced corrupt/truncated mp4' };
   }
+  // Confirm the burn is actually visible (guards silent empty burns from a bad
+  // font/glyph even when ffmpeg exits 0). Inconclusive probes don't block.
+  const verify = verifyHookYellowPixels(tmpOut);
+  if (verify.ok === false) {
+    try { unlinkSync(tmpOut); } catch { /* ignore */ }
+    return {
+      ok: false,
+      error: `hook overlay burned no visible yellow text (font=${fontFile}, yellowPixels=${verify.yellowPixels}/${verify.sampled})`,
+    };
+  }
   copyFileSync(tmpOut, videoPath);
   try {
     unlinkSync(tmpOut);
   } catch {
     /* ignore */
   }
-  return { ok: true, hookText: hookText.trim() };
+  return {
+    ok: true,
+    hookText: hookText.trim(),
+    fontFile,
+    yellowPixels: verify.yellowPixels,
+    yellowVerified: verify.ok === true,
+  };
 }
 
 /**
@@ -488,7 +628,11 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
   const hook = overlayHookText(videoPath, project);
   results.hook = hook;
   if (hook.ok) {
-    console.log(`  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}..."`);
+    console.log(
+      `  [ffmpeg] hook overlay: "${hook.hookText?.slice(0, 48)}..." (font=${hook.fontFile}, yellowPixels=${hook.yellowPixels})`,
+    );
+  } else {
+    console.warn(`  [ffmpeg] hook overlay failed: ${hook.error}`);
   }
 
   // Impact cards only when karaoke is off.
@@ -496,7 +640,7 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
     const beats = overlayImpactBeats(videoPath, project);
     results.impactBeats = beats;
     if (beats.ok) {
-      console.log(`  [ffmpeg] impact beats: ${beats.count} cards`);
+      console.log(`  [ffmpeg] impact beats: ${beats.count} cards (font=${beats.fontFile})`);
     }
   } else if (karaokeRequested) {
     results.impactBeats = { ok: true, skipped: true, reason: karaokeActive ? 'karaoke-on' : 'karaoke-requested' };
@@ -549,6 +693,14 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
     { encoding: 'utf8' },
   );
   const h = parseInt((hProbe.stdout || '1080').trim(), 10) || 1080;
+  const fontFile = resolveDrawtextFontFile();
+  if (!fontFile) {
+    return {
+      ok: false,
+      error: `no drawtext font found (looked for ${DRAWTEXT_FONT_CANDIDATES.join(', ')} under ${FONT_SEARCH_ROOTS.join(', ')})`,
+    };
+  }
+  const fontOpt = `fontfile='${escapeFontfile(fontFile)}':`;
   const fontSize = Math.round(h * 0.095);
   const border = Math.max(5, Math.round(fontSize * 0.09));
   const yFracs = [0.36, 0.44, 0.52];
@@ -559,7 +711,7 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
     const end = Math.min(duration - 0.05, start + 1.4);
     const y = `h*${yFracs[i % yFracs.length]}`;
     filters.push(
-      `drawtext=text='${text}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=${y}:enable='between(t\\,${start}\\,${end})'`,
+      `drawtext=${fontOpt}text='${text}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=${y}:enable='between(t\\,${start}\\,${end})'`,
     );
   }
   const tmpOut = videoPath.replace(/\.mp4$/, '-beats.mp4');
@@ -577,5 +729,5 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   } catch {
     /* ignore */
   }
-  return { ok: true, count: times.length };
+  return { ok: true, count: times.length, fontFile };
 }

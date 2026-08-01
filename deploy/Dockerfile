@@ -27,6 +27,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg python3 python3-pip \
+    fonts-liberation fonts-dejavu-core fonts-freefont-ttf \
     && pip3 install --break-system-packages edge-tts==7.0.2 \
     && rm -rf /var/lib/apt/lists/*
 

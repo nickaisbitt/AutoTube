@@ -144,6 +144,69 @@ export async function validateURL(urlString: string): Promise<{ valid: boolean; 
   });
 }
 
+export type RedirectValidationResult = {
+  valid: boolean;
+  finalUrl?: string;
+  error?: string;
+};
+
+/**
+ * Resolves HTTP redirects manually and validates every destination before it
+ * can be requested. The returned final URL should be used by the caller.
+ */
+export async function validateURLRedirects(
+  urlString: string,
+  maxRedirects = 5,
+): Promise<RedirectValidationResult> {
+  let currentUrl = urlString;
+  let safety = await validateURL(currentUrl);
+  if (!safety.valid) return safety;
+
+  for (let redirects = 0; redirects <= maxRedirects; redirects++) {
+    let response: Response;
+    try {
+      response = await fetch(currentUrl, {
+        method: "GET",
+        headers: { Range: "bytes=0-0" },
+        redirect: "manual",
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      return { valid: false, error: "Unable to verify URL redirects" };
+    }
+
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      await response.body?.cancel().catch(() => undefined);
+      return { valid: true, finalUrl: currentUrl };
+    }
+
+    const location = response.headers.get("location");
+    await response.body?.cancel().catch(() => undefined);
+    if (!location) {
+      return { valid: false, error: "Redirect response is missing a destination" };
+    }
+    if (redirects === maxRedirects) {
+      return { valid: false, error: "Too many redirects" };
+    }
+
+    try {
+      currentUrl = new URL(location, currentUrl).toString();
+    } catch {
+      return { valid: false, error: "Invalid redirect destination" };
+    }
+
+    safety = await validateURL(currentUrl);
+    if (!safety.valid) {
+      return {
+        valid: false,
+        error: `Unsafe redirect destination: ${safety.error || "URL blocked"}`,
+      };
+    }
+  }
+
+  return { valid: false, error: "Too many redirects" };
+}
+
 /**
  * Reads an upstream response incrementally. Content-Length is rejected before
  * reading when possible, while the streaming check handles absent or false

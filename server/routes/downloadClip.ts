@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
-import { validateURL } from "../utils/security.js";
+import { validateURLRedirects } from "../utils/security.js";
 import {
   existsSync,
   mkdirSync,
@@ -87,10 +87,10 @@ export async function handleDownloadClip(
     return;
   }
 
-  const decodedUrl = decodeURIComponent(videoUrl);
-
-  // SECURITY: Validate URL safety (SSRF protection)
-  const urlSafety = await validateURL(decodedUrl);
+  // URLSearchParams has already decoded the query parameter. Resolve redirects
+  // manually so yt-dlp starts from a destination that passed the SSRF checks.
+  const decodedUrl = videoUrl;
+  const urlSafety = await validateURLRedirects(decodedUrl);
   if (!urlSafety.valid) {
     console.warn(`[Clip Download] Blocked unsafe URL: ${urlSafety.error}`);
     res.statusCode = 403;
@@ -98,6 +98,7 @@ export async function handleDownloadClip(
     res.end(JSON.stringify({ error: `URL blocked for security: ${urlSafety.error}` }));
     return;
   }
+  const validatedVideoUrl = urlSafety.finalUrl!;
 
   // Cache key based on URL + duration
   const hash = crypto
@@ -137,7 +138,7 @@ export async function handleDownloadClip(
       "50M",
       "-o",
       rawPath,
-      decodeURIComponent(videoUrl),
+      validatedVideoUrl,
     ]);
 
     let ytdlpDone = false;
@@ -240,11 +241,11 @@ export async function handleDownloadClip(
     console.error("[Clip Download] Error:", error);
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json");
-    res.end(
-      JSON.stringify({
-        error: "Clip download failed",
+    res.end(JSON.stringify({
+      error: "Clip download failed",
+      ...(process.env.NODE_ENV !== "production" && {
         details: error instanceof Error ? error.message : String(error),
       }),
-    );
+    }));
   }
 }

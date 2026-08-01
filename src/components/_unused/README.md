@@ -22,11 +22,27 @@ Kept despite appearing dead from the frontend: `monitoring` (imported by the
 live `/api/errors` route in `server/routes/errors.ts`) and `brollPlacement`
 (dynamically imported by `store/pipeline/orchestrator.ts`).
 
+## Deleted in the FX-mirror quarantine (TypeScript duplicates of deploy/server-render/*.mjs)
+
+The production render path is `server-render.mjs` + `deploy/server-render/*.mjs`
+(`visualFx.mjs`, `audioFx.mjs`, `growthFeatures.mjs`, `advancedRender.mjs`, ...).
+The following TS directories mirrored those `.mjs` modules but had zero
+importers outside `all90TasksIntegration.test.ts` and their own
+`pipelineIntegration/integrationTest.ts`, so they were deleted:
+
+- `services/visualFx/*`
+- `services/hookFx/*`
+- `services/audioFx/*`
+- `services/advancedRender/*`
+- `services/growth/*`
+- `services/pipelineIntegration/*`
+
+Note: `services/segmentReorderer.ts` (root level) is live — imported by
+`store/pipeline/orchestrator.ts` — and is unrelated to the deleted
+`pipelineIntegration/segmentReorder.ts`.
+
 ## Still present but unwired
 
 - Hooks: `useTheme`, `useOnlineStatus`, `useKeyboardShortcuts`
-- Most of `services/visualFx/*`, `services/hookFx/*`,
-  `services/advancedRender/*`, many `pipelineIntegration/*` modules
-  (kept: exercised by `all90TasksIntegration.test.ts`)
 
 Do not add new production imports of these without a deliberate product decision.

@@ -33,10 +33,12 @@ export async function handleExportProject(
     }
 
     const sanitizedId = sanitizeProjectId(projectId);
-    if (!sanitizedId) {
+    if (!sanitizedId || sanitizedId !== projectId) {
       res.statusCode = 400;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: "Invalid project id" }));
+      res.end(JSON.stringify({
+        error: "Invalid project id; use only letters, numbers, hyphens, and underscores",
+      }));
       return;
     }
 
@@ -54,8 +56,13 @@ export async function handleExportProject(
 
     res.end(data);
   } catch (err) {
+    console.error("[Export Project] Error:", err);
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ error: String(err) }));
+    res.end(JSON.stringify({
+      error: process.env.NODE_ENV === "production"
+        ? "Project export failed"
+        : String(err),
+    }));
   }
 }

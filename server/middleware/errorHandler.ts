@@ -40,7 +40,7 @@ export function errorHandler(
 
   const isProduction = process.env.NODE_ENV === "production";
 
-  if (statusCode === 500) {
+  if (statusCode === 500 || (isProduction && statusCode >= 500)) {
     res.end(
       JSON.stringify({
         error: "Internal server error",

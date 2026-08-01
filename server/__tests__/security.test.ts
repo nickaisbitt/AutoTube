@@ -5,6 +5,7 @@ import {
   readResponseBodyWithLimit,
   ResponseSizeLimitError,
   validateURL,
+  validateURLRedirects,
 } from "../utils/security.js";
 
 describe("Security & SSRF Utilities", () => {
@@ -88,6 +89,48 @@ describe("Security & SSRF Utilities", () => {
       expect(result.valid).toBe(false);
       expect(result.error).toContain("private/internal IP");
       spy.mockRestore();
+    });
+  });
+
+  describe("validateURLRedirects", () => {
+    it("follows redirects manually and returns the validated final URL", async () => {
+      vi.spyOn(dns, "lookup").mockImplementation((_hostname, options, callback) => {
+        const cb = typeof options === "function" ? options : callback as any;
+        cb(null, [{ address: "8.8.8.8", family: 4 }] as any);
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(null, {
+          status: 302,
+          headers: { Location: "https://cdn.example/video.mp4" },
+        }))
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+      await expect(validateURLRedirects("https://videos.example/watch")).resolves.toEqual({
+        valid: true,
+        finalUrl: "https://cdn.example/video.mp4",
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.mock.calls[0][1]).toMatchObject({ redirect: "manual" });
+      expect(fetchSpy.mock.calls[1][1]).toMatchObject({ redirect: "manual" });
+    });
+
+    it("rejects a redirect to a private destination before requesting it", async () => {
+      vi.spyOn(dns, "lookup").mockImplementation((_hostname, options, callback) => {
+        const cb = typeof options === "function" ? options : callback as any;
+        cb(null, [{ address: "8.8.8.8", family: 4 }] as any);
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(null, {
+          status: 302,
+          headers: { Location: "http://127.0.0.1/admin" },
+        }),
+      );
+
+      const result = await validateURLRedirects("https://videos.example/watch");
+
+      expect(result).toMatchObject({ valid: false });
+      expect(result.error).toContain("Unsafe redirect destination");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 

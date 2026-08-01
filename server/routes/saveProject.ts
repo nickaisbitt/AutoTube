@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import { writeFileSync } from "fs";
+import { projectPathFromId, sanitizeProjectId } from "../utils/projectPaths.js";
 
 /**
  * POST /api/save-project
@@ -19,10 +20,16 @@ export async function handleSaveProject(
     return;
   }
 
-  const projectId = rawProjectId ? rawProjectId.replace(/[^a-zA-Z0-9-_]/g, "") : "";
-  const projectPath = projectId
-    ? `/tmp/autotube-project-${projectId}.json`
-    : "/tmp/autotube-project.json";
+  const projectId = rawProjectId ? sanitizeProjectId(rawProjectId) : "";
+  if (rawProjectId !== null && (!projectId || projectId !== rawProjectId)) {
+    res.statusCode = 400;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({
+      error: "Invalid project id; use only letters, numbers, hyphens, and underscores",
+    }));
+    return;
+  }
+  const projectPath = projectPathFromId(projectId);
 
   const chunks: Buffer[] = [];
 
@@ -37,16 +44,26 @@ export async function handleSaveProject(
         res.end(JSON.stringify({ ok: true, path: projectPath }));
         resolve();
       } catch (err) {
+        console.error("[Save Project] Error:", err);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ error: String(err) }));
+        res.end(JSON.stringify({
+          error: process.env.NODE_ENV === "production"
+            ? "Project save failed"
+            : String(err),
+        }));
         resolve();
       }
     });
     req.on("error", (err: Error) => {
+      console.error("[Save Project] Request error:", err);
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: `Request error: ${err.message}` }));
+      res.end(JSON.stringify({
+        error: process.env.NODE_ENV === "production"
+          ? "Project save failed"
+          : `Request error: ${err.message}`,
+      }));
       reject(err);
     });
     req.on("close", () => {

@@ -78,7 +78,11 @@ export async function handleQualityCheck(
   if (!existsSync(resolvedPath)) {
     res.statusCode = 400;
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ error: `Video file not found: ${videoPath}` }));
+    res.end(JSON.stringify({
+      error: process.env.NODE_ENV === "production"
+        ? "Video file not found"
+        : `Video file not found: ${videoPath}`,
+    }));
     return;
   }
 
@@ -203,7 +207,9 @@ export async function handleQualityCheck(
       sendEvent({
         type: "error",
         message: `Quality check failed (exit ${code})`,
-        details: stderr.slice(-500),
+        ...(process.env.NODE_ENV !== "production" && {
+          details: stderr.slice(-500),
+        }),
       });
       res.end();
       return;
@@ -221,7 +227,9 @@ export async function handleQualityCheck(
       sendEvent({
         type: "error",
         message: "Failed to parse quality report",
-        details: stdout.slice(-500),
+        ...(process.env.NODE_ENV !== "production" && {
+          details: stdout.slice(-500),
+        }),
       });
     }
     res.end();

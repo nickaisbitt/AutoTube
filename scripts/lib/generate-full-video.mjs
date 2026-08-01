@@ -399,6 +399,98 @@ function motionUrlKey(url = '') {
   return raw.split('?')[0];
 }
 
+/**
+ * Give a proxied clip a stable, query-independent media identity while keeping the
+ * transport endpoint unchanged.
+ *
+ * Query-stripping volume/dedup paths otherwise collapse every web clip to
+ * `/api/download-clip`, even though each `url=`
+ * target was different. The dot segments make the stored path unique; the server's
+ * prefix router accepts it and its URL parser normalizes the path back to the existing
+ * `/api/download-clip` endpoint (including for rate-limit classification).
+ */
+export function withDistinctProxyIdentity(url = '', identity = 'clip') {
+  const raw = String(url || '');
+  const marker = '/api/download-clip?';
+  if (!raw.includes(marker)) return raw;
+  const token = String(identity || 'clip').replace(/[^a-z0-9_-]+/gi, '-').slice(0, 80) || 'clip';
+  return raw.replace(
+    marker,
+    `/api/download-clip/.autotube-${token}/../../download-clip?`,
+  );
+}
+
+function harvestVolumeUrlKey(url = '') {
+  return String(url || '').split('?')[0];
+}
+
+/**
+ * Build a balanced assignment queue for motion padding. The least-populated
+ * segments receive one clip each before any segment receives another, so a finite
+ * pool improves the floor instead of being drained into the first few segments.
+ */
+export function buildMotionPaddingQueue(project = {}, minPerSegment = 6, limit = Infinity) {
+  const segments = Array.isArray(project.script) ? project.script : [];
+  const floor = Math.max(0, Number.parseInt(String(minPerSegment), 10) || 0);
+  const maxAssignments = Number.isFinite(limit)
+    ? Math.max(0, Math.floor(limit))
+    : Number.MAX_SAFE_INTEGER;
+  if (!segments.length || floor <= 0 || maxAssignments <= 0) return [];
+
+  const counts = new Map(
+    segments.map((segment) => {
+      const urls = new Set(
+        (project.media || [])
+          .filter((asset) => asset.segmentId === segment.id)
+          .map((asset) => harvestVolumeUrlKey(asset.url))
+          .filter(Boolean),
+      );
+      return [segment.id, urls.size];
+    }),
+  );
+  const queue = [];
+  while (queue.length < maxAssignments) {
+    const thin = segments.filter((segment) => (counts.get(segment.id) || 0) < floor);
+    if (!thin.length) break;
+    const lowest = Math.min(...thin.map((segment) => counts.get(segment.id) || 0));
+    for (const segment of thin) {
+      if (queue.length >= maxAssignments) break;
+      if ((counts.get(segment.id) || 0) !== lowest) continue;
+      queue.push(segment.id);
+      counts.set(segment.id, lowest + 1);
+    }
+  }
+  return queue;
+}
+
+function segmentMotionKey(asset = {}) {
+  return `${asset.segmentId || ''}|${motionUrlKey(asset.url)}`;
+}
+
+/**
+ * Restore only clips injected during this top-up that passed the web-motion
+ * evidence gate. The report is run-local proof; persisted/project-provided flags
+ * cannot create a relevance bypass.
+ */
+export function restoreMotionRelevancePassed(media = [], candidates = [], videoTopUp = []) {
+  const approved = new Set(
+    videoTopUp
+      .filter((entry) => entry.motionRelevancePassed === true)
+      .map(segmentMotionKey),
+  );
+  const out = [...media];
+  const present = new Set(out.map(segmentMotionKey));
+  const restored = [];
+  for (const asset of candidates) {
+    const key = segmentMotionKey(asset);
+    if (!approved.has(key) || present.has(key)) continue;
+    out.push(asset);
+    present.add(key);
+    restored.push(asset);
+  }
+  return { media: out, restored };
+}
+
 function resolveVideoDownloadUrl(asset, devServer) {
   const pageUrl = asset.sourceUrl || asset.url;
   if (asset.url?.startsWith('/api/download-clip')) {
@@ -2404,7 +2496,9 @@ export function formatMotionDropFunnel(report = {}) {
   const fetched = report.motionCandidatesSeen || 0;
   const afterJunk = report.motionAfterJunk ?? 0;
   const afterVision = report.motionAfterVision ?? (report.motionPoolSize || 0);
-  const relevanceDrop = (report.relevanceDroppedAfterTopUp || []).length;
+  const relevanceDrop = Array.isArray(report.motionRelevanceDroppedAfterTopUp)
+    ? report.motionRelevanceDroppedAfterTopUp.length
+    : (report.relevanceDroppedAfterTopUp || []).length;
   const injected = (report.videoTopUp || []).length;
   const drops =
     `junk=${report.motionDroppedJunk || 0}`
@@ -2629,6 +2723,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       const isWebClip = /web video/i.test(clip.source || '');
       // Search text asks the question; it is not evidence for a web result.
       const evidenceClip = isWebClip ? { ...clip, query: '' } : clip;
+      const strongMotionRelevance = isCyberRelevantClip(evidenceClip, topicBlob);
       if (isJunkStockClip(evidenceClip, topicBlob, { preferBright: options.preferBright === true })) {
         report.motionDroppedJunk = (report.motionDroppedJunk || 0) + 1;
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
@@ -2645,7 +2740,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           || isHeistTopic(topicBlob)
           || isAirlineTopic(topicBlob)
         )
-        && !isCyberRelevantClip(evidenceClip, topicBlob)
+        && !strongMotionRelevance
       ) {
         report.motionDroppedRelevance = (report.motionDroppedRelevance || 0) + 1;
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
@@ -2674,7 +2769,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         // is what starved inject to ~1. Stock/archive clips keep the strict skip.
         const failOpen = shouldFailOpenWebVisionSkip({
           isWebClip,
-          hasStrongEvidence: isCyberRelevantClip(evidenceClip, topicBlob),
+          hasStrongEvidence: strongMotionRelevance,
         });
         if (failOpen) {
           report.visionStockBudgetSoftAdmitted = (report.visionStockBudgetSoftAdmitted || 0) + 1;
@@ -2710,7 +2805,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         }
       }
       if (liveClips.some((c) => c.url === clip.url)) continue;
-      liveClips.push({ ...clip, query: q });
+      liveClips.push({
+        ...clip,
+        query: q,
+        // Run-local proof used only to prevent the later generic relevance pass
+        // from contradicting this stricter web-motion evidence decision.
+        motionRelevancePassed: isWebClip && strongMotionRelevance,
+      });
       addedPerQuery.set(q, addedForQuery + 1);
     }
   }
@@ -2768,13 +2869,25 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     return;
   }
 
-  // Keep chasing the configured motion floor after preserving raw harvest clips.
+  // Keep chasing both the configured motion floor and the per-segment asset floor
+  // after preserving raw harvest clips.
   const videoCount = existingVideos.length;
   const { minVideos, stockNeed } = targets;
-  if (videoCount >= minVideos && stockNeed <= 0) return;
-
   const used = usedUrls;
-  let need = Math.max(minVideos - videoCount, stockNeed);
+  const availablePoolCount = pool.filter((clip) => {
+    const key = motionUrlKey(clip.url);
+    return key && !used.has(key);
+  }).length;
+  const fullPaddingQueue = buildMotionPaddingQueue(
+    project,
+    options.minAssetsPerSegment || 0,
+  );
+  const paddingQueue = fullPaddingQueue.slice(0, availablePoolCount);
+  report.motionPaddingRequested = fullPaddingQueue.length;
+  report.motionPaddingAvailable = availablePoolCount;
+  let need = Math.max(minVideos - videoCount, stockNeed, paddingQueue.length);
+  if (need <= 0) return;
+
   const faceScore = (clip) => {
     const blob = `${clip.query || ''} ${clip.alt || ''} ${clip.title || ''}`.toLowerCase();
     if (isGenericStockJunk(blob, topicBlob)) return -4;
@@ -2853,6 +2966,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const safeQuery =
       clip.query
       || (airline ? 'airplane cabin passengers daylight' : `stock-video ${seg.title}`);
+    const injectedUrl = withDistinctProxyIdentity(clip.url, `${seg.id}-${n}`);
     // Provider metadata travels with the asset so downstream evidence gates judge the
     // clip on what it shows. Nothing aviation-flavoured is invented for empty alts —
     // a clip with no metadata must fail the relevance gate, not borrow a label.
@@ -2861,7 +2975,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       id: `stock-video-${seg.id}-${tag}-${n}`,
       segmentId: seg.id,
       type: 'video',
-      url: clip.url,
+      url: injectedUrl,
       alt:
         clip.alt
         || providerMeta
@@ -2877,9 +2991,32 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     used.add(key);
     need -= 1;
     report.videoTopUp = report.videoTopUp || [];
-    report.videoTopUp.push({ segmentId: seg.id, url: clip.url, source: clip.source || 'pool' });
+    report.videoTopUp.push({
+      segmentId: seg.id,
+      url: injectedUrl,
+      source: clip.source || 'pool',
+      motionRelevancePassed: clip.motionRelevancePassed === true,
+    });
     return true;
   };
+
+  // Volume first: round-robin the finite pool across the thinnest segments. Each
+  // queue slot retries candidates until one injects, so a failed direct-URL probe
+  // cannot silently consume that segment's padding opportunity.
+  let motionPaddingInjected = 0;
+  for (let qi = 0; qi < paddingQueue.length && need > 0 && vi < picks.length; qi += 1) {
+    const seg = segments.find((item) => item.id === paddingQueue[qi]);
+    if (!seg) continue;
+    while (vi < picks.length) {
+      const clip = picks[vi];
+      vi += 1;
+      if (await injectClip(seg, clip, `p${qi}`)) {
+        motionPaddingInjected += 1;
+        break;
+      }
+    }
+  }
+  report.motionPaddingInjected = motionPaddingInjected;
 
   for (const seg of segments) {
     if (need <= 0) break;
@@ -2890,10 +3027,6 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // Per-seg floor; variety drain below fills up to the key-mode motion target.
     const perSegTarget = isIntro ? targets.introTarget : targets.perSegTarget;
     const want = Math.max(0, perSegTarget - segVideos);
-    if (isIntro) {
-      picks.sort((a, b) => faceScore(b) - faceScore(a));
-      vi = 0;
-    }
     for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1, vi += 1) {
       await injectClip(seg, picks[vi], `s${i}`);
     }
@@ -3083,10 +3216,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     minScore: isEvalColdMode() ? 0.28 : 0.25,
   });
   report.relevanceDropped = relevance.dropped;
-  if (relevance.dropped.length) {
-    report.beforeRelevance = validated.length;
-    report.afterRelevance = relevance.media.length;
-  }
+  report.beforeRelevance = validated.length;
+  report.afterRelevance = relevance.media.length;
 
   const deduped = dedupeMediaByPHash(relevance.media, {
     devServer,
@@ -3135,18 +3266,60 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       faceSeek: options.faceSeek === true,
       preferBright: options.preferBright === true,
       cutIntervalSec: options.cutIntervalSec,
+      minAssetsPerSegment: minPerSegment,
     });
     injectCyberStockStills(project, report, options.mediaOffset || 0);
     // Re-gate after top-up (can reintroduce junk).
     stripJunkDemoVideos(project, report);
     await sanitizeProjectStillQuality(project, report, { devServer, cache: qualityCache });
-    const paddingBeforeFilter = (project.media || []).filter(isVolumePaddingAsset);
-    const afterTopUp = filterAssetsByRelevance(project.media || [], project, {
+    const beforeTopUpRelevance = [...(project.media || [])];
+    const paddingBeforeFilter = beforeTopUpRelevance.filter(isVolumePaddingAsset);
+    const afterTopUp = filterAssetsByRelevance(beforeTopUpRelevance, project, {
       minScore: isEvalColdMode() ? 0.26 : 0.22,
     });
-    report.relevanceDroppedAfterTopUp = afterTopUp.dropped;
+    report.relevanceStrictDroppedAfterTopUp = afterTopUp.dropped;
     project.media = mergeVolumePadding(afterTopUp.media, paddingBeforeFilter, project);
+
+    // Fresh web motion already cleared a topic-family evidence gate before inject.
+    // The generic pass above can score it below threshold only because assignment
+    // moved it to a segment with different essay keywords. Preserve that run-local
+    // proof after the junk/unsafe gates have had their chance to remove the clip.
+    const restoredMotion = restoreMotionRelevancePassed(
+      project.media,
+      beforeTopUpRelevance,
+      report.videoTopUp || [],
+    );
+    project.media = restoredMotion.media;
+
+    const beforeKeys = new Set(beforeTopUpRelevance.map(segmentMotionKey));
+    const finalKeys = new Set(project.media.map(segmentMotionKey));
+    report.relevanceDroppedAfterTopUp = afterTopUp.dropped.filter(
+      (asset) => !finalKeys.has(segmentMotionKey(asset)),
+    );
+    const strictKeys = new Set(afterTopUp.media.map(segmentMotionKey));
+    report.motionRelevanceProtectedAfterTopUp = beforeTopUpRelevance
+      .filter((asset) => (
+        !strictKeys.has(segmentMotionKey(asset))
+        && finalKeys.has(segmentMotionKey(asset))
+        && (report.videoTopUp || []).some((entry) => (
+          entry.motionRelevancePassed === true
+          && segmentMotionKey(entry) === segmentMotionKey(asset)
+        ))
+      ))
+      .map((asset) => ({
+        segmentId: asset.segmentId,
+        url: asset.url,
+      }));
+    report.motionRelevanceDroppedAfterTopUp = (report.videoTopUp || [])
+      .filter((entry) => (
+        entry.motionRelevancePassed === true
+        && beforeKeys.has(segmentMotionKey(entry))
+        && !finalKeys.has(segmentMotionKey(entry))
+      ));
+    report.beforeRelevanceAfterTopUp = beforeTopUpRelevance.length;
+    report.strictAfterRelevanceAfterTopUp = afterTopUp.media.length;
     report.afterTopUp = project.media.length;
+    report.afterRelevanceAfterTopUp = project.media.length;
   }
 
   const volume = evaluateHarvestVolume(project, minPerSegment);
@@ -3896,6 +4069,11 @@ export async function generateFullVideo(options) {
         cutIntervalSec: fixState.cutIntervalSec ?? 0.85,
       });
       log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
+      if (Number.isFinite(mediaReport.beforeRelevance)) {
+        log(
+          `   🎯 Initial relevance (before top-up): ${mediaReport.beforeRelevance} → ${mediaReport.afterRelevance} assets (removed ${mediaReport.relevanceDropped?.length || 0})`,
+        );
+      }
       if (mediaReport.videoTopUp?.length) {
         log(`   🎬 Video top-up: +${mediaReport.videoTopUp.length} motion clips`);
       }
@@ -3931,8 +4109,17 @@ export async function generateFullVideo(options) {
       if (mediaReport.cyberStockSkipped) {
         log(`   🎬 Cyber stills: ${mediaReport.cyberStockSkipped}`);
       }
-      if (mediaReport.relevanceDropped?.length) {
-        log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
+      if (Number.isFinite(mediaReport.beforeRelevanceAfterTopUp)) {
+        log(
+          `   🎯 Post-top-up relevance: ${mediaReport.beforeRelevanceAfterTopUp} → ${mediaReport.afterRelevanceAfterTopUp} assets`
+          + ` (strict=${mediaReport.strictAfterRelevanceAfterTopUp}, removed=${mediaReport.relevanceDroppedAfterTopUp?.length || 0}, protected-motion=${mediaReport.motionRelevanceProtectedAfterTopUp?.length || 0})`,
+        );
+      }
+      if (mediaReport.motionPaddingRequested) {
+        log(
+          `   ⚖️ Motion distribution: padded=${mediaReport.motionPaddingInjected || 0}/${mediaReport.motionPaddingRequested}`
+          + ` (pool-available=${mediaReport.motionPaddingAvailable || 0}, target=${fixState.minAssetsPerSegment || 6}/segment)`,
+        );
       }
       if (mediaReport.motionCandidatesSeen || mediaReport.motionPoolSize) {
         log(`   📉 ${formatMotionDropFunnel(mediaReport)}`);

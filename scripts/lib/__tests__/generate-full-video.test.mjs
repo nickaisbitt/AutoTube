@@ -6,6 +6,7 @@ import {
   archiveIdentifierFromUrl,
   archiveShortQueryVariants,
   archiveTopicSubjectQueries,
+  buildMotionPaddingQueue,
   decideStockVisionGate,
   fetchWebVideoResults,
   formatMotionDropFunnel,
@@ -25,10 +26,13 @@ import {
   resolveVisionUnverifiedMax,
   shouldFailOpenWebVisionSkip,
   spawnSyncFailureReason,
+  restoreMotionRelevancePassed,
   stripJunkDemoVideos,
   webMotionQueryVariants,
+  withDistinctProxyIdentity,
   withArchiveSweepSuffix,
 } from '../generate-full-video.mjs';
+import { evaluateHarvestVolume } from '../harvest-quality.mjs';
 
 const AIRLINE_TOPIC = 'How a regional airline hid recurring cabin-pressure failures from passengers';
 const HOUSING_TOPIC = 'The landlord algorithm that evicted tenants from rent-stabilized apartments';
@@ -818,6 +822,95 @@ describe('resolveInjectClipProbe', () => {
   });
 });
 
+describe('web-motion volume identity and distribution', () => {
+  it('stores distinct proxy identities that fetch through the unchanged endpoint', () => {
+    const base =
+      'http://localhost:5173/api/download-clip?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dabc&duration=10';
+    const first = withDistinctProxyIdentity(base, 'seg-a-0');
+    const second = withDistinctProxyIdentity(base, 'seg-b-1');
+
+    expect(first.split('?')[0]).not.toBe(second.split('?')[0]);
+    expect(new URL(first).pathname).toBe('/api/download-clip');
+    expect(new URL(second).pathname).toBe('/api/download-clip');
+    expect(new URL(first).searchParams.get('url')).toBe('https://www.youtube.com/watch?v=abc');
+    expect(resolveInjectClipProbe(first).probe).toBe(false);
+  });
+
+  it('makes six web proxy targets count as six assets at the unchanged volume gate', () => {
+    const segment = {
+      id: 's1',
+      title: 'Bank fraud phone breach',
+      narration: 'Bank fraud investigators traced stolen phone records and account data.',
+    };
+    const media = Array.from({ length: 6 }, (_, index) => {
+      const proxy =
+        `/api/download-clip?url=${encodeURIComponent(`https://youtu.be/bank-${index}`)}&duration=10`;
+      return {
+        id: `web-${index}`,
+        segmentId: segment.id,
+        type: 'video',
+        url: withDistinctProxyIdentity(proxy, `${segment.id}-${index}`),
+        alt: 'bank fraud smartphone security investigation',
+        query: 'bank fraud phone breach',
+        source: 'Bing web video',
+      };
+    });
+    const volume = evaluateHarvestVolume({
+      topic: 'The bank fraud phone breach that exposed account records',
+      script: [segment],
+      media,
+    }, 6);
+
+    expect(volume.perSegment.s1.count).toBe(6);
+    expect(volume.pass).toBe(true);
+  });
+
+  it('balances a finite motion pool across the thinnest segments before filling to six', () => {
+    const script = [
+      { id: 's1', title: 'Three' },
+      { id: 's2', title: 'Two' },
+      { id: 's3', title: 'One' },
+    ];
+    const media = [
+      ...['a', 'b', 'c'].map((id) => ({ segmentId: 's1', url: `https://img/${id}.jpg` })),
+      ...['d', 'e'].map((id) => ({ segmentId: 's2', url: `https://img/${id}.jpg` })),
+      { segmentId: 's3', url: 'https://img/f.jpg' },
+    ];
+    const project = { script, media };
+
+    expect(buildMotionPaddingQueue(project, 6, 4)).toEqual(['s3', 's2', 's3', 's1']);
+
+    const full = buildMotionPaddingQueue(project, 6);
+    const counts = { s1: 3, s2: 2, s3: 1 };
+    for (const segmentId of full) counts[segmentId] += 1;
+    expect(counts).toEqual({ s1: 6, s2: 6, s3: 6 });
+    expect(full).toHaveLength(12);
+  });
+
+  it('restores only fresh clips with run-local motion relevance proof', () => {
+    const trusted = {
+      id: 'trusted',
+      segmentId: 's1',
+      type: 'video',
+      url: withDistinctProxyIdentity('/api/download-clip?url=https%3A%2F%2Fyoutu.be%2Fabc', 's1-0'),
+    };
+    const untrusted = {
+      id: 'untrusted',
+      segmentId: 's1',
+      type: 'video',
+      url: '/api/download-clip?url=https%3A%2F%2Fyoutu.be%2Fbad',
+    };
+    const kept = [{ id: 'still', segmentId: 's1', type: 'image', url: 'https://img/keep.jpg' }];
+    const result = restoreMotionRelevancePassed(kept, [trusted, untrusted], [
+      { segmentId: 's1', url: trusted.url, motionRelevancePassed: true },
+      { segmentId: 's1', url: untrusted.url, motionRelevancePassed: false },
+    ]);
+
+    expect(result.media.map((asset) => asset.id)).toEqual(['still', 'trusted']);
+    expect(result.restored).toEqual([trusted]);
+  });
+});
+
 describe('shouldFailOpenWebVisionSkip', () => {
   it('keeps a web clip that carries its own strong evidence when the vision budget is spent', () => {
     expect(shouldFailOpenWebVisionSkip({ isWebClip: true, hasStrongEvidence: true })).toBe(true);
@@ -845,12 +938,13 @@ describe('formatMotionDropFunnel', () => {
       injectProbeFailed: 1,
       injectProxyTrusted: 14,
       relevanceDroppedAfterTopUp: new Array(2),
+      motionRelevanceDroppedAfterTopUp: [],
       videoTopUp: new Array(17),
     });
     expect(line).toContain('fetched=180');
     expect(line).toContain('after-junk=150');
     expect(line).toContain('after-vision=140');
-    expect(line).toContain('after-relevance=138');
+    expect(line).toContain('after-relevance=140');
     expect(line).toContain('injected=17');
     expect(line).toContain('junk=22 relevance=8 vision=10 web-fail-open=4');
     expect(line).toContain('probe-pass=3 probe-fail=1 proxy-trusted=14');

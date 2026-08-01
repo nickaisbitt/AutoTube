@@ -20,8 +20,13 @@ These are **code honesty** fixes. They do **not** satisfy upload-ready ≥7 or p
 |-----|--------|----------|
 | `npm run dod:check` | **PASS** | deploy/server absent; server-render sync OK |
 | `npm run lint` | **PASS** | `tsc --noEmit` exit 0 |
-| `npm run generate:video` (once) | **PASS** | Airline topic → `test-recordings/FINAL-VIDEO-final.mp4` (~70.7 s / ~22.7 MB); Archive-only harvest + espeak narration |
-| `npm run watch:video` fail-closed | **PASS** | Exit **1** when not upload-ready; raw brutal **4.0–5.4** on Archive-only artifact; upload-ready **NO**; gates use raw scores |
+| Waves A–E code | **SHIPPED** | Keyless motion packs, topical floors, keep-best freeze, edit pacing, E2E auth mocks, CI `dod:check`, this DoD doc |
+| `npm run generate:video` (Wave F) | **PASS** | Airline topic → `FINAL-VIDEO-final.mp4` (~94.8 s / ~45.3 MB); keyless Archive-only (`pexels=0 pixabay=0 archive=45`); soft-pass `15v/7segs`; exit **0** |
+| `npm run watch:video` fail-closed | **PASS** | Exit **1**; brutal raw **2.6**/10; upload-ready **NO**; criticals YES; gates use raw scores |
+| Stock keys | **MISSING** | `.env.local` has OpenRouter + `AUTOTUBE_API_KEY` only — no `PEXELS_*` / `PIXABAY_*` (re-proven 2026-08-01) |
+| Upload-ready ≥7 / 3-topic proof | **BLOCKED** | Plan exit: keys proven missing. Keyless Archive cannot clear brutal ≥7 on this cold topic. |
+
+Local proof notes (gitignored under `test-recordings/dod-proof/`): `airline-RESULT.txt`, `airline-WATCH_REPORT.md`, generate/watch logs.
 
 Watcher honesty is working: low scores are reported and the process exits non-zero. That is the expected outcome without stock API keys.
 
@@ -56,12 +61,13 @@ Optional (not required for §D quality bar):
 
 | # | Bar | Status | Unblock |
 |---|-----|--------|---------|
-| 1 | **Upload-ready YES** | **OPEN** | Fresh `generate:video` + `watch:video` exit 0 (no `--min-score` override) |
-| 2 | **Brutal raw ≥ 7** | **OPEN** | Same artifact: `watch:video --min-score 7` exit 0, no criticals |
+| 1 | **Upload-ready YES** | **BLOCKED (keys)** | Add `PEXELS_API_KEY` and/or `PIXABAY_API_KEY`, restart Vite, regenerate + watch exit 0 |
+| 2 | **Brutal raw ≥ 7** | **BLOCKED (keys)** | Same; Wave F keyless raw was **2.6** — do not lower floors |
 | 3 | **Prod deploy currency** | **OPEN** | `RAILWAY_API_TOKEN` → `npm run railway:completion-check` exit 0 |
 | 4 | **9.3 stretch** | **OPEN** (after ≥7) | `npm run loop:video -- --until-score 9.3` on cold topics |
+| 5 | **3-topic proof pack** | **BLOCKED (keys)** | Only after §D.1–2 green on three cold topics under `test-recordings/dod-proof/` |
 
-Do **not** claim §D.1–2 met from fixture/mock harvest, pre-sweep recordings, or nursing 8.2 artifacts on other branches.
+Do **not** claim §D.1–2 met from fixture/mock harvest, pre-sweep recordings, keyless Archive runs, or nursing 8.2 artifacts on other branches.
 
 ---
 

@@ -1498,8 +1498,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
 
   const liveClips = [];
   const hasStockKeysEarly = Boolean(resolvePexelsKey() || resolvePixabayKey());
-  // Without Pexels/Pixabay, airline soft-pass still needs ≥12 unique motion clips —
-  // lean harder on archive.org (keyless) instead of stopping at the tiny non-stock cap.
+  // Without Pexels/Pixabay, archive.org is the only motion source — widen its caps so the
+  // keyless airline floor (and its aviation-evidence majority) is reachable.
   const airlineKeyless = isAirlineTopic(topicBlob) && !hasStockKeysEarly;
   const queries = stockMotionQueries(topicBlob, cyberTopic, {
     faceSeek: options.faceSeek === true,
@@ -1644,8 +1644,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   // With stock API keys, require real stock motion (not harvest proxies).
   const hasStockKeys = Boolean(resolvePexelsKey() || resolvePixabayKey());
   const airlineTopic = isAirlineTopic(topicBlob);
-  // Airline soft-pass floor is max(12, segN*2). Without Pexels/Pixabay, still chase that
-  // via archive — do not stop at the generic keyless cap of 6 (ships HARVEST_VOLUME_FAIL).
+  // Keyless airline soft-passes at max(8, segN) motion clips, but keep chasing the keyed
+  // target via archive — a fuller pool cuts denser and clears the aviation-evidence majority.
   const minVideos = hasStockKeys
     ? Math.min(
       28,

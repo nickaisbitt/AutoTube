@@ -35,6 +35,44 @@ describe('quality waves 2–5 helpers', () => {
     pexelsFetched: videoCount,
     videoTopUp: Array.from({ length: 6 }, (_, i) => i + 1),
   });
+  // Keyless runs fill from Archive.org only (no Pexels/Pixabay).
+  const archiveAirlineVideo = (i: number) => ({
+    ...strongAirlineVideo(i),
+    url: `https://archive.org/download/airline-strong-${i}/clip.mp4`,
+    source: 'Archive.org live',
+  });
+  const weakAirlineVideo = (i: number) => ({
+    type: 'video',
+    segmentId: `s${(i % 6) + 1}`,
+    url: `https://archive.org/download/airport-weak-${i}/clip.mp4`,
+    alt: 'airport terminal passengers walking gate',
+    query: 'airline passenger reaction',
+    source: 'Archive.org live',
+  });
+  const archiveMotionReport = (videoCount: number) => ({
+    volumePass: false,
+    archiveLiveFetched: videoCount,
+    videoTopUp: Array.from({ length: 6 }, (_, i) => i + 1),
+  });
+  const withoutStockKeys = async (fn: () => Promise<void> | void) => {
+    const saved = saveStockKeyEnv();
+    try {
+      for (const name of stockKeyEnvNames) delete process.env[name];
+      await fn();
+    } finally {
+      restoreStockKeyEnv(saved);
+    }
+  };
+  const withStockKeys = async (fn: () => Promise<void> | void) => {
+    const saved = saveStockKeyEnv();
+    try {
+      for (const name of stockKeyEnvNames) delete process.env[name];
+      process.env.PEXELS_API_KEY = 'test-key';
+      await fn();
+    } finally {
+      restoreStockKeyEnv(saved);
+    }
+  };
 
   it('clearTopicPackaging resets hooks and mediaOffset', async () => {
     const { clearTopicPackaging } = await import('../../../scripts/lib/loop-state.mjs');
@@ -230,9 +268,121 @@ describe('quality waves 2–5 helpers', () => {
       script: airlineScript(),
       media: Array.from({ length: 4 }, (_, i) => strongAirlineVideo(i)),
     };
-    const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(4), project);
-    expect(soft.pass).toBe(false);
-    expect(soft.reason).toBe('soft-pass-motion-airline-thin(4/12 videos)');
+    await withStockKeys(() => {
+      const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(4), project);
+      expect(soft.pass).toBe(false);
+      expect(soft.reason).toBe('soft-pass-motion-airline-thin(4/12 videos)');
+    });
+    await withoutStockKeys(() => {
+      const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(4), project);
+      expect(soft.pass).toBe(false);
+      expect(soft.reason).toBe('soft-pass-motion-airline-thin(4/8 videos)');
+    });
+  });
+
+  it('keyless airline soft-passes an archive-only pool at the lowered motion floor', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: Array.from({ length: 8 }, (_, i) => archiveAirlineVideo(i)),
+    };
+    await withoutStockKeys(() => {
+      const soft = evaluateHarvestVolumeWithSoftPass(archiveMotionReport(17), project);
+      expect(soft.pass).toBe(true);
+      expect(soft.reason).toBe('soft-pass-motion-airline(8v/6segs)');
+    });
+  });
+
+  it('the same archive pool stays below the airline floor when stock keys exist', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: Array.from({ length: 8 }, (_, i) => archiveAirlineVideo(i)),
+    };
+    await withStockKeys(() => {
+      const soft = evaluateHarvestVolumeWithSoftPass(archiveMotionReport(17), project);
+      expect(soft.pass).toBe(false);
+      expect(soft.reason).toBe('soft-pass-motion-airline-thin(8/12 videos)');
+    });
+  });
+
+  it('keyless airline still fails below the lowered floor', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: Array.from({ length: 7 }, (_, i) => archiveAirlineVideo(i)),
+    };
+    await withoutStockKeys(() => {
+      const soft = evaluateHarvestVolumeWithSoftPass(archiveMotionReport(17), project);
+      expect(soft.pass).toBe(false);
+      expect(soft.reason).toBe('soft-pass-motion-airline-thin(7/8 videos)');
+    });
+  });
+
+  it('keyless airline floor demands an aviation-evidence majority, not query hits', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: [
+        ...Array.from({ length: 4 }, (_, i) => archiveAirlineVideo(i)),
+        ...Array.from({ length: 6 }, (_, i) => weakAirlineVideo(i)),
+      ],
+    };
+    await withoutStockKeys(() => {
+      const soft = evaluateHarvestVolumeWithSoftPass(archiveMotionReport(17), project);
+      expect(soft.pass).toBe(false);
+      expect(soft.reason).toBe('soft-pass-motion-airline-keyless-evidence(4/5 videos)');
+    });
+  });
+
+  it('keyless pools at the stock-key floor keep the old evidence bar', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: [
+        ...Array.from({ length: 4 }, (_, i) => archiveAirlineVideo(i)),
+        ...Array.from({ length: 8 }, (_, i) => weakAirlineVideo(i)),
+      ],
+    };
+    await withoutStockKeys(() => {
+      const soft = evaluateHarvestVolumeWithSoftPass(archiveMotionReport(17), project);
+      expect(soft.pass).toBe(true);
+      expect(soft.reason).toBe('soft-pass-motion-airline(12v/6segs)');
+    });
+  });
+
+  it('keyless airline soft-pass still fails closed on a missing volume verdict', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: airlineScript(),
+      media: Array.from({ length: 12 }, (_, i) => archiveAirlineVideo(i)),
+    };
+    await withoutStockKeys(() => {
+      expect(
+        evaluateHarvestVolumeWithSoftPass({ archiveLiveFetched: 17 }, project),
+      ).toEqual({ pass: false, reason: 'volume-unknown-fail-closed' });
+      expect(
+        evaluateHarvestVolumeWithSoftPass({ volumePass: null, archiveLiveFetched: 17 }, project),
+      ).toEqual({ pass: false, reason: 'volume-unknown-fail-closed' });
+    });
   });
 
   it('airline soft-pass-motion requires at least four strong aviation videos', async () => {

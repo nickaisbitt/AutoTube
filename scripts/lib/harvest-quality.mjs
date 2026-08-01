@@ -612,12 +612,33 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
       return { pass: false, reason: airlineSoftFail };
     }
     // Never soft-pass a slideshow pool — need enough unique motion for dense cuts.
-    const minAirlineVideos = Math.max(12, segN * 2);
+    // Without Pexels/Pixabay keys the only motion source is keyless Archive.org, which
+    // cannot reach the stock-key floor; drop to ~one clip per segment and charge the
+    // discount to the aviation-evidence majority below.
+    const stockKeyAirlineVideos = Math.max(12, segN * 2);
+    const minAirlineVideos = hasStockKeys
+      ? stockKeyAirlineVideos
+      : Math.max(AIRLINE_KEYLESS_SOFT_PASS_MIN_VIDEOS, segN);
     if (videoCount < minAirlineVideos) {
       return {
         pass: false,
         reason: `soft-pass-motion-airline-thin(${videoCount}/${minAirlineVideos} videos)`,
       };
+    }
+    if (!hasStockKeys && videoCount < stockKeyAirlineVideos) {
+      // A discounted pool is only earned by visual aviation evidence (alt/title/URL),
+      // never by the query we searched with.
+      const strongVideos = countAirlineStrongVideos(uniqueVideos);
+      const strongNeeded = Math.max(
+        AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS,
+        Math.ceil(videoCount / 2),
+      );
+      if (strongVideos < strongNeeded) {
+        return {
+          pass: false,
+          reason: `soft-pass-motion-airline-keyless-evidence(${strongVideos}/${strongNeeded} videos)`,
+        };
+      }
     }
     if (stockFetched > 0 || topUp >= segN || liveStockPresent) {
       return { pass: true, reason: `soft-pass-motion-airline(${videoCount}v/${segN}segs)` };
@@ -688,6 +709,8 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
 const SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.4;
 
 const AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
+/** Keyless airline runs fill from Archive.org only, so the motion floor is per-segment. */
+const AIRLINE_KEYLESS_SOFT_PASS_MIN_VIDEOS = 8;
 const AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
 const AIRLINE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
 
@@ -769,6 +792,15 @@ function isAirlineStrongVideo(asset = {}) {
   return false;
 }
 
+/**
+ * Unique videos carrying real aviation visual evidence (hard-junk pads already excluded).
+ *
+ * @param {object[]} [uniqueVideos]
+ */
+export function countAirlineStrongVideos(uniqueVideos = []) {
+  return uniqueVideos.filter(isAirlineStrongVideo).length;
+}
+
 export function airlineSoftPassMotionFailureReason(project, stats = {}) {
   const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
   if (!isAirlineTopic(topicBlob)) return null;
@@ -797,7 +829,7 @@ export function airlineSoftPassMotionFailureReason(project, stats = {}) {
     return `soft-pass-motion-airline-generic-junk(${genericJunkVideos}/${cleanCount} videos)`;
   }
 
-  const strongVideos = cleanVideos.filter(isAirlineStrongVideo).length;
+  const strongVideos = countAirlineStrongVideos(cleanVideos);
   if (strongVideos < AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS) {
     return `soft-pass-motion-airline-aviation-strong-floor(${strongVideos}/${AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS} videos)`;
   }

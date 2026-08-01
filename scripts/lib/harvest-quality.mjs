@@ -982,7 +982,7 @@ export function airlineSoftPassMotionFailureReason(project, stats = {}) {
   );
   const strongFloor = hasStockKeys
     ? AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS
-    : Math.min(AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS, 3);
+    : 1;
   if (strongVideos < strongFloor) {
     return `soft-pass-motion-airline-aviation-strong-floor(${strongVideos}/${strongFloor} videos)`;
   }

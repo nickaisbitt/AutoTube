@@ -65,9 +65,16 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Housing — crash they said never happen | Exit **0** · 81.9s · ~58 MB | Exit **1** · raw **4.6**/10 · upload-ready **NO** | soft-pass-aggregate after re-pad |
 | Healthcare — Why AI will change healthcare | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (4/6 assets/seg after junk filters) |
 
+**Quality wave** (hook fontfile + yellow verify, Ken-Burns, face-first fallback, portrait harvest boost, false-empty OCR recovery, reuse cap ≤2 / 30s):
+
+| Topic | Generate | Watch | Notes |
+|-------|----------|-------|-------|
+| Airline-v2 | Exit **0** · 70.9s · yellowPixels=31761 | Exit **1** · raw **4.4–5.4** · hook PASS on rewatch | still KEYS_BLOCKED; sim reuse addressed in `0bf74d7` |
+| Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs, keyless + junk/pHash) |
+
 Watcher honesty is working: raw &lt;7 → exit 1; thin keyless harvest → non-zero generate. Floors have **not** been lowered.
 
-Local proof (gitignored): `test-recordings/dod-proof/{airline,housing,healthcare}/` + `SUMMARY.txt`.
+Local proof (gitignored): `test-recordings/dod-proof/{airline,airline-v2,housing,healthcare}/` + `SUMMARY.txt`.
 
 **Not done:** upload-ready YES, brutal raw ≥7, keyed 3-topic green pack, prod deploy currency. Do not claim these from fixture/mock harvest, keyless Archive runs, or pre-sweep recordings on other branches.
 

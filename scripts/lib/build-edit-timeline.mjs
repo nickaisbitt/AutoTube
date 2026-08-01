@@ -569,7 +569,18 @@ export function buildEditTimeline(project, options = {}) {
       : assets;
 
     const duration = seg.duration || 20;
-    const interval = isIntro ? Math.min(effectiveCut, 0.65) : effectiveCut;
+    // When a body segment has ≤2 distinct still URLs and no video, force a longer
+    // hold per cut so ffmpeg Ken-Burns animation has room to breathe.  A 1.25 s
+    // ping-pong between two Archive stills reads as slideshow; at ≥4 s each still
+    // the directional zoom/pan motion is clearly visible before the next cut.
+    const segUniqueUrlSet = new Set(assets.map((a) => urlKey(a)).filter(Boolean));
+    const onlyTwoStillsInSeg = !isIntro && !isOutro && segUniqueUrlSet.size <= 2 && videos.length === 0;
+    const STILL_PAIR_HOLD_SEC = 4.0;
+    const interval = isIntro
+      ? Math.min(effectiveCut, 0.65)
+      : onlyTwoStillsInSeg
+        ? Math.max(effectiveCut, STILL_PAIR_HOLD_SEC)
+        : effectiveCut;
     const maxReuseThisSeg = isIntro || isOutro ? 1 : effectiveMaxReuse;
     const usableBodyVideos = (!isIntro && !isOutro && videos.length)
       ? uniqueAssetsByUrl(videos.filter((a) => scoreAsset(a) >= 0))
@@ -683,6 +694,18 @@ export function buildEditTimeline(project, options = {}) {
               if (introFaceTier(candidate, faceTierOptions) < minTier) continue;
               if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
             }
+          }
+          // No strict readable face found (Archive stills often lack role-word metadata).
+          // Promote human-cluster or portrait-like assets before fully relaxing: a partial
+          // face signal beats an aerial/establishing shot for the hook opener.
+          for (let j = 0; j < rankedPool.length; j++) {
+            const candidate = rankedPool[(ai + j) % rankedPool.length];
+            const cluster = visualSubjectCluster(candidate);
+            const blob = assetBlob(candidate);
+            const isPortraitLike = isHumanCluster(cluster)
+              || /\b(portrait|close.?up|person|people)\b/.test(blob);
+            if (!isPortraitLike) continue;
+            if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
           }
         }
         for (let j = 0; j < rankedPool.length; j++) {

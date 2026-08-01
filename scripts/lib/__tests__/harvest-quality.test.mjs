@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  airlineSoftPassMotionFailureReason,
+  canonicalMediaKey,
   countAirlineStrongVideos,
   ensureTopicalVideoCoverage,
   evaluateHarvestVolumeWithSoftPass,
+  filterAssetsByRelevance,
+  hasAirlineAviationEvidence,
   isWebNativeMotionSource,
   keylessArchiveHumanPortraitScore,
   scoreAssetRelevance,
@@ -240,5 +244,189 @@ describe('web-native motion is first-class live motion', () => {
     const result = evaluateHarvestVolumeWithSoftPass(mediaReport, project);
     expect(result.pass).toBe(true);
     expect(result.reason).toMatch(/^soft-pass-web-motion\(/);
+  });
+});
+
+describe('proxied download-clip web clips (Bing/Google/DuckDuckGo) count as aviation motion', () => {
+  // Raw web harvest is the primary supply — no Pexels/Pixabay keys present.
+  beforeEach(() => {
+    vi.stubEnv('PEXELS_API_KEY', '');
+    vi.stubEnv('VITE_PEXELS_KEY', '');
+    vi.stubEnv('PIXABAY_API_KEY', '');
+    vi.stubEnv('VITE_PIXABAY_KEY', '');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const DEV = 'http://localhost:5173';
+  // Shape matches generate-full-video's fetchWebVideoResults + sanitize output:
+  // proxied `/api/download-clip?url=<encoded target>&duration=10`, real page title
+  // echoed into alt+title, plus the harvest query and the web-video source label.
+  const webClip = ({ segmentId = 'intro', title, query, target, source = 'Bing web video' }) => ({
+    type: 'video',
+    segmentId,
+    url: `${DEV}/api/download-clip?url=${encodeURIComponent(target)}&duration=10`,
+    alt: title,
+    title,
+    query,
+    source,
+    sourceUrl: target,
+  });
+
+  it('classifies /api/download-clip Bing/Google/DDG clips as web-native motion', () => {
+    for (const source of ['Bing web video', 'Google web video', 'DuckDuckGo web video']) {
+      const clip = webClip({
+        title: 'Inside the A380 cabin',
+        query: 'cabin pressure aircraft',
+        target: 'https://youtube.com/watch?v=a1',
+        source,
+      });
+      expect(isWebNativeMotionSource(clip)).toBe(true);
+    }
+  });
+
+  it('counts download-clip web clips as aviation-strong via everyday aviation vocab in title', () => {
+    // Titles use plane/jet/airline/flight/Boeing/Airbus/turbulence/pressurization —
+    // the words real web titles use, which the narrow strong-video regexes missed.
+    const titles = [
+      'Boeing 737 flight to London',
+      'Airbus A320 emergency landing caught on camera',
+      'Passengers panic as jet loses pressurization',
+      'Severe turbulence on a regional airline',
+      'How planes stay pressurized at altitude',
+      'Inside the aircraft cabin',
+    ];
+    const clips = titles.map((title, i) => webClip({
+      segmentId: `seg${i}`,
+      title,
+      query: 'regional airline incident',
+      target: `https://youtube.com/watch?v=v${i}`,
+      source: i % 2 ? 'Google web video' : 'Bing web video',
+    }));
+    expect(countAirlineStrongVideos(clips, AIRLINE_TOPIC)).toBe(clips.length);
+  });
+
+  it('counts a download-clip web clip whose aviation proof lives only in the query', () => {
+    const queryOnly = webClip({
+      title: 'clip 12345',
+      query: 'airplane cockpit flight deck instruments',
+      target: 'https://youtube.com/watch?v=q1',
+      source: 'Google web video',
+    });
+    expect(countAirlineStrongVideos([queryOnly], AIRLINE_TOPIC)).toBe(1);
+    expect(hasAirlineAviationEvidence(queryOnly)).toBe(true);
+  });
+
+  it('still refuses non-aviation and hard-junk download-clip web clips', () => {
+    const catClip = webClip({
+      title: 'Funny cat compilation',
+      query: 'funny cats',
+      target: 'https://youtube.com/watch?v=cat',
+    });
+    const militaryClip = webClip({
+      title: 'F/A-18 fighter jet aircraft carrier landing',
+      query: 'fighter jet carrier',
+      target: 'https://youtube.com/watch?v=f18',
+      source: 'Google web video',
+    });
+    expect(countAirlineStrongVideos([catClip, militaryClip], AIRLINE_TOPIC)).toBe(0);
+  });
+
+  it('never lets a stock clip certify aviation from the query (contrast to web-native)', () => {
+    const stockQueryOnly = {
+      type: 'video',
+      segmentId: 'intro',
+      url: 'https://videos.pexels.com/video-files/1/clip.mp4',
+      source: 'Pexels Videos',
+      alt: '',
+      title: '',
+      query: 'airplane cockpit flight deck instruments',
+    };
+    expect(countAirlineStrongVideos([stockQueryOnly], AIRLINE_TOPIC)).toBe(0);
+    expect(hasAirlineAviationEvidence(stockQueryOnly)).toBe(false);
+  });
+
+  it('keeps download-clip aviation web clips through the relevance filter', () => {
+    const titles = [
+      'Boeing 737 flight to London',
+      'Airbus A320 emergency landing',
+      'jet loses pressurization mid-air',
+      'regional airline turbulence',
+    ];
+    const segments = titles.map((_, i) => ({
+      id: `seg${i}`,
+      title: `Segment ${i}`,
+      narration: 'Passengers noticed a problem after takeoff.',
+    }));
+    const media = titles.map((title, i) => webClip({
+      segmentId: `seg${i}`,
+      title,
+      query: 'regional airline cabin pressure',
+      target: `https://youtube.com/watch?v=r${i}`,
+    }));
+    const project = { topic: AIRLINE_TOPIC, title: 'Hidden Failures', script: segments, media };
+    const { media: kept, dropped } = filterAssetsByRelevance(media, project);
+    expect(kept.length).toBe(media.length);
+    expect(dropped).toEqual([]);
+  });
+
+  it('canonicalMediaKey keeps distinct proxied targets distinct (no /api/download-clip collapse)', () => {
+    const a = `${DEV}/api/download-clip?url=${encodeURIComponent('https://youtube.com/watch?v=aaa')}&duration=10`;
+    const b = `${DEV}/api/download-clip?url=${encodeURIComponent('https://youtube.com/watch?v=bbb')}&duration=10`;
+    expect(canonicalMediaKey(a)).not.toBe(canonicalMediaKey(b));
+    // The naive query-stripping key would have collapsed both to `/api/download-clip`.
+    expect(canonicalMediaKey(a)).not.toBe(`${DEV}/api/download-clip`);
+    // Non-proxied URLs still key by their query-stripped path.
+    expect(canonicalMediaKey('https://archive.org/download/x/x.mp4?a=1')).toBe(
+      'https://archive.org/download/x/x.mp4',
+    );
+  });
+
+  it('soft-passes an airline pool of ≥6 distinct download-clip web videos (no strong-floor/thin fail)', () => {
+    const segments = Array.from({ length: 6 }, (_, i) => ({
+      id: `seg${i}`,
+      title: `Segment ${i}`,
+      narration: 'Passengers noticed a problem after takeoff.',
+    }));
+    const SOURCES = ['Bing web video', 'Google web video', 'DuckDuckGo web video'];
+    const TITLES = [
+      'Boeing 737 flight',
+      'Airbus A320 emergency landing',
+      'jet loses pressurization',
+      'regional airline turbulence',
+      'planes pressurized at altitude',
+      'inside the aircraft cabin',
+    ];
+    const media = [];
+    let idx = 0;
+    for (const seg of segments) {
+      for (let k = 0; k < 2; k += 1) {
+        media.push(webClip({
+          segmentId: seg.id,
+          title: TITLES[idx % TITLES.length],
+          query: 'regional airline cabin pressure incident',
+          target: `https://youtube.com/watch?v=v${idx}`,
+          source: SOURCES[idx % SOURCES.length],
+        }));
+        idx += 1;
+      }
+    }
+    const project = { topic: AIRLINE_TOPIC, title: 'Hidden Failures', script: segments, media };
+    // The dedicated airline gate no longer trips the aviation-strong floor.
+    expect(airlineSoftPassMotionFailureReason(project, {})).toBeNull();
+
+    const mediaReport = {
+      volumePass: false,
+      cyberStockInjected: 0,
+      pexelsFetched: 0,
+      pixabayFetched: 0,
+      archiveLiveFetched: 0,
+      videoTopUp: [],
+    };
+    const result = evaluateHarvestVolumeWithSoftPass(mediaReport, project);
+    expect(result.pass).toBe(true);
+    expect(result.reason).toMatch(/^soft-pass-motion-airline\(/);
+    expect(result.reason).not.toMatch(/aviation-strong-floor|thin/);
   });
 });

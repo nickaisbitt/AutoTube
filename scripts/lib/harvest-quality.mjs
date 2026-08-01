@@ -554,8 +554,37 @@ const PROVIDER_ALT_ONLY_RE =
 
 const CRIME_HEIST_EVIDENCE_RE =
   /airport|runway|terminal|vault|safe|security|diamond|jewel|cargo|guard|heist|plane|aviation|warehouse|investigation|documentary|news/i;
+/**
+ * Everyday aviation vocabulary. Real Bing/Google/DuckDuckGo/YouTube titles and
+ * harvest queries rarely say the narrow "airplane cabin" phrasings the strict
+ * strong-video regexes look for; they say plane/jet/airliner/airline/flight,
+ * name the manufacturer (Boeing/Airbus/Embraer), or describe the event
+ * (turbulence, pressurization, decompression, emergency landing). Keeping this
+ * list broad is what lets web-native aviation clips clear the airline relevance
+ * fallback and count as aviation-strong. It is only ever consulted on airline
+ * topics (callers gate on isAirlineTopic), so the extra breadth is safe.
+ */
 const AIRLINE_AVIATION_EVIDENCE_RE =
-  /\b(airplane|aircraft|aviation|cabin|cockpit|oxygen\s*mask|hangar|runway|tarmac|boarding|flight\s*attendant|pilot\s*cockpit)\b/i;
+  /\b(airplanes?|aeroplanes?|aircrafts?|airliners?|jetliners?|airlines?|aviation|jets?|planes?|cabin|cockpits?|flight\s*decks?|oxygen\s*masks?|hangars?|runways?|tarmac|taxiways?|boarding|jet\s*bridges?|jetways?|flight\s*attendants?|air\s*hostess(?:es)?|cabin\s*crew|fuselages?|airports?|boeing|airbus|embraer|bombardier|turbulence|pressuriz\w*|depressuriz\w*|decompress\w*|cabin\s*altitude|take-?offs?|in-?flight|mid-?air|emergency\s*landings?|flights?|flying)\b/i;
+
+/**
+ * Does an asset carry aviation evidence? Stock clips must prove it from the media
+ * itself (alt/title/URL, never the search query). Web-native clips (raw web
+ * harvest via Bing/Google/DuckDuckGo/`/api/download-clip`, Vimeo, Dailymotion,
+ * Giphy, Archive.org) may additionally prove it from their real page title and
+ * the deliberate harvest query — the same evidence contract used for archive
+ * items — because the operator opted into web harvest being the primary supply.
+ *
+ * @param {object} asset
+ * @returns {boolean}
+ */
+export function hasAirlineAviationEvidence(asset = {}) {
+  if (AIRLINE_AVIATION_EVIDENCE_RE.test(visualEvidenceBlob(asset))) return true;
+  if (isWebNativeMotionSource(asset) && AIRLINE_AVIATION_EVIDENCE_RE.test(webNativeEvidenceBlob(asset))) {
+    return true;
+  }
+  return false;
+}
 
 /** The search string an asset was fetched with (synthetic pool queries dropped). */
 export function assetSearchQueryText(asset) {
@@ -681,9 +710,12 @@ export function filterAssetsByRelevance(media, project, options = {}) {
     const score = scoreAssetRelevance(asset, seg, topic, topicKeywords);
     if (score >= minScore) {
       kept.push({ ...asset, relevanceScore: Math.round(score * 100) / 100 });
-    } else if (isAirlineTopic(topic) && AIRLINE_AVIATION_EVIDENCE_RE.test(visualEvidenceBlob(asset))) {
-      // Keyword essay matching misses short aviation stock alts, but the aviation
-      // token has to come from the media itself — never from the search query.
+    } else if (isAirlineTopic(topic) && hasAirlineAviationEvidence(asset)) {
+      // Keyword essay matching misses short aviation stock alts. Stock clips must
+      // prove aviation from the media itself (alt/title), but web-native clips (raw
+      // web harvest) may also prove it from their real page title and the deliberate
+      // harvest query — parallel to Archive.org's evidence verdict — so a Bing/Google
+      // "/api/download-clip" aviation clip is not discarded as off-topic.
       kept.push({ ...asset, relevanceScore: 0.35 });
     } else {
       dropped.push({
@@ -726,9 +758,9 @@ export function mergeVolumePadding(media, padding, project = null) {
   }
   const out = [...media];
   for (const asset of pad) {
-    const key = (asset.url || '').split('?')[0];
+    const key = canonicalMediaKey(asset.url || '');
     if (!key) continue;
-    if (out.some((m) => m.segmentId === asset.segmentId && (m.url || '').split('?')[0] === key)) continue;
+    if (out.some((m) => m.segmentId === asset.segmentId && canonicalMediaKey(m.url || '') === key)) continue;
     out.push(asset);
   }
   return out;
@@ -739,9 +771,37 @@ function isVideoAsset(asset) {
   return asset?.type === 'video' || /\.(?:mp4|webm|mov)(?:[?#]|$)/i.test(asset?.url || '');
 }
 
+/**
+ * Canonical dedup key for a media URL.
+ *
+ * Web-native motion is proxied through `/api/download-clip?url=<encoded target>&…`,
+ * so a naive `split('?')[0]` collapses EVERY proxied web clip to the single key
+ * `/api/download-clip`. That silently deduped a whole 16-clip web pool down to one
+ * "unique video", which is why a web-rich airline harvest reported `0/1` videos and
+ * failed the aviation-strong / thin floors. Key proxied clips by their decoded
+ * target URL so distinct web clips stay distinct; everything else keeps the
+ * query-stripped URL key.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function canonicalMediaKey(url = '') {
+  const raw = String(url || '');
+  if (!raw) return '';
+  if (raw.includes('/api/download-clip')) {
+    try {
+      const target = new URL(raw, 'http://autotube.local').searchParams.get('url');
+      if (target) return `download-clip:${target.split('#')[0]}`;
+    } catch {
+      // Fall through to the generic key below.
+    }
+  }
+  return raw.split('?')[0];
+}
+
 /** @param {object} asset */
 function mediaAssetKey(asset) {
-  return String(asset?.url || '').split('?')[0];
+  return canonicalMediaKey(asset?.url || '');
 }
 
 /** Archive.org motion from the keyless harvest path (no stock API keys). */
@@ -944,7 +1004,7 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
   for (const seg of segments) {
     const assets = (project.media || []).filter((m) => m.segmentId === seg.id);
     const uniqueUrls = new Set(
-      assets.map((a) => (a.url || '').split('?')[0]).filter(Boolean),
+      assets.map((a) => canonicalMediaKey(a.url || '')).filter(Boolean),
     );
     perSegment[seg.id] = {
       title: seg.title,
@@ -1030,7 +1090,9 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const seenVideoKeys = new Set();
   for (const asset of media) {
     if (!(asset.type === 'video' || /\.mp4/i.test(asset.url || ''))) continue;
-    const key = String(asset.url || asset.id || `${asset.segmentId || ''}:${asset.alt || ''}:${asset.query || ''}`).split('?')[0];
+    const key = asset.url
+      ? canonicalMediaKey(asset.url)
+      : String(asset.id || `${asset.segmentId || ''}:${asset.alt || ''}:${asset.query || ''}`);
     if (!key || seenVideoKeys.has(key)) continue;
     seenVideoKeys.add(key);
     uniqueVideos.push(asset);
@@ -1278,7 +1340,9 @@ function uniqueVideoAssets(media = []) {
   const seenVideoKeys = new Set();
   for (const asset of media) {
     if (!(asset.type === 'video' || /\.mp4/i.test(asset.url || ''))) continue;
-    const key = String(asset.url || asset.id || `${asset.segmentId || ''}:${asset.alt || ''}:${asset.query || ''}`).split('?')[0];
+    const key = asset.url
+      ? canonicalMediaKey(asset.url)
+      : String(asset.id || `${asset.segmentId || ''}:${asset.alt || ''}:${asset.query || ''}`);
     if (!key || seenVideoKeys.has(key)) continue;
     seenVideoKeys.add(key);
     uniqueVideos.push(asset);
@@ -1331,6 +1395,12 @@ function isAirlineStrongVideo(asset = {}, topicBlob = '') {
   ) {
     return true;
   }
+  // Everyday aviation vocabulary (plane/jet/airliner/airline/flight, Boeing/Airbus,
+  // turbulence/pressurization/decompression/emergency landing) is what real web
+  // harvest titles and queries actually use. Junk (military/medical/mail/etc.) was
+  // already rejected above, so a surviving blob with this evidence is genuine
+  // aviation motion — the fix that lets Bing/Google "download-clip" web clips count.
+  if (AIRLINE_AVIATION_EVIDENCE_RE.test(blob)) return true;
   return false;
 }
 

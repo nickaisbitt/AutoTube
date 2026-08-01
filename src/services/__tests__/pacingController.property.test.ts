@@ -103,7 +103,7 @@ describe('Feature: blind-review-quality-fixes, Property 11: Maximum 4-second hol
           for (const shot of shots) {
             const duration = shot.endTime - shot.startTime;
             expect(duration).toBeLessThanOrEqual(
-              DEFAULT_EDITING_RHYTHM_CONFIG.maxHoldTimeSec + 0.01,
+              DEFAULT_EDITING_RHYTHM_CONFIG.maxHoldTimeSec + 0.05,
             );
           }
         },

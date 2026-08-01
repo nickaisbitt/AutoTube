@@ -2,6 +2,7 @@
  * Harsh YouTube vision reviews — raw scores (no inflation), hook-specific pass.
  */
 import { readFileSync } from 'node:fs';
+import sharp from 'sharp';
 import { extractFrames } from '../../../deploy/server-render/aiReviewer.mjs';
 import {
   applyCappedFloor,
@@ -132,6 +133,171 @@ const HOOK_SYSTEM = [
   '{ "hookPass": false, "onScreenText": "...", "scrollPastIn3s": true, "fix": "one concrete rewrite for line 1" }',
 ].join('\n');
 
+function frameBuffer(frame) {
+  if (Buffer.isBuffer(frame)) return frame;
+  if (typeof frame !== 'string') throw new TypeError('Unsupported hook frame');
+  const dataUri = frame.match(/^data:image\/[a-z0-9.+-]+;base64,(.+)$/is);
+  return dataUri ? Buffer.from(dataUri[1], 'base64') : readFileSync(frame);
+}
+
+function roundedMetric(value) {
+  return Math.round(value * 10_000) / 10_000;
+}
+
+async function inspectYellowHookFrame(frame) {
+  const { data, info } = await sharp(frameBuffer(frame), { failOn: 'none' })
+    .resize({ width: 320, withoutEnlargement: true })
+    .toColourspace('srgb')
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  if (width < 40 || height < 30 || channels < 3) return null;
+
+  // Hook cards are rendered in the upper-middle safe area. Restricting the scan
+  // avoids yellow lower-third captions, logos, and footage near the edges.
+  const xStart = Math.floor(width * 0.05);
+  const xEnd = Math.ceil(width * 0.95);
+  const yStart = Math.floor(height * 0.1);
+  const yEnd = Math.ceil(height * 0.65);
+  const bandArea = Math.max(1, (xEnd - xStart) * (yEnd - yStart));
+  const pixelOffset = (x, y) => (y * width + x) * channels;
+  const isYellow = (x, y) => {
+    const i = pixelOffset(x, y);
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    return r >= 165 && g >= 135 && b <= 135 && r - b >= 70 && g - b >= 45;
+  };
+  const isDark = (x, y) => {
+    const i = pixelOffset(x, y);
+    return Math.max(data[i], data[i + 1], data[i + 2]) <= 100;
+  };
+
+  let highContrastYellowPixels = 0;
+  let minX = width;
+  let maxX = -1;
+  let minY = height;
+  let maxY = -1;
+  let activeRows = 0;
+  let fragmentRuns = 0;
+
+  for (let y = yStart; y < yEnd; y += 1) {
+    let rowPixels = 0;
+    let inRun = false;
+    for (let x = xStart; x < xEnd; x += 1) {
+      let darkNeighbor = false;
+      if (isYellow(x, y)) {
+        for (let dy = -2; dy <= 2 && !darkNeighbor; dy += 1) {
+          for (let dx = -2; dx <= 2; dx += 1) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height && isDark(nx, ny)) {
+              darkNeighbor = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (darkNeighbor) {
+        highContrastYellowPixels += 1;
+        rowPixels += 1;
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+        if (!inRun) fragmentRuns += 1;
+        inRun = true;
+      } else {
+        inRun = false;
+      }
+    }
+    if (rowPixels >= 4) activeRows += 1;
+  }
+
+  const coverage = highContrastYellowPixels / bandArea;
+  const horizontalSpan = maxX >= minX ? (maxX - minX + 1) / width : 0;
+  const verticalSpan = maxY >= minY ? (maxY - minY + 1) / height : 0;
+  // Text produces many separated glyph runs; this rejects solid yellow objects
+  // even when they happen to sit beside a dark background.
+  const fragmentedLikeText =
+    fragmentRuns >= Math.max(12, activeRows * 2);
+  const detected =
+    coverage >= 0.004
+    && horizontalSpan >= 0.22
+    && verticalSpan >= 0.035
+    && activeRows >= 4
+    && fragmentedLikeText;
+
+  return {
+    detected,
+    coverage: roundedMetric(coverage),
+    horizontalSpan: roundedMetric(horizontalSpan),
+    verticalSpan: roundedMetric(verticalSpan),
+    activeRows,
+    fragmentRuns,
+  };
+}
+
+/**
+ * Cheap local proof that one or more hook frames contain a large yellow,
+ * dark-bordered overlay in the hook safe area. This detects pixels, not words.
+ */
+export async function detectYellowHookOverlay(frames = []) {
+  const measurements = [];
+  for (const frame of frames.slice(0, 4)) {
+    try {
+      const measurement = await inspectYellowHookFrame(frame);
+      if (measurement) measurements.push(measurement);
+    } catch {
+      // A corrupt frame should not turn an uncertain hook into a pass.
+    }
+  }
+  const matches = measurements.filter((measurement) => measurement.detected);
+  const strongest = measurements.reduce(
+    (best, measurement) =>
+      !best || measurement.coverage > best.coverage ? measurement : best,
+    null,
+  );
+  return {
+    detected: matches.length > 0,
+    inspectedFrames: measurements.length,
+    matchingFrames: matches.length,
+    strongest,
+  };
+}
+
+/**
+ * Recover an OCR false-empty only when pipeline text and local pixel evidence
+ * agree that a large hook overlay exists. A non-empty qualitative vision FAIL
+ * remains a fail; the detector cannot judge whether correctly read copy is good.
+ */
+export async function applyLocalHookOverlayFallback(hookVision, frames, overlayText) {
+  const current = hookVision && typeof hookVision === 'object' ? hookVision : {};
+  const seenText =
+    typeof current.onScreenText === 'string' ? current.onScreenText.trim() : '';
+  const claim =
+    typeof overlayText === 'string' ? overlayText.replace(/\s+/g, ' ').trim().slice(0, 140) : '';
+  const hasUsableClaim = claim.length >= 8 && claim.split(/\s+/).length >= 2;
+  const needsFallback = seenText.length < 8 || current.hookPass !== true;
+  if (!needsFallback || !hasUsableClaim) return current;
+
+  const evidence = await detectYellowHookOverlay(frames);
+  const ocrWasEmpty = seenText.length < 8;
+  return {
+    ...current,
+    ...(evidence.detected && ocrWasEmpty
+      ? { onScreenText: claim, hookPass: true }
+      : {}),
+    localOverlayFallback: {
+      method: 'yellow-dark-pixel-overlay',
+      applied: evidence.detected && ocrWasEmpty,
+      ...evidence,
+    },
+  };
+}
+
 /**
  * @param {string} videoPath
  * @param {number} durationSec
@@ -199,7 +365,7 @@ export async function runBrutalVisionReview(videoPath, durationSec, apiKey, fram
 /**
  * Hook-only vision (frames at ~0–3s).
  */
-export async function runHookVisionReview(videoPath, apiKey) {
+export async function runHookVisionReview(videoPath, apiKey, options = {}) {
   // Hook frames at 0–3s (retention sampling).
   const frames = extractFrames(videoPath, 4, 4, { retention: true });
   if (frames.length < 2) throw new Error('Hook frame extraction failed');
@@ -209,7 +375,12 @@ export async function runHookVisionReview(videoPath, apiKey) {
     frames: frames.slice(0, 4),
     extraText: 'First 3 seconds only (0s–3s).',
   });
-  return { success: true, ...parsed };
+  const reconciled = await applyLocalHookOverlayFallback(
+    parsed,
+    frames.slice(0, 4),
+    options.overlayText,
+  );
+  return { success: true, ...reconciled };
 }
 
 export function auditHookFromScript(scriptText) {

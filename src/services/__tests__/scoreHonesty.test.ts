@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import sharp from 'sharp';
 
 describe('score-honesty', () => {
   it('caps floors at raw+1 and never mints 8 with critical issues', async () => {
@@ -129,6 +130,72 @@ describe('score-honesty', () => {
     const noClaim = reconcileHookVision({ hookPass: false, onScreenText: '' }, {});
     expect(noClaim.pipelineClaimsOverlay).toBeNull();
     expect(reconcileHookVision(null, project)).toBeNull();
+  });
+
+  it('recovers false-empty hook OCR only with yellow/dark pixel proof', async () => {
+    const { applyLocalHookOverlayFallback, detectYellowHookOverlay } = await import(
+      '../../../powers/video-watcher/src/vision-brutal.mjs'
+    );
+    const claim = 'WHY DID THE CABIN KEEP FAILING?';
+    const overlaySvg = Buffer.from(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
+        <rect width="640" height="360" fill="#dce8ef"/>
+        <g text-anchor="middle" font-family="sans-serif" font-size="54"
+           font-weight="800" fill="#ffe600" stroke="#050505" stroke-width="10"
+           paint-order="stroke">
+          <text x="320" y="135">WHY DID THE CABIN</text>
+          <text x="320" y="205">KEEP FAILING?</text>
+        </g>
+      </svg>
+    `);
+    const overlayJpeg = await sharp(overlaySvg).jpeg({ quality: 92 }).toBuffer();
+    const overlayFrame = `data:image/jpeg;base64,${overlayJpeg.toString('base64')}`;
+
+    const evidence = await detectYellowHookOverlay([overlayFrame, overlayFrame]);
+    expect(evidence.detected).toBe(true);
+    expect(evidence.matchingFrames).toBe(2);
+
+    const recovered = await applyLocalHookOverlayFallback(
+      { hookPass: false, onScreenText: '', scrollPastIn3s: false },
+      [overlayFrame],
+      claim,
+    );
+    expect(recovered.hookPass).toBe(true);
+    expect(recovered.onScreenText).toBe(claim);
+    expect(recovered.localOverlayFallback).toMatchObject({
+      method: 'yellow-dark-pixel-overlay',
+      detected: true,
+      applied: true,
+    });
+
+    // Pixel evidence cannot overturn a qualitative fail when model OCR worked.
+    const qualitativeFail = await applyLocalHookOverlayFallback(
+      { hookPass: false, onScreenText: claim },
+      [overlayFrame],
+      claim,
+    );
+    expect(qualitativeFail.hookPass).toBe(false);
+    expect(qualitativeFail.localOverlayFallback).toMatchObject({
+      detected: true,
+      applied: false,
+    });
+
+    const flatJpeg = await sharp({
+      create: {
+        width: 640,
+        height: 360,
+        channels: 3,
+        background: { r: 255, g: 225, b: 0 },
+      },
+    }).jpeg().toBuffer();
+    const rejected = await applyLocalHookOverlayFallback(
+      { hookPass: false, onScreenText: '' },
+      [`data:image/jpeg;base64,${flatJpeg.toString('base64')}`],
+      claim,
+    );
+    expect(rejected.hookPass).toBe(false);
+    expect(rejected.onScreenText).toBe('');
+    expect(rejected.localOverlayFallback.detected).toBe(false);
   });
 
   it('computeUploadReady ANDs brutal-raw, objective, scene, and hook gates', async () => {

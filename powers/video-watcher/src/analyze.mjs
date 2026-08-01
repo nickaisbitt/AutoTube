@@ -176,9 +176,8 @@ function loadOptionalScript(explicitPath) {
 }
 
 /**
- * Record what the pipeline CLAIMS is burned in — but never let that claim
- * override vision. A vision miss fails closed: hookPass/onScreenText stay
- * exactly as the model judged them.
+ * Record what the pipeline claims is burned in. The claim alone never overrides
+ * vision; runHookVisionReview may separately confirm it with local pixel proof.
  */
 export function reconcileHookVision(hookVision, project, overlayHint) {
   if (!hookVision) return hookVision;
@@ -379,8 +378,11 @@ function buildNumberedReport(ctx) {
     );
     n += 1;
     if (hookVision.pipelineClaimsOverlay) {
+      const localConfirmation = hookVision.localOverlayFallback?.detected
+        ? 'confirmed by local yellow/dark overlay pixels'
+        : 'recorded for context only; unconfirmed claim does not override vision';
       lines.push(
-        `${n}. **Pipeline overlay claim:** pipeline says it burned in "${hookVision.pipelineClaimsOverlay}" — recorded for context only; vision verdict above is authoritative (fail closed)`,
+        `${n}. **Pipeline overlay claim:** pipeline says it burned in "${hookVision.pipelineClaimsOverlay}" — ${localConfirmation}`,
       );
       n += 1;
     }
@@ -513,6 +515,12 @@ export async function watchVideo(options = {}) {
   const apiKey = options.api_key || process.env.OPENROUTER_API_KEY || '';
   const skipVision = options.skip_vision === true;
   const projectForHook = loadOptionalProject(options.project_path);
+  const resolvedHookOverlay =
+    options.hook_overlay
+    || projectForHook?.exportSettings?.hookOverlay
+    || projectForHook?.hookLine
+    || projectForHook?.exportSettings?.hookLine
+    || hookScript.firstSentence;
 
   let brutal = null;
   let hookVision = null;
@@ -521,18 +529,20 @@ export async function watchVideo(options = {}) {
   if (!skipVision && apiKey) {
     const dur = framesMeta.durationSec;
     try {
-      hookVision = await runHookVisionReview(videoPath, apiKey);
+      hookVision = await runHookVisionReview(videoPath, apiKey, {
+        overlayText: resolvedHookOverlay,
+      });
       hookVision = reconcileHookVision(
         hookVision,
         projectForHook,
-        options.hook_overlay || projectForHook?.exportSettings?.hookOverlay,
+        resolvedHookOverlay,
       );
     } catch (e) {
       hookVision = { hookPass: false, error: e.message };
       hookVision = reconcileHookVision(
         hookVision,
         projectForHook,
-        options.hook_overlay || projectForHook?.exportSettings?.hookOverlay,
+        resolvedHookOverlay,
       );
     }
     const runBrutalOnce = async () =>

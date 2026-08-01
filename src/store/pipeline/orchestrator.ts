@@ -16,7 +16,7 @@ import type {
   AppConfig,
 } from '../../types';
 import { apiFetch } from '../../utils/apiClient';
-import { hasSpeechSupport, loadSpeechVoices, pickPreferredVoice, stopSpeaking } from '../../utils/speech';
+import { isSpeechSynthesisUsable, loadSpeechVoices, pickPreferredVoice, stopSpeaking } from '../../utils/speech';
 import {
   sourceSegmentMedia,
   replaceMediaAsset as replaceSegmentMedia,
@@ -54,7 +54,15 @@ import { runAIEditPass } from '../../services/aiEditor';
 import { resolveProjectHookLine, syncIntroNarrationToHook } from '../../services/seoTitles';
 import { prepareThumbnailConcepts } from '../../services/thumbnail';
 import { runBlindReview } from '../../services/blindReview';
-import { generateGrokTts, generateMeloTts, generateGrokTtsViaProxy, generateMeloTtsViaProxy, fetchServerTtsCapabilities } from '../../services/tts';
+import {
+  generateGrokTts,
+  generateMeloTts,
+  generateGrokTtsViaProxy,
+  generateMeloTtsViaProxy,
+  fetchServerTtsCapabilities,
+  isPlausibleCloudflareAccountId,
+  isPlausibleCloudflareApiToken,
+} from '../../services/tts';
 import { CURRENT_PROJECT_VERSION } from '../../services/projectMigrations';
 
 // LR-1 fix: use crypto.randomUUID() for guaranteed uniqueness
@@ -574,11 +582,27 @@ export async function executeGenerateNarration(
   const hasGrokServer = serverCaps?.grok ?? false;
   const hasMeloServer = serverCaps?.melo ?? false;
   const hasGrok = hasGrokServer || !!xaiKey;
-  const hasMelo = hasMeloServer || (!!cfAccountId && !!cfApiToken);
 
-  const supported = hasSpeechSupport();
-  const voices = supported ? await loadSpeechVoices() : [];
+  // Melo BYOK is only usable when the account id / token actually look like
+  // Cloudflare credentials. A truncated or malformed paste (e.g. a 31-char
+  // account id) would otherwise trigger a doomed Cloudflare call per segment,
+  // stalling headless narration instead of failing fast to browser/unavailable.
+  const hasMeloByok = isPlausibleCloudflareAccountId(cfAccountId) && isPlausibleCloudflareApiToken(cfApiToken);
+  if ((cfAccountId || cfApiToken) && !hasMeloByok) {
+    logger.warn(
+      'Store',
+      'Ignoring VITE_CF_* Melo BYOK credentials — account id/token are not a valid Cloudflare shape; skipping Melo (fail fast to browser/unavailable clips)',
+    );
+  }
+  const hasMelo = hasMeloServer || hasMeloByok;
+
+  // Browser SpeechSynthesis is useless in automated/headless browsers (the API
+  // exists but ships no voices), so probe usability first and skip the voice
+  // load entirely there — this keeps loop-fast narration completing in seconds.
+  const browserSpeechUsable = isSpeechSynthesisUsable();
+  const voices = browserSpeechUsable ? await loadSpeechVoices() : [];
   const selectedVoice = pickPreferredVoice(voices);
+  const browserTtsAvailable = browserSpeechUsable && !!selectedVoice;
 
   const engines: string[] = [];
   if (hasGrok) engines.push('Grok TTS');
@@ -653,9 +677,11 @@ export async function executeGenerateNarration(
       }
     }
 
-    // Tier 3: Browser TTS (free fallback)
+    // Tier 3: Browser TTS (free fallback). In headless/automated browsers this
+    // is unavailable, so mark the clip unavailable immediately rather than
+    // handing the renderer a live-speech marker that would never produce audio.
     if (!audioUrl) {
-      if (!supported || !selectedVoice) {
+      if (!browserTtsAvailable) {
         status = 'unavailable';
       }
       engineUsed = 'browser';
@@ -689,7 +715,7 @@ export async function executeGenerateNarration(
             clipMode: 'live_browser',
             engineUsed: 'browser',
             estimatedDuration: Math.max(6, Math.ceil((seg.narration.split(/\s+/).length / 150) * 60)),
-            status: !supported || !selectedVoice ? 'unavailable' : 'ready',
+            status: browserTtsAvailable ? 'ready' : 'unavailable',
           })),
         ),
       );
@@ -717,7 +743,7 @@ export async function executeGenerateNarration(
         clipMode: 'live_browser',
         engineUsed: 'browser',
         estimatedDuration,
-        status: !supported || !selectedVoice ? 'unavailable' : 'ready',
+        status: browserTtsAvailable ? 'ready' : 'unavailable',
       });
 
       const delayMs = Math.max(50, Math.min(200, wordCount * 0.5));

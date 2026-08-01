@@ -974,8 +974,17 @@ export function airlineSoftPassMotionFailureReason(project, stats = {}) {
   }
 
   const strongVideos = countAirlineStrongVideos(cleanVideos, topicBlob);
-  if (strongVideos < AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS) {
-    return `soft-pass-motion-airline-aviation-strong-floor(${strongVideos}/${AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS} videos)`;
+  const hasStockKeys = Boolean(
+    process.env.PEXELS_API_KEY
+      || process.env.VITE_PEXELS_KEY
+      || process.env.PIXABAY_API_KEY
+      || process.env.VITE_PIXABAY_KEY,
+  );
+  const strongFloor = hasStockKeys
+    ? AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS
+    : Math.min(AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS, 3);
+  if (strongVideos < strongFloor) {
+    return `soft-pass-motion-airline-aviation-strong-floor(${strongVideos}/${strongFloor} videos)`;
   }
 
   return null;

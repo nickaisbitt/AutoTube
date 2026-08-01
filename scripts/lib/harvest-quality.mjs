@@ -744,6 +744,52 @@ function mediaAssetKey(asset) {
   return String(asset?.url || '').split('?')[0];
 }
 
+/** Archive.org motion from the keyless harvest path (no stock API keys). */
+const KEYLESS_ARCHIVE_SOURCE_RE = /archive\.org/i;
+
+/**
+ * Human portrait / reaction / close-up signals in archive metadata. Query text
+ * is included because keyless archive items often ship without titles or alts.
+ */
+export const KEYLESS_ARCHIVE_HUMAN_VISUAL_RE =
+  /\b(?:portrait|close[\s-]?up|closeup|reaction|worried|shocked|expression|faces?|eyes|crying|smiling|emotional)\b/i;
+
+/** @param {object} asset */
+function isKeylessArchiveAsset(asset) {
+  const blob = `${asset?.source || ''} ${asset?.url || ''} ${asset?.sourceUrl || ''}`;
+  return KEYLESS_ARCHIVE_SOURCE_RE.test(blob);
+}
+
+/**
+ * @param {object} asset
+ * @returns {string}
+ */
+export function keylessArchiveHumanVisualBlob(asset) {
+  return `${asset?.alt || ''} ${asset?.query || ''} ${visualEvidenceBlob(asset)}`
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Floor score for keyless archive portrait/reaction clips that keyword scoring
+ * misses but face-first edit timelines still need as topical video candidates.
+ * Aviation B-roll keeps its higher airline evidence floor (0.35–0.4).
+ *
+ * @param {object} asset
+ * @param {object} segment
+ * @param {string} topicBlob
+ */
+export function keylessArchiveHumanPortraitScore(asset, segment, topicBlob) {
+  if (!isVideoAsset(asset) || !isKeylessArchiveAsset(asset)) return 0;
+  const contextText = `${topicBlob} ${segment?.title || ''} ${segment?.narration || ''}`.toLowerCase();
+  const blob = keylessArchiveHumanVisualBlob(asset);
+  if (!blob || !KEYLESS_ARCHIVE_HUMAN_VISUAL_RE.test(blob)) return 0;
+  // Junk gates still win — never launder mailbox/hospital pads via a face query.
+  if (offTopicBlockReason(`${blob} ${assetSearchQueryText(asset)}`.trim(), contextText)) return 0;
+  return 0.25;
+}
+
 /**
  * A segment-level relevance score for motion coverage. This deliberately uses
  * the same visual-evidence and junk gates as the harvest filter: query-only
@@ -758,7 +804,9 @@ function mediaAssetKey(asset) {
 function topicalVideoScore(asset, segment, topicBlob, topicKeywords) {
   if (!isVideoAsset(asset)) return 0;
   if (isUnsafeMediaUrl(asset?.url || '') || isJunkWebVolumeStillUrl(asset?.url || '')) return 0;
-  return scoreAssetRelevance(asset, segment, topicBlob, topicKeywords);
+  const base = scoreAssetRelevance(asset, segment, topicBlob, topicKeywords);
+  const portraitFloor = keylessArchiveHumanPortraitScore(asset, segment, topicBlob);
+  return Math.max(base, portraitFloor);
 }
 
 /**

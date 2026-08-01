@@ -51,6 +51,17 @@ function isNeverUseVisual(asset) {
   return NEVER_USE_SUBJECT_RE.test(assetBlob(asset));
 }
 
+/**
+ * Archive / simulator / generic stock-footage clips. Thin keyless pools lean on
+ * these (e.g. one flight-sim clip harvested four times), so a repeat of one of
+ * them reads as a hard loop even when its topical score is high — demote extra.
+ */
+const ARCHIVE_SIM_STOCK_RE = /\b(archive\.org|archive|flight ?sim|sim(?:ulator|ulation)|stock footage|getty|pond5|videvo|coverr)\b/;
+
+function isArchiveOrSimStock(asset) {
+  return ARCHIVE_SIM_STOCK_RE.test(assetBlob(asset));
+}
+
 const CAMERA_STORY_RE = /\b(cctv|surveillance|security camera|security cameras|cameras?|footage|body ?cam|dash ?cam)\b/i;
 
 function isSurveillanceVisual(asset) {
@@ -282,6 +293,18 @@ export function buildEditTimeline(project, options = {}) {
   const MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC = 2.5;
   const ENOUGH_URLS_FOR_SNAPPY_CUTS = 3;
   const RECENT_URL_WINDOW = 4;
+  // Thin-pool over-reuse guard. A source URL may appear at most twice inside the
+  // opening window (and, for short videos, across the whole timeline) whenever
+  // an unused alternative still exists — this defeats the "same clip ×4 in the
+  // first sample" failure that hardMaxReuse / ping-pong logic let through for
+  // thin keyless pools. Enforced on every pick pass except the final `relaxed`
+  // fallback, which drops the cluster/look-back preferences and only then
+  // relaxes to hardMaxReuse, so a genuinely thin pool still renders full
+  // coverage (a fresh same-cluster clip, never a gap) instead of looping.
+  const STRICT_REUSE_CAP = 2;
+  const STRICT_REUSE_WINDOW_SEC = 30;
+  const SHORT_VIDEO_MAX_SEC = 75;
+  const isShortVideo = totalDur > 0 && totalDur <= SHORT_VIDEO_MAX_SEC;
   // The look-back must always leave candidates: with a 4-URL pool a 4-wide
   // window bans everything and the previous cut freezes for the whole segment.
   const uniqueUrlCount = new Set(globalPool.map((a) => urlKey(a)).filter(Boolean)).size;
@@ -342,6 +365,10 @@ export function buildEditTimeline(project, options = {}) {
   // it cannot see an alternating pair on its own — ping-pong detection needs
   // the uncapped trail of picked URLs.
   const timelinePickUrlHistory = [];
+  // Cumulative timeline seconds emitted by prior segments — segment-local `t`
+  // resets to 0 each segment, so this is what places a pick within the video's
+  // opening window for the strict reuse cap.
+  let timelineElapsedSec = 0;
   let airlineLimitedClusterUseTotal = 0;
   let previousTimelineUrl = null;
   let previousTimelineCluster = null;
@@ -406,6 +433,10 @@ export function buildEditTimeline(project, options = {}) {
       let reusePenalty = 0;
       if (priorUses === 1) reusePenalty = -5;
       if (priorUses >= 2) reusePenalty = -25 - (priorUses - 2) * 12;
+      // A repeated archive/sim clip reads as a hard loop even when it scores
+      // topically. Demote it further on any prior use so a fresher (even
+      // lower-scoring) clip wins the slot before the reuse cap is reached.
+      if (priorUses >= 1 && isArchiveOrSimStock(a)) reusePenalty -= 12;
       reusePenalty += stillQualityTimelinePenalty(a);
       if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (isGenericStockJunk(blob, topicBlob)) return -8;
@@ -597,6 +628,8 @@ export function buildEditTimeline(project, options = {}) {
     let lastCluster = null;
     while (t < duration - 0.05) {
       const end = Math.min(duration, t + interval);
+      const globalStartSec = timelineElapsedSec + t;
+      const withinStrictReuseWindow = globalStartSec < STRICT_REUSE_WINDOW_SEC || isShortVideo;
       const activeBeat = beatAtSegmentTime(segBeats, t, duration, seg);
       const introLeadWindow = seg === script[0] && t < 3;
       const introOutroReuse = isIntro || isOutro;
@@ -659,6 +692,20 @@ export function buildEditTimeline(project, options = {}) {
         const uses = reuseCountFor(key, introOutroReuse);
         // Never exceed hard max — even as last resort (stops 9–12× loops).
         if (key && uses >= hardMaxReuse) return false;
+        // Strict opening-window / short-video cap: no URL past 2 uses while an
+        // alternative is still reachable. Enforced on every pass except the
+        // final `relaxed` fallback — that one drops the cluster/look-back
+        // preferences too, so it can reach a fresh same-cluster clip instead of
+        // looping this one, and only relaxes to hardMax when the pool is
+        // genuinely too thin to offer any alternative (never renders a gap).
+        if (
+          !relaxed
+          && key
+          && withinStrictReuseWindow
+          && uses >= STRICT_REUSE_CAP
+        ) {
+          return false;
+        }
         if (!allowOverReuse && key && uses >= maxReuseThisSeg) return false;
         // Never over-reuse office pads on non-workplace topics.
         if (
@@ -787,10 +834,14 @@ export function buildEditTimeline(project, options = {}) {
         const base = clean.length ? clean : coverage;
         const intrinsic = (c) => scoreAsset(c, activeBeat, { ignoreReuse: true });
         const onBrand = base.filter((c) => intrinsic(c) >= 0);
+        // Spread reuse first: this last-resort path is where a single high-fit
+        // archive/sim clip used to loop 4×+ (it wins on intrinsic fit while its
+        // reuse is ignored). Picking the least-used URL first — fit only as a
+        // tiebreak — keeps coverage varied instead of hammering one clip.
         asset = (onBrand.length ? onBrand : base).sort((a, b) => {
-          const fitDelta = intrinsic(b) - intrinsic(a);
-          if (fitDelta !== 0) return fitDelta;
-          return reuseCountFor(urlKey(a), introOutroReuse) - reuseCountFor(urlKey(b), introOutroReuse);
+          const reuseDelta = reuseCountFor(urlKey(a), introOutroReuse) - reuseCountFor(urlKey(b), introOutroReuse);
+          if (reuseDelta !== 0) return reuseDelta;
+          return intrinsic(b) - intrinsic(a);
         })[0] || null;
       }
       if (!asset) {
@@ -829,6 +880,7 @@ export function buildEditTimeline(project, options = {}) {
       t = end;
       ai += 1;
     }
+    timelineElapsedSec += duration;
   }
 
   return entries;

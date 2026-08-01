@@ -199,3 +199,160 @@ describe('buildEditTimeline: introFaceTier human-cluster fallback', () => {
     expect(firstEntry.assetId).toBe('human1');
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildEditTimeline: strict reuse cap for thin keyless pools
+// ---------------------------------------------------------------------------
+
+function makeVideoPool(n, { source = 'Stock video pool', prefix = 'clip' } = {}) {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `v${i}`,
+    segmentId: 'seg1',
+    type: 'video',
+    url: `https://example.com/${prefix}${i}.mp4`,
+    alt: `airline b-roll clip ${i} cabin aircraft`,
+    query: 'airline aircraft cabin',
+    source,
+  }));
+}
+
+function reuseCounts(timeline, windowSec = null) {
+  const counts = new Map();
+  for (const e of timeline) {
+    if (windowSec != null && e.startSec >= windowSec) continue;
+    counts.set(e.assetId, (counts.get(e.assetId) || 0) + 1);
+  }
+  return counts;
+}
+
+describe('buildEditTimeline: strict reuse cap (thin keyless pools)', () => {
+  it('caps a dominant archive/sim clip at ≤2 in the first 30s when alternatives exist (airline-v2 repro)', () => {
+    // The airline-v2 failure: a lone flight-sim archive clip is the only
+    // non-"aircraft" cluster, so the consecutive-cluster rule funnelled every
+    // other pick back onto it — it appeared ≥3× in the opening sample even
+    // though five fresh airline clips were available. The strict window cap
+    // must hold it (and every URL) to ≤2 across the opening 30s.
+    const project = {
+      topic: 'airline emergency mystery',
+      script: [
+        {
+          id: 'seg1',
+          type: 'body',
+          duration: 150,
+          narration: 'The airline flight faced an emergency as the aircraft cabin filled with worried passengers and crew members.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'sim',
+          segmentId: 'seg1',
+          type: 'video',
+          url: 'https://archive.org/download/flightsim/flightsim.mp4',
+          alt: 'airplane cockpit flight simulator aviation jet flight deck aircraft cabin passenger',
+          query: 'flight simulator cockpit aircraft cabin',
+          source: 'Archive.org live',
+        },
+        ...Array.from({ length: 5 }, (_, i) => ({
+          id: `fresh${i}`,
+          segmentId: 'seg1',
+          type: 'video',
+          url: `https://example.com/fresh${i}.mp4`,
+          alt: `airplane clip ${i}`,
+          query: 'airplane',
+          source: 'Pexels Videos',
+        })),
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const first30 = reuseCounts(timeline, 30);
+    expect(first30.get('sim') || 0).toBeLessThanOrEqual(2);
+    expect(Math.max(...first30.values())).toBeLessThanOrEqual(2);
+  });
+
+  it('holds a repeated source URL to ≤2 within the first 30s window when alternatives exist', () => {
+    // Broad pool, long (non-short) video: the opening 30s must never loop a
+    // single clip past twice while fresh URLs remain reachable.
+    const project = {
+      topic: 'airline emergency mystery',
+      script: [
+        {
+          id: 'seg1',
+          type: 'body',
+          duration: 150,
+          narration: 'The airline flight faced an emergency as the aircraft cabin filled with worried passengers and crew.',
+          title: 'Body',
+        },
+      ],
+      media: makeVideoPool(14),
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const counts = reuseCounts(timeline, 30);
+    const maxReuse = Math.max(...counts.values());
+    expect(maxReuse).toBeLessThanOrEqual(2);
+  });
+
+  it('relaxes the cap when the pool is too thin for an alternative to exist', () => {
+    // Only 2 clips over 20s: no third URL to cut to, so reuse past twice is the
+    // best available coverage. The cap must not starve the timeline into gaps.
+    const project = {
+      topic: 'airline emergency mystery',
+      script: [
+        {
+          id: 'seg1',
+          type: 'body',
+          duration: 20,
+          narration: 'The airline flight faced an emergency as the aircraft cabin filled with passengers.',
+          title: 'Body',
+        },
+      ],
+      media: makeVideoPool(2),
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    // Full coverage: cuts span the whole segment with no gap.
+    expect(timeline.length).toBeGreaterThan(0);
+    expect(timeline[timeline.length - 1].endSec).toBeGreaterThanOrEqual(19.9);
+  });
+
+  it('demotes a repeated archive/sim clip below a fresher lower-scoring clip', () => {
+    // A highly-topical flight-sim archive clip must not be reused a second time
+    // ahead of a fresh, less-topical airline clip: after its first use the
+    // archive/sim penalty demotes it so variety wins the next slot.
+    const project = {
+      topic: 'airline emergency mystery',
+      script: [
+        {
+          id: 'seg1',
+          type: 'body',
+          duration: 10,
+          narration: 'The airline flight faced an emergency as the aircraft cabin filled with passengers.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'sim',
+          segmentId: 'seg1',
+          type: 'video',
+          url: 'https://archive.org/download/flightsim/flightsim.mp4',
+          alt: 'airplane cockpit flight simulator aviation jet flight deck aircraft cabin',
+          query: 'flight simulator cockpit aircraft',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'fresh',
+          segmentId: 'seg1',
+          type: 'video',
+          url: 'https://example.com/fresh.mp4',
+          alt: 'airplane cabin aisle',
+          query: 'airline cabin',
+          source: 'Pexels Videos',
+        },
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const counts = reuseCounts(timeline);
+    // The sim clip is used at most as often as the fresh clip — never looped.
+    expect(counts.get('sim') || 0).toBeLessThanOrEqual(counts.get('fresh') || 0);
+  });
+});

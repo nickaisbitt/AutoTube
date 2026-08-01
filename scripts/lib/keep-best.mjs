@@ -71,7 +71,7 @@ export function loadFrozenProject(frozenPath) {
  * Keeps new script/narration durations; reassigns segmentIds when lengths match.
  * @param {object} project
  * @param {object} frozen
- * @returns {{ ok: boolean, mediaCount: number, timelineCount: number }}
+ * @returns {{ ok: boolean, mediaCount: number, timelineCount: number, orphanMediaCount?: number, orphanTimelineCount?: number, droppedOrphanMediaIds?: string[] }}
  */
 export function applyFrozenMediaToProject(project, frozen) {
   if (!project || !frozen?.media?.length) {
@@ -79,33 +79,64 @@ export function applyFrozenMediaToProject(project, frozen) {
   }
   const script = project.script || [];
   const frozenScript = frozen.script || [];
-  const media = (frozen.media || []).map((m, i) => {
-    const segIdx = Math.min(
-      Math.max(0, frozenScript.findIndex((s) => s.id === m.segmentId)),
-      Math.max(0, script.length - 1),
-    );
+  if (!script.length || !frozenScript.length) {
+    return { ok: false, mediaCount: 0, timelineCount: 0 };
+  }
+  const droppedOrphanMediaIds = [];
+  const media = [];
+  for (const [i, m] of (frozen.media || []).entries()) {
+    const frozenSegIdx = frozenScript.findIndex((s) => s.id === m.segmentId);
+    if (frozenSegIdx < 0) {
+      droppedOrphanMediaIds.push(m.id || m.url || `frozen-${i}`);
+      continue;
+    }
+    const segIdx = Math.min(frozenSegIdx, script.length - 1);
     const seg = script[segIdx] || script[0];
-    return {
+    if (!seg) {
+      droppedOrphanMediaIds.push(m.id || m.url || `frozen-${i}`);
+      continue;
+    }
+    media.push({
       ...m,
       segmentId: seg?.id || m.segmentId,
       id: m.id || `frozen-${i}`,
+    });
+  }
+  if (!media.length) {
+    return {
+      ok: false,
+      mediaCount: 0,
+      timelineCount: 0,
+      orphanMediaCount: droppedOrphanMediaIds.length,
+      droppedOrphanMediaIds,
     };
-  });
+  }
   project.media = media;
+  let orphanTimelineCount = 0;
   if (Array.isArray(frozen.editTimeline) && frozen.editTimeline.length) {
     const idMap = new Map();
     for (let i = 0; i < frozenScript.length && i < script.length; i += 1) {
       idMap.set(frozenScript[i].id, script[i].id);
     }
-    project.editTimeline = frozen.editTimeline.map((e) => ({
-      ...e,
-      segmentId: idMap.get(e.segmentId) || e.segmentId,
-    }));
+    project.editTimeline = frozen.editTimeline
+      .map((e) => {
+        if (!e.segmentId) return e;
+        const segmentId = idMap.get(e.segmentId);
+        if (!segmentId) {
+          orphanTimelineCount += 1;
+          return null;
+        }
+        return { ...e, segmentId };
+      })
+      .filter(Boolean);
   }
   return {
     ok: true,
     mediaCount: media.length,
     timelineCount: (project.editTimeline || []).length,
+    orphanMediaCount: droppedOrphanMediaIds.length,
+    orphanTimelineCount,
+    droppedOrphanMediaIds,
   };
 }
 

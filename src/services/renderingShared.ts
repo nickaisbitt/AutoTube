@@ -433,6 +433,46 @@ export function computeActiveAssetIndex(
 }
 
 // ---------------------------------------------------------------------------
+// Browser-fallback assembly planning (avoid shipping silent video)
+// ---------------------------------------------------------------------------
+
+/**
+ * How the browser render fallback should assemble the captured frames.
+ *
+ * - `mediarecorder-with-audio`: the project has audio (narration and/or
+ *   background music); use the MediaRecorder path which mixes audio tracks.
+ *   The server `/api/render-video` ffmpeg path is video-only and would drop
+ *   the narration, so it must NOT be used here.
+ * - `video-only-ffmpeg`: the project genuinely has no audio inputs and silent
+ *   output has been explicitly permitted (ALLOW_SILENT); the fast video-only
+ *   ffmpeg path is acceptable.
+ * - `refuse`: the project has no audio inputs and silent output is not
+ *   permitted; the fallback should fail loudly rather than pass off a silent
+ *   video as a success.
+ */
+export type FallbackAssemblyPlan =
+  | 'mediarecorder-with-audio'
+  | 'video-only-ffmpeg'
+  | 'refuse';
+
+/**
+ * Decide how the browser fallback should assemble a video, given whether the
+ * project has any audio inputs and whether silent output is explicitly allowed.
+ *
+ * @param hasAudioInputs - true if narration clips are ready and/or background
+ *                         music is available.
+ * @param allowSilent    - true if ALLOW_SILENT has been set to permit silent
+ *                         video output.
+ */
+export function planFallbackAssembly(
+  hasAudioInputs: boolean,
+  allowSilent: boolean,
+): FallbackAssemblyPlan {
+  if (hasAudioInputs) return 'mediarecorder-with-audio';
+  return allowSilent ? 'video-only-ffmpeg' : 'refuse';
+}
+
+// ---------------------------------------------------------------------------
 // Resolution presets
 // ---------------------------------------------------------------------------
 

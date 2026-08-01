@@ -444,9 +444,9 @@ export default function NarrationStep({ project, status, progress, message, onGe
         <button
           onClick={onNext}
           className="flex w-full items-center justify-center gap-2 bg-brand-500 px-6 py-4 text-sm font-bold uppercase text-black shadow-hard hover:bg-brand-400"
-          data-testid="assemble-video-button"
+          data-testid="continue-to-ai-edit-button"
         >
-          Assemble Video
+          Continue to AI Edit
           <ChevronRight className="h-4 w-4" />
         </button>
       )}

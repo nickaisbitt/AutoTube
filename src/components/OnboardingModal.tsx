@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { Key, Zap, Film, Mic, ChevronRight, Check, ExternalLink } from 'lucide-react';
+import { Key, Zap, Film, Mic, ChevronRight, Check, ExternalLink, Settings } from 'lucide-react';
 import { useVideoProject } from '../store/StoreContext';
 
 interface OnboardingModalProps {
   isOpen: boolean;
   onComplete: () => void;
+  /** Optional: open Settings when user skips without a key (avoids dead-start). */
+  onOpenSettings?: () => void;
 }
 
 const STEPS = [
@@ -30,19 +32,46 @@ const STEPS = [
   },
 ];
 
-export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalProps) {
+export default function OnboardingModal({ isOpen, onComplete, onOpenSettings }: OnboardingModalProps) {
   const { appConfig, setAppConfig } = useVideoProject();
   const [openRouterKey, setOpenRouterKey] = useState(appConfig.openRouterKey);
   const [currentStep, setCurrentStep] = useState(0);
+  const [keyError, setKeyError] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSave = () => {
+  const persistKeyAndComplete = (key: string) => {
     setAppConfig({
       ...appConfig,
-      openRouterKey: openRouterKey.trim(),
+      openRouterKey: key,
     });
     onComplete();
+  };
+
+  const handleSave = () => {
+    const trimmed = openRouterKey.trim();
+    if (!trimmed) {
+      setKeyError(true);
+      return;
+    }
+    setKeyError(false);
+    persistKeyAndComplete(trimmed);
+  };
+
+  /** Skip: require a key, or open Settings — never persist empty key + seen forever. */
+  const handleSkip = () => {
+    const trimmed = openRouterKey.trim();
+    if (trimmed) {
+      setKeyError(false);
+      persistKeyAndComplete(trimmed);
+      return;
+    }
+    if (onOpenSettings) {
+      setKeyError(false);
+      onOpenSettings();
+      return;
+    }
+    setKeyError(true);
   };
 
   const StepIcon = STEPS[currentStep].icon;
@@ -82,10 +111,14 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
               <input
                 type="password"
                 value={openRouterKey}
-                onChange={(e) => setOpenRouterKey(e.target.value)}
+                onChange={(e) => {
+                  setOpenRouterKey(e.target.value);
+                  if (e.target.value.trim()) setKeyError(false);
+                }}
                 placeholder="sk-or-v1-..."
                 className="w-full border-2 border-surface-700 bg-surface-800 px-3 py-2.5 text-sm font-mono text-white placeholder-surface-500 focus:border-brand-500 focus:outline-none"
                 aria-label="OpenRouter API Key"
+                data-testid="onboarding-api-key-input"
               />
               <a
                 href="https://openrouter.ai/keys"
@@ -95,25 +128,50 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
               >
                 Get your key <ExternalLink className="h-3 w-3" />
               </a>
+              {keyError && (
+                <p className="mt-2 text-xs font-mono text-red-400" data-testid="onboarding-key-required">
+                  Enter an API key, or open Settings to add one before continuing.
+                </p>
+              )}
             </div>
           </div>
         )}
 
         {/* Navigation */}
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            data-testid={currentStep === 0 ? 'onboarding-skip' : 'onboarding-back'}
-            onClick={() => currentStep === 0 ? handleSave() : setCurrentStep(Math.max(0, currentStep - 1))}
-            className="border-2 border-surface-700 px-4 py-2 text-sm font-mono font-medium text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
-          >
-            {currentStep === 0 ? 'Skip' : '← Back'}
-          </button>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid={currentStep === 0 ? 'onboarding-skip' : 'onboarding-back'}
+              onClick={() => currentStep === 0 ? handleSkip() : setCurrentStep(Math.max(0, currentStep - 1))}
+              className="border-2 border-surface-700 px-4 py-2 text-sm font-mono font-medium text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
+            >
+              {currentStep === 0 ? 'Skip' : '← Back'}
+            </button>
+            {currentStep === 0 && onOpenSettings && (
+              <button
+                type="button"
+                data-testid="onboarding-open-settings"
+                onClick={() => onOpenSettings()}
+                className="inline-flex items-center gap-1 border-2 border-surface-700 px-3 py-2 text-sm font-mono font-medium text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Settings
+              </button>
+            )}
+          </div>
           
           {currentStep < STEPS.length - 1 ? (
             <button
-              onClick={() => setCurrentStep(currentStep + 1)}
+              onClick={() => {
+                if (currentStep === 0 && !openRouterKey.trim()) {
+                  setKeyError(true);
+                  return;
+                }
+                setCurrentStep(currentStep + 1);
+              }}
               className="flex items-center gap-2 bg-brand-500 px-4 py-2 text-sm font-bold uppercase text-black shadow-hard-sm"
+              data-testid="onboarding-next"
             >
               Next <ChevronRight className="h-4 w-4" />
             </button>
@@ -121,6 +179,7 @@ export default function OnboardingModal({ isOpen, onComplete }: OnboardingModalP
             <button
               onClick={handleSave}
               className="flex items-center gap-2 bg-emerald-500 px-4 py-2 text-sm font-bold uppercase text-black shadow-hard-sm"
+              data-testid="onboarding-get-started"
             >
               <Check className="h-4 w-4" />
               Get Started

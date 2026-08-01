@@ -34,7 +34,7 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
   const exportBlock = getExportBlockStatus(project);
 
   const handleExport = async () => {
-    if (exportBlock.blocked) return;
+    if (exportBlock.blocked && !exportBlock.allowDownloadAnyway) return;
     setIsExporting(true);
     try {
       await onExport(quality, format, resolution);
@@ -181,13 +181,24 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
 
         {exportBlock.blocked && (
           <div
-            className="mb-6 flex gap-3 border-2 border-red-500/60 bg-red-950/40 p-4 text-xs font-mono text-red-300"
+            className={`mb-6 flex gap-3 border-2 p-4 text-xs font-mono ${
+              exportBlock.allowDownloadAnyway
+                ? 'border-amber-500/60 bg-amber-950/40 text-amber-200'
+                : 'border-red-500/60 bg-red-950/40 text-red-300'
+            }`}
             data-testid="export-quality-block"
           >
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+            <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${exportBlock.allowDownloadAnyway ? 'text-amber-400' : 'text-red-400'}`} />
             <div>
-              <p className="font-semibold uppercase tracking-wider text-red-200">Export blocked</p>
-              <p className="mt-1 text-red-300/90">{exportBlock.reason}</p>
+              <p className={`font-semibold uppercase tracking-wider ${exportBlock.allowDownloadAnyway ? 'text-amber-100' : 'text-red-200'}`}>
+                {exportBlock.allowDownloadAnyway ? 'Quality warning' : 'Export blocked'}
+              </p>
+              <p className="mt-1 opacity-90">{exportBlock.warning ?? exportBlock.reason}</p>
+              {exportBlock.allowDownloadAnyway && (
+                <p className="mt-2 text-[10px] uppercase tracking-wider opacity-80">
+                  You can still export — review quality before publishing.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -195,9 +206,9 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
         {/* Export Button */}
         <button
           onClick={handleExport}
-          disabled={isExporting || exportBlock.blocked}
+          disabled={isExporting || (exportBlock.blocked && !exportBlock.allowDownloadAnyway)}
           className={`flex w-full items-center justify-center gap-2 px-6 py-3 text-sm font-bold uppercase text-black shadow-hard ${
-            isExporting || exportBlock.blocked ? 'cursor-not-allowed bg-surface-600' : 'bg-brand-500'
+            isExporting || (exportBlock.blocked && !exportBlock.allowDownloadAnyway) ? 'cursor-not-allowed bg-surface-600' : 'bg-brand-500'
           }`}
           data-testid="export-submit-button"
         >
@@ -206,7 +217,11 @@ export default function ExportModal({ isOpen, onClose, project, onExport }: Expo
           ) : (
             <Download className="h-4 w-4" />
           )}
-          {isExporting ? 'Exporting...' : 'Export Video'}
+          {isExporting
+            ? 'Exporting...'
+            : exportBlock.allowDownloadAnyway
+              ? 'Export Anyway'
+              : 'Export Video'}
           <Check className="h-4 w-4" />
         </button>
       </div>

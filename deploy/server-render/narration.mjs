@@ -18,8 +18,18 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const KOKORO_SCRIPT = join(__dirname, 'kokoro_generate.py');
 
-/** Keep in sync with COLD_OPEN_SECONDS in server-render.mjs (3.5s cold open) */
+/**
+ * Default lead-in silence — must match the video cold open in server-render.mjs
+ * (3.5s long-form, 0s shorts). Callers pass `introSilenceSec` to override
+ * (shorts render no cold open, so no intro silence either).
+ */
 const INTRO_SILENCE_SECONDS = 3.5;
+
+/** Default trailing silence — must match video END_SCREEN_SECONDS (4s long-form, 2s shorts). */
+const END_SILENCE_SECONDS = 4;
+
+/** Breath sound length inserted between segments (Task 18). */
+const BREATH_SECONDS = 0.25;
 
 const TTS_SETUP_DOC = 'scripts/squad/A3-tts-setup.md';
 
@@ -809,13 +819,32 @@ function generateEdgeTtsSegment(text, audioFile, subtitleFile, voice, edgeRunner
  * Task 21: Inserts silence pauses at paragraph breaks.
  * Task 24: Uses 48kHz sample rate for all silence generation.
  *
+ * A/V timeline contract (single source of truth):
+ * - Every returned entry is tagged with `kind` ('intro-silence' | 'narration' |
+ *   'breath' | 'gap' | 'end-silence') and per-segment entries carry `segmentIndex`,
+ *   so downstream (caption offsets, ducking timings, video holds) can rebuild the
+ *   exact audio timeline from cumulative durations.
+ * - Inter-segment pauses (breath + gap) are emitted AFTER each narration segment so
+ *   VTT word timestamps stay relative to the segment slot start, and the pause
+ *   seconds are FOLDED into `seg.duration` — the video timeline therefore includes
+ *   the same pauses the concatenated audio carries.
+ * - `introSilenceSec` / `endSilenceSec` must match the video cold open / end screen
+ *   durations (pass 0 / 2 for shorts).
+ *
  * @param {Array} segments   Script segments with narration text.
  * @param {string} outputDir Directory to write audio files.
- * @param {object} [options] Optional config.
- * @returns {Promise<Array<{file: string, duration: number}>>}
+ * @param {object} [options] Optional config ({ cfAccountId, cfApiToken, edgeVoice, introSilenceSec, endSilenceSec }).
+ * @returns {Promise<Array<{file: string, duration: number, kind: string, segmentIndex?: number, subtitleFile?: string|null}>>}
  */
 export async function generateNarration(segments, outputDir, options = {}) {
   const { cfAccountId, cfApiToken, edgeVoice } = options;
+  const introSilenceSec = Number.isFinite(options.introSilenceSec)
+    ? Math.max(0, options.introSilenceSec)
+    : INTRO_SILENCE_SECONDS;
+  const endSilenceSec = Number.isFinite(options.endSilenceSec)
+    ? Math.max(0, options.endSilenceSec)
+    : END_SILENCE_SECONDS;
+  const segmentGapSec = Math.max(0, parseFloat(process.env.AUTOTUBE_SEGMENT_GAP_SEC || '0.25') || 0);
   const providers = assertTtsAvailable({ cfAccountId, cfApiToken });
   const useMelo = providers.melo;
   const audioFiles = [];
@@ -826,10 +855,12 @@ export async function generateNarration(segments, outputDir, options = {}) {
   if (providers.edgeTts) engines.push('edge-tts');
   console.log(`Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
 
-  // Intro silence — matches cold open duration in server-render.mjs (title card currently skipped)
-  const introSilenceFile = join(outputDir, 'silence-intro.wav');
-  if (generateSilence(introSilenceFile, INTRO_SILENCE_SECONDS)) {
-    audioFiles.push({ file: introSilenceFile, duration: INTRO_SILENCE_SECONDS });
+  // Intro silence — matches cold open duration in server-render.mjs (0 in shorts)
+  if (introSilenceSec > 0) {
+    const introSilenceFile = join(outputDir, 'silence-intro.wav');
+    if (generateSilence(introSilenceFile, introSilenceSec)) {
+      audioFiles.push({ file: introSilenceFile, duration: introSilenceSec, kind: 'intro-silence' });
+    }
   }
 
   for (let i = 0; i < segments.length; i++) {
@@ -837,15 +868,6 @@ export async function generateNarration(segments, outputDir, options = {}) {
 
     // Validate seg.duration to prevent ffmpeg crashes from NaN/undefined
     const segDuration = (typeof seg.duration === 'number' && !isNaN(seg.duration) && seg.duration > 0) ? seg.duration : 10;
-
-    // Brief pause between segments (video has no segment title cards — keep A/V in sync)
-    const segmentGapSec = parseFloat(process.env.AUTOTUBE_SEGMENT_GAP_SEC || '0.25');
-    if (segmentGapSec > 0) {
-      const silenceFile = join(outputDir, `silence-${i}.wav`);
-      if (generateSilence(silenceFile, segmentGapSec)) {
-        audioFiles.push({ file: silenceFile, duration: segmentGapSec });
-      }
-    }
 
     const audioFile = join(outputDir, `narration-${i}.wav`);
     const subtitleFile = audioFile.replace(/\.\w+$/, '.vtt');
@@ -904,7 +926,6 @@ export async function generateNarration(segments, outputDir, options = {}) {
     if (success) {
       // Get the actual duration of generated audio for precise synchronization
       const actualDuration = getAudioDuration(audioFile) || segDuration;
-      seg.duration = actualDuration;
 
       if (process.env.AUTOTUBE_WHISPER_ALIGN === '1' && existsSync(audioFile)) {
         const alignScript = join(dirname(fileURLToPath(import.meta.url)), '../../server/tts/align-whisper.py');
@@ -928,34 +949,42 @@ export async function generateNarration(segments, outputDir, options = {}) {
         generateWebVTT(seg.narration, actualDuration, subtitleFile);
       }
 
-      // Task 18: Insert breathing sound between segments (not after last segment)
+      // Task 21: Track paragraph breaks in narration (metadata only)
+      const paragraphs = detectParagraphBreaks(seg.narration || '');
+      const narrationEntry = {
+        file: audioFile,
+        duration: actualDuration,
+        subtitleFile: existsSync(subtitleFile) ? subtitleFile : null,
+        kind: 'narration',
+        segmentIndex: i,
+      };
+      if (paragraphs.length > 1) {
+        narrationEntry.paragraphPauses = paragraphs.length - 1;
+      }
+      audioFiles.push(narrationEntry);
+
+      // Task 18: Inter-segment pause (breath + gap) AFTER the narration so VTT word
+      // timestamps stay relative to the slot start. Breath only between segments;
+      // the gap also trails the last segment as a beat before the end screen.
+      let pauseAfterSec = 0;
       if (i < segments.length - 1) {
         const breathPath = join(outputDir, `breath-${i}.wav`);
         if (generateBreathSound(breathPath)) {
-          audioFiles.push({ file: breathPath, duration: 0.25 });
+          audioFiles.push({ file: breathPath, duration: BREATH_SECONDS, kind: 'breath', segmentIndex: i });
+          pauseAfterSec += BREATH_SECONDS;
+        }
+      }
+      if (segmentGapSec > 0) {
+        const silenceFile = join(outputDir, `silence-${i}.wav`);
+        if (generateSilence(silenceFile, segmentGapSec)) {
+          audioFiles.push({ file: silenceFile, duration: segmentGapSec, kind: 'gap', segmentIndex: i });
+          pauseAfterSec += segmentGapSec;
         }
       }
 
-      // Task 21: Detect paragraph breaks in narration and insert silence pauses
-      const narrationText = seg.narration || '';
-      const paragraphs = detectParagraphBreaks(narrationText);
-      if (paragraphs.length > 1) {
-        // Insert 0.4s silence between paragraphs (estimated within segment duration)
-        const paraPausePath = join(outputDir, `para-pause-${i}.wav`);
-        generateSilence(paraPausePath, 0.4);
-        audioFiles.push({
-          file: audioFile,
-          duration: actualDuration,
-          subtitleFile: existsSync(subtitleFile) ? subtitleFile : null,
-          paragraphPauses: paragraphs.length - 1,
-        });
-      } else {
-        audioFiles.push({
-          file: audioFile,
-          duration: actualDuration,
-          subtitleFile: existsSync(subtitleFile) ? subtitleFile : null,
-        });
-      }
+      // Fold the trailing pause into the segment duration used by the video
+      // timeline so video totals match audio totals (mux no longer truncates).
+      seg.duration = actualDuration + pauseAfterSec;
     } else {
       throw new Error(
         `TTS failed for segment ${i + 1} "${segTitle}": exhausted ${engines.join(' → ')}. ` +
@@ -966,15 +995,46 @@ export async function generateNarration(segments, outputDir, options = {}) {
 
   console.log(`\n  ✓ Generated ${audioFiles.length} audio segments (chain: ${engines.join(' → ')})`);
 
-  // Add end screen silence (must match video END_SCREEN_SECONDS = 4)
-  const firstAudioFile = audioFiles.length > 0 ? audioFiles[0].file : join(outputDir, 'silence-placeholder.wav');
-  if (audioFiles.length === 0 || !existsSync(firstAudioFile)) {
-    generateSilence(firstAudioFile, 0.1);
-  }
-  const endScreenFile = join(dirname(firstAudioFile), 'silence-end.wav');
-  if (generateSilence(endScreenFile, 4)) {
-    audioFiles.push({ file: endScreenFile, duration: 4 });
+  // Add end screen silence (must match video END_SCREEN_SECONDS — 4 long-form / 2 shorts)
+  if (endSilenceSec > 0) {
+    const firstAudioFile = audioFiles.length > 0 ? audioFiles[0].file : join(outputDir, 'silence-placeholder.wav');
+    if (audioFiles.length === 0 || !existsSync(firstAudioFile)) {
+      generateSilence(firstAudioFile, 0.1);
+    }
+    const endScreenFile = join(dirname(firstAudioFile), 'silence-end.wav');
+    if (generateSilence(endScreenFile, endSilenceSec)) {
+      audioFiles.push({ file: endScreenFile, duration: endSilenceSec, kind: 'end-silence' });
+    }
   }
 
   return audioFiles;
+}
+
+/**
+ * Absolute speech-start offsets (seconds into the concatenated narration mix) per
+ * script segment, derived from actual audioFiles cumulative durations. Includes
+ * intro silence and every inter-segment gap/breath — the exact values captions and
+ * ducking must use. Untagged legacy entries fall back to the `subtitleFile`-key
+ * heuristic used by buildNarrationTimingsFromAudioFiles.
+ *
+ * @param {Array<{duration: number, kind?: string, segmentIndex?: number, subtitleFile?: string|null}>} audioFiles
+ * @returns {Map<number, {start: number, end: number}>} segmentIndex → speech interval
+ */
+export function narrationSpeechIntervals(audioFiles) {
+  const intervals = new Map();
+  let cursor = 0;
+  let fallbackIdx = 0;
+  for (const entry of audioFiles || []) {
+    const duration = Math.max(0, Number(entry?.duration) || 0);
+    const isNarration = entry?.kind
+      ? entry.kind === 'narration'
+      : Boolean(entry) && 'subtitleFile' in entry;
+    if (isNarration && duration > 0) {
+      const segIdx = Number.isInteger(entry.segmentIndex) ? entry.segmentIndex : fallbackIdx;
+      intervals.set(segIdx, { start: cursor, end: cursor + duration });
+      fallbackIdx = segIdx + 1;
+    }
+    cursor += duration;
+  }
+  return intervals;
 }

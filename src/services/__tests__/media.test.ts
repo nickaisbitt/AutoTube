@@ -1,11 +1,40 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { scoreCandidate, searchDDGLocal, searchWikimedia, searchDDGVideos, parseDurationToSeconds } from '../media';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  scoreCandidate,
+  searchDDGLocal,
+  searchWikimedia,
+  searchDDGVideos,
+  parseDurationToSeconds,
+  hasWatermarkIndicator,
+  harvestMediaWithSafetyNet,
+} from '../media';
 import type { MediaCandidate } from '../media';
-import type { TopicContext } from '../../types';
+import type { AppConfig, TopicContext } from '../../types';
 
 vi.mock('../logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), success: vi.fn() },
 }));
+
+vi.mock('../sourceProviders', () => ({
+  queryAllProviders: vi.fn(async () => []),
+}));
+
+vi.mock('../fullResResolver', () => ({
+  batchResolve: vi.fn(async () => new Map()),
+}));
+
+vi.mock('../qualityScorer', () => ({
+  batchScoreQuality: vi.fn(async () => new Map()),
+}));
+
+vi.mock('../visionCheck', () => ({
+  batchVisionCheck: vi.fn(async () => new Map()),
+  checkCandidateVision: vi.fn(async () => null),
+}));
+
+import { queryAllProviders } from '../sourceProviders';
+
+const mockQueryAllProviders = vi.mocked(queryAllProviders);
 
 // ---------------------------------------------------------------------------
 // Shared baseline objects
@@ -231,6 +260,60 @@ describe('scoreCandidate', () => {
     expect(scoreCandidate(passenger, aviationTopic) - scoreCandidate(brandedLogo, aviationTopic)).toBeGreaterThan(500);
   });
 
+  it('derives airline topic flags from the topic context, not the candidate query', () => {
+    const neutralTopic: TopicContext = {
+      ...baseTopicContext,
+      topic: 'Municipal library reading room',
+      resolvedTitle: 'Municipal library reading room',
+    };
+    const brandedLogo: MediaCandidate = {
+      ...baseCandidate,
+      alt: 'Qatar Airways brand logo close-up on the aircraft tail',
+      sourceUrl: undefined,
+    };
+
+    // Same candidate, same neutral topic — only the candidate's own query mentions aviation.
+    const withAviationQuery = { ...brandedLogo, query: 'regional aviation cabin pressure' };
+    const withNeutralQuery = { ...brandedLogo, query: 'municipal library reading room' };
+
+    expect(scoreCandidate(withAviationQuery, neutralTopic)).toBe(scoreCandidate(withNeutralQuery, neutralTopic));
+
+    // The airline penalties still apply when the *topic* is an airline story.
+    const airlineTopic: TopicContext = {
+      ...baseTopicContext,
+      topic: 'How a regional airline hid recurring cabin-pressure failures',
+      resolvedTitle: 'How a regional airline hid recurring cabin-pressure failures',
+    };
+    expect(scoreCandidate(withAviationQuery, airlineTopic))
+      .toBeLessThan(scoreCandidate(withAviationQuery, neutralTopic));
+  });
+
+  it('derives nursing-abuse topic flags from the topic context, not the candidate query', () => {
+    const neutralTopic: TopicContext = {
+      ...baseTopicContext,
+      topic: 'Municipal library reading room',
+      resolvedTitle: 'Municipal library reading room',
+    };
+    const officeStock: MediaCandidate = {
+      ...baseCandidate,
+      alt: 'corporate office skyline glass building',
+      sourceUrl: undefined,
+    };
+
+    const withNursingQuery = { ...officeStock, query: 'nursing home abuse cctv hallway' };
+    const withNeutralQuery = { ...officeStock, query: 'municipal library reading room' };
+
+    expect(scoreCandidate(withNursingQuery, neutralTopic)).toBe(scoreCandidate(withNeutralQuery, neutralTopic));
+
+    const nursingTopic: TopicContext = {
+      ...baseTopicContext,
+      topic: 'Inside a nursing home abuse cover-up',
+      resolvedTitle: 'Inside a nursing home abuse cover-up',
+    };
+    expect(scoreCandidate(withNursingQuery, nursingTopic))
+      .toBeLessThan(scoreCandidate(withNursingQuery, neutralTopic));
+  });
+
   it('demotes corporate aviation stock below hangar paperwork stakes', () => {
     const aviationTopic: TopicContext = {
       ...baseTopicContext,
@@ -252,6 +335,160 @@ describe('scoreCandidate', () => {
     };
 
     expect(scoreCandidate(paperwork, aviationTopic)).toBeGreaterThan(scoreCandidate(corporate, aviationTopic));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Watermark indicator matching
+// ---------------------------------------------------------------------------
+
+describe('hasWatermarkIndicator', () => {
+  it('ignores words that merely contain an indicator as a substring', () => {
+    expect(hasWatermarkIndicator({
+      alt: 'company comparison chart in Stockholm',
+      url: 'https://cdn.example.com/stockholm-company-comparison.jpg',
+    })).toBe(false);
+
+    expect(hasWatermarkIndicator({
+      alt: 'compass competition compound complete',
+      url: 'https://stockholm.example.com/compare/sampler.jpg',
+    })).toBe(false);
+  });
+
+  it('flags indicators that appear as whole tokens in alt text', () => {
+    expect(hasWatermarkIndicator({ alt: 'stock photo of a bridge', url: 'https://example.com/a.jpg' })).toBe(true);
+    expect(hasWatermarkIndicator({ alt: 'licensed editorial image', url: 'https://example.com/a.jpg' })).toBe(true);
+    expect(hasWatermarkIndicator({ alt: 'watermarked frame', url: 'https://example.com/a.jpg' })).toBe(true);
+  });
+
+  it('flags indicators that appear as host or path tokens in the URL', () => {
+    expect(hasWatermarkIndicator({ alt: 'bridge', url: 'https://example.com/preview/frame-1.jpg' })).toBe(true);
+    expect(hasWatermarkIndicator({ alt: 'bridge', url: 'https://images.example.com/comp/xyz.jpg' })).toBe(true);
+    expect(hasWatermarkIndicator({ alt: 'bridge', url: 'https://stock.example.com/xyz.jpg' })).toBe(true);
+    expect(hasWatermarkIndicator({ alt: 'bridge', url: 'https://example.com/adobe%20stock/xyz.jpg' })).toBe(true);
+  });
+});
+
+describe('scoreCandidate — watermark indicator penalty', () => {
+  it('applies the −300 penalty only for whole-token indicator matches', () => {
+    const innocent: MediaCandidate = {
+      ...baseCandidate,
+      alt: 'company comparison in Stockholm',
+      url: 'https://cdn.example.com/stockholm-company.jpg',
+      sourceUrl: undefined,
+    };
+    const watermarked: MediaCandidate = {
+      ...innocent,
+      alt: 'stock sample preview',
+      url: 'https://cdn.example.com/stock-sample-preview.jpg',
+    };
+
+    expect(scoreCandidate(innocent, baseTopicContext) - scoreCandidate(watermarked, baseTopicContext)).toBe(300);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// harvestMediaWithSafetyNet — fallback filtering
+// ---------------------------------------------------------------------------
+
+describe('harvestMediaWithSafetyNet fallback chain', () => {
+  const primaryQuery = 'nursing home abuse investigation footage';
+  const broadenedQuery = 'nursing home abuse';
+  const entityQuery = 'Sunrise Care State Inspector';
+
+  const harvestConfig: AppConfig = { sourceType: 'stock' };
+
+  const harvestTopic: TopicContext = {
+    ...baseTopicContext,
+    topic: 'Nursing home abuse investigation',
+    coreSubject: 'Nursing home abuse investigation',
+    entities: ['Sunrise Care', 'State Inspector'],
+  };
+
+  function harvestCandidate(overrides: Partial<MediaCandidate>): MediaCandidate {
+    return {
+      url: 'https://example.com/image.jpg',
+      alt: 'nursing home abuse investigation footage',
+      source: 'DuckDuckGo Images',
+      baseScore: 300,
+      query: primaryQuery,
+      finalScore: 0,
+      type: 'image',
+      width: 1920,
+      height: 1080,
+      ...overrides,
+    };
+  }
+
+  /** Blocked domains, NSFW hosts and undersized images returned by every fallback query. */
+  const dirtyFallbackResults: MediaCandidate[] = [
+    harvestCandidate({ url: 'https://sputniknews.com/propaganda.jpg' }),
+    harvestCandidate({ url: 'https://cdn.pornhub.com/nsfw.jpg' }),
+    harvestCandidate({ url: 'https://example.com/via-source.jpg', sourceUrl: 'https://9gag.com/gag/1' }),
+    harvestCandidate({ url: 'https://example.com/low-res.jpg', width: 640, height: 480 }),
+    harvestCandidate({ url: 'https://example.com/clean.jpg' }),
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Wikimedia fallback goes straight to the network — keep it offline.
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('applies the domain/NSFW/resolution filter chain to fallback query results', async () => {
+    mockQueryAllProviders.mockImplementation(async (query: string) => (
+      query === primaryQuery ? [] : dirtyFallbackResults
+    ));
+
+    const { candidates } = await harvestMediaWithSafetyNet(primaryQuery, harvestTopic, harvestConfig);
+
+    const queriedTerms = mockQueryAllProviders.mock.calls.map(call => call[0]);
+    expect(queriedTerms).toContain(broadenedQuery);
+    expect(queriedTerms).toContain(harvestTopic.coreSubject);
+
+    const urls = candidates.map(c => c.url);
+    expect(urls).toContain('https://example.com/clean.jpg');
+    expect(urls).not.toContain('https://sputniknews.com/propaganda.jpg');
+    expect(urls).not.toContain('https://cdn.pornhub.com/nsfw.jpg');
+    expect(urls).not.toContain('https://example.com/via-source.jpg');
+    expect(urls).not.toContain('https://example.com/low-res.jpg');
+  });
+
+  it('filters the entity fallback too, leaving nothing when every result is blocked', async () => {
+    mockQueryAllProviders.mockImplementation(async (query: string) => (
+      query === primaryQuery ? [] : dirtyFallbackResults.filter(c => c.url !== 'https://example.com/clean.jpg')
+    ));
+
+    const { candidates } = await harvestMediaWithSafetyNet(primaryQuery, harvestTopic, harvestConfig);
+
+    expect(mockQueryAllProviders.mock.calls.map(call => call[0])).toContain(entityQuery);
+    expect(candidates).toEqual([]);
+  });
+
+  it('leaves a segment empty instead of injecting Picsum stock as a last resort', async () => {
+    mockQueryAllProviders.mockResolvedValue([]);
+
+    const { candidates, trace } = await harvestMediaWithSafetyNet(primaryQuery, harvestTopic, harvestConfig);
+
+    expect(candidates).toEqual([]);
+    expect(candidates.some(c => c.url.includes('picsum.photos'))).toBe(false);
+    expect(trace.join(' | ')).toContain('Fallback exhausted');
+  });
+
+  it('never injects Picsum candidates alongside real fallback results', async () => {
+    mockQueryAllProviders.mockImplementation(async (query: string) => (
+      query === primaryQuery ? [] : [harvestCandidate({ url: 'https://example.com/clean.jpg' })]
+    ));
+
+    const { candidates } = await harvestMediaWithSafetyNet(primaryQuery, harvestTopic, harvestConfig);
+
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates.some(c => c.url.includes('picsum.photos'))).toBe(false);
+    expect(candidates.some(c => c.source.includes('Picsum'))).toBe(false);
   });
 });
 

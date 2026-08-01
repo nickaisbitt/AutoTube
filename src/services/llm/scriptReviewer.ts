@@ -105,7 +105,7 @@ async function polishScriptPass(
   signal?: AbortSignal,
 ): Promise<ScriptSegment[]> {
   const systemPrompt =
-    'You are a ruthless YouTube script editor. Your job is to POLISH this script — tighten every sentence, cut every word that doesn\'t earn its place, and make the narration punchier. Return the polished script as a JSON array of segments with the same structure.';
+    'You are a ruthless YouTube script editor. Your job is to POLISH this script — tighten every sentence, cut every word that doesn\'t earn its place, and make the narration punchier. Return the polished script as a JSON object: { "segments": [ ... ] }';
 
   const scriptJson = JSON.stringify(
     segments.map((s) => ({
@@ -117,7 +117,7 @@ async function polishScriptPass(
     })),
   );
 
-  const userPrompt = `Here is the script for a video about "${sanitiseTopic(topic)}":\n\n${scriptJson}\n\nPOLISH this script using the rules below. For EVERY item, check the script and FIX violations.\n\n=== POLISH CHECKLIST ===\n\n1. FILLER REMOVAL: Remove every instance of: "basically", "actually", "literally", "essentially", "it's worth noting", "let me explain", "here's the thing", "now", "so", "well" (when used as sentence openers). These add nothing.\n\n2. VERB STRENGTH: Replace weak verbs with strong ones. "went" → "surged/plummeted/dove". "is going to" → "will". "has been" → "was". Every verb should carry weight.\n\n3. SENTENCE VARIATION: If 3+ consecutive sentences are the same length, rewrite one to be dramatically shorter or longer. Rhythm is everything.\n\n4. PAYOFF DELIVERY: Every segment must end with a payoff — an insight, a consequence, or a forward-looking statement that rewards the viewer. Never end a segment on a flat note.\n\n5. HOOK SHARPENING: The first 2 sentences of the intro must be the sharpest in the entire script. If they're not, rewrite them.\n\n6. SPECIFICITY BOOST: Any vague phrase ("a lot", "many", "significant", "substantial") must be replaced with a specific number or concrete detail.\n\n7. RHYTHM: Alternate between short punchy sentences (2-5 words) and medium explanatory sentences (10-20 words). Never write a paragraph where all sentences are the same length.\n\n8. WORD ECONOMY: Cut every word that doesn't change meaning. "In order to" → "To". "Due to the fact that" → "Because". "At this point in time" → "Now".\n\nReturn ONLY a valid JSON array of the polished segments. No markdown, no preamble.`;
+  const userPrompt = `Here is the script for a video about "${sanitiseTopic(topic)}":\n\n${scriptJson}\n\nPOLISH this script using the rules below. For EVERY item, check the script and FIX violations.\n\n=== POLISH CHECKLIST ===\n\n1. FILLER REMOVAL: Remove every instance of: "basically", "actually", "literally", "essentially", "it's worth noting", "let me explain", "here's the thing", "now", "so", "well" (when used as sentence openers). These add nothing.\n\n2. VERB STRENGTH: Replace weak verbs with strong ones. "went" → "surged/plummeted/dove". "is going to" → "will". "has been" → "was". Every verb should carry weight.\n\n3. SENTENCE VARIATION: If 3+ consecutive sentences are the same length, rewrite one to be dramatically shorter or longer. Rhythm is everything.\n\n4. PAYOFF DELIVERY: Every segment must end with a payoff — an insight, a consequence, or a forward-looking statement that rewards the viewer. Never end a segment on a flat note.\n\n5. HOOK SHARPENING: The first 2 sentences of the intro must be the sharpest in the entire script. If they're not, rewrite them.\n\n6. SPECIFICITY BOOST: Any vague phrase ("a lot", "many", "significant", "substantial") must be replaced with a specific number or concrete detail.\n\n7. RHYTHM: Alternate between short punchy sentences (2-5 words) and medium explanatory sentences (10-20 words). Never write a paragraph where all sentences are the same length.\n\n8. WORD ECONOMY: Cut every word that doesn't change meaning. "In order to" → "To". "Due to the fact that" → "Because". "At this point in time" → "Now".\n\nReturn ONLY a valid JSON object in this shape: { "segments": [ ... ] }. No markdown, no preamble.`;
 
   try {
     const response = await fetchWithTimeout(
@@ -184,7 +184,7 @@ async function trimScriptPass(
   signal?: AbortSignal,
 ): Promise<ScriptSegment[]> {
   const systemPrompt =
-    'You are a ruthless script trimmer. Remove every sentence that does not advance the story. Each surviving sentence must do at least one of: advance the argument, provide a concrete detail, create emotional impact, re-hook the viewer, or give practical value. If a sentence does NONE of these, DELETE it. Return the trimmed script as a JSON array.';
+    'You are a ruthless script trimmer. Remove every sentence that does not advance the story. Each surviving sentence must do at least one of: advance the argument, provide a concrete detail, create emotional impact, re-hook the viewer, or give practical value. If a sentence does NONE of these, DELETE it. Return the trimmed script as a JSON object: { "segments": [ ... ] }';
 
   const scriptJson = JSON.stringify(
     segments.map((s) => ({
@@ -196,7 +196,7 @@ async function trimScriptPass(
     })),
   );
 
-  const userPrompt = `Here is the script for a video about "${sanitiseTopic(topic)}":\n\n${scriptJson}\n\nTRIM this script. Remove any sentence that does not advance the story.\n\nRULES:\n1. Every sentence must serve at least one purpose: advance the argument, provide a concrete detail, create emotional impact, re-hook the viewer, or give practical value.\n2. If a sentence is filler, repetition, throat-clearing, or vague commentary — REMOVE it.\n3. Common offenders to cut: "This is really important.", "Let's think about that for a moment.", "It's worth noting that...", "The implications are significant.", "This is a big deal.", "Now let's move on to...", "So what does this mean?"\n4. After removing sentences, do NOT add new filler to fill the gap. Let the segment be shorter if needed.\n5. Ensure the narration still flows naturally after trimming — no abrupt jumps.\n6. Do NOT trim the intro or outro below 5 sentences each.\n\nReturn ONLY a valid JSON array of the trimmed segments. No markdown, no preamble.`;
+  const userPrompt = `Here is the script for a video about "${sanitiseTopic(topic)}":\n\n${scriptJson}\n\nTRIM this script. Remove any sentence that does not advance the story.\n\nRULES:\n1. Every sentence must serve at least one purpose: advance the argument, provide a concrete detail, create emotional impact, re-hook the viewer, or give practical value.\n2. If a sentence is filler, repetition, throat-clearing, or vague commentary — REMOVE it.\n3. Common offenders to cut: "This is really important.", "Let's think about that for a moment.", "It's worth noting that...", "The implications are significant.", "This is a big deal.", "Now let's move on to...", "So what does this mean?"\n4. After removing sentences, do NOT add new filler to fill the gap. Let the segment be shorter if needed.\n5. Ensure the narration still flows naturally after trimming — no abrupt jumps.\n6. Do NOT trim the intro or outro below 5 sentences each.\n\nReturn ONLY a valid JSON object in this shape: { "segments": [ ... ] }. No markdown, no preamble.`;
 
   try {
     const response = await fetchWithTimeout(
@@ -267,7 +267,7 @@ export async function reviewAndImproveScript(
   signal?: AbortSignal,
 ): Promise<ScriptSegment[]> {
   const systemPrompt =
-    'You are a ruthless YouTube script editor who enforces specificity. Every segment must contain real statistics with numbers (dates, dollar amounts, percentages), named entities (real companies, people, places), and a mini-story arc (setup \u2192 tension \u2192 payoff). No generic summaries \u2014 demand concrete data and specific examples. Return the improved script as a JSON array of segments with the same structure.';
+    'You are a ruthless YouTube script editor who enforces specificity. Every segment must contain real statistics with numbers (dates, dollar amounts, percentages), named entities (real companies, people, places), and a mini-story arc (setup \u2192 tension \u2192 payoff). No generic summaries \u2014 demand concrete data and specific examples. Return the improved script as a JSON object: { "segments": [ ... ] }';
 
   const scriptJson = JSON.stringify(
     segments.map((s) => ({
@@ -423,7 +423,7 @@ export async function reviewAndImproveScript(
 - Remove any example or aside that appears without setup. Every mention must connect to the main argument.
 - If a named person is mentioned, verify they are plausible for the topic. If fabricated, replace with honest framing like "one engineer" or "a former employee."
 
-Return ONLY a valid JSON array of the improved segments. No markdown, no preamble.`;
+Return ONLY a valid JSON object in this shape: { "segments": [ ... ] }. No markdown, no preamble.`;
 
   try {
     const response = await fetchWithTimeout(

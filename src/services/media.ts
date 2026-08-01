@@ -34,6 +34,7 @@ import {
   isSafeStockProviderQuery,
   resolveTopicFamily,
   stockProviderQueriesForTopic,
+  topicFamilyTemplatesEnabled,
 } from './topicFamilyQueries';
 
 function isLoopFastMode(): boolean {
@@ -113,6 +114,51 @@ export const WATERMARK_INDICATORS = [
   'stock', 'watermark', 'preview', 'comp', 'sample', 'licensed',
   'shutterstock', 'gettyimages', 'alamy watermark', 'adobe stock',
 ];
+
+/**
+ * Whole-token matchers for WATERMARK_INDICATORS. Plain substring matching penalised
+ * innocent words such as "company", "stockholm" and "comparison", so each indicator
+ * must match a complete token (optionally pluralised or -ed/-ing suffixed).
+ */
+const WATERMARK_INDICATOR_PATTERNS: RegExp[] = WATERMARK_INDICATORS.map((indicator) => {
+  const escaped = indicator
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '[\\s_-]+');
+  return new RegExp(`(?<![a-z0-9])${escaped}(?:s|ed|ing)?(?![a-z0-9])`, 'i');
+});
+
+function safeDecodeUriComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Hostname + decoded path/query with every separator collapsed to a space, so
+ * indicator matching sees URL tokens ("photo-stock-1.jpg" → "photo stock 1 jpg")
+ * instead of one long string where "stockholm" looks like "stock".
+ */
+function watermarkMatchTextForUrl(url: string): string {
+  if (!url) return '';
+  let raw = url;
+  try {
+    const parsed = new URL(url);
+    raw = `${parsed.hostname} ${safeDecodeUriComponent(parsed.pathname)} ${safeDecodeUriComponent(parsed.search)}`;
+  } catch {
+    /* relative or malformed URL — match against the raw string */
+  }
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+}
+
+/* @internal */
+export function hasWatermarkIndicator(candidate: { alt?: string; url?: string }): boolean {
+  const alt = (candidate.alt || '').toLowerCase();
+  const urlText = watermarkMatchTextForUrl(candidate.url || '');
+  return WATERMARK_INDICATOR_PATTERNS.some((pattern) => pattern.test(alt) || pattern.test(urlText));
+}
 
 const WATERMARK_DOMAIN_PENALTY = -500;
 const WATERMARK_INDICATOR_PENALTY = -300;
@@ -663,7 +709,9 @@ export function scoreCandidate(
   }
 
   // 8b2. Nursing abuse topics: demote office/architecture, boost CCTV/care
-  const topicLower = `${_topicContext?.topic || ''} ${_topicContext?.resolvedTitle || ''} ${c.query || ''}`.toLowerCase();
+  // Topic flags come from the topic context only — a candidate's own query must not
+  // decide which topic family it is judged against.
+  const topicLower = `${_topicContext?.topic || ''} ${_topicContext?.resolvedTitle || ''}`.toLowerCase();
   const nursingTopic = /nursing\s*home|elder\s*abuse|care\s*home/.test(topicLower);
   if (nursingTopic) {
     if (/\b(office|corporate|skyline|architectural|conference room|business district|glass building)\b/i.test(meta)) {
@@ -938,16 +986,10 @@ export function scoreCandidate(
     }
   }
 
-  // 17. Watermark indicator string penalty — penalize candidates with watermark indicators in alt/URL
-  {
-    const altLower = (c.alt || '').toLowerCase();
-    const urlLower = (c.url || '').toLowerCase();
-    const hasWatermarkIndicator = WATERMARK_INDICATORS.some(
-      indicator => altLower.includes(indicator) || urlLower.includes(indicator)
-    );
-    if (hasWatermarkIndicator) {
-      score += WATERMARK_INDICATOR_PENALTY; // -300
-    }
+  // 17. Watermark indicator string penalty — whole-token matching on alt text and on
+  // URL host/path tokens, so 'company'/'stockholm'/'comparison' are not treated as stock
+  if (hasWatermarkIndicator(c)) {
+    score += WATERMARK_INDICATOR_PENALTY; // -300
   }
 
   // 18. Keyword match relevance scoring — require at least 2 keyword matches between
@@ -1062,8 +1104,8 @@ function upgradeToFullSize(url: string): string {
  *
  * This relies on the Vite dev-server proxy at /api/search.
  * In production (static single-file build) the proxy is unavailable, so
- * this function returns an empty array and the harvester falls back to
- * Wikimedia Commons, Unsplash, and Picsum automatically.
+ * this function returns an empty array and the harvester falls back to the
+ * remaining providers (Wikimedia Commons, Unsplash, Archive.org, …).
  */
 /* @internal */
 export async function searchDDGLocal(query: string, signal?: AbortSignal): Promise<MediaCandidate[]> {
@@ -1713,7 +1755,35 @@ async function hashCandidateThumb(
 // Cascading Resilience Engine 4.1
 // ---------------------------------------------------------------------------
 
-async function harvestMediaWithSafetyNet(
+/**
+ * Size / resolution / megapixel / aspect-ratio filters plus the domain blocklist
+ * (propaganda, watermarked stock, low-quality, NSFW). Every harvest result — primary
+ * query and every fallback query alike — must pass through here before it is scored.
+ */
+function filterHarvestCandidates(
+  candidates: MediaCandidate[],
+  stage: string,
+  excludeUrls?: Set<string>,
+): MediaCandidate[] {
+  let filtered = candidates
+    .filter(meetsMinimumSize)
+    .filter(meetsResolutionMinimum)
+    .filter(meetsMegapixelMinimum)
+    .filter(meetsAspectRatio);
+
+  if (excludeUrls && excludeUrls.size > 0) {
+    filtered = filtered.filter((c) => !excludeUrls.has((c.url || '').split('?')[0].toLowerCase()));
+  }
+
+  const { accepted, rejected } = filterCandidates(filtered);
+  for (const { candidate: rejCandidate, pattern, category } of rejected) {
+    logger.warn('DomainFilter', `Rejected (${stage}): ${rejCandidate.url} [${category}] matched pattern "${pattern}"`);
+  }
+  return accepted;
+}
+
+/* @internal — exported for tests */
+export async function harvestMediaWithSafetyNet(
   query: string,
   topicContext: TopicContext,
   config: AppConfig,
@@ -1771,25 +1841,16 @@ async function harvestMediaWithSafetyNet(
 
   progressCallback?.(`Found ${candidates.length} candidates, filtering...`, 15);
 
-  // Resolution minimum filter (Task 149)
-  candidates = candidates.filter(meetsResolutionMinimum);
+  // Resolution / megapixel / aspect-ratio / domain filtering before scoring
+  const accepted = filterHarvestCandidates(candidates, `S${depth + 1} primary`);
 
-  // Megapixel minimum filter (ensure sufficient image resolution)
-  candidates = candidates.filter(meetsMegapixelMinimum);
-
-  // Aspect ratio validation (Task 150)
-  candidates = candidates.filter(meetsAspectRatio);
-
-  // Domain filtering — reject blocked domains before scoring
-  const { accepted, rejected } = filterCandidates(candidates);
-  for (const { candidate: rejCandidate, pattern, category } of rejected) {
-    logger.warn('DomainFilter', `Rejected: ${rejCandidate.url} [${category}] matched pattern "${pattern}"`);
-  }
-
-  let scored = accepted.map(c => ({
+  /** Score a filtered batch with this segment's context. */
+  const scoreBatch = (batch: MediaCandidate[]) => batch.map(c => ({
     ...c,
-    finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle)
-  })).sort((a, b) => b.finalScore - a.finalScore);
+    finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
+  }));
+
+  let scored = scoreBatch(accepted).sort((a, b) => b.finalScore - a.finalScore);
 
   scored = applySecondaryStockPolicy(scored);
 
@@ -1841,11 +1902,10 @@ async function harvestMediaWithSafetyNet(
   }
 
   // Watermark/vision fallback: if vision check rejected all top candidates,
-  // try dedicated Wikimedia Commons and Unsplash (Picsum) sources before
-  // falling through to the general fallback chain.
+  // try dedicated Wikimedia Commons before falling through to the general fallback chain.
   if (visionRejectedAll && scored.filter(c => c.finalScore > 100).length < 2 && !signal?.aborted) {
-    trace.push(`[S${depth+1}] Vision rejected all top candidates — trying Wikimedia/Unsplash fallback`);
-    logger.warn('VisionCheck', `All top candidates rejected — attempting Wikimedia/Unsplash fallback for "${cleanQuery}"`);
+    trace.push(`[S${depth+1}] Vision rejected all top candidates — trying Wikimedia fallback`);
+    logger.warn('VisionCheck', `All top candidates rejected — attempting Wikimedia fallback for "${cleanQuery}"`);
 
     // Step A: Broaden query for watermark-free sources
     const broadenedFallbackQuery = cleanQuery
@@ -1856,49 +1916,16 @@ async function harvestMediaWithSafetyNet(
 
     // Step B: Try Wikimedia Commons directly
     const wikimediaResults = await searchWikimedia(broadenedFallbackQuery, signal);
-    if (wikimediaResults.length > 0) {
-      const wikiScored = wikimediaResults.map(c => ({
-        ...c,
-        finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
-      }));
-      scored.push(...wikiScored);
-      trace.push(`[S${depth+1}] Wikimedia fallback: found ${wikimediaResults.length} candidates`);
+    const wikimediaAccepted = filterHarvestCandidates(
+      wikimediaResults,
+      `S${depth + 1} vision-fallback wikimedia`,
+      loopCtx.exclude,
+    );
+    if (wikimediaAccepted.length > 0) {
+      scored.push(...scoreBatch(wikimediaAccepted));
+      trace.push(`[S${depth+1}] Wikimedia fallback: found ${wikimediaAccepted.length} candidates`);
+      scored.sort((a, b) => b.finalScore - a.finalScore);
     }
-
-    // Step C: Try Unsplash/Picsum as watermark-free source
-    const seed = broadenedFallbackQuery.toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 30);
-    const unsplashFallbacks: MediaCandidate[] = [
-      {
-        url: `https://picsum.photos/seed/${seed}-wm-fallback/1920/1080`,
-        alt: broadenedFallbackQuery,
-        source: 'Picsum (Unsplash fallback)',
-        baseScore: 30,
-        query: cleanQuery,
-        finalScore: 0,
-        type: 'image',
-        width: 1920,
-        height: 1080,
-      },
-      {
-        url: `https://picsum.photos/seed/${seed}-wm-fallback2/1280/720`,
-        alt: broadenedFallbackQuery,
-        source: 'Picsum (Unsplash fallback)',
-        baseScore: 30,
-        query: cleanQuery,
-        finalScore: 0,
-        type: 'image',
-        width: 1280,
-        height: 720,
-      },
-    ];
-    const unsplashScored = unsplashFallbacks.map(c => ({
-      ...c,
-      finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
-    }));
-    scored.push(...unsplashScored);
-    trace.push(`[S${depth+1}] Unsplash fallback: added ${unsplashFallbacks.length} candidates`);
-
-    scored.sort((a, b) => b.finalScore - a.finalScore);
   }
 
   // Resolution stage — resolve full-resolution URLs (with 15s timeout)
@@ -2004,11 +2031,8 @@ async function harvestMediaWithSafetyNet(
       trace.push(`[S${depth+1}] Fallback: broadening query to "${broadenedQuery}"`);
       logger.warn('MediaHarvester', `Fallback activated: broadening query from "${cleanQuery}" to "${broadenedQuery}"`);
       const broadened = await queryAllProviders(broadenedQuery, config, signal);
-      const broadScored = broadened.map(c => ({
-        ...c,
-        finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
-      }));
-      scored.push(...broadScored);
+      const broadAccepted = filterHarvestCandidates(broadened, `S${depth + 1} broadened`, loopCtx.exclude);
+      scored.push(...scoreBatch(broadAccepted));
       scored.sort((a, b) => b.finalScore - a.finalScore);
     }
 
@@ -2020,58 +2044,27 @@ async function harvestMediaWithSafetyNet(
         trace.push(`[S${depth+1}] Fallback: using coreSubject "${coreSubjectQuery}"`);
         logger.warn('MediaHarvester', `Fallback activated: using coreSubject "${coreSubjectQuery}" after broadened query failed`);
         const coreResults = await queryAllProviders(coreSubjectQuery, config, signal);
-        const coreScored = coreResults.map(c => ({
-          ...c,
-          finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
-        }));
-        scored.push(...coreScored);
+        const coreAccepted = filterHarvestCandidates(coreResults, `S${depth + 1} coreSubject`, loopCtx.exclude);
+        scored.push(...scoreBatch(coreAccepted));
         scored.sort((a, b) => b.finalScore - a.finalScore);
       }
     }
 
-    // Step 1c: Dedicated Wikimedia Commons / Unsplash fallback for watermark-free sources
+    // Step 1c: Dedicated Wikimedia Commons fallback for watermark-free sources
     const stillViableWmFree = scored.filter(c => c.finalScore > 100);
     if (stillViableWmFree.length < 2 && !signal?.aborted) {
       const wmFreeQuery = broadenedQuery || cleanQuery;
-      trace.push(`[S${depth+1}] Fallback: trying dedicated Wikimedia/Unsplash for "${wmFreeQuery}"`);
-      logger.warn('MediaHarvester', `Fallback activated: dedicated Wikimedia/Unsplash search for "${wmFreeQuery}"`);
+      trace.push(`[S${depth+1}] Fallback: trying dedicated Wikimedia for "${wmFreeQuery}"`);
+      logger.warn('MediaHarvester', `Fallback activated: dedicated Wikimedia search for "${wmFreeQuery}"`);
 
       // Try Wikimedia Commons directly with broadened query
       const wikiResults = await searchWikimedia(wmFreeQuery, signal);
-      if (wikiResults.length > 0) {
-        const wikiScored = wikiResults.map(c => ({
-          ...c,
-          finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
-        }));
-        scored.push(...wikiScored);
-        trace.push(`[S${depth+1}] Wikimedia fallback: found ${wikiResults.length} candidates`);
+      const wikiAccepted = filterHarvestCandidates(wikiResults, `S${depth + 1} wikimedia`, loopCtx.exclude);
+      if (wikiAccepted.length > 0) {
+        scored.push(...scoreBatch(wikiAccepted));
+        trace.push(`[S${depth+1}] Wikimedia fallback: found ${wikiAccepted.length} candidates`);
+        scored.sort((a, b) => b.finalScore - a.finalScore);
       }
-
-      // Add Unsplash/Picsum watermark-free candidates
-      const wmFreeSeed = wmFreeQuery.toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 30);
-      scored.push({
-        url: `https://picsum.photos/seed/${wmFreeSeed}-clean/1920/1080`,
-        alt: wmFreeQuery,
-        source: 'Picsum (Fallback)',
-        baseScore: 30,
-        query: cleanQuery,
-        finalScore: scoreCandidate({
-          url: `https://picsum.photos/seed/${wmFreeSeed}-clean/1920/1080`,
-          alt: wmFreeQuery,
-          source: 'Picsum (Fallback)',
-          baseScore: 30,
-          query: cleanQuery,
-          finalScore: 0,
-          type: 'image',
-          width: 1920,
-          height: 1080,
-        }, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
-        type: 'image',
-        width: 1920,
-        height: 1080,
-      });
-
-      scored.sort((a, b) => b.finalScore - a.finalScore);
     }
 
     // Step 2: Search related entities from TopicContext
@@ -2081,20 +2074,15 @@ async function harvestMediaWithSafetyNet(
       trace.push(`[S${depth+1}] Fallback: searching entities "${entityQuery}"`);
       logger.warn('MediaHarvester', `Fallback activated: searching entities "${entityQuery}"`);
       const entityResults = await queryAllProviders(entityQuery, config, signal);
-      const entityScored = entityResults.map(c => ({
-        ...c,
-        finalScore: scoreCandidate(c, topicContext, visualConcept, config.sourceType, narrationText, segmentTitle),
-      }));
-      scored.push(...entityScored);
+      const entityAccepted = filterHarvestCandidates(entityResults, `S${depth + 1} entities`, loopCtx.exclude);
+      scored.push(...scoreBatch(entityAccepted));
       scored.sort((a, b) => b.finalScore - a.finalScore);
     }
 
     // Step 3: Use Wikipedia hero image
     const stillViable2 = scored.filter(c => c.finalScore > 100);
     if (stillViable2.length < 2 && topicContext.thumbnailUrl) {
-      trace.push(`[S${depth+1}] Fallback: using Wikipedia hero image`);
-      logger.warn('MediaHarvester', `Fallback activated: using Wikipedia hero image for "${cleanQuery}"`);
-      scored.push({
+      const hero: MediaCandidate = {
         url: topicContext.thumbnailUrl,
         alt: `Wikipedia: ${topicContext.coreSubject}`,
         source: 'Wikipedia (Hero)',
@@ -2102,26 +2090,20 @@ async function harvestMediaWithSafetyNet(
         query: cleanQuery,
         finalScore: 120,
         type: 'image',
-      });
+      };
+      const heroAccepted = filterHarvestCandidates([hero], `S${depth + 1} wikipedia-hero`);
+      if (heroAccepted.length > 0) {
+        trace.push(`[S${depth+1}] Fallback: using Wikipedia hero image`);
+        logger.warn('MediaHarvester', `Fallback activated: using Wikipedia hero image for "${cleanQuery}"`);
+        scored.push(...heroAccepted);
+      }
     }
 
-    // Step 4: Last resort — Picsum stock seeded by segment title
-    const stillViable3 = scored.filter(c => c.finalScore > 100);
-    if (stillViable3.length < 2) {
-      trace.push(`[S${depth+1}] Fallback: using Picsum stock (last resort)`);
-      logger.warn('MediaHarvester', `Fallback activated: using Picsum stock (last resort) for "${cleanQuery}"`);
-      const seed = cleanQuery.toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 30);
-      scored.push({
-        url: `https://picsum.photos/seed/${seed}-fallback/1920/1080`,
-        alt: cleanQuery,
-        source: 'Picsum (Fallback)',
-        baseScore: 30,
-        query: cleanQuery,
-        finalScore: 30,
-        type: 'image',
-        width: 1920,
-        height: 1080,
-      });
+    // No synthetic last-resort stock: a segment with nothing viable stays empty so the
+    // caller can retry or fail, instead of shipping random Picsum photos.
+    if (scored.filter(c => c.finalScore > 100).length < 2) {
+      trace.push(`[S${depth+1}] Fallback exhausted: no viable candidates for "${cleanQuery}"`);
+      logger.warn('MediaHarvester', `Fallback exhausted with no viable candidates for "${cleanQuery}"`);
     }
   }
 
@@ -2243,6 +2225,16 @@ async function pickDistinctShotCandidate(
   return undefined;
 }
 
+/** Longest leading word window of a query that stock providers accept, or '' if none does. */
+function safeStockProviderPrefix(query: string): string {
+  const words = query.split(/\s+/).filter(Boolean);
+  for (let n = Math.min(words.length, 6); n >= 2; n -= 1) {
+    const candidate = words.slice(0, n).join(' ');
+    if (isSafeStockProviderQuery(candidate)) return candidate;
+  }
+  return '';
+}
+
 function buildSpecificQuery(baseQuery: string, topicContext: TopicContext): string {
   const topic = topicContext.topic || topicContext.coreSubject || '';
   const family = resolveTopicFamily(topic);
@@ -2252,11 +2244,16 @@ function buildSpecificQuery(baseQuery: string, topicContext: TopicContext): stri
   if (family === 'airline') {
     const base = String(baseQuery || '').trim().replace(/\s+/g, ' ');
     if (isSafeStockProviderQuery(base)) return base;
-    const safe = stockProviderQueriesForTopic(topic, 10);
-    if (!safe.length) return 'airplane cabin passengers daylight';
-    let hash = 0;
-    for (let i = 0; i < base.length; i += 1) hash = (hash + base.charCodeAt(i) * (i + 1)) % 997;
-    return safe[hash % safe.length];
+    // Family query templates are opt-in via AUTOTUBE_TOPIC_FAMILY_TEMPLATES (and forced off
+    // during cold eval), so only substitute one when that flag is actually on.
+    const safe = topicFamilyTemplatesEnabled() ? stockProviderQueriesForTopic(topic, 10) : [];
+    if (safe.length) {
+      let hash = 0;
+      for (let i = 0; i < base.length; i += 1) hash = (hash + base.charCodeAt(i) * (i + 1)) % 997;
+      return safe[hash % safe.length];
+    }
+    // Without templates, still shorten the essay so stock providers are not skipped.
+    return safeStockProviderPrefix(base) || base;
   }
 
   let query = baseQuery;

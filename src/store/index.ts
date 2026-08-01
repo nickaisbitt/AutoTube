@@ -228,24 +228,42 @@ export function useVideoProject() {
   const sourceMedia = useCallback(async (projectOverride?: VideoProject) => {
     const activeProject = projectOverride ?? project;
     if (!activeProject || sourcingRef.current) return null;
-    sourcingRef.current = true;
 
-    // Safety timeout — reset sourcingRef if stuck for >60s
-    const sourcingTimeout = window.setTimeout(() => {
-      if (sourcingRef.current) {
-        logger.warn('Store', 'sourcingRef safety timeout: resetting after 60s');
-        sourcingRef.current = false;
-      }
-    }, 60_000);
+    // Generation token + AbortController: ignore stale completions; do not unlock
+    // the mutex at 60s while this generation is still actively running.
+    const generation = Symbol('sourceMedia');
+    let activeGeneration: symbol | null = generation;
+    sourcingRef.current = true;
 
     mediaAbortRef.current = new AbortController();
     const signal = mediaAbortRef.current.signal;
+    const controller = mediaAbortRef.current;
+
+    const sourcingTimeout = window.setTimeout(() => {
+      // Still mid-flight for this generation — keep mutex locked (do not unlock).
+      if (activeGeneration === generation && mediaAbortRef.current === controller && !signal.aborted) {
+        logger.warn('Store', 'sourceMedia still running after 60s — keeping sourcing mutex locked');
+        return;
+      }
+      // Only unlock if this generation was already aborted/superseded
+      if (activeGeneration === generation && sourcingRef.current) {
+        logger.warn('Store', 'sourcingRef safety timeout: resetting after abort/stale generation');
+        sourcingRef.current = false;
+        activeGeneration = null;
+      }
+    }, 60_000);
+
+    const isStale = () => activeGeneration !== generation || signal.aborted;
 
     try {
       updateStepStatus('media', 'processing');
       setCurrentStep('media');
 
       const updatedProject = await executeSourceMedia(activeProject, appConfig, signal, getProgressCallbacks());
+      if (isStale()) {
+        logger.info('Store', 'Ignoring stale sourceMedia completion');
+        return null;
+      }
       if (!updatedProject) {
         updateStepStatus('media', 'active');
         setProcessingProgress(0);
@@ -258,6 +276,10 @@ export function useVideoProject() {
         media: updatedProject.media,
         topicContext: updatedProject.topicContext,
         visualPlans: updatedProject.visualPlans,
+        // Gate / orchestrator fields — must persist (not only media/topic/plans)
+        visualBeatSheet: updatedProject.visualBeatSheet,
+        script: updatedProject.script,
+        storyArcValidation: updatedProject.storyArcValidation,
       } : updatedProject));
       updateStepStatus('media', 'complete');
       updateStepStatus('narration', 'active');
@@ -266,12 +288,13 @@ export function useVideoProject() {
 
       return updatedProject;
     } catch (err) {
-      if ((err as Error).name === 'AbortError') {
+      if ((err as Error).name === 'AbortError' || isStale()) {
         logger.info('Store', 'Media sourcing cancelled by user');
-        sourcingRef.current = false;
-        updateStepStatus('media', 'active');
-        setProcessingProgress(0);
-        setProcessingMessage('');
+        if (!isStale() || (err as Error).name === 'AbortError') {
+          updateStepStatus('media', 'active');
+          setProcessingProgress(0);
+          setProcessingMessage('');
+        }
         return null;
       }
       logger.error('Store', 'sourceMedia failed', err);
@@ -279,8 +302,11 @@ export function useVideoProject() {
       setProcessingMessage(`Media sourcing failed: ${(err as Error).message}`);
       return null;
     } finally {
-      sourcingRef.current = false;
       window.clearTimeout(sourcingTimeout);
+      if (activeGeneration === generation) {
+        sourcingRef.current = false;
+        activeGeneration = null;
+      }
     }
   }, [project, updateStepStatus, appConfig, setCurrentStep, setProject, setProcessingProgress, setProcessingMessage, getProgressCallbacks, sourcingRef, mediaAbortRef]);
 
@@ -428,6 +454,9 @@ export function useVideoProject() {
           thumbnail: updatedProject!.thumbnail,
           exportSettings: updatedProject!.exportSettings,
           blindReview: updatedProject!.blindReview,
+          thumbnailConcepts: updatedProject!.thumbnailConcepts,
+          selectedThumbnailConcept: updatedProject!.selectedThumbnailConcept,
+          editTimeline: updatedProject!.editTimeline,
         } : updatedProject));
 
         updateStepStatus('assembly', 'complete');

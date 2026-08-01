@@ -166,15 +166,13 @@ describe('Bug 1: sourcingRef reset on abort', () => {
   });
 
   /**
-   * Task 1.1: safety timeout resets sourcingRef after 60s
-   *
-   * If sourceMedia gets stuck (e.g., a promise never resolves and never rejects),
-   * the safety timeout should reset sourcingRef.current after 60 seconds.
+   * Safety timeout must NOT unlock sourcingRef while media is still actively running.
+   * Mutex stays tied to the in-flight AbortController / generation token.
    */
-  it('safety timeout resets sourcingRef after 60s if stuck', async () => {
+  it('safety timeout does not unlock sourcingRef while media still running', async () => {
     const segments = makeHookSafeSegments(1);
 
-    // resolveTopicContext never resolves or rejects (simulates stuck state)
+    // resolveTopicContext never resolves or rejects (simulates stuck/long-running state)
     resolveTopicContext.mockImplementation(
       () => new Promise(() => {}), // never settles
     );
@@ -216,13 +214,11 @@ describe('Bug 1: sourcingRef reset on abort', () => {
       expect(resolved).toBeNull();
     });
 
-    // Advance time past the 60s safety timeout
+    // Advance time past the 60s safety timeout — mutex must stay locked while active
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
 
-    // Now a third call should succeed because the safety timeout reset sourcingRef
-    // We make resolveTopicContext resolve this time
     resolveTopicContext.mockResolvedValue({
       topic: 'Test',
       coreSubject: 'Test',
@@ -248,20 +244,18 @@ describe('Bug 1: sourcingRef reset on abort', () => {
       assets: [{ url: 'https://example.com/img.jpg', alt: 'test', source: 'test', concept: 'test' }],
     });
 
-    let thirdPromise: Promise<unknown>;
+    let thirdResult: unknown;
     act(() => {
-      thirdPromise = result.current.sourceMedia();
+      thirdResult = result.current.sourceMedia();
     });
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(200);
+      const resolved = await (thirdResult as Promise<unknown>);
+      // Still blocked — 60s timeout must not unlock mid-flight
+      expect(resolved).toBeNull();
     });
 
-    await act(async () => {
-      await thirdPromise!;
-    });
-
-    // The third call should have completed — proving the safety timeout worked
-    expect(result.current.stepStatuses.media).toBe('complete');
+    // Original call still holds the mutex
+    expect(result.current.stepStatuses.media).toBe('processing');
   });
 });

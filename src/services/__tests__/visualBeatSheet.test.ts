@@ -73,4 +73,26 @@ describe('visualBeatSheet', () => {
     expect(visualBeatsEnabled()).toBe(true);
     delete process.env.AUTOTUBE_VISUAL_BEATS;
   });
+
+  it('returns a validation failure instead of throwing for a missing sheet', () => {
+    expect(validateVisualBeatSheet(undefined)).toEqual({ ok: false, errors: ['no-beats'] });
+  });
+
+  it('builds one valid beat when the maximum budget is one', () => {
+    const sheet = buildVisualBeatSheetFromScript(
+      'school ransomware',
+      [
+        seg({
+          id: 's1',
+          narration: 'Parents received a warning email. District servers failed overnight.',
+        }),
+      ],
+      { min: 1, max: 1 },
+    );
+
+    expect(sheet.beats).toHaveLength(1);
+    expect(sheet.beats[0].id).toBe('beat-1');
+    expect(sheet.beats[0].searchableSubject).toBeTruthy();
+    expect(validateVisualBeatSheet(sheet).ok).toBe(true);
+  });
 });

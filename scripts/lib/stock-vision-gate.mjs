@@ -52,13 +52,14 @@ export function visionPromptForTopic(topicBlob = '') {
  * @param {string} imageUrl
  * @param {string} apiKey
  * @param {string} [topicBlob]
- * @returns {Promise<{ reject: boolean, reason?: string }>}
+ * @returns {Promise<{ ran: boolean, reject: boolean, reason?: string }>}
  */
 export async function visionRejectOffBrandStock(imageUrl, apiKey, topicBlob = '') {
-  if (!imageUrl || !apiKey) return { reject: false, reason: 'skipped' };
+  if (!imageUrl) return { ran: false, reject: false, reason: 'missing-image' };
+  if (!apiKey) return { ran: false, reject: false, reason: 'missing-key' };
   // If the topic itself is about insects/puppets, do not reject
   if (/\b(beetle|insect|puppet|cartoon|minecraft)\b/i.test(topicBlob)) {
-    return { reject: false, reason: 'topic-allows' };
+    return { ran: true, reject: false, reason: 'topic-allows' };
   }
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -86,15 +87,18 @@ export async function visionRejectOffBrandStock(imageUrl, apiKey, topicBlob = ''
         response_format: { type: 'json_object' },
       }),
     });
-    if (!response.ok) return { reject: false, reason: `http-${response.status}` };
+    if (!response.ok) return { ran: false, reject: false, reason: `http-${response.status}` };
     const data = await response.json();
     const raw = openRouterMessageText(data?.choices?.[0]?.message);
-    if (!raw) return { reject: false, reason: 'empty' };
+    if (!raw) return { ran: false, reject: false, reason: 'empty' };
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}') + 1;
     const parsed = JSON.parse(start >= 0 ? raw.slice(start, end) : raw);
-    return { reject: parsed.reject === true, reason: parsed.reason || '' };
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.reject !== 'boolean') {
+      return { ran: false, reject: false, reason: 'malformed' };
+    }
+    return { ran: true, reject: parsed.reject === true, reason: parsed.reason || '' };
   } catch (e) {
-    return { reject: false, reason: `error:${e.message}` };
+    return { ran: false, reject: false, reason: `error:${e.message}` };
   }
 }

@@ -552,9 +552,10 @@ describe('quality waves 2–5 helpers', () => {
     expect(getCostSummary().grandTotal).toBeGreaterThanOrEqual(0);
   });
 
-  it('openRouterMessageText falls back to reasoning', async () => {
+  it('openRouterMessageText returns content and does NOT fall back to reasoning', async () => {
     const { openRouterMessageText } = await import('../../utils/openRouterMessageText');
-    expect(openRouterMessageText({ content: '', reasoning: '{"ok":true}' })).toBe('{"ok":true}');
+    // reasoning is chain-of-thought prose — must NOT be fed into JSON parsers
+    expect(openRouterMessageText({ content: '', reasoning: '{"ok":true}' })).toBe('');
     expect(openRouterMessageText({ content: 'hello' })).toBe('hello');
   });
 

@@ -533,6 +533,15 @@ describe('isDomainBlocked', () => {
       ['https://xhamster.com/videos/123', 'xhamster'],
       ['https://redtube.com/123', 'redtube'],
       ['https://youporn.com/watch/123', 'youporn'],
+      ['https://ei-ph.rdtcdn.com/videos/202401/09/x.jpg', 'rdtcdn'],
+      ['https://cdn.ahcdn.com/thumb.jpg', 'ahcdn'],
+      ['https://cdn.x-cdn.com/img.jpg', 'x-cdn'],
+      ['https://ads.trafficjunky.net/x.jpg', 'trafficjunky'],
+      ['https://syndication.exoclick.com/x.jpg', 'exoclick'],
+      ['https://example.com/media/porn/thumb.jpg', '/porn'],
+      ['https://cdn.example.com/xxx/foo.jpg', '/xxx/'],
+      ['https://example.com/nsfw.jpg', 'nsfw'],
+      ['https://cdn.adult-cdn.net/x.jpg', 'adult-cdn'],
     ])('blocks %s (pattern: %s)', (url, expectedPattern) => {
       const result = isDomainBlocked(url);
       expect(result.blocked).toBe(true);

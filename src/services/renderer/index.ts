@@ -6,7 +6,7 @@
 
 export { renderVideoToBlob, QUALITY_PRESETS } from './orchestrator';
 export type { RenderOptions, ImgCache } from './orchestrator';
-export { computeVisualStyle, getFrameSampleRate } from './animation';
+export { computeVisualStyle, getFrameSampleRate, getFrameInterval, getEffectiveSampleRate } from './animation';
 export type { VisualStyleType } from './animation';
 export { drawProceduralBackground, draw, saturationCache } from './canvas/draw';
 export { drawKineticTextOverlay, drawDiagramOverlay } from './canvas/overlays';

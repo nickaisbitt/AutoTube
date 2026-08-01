@@ -319,6 +319,50 @@ export function isVolumePaddingAsset(asset) {
   return /volume top-up|stock pool|stock-video|cyber-stock|stock video pool|topup-|stock-topup-/i.test(blob);
 }
 
+/** Synthetic harvest queries that never describe the media they fetched. */
+const SYNTHETIC_QUERY_RE = /^(stock-video|stock-pool)\b/i;
+
+const PROVIDER_ALT_PREFIX_RE =
+  /^(?:pexels|pixabay|unsplash|archive\.org|mixkit|coverr)(?:\s+(?:video|photo|image|still))?\s*:\s*/i;
+const PROVIDER_ALT_ONLY_RE =
+  /^(?:pexels|pixabay|unsplash|archive\.org|mixkit|coverr)(?:\s+(?:video|photo|image|still))?$/i;
+
+const CRIME_HEIST_EVIDENCE_RE =
+  /airport|runway|terminal|vault|safe|security|diamond|jewel|cargo|guard|heist|plane|aviation|warehouse|investigation|documentary|news/i;
+const AIRLINE_AVIATION_EVIDENCE_RE =
+  /\b(airplane|aircraft|aviation|cabin|cockpit|oxygen\s*mask|hangar|runway|tarmac|boarding|flight\s*attendant|pilot\s*cockpit)\b/i;
+
+/** The search string an asset was fetched with (synthetic pool queries dropped). */
+export function assetSearchQueryText(asset) {
+  const query = String(asset?.query || '').trim();
+  if (!query || SYNTHETIC_QUERY_RE.test(query)) return '';
+  return query.toLowerCase();
+}
+
+/**
+ * What the media itself claims to show. The query used to fetch an asset is
+ * excluded on purpose: providers echo the search string back into `alt`, which
+ * lets a football clip certify itself as "worried passenger face". Query text
+ * may only strengthen an asset that already has visual evidence.
+ *
+ * @param {object} asset
+ * @returns {string}
+ */
+export function visualEvidenceBlob(asset) {
+  const rawAlt = String(asset?.alt || '').trim();
+  const query = assetSearchQueryText(asset);
+  let alt = PROVIDER_ALT_ONLY_RE.test(rawAlt)
+    ? ''
+    : rawAlt.replace(PROVIDER_ALT_PREFIX_RE, '').toLowerCase();
+  if (alt && query) {
+    alt = alt.split(query).join(' ');
+  }
+  return `${alt} ${asset?.title || ''} ${asset?.sourceUrl || ''} ${asset?.url || ''} ${asset?.thumbnailUrl || ''}`
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * @param {object} asset
  * @param {object} segment
@@ -332,67 +376,35 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   const strongTopicKws = topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
   const corpus = new Set([...strongTopicKws, ...segKeywords]);
 
-  const haystackRaw = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
-  // Ignore synthetic stock-video/stock-pool queries.
-  const queryText = String(asset?.query || '');
-  const queryForScore = /^(stock-video|stock-pool)\b/i.test(queryText) ? '' : queryText.toLowerCase();
-  const haystack = `${haystackRaw} ${queryForScore}`.trim();
-  if (!haystack.trim()) return 0;
+  const visual = visualEvidenceBlob(asset);
+  const queryForScore = assetSearchQueryText(asset);
+  if (!visual) return 0;
 
   const contextText = `${topic} ${segText}`.toLowerCase();
-  if (offTopicBlockReason(haystack, contextText)) return 0;
+  // Junk/off-brand gates still read the query: a fetch string that admits junk fails closed.
+  if (offTopicBlockReason(`${visual} ${queryForScore}`.trim(), contextText)) return 0;
 
-  let topicHits = 0;
-  let segHits = 0;
-  for (const kw of strongTopicKws) {
-    if (haystack.includes(kw)) topicHits += 1;
-  }
-  for (const kw of segKeywords) {
-    if (haystack.includes(kw)) segHits += 1;
-  }
+  const countHits = (keywords, text) => keywords.reduce((n, kw) => (text.includes(kw) ? n + 1 : n), 0);
+  const visualTopicHits = countHits(strongTopicKws, visual);
+  const visualSegHits = countHits(segKeywords, visual);
+  const combined = queryForScore ? `${visual} ${queryForScore}` : visual;
+  const topicHits = countHits(strongTopicKws, combined);
+  const segHits = countHits(segKeywords, combined);
 
-  const strongHits = topicHits + segHits;
-  if (strongHits === 0) {
-    if (
-      isCrimeHeistTopic(topic)
-      && /airport|runway|terminal|vault|safe|security|diamond|jewel|cargo|guard|heist|plane|aviation|warehouse|investigation|documentary|news/.test(
-        haystack,
-      )
-    ) {
-      return 0.35;
-    }
-    if (
-      isAirlineTopic(topic)
-      && /\b(airplane|aircraft|aviation|cabin|cockpit|oxygen\s*mask|hangar|runway|tarmac|boarding|flight\s*attendant|pilot\s*cockpit)\b/i.test(
-        haystack,
-      )
-    ) {
-      return 0.4;
-    }
+  // The query never establishes relevance on its own — the media must show something topical.
+  if (visualTopicHits + visualSegHits === 0) {
+    if (isCrimeHeistTopic(topic) && CRIME_HEIST_EVIDENCE_RE.test(visual)) return 0.35;
+    if (isAirlineTopic(topic) && AIRLINE_AVIATION_EVIDENCE_RE.test(visual)) return 0.4;
     return 0;
   }
   if (segHits === 0 && topicHits < 2) {
-    if (
-      isCrimeHeistTopic(topic)
-      && /airport|runway|terminal|vault|safe|security|diamond|jewel|cargo|guard|heist|plane|aviation|warehouse|investigation|documentary|news/.test(
-        haystack,
-      )
-    ) {
-      return 0.3;
-    }
-    if (
-      isAirlineTopic(topic)
-      && /\b(airplane|aircraft|aviation|cabin|cockpit|oxygen\s*mask|hangar|runway|tarmac|boarding|flight\s*attendant|pilot\s*cockpit)\b/i.test(
-        haystack,
-      )
-    ) {
-      return 0.35;
-    }
+    if (isCrimeHeistTopic(topic) && CRIME_HEIST_EVIDENCE_RE.test(visual)) return 0.3;
+    if (isAirlineTopic(topic) && AIRLINE_AVIATION_EVIDENCE_RE.test(visual)) return 0.35;
     return 0;
   }
 
   const denom = Math.min(Math.max(corpus.size, 1), 8);
-  let score = strongHits / denom;
+  let score = (topicHits + segHits) / denom;
 
   if (asset?.type === 'video' || /\.(mp4|webm|mov)/i.test(asset?.url || '')) {
     score += 0.05;
@@ -435,13 +447,9 @@ export function filterAssetsByRelevance(media, project, options = {}) {
     const score = scoreAssetRelevance(asset, seg, topic, topicKeywords);
     if (score >= minScore) {
       kept.push({ ...asset, relevanceScore: Math.round(score * 100) / 100 });
-    } else if (
-      isAirlineTopic(topic)
-      && /\b(airplane|aircraft|aviation|cabin|cockpit|oxygen\s*mask|hangar|runway|tarmac|boarding|flight\s*attendant|pilot\s*cockpit)\b/i.test(
-        haystack,
-      )
-    ) {
-      // Keyword essay matching still misses short aviation stock queries — keep them.
+    } else if (isAirlineTopic(topic) && AIRLINE_AVIATION_EVIDENCE_RE.test(visualEvidenceBlob(asset))) {
+      // Keyword essay matching misses short aviation stock alts, but the aviation
+      // token has to come from the media itself — never from the search query.
       kept.push({ ...asset, relevanceScore: 0.35 });
     } else {
       dropped.push({
@@ -456,6 +464,9 @@ export function filterAssetsByRelevance(media, project, options = {}) {
   return { media: kept, dropped, minScore };
 }
 
+/** Volume padding gets a discount on the relevance floor, never a bypass. */
+export const VOLUME_PADDING_MIN_RELEVANCE = 0.2;
+
 /**
  * Re-attach volume-padding assets dropped by relevance so per-segment counts hold.
  * @param {object[]} media
@@ -464,13 +475,19 @@ export function filterAssetsByRelevance(media, project, options = {}) {
 export function mergeVolumePadding(media, padding, project = null) {
   let pad = padding || [];
   if (project && pad.length) {
-    // Keep volume padding unless hard junk/off-brand.
     const topicBlob = `${project.topic || ''} ${project.title || ''}`;
+    const topicKeywords = extractKeywords(topicBlob, 12);
+    const segments = Object.fromEntries((project.script || []).map((s) => [s.id, s]));
     pad = pad.filter((asset) => {
       const blob = `${asset.alt || ''} ${asset.query || ''} ${asset.source || ''} ${asset.url || ''}`;
       if (isOffBrandVisual(blob, topicBlob)) return false;
       if (isGenericStockJunk(blob, topicBlob)) return false;
-      return true;
+      // Padding must still be topical, or thin segments become a laundering channel
+      // for off-topic media the relevance filter just dropped.
+      const seg = segments[asset.segmentId] || project.script?.[0];
+      return (
+        scoreAssetRelevance(asset, seg, topicBlob, topicKeywords) >= VOLUME_PADDING_MIN_RELEVANCE
+      );
     });
   }
   const out = [...media];
@@ -530,8 +547,13 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
  * @returns {{ pass: boolean, reason?: string }}
  */
 export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
-  if (mediaReport?.volumePass !== false) {
+  const volumePass = mediaReport?.volumePass;
+  if (volumePass === true) {
     return { pass: true, reason: 'volume-hard-pass' };
+  }
+  if (volumePass !== false) {
+    // A missing verdict is not a pass: without a volume check there is nothing to soft-pass.
+    return { pass: false, reason: 'volume-unknown-fail-closed' };
   }
   const segments = project?.script || [];
   const segN = segments.length || 1;
@@ -600,6 +622,20 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     if (stockFetched > 0 || topUp >= segN || liveStockPresent) {
       return { pass: true, reason: `soft-pass-motion-airline(${videoCount}v/${segN}segs)` };
     }
+    // Airline harvests are judged by the airline gate alone — falling through to the
+    // generic soft-passes would let stills/aggregate counts launder an untested pool.
+    return {
+      pass: false,
+      reason: `soft-pass-motion-airline-no-live-motion(${videoCount}v/${segN}segs)`,
+    };
+  }
+
+  // No soft-pass may launder a junk-dominated video pool, whichever path would fire.
+  if (videoCount > 0 && genericJunkRatio > SOFT_PASS_GENERIC_JUNK_RATIO_MAX) {
+    return {
+      pass: false,
+      reason: `soft-pass-motion-generic-junk(${genericJunkVideos}/${videoCount} videos)`,
+    };
   }
 
   // Soft-pass A: cyber stills + ≥1 video/seg
@@ -610,12 +646,6 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const motionMinPerSeg = 2;
   const motionRich = videosPerSeg >= motionMinPerSeg && (stockFetched > 0 || topUp >= segN);
   if (motionRich) {
-    if (genericJunkRatio > 0.4) {
-      return {
-        pass: false,
-        reason: `soft-pass-motion-generic-junk(${genericJunkVideos}/${videoCount} videos)`,
-      };
-    }
     if (stockKeyMotionAvailable && uniqueTopicalVideos < 16) {
       return {
         pass: false,
@@ -653,6 +683,9 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   }
   return { pass: false, reason: 'volume-hard-fail' };
 }
+
+/** Shared junk ceiling for every non-airline soft-pass path. */
+const SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.4;
 
 const AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
 const AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
@@ -711,14 +744,21 @@ function airlineHardRejectReason(asset = {}) {
 }
 
 function isAirlineStrongVideo(asset = {}) {
-  const blob = airlineVideoBlob(asset);
-  if (airlineHardRejectReason(asset) || isGenericStockJunk(blob, 'airline cabin pressure')) return false;
+  // Rejections read the full blob (query included) so junk fails closed…
+  if (
+    airlineHardRejectReason(asset)
+    || isGenericStockJunk(airlineVideoBlob(asset), 'airline cabin pressure')
+  ) {
+    return false;
+  }
+  // …but aviation proof has to come from the media, not the string we searched with.
+  const blob = visualEvidenceBlob(asset);
+  if (!blob) return false;
   if (AIRLINE_STRONG_CABIN_RE.test(blob)) return true;
   if (AIRLINE_STRONG_COCKPIT_RE.test(blob)) return true;
   if (AIRLINE_STRONG_OXYGEN_RE.test(blob)) return true;
   if (AIRLINE_STRONG_HANGAR_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
   if (AIRLINE_STRONG_RUNWAY_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
-  // Controlled search queries / aviation tokens count as strong even with placeholder alts.
   if (
     /\b(airplane cabin|pilot cockpit|flight attendant airplane|passenger oxygen mask|oxygen mask deploy|maintenance hangar|mechanic tools aircraft|cabin pressure gauge|airport runway plane|aircraft maintenance|airplane|aircraft|cockpit|hangar|runway|tarmac|boarding)\b/i.test(
       blob,

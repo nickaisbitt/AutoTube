@@ -419,7 +419,9 @@ describe('isJunkStockClip + faceSeek relevance', () => {
       ]),
     );
     expect(q.every((query) => !/FAA report paperwork|redacted paperwork/i.test(query))).toBe(true);
-    expect(q.every((query) => wordCount(query) >= 3 && wordCount(query) <= 6)).toBe(true);
+    // Head pack is descriptive; bare aviation fallbacks ("airplane", "cockpit") stay allowed.
+    expect(q.slice(0, 8).every((query) => wordCount(query) >= 3 && wordCount(query) <= 6)).toBe(true);
+    expect(q.every((query) => wordCount(query) >= 1 && wordCount(query) <= 6)).toBe(true);
     expect(q.every((query) => query.length <= 64 && isSafeStockMotionQuery(query))).toBe(true);
     expect(q.every((query) => !query.toLowerCase().includes('regional airline cabin pressure cover up'))).toBe(
       true,
@@ -505,6 +507,7 @@ describe('isJunkStockClip + faceSeek relevance', () => {
         topic,
       ),
     ).toBe(false);
+    // A trusted query is intent, not evidence: with no visual metadata it proves nothing.
     expect(
       isAirlineRelevantClip(
         {
@@ -513,11 +516,21 @@ describe('isJunkStockClip + faceSeek relevance', () => {
         },
         topic,
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isAirlineRelevantClip(
         {
           alt: 'Pexels video',
+          query: 'airplane cabin passenger face worried',
+        },
+        topic,
+      ),
+    ).toBe(false);
+    // Same query, but the clip's own tags show the cabin — that passes.
+    expect(
+      isAirlineRelevantClip(
+        {
+          alt: 'airplane cabin interior passengers seated aisle',
           query: 'airplane cabin passenger face worried',
         },
         topic,
@@ -587,6 +600,221 @@ describe('isJunkStockClip + faceSeek relevance', () => {
     ]) {
       expect(prompt).toMatch(preferPattern);
     }
+  });
+});
+
+describe('harvest relevance uses visual evidence, not the search query', () => {
+  const airlineTopic = 'How a regional airline hid recurring cabin-pressure failures';
+  const airlineSegment = {
+    id: 's1',
+    title: 'Cabin pressure failures',
+    narration: 'airline cabin pressure failure cockpit oxygen inspection',
+  };
+  const airlineProject = () => ({
+    topic: airlineTopic,
+    script: [airlineSegment],
+    media: [],
+  });
+
+  it('scores query-only "aviation" clips at zero and still credits real tags', async () => {
+    const { scoreAssetRelevance } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const query = 'airplane cabin pressure failure oxygen mask';
+
+    expect(
+      scoreAssetRelevance(
+        {
+          type: 'video',
+          url: 'https://videos.example.com/clip-1234.mp4',
+          alt: 'football player celebration stadium',
+          query,
+        },
+        airlineSegment,
+        airlineTopic,
+      ),
+    ).toBe(0);
+    expect(
+      scoreAssetRelevance(
+        {
+          type: 'video',
+          url: 'https://videos.example.com/clip-5678.mp4',
+          alt: 'Pexels video',
+          query,
+        },
+        airlineSegment,
+        airlineTopic,
+      ),
+    ).toBe(0);
+    expect(
+      scoreAssetRelevance(
+        {
+          type: 'video',
+          url: 'https://videos.example.com/clip-9012.mp4',
+          alt: 'airplane cabin oxygen masks deployed above passengers',
+          query,
+        },
+        airlineSegment,
+        airlineTopic,
+      ),
+    ).toBeGreaterThan(0.25);
+  });
+
+  it('airline keep-path in filterAssetsByRelevance ignores query-only aviation tokens', async () => {
+    const { filterAssetsByRelevance } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const { media: kept, dropped } = filterAssetsByRelevance(
+      [
+        {
+          id: 'echo',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.example.com/echo-clip.mp4',
+          alt: 'Pexels video',
+          query: 'airplane cabin oxygen mask deploy',
+        },
+        {
+          id: 'real',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://videos.example.com/real-clip.mp4',
+          alt: 'airplane cabin aisle passengers daylight',
+          query: 'airplane cabin oxygen mask deploy',
+        },
+      ],
+      airlineProject(),
+      { minScore: 0.25 },
+    );
+
+    expect(kept.map((a: { id: string }) => a.id)).toEqual(['real']);
+    expect(dropped.some((d: { url?: string }) => d.url?.includes('echo-clip'))).toBe(true);
+  });
+
+  it('airline strong-video floor does not count query-only evidence', async () => {
+    const { airlineSoftPassMotionFailureReason } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: Array.from({ length: 6 }, (_, i) => ({ id: `s${i + 1}` })),
+      media: Array.from({ length: 12 }, (_, i) => ({
+        type: 'video',
+        segmentId: `s${(i % 6) + 1}`,
+        url: `https://videos.example.com/opaque-${i}.mp4`,
+        alt: 'Pexels video',
+        query: 'airplane cabin oxygen mask deploy',
+        source: 'Stock video pool',
+      })),
+    };
+
+    expect(airlineSoftPassMotionFailureReason(project)).toBe(
+      'soft-pass-motion-airline-aviation-strong-floor(0/4 videos)',
+    );
+  });
+
+  it('mergeVolumePadding drops off-topic padding instead of laundering it', async () => {
+    const { mergeVolumePadding } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const padding = (id: string, alt: string, slug: string) => ({
+      id,
+      segmentId: 's1',
+      type: 'image',
+      url: `https://images.example.com/${slug}.jpg`,
+      alt,
+      query: 'stock-pool Hook',
+      source: 'Stock pool (volume top-up)',
+    });
+
+    const merged = mergeVolumePadding(
+      [],
+      [
+        padding('pad-offtopic', 'camel caravan desert dunes at sunset', 'desert-camel'),
+        padding('pad-cabin', 'airplane cabin interior oxygen mask panel', 'cabin-panel'),
+      ],
+      airlineProject(),
+    );
+
+    expect(merged.map((a: { id: string }) => a.id)).toEqual(['pad-cabin']);
+  });
+});
+
+describe('harvest volume soft-pass fails closed', () => {
+  const airlineTopic = 'How a regional airline hid recurring cabin-pressure failures';
+  const strongAirlineVideos = () =>
+    Array.from({ length: 12 }, (_, i) => ({
+      type: 'video',
+      segmentId: `s${(i % 6) + 1}`,
+      url: `https://videos.example.com/airline-strong-${i}.mp4`,
+      alt: [
+        'airplane cabin passengers oxygen masks',
+        'pilot cockpit instruments aircraft',
+        'maintenance hangar aircraft mechanic',
+        'airport runway aircraft taking off',
+      ][i % 4],
+      source: 'Stock video pool',
+    }));
+
+  it('treats a missing volume verdict as a failure, not a hard pass', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: Array.from({ length: 6 }, (_, i) => ({ id: `s${i + 1}` })),
+      media: strongAirlineVideos(),
+    };
+
+    expect(evaluateHarvestVolumeWithSoftPass({}, project)).toEqual({
+      pass: false,
+      reason: 'volume-unknown-fail-closed',
+    });
+    expect(
+      evaluateHarvestVolumeWithSoftPass({ volumePass: undefined, cyberStockInjected: 40 }, project),
+    ).toEqual({ pass: false, reason: 'volume-unknown-fail-closed' });
+    expect(evaluateHarvestVolumeWithSoftPass({ volumePass: true }, project)).toEqual({
+      pass: true,
+      reason: 'volume-hard-pass',
+    });
+  });
+
+  it('airline harvests never fall through to the generic soft-passes', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: airlineTopic,
+      script: Array.from({ length: 6 }, (_, i) => ({ id: `s${i + 1}` })),
+      media: strongAirlineVideos(),
+    };
+
+    const soft = evaluateHarvestVolumeWithSoftPass(
+      { volumePass: false, cyberStockInjected: 8 },
+      project,
+    );
+    expect(soft.pass).toBe(false);
+    expect(soft.reason).toBe('soft-pass-motion-airline-no-live-motion(12v/6segs)');
+  });
+
+  it('junk-dominated pools cannot ride the cyber-stills soft-pass', async () => {
+    const { evaluateHarvestVolumeWithSoftPass } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const project = {
+      topic: 'How school districts lost student mental-health records to ransomware',
+      script: [{ id: 's1' }, { id: 's2' }],
+      media: Array.from({ length: 8 }, (_, i) => ({
+        type: 'video',
+        segmentId: i % 2 ? 's1' : 's2',
+        url: `https://videos.example.com/mix-${i}.mp4`,
+        alt: i < 6
+          ? 'corporate handshake empty office skyline timelapse'
+          : 'school hallway students worried phone ransomware records',
+        source: 'Stock video pool',
+      })),
+    };
+
+    const soft = evaluateHarvestVolumeWithSoftPass(
+      { volumePass: false, cyberStockInjected: 8 },
+      project,
+    );
+    expect(soft.pass).toBe(false);
+    expect(soft.reason).toBe('soft-pass-motion-generic-junk(6/8 videos)');
   });
 });
 

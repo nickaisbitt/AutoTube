@@ -76,11 +76,17 @@ export function usePlayback(
     };
   }, [audioRef]);
 
-  useEffect(() => {
+  // Seek the native <video> only on explicit user seeks (jumpToTime / reset).
+  // Never assign video.currentTime from timeupdate-driven currentTime state — that
+  // creates a seek loop (timeupdate → setState → effect → currentTime = … → timeupdate).
+  const seekVideoTo = useCallback((time: number) => {
     if (previewMode === 'rendered' && videoRef.current) {
-      videoRef.current.currentTime = currentTime;
+      const video = videoRef.current;
+      if (Math.abs(video.currentTime - time) > 0.25) {
+        video.currentTime = time;
+      }
     }
-  }, [currentTime, previewMode, videoRef]);
+  }, [previewMode, videoRef]);
 
   useEffect(() => {
     if (previewMode === 'rendered' && videoRef.current) {
@@ -216,6 +222,7 @@ export function usePlayback(
     stopSpeaking();
     audioRef.pause();
     setCurrentTime(0);
+    seekVideoTo(0);
     setIsPlaying(false);
     setIsNarrating(false);
     lastNarratedSegment.current = -1;
@@ -223,7 +230,9 @@ export function usePlayback(
 
   const jumpToTime = (newTime: number) => {
     seekingRef.current = true;
-    setCurrentTime(Math.max(0, newTime));
+    const clamped = Math.max(0, newTime);
+    setCurrentTime(clamped);
+    seekVideoTo(clamped);
     lastNarratedSegment.current = -1;
     stopSpeaking();
     audioRef.pause();

@@ -123,12 +123,15 @@ export function hasWeakHookOpener(text: string): { weak: boolean; reason: string
     }
   }
 
-  const lower = trimmed.toLowerCase();
-  const match = GENERIC_HOOK_PHRASES.find((p) => lower.includes(p));
+  // Scope GENERIC_HOOK_PHRASES to the first sentence only.
+  // Checking the full narration would incorrectly flag hooks that happen to
+  // contain a generic phrase mid-paragraph (e.g. "…in today's video market…").
+  const firstSentenceLower = firstSentence.toLowerCase();
+  const match = GENERIC_HOOK_PHRASES.find((p) => firstSentenceLower.includes(p));
   if (match) {
     return {
       weak: true,
-      reason: `Opening uses generic phrase "${match}" — rewrite with personal-stakes hook`,
+      reason: `Opening sentence uses generic phrase "${match}" — rewrite with personal-stakes hook`,
     };
   }
 
@@ -152,11 +155,16 @@ export function buildShortHookOverlay(text: string, maxWords = MAX_HOOK_OVERLAY_
 /**
  * Detects the hook pattern used in a text.
  *
- * Identifies one of four patterns:
+ * Identifies one of three valid patterns (question hooks are intentionally
+ * excluded — the script generator bans question-only hooks to prevent weak
+ * openers like "What if…?" or "Have you ever…?"):
  * - surprising_statistic: Contains numbers, percentages, or dollar amounts
- * - provocative_question: Contains a question mark in the first 2 sentences
  * - personal_stakes: Uses you/your language to address the viewer directly
  * - counterintuitive_claim: Uses but/however/actually to set up a twist
+ *
+ * NOTE: `provocative_question` is kept in the HookPattern union for backward
+ * compatibility but is never returned by this detector — generator rule and
+ * validator now agree: question-only hooks are invalid.
  *
  * @param text - The text to analyze for hook patterns
  * @returns The detected HookPattern, or null if no pattern is found
@@ -173,11 +181,6 @@ export function detectHookPattern(text: string): HookPattern | null {
     }
   }
 
-  // Check for provocative question (question marks in first 2 sentences)
-  if (firstTwoSentences.includes('?')) {
-    return 'provocative_question';
-  }
-
   // Check for personal stakes (you/your language)
   for (const pattern of PERSONAL_STAKES_PATTERNS) {
     if (pattern.test(firstTwoSentences)) {
@@ -191,6 +194,9 @@ export function detectHookPattern(text: string): HookPattern | null {
       return 'counterintuitive_claim';
     }
   }
+
+  // Question-only hooks are NOT valid — generator bans them ("NOT a question").
+  // A "?" alone no longer satisfies the hook requirement.
 
   return null;
 }

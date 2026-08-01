@@ -140,6 +140,7 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
   }
 
   const exportBlock = getExportBlockStatus(project);
+  const exportHardBlocked = exportBlock.blocked && !exportBlock.allowDownloadAnyway;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-6 py-8" data-testid="preview-step">
@@ -156,14 +157,14 @@ export default function PreviewStep({ project, onReset, onOpenExport }: PreviewS
           {onOpenExport && (
             <button
               onClick={onOpenExport}
-              disabled={exportBlock.blocked}
+              disabled={exportHardBlocked}
               className={`flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase shadow-hard-sm ${
-                exportBlock.blocked
+                exportHardBlocked
                   ? 'cursor-not-allowed bg-surface-700 text-surface-500'
                   : 'bg-brand-500 text-black hover:bg-brand-400'
               }`}
-              aria-label={exportBlock.blocked ? 'Export blocked by quality gate' : 'Open export settings'}
-              title={exportBlock.blocked ? exportBlock.reason : 'Open export settings'}
+              aria-label={exportHardBlocked ? 'Export blocked by quality gate' : 'Open export settings'}
+              title={exportBlock.warning ?? exportBlock.reason ?? 'Open export settings'}
               data-testid="preview-export-button"
             >
               <Download className="h-4 w-4" />

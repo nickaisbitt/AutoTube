@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { buildImpactBeatsForTopic } from '../scripts/lib/impactBeatsByTopic.mjs';
 import { promoteIntroFaceVideo } from '../scripts/lib/patch-project-for-loop.mjs';
 import { overlayTextPolicy, repairMergedCaptionText } from '../deploy/server-render/ffmpegOverlays.mjs';
+import { narrationSpeechIntervals } from '../deploy/server-render/narration.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -39,6 +40,35 @@ describe('ffmpeg overlay policy — less text spam', () => {
   it('repairs merged caption words before ASS text is burned', () => {
     expect(repairMergedCaptionText('CABINKEEP')).toBe('CABIN KEEP');
     expect(repairMergedCaptionText('cabinKeep APIResponse 2026Update')).toBe('cabin Keep API Response 2026 Update');
+  });
+});
+
+describe('caption offsets from the narration audio timeline', () => {
+  it('includes intro silence and inter-segment gap/breath pads in speech offsets', () => {
+    const audioFiles = [
+      { file: 'silence-intro.wav', duration: 3.5, kind: 'intro-silence' },
+      { file: 'narration-0.wav', duration: 10, kind: 'narration', segmentIndex: 0, subtitleFile: 'narration-0.vtt' },
+      { file: 'breath-0.wav', duration: 0.25, kind: 'breath', segmentIndex: 0 },
+      { file: 'silence-0.wav', duration: 0.25, kind: 'gap', segmentIndex: 0 },
+      { file: 'narration-1.wav', duration: 8, kind: 'narration', segmentIndex: 1, subtitleFile: null },
+      { file: 'silence-1.wav', duration: 0.25, kind: 'gap', segmentIndex: 1 },
+      { file: 'silence-end.wav', duration: 4, kind: 'end-silence' },
+    ];
+    const intervals = narrationSpeechIntervals(audioFiles);
+    expect(intervals.get(0)).toEqual({ start: 3.5, end: 13.5 });
+    // Segment 1 speech starts after intro + narration 0 + breath + gap (NOT just script durations).
+    expect(intervals.get(1).start).toBeCloseTo(14.0, 5);
+    expect(intervals.get(1).end).toBeCloseTo(22.0, 5);
+  });
+
+  it('supports untagged legacy entries via the subtitleFile-key heuristic', () => {
+    const audioFiles = [
+      { file: 'silence-intro.wav', duration: 3.5 },
+      { file: 'silence-0.wav', duration: 0.25 },
+      { file: 'narration-0.wav', duration: 10, subtitleFile: 'narration-0.vtt' },
+    ];
+    const intervals = narrationSpeechIntervals(audioFiles);
+    expect(intervals.get(0)).toEqual({ start: 3.75, end: 13.75 });
   });
 });
 

@@ -95,10 +95,13 @@ const counterintuitiveHookNarrationArb = fc.tuple(
   fillerWordsArb(20, 35),
 ).map(([hook, filler]) => `${hook} ${filler}`);
 
-/** Arbitrary for intro narration with any valid hook pattern */
+/** Arbitrary for intro narration with any valid hook pattern.
+ *  NOTE: questionHookNarrationArb is intentionally excluded — the generator
+ *  bans question-only hooks and detectHookPattern no longer returns
+ *  'provocative_question'. Pure question openers without stats/you/but are
+ *  not valid hooks. Examples that contain "you/your" resolve to personal_stakes. */
 const hookNarrationArb = fc.oneof(
   statisticHookNarrationArb,
-  questionHookNarrationArb,
   personalStakesHookNarrationArb,
   counterintuitiveHookNarrationArb,
 );
@@ -165,11 +168,14 @@ describe('Feature: video-quality-max, Property 5: Hook Validation and Pattern De
     );
   });
 
-  it('detects provocative_question pattern in narration with questions', () => {
+  it('question-only hooks are NOT detected as provocative_question — generator bans question hooks', () => {
+    // Question hooks that contain "you/your" are recognised as personal_stakes (stronger signal).
+    // Question hooks with no stats, no you/your, and no but/however/actually return null.
+    // In all cases, 'provocative_question' is NEVER returned — matching the generator rule.
     fc.assert(
       fc.property(questionHookNarrationArb, (narration) => {
         const pattern = detectHookPattern(narration);
-        expect(pattern).toBe('provocative_question');
+        expect(pattern).not.toBe('provocative_question');
       }),
       { numRuns: 100 },
     );
@@ -203,11 +209,11 @@ describe('Feature: video-quality-max, Property 5: Hook Validation and Pattern De
         // Must detect a hook
         expect(result.hasHook).toBe(true);
 
-        // Pattern must be one of the four valid patterns
+        // Pattern must be one of the three detectable patterns
+        // ('provocative_question' is never returned — generator bans question hooks)
         expect(result.pattern).not.toBeNull();
         expect([
           'surprising_statistic',
-          'provocative_question',
           'personal_stakes',
           'counterintuitive_claim',
         ]).toContain(result.pattern);

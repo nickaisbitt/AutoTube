@@ -44,7 +44,10 @@ test.describe('Full pipeline — topic → -final.mp4', () => {
     await expect(page.getByRole('button', { name: /Prepare Narration/i })).toBeVisible({ timeout: 600_000 });
 
     await page.getByRole('button', { name: /Prepare Narration/i }).click();
-    await expect(page.getByTestId('skip-ai-edit-button')).toBeVisible({ timeout: 900_000 });
+    // Land on narration review — do not auto-jump to AI Edit
+    await expect(page.getByTestId('continue-to-ai-edit-button')).toBeVisible({ timeout: 900_000 });
+    await page.getByTestId('continue-to-ai-edit-button').click();
+    await expect(page.getByTestId('skip-ai-edit-button')).toBeVisible({ timeout: 120_000 });
 
     await page.getByTestId('skip-ai-edit-button').click();
     await expect(page.getByTestId('assemble-video-button')).toBeVisible({ timeout: 30_000 });

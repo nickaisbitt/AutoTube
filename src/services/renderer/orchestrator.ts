@@ -1,8 +1,8 @@
 import type { VideoProject, MediaAsset, KenBurnsParams, SegmentEditEntry, TransitionType } from '../../types';
 import { logger } from '../logger';
-import { getBackgroundMusicPath, computeBgMusicVolume, computeKenBurnsParams, computeCrossfadeAlpha, computeActiveAssetIndex, RESOLUTION_PRESETS, type ResolutionKey } from '../renderingShared';
+import { getBackgroundMusicPath, computeBgMusicVolume, computeKenBurnsParams, computeCrossfadeAlpha, computeActiveAssetIndex, planFallbackAssembly, RESOLUTION_PRESETS, type ResolutionKey } from '../renderingShared';
 import { getMusicPresetUrl } from '../audioMixer';
-import { computeVisualStyle, getFrameSampleRate } from './animation';
+import { computeVisualStyle, getFrameSampleRate, getFrameInterval, getEffectiveSampleRate } from './animation';
 import { draw, drawProceduralBackground, saturationCache } from './canvas/draw';
 import { drawKineticTextOverlay, drawDiagramOverlay } from './canvas/overlays';
 import { renderTransition, getTransitionConfigForSectionChange, selectTransitionForSegment } from './canvas/transitions';
@@ -38,6 +38,29 @@ export const IMG_CACHE_MAX = 60;
 
 // Maximum number of frames the renderer will capture to prevent OOM.
 export const MAX_FRAMES = 2000;
+
+/**
+ * Whether silent video output is explicitly permitted (ALLOW_SILENT=1).
+ *
+ * The browser fallback normally refuses to assemble a video with no audio when
+ * the project has no narration or music, to avoid passing off a silent clip as
+ * a successful render. Setting ALLOW_SILENT (or VITE_ALLOW_SILENT) to `1`/`true`
+ * opts back into silent output.
+ */
+export function isSilentFallbackAllowed(): boolean {
+  const truthy = (v: unknown): boolean => v === '1' || v === 'true' || v === 1 || v === true;
+  try {
+    const env = typeof import.meta !== 'undefined' ? (import.meta as unknown as { env?: Record<string, unknown> }).env : undefined;
+    if (env && (truthy(env.VITE_ALLOW_SILENT) || truthy(env.ALLOW_SILENT))) return true;
+  } catch { /* import.meta not available */ }
+  try {
+    if (typeof process !== 'undefined' && process.env && (truthy(process.env.ALLOW_SILENT) || truthy(process.env.VITE_ALLOW_SILENT))) return true;
+  } catch { /* process not available */ }
+  try {
+    if (typeof globalThis !== 'undefined' && truthy((globalThis as Record<string, unknown>).ALLOW_SILENT)) return true;
+  } catch { /* ignore */ }
+  return false;
+}
 
 export async function renderVideoToBlob(
   project: VideoProject,
@@ -160,9 +183,15 @@ export async function renderVideoToBlob(
     }
   }
 
-  const frameInterval = Math.max(1, Math.round(fps / frameSampleRate));
+  const frameInterval = getFrameInterval(fps, frameSampleRate);
+  // The actual capture rate is fps / frameInterval, which may differ from the
+  // requested frameSampleRate when it does not divide fps evenly (e.g. 24fps
+  // with a target of 16 → interval 2 → 12fps actual). We MUST report this
+  // effective rate to /api/render-video and MediaRecorder, otherwise the video
+  // plays back too fast (~33% for standard quality).
+  const effectiveSampleRate = getEffectiveSampleRate(fps, frameSampleRate);
   // Scale frame budget with video duration so 5–8 min videos aren't truncated at ~83s
-  const estimatedFrameBudget = Math.ceil(totalSec * frameSampleRate * 1.15);
+  const estimatedFrameBudget = Math.ceil(totalSec * effectiveSampleRate * 1.15);
   const MAX_CAPTURED_FRAMES = Math.min(12_000, Math.max(MAX_FRAMES, estimatedFrameBudget));
   const RENDER_DEADLINE = Date.now() + Math.max(totalSec * 3000, 300000);
   const isRenderingFlag = true;
@@ -316,24 +345,52 @@ export async function renderVideoToBlob(
     }
   }
 
-  onProgress?.(95, 'Assembling video with ffmpeg...');
-  logger.info('Renderer', `Captured ${capturedFrames.length} frames, sending to ffmpeg...`);
+  onProgress?.(95, 'Assembling video...');
+  logger.info('Renderer', `Captured ${capturedFrames.length} frames`);
 
-  // Try server-side ffmpeg assembly first (dev mode)
-  try {
-    const res = await apiFetch('/api/render-video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ frames: capturedFrames, fps: frameSampleRate, format: requestedFormat }),
-    });
-    if (res.ok) {
-      const videoBlob = await res.blob();
-      onProgress?.(100, 'Done!');
-      logger.success('Renderer', `Done (ffmpeg): ${(videoBlob.size / 1024 / 1024).toFixed(2)}MB`);
-      return videoBlob;
+  // ── Decide how to assemble without shipping a silent video ──
+  // The server /api/render-video ffmpeg path assembles VIDEO ONLY (no audio),
+  // so it must not be used when the project has narration/music — the
+  // MediaRecorder path below mixes narration + background music. When there is
+  // no audio at all, refuse (unless ALLOW_SILENT) rather than pass off a silent
+  // clip as a successful render.
+  const readyClips = project.narration.filter(n => n.status === 'ready' && n.audioUrl);
+  const musicEnabled = project.exportSettings?.backgroundMusic !== false;
+  const musicPresetId = project.exportSettings?.musicPreset;
+  const musicPath = musicEnabled
+    ? (musicPresetId ? getMusicPresetUrl(musicPresetId) : getBackgroundMusicPath(project.style))
+    : null;
+  const hasAudioInputs = readyClips.length > 0 || !!musicPath;
+  const fallbackPlan = planFallbackAssembly(hasAudioInputs, isSilentFallbackAllowed());
+
+  if (fallbackPlan === 'refuse') {
+    throw new Error(
+      'Browser render fallback would produce a silent video: server render failed and the ' +
+      'project has no narration or background music to attach. Refusing to ship silent output ' +
+      'as a successful render. Set ALLOW_SILENT=1 to permit silent video.',
+    );
+  }
+
+  // Video-only server-side ffmpeg assembly — only safe when there is no audio.
+  if (fallbackPlan === 'video-only-ffmpeg') {
+    onProgress?.(95, 'Assembling video with ffmpeg...');
+    try {
+      const res = await apiFetch('/api/render-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ frames: capturedFrames, fps: effectiveSampleRate, format: requestedFormat }),
+      });
+      if (res.ok) {
+        const videoBlob = await res.blob();
+        onProgress?.(100, 'Done!');
+        logger.success('Renderer', `Done (ffmpeg, silent): ${(videoBlob.size / 1024 / 1024).toFixed(2)}MB`);
+        return videoBlob;
+      }
+    } catch {
+      logger.warn('Renderer', 'ffmpeg endpoint unavailable, falling back to MediaRecorder');
     }
-  } catch {
-    logger.warn('Renderer', 'ffmpeg endpoint unavailable, falling back to MediaRecorder');
+  } else {
+    logger.info('Renderer', 'Project has audio — using MediaRecorder to preserve narration/music (skipping video-only ffmpeg)');
   }
 
   // Fallback: use MediaRecorder on a fresh untainted canvas
@@ -342,19 +399,23 @@ export async function renderVideoToBlob(
   recCanvas.height = height;
   const recCtx = recCanvas.getContext('2d')!;
   const mimeType = getSupportedMimeType(requestedFormat);
-  const stream = recCanvas.captureStream(frameSampleRate);
+  const stream = recCanvas.captureStream(effectiveSampleRate);
 
   // ── Audio mixing via Web Audio API (narration + background music) ──
+  // Nodes are created and connected here, but the buffer sources are STARTED
+  // only after recorder.start(), scheduled relative to the audio-context clock
+  // captured at that moment. Starting them during setup (which includes async
+  // fetch/decode) would misalign — or entirely skip the start of — narration
+  // relative to the captured video.
   let bgAudioCtx: AudioContext | null = null;
   let bgSourceNode: AudioBufferSourceNode | null = null;
   let bgGainNode: GainNode | null = null; // Store gain node for fade-out
-  const narrationSourceNodes: AudioBufferSourceNode[] = [];
+  const scheduledNarration: { source: AudioBufferSourceNode; offset: number }[] = [];
   try {
     bgAudioCtx = new AudioContext();
     const audioDest = bgAudioCtx.createMediaStreamDestination();
 
-    // ── Narration audio: schedule each clip at its segment start time ──
-    const readyClips = project.narration.filter(n => n.status === 'ready' && n.audioUrl);
+    // ── Narration audio: prepare each clip with its segment start offset ──
     if (readyClips.length > 0) {
       let cumulativeTime = 0;
       for (const seg of project.script) {
@@ -367,8 +428,7 @@ export async function renderVideoToBlob(
               const narrationSource = bgAudioCtx.createBufferSource();
               narrationSource.buffer = narrationBuffer;
               narrationSource.connect(audioDest);
-              narrationSource.start(cumulativeTime);
-              narrationSourceNodes.push(narrationSource);
+              scheduledNarration.push({ source: narrationSource, offset: cumulativeTime });
             }
           } catch (narErr) {
             logger.warn('Renderer', `Failed to load narration for segment ${seg.id}: ${(narErr as Error).message}`);
@@ -376,15 +436,9 @@ export async function renderVideoToBlob(
         }
         cumulativeTime += seg.duration;
       }
-      logger.info('Renderer', `Scheduled ${narrationSourceNodes.length} narration clips`);
     }
 
     // ── Background music ──
-    const musicEnabled = project.exportSettings?.backgroundMusic !== false;
-    const musicPresetId = project.exportSettings?.musicPreset;
-    const musicPath = musicEnabled
-      ? (musicPresetId ? getMusicPresetUrl(musicPresetId) : getBackgroundMusicPath(project.style))
-      : null;
     if (musicPath) {
       const musicRes = await fetch(musicPath);
       if (musicRes.ok) {
@@ -404,8 +458,6 @@ export async function renderVideoToBlob(
         bgSourceNode.loop = true;
         bgSourceNode.connect(gainNode);
         gainNode.connect(audioDest);
-
-        bgSourceNode.start();
         logger.info('Renderer', `Background music loaded: ${musicPath} (volume: ${bgVolume})`);
       } else {
         logger.warn('Renderer', `Background music file not found: ${musicPath} (${musicRes.status})`);
@@ -426,7 +478,25 @@ export async function renderVideoToBlob(
   const done = new Promise<void>(resolve => { recorder.onstop = () => setTimeout(resolve, 250); });
   recorder.start(1000);
 
-  const frameDurationMs = Math.max(1, Math.round(1000 / frameSampleRate));
+  // Start all audio sources relative to the context clock at the moment
+  // recording actually begins, so narration/music align with the captured
+  // frames regardless of how long audio decoding took during setup.
+  const narrationSourceNodes: AudioBufferSourceNode[] = [];
+  if (bgAudioCtx) {
+    const audioBaseTime = bgAudioCtx.currentTime;
+    for (const { source, offset } of scheduledNarration) {
+      try { source.start(audioBaseTime + offset); } catch { /* already started */ }
+      narrationSourceNodes.push(source);
+    }
+    if (bgSourceNode) {
+      try { bgSourceNode.start(audioBaseTime); } catch { /* already started */ }
+    }
+    if (scheduledNarration.length > 0) {
+      logger.info('Renderer', `Scheduled ${scheduledNarration.length} narration clips at recorder start (t=${audioBaseTime.toFixed(3)}s)`);
+    }
+  }
+
+  const frameDurationMs = Math.max(1, Math.round(1000 / effectiveSampleRate));
   for (const dataUrl of capturedFrames) {
     await new Promise<void>((resolve, reject) => {
       const img = new Image();

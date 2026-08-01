@@ -195,6 +195,7 @@ export function isSafeStockProviderQuery(query: string): boolean {
 }
 
 export function stockProviderQueriesForTopic(topic: string, n = 4): string[] {
+  if (!topicFamilyTemplatesEnabled()) return [];
   const family = resolveTopicFamily(topic);
   if (family === 'generic') return [];
   return (TOPIC_FAMILY_QUERIES[family] || [])

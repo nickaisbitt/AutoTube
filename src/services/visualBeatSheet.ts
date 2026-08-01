@@ -173,6 +173,8 @@ export function buildVisualBeatSheetFromScript(
   const picked: VisualBeat[] = [];
   if (candidates.length <= target) {
     candidates.forEach((c, i) => picked.push({ ...c, id: `beat-${i + 1}` }));
+  } else if (target === 1) {
+    picked.push({ ...candidates[0], id: 'beat-1' });
   } else {
     for (let i = 0; i < target; i += 1) {
       const idx = Math.round((i * (candidates.length - 1)) / (target - 1));
@@ -203,11 +205,14 @@ export function buildVisualBeatSheetFromScript(
 /**
  * Basic structural validation for tests and pre-render gates.
  */
-export function validateVisualBeatSheet(sheet: VisualBeatSheet): { ok: boolean; errors: string[] } {
+export function validateVisualBeatSheet(
+  sheet: VisualBeatSheet | null | undefined,
+): { ok: boolean; errors: string[] } {
   const errors: string[] = [];
-  if (!sheet?.beats?.length) errors.push('no-beats');
-  if (sheet.beats.length > sheet.budget.max) errors.push('over-budget');
-  for (const b of sheet.beats || []) {
+  const beats = Array.isArray(sheet?.beats) ? sheet.beats : [];
+  if (!beats.length) errors.push('no-beats');
+  if (sheet?.budget && beats.length > sheet.budget.max) errors.push('over-budget');
+  for (const b of beats) {
     if (!b.searchableSubject?.trim()) errors.push(`${b.id}:empty-subject`);
     if (!b.narrationExcerpt?.trim()) errors.push(`${b.id}:empty-excerpt`);
     if (!b.evidence?.trim()) errors.push(`${b.id}:empty-evidence`);

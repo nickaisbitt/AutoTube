@@ -12,8 +12,19 @@ export const DOMAIN_BLOCKLIST = new Map<string, string[]>([
   ['propaganda', ['sputniknews', 'sputnikglobe', 'presstv', 'cgtn', 'tass', 'xinhua', 'globalresearch', 'zerohedge', 'breitbart', 'infowars', 'newsmax', 'epochtimes', 'farsnews', 'alalam', 'almanar', 'cctv', 'informationclearinghouse', 'activistpost', 'beforeitsnews', 'naturalnews', 'prisonplanet']],
   ['watermarked-stock', ['shutterstock', 'gettyimages', 'istockphoto', '123rf', 'dreamstime', 'depositphotos', 'alamy']],
   ['low-quality', ['9gag', 'imgur', 'memegenerator', 'knowyourmeme', 'ifunny', 'cheezburger', 'buzzfeed']],
-  ['adult-content', ['pornhub', 'xvideos', 'xhamster', 'redtube', 'youporn', 'rdtcdn', 'onlyfans', 'spankbang', 'tube8', 'brazzers', 'phncdn', 'xnxx', 'xnnx']],
+  // SYNC WITH scripts/lib/stock-media-urls.mjs UNSAFE_MEDIA_URL_RE host patterns
+  ['adult-content', [
+    'pornhub', 'xvideos', 'xhamster', 'redtube', 'youporn', 'rdtcdn', 'onlyfans',
+    'spankbang', 'tube8', 'brazzers', 'phncdn', 'xnxx', 'xnnx',
+    'ahcdn', 'x-cdn', 'trafficjunky', 'exoclick',
+  ]],
 ]);
+
+/**
+ * Path / keyword signals in full URL — aligned with script-side UNSAFE_MEDIA_URL_RE.
+ * SYNC WITH scripts/lib/stock-media-urls.mjs UNSAFE_MEDIA_URL_RE path patterns.
+ */
+const ADULT_URL_SIGNAL_RE = /\b(\/porn|\/xxx\/|nsfw|adult[-_]?cdn)\b/i;
 
 // ---------------------------------------------------------------------------
 // Trusted Domains — known high-quality editorial / stock sources
@@ -65,6 +76,11 @@ export function isDomainBlocked(url: string): { blocked: boolean; pattern?: stri
         return { blocked: true, pattern, category };
       }
     }
+  }
+
+  const signalMatch = ADULT_URL_SIGNAL_RE.exec(url);
+  if (signalMatch) {
+    return { blocked: true, pattern: signalMatch[1], category: 'adult-content' };
   }
 
   return { blocked: false };

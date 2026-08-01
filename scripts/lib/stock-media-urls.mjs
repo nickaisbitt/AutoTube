@@ -419,9 +419,12 @@ export const STOCK_CYBER_IMAGES = [
 export const JUNK_VIDEO_HOST_RE =
   /(?:w3schools\.com|media\.w3\.org|samplelib\.com|filesamples\.com|interactive-examples\.mdn|commondatastorage\.googleapis\.com\/gtv-videos|googlevideo\.com\/videoplayback|forbigger|sintel|big.?buck.?bunny|flower\.mp4)/i;
 
-/** Adult / porn CDNs — never allow in harvest, timeline, or volume top-up. */
+/**
+ * Adult / porn CDNs — never allow in harvest, timeline, or volume top-up.
+ * SYNC WITH src/services/domainFilter.ts DOMAIN_BLOCKLIST adult-content + ADULT_URL_SIGNAL_RE.
+ */
 export const UNSAFE_MEDIA_URL_RE =
-  /\b(rdtcdn|pornhub|xvideos|xhamster|xnxx|xnnx|onlyfans|spankbang|redtube|youporn|tube8|brazzers|x-cdn\.com|phncdn|ahcdn\.com|trafficjunky|exoclick|\/porn|\/xxx\/|nsfw|adult[-_]?cdn)\b/i;
+  /\b(rdtcdn|pornhub|xvideos|xhamster|xnxx|xnnx|onlyfans|spankbang|redtube|youporn|tube8|brazzers|phncdn|ahcdn|x-cdn|trafficjunky|exoclick|\/porn|\/xxx\/|nsfw|adult[-_]?cdn)\b/i;
 
 /**
  * Tourism / celeb / album / random blog hosts that web volume-top-up scrapes into

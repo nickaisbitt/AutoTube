@@ -175,43 +175,55 @@ function loadOptionalScript(explicitPath) {
   return project?.script?.map((s) => s.narration).filter(Boolean).join('\n\n') || '';
 }
 
-/** Trust pipeline hook overlay when Vision OCR misses yellow burn-in. */
-function reconcileHookVision(hookVision, project, overlayHint) {
+/**
+ * Record what the pipeline CLAIMS is burned in — but never let that claim
+ * override vision. A vision miss fails closed: hookPass/onScreenText stay
+ * exactly as the model judged them.
+ */
+export function reconcileHookVision(hookVision, project, overlayHint) {
   if (!hookVision) return hookVision;
-  const expected = (
+  const claimed = (
     overlayHint
     || project?.exportSettings?.hookOverlay
     || project?.hookLine
     || project?.exportSettings?.hookLine
     || ''
-  )
-    .trim()
-    .toUpperCase();
-  if (!expected || expected.split(/\s+/).length < 2) return hookVision;
-  const seen = (hookVision.onScreenText || '').toUpperCase();
-  const overlap = expected
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && seen.includes(w)).length;
-  if (overlap >= 1 || seen.trim().length >= 8) {
-    return {
-      ...hookVision,
-      hookPass: true,
-      scrollPastIn3s: false,
-      scrollPastCleared: hookVision.scrollPastIn3s === true || hookVision.hookPass !== true,
-    };
-  }
-  // Don't fail empty OCR when the pipeline overlay is on screen.
-  if (!seen.trim() || overlap === 0) {
-    return {
-      ...hookVision,
-      hookPass: true,
-      onScreenText: expected.slice(0, 80),
-      scrollPastIn3s: false,
-      ocrOverride: true,
-      fix: hookVision.fix,
-    };
-  }
-  return hookVision;
+  ).trim();
+  const pipelineClaimsOverlay =
+    claimed.split(/\s+/).filter(Boolean).length >= 2 ? claimed.slice(0, 80) : null;
+  return { ...hookVision, pipelineClaimsOverlay };
+}
+
+/**
+ * Structured upload-ready verdict. ANDs the brutal-raw gate, the objective
+ * gate (when available), scene QA (when available), and hook vision.
+ * Never derived from report prose.
+ */
+export function computeUploadReady({
+  brutal,
+  hookVision,
+  hookScript,
+  objectiveGate,
+  sceneQa,
+  skipVision = false,
+}) {
+  // skip_vision (draft) is not a hard fail — but brutal?.uploadReady below still
+  // requires a real review, so drafts never pass.
+  const brutalFailed = !skipVision && (brutal?.success === false || brutal == null);
+  const hookVisionOk =
+    hookVision?.hookPass === true
+    || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
+  const objectiveOk = !objectiveGate?.available || objectiveGate.pass === true;
+  const sceneOk = !sceneQa?.available || sceneQa.pass === true;
+  return (
+    !brutalFailed &&
+    brutal?.uploadReady === true &&
+    !brutal?.hasCriticalIssues &&
+    objectiveOk &&
+    sceneOk &&
+    hookVisionOk &&
+    hookScript?.pass !== false
+  );
 }
 
 function selectKeyFrames(frames) {
@@ -304,12 +316,9 @@ function buildNumberedReport(ctx) {
   const hookVisionOk =
     hookVision?.hookPass === true
     || (typeof hookVision?.onScreenText === 'string' && hookVision.onScreenText.trim().length >= 8);
-  const uploadReady =
-    !brutalFailed &&
-    brutal?.uploadReady === true &&
-    hookVisionOk &&
-    hookScript?.pass !== false &&
-    !brutal?.hasCriticalIssues;
+  // Structured boolean computed by watchVideo via computeUploadReady — the
+  // report only renders it, never derives it.
+  const uploadReady = ctx.uploadReady === true;
 
   const lines = [];
   let n = 1;
@@ -318,7 +327,22 @@ function buildNumberedReport(ctx) {
   lines.push('');
   lines.push(`${n}. **Verdict:** ${brutal?.report?.verdict || legacyVision?.report?.summary || 'See scores below'}`);
   n += 1;
-  lines.push(`${n}. **Upload-ready?** ${uploadReady ? 'YES (automated bar)' : 'NO — fix top issues first'}`);
+  const failedGates = [];
+  if (!uploadReady) {
+    if (brutalFailed) failedGates.push(`brutal review failed (${brutal?.error || 'no review'})`);
+    else if (brutal == null) failedGates.push('no brutal review (vision skipped / draft tier)');
+    else if (brutal?.uploadReady !== true) {
+      failedGates.push(`brutal raw ${typeof rawOverall === 'number' ? `${rawOverall}/10` : '—'} below 7`);
+    }
+    if (brutal?.hasCriticalIssues) failedGates.push('critical quality issues');
+    if (objectiveGate?.available && objectiveGate.pass !== true) failedGates.push('objective gate FAIL');
+    if (sceneQa?.available && sceneQa.pass !== true) failedGates.push('scene QA FAIL');
+    if (!hookVisionOk) failedGates.push(skipVision ? 'hook vision skipped' : 'hook vision FAIL');
+    if (hookScript?.pass === false) failedGates.push('hook script FAIL');
+  }
+  lines.push(
+    `${n}. **Upload-ready?** ${uploadReady ? 'YES (automated bar)' : `NO — ${failedGates.join('; ') || 'fix top issues first'}`}`,
+  );
   n += 1;
   lines.push(
     `${n}. **File:** \`${videoPath}\` | ${analyzedSec.toFixed(0)}s analyzed | ${meta.width}x${meta.height} | mode: ${mode}`,
@@ -354,6 +378,12 @@ function buildNumberedReport(ctx) {
       `${n}. **Hook (frames 0–3s):** ${hookVision.hookPass ? 'PASS' : 'FAIL'} | on-screen: "${(hookVision.onScreenText || '').slice(0, 70)}" | scroll-past: ${hookVision.scrollPastIn3s ? 'yes' : 'no'}`,
     );
     n += 1;
+    if (hookVision.pipelineClaimsOverlay) {
+      lines.push(
+        `${n}. **Pipeline overlay claim:** pipeline says it burned in "${hookVision.pipelineClaimsOverlay}" — recorded for context only; vision verdict above is authoritative (fail closed)`,
+      );
+      n += 1;
+    }
     if (hookVision.fix) {
       lines.push(`${n}. **Hook fix:** ${hookVision.fix}`);
       n += 1;
@@ -534,6 +564,15 @@ export async function watchVideo(options = {}) {
     brutal = { success: false, error: 'OPENROUTER_API_KEY not set' };
   }
 
+  const uploadReady = computeUploadReady({
+    brutal,
+    hookVision,
+    hookScript,
+    objectiveGate,
+    sceneQa,
+    skipVision,
+  });
+
   const reportText = buildNumberedReport({
     videoPath,
     meta,
@@ -546,6 +585,7 @@ export async function watchVideo(options = {}) {
     hookVision,
     brutal,
     legacyVision,
+    uploadReady,
     apiKeyUsed: Boolean(apiKey) && !skipVision,
     mode,
     renderTier: options.render_tier,
@@ -571,6 +611,6 @@ export async function watchVideo(options = {}) {
     hookVision,
     brutal,
     legacyVision,
-    uploadReady: reportText.includes('**Upload-ready?** YES'),
+    uploadReady,
   };
 }

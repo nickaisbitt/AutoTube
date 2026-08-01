@@ -25,9 +25,9 @@ export async function generateHashtags(
   const currentYear = new Date().getFullYear();
 
   const systemPrompt =
-    'You are a YouTube SEO expert. Generate exactly 3-5 hashtags for a video. Return ONLY a JSON array of strings. No markdown, no preamble.';
+    'You are a YouTube SEO expert. Generate exactly 3-5 hashtags for a video. Return ONLY a JSON object with key "hashtags" containing an array of strings: { "hashtags": ["#tag1", "#tag2", ...] }. No markdown, no preamble.';
 
-  const userPrompt = `Generate 3-5 YouTube hashtags for a video about "${safeTopic}" in the "${style}" style.\n\nHASHTAG FORMAT RULES:\n1. First hashtag: #topic (lowercase, no spaces) — e.g., #cybersecurity, #spacex, #ai\n2. Second hashtag: #topicExplained — e.g., #cybersecurityexplained\n3. Third hashtag: #topic${currentYear} — e.g., #cybersecurity${currentYear}\n4. Fourth hashtag (optional): #style category — e.g., #documentary, #business, #tech\n5. Fifth hashtag (optional): #channelName — use "${channelName || 'AutoTube'}"\n\nEach hashtag must be:\n- All lowercase\n- No spaces or special characters (only alphanumeric)\n- Max 30 characters each\n- Relevant to the video content\n\nReturn ONLY a JSON array of hashtag strings (with # prefix).`;
+  const userPrompt = `Generate 3-5 YouTube hashtags for a video about "${safeTopic}" in the "${style}" style.\n\nHASHTAG FORMAT RULES:\n1. First hashtag: #topic (lowercase, no spaces) — e.g., #cybersecurity, #spacex, #ai\n2. Second hashtag: #topicExplained — e.g., #cybersecurityexplained\n3. Third hashtag: #topic${currentYear} — e.g., #cybersecurity${currentYear}\n4. Fourth hashtag (optional): #style category — e.g., #documentary, #business, #tech\n5. Fifth hashtag (optional): #channelName — use "${channelName || 'AutoTube'}"\n\nEach hashtag must be:\n- All lowercase\n- No spaces or special characters (only alphanumeric)\n- Max 30 characters each\n- Relevant to the video content\n\nReturn ONLY a JSON object: { "hashtags": ["#tag1", "#tag2", ...] } (with # prefix on each tag).`;
 
   const fallback = generateFallbackHashtags(safeTopic, currentYear, channelName);
 

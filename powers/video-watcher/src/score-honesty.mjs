@@ -11,8 +11,11 @@ const CRITICAL_ISSUE_RE =
 const SCROLL_PAST_CRITICAL_RE =
   /\b(?:would|will)\s+scroll\s*past\b|\bscroll[- ]past:\s*yes\b|\b(?:viewers?|audience)\s+(?:would|will)\s+scroll\s*past\b|\bscrolls?\s+past\s+(?:in|within)\s+(?:[0-3](?:\.\d+)?\s*s(?:ec(?:onds?)?)?|0\s*[-–]\s*3)/i;
 
+// Only genuine hedges are whitelisted (might/may/could, or would/will softened
+// by likely/probably/quickly). A firm "I would scroll past this" is a negative
+// verdict and must stay critical.
 const SOFT_SCROLL_HEDGE_RE =
-  /\bi\s+would\s+scroll\s*past\s+this\b|\b(?:would|will|might|may|could)\s+(?:likely|probably|quickly)\s+(?:make\s+(?:me|viewers?|someone)\s+)?scroll\s*past\b|\b(?:would|will|might|may|could)\s+make\s+(?:me|viewers?|someone)\s+scroll\s*past\b/gi;
+  /\b(?:might|may|could)\s+(?:(?:likely|probably|quickly)\s+)?(?:make\s+(?:me|viewers?|someone)\s+)?scroll\s*past\b|\b(?:would|will)\s+(?:likely|probably|quickly)\s+(?:make\s+(?:me|viewers?|someone)\s+)?scroll\s*past\b/gi;
 
 const OVERLAY_GLITCH_RE = /\bauto\s+skipped\b/i;
 
@@ -154,17 +157,15 @@ export function applyHonestSceneFloors(brutal, ctx = {}) {
   return brutal;
 }
 
-/** Prefer raw for --until-score; floored only if raw is within 0.5 of target. */
+/**
+ * Raw-only score for --until-score gates. Floored scores never count toward a
+ * target — floors are display nudges, not quality. Falls back to floored/overall
+ * only when no raw was recorded (e.g. review pre-dates raw tracking).
+ */
 export function scoreForTargetGate(brutal, untilScore) {
   if (brutal?.success === false) return null;
   const raw = brutal?.rawOverall;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
   const floored = brutal?.flooredOverall ?? brutal?.overall;
-  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
-    return typeof floored === 'number' && Number.isFinite(floored) ? floored : null;
-  }
-  if (brutal?.hasCriticalIssues) return raw;
-  if (typeof untilScore === 'number' && Number.isFinite(untilScore) && raw >= untilScore - 0.5) {
-    return typeof floored === 'number' ? Math.max(raw, floored) : raw;
-  }
-  return raw;
+  return typeof floored === 'number' && Number.isFinite(floored) ? floored : null;
 }

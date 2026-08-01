@@ -1,11 +1,14 @@
 /**
  * Normalize OpenRouter chat message text (mjs copy for scripts/server-render).
- * Prefer message.content; fall back to reasoning (mimo / reasoning models).
+ *
+ * Returns the message content string, or '' when content is absent or empty.
+ * Does NOT fall back to the `reasoning` field: reasoning models emit
+ * chain-of-thought in that field, which is prose—not JSON—and must not be
+ * fed into JSON parsers. Callers should throw/retry on empty content.
  */
 export function openRouterMessageText(message) {
   if (!message || typeof message !== 'object') return '';
   if (typeof message.content === 'string' && message.content.trim()) return message.content.trim();
-  if (typeof message.reasoning === 'string' && message.reasoning.trim()) return message.reasoning.trim();
   if (Array.isArray(message.content)) {
     return message.content
       .map((part) => (typeof part === 'string' ? part : part?.text || ''))

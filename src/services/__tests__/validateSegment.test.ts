@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import { validateSegment, stripPartLabels } from '../llm/index';
-import type { ScriptSegment } from '../../types';
+import type { ScriptSegment, AudioDirection } from '../../types';
 
 /**
  * **Validates: Requirements 17.1**
@@ -205,5 +205,86 @@ describe('Property 14: Segment validation produces valid defaults', () => {
       ),
       { numRuns: 100 },
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// audioDirection and dataVisualization preservation (fix: prompt requires them)
+// ---------------------------------------------------------------------------
+
+describe('validateSegment — audioDirection and dataVisualization preservation', () => {
+  const base = { type: 'section', title: 'Test', narration: 'Test narration here.', visualNote: 'B-roll', duration: 15 };
+
+  it('preserves a fully-valid audioDirection', () => {
+    const raw = {
+      ...base,
+      audioDirection: {
+        soundBed: 'tense',
+        impactCues: ['impact_hit', 'whoosh'],
+        sonicSpace: true,
+        intensity: 8,
+      },
+    };
+    const result = validateSegment(raw, 0);
+    expect(result.audioDirection).toBeDefined();
+    expect(result.audioDirection?.soundBed).toBe('tense');
+    expect(result.audioDirection?.impactCues).toEqual(['impact_hit', 'whoosh']);
+    expect(result.audioDirection?.sonicSpace).toBe(true);
+    expect(result.audioDirection?.intensity).toBe(8);
+  });
+
+  it('preserves audioDirection with empty impactCues array', () => {
+    const raw = {
+      ...base,
+      audioDirection: { soundBed: 'calm', impactCues: [], sonicSpace: false, intensity: 3 },
+    };
+    const result = validateSegment(raw, 0);
+    expect(result.audioDirection?.soundBed).toBe('calm');
+    expect(result.audioDirection?.impactCues).toEqual([]);
+    expect(result.audioDirection?.sonicSpace).toBe(false);
+    expect(result.audioDirection?.intensity).toBe(3);
+  });
+
+  it('clamps intensity to [0, 10]', () => {
+    const rawHigh = { ...base, audioDirection: { soundBed: 'building', impactCues: [], sonicSpace: false, intensity: 15 } };
+    const rawLow = { ...base, audioDirection: { soundBed: 'building', impactCues: [], sonicSpace: false, intensity: -5 } };
+    expect(validateSegment(rawHigh, 0).audioDirection?.intensity).toBe(10);
+    expect(validateSegment(rawLow, 0).audioDirection?.intensity).toBe(0);
+  });
+
+  it('drops audioDirection when soundBed is invalid', () => {
+    const raw = {
+      ...base,
+      audioDirection: { soundBed: 'spooky', impactCues: [], sonicSpace: false, intensity: 5 },
+    };
+    const result = validateSegment(raw, 0);
+    expect(result.audioDirection).toBeUndefined();
+  });
+
+  it('drops audioDirection when it is not an object', () => {
+    expect(validateSegment({ ...base, audioDirection: 'tense' }, 0).audioDirection).toBeUndefined();
+    expect(validateSegment({ ...base, audioDirection: null }, 0).audioDirection).toBeUndefined();
+    expect(validateSegment({ ...base, audioDirection: 42 }, 0).audioDirection).toBeUndefined();
+  });
+
+  it('preserves dataVisualization when present', () => {
+    const raw = { ...base, dataVisualization: 'Bar chart: Nvidia 80%, AMD 15%, Intel 5%' };
+    const result = validateSegment(raw, 0);
+    expect(result.dataVisualization).toBe('Bar chart: Nvidia 80%, AMD 15%, Intel 5%');
+  });
+
+  it('drops dataVisualization when absent or blank', () => {
+    expect(validateSegment(base, 0).dataVisualization).toBeUndefined();
+    expect(validateSegment({ ...base, dataVisualization: '   ' }, 0).dataVisualization).toBeUndefined();
+    expect(validateSegment({ ...base, dataVisualization: 123 }, 0).dataVisualization).toBeUndefined();
+  });
+
+  it('property: audioDirection is preserved for all valid soundBeds', () => {
+    const validBeds: AudioDirection['soundBed'][] = ['calm', 'tense', 'neutral', 'building', 'release'];
+    for (const soundBed of validBeds) {
+      const raw = { ...base, audioDirection: { soundBed, impactCues: ['whoosh'], sonicSpace: true, intensity: 5 } };
+      const result = validateSegment(raw, 0);
+      expect(result.audioDirection?.soundBed).toBe(soundBed);
+    }
   });
 });

@@ -9,6 +9,7 @@ import { openRouterMessageText } from '../../utils/openRouterMessageText';
 import { sanitiseTopic, parseSegmentsFromContent, injectTransitionIfMissing } from './parsing';
 import { fetchWikiContext, fetchTopicContext } from './topicContext';
 import { DEFAULT_LLM_MODEL } from './defaultModels';
+import { callLLM } from './callLLM';
 
 const OPENROUTER_ENDPOINT = '/api/llm';
 
@@ -372,47 +373,27 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
   const audienceModifier = getAudiencePromptModifier(config.audience || '');
   const finalSystemPrompt = systemPrompt + '\n' + audienceModifier;
 
-  const response = await fetchWithTimeout(OPENROUTER_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://autotube.video',
-      'X-Title': 'AutoTube AI Generator',
-    },
-    body: JSON.stringify({
+  // Primary script call — routed through callLLM for unified cost tracking and retry.
+  // Cold script calls routinely exceed 30 s; set timeoutMs to 180 s to match the proxy budget.
+  const { data: segments0 } = await callLLM(
+    [
+      { role: 'system', content: finalSystemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    {
+      apiKey,
       model,
-      messages: [
-        { role: 'system', content: finalSystemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      response_format: { type: 'json_object' },
-    }),
-  }, {
-    // Cold OpenRouter script calls (main + title variants) routinely exceed 30s;
-    // the /api/llm proxy allows ~120s — match that budget so we don't abort as "user cancel".
-    timeoutMs: 180_000,
-    maxRetries: 2,
-    signal,
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    logger.error('OpenRouter', `Script generation failed (Status: ${response.status})`, err);
-    throw new Error(`OpenRouter Error: ${err}`);
-  }
-
-  const data = await response.json();
+      endpoint: OPENROUTER_ENDPOINT,
+      timeoutMs: 180_000,
+      maxRetries: 3,
+      signal,
+    },
+    parseSegmentsFromContent,
+  );
   logger.success('OpenRouter', 'Successfully generated script structure.');
 
-  const rawContent = openRouterMessageText(data?.choices?.[0]?.message);
-  if (!rawContent) {
-    logger.warn('OpenRouter', 'API returned no content in response');
-    throw new Error('AI returned empty response');
-  }
-
   try {
-    let segments = parseSegmentsFromContent(rawContent);
+    let segments = segments0;
     // Safety net: inject a transition segment if the LLM forgot one (Requirement 1.2)
     segments = injectTransitionIfMissing(segments);
 
@@ -713,5 +694,5 @@ export function buildSpecificityFixPrompt(
     }
   }).join('\n');
 
-  return `The following script about "${topic}" has specificity issues that must be fixed:\n\n${JSON.stringify(segments.map(s => ({ type: s.type, title: s.title, narration: s.narration, visualNote: s.visualNote, duration: s.duration })))}\n\nISSUES TO FIX:\n${issueDescriptions}\n\nCRITICAL FIX INSTRUCTIONS:\n- Add specific data and examples, make it less generic\n- Every segment MUST contain at least 2 specific statistics with numbers (dates, dollar amounts, percentages)\n- Every segment MUST mention at least 2 named entities (real companies, people, places)\n- The first segment MUST open with a hook — a specific attention-grabbing claim, not a generic welcome\n- Each segment should feel like a mini-story with setup, conflict, and payoff, not a Wikipedia summary\n\nReturn ONLY a valid JSON array of the fixed segments. No markdown, no preamble.`;
+  return `The following script about "${topic}" has specificity issues that must be fixed:\n\n${JSON.stringify(segments.map(s => ({ type: s.type, title: s.title, narration: s.narration, visualNote: s.visualNote, duration: s.duration })))}\n\nISSUES TO FIX:\n${issueDescriptions}\n\nCRITICAL FIX INSTRUCTIONS:\n- Add specific data and examples, make it less generic\n- Every segment MUST contain at least 2 specific statistics with numbers (dates, dollar amounts, percentages)\n- Every segment MUST mention at least 2 named entities (real companies, people, places)\n- The first segment MUST open with a hook — a specific attention-grabbing claim, not a generic welcome\n- Each segment should feel like a mini-story with setup, conflict, and payoff, not a Wikipedia summary\n\nReturn ONLY a valid JSON object in this shape: { "segments": [ ... ] }. No markdown, no preamble.`;
 }

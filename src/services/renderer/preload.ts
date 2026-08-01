@@ -192,7 +192,12 @@ export async function preload(project: VideoProject, cache: ImgCache, blobUrls: 
         const img = await loadImage(imageUrl, a.alt, blobUrls);
         logger.info('Renderer', `Preloaded: ${imageUrl.substring(0,60)} safeForCanvas=${(img as RenderableImage).safeForCanvas} w=${img.naturalWidth} h=${img.naturalHeight}`);
         cache[a.url] = img;
-        evictOldestEntries(cache);
+        // NOTE: do NOT evict here. Every asset in project.media is needed later
+        // in render order, and IMG_CACHE_MAX (60) is smaller than many projects'
+        // asset counts — evicting during preload would nuke early assets (e.g.
+        // the hook/intro imagery) before rendering even reaches them.
+        // evictOldestEntries remains available for callers that render
+        // incrementally and want LRU-style bounding.
       } catch (err) {
         logger.warn('Renderer', `Preload failed for ${imageUrl.substring(0,60)}: ${(err as Error).message}`);
         // Use fallback image so rendering can continue

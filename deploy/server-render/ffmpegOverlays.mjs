@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
+import { narrationSpeechIntervals } from './narration.mjs';
 import { hookOverlayWords, preserveHookWordBoundaries } from '../../scripts/lib/hook-overlay-text.mjs';
 import { buildImpactBeatsForTopic } from '../../scripts/lib/impactBeatsByTopic.mjs';
 import { impactBeatsMatchTopic, isAirlineTopic } from '../../scripts/lib/topic-family.mjs';
@@ -203,10 +204,13 @@ export function overlayHookText(videoPath, project, options = {}) {
 
 /**
  * Burn word-timed captions (YouTube-style, max 4 words per line).
- * VTT word times are segment-relative — offset by script segment durations or stacked.
+ * VTT word times are segment-relative — offset to absolute mix time via
+ * `options.audioFiles` (exact cumulative audio durations, including intro
+ * silence and inter-segment gap/breath pads) or, as a legacy fallback, by
+ * stacking script segment durations.
  * @param {string} videoPath
  * @param {Map<number, Array<{ word: string, start: number, end: number }>>} wordTimestampCache
- * @param {{ project?: object }} [options]
+ * @param {{ project?: object, audioFiles?: Array<{duration: number, kind?: string, segmentIndex?: number}> }} [options]
  */
 export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = {}) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
@@ -333,9 +337,19 @@ export function overlayKaraokeCaptions(videoPath, wordTimestampCache, options = 
   const script = project.script || [];
   // Muxed audio starts with INTRO_SILENCE_SECONDS before segment 0 speech.
   const INTRO_SILENCE_SEC = Number(process.env.AUTOTUBE_INTRO_SILENCE_SEC || 3.5);
+  // Preferred: exact speech-start offsets from the actual narration audio timeline
+  // (cumulative audioFiles durations include intro silence + gap/breath pads that
+  // generateNarration inserts between segments).
+  const speechIntervals = options.audioFiles?.length
+    ? narrationSpeechIntervals(options.audioFiles)
+    : null;
   const segOffsetFor = (segKey) => {
     const n = Number(segKey);
+    const exact = speechIntervals?.get(n);
+    if (exact) return exact.start;
     if (!Number.isFinite(n) || n < 0) return INTRO_SILENCE_SEC;
+    // Legacy fallback: stack script durations (post-TTS these include the folded
+    // inter-segment pauses, so they approximate the audio timeline).
     let off = INTRO_SILENCE_SEC;
     for (let i = 0; i < n && i < script.length; i += 1) {
       off += Number(script[i]?.duration) || 0;
@@ -428,15 +442,17 @@ export function overlayTextPolicy(project, wordTimestampCache) {
 
 /**
  * Apply YouTube overlays after ffmpeg assembly mux.
+ * Pass `options.audioFiles` (from generateNarration) so caption offsets are derived
+ * from the actual audio timeline instead of script duration estimates.
  */
-export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCache) {
+export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCache, options = {}) {
   const results = {};
   if (!isYouTubeExportMode(project)) return results;
 
   const { karaokeRequested, karaokeActive, burnImpactBeats } = overlayTextPolicy(project, wordTimestampCache);
 
   if (karaokeActive) {
-    const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, { project });
+    const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache, { project, audioFiles: options.audioFiles });
     results.captions = caps;
     if (caps.ok) {
       console.log(`  [ffmpeg] captions: ${caps.captionCount} lines burned`);

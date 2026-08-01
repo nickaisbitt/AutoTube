@@ -736,7 +736,7 @@ export async function executeAssembleVideo(
   const isReExport = activeProject.status === 'complete' && !!activeProject.thumbnail;
   if (isReExport) {
     const block = getExportBlockStatus(activeProject);
-    if (block.blocked) {
+    if (block.blocked && !block.allowDownloadAnyway) {
       throw new Error(block.reason ?? 'Export blocked by quality gate');
     }
   }
@@ -1016,6 +1016,18 @@ export async function applyQualityRecommendations(
         // Requires dedicated fact-check pass — logged for manual review
         logger.info('QualityGate', 'add_sources recommendation noted — requires OpenRouter fact-check pass');
         break;
+
+      case 'reharvest_media': {
+        callbacks.setProcessingMessage('Re-harvesting media for placeholder/low-quality assets...');
+        try {
+          const reharvested = await executeSourceMedia(updated, appConfig, signal, callbacks);
+          if (reharvested) updated = reharvested;
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') throw err;
+          logger.warn('QualityGate', 'reharvest_media failed', err);
+        }
+        break;
+      }
     }
   }
 
@@ -1160,11 +1172,16 @@ export function isQualityExportBlockBypassed(): boolean {
 export interface ExportBlockStatus {
   blocked: boolean;
   reason?: string;
+  /** Soft warning — download still allowed (with UI warning). */
+  warning?: string;
+  /** When true with blocked, UI may offer Download anyway. */
+  allowDownloadAnyway?: boolean;
 }
 
 /**
  * Returns whether export/download should be blocked due to failed assembly quality gates.
- * Bypass when SKIP_QUALITY_BLOCK=1 (CI/E2E).
+ * Blind-review / assembly score failures are soft: warn but allow Download anyway so
+ * finished videos are not left unexportable. Bypass when SKIP_QUALITY_BLOCK=1 (CI/E2E).
  */
 export function getExportBlockStatus(project: VideoProject): ExportBlockStatus {
   if (isQualityExportBlockBypassed()) {
@@ -1185,7 +1202,13 @@ export function getExportBlockStatus(project: VideoProject): ExportBlockStatus {
       ? criticalMessages.join('; ')
       : 'Quality gate failed — blind review or assembly scores below threshold';
 
-  return { blocked: true, reason };
+  // Soft block: surface the failure but allow export/download with an override path.
+  return {
+    blocked: true,
+    reason,
+    warning: reason,
+    allowDownloadAnyway: true,
+  };
 }
 
 /** Convenience wrapper for UI export buttons. */

@@ -2,7 +2,7 @@
  * Parsing utilities — segment parsing, validation, and topic sanitisation.
  */
 
-import type { ScriptSegment } from '../../types';
+import type { ScriptSegment, AudioDirection } from '../../types';
 import { repairTruncatedJson } from '../../utils/jsonRepair';
 
 /**
@@ -134,6 +134,34 @@ export function validateSegment(raw: unknown, index: number): ScriptSegment {
       ? s.chapterLabel.trim().slice(0, 50)
       : undefined;
 
+  // Preserve audioDirection when present and structurally valid — prompt requires it.
+  const VALID_SOUND_BEDS = new Set<string>(['calm', 'tense', 'neutral', 'building', 'release']);
+  let audioDirection: AudioDirection | undefined;
+  if (s.audioDirection && typeof s.audioDirection === 'object') {
+    const ad = s.audioDirection as Record<string, unknown>;
+    const soundBedRaw = String(ad.soundBed);
+    if (VALID_SOUND_BEDS.has(soundBedRaw)) {
+      const impactCues = Array.isArray(ad.impactCues)
+        ? (ad.impactCues as unknown[]).filter((c): c is string => typeof c === 'string')
+        : [];
+      const sonicSpace = typeof ad.sonicSpace === 'boolean' ? ad.sonicSpace : false;
+      const rawIntensity = Number(ad.intensity);
+      const intensity = Number.isFinite(rawIntensity) ? Math.max(0, Math.min(10, rawIntensity)) : 5;
+      audioDirection = {
+        soundBed: soundBedRaw as AudioDirection['soundBed'],
+        impactCues,
+        sonicSpace,
+        intensity,
+      };
+    }
+  }
+
+  // Preserve dataVisualization when present — required by DATA VISUALIZATION PROMPT RULE.
+  const dataVisualization =
+    typeof s.dataVisualization === 'string' && s.dataVisualization.trim()
+      ? s.dataVisualization.trim()
+      : undefined;
+
   return {
     id: Math.random().toString(36).substring(2, 11),
     type,
@@ -142,6 +170,8 @@ export function validateSegment(raw: unknown, index: number): ScriptSegment {
     visualNote,
     duration,
     ...(chapterLabel !== undefined && { chapterLabel }),
+    ...(audioDirection !== undefined && { audioDirection }),
+    ...(dataVisualization !== undefined && { dataVisualization }),
   };
 }
 

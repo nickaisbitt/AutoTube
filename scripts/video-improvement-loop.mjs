@@ -350,6 +350,7 @@ async function main() {
     const scenePass = watch.sceneQa?.pass === true;
     const scoreTargetMet =
       !brutalFailed &&
+      watch.brutal?.hasCriticalIssues !== true &&
       objectivePass &&
       renderTier === 'full' &&
       typeof brutalScore === 'number' &&

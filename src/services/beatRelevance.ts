@@ -92,13 +92,17 @@ export function scoreCandidateAgainstBeat(
   candidate: { alt?: string; url?: string; query?: string; source?: string },
   beat: Pick<VisualBeat, 'intent' | 'searchableSubject' | 'narrationExcerpt' | 'mustShow' | 'mustAvoid'>,
 ): BeatRelevanceScore {
-  const blob = `${candidate.alt || ''} ${candidate.query || ''} ${candidate.source || ''} ${candidate.url || ''}`.toLowerCase();
+  // The query is chosen from the beat before a result is fetched, so treating it
+  // as evidence would make every result look relevant. Only fetched-result
+  // metadata can satisfy the heuristic acceptance gate.
+  const evidenceBlob = `${candidate.alt || ''} ${candidate.source || ''} ${candidate.url || ''}`.toLowerCase();
+  const queryBlob = String(candidate.query || '').toLowerCase();
   const reasons: string[] = [];
   let score = 0;
   const beatContext = `${beat.searchableSubject || ''} ${beat.narrationExcerpt || ''} ${beat.intent || ''}`;
 
   for (const avoid of beat.mustAvoid || []) {
-    if (avoid && blob.includes(avoid.toLowerCase())) {
+    if (avoid && evidenceBlob.includes(avoid.toLowerCase())) {
       return { score: 0, reasons: [`mustAvoid:${avoid}`], reject: true };
     }
   }
@@ -110,7 +114,7 @@ export function scoreCandidateAgainstBeat(
 
   let hits = 0;
   for (const t of subjectTokens) {
-    if (blob.includes(t)) hits += 1;
+    if (evidenceBlob.includes(t)) hits += 1;
   }
   if (subjectTokens.length) {
     const ratio = hits / subjectTokens.length;
@@ -120,7 +124,7 @@ export function scoreCandidateAgainstBeat(
 
   let excerptHits = 0;
   for (const t of excerptTokens.slice(0, 12)) {
-    if (blob.includes(t)) excerptHits += 1;
+    if (evidenceBlob.includes(t)) excerptHits += 1;
   }
   if (excerptTokens.length) {
     const ratio = excerptHits / Math.min(12, excerptTokens.length);
@@ -129,30 +133,39 @@ export function scoreCandidateAgainstBeat(
   }
 
   for (const t of intentTokens.slice(0, 6)) {
-    if (blob.includes(t)) {
+    if (evidenceBlob.includes(t)) {
       score += 0.05;
       reasons.push(`intent:${t}`);
     }
   }
 
   for (const m of mustShow) {
-    if (m && blob.includes(m)) {
+    if (m && evidenceBlob.includes(m)) {
       score += 0.15;
       reasons.push(`mustShow:${m}`);
     }
   }
 
   // Generic stock language without subject overlap → soft reject
-  if (isGenericBeatJunk(blob, beatContext)) {
+  if (isGenericBeatJunk(evidenceBlob, beatContext)) {
     return { score: Math.min(score, 0.1), reasons: [...reasons, 'generic-stock-junk'], reject: true };
   }
-  const generic = /stock photo|b-roll footage|establish visual|supporting b-roll|generic corporate/.test(blob);
+  const generic = /stock photo|b-roll footage|establish visual|supporting b-roll|generic corporate/.test(evidenceBlob);
   if (generic && hits === 0) {
     return { score: Math.min(score, 0.15), reasons: [...reasons, 'generic-stock'], reject: true };
   }
 
-  score = Math.max(0, Math.min(1, score));
-  return { score, reasons, reject: score < 0.12 && hits === 0 };
+  const evidenceScore = Math.max(0, Math.min(1, score));
+
+  // Query overlap is useful only as a small ranking prior. It cannot change
+  // acceptance: reject is determined entirely from alt/url/source evidence.
+  const priorTokens = [...subjectTokens, ...excerptTokens.slice(0, 12), ...intentTokens.slice(0, 6)];
+  const queryHits = new Set(priorTokens.filter((t) => queryBlob.includes(t))).size;
+  const queryPrior = Math.min(0.08, queryHits * 0.015);
+  if (queryPrior > 0) reasons.push(`query-prior:${queryHits}`);
+
+  score = Math.max(0, Math.min(1, evidenceScore + queryPrior));
+  return { score, reasons, reject: evidenceScore < 0.12 && hits === 0 };
 }
 
 export function buildBeatRelevancePrompt(beat: VisualBeat, imageUrl: string): {
@@ -255,10 +268,16 @@ export async function rankCandidatesWithBeatVision<T extends { alt?: string; url
   const scored = await Promise.all(
     shortlist.map(async (c) => {
       let best = scoreCandidateAgainstBeat(c, beats[0]);
-      for (const beat of beats) {
+      let bestBeat = beats[0];
+      for (const beat of beats.slice(1)) {
         const h = scoreCandidateAgainstBeat(c, beat);
-        if (!h.reject && (best.reject || h.score > best.score)) best = h;
-        else if (h.reject === best.reject && h.score > best.score) best = h;
+        if (
+          (!h.reject && best.reject)
+          || (h.reject === best.reject && h.score > best.score)
+        ) {
+          best = h;
+          bestBeat = beat;
+        }
       }
 
       let vision: BeatRelevanceScore | null = null;
@@ -270,10 +289,9 @@ export async function rankCandidatesWithBeatVision<T extends { alt?: string; url
         && !options.signal?.aborted
       ) {
         options.budget.remaining -= 1;
-        const beat = beats[0];
         vision = await scoreImageAgainstBeatVision(
           c.resolvedUrl || c.url || '',
-          beat,
+          bestBeat,
           apiKey,
           { signal: options.signal },
         );

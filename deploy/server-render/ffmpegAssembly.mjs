@@ -561,10 +561,19 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
  * @param {object} project
  * @param {string} outputPath
  * @param {object} options
+ * @param {number} [options.introHoldSec] Extra b-roll seconds folded into segment 0's
+ *   video slot to cover the narration mix's intro silence (hook window).
+ * @param {number} [options.outroHoldSec] Extra b-roll seconds folded into the last
+ *   segment's video slot to cover the narration mix's end-screen silence.
  */
 export async function renderViaFfmpegAssembly(project, outputPath, options = {}) {
   const workDir = join(dirname(outputPath), 'ffmpeg-assembly');
   mkdirSync(workDir, { recursive: true });
+  const introHoldSec = Math.max(0, Number(options.introHoldSec) || 0);
+  const outroHoldSec = Math.max(0, Number(options.outroHoldSec) || 0);
+  if (introHoldSec > 0 || outroHoldSec > 0) {
+    console.log(`  [ffmpeg] timeline holds: intro ${introHoldSec.toFixed(2)}s, outro ${outroHoldSec.toFixed(2)}s (match audio silences)`);
+  }
   const segmentOutputs = [];
   const perSegment = [];
   let totalClipCount = 0;
@@ -585,7 +594,15 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     console.log(`  [ffmpeg] segment ${si + 1}/${project.script.length}: ${seg.title} (${(seg.duration || 0).toFixed(1)}s)`);
     const segOut = join(workDir, `segment-${si}.mp4`);
     const isHookSegment = si === 0 || seg.type === 'intro';
-    const result = await renderSegmentClips(seg, segMedia, project, segOut, {
+    // Fold audio intro/end silences into the first/last video slots so the video
+    // timeline matches the concatenated narration exactly (no trim of speech).
+    const extraHoldSec =
+      (si === 0 ? introHoldSec : 0)
+      + (si === project.script.length - 1 ? outroHoldSec : 0);
+    const segForVideo = extraHoldSec > 0
+      ? { ...seg, duration: (seg.duration || 20) + extraHoldSec }
+      : seg;
+    const result = await renderSegmentClips(segForVideo, segMedia, project, segOut, {
       ...options,
       sharedLastGoodClipPath: sharedLastGoodRef.path,
       sharedLastGoodRef,
@@ -630,10 +647,23 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const muxDurationSec = videoDurationSec;
 
   if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
+    const overshootSec = audioDurationSec - videoDurationSec;
+    // Guard: a large overshoot means real narration (not just trailing silence)
+    // would be silently cut off at the mux. Fail loudly instead.
+    const maxTrimSec = Math.max(0, Number(process.env.AUTOTUBE_MAX_AUDIO_TRIM_SEC ?? 2));
+    if (overshootSec > maxTrimSec && process.env.AUTOTUBE_ALLOW_AUDIO_TRIM !== '1') {
+      return {
+        ok: false,
+        error:
+          `A/V timeline mismatch: mux would trim ${overshootSec.toFixed(2)}s of audio `
+          + `(audio ${audioDurationSec.toFixed(2)}s vs video ${videoDurationSec.toFixed(2)}s, allowed ${maxTrimSec}s). `
+          + 'Narration would be cut off. Set AUTOTUBE_ALLOW_AUDIO_TRIM=1 to override.',
+      };
+    }
     const trimmedAudio = join(workDir, 'narration-trimmed.wav');
     if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
       audioForMux = trimmedAudio;
-      audioTrimmedSec = audioDurationSec - videoDurationSec;
+      audioTrimmedSec = overshootSec;
       console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (no video freeze-pad)`);
     }
   }
@@ -680,6 +710,8 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     videoSec: videoDurationSec,
     audioSec: audioDurationSec,
     audioTrimmedSec: Math.round(audioTrimmedSec * 100) / 100,
+    introHoldSec,
+    outroHoldSec,
     tpadSec: 0,
     muxDurationSec,
     perSegment,

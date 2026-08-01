@@ -1,4 +1,5 @@
-import { Download, Upload, FileText } from 'lucide-react';
+import { useState } from 'react';
+import { Download, Upload, FileText, AlertTriangle } from 'lucide-react';
 import type { VideoProject } from '../../types';
 import { generateSRTSubtitles, generateVTTSubtitles, downloadSubtitles } from '../../services/subtitles';
 import { openYouTubeUpload, generateYouTubeMetadata } from '../../services/youtube';
@@ -18,15 +19,50 @@ export interface ExportActionsProps {
   thumbnailPreviewFailed: boolean;
 }
 
+function downloadProjectVideo(project: VideoProject) {
+  if (!project?.thumbnail) return;
+  const a = document.createElement('a');
+  a.href = project.thumbnail;
+  const format = project.exportSettings?.format || 'webm';
+  a.download = project.exportSettings?.fileName || `${project.title.replace(/[^a-z0-9]/gi, '_')}.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 export default function ExportActions({
   project,
   thumbnailPreviewUrl,
   thumbnailPreviewFailed,
 }: ExportActionsProps) {
   const exportBlock = getExportBlockStatus(project);
+  const [overrideConfirmed, setOverrideConfirmed] = useState(false);
+  const hardBlocked = exportBlock.blocked && !exportBlock.allowDownloadAnyway;
+  const softBlocked = exportBlock.blocked && !!exportBlock.allowDownloadAnyway && !overrideConfirmed;
 
   return (
     <div className="space-y-3">
+      {(exportBlock.warning || softBlocked) && (
+        <div
+          className="flex gap-3 border-2 border-amber-500/60 bg-amber-950/30 p-3 text-xs font-mono text-amber-200"
+          data-testid="export-quality-warning"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <div className="space-y-2">
+            <p>{exportBlock.warning ?? exportBlock.reason}</p>
+            {softBlocked && (
+              <button
+                type="button"
+                data-testid="download-anyway-button"
+                onClick={() => setOverrideConfirmed(true)}
+                className="border-2 border-amber-500 px-3 py-1.5 text-[10px] font-bold uppercase text-amber-200 hover:bg-amber-500 hover:text-black"
+              >
+                Download anyway
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       <button
         onClick={async () => {
           if (!project?.thumbnail) return;
@@ -60,27 +96,27 @@ export default function ExportActions({
       </button>
       <button
         onClick={() => {
-          if (exportBlock.blocked) {
+          if (hardBlocked) {
             toast(exportBlock.reason ?? 'Export blocked by quality gate', 'error');
             return;
           }
-          if (!project?.thumbnail) return;
-          const a = document.createElement('a');
-          a.href = project.thumbnail;
-          const format = project.exportSettings?.format || 'webm';
-          a.download = project.exportSettings?.fileName || `${project.title.replace(/[^a-z0-9]/gi, '_')}.${format}`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+          if (softBlocked) {
+            toast(exportBlock.warning ?? exportBlock.reason ?? 'Confirm Download anyway first', 'warning');
+            return;
+          }
+          if (exportBlock.warning && overrideConfirmed) {
+            toast(exportBlock.warning, 'warning');
+          }
+          downloadProjectVideo(project);
         }}
-        disabled={exportBlock.blocked}
+        disabled={hardBlocked || softBlocked}
         className={`flex w-full items-center gap-3 border-2 px-4 py-3 text-sm font-medium ${
-          exportBlock.blocked
+          hardBlocked || softBlocked
             ? 'cursor-not-allowed border-surface-800 bg-surface-950 text-surface-600'
             : 'border-surface-700 bg-surface-900 text-surface-300 transition-colors duration-200 hover:bg-brand-500 hover:text-black'
         }`}
         data-testid="download-video-button"
-        title={exportBlock.blocked ? exportBlock.reason : undefined}
+        title={hardBlocked || softBlocked ? (exportBlock.reason ?? exportBlock.warning) : undefined}
       >
         <Download className="h-5 w-5" />
         Download Video

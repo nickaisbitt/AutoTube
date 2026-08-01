@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import AppShell from './components/AppShell';
 import AppModals from './components/AppModals';
+import OnboardingModal from './components/OnboardingModal';
 import PipelineStepRouter from './components/PipelineStepRouter';
 import RenderProgressDashboard from './components/RenderProgressDashboard';
 import ToastContainer from './components/Toast';
@@ -27,13 +28,29 @@ function AppContent() {
     }
   }, [loadProject, appConfig.openRouterKey]);
 
+  const finishOnboarding = useCallback(() => {
+    localStorage.setItem('autotube_onboarding_seen', 'true');
+    setShowOnboarding(false);
+    loadProject();
+  }, [loadProject]);
+
+  /** Dismiss onboarding without marking seen forever when no key — open Settings instead. */
+  const handleOnboardingOpenSettings = useCallback(() => {
+    setShowOnboarding(false);
+    setIsSettingsOpen(true);
+    loadProject();
+  }, [loadProject]);
+
   const handleExport = useCallback(async (quality: 'draft' | 'standard' | 'high', format: 'webm' | 'mp4', resolution?: '720p' | '1080p' | '4K' | '2.39:1') => {
     if (!project) return;
 
     const block = getExportBlockStatus(project);
-    if (block.blocked) {
+    if (block.blocked && !block.allowDownloadAnyway) {
       toast(block.reason ?? 'Export blocked by quality gate', 'error');
       return;
+    }
+    if (block.warning || (block.blocked && block.allowDownloadAnyway)) {
+      toast(block.warning ?? block.reason ?? 'Quality gate warning — exporting anyway', 'warning');
     }
     
     const clonedProject = structuredClone(project);
@@ -60,12 +77,18 @@ function AppContent() {
     <AppShell onOpenSettings={() => setIsSettingsOpen(true)}>
       <PipelineStepRouter onOpenExport={() => setIsExportOpen(true)} />
       <RenderProgressDashboard />
+      {/* Own onboarding so Skip/Settings can loadProject without dead-starting */}
+      <OnboardingModal
+        isOpen={showOnboarding}
+        onComplete={finishOnboarding}
+        onOpenSettings={handleOnboardingOpenSettings}
+      />
       <AppModals
         isSettingsOpen={isSettingsOpen}
         setIsSettingsOpen={setIsSettingsOpen}
         isExportOpen={isExportOpen}
         setIsExportOpen={setIsExportOpen}
-        showOnboarding={showOnboarding}
+        showOnboarding={false}
         setShowOnboarding={setShowOnboarding}
         handleExport={handleExport}
       />

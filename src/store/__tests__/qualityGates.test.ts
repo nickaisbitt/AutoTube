@@ -254,11 +254,13 @@ describe('evaluateQualityGate', () => {
       vi.unstubAllEnvs();
     });
 
-    it('blocks export when assembly gate fails', () => {
+    it('blocks export when assembly gate fails but allows Download anyway', () => {
       const project = makeProject({ blindReview: failingBlindReview });
       expect(isExportBlocked(project)).toBe(true);
       const status = getExportBlockStatus(project);
       expect(status.blocked).toBe(true);
+      expect(status.allowDownloadAnyway).toBe(true);
+      expect(status.warning).toBeTruthy();
       expect(status.reason).toContain('Thumbnail effectiveness');
     });
 

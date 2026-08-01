@@ -3189,20 +3189,49 @@ async function concatenateAudio(audioFiles, outputFile) {
   }
 
   const { concatenateAudio: concatAudio } = await import('./server-render/audio.mjs');
-  return concatAudio(audioFiles, outputFile);
+  // crossfadeDuration 0: acrossfade over the narration/silence pads produced
+  // near-silent mixes AND shortened the mix per boundary, desyncing A/V.
+  return concatAudio(audioFiles, outputFile, { crossfadeDuration: 0 });
 }
 
+/**
+ * Speech intervals (absolute seconds into the concatenated narration mix) for
+ * dynamic music ducking. Uses generateNarration kind tags when present; falls
+ * back to the subtitleFile heuristic for untagged legacy entries. Cumulative
+ * durations include intro silence and inter-segment gap/breath pads.
+ */
 function buildNarrationTimingsFromAudioFiles(audioFiles) {
   const timings = [];
   let cursor = 0;
   for (const audio of audioFiles) {
     const duration = Math.max(0, Number(audio.duration) || 0);
-    if (audio.subtitleFile && duration > 0) {
+    const isNarration = audio.kind ? audio.kind === 'narration' : Boolean(audio.subtitleFile);
+    if (isNarration && duration > 0) {
       timings.push({ start: cursor, end: cursor + duration });
     }
     cursor += duration;
   }
   return timings;
+}
+
+/**
+ * Zero-narration gate: a render with no narration segments must fail loudly
+ * instead of shipping a silent video. Escape hatch: ALLOW_SILENT=1 (or
+ * AUTOTUBE_ALLOW_SILENT=1) for intentionally silent renders.
+ */
+function assertNarrationPresent(audioFiles, label = 'render') {
+  const narrationCount = (audioFiles || []).filter(
+    (af) => (af.kind ? af.kind === 'narration' : Boolean(af.subtitleFile)) || /narration-\d+\.\w+$/i.test(af.file || ''),
+  ).length;
+  if (narrationCount > 0) return narrationCount;
+  if (process.env.ALLOW_SILENT === '1' || process.env.AUTOTUBE_ALLOW_SILENT === '1') {
+    log('warn', `  ⚠ Zero narration segments for ${label} — continuing because ALLOW_SILENT=1`);
+    return 0;
+  }
+  throw new Error(
+    `Zero narration segments generated for ${label} (audioFiles=${(audioFiles || []).length}). ` +
+    'Refusing to render a silent video. Set ALLOW_SILENT=1 to override.',
+  );
 }
 
 /** FFmpeg assembly path: TTS + clip concat (skips canvas preload / frame loop). */
@@ -3215,13 +3244,22 @@ async function runFfmpegAssemblyRender(project) {
   const cfApiToken = process.env.CF_API_TOKEN || '';
   const edgeVoice = project.exportSettings?.edgeTtsVoice || 'en-US-GuyNeural';
 
+  // Intro silence follows the cold-open/hook window (none in shorts) and end
+  // silence matches the end-screen hold — passed through so the narration mix and
+  // the video timeline are built from the same numbers.
+  const isShortsMode = project.exportSettings?.format === 'shorts';
+  const introSilenceSec = isShortsMode ? 0 : 3.5;
+  const endSilenceSec = isShortsMode ? 2 : 4;
+
   stepMetrics.startStep('narration');
   let audioFiles = [];
   const TTS_MAX_RETRIES = 3;
   const TTS_RETRY_DELAY_MS = 2000;
   for (let ttsAttempt = 1; ttsAttempt <= TTS_MAX_RETRIES; ttsAttempt++) {
     try {
-      audioFiles = await generateNarration(project.script, audioDir, { cfAccountId, cfApiToken, edgeVoice });
+      audioFiles = await generateNarration(project.script, audioDir, {
+        cfAccountId, cfApiToken, edgeVoice, introSilenceSec, endSilenceSec,
+      });
       if (audioFiles.length > 0) break;
     } catch (err) {
       log('info', `  ⚠ Narration attempt ${ttsAttempt}/${TTS_MAX_RETRIES} failed: ${err.message}`);
@@ -3232,16 +3270,20 @@ async function runFfmpegAssemblyRender(project) {
     }
   }
 
+  // Zero narration must fail the render (ALLOW_SILENT=1 to override).
+  assertNarrationPresent(audioFiles, 'ffmpeg assembly render');
+
   wordTimestampCache.clear();
   let narrationSegIdx = 0;
   for (const af of audioFiles) {
     if (af.subtitleFile && existsSync(af.subtitleFile)) {
       const words = parseVttWordTimestamps(af.subtitleFile);
+      const segIdx = Number.isInteger(af.segmentIndex) ? af.segmentIndex : narrationSegIdx;
       if (words.length > 0) {
-        wordTimestampCache.set(narrationSegIdx, words);
-        log('info', `  📝 Loaded ${words.length} word timestamps for segment ${narrationSegIdx + 1}`);
+        wordTimestampCache.set(segIdx, words);
+        log('info', `  📝 Loaded ${words.length} word timestamps for segment ${segIdx + 1}`);
       }
-      narrationSegIdx++;
+      narrationSegIdx = segIdx + 1;
     }
   }
 
@@ -3284,11 +3326,18 @@ async function runFfmpegAssemblyRender(project) {
     log('warn', `  ⚠ Audio concat for ffmpeg assembly: ${err.message}`);
   }
   const narrationTimings = buildNarrationTimingsFromAudioFiles(audioFiles);
+  // Video must hold b-roll through the audio's intro/end silences — otherwise the
+  // mux trims that much narration off the end of the mix.
+  const sumKind = (kind) => audioFiles
+    .filter((af) => af.kind === kind)
+    .reduce((s, af) => s + (Number(af.duration) || 0), 0);
   const ffResult = await renderViaFfmpegAssembly(project, OUTPUT_FILE, {
     devServer: process.env.DEV_SERVER_URL || 'http://localhost:5173',
     cutIntervalSec: cutInterval,
     mixedAudioPath: existsSync(mixedAudio) ? mixedAudio : null,
     narrationTimings,
+    introHoldSec: sumKind('intro-silence'),
+    outroHoldSec: sumKind('end-silence'),
   });
   if (!ffResult.ok) {
     throw new Error(ffResult.error || 'ffmpeg assembly render failed');
@@ -3296,7 +3345,8 @@ async function runFfmpegAssemblyRender(project) {
   log('info', `  ✓ FFmpeg assembly complete (${ffResult.segmentCount} segments, ${ffResult.manifest?.clipCount ?? '?'} clips, tpad ${ffResult.manifest?.tpadSec ?? 0}s)`);
   try {
     const { applyFfmpegYoutubeOverlays } = await import('./server-render/ffmpegOverlays.mjs');
-    const overlayResults = applyFfmpegYoutubeOverlays(OUTPUT_FILE, project, wordTimestampCache);
+    // audioFiles gives captions exact speech offsets (intro silence + segment pads).
+    const overlayResults = applyFfmpegYoutubeOverlays(OUTPUT_FILE, project, wordTimestampCache, { audioFiles });
     if (overlayResults.hook?.ok === false && overlayResults.hook?.error) {
       log('warn', `  ⚠ Hook overlay skipped: ${overlayResults.hook.error}`);
     }
@@ -3775,12 +3825,20 @@ async function render() {
   stepMetrics.startStep('narration');
 
   // Task 127: TTS retry with fallback — retry narration generation up to 3 times
+  // Intro/end silences must mirror the video cold open and end screen (both 0/2s in
+  // shorts) so the narration mix length equals the rendered video length.
+  const narrationIntroSilenceSec = isShortsMode ? 0 : 3.5;
+  const narrationEndSilenceSec = isShortsMode ? 2 : 4;
   let audioFiles = [];
   const TTS_MAX_RETRIES = 3;
   const TTS_RETRY_DELAY_MS = 2000;
   for (let ttsAttempt = 1; ttsAttempt <= TTS_MAX_RETRIES; ttsAttempt++) {
     try {
-      audioFiles = await generateNarration(project.script, audioDir, { cfAccountId, cfApiToken, edgeVoice });
+      audioFiles = await generateNarration(project.script, audioDir, {
+        cfAccountId, cfApiToken, edgeVoice,
+        introSilenceSec: narrationIntroSilenceSec,
+        endSilenceSec: narrationEndSilenceSec,
+      });
       if (audioFiles.length > 0) break;
     } catch (err) {
       log('info', `  ⚠ Narration attempt ${ttsAttempt}/${TTS_MAX_RETRIES} failed: ${err.message}`);
@@ -3791,17 +3849,21 @@ async function render() {
     }
   }
 
+  // Zero narration must fail the render (ALLOW_SILENT=1 to override).
+  assertNarrationPresent(audioFiles, 'canvas render');
+
   // Load VTT word timestamps into cache for karaoke sync.
-  // audioFiles includes silence gaps, so use a separate counter for segment indices.
+  // audioFiles includes silence gaps — use the tagged segmentIndex (fallback: counter).
   let narrationSegIdx = 0;
   for (const af of audioFiles) {
     if (af.subtitleFile && existsSync(af.subtitleFile)) {
       const words = parseVttWordTimestamps(af.subtitleFile);
+      const segIdx = Number.isInteger(af.segmentIndex) ? af.segmentIndex : narrationSegIdx;
       if (words.length > 0) {
-        wordTimestampCache.set(narrationSegIdx, words);
-        log('info', `  📝 Loaded ${words.length} word timestamps for segment ${narrationSegIdx + 1}`);
+        wordTimestampCache.set(segIdx, words);
+        log('info', `  📝 Loaded ${words.length} word timestamps for segment ${segIdx + 1}`);
       }
-      narrationSegIdx++;
+      narrationSegIdx = segIdx + 1;
     }
   }
 
@@ -4477,19 +4539,11 @@ async function render() {
       }
     }
 
-    // Flash transition frame between title card and segment content (req f)
-    if (!DRAFT_MODE) {
-      drawFlashFrame(ctx, WIDTH, HEIGHT, 'white', 0.5);
-      const raw = getFrameBuffer(canvas);
-      if (raw === null) break;
-      const canWrite = writeFrameSafely(raw);
-      if (canWrite === 'dead') break;
-      if (!canWrite) {
-        try { await waitForDrain(30000); } catch { log('warn', 'Drain timeout, continuing anyway'); }
-      }
-      totalFrames++;
-      globalFrameCounter++;
-    }
+    // NOTE: the old title-card→segment flash wrote an EXTRA frame here (outside the
+    // per-segment frame budget), lengthening the video by 1 frame per segment and
+    // drifting A/V sync. Title cards are disabled (SEGMENT_TITLE_FRAMES=0) and
+    // in-timeline flashes are handled inside the segment loop, so no extra frame
+    // may be written between segments.
 
     // ── Regular segment frames ────────────────────────────────────────────
     let prevMi = -1; // Track previous media index for zoom/pan transitions (Step 10)
@@ -4900,18 +4954,11 @@ async function render() {
           const musicPreset = project.exportSettings?.musicPreset || null;
           log('info', `  Style: ${videoStyle}, BG music: ${bgMusicEnabled}, Music preset: ${musicPreset || 'auto'}, Duration: ${totalSec}s`);
 
-          // Build narration timings from project script
-          // Build narration timings from project script matching transition configurations
-          let currentTime = TITLE_CARD_SECONDS + COLD_OPEN_FRAMES / FPS;
-          const narrationTimings = [];
-          if (project.script) {
-            for (const seg of project.script) {
-              currentTime += CONFIG.SEGMENT_TITLE_DURATION;
-              narrationTimings.push({ start: currentTime, end: currentTime + seg.duration });
-              currentTime += seg.duration;
-            }
-          }
-
+          // Narration timings for music ducking come from the actual audio timeline
+          // (cumulative audioFiles durations include intro silence and the
+          // inter-segment gap/breath pads) — script-duration sums drifted ~0.5s per
+          // segment and mis-timed the ducking envelope.
+          const narrationTimings = buildNarrationTimingsFromAudioFiles(audioFiles);
 
           const muxOk = muxAudio(OUTPUT_FILE, combinedAudio, finalMp4, totalSec, {
           style: videoStyle,
@@ -5128,6 +5175,33 @@ async function render() {
   }
   const finalOutputGate = assertRenderOutput(finalMp4File, 'Final render output');
   log('info', `  ✅ Final output validated (${(finalOutputGate.size / 1024 / 1024).toFixed(1)}MB)`);
+
+  // Final A/V sync validation: the muxed audio stream must span the video stream.
+  // A short audio stream means narration was truncated at the mux (timeline drift).
+  try {
+    const probeStream = (selector) => {
+      const p = spawnSync('ffprobe', [
+        '-v', 'error', '-select_streams', selector,
+        '-show_entries', 'stream=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', finalMp4File,
+      ], { encoding: 'utf8', timeout: 30000 });
+      const d = parseFloat((p.stdout || '').trim());
+      return Number.isFinite(d) ? d : null;
+    };
+    const videoStreamSec = probeStream('v:0');
+    const audioStreamSec = probeStream('a:0');
+    if (videoStreamSec !== null && audioStreamSec !== null) {
+      const avDriftSec = videoStreamSec - audioStreamSec;
+      log('info', `  🎚️ A/V stream durations: video ${videoStreamSec.toFixed(2)}s, audio ${audioStreamSec.toFixed(2)}s (drift ${avDriftSec.toFixed(2)}s)`);
+      if (Math.abs(avDriftSec) > 0.75) {
+        log('warn', `  ⚠ A/V duration drift ${avDriftSec.toFixed(2)}s exceeds 0.75s — narration may be truncated or padded (check gap/hold timeline sync)`);
+      }
+    } else if (audioFiles.length > 0 && audioStreamSec === null) {
+      log('warn', '  ⚠ Final output has no audio stream despite generated narration');
+    }
+  } catch (avErr) {
+    log('warn', `  ⚠ A/V duration validation skipped: ${avErr.message}`);
+  }
 
   if (renderPassed && finalMp4File) {
     // Copy to Downloads with a topic-based filename

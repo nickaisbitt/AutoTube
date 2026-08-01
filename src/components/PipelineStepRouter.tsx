@@ -76,10 +76,9 @@ export default function PipelineStepRouter({ onOpenExport }: PipelineStepRouterP
   const handleGenerateNarration = useCallback(async () => {
     if (!project) return;
     setCurrentStep('narration');
-    const result = await generateNarration(project);
-    if (result) {
-      setCurrentStep('ai_edit');
-    }
+    // Stay on narration after Prepare Narration so the user can review clips.
+    // Advancement to AI Edit is explicit via NarrationStep's Continue CTA.
+    await generateNarration(project);
   }, [project, generateNarration, setCurrentStep]);
 
   const handleRunAIEdit = useCallback(async () => {

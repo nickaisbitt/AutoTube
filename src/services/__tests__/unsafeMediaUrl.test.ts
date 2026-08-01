@@ -3,13 +3,43 @@ import {
   isUnsafeMediaUrl,
   isJunkWebVolumeStillUrl,
 } from '../../../scripts/lib/stock-media-urls.mjs';
-import { isVolumePaddingAsset } from '../../../scripts/lib/harvest-quality.mjs';
+import { isDomainBlocked } from '../domainFilter';
 
 describe('unsafe media URL bans', () => {
   it('flags adult CDN hosts', () => {
     expect(isUnsafeMediaUrl('https://ei-ph.rdtcdn.com/videos/202401/09/x.jpg')).toBe(true);
     expect(isUnsafeMediaUrl('https://cdn.pornhub.com/thumb.jpg')).toBe(true);
     expect(isJunkWebVolumeStillUrl('https://ei-ph.rdtcdn.com/x.jpg')).toBe(true);
+  });
+
+  it('flags additional adult CDN hosts aligned with domainFilter', () => {
+    const urls = [
+      'https://cdn.ahcdn.com/thumb.jpg',
+      'https://cdn.x-cdn.com/img.jpg',
+      'https://ads.trafficjunky.net/x.jpg',
+      'https://syndication.exoclick.com/x.jpg',
+    ];
+    for (const url of urls) {
+      expect(isUnsafeMediaUrl(url)).toBe(true);
+      expect(isDomainBlocked(url).blocked).toBe(true);
+      expect(isDomainBlocked(url).category).toBe('adult-content');
+    }
+  });
+
+  it('flags path and keyword NSFW signals aligned with domainFilter', () => {
+    const cases = [
+      ['https://example.com/media/porn/thumb.jpg', '/porn'],
+      ['https://cdn.example.com/xxx/foo.jpg', '/xxx/'],
+      ['https://example.com/nsfw.jpg', 'nsfw'],
+      ['https://cdn.adult-cdn.net/x.jpg', 'adult-cdn'],
+    ] as const;
+    for (const [url, pattern] of cases) {
+      expect(isUnsafeMediaUrl(url)).toBe(true);
+      const blocked = isDomainBlocked(url);
+      expect(blocked.blocked).toBe(true);
+      expect(blocked.category).toBe('adult-content');
+      expect(blocked.pattern).toBe(pattern);
+    }
   });
 
   it('flags junk web volume still hosts', () => {

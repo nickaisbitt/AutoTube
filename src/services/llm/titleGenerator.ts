@@ -130,13 +130,13 @@ export async function generateVideoTitle(
     .join('\n');
 
   const systemPrompt =
-    'You are a YouTube title optimization expert. Generate exactly 3 title options for the given video script. Return ONLY a JSON array of 3 strings. No markdown, no preamble.';
+    'You are a YouTube title optimization expert. Generate exactly 3 title options for the given video script. Return ONLY a JSON object with key "titles" containing an array of 3 strings: { "titles": ["...", "...", "..."] }. No markdown, no preamble.';
 
   const hookInstruction = hookLine
     ? `\n\nHOOK ALIGNMENT (CRITICAL):\nThe video's opening hook line is: "${hookLine}". The title MUST echo or reference the core claim from this hook line. At least one title must contain a key phrase, number, or named entity from the hook. The title and hook should feel like they belong to the same story — a viewer who reads the title should immediately recognize the hook when the video starts.`
     : '';
 
-  const userPrompt = `Generate 3 YouTube-optimized title options for this video about "${sanitiseTopic(topic)}".\n\nScript:\n${scriptSummary}\n\nTitle requirements:\n- 40-70 characters each\n- Match the script's actual angle, not just the raw topic\n- Use curiosity, conflict, or specificity to drive clicks\n- Avoid generic patterns like "The Full Story" or "Everything You Need to Know"${hookInstruction}\n\nReturn ONLY a JSON array of 3 title strings.`;
+  const userPrompt = `Generate 3 YouTube-optimized title options for this video about "${sanitiseTopic(topic)}".\n\nScript:\n${scriptSummary}\n\nTitle requirements:\n- 40-70 characters each\n- Match the script's actual angle, not just the raw topic\n- Use curiosity, conflict, or specificity to drive clicks\n- Avoid generic patterns like "The Full Story" or "Everything You Need to Know"${hookInstruction}\n\nReturn ONLY a JSON object: { "titles": ["title1", "title2", "title3"] }.`;
 
   try {
     const response = await fetchWithTimeout(

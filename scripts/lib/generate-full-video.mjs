@@ -246,6 +246,15 @@ export async function checkDevServer(devServer = process.env.DEV_SERVER_URL || '
   }
 }
 
+export function spawnSyncFailureReason(result, label = 'process') {
+  if (result?.status === 0) return '';
+  if (result?.status === null) {
+    const signal = result?.signal ? ` (${result.signal})` : '';
+    return `${label} killed or timed out${signal}`;
+  }
+  return `${label} exit ${result?.status}`;
+}
+
 function isLikelyVideoHost(url = '') {
   return /(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|player\.vimeo|archive\.org|giphy|tiktok\.com|vm\.tiktok)/i.test(url);
 }
@@ -821,7 +830,7 @@ function airlineClipSearchQuery(clip = {}) {
 
 function hasAirlineCompatibleVisualEvidence(evidence = '') {
   const blob = String(evidence || '').trim();
-  return !blob || AIRLINE_STRONG_RE.test(blob) || (AIRLINE_WEAK_RE.test(blob) && AIRLINE_WEAK_CONTEXT_RE.test(blob));
+  return Boolean(blob && (AIRLINE_STRONG_RE.test(blob) || (AIRLINE_WEAK_RE.test(blob) && AIRLINE_WEAK_CONTEXT_RE.test(blob))));
 }
 
 function isTrustedAirlineSearchQuery(query = '') {
@@ -841,20 +850,9 @@ function isAirlineRelevantClip(clip = {}, topicBlob = '') {
   if (AIRLINE_OFF_TOPIC_RE.test(evidence)) return false;
   if (AIRLINE_STRONG_RE.test(evidence)) return true;
   if (AIRLINE_WEAK_RE.test(evidence) && AIRLINE_WEAK_CONTEXT_RE.test(evidence)) return true;
-  // Echo-only alts: allow only short, controlled aviation search queries (not topic essays).
+  // Echo-only alts are not proof; trusted queries still need visual metadata.
   const query = airlineClipSearchQuery(clip);
   if (isTrustedAirlineSearchQuery(query) && hasAirlineCompatibleVisualEvidence(evidence)) {
-    return true;
-  }
-  // Archive.org titles are often opaque (identifiers / news dumps). When the search
-  // query itself is a short trusted aviation string and the title isn't off-topic,
-  // trust the query — otherwise keyless cold eval starves at ~6 hangar pads.
-  if (
-    isTrustedAirlineSearchQuery(query)
-    && /Archive\.org/i.test(String(clip.source || ''))
-    && !AIRLINE_OFF_TOPIC_RE.test(`${clip.alt || ''} ${clip.url || ''}`)
-    && !AIRLINE_DISCONNECTED_PAD_RE.test(`${clip.alt || ''} ${clip.url || ''}`)
-  ) {
     return true;
   }
   return false;
@@ -1488,6 +1486,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         report.visionStockChecked = (report.visionStockChecked || 0) + 1;
         const verdict = await visionRejectOffBrandStock(thumb, apiKey, topicBlob);
+        if (verdict.ran === false) {
+          report.visionStockUnverified = (report.visionStockUnverified || 0) + 1;
+          if (isAirlineTopic(topicBlob)) {
+            report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+            continue;
+          }
+        }
         if (verdict.reject) {
           report.visionStockRejected = (report.visionStockRejected || 0) + 1;
           report.visionStockRejectedThumbs = report.visionStockRejectedThumbs || [];
@@ -2021,10 +2026,10 @@ export async function generateFullVideo(options) {
         stdio: ['inherit', 'pipe', 'pipe'],
       });
       writeFileSync(join(outDir, 'render.log'), `${render.stdout || ''}\n${render.stderr || ''}`);
-      if (render.status !== 0 && render.status !== null) {
+      if (render.status !== 0) {
         return {
           ok: false,
-          error: `keep-best render failed: exit ${render.status}`,
+          error: `keep-best render failed: ${spawnSyncFailureReason(render, 'server-render')}`,
           topic,
           outDir,
           fixState,
@@ -2600,8 +2605,11 @@ export async function generateFullVideo(options) {
       const frozen = loadFrozenProject(frozenPath);
       const applied = applyFrozenMediaToProject(project, frozen);
       if (applied.ok) {
+        const orphanSuffix = applied.orphanMediaCount
+          ? `; dropped ${applied.orphanMediaCount} orphan frozen assets`
+          : '';
         log(
-          `❄️ Keep-best polish: reused ${applied.mediaCount} frozen assets / ${applied.timelineCount} timeline cuts (no reharvest lottery)`,
+          `❄️ Keep-best polish: reused ${applied.mediaCount} frozen assets / ${applied.timelineCount} timeline cuts (no reharvest lottery)${orphanSuffix}`,
         );
         fixState.reHarvestMedia = false;
       } else {
@@ -2756,8 +2764,8 @@ export async function generateFullVideo(options) {
     writeFileSync(renderLogPath, renderLogBody);
     writeFileSync(join(outDir, 'render.log'), renderLogBody);
 
-    if (render.status !== 0 && render.status !== null) {
-      return { ok: false, error: `server-render exit ${render.status}`, topic, outDir, projectPath };
+    if (render.status !== 0) {
+      return { ok: false, error: spawnSyncFailureReason(render, 'server-render'), topic, outDir, projectPath };
     }
 
     const finalMp4 = mp4Out.replace('.mp4', '-final.mp4');

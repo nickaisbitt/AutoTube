@@ -40,7 +40,7 @@ test.describe('Critical User Flows', () => {
     });
   });
 
-  test('error handling — onboarding skip leaves app usable without real API key', async ({ page }) => {
+  test('error handling — onboarding skip without key opens settings (no dead-start)', async ({ page }) => {
     await page.unroute('**/openrouter.ai/**');
     await page.addInitScript(() => {
       localStorage.removeItem('autotube_onboarding_seen');
@@ -53,11 +53,16 @@ test.describe('Critical User Flows', () => {
     const modal = page.getByTestId('onboarding-modal');
     if (await modal.isVisible({ timeout: 5000 }).catch(() => false)) {
       await page.getByTestId('onboarding-skip').click();
-      await expect(modal).toBeHidden({ timeout: 5000 });
+      // Skip without key must open Settings (or show key required) — not persist empty forever
+      const settingsVisible = await page.getByTestId('settings-modal').isVisible({ timeout: 3000 }).catch(() => false);
+      const keyRequired = await page.getByTestId('onboarding-key-required').isVisible({ timeout: 1000 }).catch(() => false);
+      expect(settingsVisible || keyRequired).toBeTruthy();
+      if (settingsVisible) {
+        await expect(modal).toBeHidden({ timeout: 5000 });
+      }
     }
 
     await expect(page.getByTestId('pipeline-sidebar')).toBeVisible();
     await expect(page.getByTestId('topic-input')).toBeVisible();
-    await expect(page.getByTestId('generate-script-only')).toBeVisible();
   });
 });

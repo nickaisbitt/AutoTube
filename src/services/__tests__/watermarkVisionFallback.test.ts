@@ -7,8 +7,8 @@
  * Tests that:
  * - Vision check is invoked on top 3 candidates when OpenRouter key is available
  * - Candidates rejected by vision check are removed from results
- * - When all candidates are rejected, the fallback chain tries Wikimedia/Unsplash
- * - Procedural background (Picsum) is used as last resort
+ * - When all candidates are rejected, the fallback chain tries Wikimedia
+ * - The Wikipedia hero image is the last resort — no synthetic Picsum stock is injected
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MediaCandidate } from '../media';
@@ -222,7 +222,7 @@ describe('Watermark Fallback Chain (Req 1.4)', () => {
     vi.restoreAllMocks();
   });
 
-  it('tries Wikimedia/Unsplash when all top candidates are rejected by vision check', async () => {
+  it('tries Wikimedia when all top candidates are rejected by vision check', async () => {
     // All candidates from initial query will be rejected by vision check
     const candidates = [
       makeCandidate({ url: 'https://example.com/bad1.jpg', alt: 'test topic bad one', baseScore: 300 }),
@@ -282,8 +282,9 @@ describe('Watermark Fallback Chain (Req 1.4)', () => {
 
     const result = await sourceSegmentMedia(segment, plan, baseTopicContext, new Set(), 0, baseConfig);
 
-    // Should have found some asset (either from Wikimedia fallback or Picsum)
+    // Should have found some asset from the Wikimedia/Wikipedia fallback
     expect(result.assets.length).toBeGreaterThan(0);
+    expect(result.assets.some(a => a.url.includes('picsum.photos'))).toBe(false);
 
     // The selected asset should NOT be one of the rejected watermarked ones
     const selectedUrls = result.assets.map(a => a.url);
@@ -292,7 +293,7 @@ describe('Watermark Fallback Chain (Req 1.4)', () => {
     expect(selectedUrls).not.toContain('https://example.com/bad3.jpg');
   });
 
-  it('falls back to procedural background (Picsum) when Wikimedia also fails', async () => {
+  it('falls back to the Wikipedia hero image — never synthetic Picsum stock — when Wikimedia also fails', async () => {
     // All candidates rejected, Wikimedia returns nothing
     const candidates = [
       makeCandidate({ url: 'https://example.com/bad1.jpg', alt: 'test topic bad', baseScore: 300 }),
@@ -336,17 +337,17 @@ describe('Watermark Fallback Chain (Req 1.4)', () => {
 
     const result = await sourceSegmentMedia(segment, plan, baseTopicContext, new Set(), 0, baseConfig);
 
-    // Should still produce assets (from Picsum fallback or Wikipedia hero)
+    // Should still produce assets from the Wikipedia hero image
     expect(result.assets.length).toBeGreaterThan(0);
 
-    // The asset should be from a fallback source (Picsum or Wikipedia)
     const asset = result.assets[0];
-    const isFallbackSource = asset.source.includes('Picsum') ||
-      asset.source.includes('Wikipedia') ||
+    const isFallbackSource = asset.source.includes('Wikipedia') ||
       asset.source.includes('Wikimedia') ||
-      asset.source.includes('Unsplash') ||
-      asset.url.includes('picsum.photos') ||
       asset.url.includes('wikimedia.org');
     expect(isFallbackSource).toBe(true);
+
+    // No synthetic Picsum candidate may be injected as a last resort
+    expect(result.assets.some(a => a.url.includes('picsum.photos'))).toBe(false);
+    expect(result.assets.some(a => a.source.includes('Picsum'))).toBe(false);
   });
 });

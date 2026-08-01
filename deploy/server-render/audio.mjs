@@ -312,10 +312,15 @@ export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, t
  * - Applies 150ms fade-out/fade-in overlap between consecutive segments
  * - Normalizes all segments to consistent sample rate (48kHz) before concatenation
  *
+ * IMPORTANT: narration + silence-pad lists (generateNarration output) must pass
+ * crossfadeDuration: 0 — acrossfade over silence pads produces near-silent mixes
+ * AND shortens the mix by crossfadeDuration per boundary, desyncing the A/V
+ * timeline. Zero crossfade uses the sample-exact WAV concat path instead.
+ *
  * @param {Array<{file: string, duration: number}>} audioFiles  Audio segments to concatenate.
  * @param {string} outputFile  Path for the combined output file.
  * @param {object} [options]   Optional parameters.
- * @param {number} [options.crossfadeDuration=0.15] Crossfade duration in seconds.
+ * @param {number} [options.crossfadeDuration=0.5] Crossfade duration in seconds (0 = exact concat).
  * @returns {Promise<boolean>} True if concatenation succeeded.
  */
 export async function concatenateAudio(audioFiles, outputFile, options = {}) {

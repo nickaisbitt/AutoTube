@@ -1044,6 +1044,140 @@ describe('harvest volume soft-pass fails closed', () => {
   });
 });
 
+describe('airline harvest junk (wildfire/Google/booking/false-pressure)', () => {
+  const airlineTopic = 'The regional airline that hid cabin-pressure failures';
+
+  it('rejects wildfire, Google clickbait, booking promos, and false-pressure scrapes', async () => {
+    const { airlineHarvestJunkReason, genericStockJunkReason, filterAssetsByRelevance } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+
+    expect(
+      airlineHarvestJunkReason(
+        "LA's Deadly Fires Triggered by Hidden Electrical Faults grid failures",
+        airlineTopic,
+      ),
+    ).toMatch(/wildfire|grid|solar/i);
+    expect(
+      airlineHarvestJunkReason(
+        'SOME TERMINATED PROJECTS BY IT GIANT GOOGLE - MUST WATCH FAILURES HIDDEN IN SUCCESS',
+        airlineTopic,
+      ),
+    ).toMatch(/tech|clickbait/i);
+    expect(
+      airlineHarvestJunkReason('How to book Allegiant Airline flight tickets', airlineTopic),
+    ).toMatch(/booking|promo/i);
+    expect(
+      airlineHarvestJunkReason(
+        'Calculate the final pressure and temperature of an ideal diatomic gas',
+        airlineTopic,
+      ),
+    ).toMatch(/false-pressure/i);
+    expect(
+      airlineHarvestJunkReason(
+        'How to Beat the New Final Searchlights in Pressure (Worth the Wait Update)',
+        airlineTopic,
+      ),
+    ).toMatch(/false-pressure/i);
+    expect(
+      airlineHarvestJunkReason(
+        'Orion Pressure Vessel V Final Weld spacecraft capsule',
+        airlineTopic,
+      ),
+    ).toMatch(/false-pressure/i);
+    expect(
+      airlineHarvestJunkReason(
+        'flying with fuel made from sunlight solar kerosene swiss airline',
+        airlineTopic,
+      ),
+    ).toMatch(/solar-fuel|SAF/i);
+    expect(
+      airlineHarvestJunkReason('Hugh Thompson Jr #shorts #viral hero pilot', airlineTopic),
+    ).toMatch(/shorts|viral|clickbait/i);
+    expect(
+      genericStockJunkReason('airplane cabin oxygen masks deployed above passengers', airlineTopic),
+    ).toBeNull();
+
+    const project = {
+      topic: airlineTopic,
+      script: [
+        {
+          id: 's1',
+          title: 'Hidden failures',
+          narration: 'airline cabin pressure failure cockpit oxygen inspection hangar',
+        },
+      ],
+      media: [],
+    };
+    const { media: kept, dropped } = filterAssetsByRelevance(
+      [
+        {
+          id: 'wildfire',
+          segmentId: 's1',
+          type: 'image',
+          url: 'https://s1.dmcdn.net/v/example/x720',
+          alt: "LA's Deadly Fires Triggered by Hidden Electrical Faults grid failures",
+          query: 'Hidden Failures',
+        },
+        {
+          id: 'physics',
+          segmentId: 's1',
+          type: 'image',
+          url: 'https://storage.googleapis.com/filo-question-diagrams/gas.jpg',
+          alt: 'Calculate the final pressure of an ideal diatomic gas',
+          query: 'Final Pressure',
+        },
+        {
+          id: 'cabin',
+          segmentId: 's1',
+          type: 'video',
+          url: 'https://archive.org/download/example/cabin.mp4',
+          alt: 'airplane cabin oxygen mask deployed above worried passengers',
+          query: 'oxygen mask deploy airplane cabin',
+        },
+      ],
+      project,
+      { minScore: 0.2 },
+    );
+    expect(dropped.some((d: { url?: string }) => d.url?.includes('dmcdn'))).toBe(true);
+    expect(dropped.some((d: { url?: string }) => d.url?.includes('filo-question'))).toBe(true);
+    expect(kept.map((a: { id: string }) => a.id)).toEqual(['cabin']);
+  });
+
+  it('does not score physics/game "pressure" stills via ambiguous topic words alone', async () => {
+    const { scoreAssetRelevance } = await import('../../../scripts/lib/harvest-quality.mjs');
+    const seg = {
+      id: 's1',
+      title: 'Final pressure',
+      narration: 'cabin pressure failures were hidden from passengers',
+    };
+    expect(
+      scoreAssetRelevance(
+        {
+          type: 'image',
+          alt: 'Calculate the final pressure and temperature of an ideal diatomic gas',
+          query: 'Final Pressure',
+          url: 'https://example.com/gas.jpg',
+        },
+        seg,
+        airlineTopic,
+      ),
+    ).toBe(0);
+    expect(
+      scoreAssetRelevance(
+        {
+          type: 'video',
+          alt: 'physiology of flight ups and downs of cabin pressurization faa',
+          query: 'cabin pressurization',
+          url: 'https://archive.org/download/gov.faa.safety/cabin.mp4',
+        },
+        seg,
+        airlineTopic,
+      ),
+    ).toBeGreaterThan(0);
+  });
+});
+
 describe('hook overlay layout + templates', () => {
   it('builds short expose overlays without EXPOSED: colon spam', async () => {
     const { buildShortHookOverlay } = await import('../../../scripts/lib/patch-project-for-loop.mjs');

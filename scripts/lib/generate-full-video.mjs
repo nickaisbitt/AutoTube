@@ -579,17 +579,24 @@ function stripJunkDemoVideos(project, report) {
       report.junkVideoDropped = report.junkVideoDropped || [];
       report.junkVideoDropped.push({ url, reason: 'demo/off-topic/broken proxy clip' });
       const thumb = asset.thumbnailUrl;
-      if (
-        thumb
-        && !isJunkHarvestUrl(thumb)
-        && !isUnsafeMediaUrl(thumb)
-        && isImageLikeUrl(thumb)
-      ) {
+      // Never launder a junk motion clip into the timeline as a still.
+      const thumbAsset = {
+        ...asset,
+        type: 'image',
+        url: thumb,
+        source: `${asset.source || 'Video'} still`,
+      };
+      const thumbAlsoJunk =
+        !thumb
+        || isJunkHarvestUrl(thumb)
+        || isUnsafeMediaUrl(thumb)
+        || !isImageLikeUrl(thumb)
+        || isJunkStockClip(thumbAsset, topicBlob)
+        || isOffBrandVisual(`${asset.alt || ''} ${thumb} ${asset.query || ''}`, topicBlob)
+        || (isAirlineTopic(topicBlob) && !isAirlineRelevantClip(thumbAsset, topicBlob));
+      if (!thumbAlsoJunk) {
         kept.push({
-          ...asset,
-          type: 'image',
-          url: thumb,
-          source: `${asset.source || 'Video'} still`,
+          ...thumbAsset,
           isFallback: false,
         });
       }
@@ -598,7 +605,34 @@ function stripJunkDemoVideos(project, report) {
     kept.push(asset);
   }
   project.media = kept;
+  stripJunkStillAssets(project, report);
   stripUnsafeMediaAssets(project, report);
+}
+
+/** Drop off-topic web stills (wildfire/Google/booking/physics) that never hit the video junk path. */
+function stripJunkStillAssets(project, report) {
+  if (!project?.media?.length) return;
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
+  const kept = [];
+  for (const asset of project.media) {
+    if (asset.type === 'video' || /\.(mp4|webm|mov)(\?|$)/i.test(asset.url || '')) {
+      kept.push(asset);
+      continue;
+    }
+    const blob = `${asset.alt || ''} ${asset.title || ''} ${asset.url || ''} ${asset.query || ''} ${asset.source || ''}`;
+    const junk =
+      isJunkStockClip(asset, topicBlob)
+      || isOffBrandVisual(blob, topicBlob)
+      || isGenericStockJunk(blob, topicBlob)
+      || (isAirlineTopic(topicBlob) && AIRLINE_OFF_TOPIC_RE.test(blob));
+    if (junk) {
+      report.junkStillDropped = report.junkStillDropped || [];
+      report.junkStillDropped.push({ url: asset.url, reason: 'off-topic/web still junk' });
+      continue;
+    }
+    kept.push(asset);
+  }
+  project.media = kept;
 }
 
 /**
@@ -997,7 +1031,7 @@ const AIRLINE_TRUSTED_QUERY_RE =
   /\b(oxygen\s*mask|cockpit|flight\s*deck|hangar|runway|tarmac|cabin\s*(interior|pressure|pressuri[sz](?:ation|ed)|passengers?)|airplane|airliner|jetliner|turboprop|aircraft|fuselage|flight\s*attendant|pilot\s*(cockpit|headset|face)|boarding|jet\s*bridge|pressure\s*gauge|faa\s*report|maintenance\s*hangar|airplane\s*cabin)\b/i;
 /** Never OK on airline stories — keyword miss from faceSeek / long topic harvest. */
 const AIRLINE_OFF_TOPIC_RE =
-  /\b(football|soccer|nfl|athlete|jersey|stadium|basketball|tennis|hockey|golf|baseball|sports?|sports?\s*player|cheerleader|mail\s*box|mailbox|u\.?s\.?\s*mail|postal|magnifying\s*glass|financial\s*reports?|stock\s*documents?\s*desk|astronaut|space\s*suit|spacewalk|nasa|space\s*station|galaxy|nebula|patient|medical\s*attention|medical\s*patient|hospital|icu\b|surgery|surgeon|operating\s*room|nurse|nurse\s*station|ambulance\s*stretcher|stretcher|iv\s*drip|hospital\s*bed|garage|auto\s*repair|car\s*engine|crying\s*(woman|girl|man)|emotional\s*portrait|stock\s*reaction|yoga|gym\s*workout|fashion|fashion\s*runway)\b/i;
+  /\b(football|soccer|nfl|athlete|jersey|stadium|basketball|tennis|hockey|golf|baseball|sports?|sports?\s*player|cheerleader|mail\s*box|mailbox|u\.?s\.?\s*mail|postal|magnifying\s*glass|financial\s*reports?|stock\s*documents?\s*desk|astronaut|space\s*suit|spacewalk|nasa|space\s*station|galaxy|nebula|orion\s+pressure\s+vessel|pressure\s+vessel|spacecraft|ideal\s+(?:diatomic\s+)?gas|diatomic\s+gas|searchlights?\s+in\s+pressure|roblox|wildfires?|forest\s*fires?|deadly\s*fires?|grid\s*failures?|solar\s*farms?|solar\s*kerosene|fuel\s+made\s+from\s+sunlight|google\s+logo|it\s+giant\s+google|how\s+to\s+book|book\s+(?:airline\s+)?flight\s+tickets?|#\s*shorts|#\s*viral|clinton\s+lynch|budget\s+20\d{2}|patient|medical\s*attention|medical\s*patient|hospital|icu\b|surgery|surgeon|operating\s*room|nurse|nurse\s*station|ambulance\s*stretcher|stretcher|iv\s*drip|hospital\s*bed|garage|auto\s*repair|car\s*engine|crying\s*(woman|girl|man)|emotional\s*portrait|stock\s*reaction|yoga|gym\s*workout|fashion|fashion\s*runway)\b/i;
 const TRUSTED_AIRLINE_QUERY_MAX_LENGTH = 72;
 const AIRLINE_DISCONNECTED_PAD_RE =
   /\b(u\.?\s*s\.?\s*mail|usps|postal|post\s*office|mailbox|letterbox|mail\s*(truck|carrier|delivery|bag|slot)|magnifying\s*glass|financial\s*(report|chart|graph|statement)|stock\s*(chart|market|ticker)|bar\s*chart|line\s*chart|spreadsheet|accounting\s*desk|hospital|patient|medical|icu|doctor|nurse|oxygen\s*(tank|cylinder|therapy|patient|hospital)|nasal\s*cannula)\b/i;

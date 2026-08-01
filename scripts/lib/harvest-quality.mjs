@@ -25,6 +25,16 @@ const WEAK_TOPIC_WORDS = new Set([
   'social', 'media', 'online', 'watch', 'footage', 'clip', 'trending', 'update',
 ]);
 
+/**
+ * Shared essay words on cabin-pressure topics that also match games, physics
+ * homework, wildfire "failures", and tech clickbait. Never count these alone.
+ */
+const AIRLINE_AMBIGUOUS_TOPIC_WORDS = new Set([
+  'pressure', 'pressures', 'failure', 'failures', 'failing', 'failed',
+  'hidden', 'hiding', 'hid', 'final', 'means', 'report', 'reports',
+  'recurring', 'regional', 'keep', 'kept', 'cabin',
+]);
+
 /** Topic-level tokens that strongly indicate off-topic harvest noise. */
 const OFF_TOPIC_BLOCKLIST = [
   { pattern: /\btrump\b/i, requires: /\btrump|president|white house|election|maga\b/i },
@@ -270,6 +280,71 @@ function airlinePaperworkJunkReason(haystack, contextText) {
   return null;
 }
 
+/** Wildfire / grid-failure news art scraped via "hidden failures" queries. */
+export const AIRLINE_WILDFIRE_GRID_JUNK_RE =
+  /\b(wildfires?|forest\s*fires?|deadly\s*fires?|grid\s*failures?|electrical\s*faults?|power\s*grid|solar\s*farms?|solar\s*panels?|photovoltaic)\b/i;
+
+/** Tech-giant clickbait and logo pads. */
+export const AIRLINE_TECH_CLICKBAIT_JUNK_RE =
+  /\b((?:it\s*)?giant\s+google|google\s+logo|terminated\s+projects?|must\s+watch\s+failures?|failures?\s+hidden\s+in\s+success|tech\s+giant)\b/i;
+
+/** Booking / how-to-fly promo stills (not investigation B-roll). */
+export const AIRLINE_BOOKING_PROMO_JUNK_RE =
+  /\b(how\s+to\s+book|book\s+(?:airline\s+)?flight\s+tickets?|flight\s+tickets?\s+promo|cheap\s+flights?\s+deal|book\s+allegiant|allegiant\s+airline\s+flight)\b/i;
+
+/** Physics homework / game / spacecraft that share the word "pressure". */
+export const AIRLINE_FALSE_PRESSURE_JUNK_RE =
+  /\b(ideal\s+(?:diatomic\s+)?gas|diatomic\s+gas|calculate\s+the\s+final\s+pressure|textbook\s+(?:page|diagram|problem)|homework\s+diagram|filo-question|searchlights?\s+in\s+pressure|beat\s+the\s+new\s+final|roblox|orion\s+pressure\s+vessel|pressure\s+vessel\s+weld|spacecraft|space\s*capsule)\b/i;
+
+/** SAF / solar-kerosene marketing on a cabin-pressure investigation. */
+export const AIRLINE_SOLAR_FUEL_PROMO_RE =
+  /\b(solar\s+kerosene|fuel\s+made\s+from\s+sunlight|sustainable\s+aviation\s+fuel|\bsaf\b|sunlight.{0,40}airline|airline.{0,40}solar\s+fuel)\b/i;
+
+/** YouTube Shorts / viral clickbait packaging. */
+export const VIRAL_SHORTS_CLICKBAIT_RE =
+  /\b#\s*shorts\b|\b#\s*viral\b|\bmust\s+watch\b|\b(?:youtube\s+)?shorts?\b.{0,40}\b(?:viral|trending)\b/i;
+
+/** Political / budget pads that hitch a ride on airport/tarmac keywords. */
+export const AIRLINE_POLITICS_PAD_RE =
+  /\b(clinton\s+lynch|budget\s+20\d{2}|what\s+budget\s+means|tarmac\s+meeting|judicial\s+watch)\b/i;
+
+/**
+ * Off-topic scrapes that survive keyword overlap on cabin-pressure topics
+ * ("pressure", "failures", "hidden").
+ *
+ * @param {string} haystack
+ * @param {string} contextText
+ * @returns {string|null}
+ */
+export function airlineHarvestJunkReason(haystack, contextText = '') {
+  if (!isAirlineTopic(contextText)) return null;
+  const h = String(haystack || '');
+  if (!h.trim()) return null;
+  const ctx = String(contextText || '');
+  if (AIRLINE_WILDFIRE_GRID_JUNK_RE.test(h) && !/\b(wildfire|forest\s*fire|grid\s*failure|solar\s*farm)\b/i.test(ctx)) {
+    return 'wildfire/grid/solar-farm stock for airline';
+  }
+  if (AIRLINE_TECH_CLICKBAIT_JUNK_RE.test(h) && !/\b(google|tech\s*giant|silicon\s*valley)\b/i.test(ctx)) {
+    return 'tech-giant clickbait for airline';
+  }
+  if (AIRLINE_BOOKING_PROMO_JUNK_RE.test(h)) {
+    return 'airline booking/promo still';
+  }
+  if (AIRLINE_FALSE_PRESSURE_JUNK_RE.test(h)) {
+    return 'false-pressure (game/physics/spacecraft) stock';
+  }
+  if (AIRLINE_SOLAR_FUEL_PROMO_RE.test(h) && !/\b(solar\s*kerosene|sustainable\s+aviation|saf|sunlight\s+fuel)\b/i.test(ctx)) {
+    return 'solar-fuel/SAF promo for cabin-pressure story';
+  }
+  if (VIRAL_SHORTS_CLICKBAIT_RE.test(h)) {
+    return 'viral shorts clickbait packaging';
+  }
+  if (AIRLINE_POLITICS_PAD_RE.test(h) && !/\b(clinton|lynch|budget|congress|election)\b/i.test(ctx)) {
+    return 'politics/budget pad for airline';
+  }
+  return null;
+}
+
 /**
  * @param {string} haystack
  * @param {string} contextText
@@ -298,6 +373,8 @@ export function genericStockJunkReason(haystack, contextText = '') {
   }
   const airlinePaperworkJunk = airlinePaperworkJunkReason(h, ctx);
   if (airlinePaperworkJunk) return airlinePaperworkJunk;
+  const airlineHarvestJunk = airlineHarvestJunkReason(h, ctx);
+  if (airlineHarvestJunk) return airlineHarvestJunk;
   if (MONOCHROME_STOCK_RE.test(h) && !MONOCHROME_STOCK_RE.test(ctx)) {
     return 'black-and-white/monochrome stock';
   }
@@ -500,9 +577,18 @@ export function visualEvidenceBlob(asset) {
  */
 export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   const segText = `${segment?.title || ''} ${segment?.narration || ''}`;
-  const segKeywords = extractKeywords(segText, 10);
+  const segKeywords = extractKeywords(segText, 10).filter((kw) => {
+    if (WEAK_TOPIC_WORDS.has(kw)) return false;
+    if (isAirlineTopic(topic) && AIRLINE_AMBIGUOUS_TOPIC_WORDS.has(kw)) return false;
+    return true;
+  });
   const topicKws = topicKeywords.length ? topicKeywords : extractKeywords(topic, 12);
-  const strongTopicKws = topicKws.filter((kw) => !WEAK_TOPIC_WORDS.has(kw));
+  const strongTopicKws = topicKws.filter((kw) => {
+    if (WEAK_TOPIC_WORDS.has(kw)) return false;
+    // "pressure"/"failures"/"hidden" alone must not certify physics games or wildfire news.
+    if (isAirlineTopic(topic) && AIRLINE_AMBIGUOUS_TOPIC_WORDS.has(kw)) return false;
+    return true;
+  });
   const corpus = new Set([...strongTopicKws, ...segKeywords]);
 
   const visual = visualEvidenceBlob(asset);
@@ -1008,6 +1094,33 @@ const AIRLINE_HARD_REJECT_PATTERNS = [
     reason: 'military-naval',
     pattern: MILITARY_NAVAL_VISUAL_RE,
     skipWhen: MILITARY_TOPIC_RE,
+  },
+  {
+    reason: 'wildfire-grid-solar',
+    pattern: AIRLINE_WILDFIRE_GRID_JUNK_RE,
+    skipWhen: /\b(wildfire|forest\s*fire|grid\s*failure|solar\s*farm)\b/i,
+  },
+  {
+    reason: 'tech-clickbait',
+    pattern: AIRLINE_TECH_CLICKBAIT_JUNK_RE,
+  },
+  {
+    reason: 'booking-promo',
+    pattern: AIRLINE_BOOKING_PROMO_JUNK_RE,
+  },
+  {
+    reason: 'false-pressure',
+    pattern: AIRLINE_FALSE_PRESSURE_JUNK_RE,
+  },
+  {
+    reason: 'solar-fuel-promo',
+    pattern: AIRLINE_SOLAR_FUEL_PROMO_RE,
+    skipWhen: /\b(solar\s*kerosene|sustainable\s+aviation|saf|sunlight\s+fuel)\b/i,
+  },
+  {
+    reason: 'politics-pad',
+    pattern: AIRLINE_POLITICS_PAD_RE,
+    skipWhen: /\b(clinton|lynch|budget|congress|election)\b/i,
   },
 ];
 

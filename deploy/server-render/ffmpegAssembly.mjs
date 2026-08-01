@@ -118,6 +118,40 @@ function shouldApplyGentleZoomPunch(scheduleIndex, isHookSegment) {
   return cutNumber % 11 === 5;
 }
 
+/**
+ * Five directional Ken-Burns presets for stills, cycling by clipIndex so that
+ * adjacent cuts always vary both zoom direction and pan axis.  Motion is sized
+ * so a 1.25 s clip (30 frames @ 24 fps) shows a clearly visible 5–8 % zoom
+ * change and 40–60 px of pan on a 1 920 px source — enough that Archive stills
+ * read as documentary camera work rather than a frozen slideshow.
+ *
+ * All pan offsets are kept well within the zoompan valid region:
+ *   x ∈ [0, iw − iw/z],  y ∈ [0, ih − ih/z]
+ * At z ≈ 1.10 that gives ~175 px of slack on a 1 920-wide source, so
+ * 30 frames × 1.8 px/frame = 54 px is safely bounded.
+ */
+function stillKenBurnsFilter(frames, w, h, clipIndex) {
+  switch (clipIndex % 5) {
+    case 0:
+      // Zoom-in from centre, drift right (reading direction)
+      return `zoompan=z='min(zoom+0.003,1.14)':x='iw/2-(iw/zoom/2)+on*1.5':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`;
+    case 1:
+      // Zoom-in from centre, drift up (upward reveal)
+      return `zoompan=z='min(zoom+0.003,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)-on*1.2':d=${frames}:s=${w}x${h}:fps=${FPS}`;
+    case 2:
+      // Zoom-out with left drift (pullback reveal — starts at 1.15 × and retreats)
+      return `zoompan=z='max(1.15-on*0.004,1.0)':x='iw/2-(iw/zoom/2)-on*1.8':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`;
+    case 3:
+      // Zoom-in from upper-left corner with diagonal drift down-right
+      return `zoompan=z='min(zoom+0.0025,1.10)':x='on*1.6':y='on*1.0':d=${frames}:s=${w}x${h}:fps=${FPS}`;
+    case 4:
+      // Zoom-out from centre with downward drift
+      return `zoompan=z='max(1.12-on*0.003,1.0)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)+on*1.4':d=${frames}:s=${w}x${h}:fps=${FPS}`;
+    default:
+      return `zoompan=z='min(zoom+0.003,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`;
+  }
+}
+
 function computeActiveAssetIndex(timeInSegment, assetCount, intervalSec) {
   if (assetCount <= 1) return 0;
   if (intervalSec <= 0) return 0;
@@ -289,11 +323,14 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
     const punchDelta = punchStart - punchEnd;
     vf = `scale=${Math.round(w * punchStart)}:${Math.round(h * punchStart)},zoompan=z='${punchStart.toFixed(3)}-${punchDelta.toFixed(3)}*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS}`;
   } else if (!isVideo && hardCuts) {
-    const drift = 0.0012 + (clipIndex % 5) * 0.00025;
-    const maxZoom = 1.06 + (clipIndex % 4) * 0.01;
-    vf = `zoompan=z='min(zoom+${drift.toFixed(5)},${maxZoom.toFixed(2)})':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
+    // Directional Ken-Burns: 5 presets cycle across clips so still-heavy segments
+    // never read as a slideshow even when the same URL repeats.
+    vf = `${stillKenBurnsFilter(frames, w, h, clipIndex)},${vf}`;
   } else if (!isVideo && !draft) {
-    vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
+    // Subtle directional Ken-Burns for non-hard-cut renders; alternates zoom in/out.
+    const zDir = clipIndex % 2 === 0 ? `min(zoom+0.0022,1.10)` : `max(1.10-on*0.0022,1.0)`;
+    const xPan = clipIndex % 2 === 0 ? `iw/2-(iw/zoom/2)+on*0.8` : `iw/2-(iw/zoom/2)-on*0.8`;
+    vf = `zoompan=z='${zDir}':x='${xPan}':y='ih/2-(ih/zoom/2)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   }
   // Never fade-to-black between cuts — that reads as title-card blinks at every boundary.
 

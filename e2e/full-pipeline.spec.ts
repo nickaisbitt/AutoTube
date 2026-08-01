@@ -47,9 +47,18 @@ test.describe('Full pipeline — topic → -final.mp4', () => {
     // Land on narration review — do not auto-jump to AI Edit
     await expect(page.getByTestId('continue-to-ai-edit-button')).toBeVisible({ timeout: 900_000 });
     await page.getByTestId('continue-to-ai-edit-button').click();
-    await expect(page.getByTestId('skip-ai-edit-button')).toBeVisible({ timeout: 120_000 });
 
-    await page.getByTestId('skip-ai-edit-button').click();
+    // The AI edit may still be idle (skip it) or already finished when the step
+    // renders — in that case walk to assembly via the sidebar, since "Proceed to
+    // Assembly" starts the in-browser render this test does not use.
+    const skipAiEdit = page.getByTestId('skip-ai-edit-button');
+    const editSummary = page.getByTestId('proceed-to-assembly-button');
+    await expect(skipAiEdit.or(editSummary).first()).toBeVisible({ timeout: 120_000 });
+    if (await skipAiEdit.isVisible().catch(() => false)) {
+      await skipAiEdit.click();
+    } else {
+      await page.getByTestId('sidebar-step-assembly').click();
+    }
     await expect(page.getByTestId('assemble-video-button')).toBeVisible({ timeout: 30_000 });
 
     const project = await page.evaluate(() => {

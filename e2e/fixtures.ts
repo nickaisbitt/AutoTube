@@ -8,21 +8,37 @@ import {
 /** Dummy key so generateScript passes; OpenRouter is mocked in tests. */
 export const E2E_OPENROUTER_KEY = 'sk-or-v1-e2e-test-key-not-real';
 
+/** Key the fail-closed /api/* gate expects — unmocked routes 401 without it. */
+export const E2E_AUTOTUBE_API_KEY = (
+  process.env.AUTOTUBE_API_KEY ||
+  process.env.VITE_AUTOTUBE_API_KEY ||
+  ''
+).trim();
+
 export { MOCK_SCRIPT_SEGMENTS, MOCK_LONG_SCRIPT_SEGMENTS };
 
 export async function dismissOnboarding(page: Page): Promise<void> {
-  await page.addInitScript((key: string) => {
-    localStorage.setItem('autotube_onboarding_seen', 'true');
-    localStorage.removeItem('autotube_project');
-    try {
-      sessionStorage.setItem(
-        'autotube_config_session',
-        JSON.stringify({ openRouterKey: key, sourceType: 'stock', flickrKey: '', ttsVoice: 'Leo' }),
-      );
-    } catch {
-      /* ignore */
-    }
-  }, E2E_OPENROUTER_KEY);
+  await page.addInitScript(
+    ({ key, autotubeKey }: { key: string; autotubeKey: string }) => {
+      localStorage.setItem('autotube_onboarding_seen', 'true');
+      localStorage.removeItem('autotube_project');
+      try {
+        sessionStorage.setItem(
+          'autotube_config_session',
+          JSON.stringify({
+            openRouterKey: key,
+            autotubeApiKey: autotubeKey,
+            sourceType: 'stock',
+            flickrKey: '',
+            ttsVoice: 'Leo',
+          }),
+        );
+      } catch {
+        /* ignore */
+      }
+    },
+    { key: E2E_OPENROUTER_KEY, autotubeKey: E2E_AUTOTUBE_API_KEY },
+  );
 }
 
 /**
@@ -34,7 +50,7 @@ export async function installOpenRouterMock(
   page: Page,
   scriptSegments: typeof MOCK_SCRIPT_SEGMENTS = MOCK_SCRIPT_SEGMENTS,
 ): Promise<void> {
-  await page.route('**/openrouter.ai/**', async (route: Route) => {
+  const fulfilWithMock = async (route: Route) => {
     let body: string;
     try {
       const post = route.request().postDataJSON() as {
@@ -47,7 +63,13 @@ export async function installOpenRouterMock(
     }
 
     await route.fulfill({ status: 200, contentType: 'application/json', body });
-  });
+  };
+
+  await page.route('**/openrouter.ai/**', fulfilWithMock);
+  // The app talks to OpenRouter through the same-origin /api/llm proxy, which
+  // uses the server's key — without this route the mock is bypassed whenever
+  // OPENROUTER_API_KEY is present in the dev server environment.
+  await page.route('**/api/llm', fulfilWithMock);
 }
 
 /** Fast media / Wikipedia / image mocks (from user-journey.spec.ts). */

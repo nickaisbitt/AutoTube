@@ -3536,21 +3536,34 @@ export async function generateFullVideo(options) {
     const mediaStart = Date.now();
     let mediaReady = false;
     let lastLogMin = -1;
+    // The "Prepare Narration" button (media-step-next) only mounts when the store
+    // sets stepStatuses.media === 'complete', but during a live harvest that flag
+    // can flip while assets are still being written, flashing the button early.
+    // Require BOTH the visible button AND a persisted stepStatuses.media==='complete'
+    // snapshot with real assets, then re-confirm after a short settle, so we never
+    // advance into narration on a stale/premature button while harvest is running.
+    const confirmMediaComplete = async () => {
+      let btnVisible = false;
+      try {
+        btnVisible = await mediaNextBtn().isVisible({ timeout: 10_000 });
+      } catch {
+        btnVisible = false;
+      }
+      if (!btnVisible) return false;
+      const snap = await readProjectSnapshot(page);
+      if (snap.mediaStep !== 'complete' || !(snap.mediaLen > 0)) return false;
+      await page.waitForTimeout(1500);
+      const stillVisible = await mediaNextBtn().isVisible({ timeout: 5_000 }).catch(() => false);
+      if (!stillVisible) return false;
+      const snap2 = await readProjectSnapshot(page);
+      return snap2.mediaStep === 'complete' && snap2.mediaLen > 0;
+    };
     while (Date.now() < mediaDeadline) {
       await dismissOnboarding(page);
-      try {
-        mediaReady = await mediaNextBtn().isVisible({ timeout: 10_000 });
-      } catch {
-        mediaReady = false;
+      if (await confirmMediaComplete()) {
+        mediaReady = true;
+        break;
       }
-      if (!mediaReady) {
-        const snap = await readProjectSnapshot(page);
-        if (snap.mediaStep === 'complete' && snap.mediaLen > 0) {
-          await page.waitForTimeout(1500);
-          mediaReady = await mediaNextBtn().isVisible({ timeout: 5_000 }).catch(() => false);
-        }
-      }
-      if (mediaReady) break;
       const elapsedMin = Math.floor((Date.now() - mediaStart) / 60000);
       if (elapsedMin >= 1 && elapsedMin !== lastLogMin && elapsedMin % 2 === 0) {
         lastLogMin = elapsedMin;
@@ -3579,6 +3592,129 @@ export async function generateFullVideo(options) {
       throw new Error(
         `MEDIA_TIMEOUT: Prepare Narration never appeared after ${Math.round(mediaTimeoutMs / 60000)}min (mediaLen=${snap.mediaLen}, mediaStep=${snap.mediaStep || 'unknown'})`,
       );
+    }
+
+    // Sanitize + volume-gate a harvested project. Mutates gateProject.media in
+    // place. Returns { ok: true } on pass, or { ok: false, result } carrying the
+    // HARVEST_VOLUME_FAIL payload (re-harvest fixState already stamped) on fail.
+    const runHarvestVolumeGate = async (gateProject) => {
+      const mediaReport = await sanitizeRealHarvestMedia(gateProject, devServer, outDir, {
+        loopMode: true,
+        minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
+        mediaOffset: fixState.mediaOffset || 0,
+        faceSeek: fixState.faceSeekBroll === true || fixState.harvestVideoFirst !== false,
+        preferBright: fixState.preferBrightBroll === true,
+        cutIntervalSec: fixState.cutIntervalSec ?? 0.85,
+      });
+      log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
+      if (mediaReport.videoTopUp?.length) {
+        log(`   🎬 Video top-up: +${mediaReport.videoTopUp.length} motion clips`);
+      }
+      if (mediaReport.motionKeyMode) {
+        log(`   🔑 ${formatMotionPathLog(mediaReport)}`);
+      }
+      // Keyless runs already say "Archive.org only" above; repeating pexels=0 pixabay=0
+      // reads like a provider failure rather than the absence of keys.
+      if (mediaReport.motionKeyMode === 'keyed' && (mediaReport.pexelsFetched || mediaReport.pixabayFetched || mediaReport.archiveLiveFetched)) {
+        log(
+          `   📡 Live motion sources: pexels=${mediaReport.pexelsFetched || 0} pixabay=${mediaReport.pixabayFetched || 0} archive=${mediaReport.archiveLiveFetched || 0}`,
+        );
+      }
+      if (mediaReport.junkVideoDropped?.length) {
+        log(`   🗑️ Junk demo videos dropped: ${mediaReport.junkVideoDropped.length}`);
+      }
+      if (mediaReport.junkStockSkipped) {
+        log(`   🚫 Junk stock skipped: ${mediaReport.junkStockSkipped}`);
+      }
+      if (mediaReport.visionStockChecked || mediaReport.visionStockUnverified || mediaReport.visionStockBudgetSkipped) {
+        log(
+          `   👁️ Stock vision: checked=${mediaReport.visionStockChecked || 0} rejected=${mediaReport.visionStockRejected || 0} unverified=${mediaReport.visionStockUnverified || 0} skipped-unverified=${mediaReport.visionStockUnverifiedSkipped || 0} max-unverified=${mediaReport.visionStockUnverifiedMax || 0} skipped-over-budget=${mediaReport.visionStockBudgetSkipped || 0} soft-admitted=${mediaReport.visionStockBudgetSoftAdmitted || 0}`,
+        );
+      }
+      if (mediaReport.cyberStockInjected) {
+        log(`   🛡️ Cyber stock stills: +${mediaReport.cyberStockInjected}`);
+      }
+      if (mediaReport.cyberStockSkipped) {
+        log(`   🎬 Cyber stills: ${mediaReport.cyberStockSkipped}`);
+      }
+      if (mediaReport.relevanceDropped?.length) {
+        log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
+      }
+      if (mediaReport.phashDropped?.length) {
+        log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
+      }
+      if (mediaReport.volumePass === false) {
+        const soft = evaluateHarvestVolumeWithSoftPass(mediaReport, gateProject);
+        if (soft.pass) {
+          log(`   ⚠️ Volume ${soft.reason}`);
+          mediaReport.volumePass = true;
+          mediaReport.volumeSoftPass = soft.reason;
+        } else {
+          // Last chance: pad thin segments, then re-check soft-pass.
+          await topUpHarvestVolume(gateProject, devServer, Math.max(4, Math.floor(loopMinAssets * 0.75)), mediaReport);
+          const volume2 = evaluateHarvestVolume(gateProject, loopMinAssets);
+          mediaReport.harvestQuality = volume2;
+          mediaReport.volumePass = volume2.pass;
+          const airlineSoftFail = volume2.pass ? airlineSoftPassMotionFailureReason(gateProject) : null;
+          const soft2 = airlineSoftFail
+            ? { pass: false, reason: airlineSoftFail }
+            : volume2.pass
+              ? { pass: true, reason: 'volume-hard-pass-after-repad' }
+              : evaluateHarvestVolumeWithSoftPass(mediaReport, gateProject);
+          if (soft2.pass) {
+            log(`   ⚠️ Volume recovered after stock re-pad (${soft2.reason})`);
+            mediaReport.volumePass = true;
+            mediaReport.volumeSoftPass = soft2.reason;
+          } else {
+            const failing = mediaReport.harvestQuality?.failing || [];
+            const minPer = mediaReport.harvestQuality?.minPerSegment ?? loopMinAssets;
+            const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
+            const totalMedia = gateProject.media?.length ?? 0;
+            const segCount = gateProject.script?.length ?? 0;
+            const failureSummary = failing.length
+              ? `${failing.length}/${segCount} segments below ${minPer} assets`
+              : `soft-pass rejected after re-pad (${soft2.reason || soft.reason || 'none'})`;
+            fixState.reHarvestMedia = true;
+            fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+            return {
+              ok: false,
+              result: {
+                ok: false,
+                error: `HARVEST_VOLUME_FAIL: ${failureSummary} — ${detail || 'no segment detail'} (total=${totalMedia}, soft-pass=${soft2.reason || soft.reason || 'none'})`,
+                harvestQualityFail: true,
+                topic,
+                outDir,
+                fixState,
+              },
+            };
+          }
+        }
+      }
+      return { ok: true };
+    };
+
+    // ── Harvest volume gate BEFORE narration ─────────────────────────────────
+    // Sanitize + volume-check the harvested media NOW, while still on the media
+    // step, so a thin/doomed harvest fails fast (re-harvest) instead of paying
+    // for a full narration pass and only then throwing HARVEST_VOLUME_FAIL after
+    // "⏳ Narration..." — which also left us hanging in the narration CTA poll.
+    // Media is fully determined at media-complete; narration/AI-edit never mutate
+    // it, so the vetted media is reused after narration (see preSanitizedMedia).
+    let preSanitizedMedia = null;
+    if (realHarvest && !fixState.keepBestMedia) {
+      const gateProject = await page.evaluate(() => {
+        const raw = localStorage.getItem('autotube_project');
+        if (!raw) return null;
+        return JSON.parse(raw).project ?? null;
+      });
+      if (!gateProject || !(gateProject.media?.length > 0)) {
+        return { ok: false, error: 'No harvested media before narration', topic, outDir, fixState };
+      }
+      const gate = await runHarvestVolumeGate(gateProject);
+      // Fail before narration: do NOT click Prepare Narration / enter the
+      // narration CTA poll on a harvest we already know is too thin.
+      if (!gate.ok) return gate.result;
+      preSanitizedMedia = gateProject.media;
     }
 
     await clickPipelineButton(page, mediaNextBtn());
@@ -3799,94 +3935,16 @@ export async function generateFullVideo(options) {
       skipMediaPatch: realHarvest || fixState.keepBestMedia === true,
     });
     if (realHarvest && !fixState.keepBestMedia) {
-      const mediaReport = await sanitizeRealHarvestMedia(project, devServer, outDir, {
-        loopMode: true,
-        minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
-        mediaOffset: fixState.mediaOffset || 0,
-        faceSeek: fixState.faceSeekBroll === true || fixState.harvestVideoFirst !== false,
-        preferBright: fixState.preferBrightBroll === true,
-        cutIntervalSec: fixState.cutIntervalSec ?? 0.85,
-      });
-      log(`🧹 Media sanitize: ${mediaReport.before} → ${mediaReport.after} assets (${mediaReport.convertedVideoToImage.length} video→image, ${mediaReport.dropped.length} dropped)`);
-      if (mediaReport.videoTopUp?.length) {
-        log(`   🎬 Video top-up: +${mediaReport.videoTopUp.length} motion clips`);
-      }
-      if (mediaReport.motionKeyMode) {
-        log(`   🔑 ${formatMotionPathLog(mediaReport)}`);
-      }
-      // Keyless runs already say "Archive.org only" above; repeating pexels=0 pixabay=0
-      // reads like a provider failure rather than the absence of keys.
-      if (mediaReport.motionKeyMode === 'keyed' && (mediaReport.pexelsFetched || mediaReport.pixabayFetched || mediaReport.archiveLiveFetched)) {
-        log(
-          `   📡 Live motion sources: pexels=${mediaReport.pexelsFetched || 0} pixabay=${mediaReport.pixabayFetched || 0} archive=${mediaReport.archiveLiveFetched || 0}`,
-        );
-      }
-      if (mediaReport.junkVideoDropped?.length) {
-        log(`   🗑️ Junk demo videos dropped: ${mediaReport.junkVideoDropped.length}`);
-      }
-      if (mediaReport.junkStockSkipped) {
-        log(`   🚫 Junk stock skipped: ${mediaReport.junkStockSkipped}`);
-      }
-      if (mediaReport.visionStockChecked || mediaReport.visionStockUnverified || mediaReport.visionStockBudgetSkipped) {
-        log(
-          `   👁️ Stock vision: checked=${mediaReport.visionStockChecked || 0} rejected=${mediaReport.visionStockRejected || 0} unverified=${mediaReport.visionStockUnverified || 0} skipped-unverified=${mediaReport.visionStockUnverifiedSkipped || 0} max-unverified=${mediaReport.visionStockUnverifiedMax || 0} skipped-over-budget=${mediaReport.visionStockBudgetSkipped || 0} soft-admitted=${mediaReport.visionStockBudgetSoftAdmitted || 0}`,
-        );
-      }
-      if (mediaReport.cyberStockInjected) {
-        log(`   🛡️ Cyber stock stills: +${mediaReport.cyberStockInjected}`);
-      }
-      if (mediaReport.cyberStockSkipped) {
-        log(`   🎬 Cyber stills: ${mediaReport.cyberStockSkipped}`);
-      }
-      if (mediaReport.relevanceDropped?.length) {
-        log(`   🎯 Relevance filter: removed ${mediaReport.relevanceDropped.length} off-topic assets`);
-      }
-      if (mediaReport.phashDropped?.length) {
-        log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
-      }
-      if (mediaReport.volumePass === false) {
-        const soft = evaluateHarvestVolumeWithSoftPass(mediaReport, project);
-        if (soft.pass) {
-          log(`   ⚠️ Volume ${soft.reason}`);
-          mediaReport.volumePass = true;
-          mediaReport.volumeSoftPass = soft.reason;
-        } else {
-          // Last chance: pad thin segments, then re-check soft-pass.
-          await topUpHarvestVolume(project, devServer, Math.max(4, Math.floor(loopMinAssets * 0.75)), mediaReport);
-          const volume2 = evaluateHarvestVolume(project, loopMinAssets);
-          mediaReport.harvestQuality = volume2;
-          mediaReport.volumePass = volume2.pass;
-          const airlineSoftFail = volume2.pass ? airlineSoftPassMotionFailureReason(project) : null;
-          const soft2 = airlineSoftFail
-            ? { pass: false, reason: airlineSoftFail }
-            : volume2.pass
-              ? { pass: true, reason: 'volume-hard-pass-after-repad' }
-              : evaluateHarvestVolumeWithSoftPass(mediaReport, project);
-          if (soft2.pass) {
-            log(`   ⚠️ Volume recovered after stock re-pad (${soft2.reason})`);
-            mediaReport.volumePass = true;
-            mediaReport.volumeSoftPass = soft2.reason;
-          } else {
-            const failing = mediaReport.harvestQuality?.failing || [];
-            const minPer = mediaReport.harvestQuality?.minPerSegment ?? loopMinAssets;
-            const detail = failing.map((f) => `${f.title}: ${f.count}/${f.need}`).join('; ');
-            const totalMedia = project.media?.length ?? 0;
-            const segCount = project.script?.length ?? 0;
-            const failureSummary = failing.length
-              ? `${failing.length}/${segCount} segments below ${minPer} assets`
-              : `soft-pass rejected after re-pad (${soft2.reason || soft.reason || 'none'})`;
-            fixState.reHarvestMedia = true;
-            fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
-            return {
-              ok: false,
-              error: `HARVEST_VOLUME_FAIL: ${failureSummary} — ${detail || 'no segment detail'} (total=${totalMedia}, soft-pass=${soft2.reason || soft.reason || 'none'})`,
-              harvestQualityFail: true,
-              topic,
-              outDir,
-              fixState,
-            };
-          }
-        }
+      if (preSanitizedMedia) {
+        // Media was already sanitized + volume-gated on the media step (before
+        // narration). Narration/AI-edit never mutate media, so reuse that vetted
+        // media instead of re-running the whole sanitize here.
+        project.media = preSanitizedMedia;
+      } else {
+        // No pre-narration gate ran (keep-best fell back to live media after
+        // narration): sanitize + volume-gate the live media now.
+        const gate = await runHarvestVolumeGate(project);
+        if (!gate.ok) return gate.result;
       }
       // Re-assert shock hook + overlay after media mutations.
       patchProjectForLoop(project, topic, { ...fixState, forceRealStock: false }, { skipMediaPatch: true });

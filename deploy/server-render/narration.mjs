@@ -256,9 +256,29 @@ function resolveEdgeTtsRunner(python = getKokoroPython()) {
 }
 
 /**
+ * Resolve how to invoke espeak-ng (last-resort offline TTS).
+ * Available when `which espeak-ng` succeeds or `espeak-ng --version` runs.
+ * @returns {{ available: boolean, command: string, detail?: string }}
+ */
+function resolveEspeakRunner() {
+  const cliCheck = spawnSync('which', ['espeak-ng'], { encoding: 'utf8', timeout: 5000 });
+  if (cliCheck.status === 0) {
+    return { available: true, command: 'espeak-ng' };
+  }
+
+  const versionCheck = spawnSync('espeak-ng', ['--version'], { encoding: 'utf8', timeout: 5000 });
+  if (versionCheck.status === 0) {
+    return { available: true, command: 'espeak-ng' };
+  }
+
+  const detail = (cliCheck.stderr || versionCheck.stderr || versionCheck.error?.message || '').trim();
+  return { available: false, command: 'espeak-ng', detail: detail || 'espeak-ng not found' };
+}
+
+/**
  * Detect which TTS providers are available on this host.
  * @param {object} [options]
- * @returns {{ kokoro: boolean, melo: boolean, edgeTts: boolean, python: string, edgeRunner: ReturnType<typeof resolveEdgeTtsRunner> }}
+ * @returns {{ kokoro: boolean, melo: boolean, edgeTts: boolean, espeak: boolean, python: string, edgeRunner: ReturnType<typeof resolveEdgeTtsRunner>, espeakRunner: ReturnType<typeof resolveEspeakRunner> }}
  */
 export function detectTtsProviders(options = {}) {
   const python = getKokoroPython();
@@ -279,12 +299,15 @@ export function detectTtsProviders(options = {}) {
   }
 
   const edgeRunner = resolveEdgeTtsRunner(python);
+  const espeakRunner = resolveEspeakRunner();
   return {
     kokoro,
     melo,
     edgeTts: edgeRunner.available,
+    espeak: espeakRunner.available,
     python,
     edgeRunner,
+    espeakRunner,
   };
 }
 
@@ -295,13 +318,14 @@ export function detectTtsProviders(options = {}) {
  */
 export function assertTtsAvailable(options = {}) {
   const providers = detectTtsProviders(options);
-  if (!providers.kokoro && !providers.melo && !providers.edgeTts) {
+  if (!providers.kokoro && !providers.melo && !providers.edgeTts && !providers.espeak) {
     const lines = [
       'No TTS engine available for server render.',
       'Install at least one provider (edge-tts is the quickest):',
       '  pip install --break-system-packages edge-tts',
       'Optional Kokoro: pip install kokoro torch (set KOKORO_PYTHON if using a venv)',
       'Optional MeloTTS: set CF_ACCOUNT_ID and CF_API_TOKEN',
+      'Last-resort offline fallback: apt-get install espeak-ng',
       `See ${TTS_SETUP_DOC} for full setup.`,
     ];
     if (providers.edgeRunner.detail) {
@@ -827,6 +851,57 @@ function generateEdgeTtsSegment(text, audioFile, subtitleFile, voice, edgeRunner
 }
 
 /**
+ * Last-resort offline narration via espeak-ng. espeak-ng only speaks plain text,
+ * so SSML/prosody markup is stripped first. The synthesizer writes a mono WAV
+ * (~22kHz); we re-encode it to the pipeline's 48kHz standard via ffmpeg so it
+ * lines up with the other engines. Robotic quality is intentional — this only
+ * runs when Kokoro / MeloTTS / edge-tts are all unavailable.
+ * @param {string} text
+ * @param {string} audioFile Path to write the final 48kHz WAV.
+ * @param {ReturnType<typeof resolveEspeakRunner>} [espeakRunner]
+ * @returns {boolean}
+ */
+function generateEspeakSegment(text, audioFile, espeakRunner) {
+  const runner = espeakRunner || resolveEspeakRunner();
+  if (!runner.available) {
+    console.warn(`  ⚠ espeak-ng unavailable: ${runner.detail || 'not installed'}`);
+    return false;
+  }
+
+  const cleanText = stripSsml(text || '');
+  if (!cleanText) {
+    console.warn('  ⚠ espeak-ng: no text to synthesize after stripping SSML');
+    return false;
+  }
+
+  const rawWav = audioFile.replace(/\.\w+$/, '.espeak-raw.wav');
+  const espeakResult = spawnSync(runner.command, [cleanText, '-w', rawWav], {
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+  if (espeakResult.status !== 0 || !existsSync(rawWav) || statSync(rawWav).size === 0) {
+    const errMsg = (espeakResult.stderr || espeakResult.stdout || espeakResult.error?.message || '').trim();
+    console.warn(`  ⚠ espeak-ng failed: ${errMsg.substring(0, 200)}`);
+    try { rmSync(rawWav, { force: true }); } catch {}
+    return false;
+  }
+
+  // Convert espeak's mono/22kHz WAV to the 48kHz format used by the rest of
+  // the pipeline. If ffmpeg is missing/fails, fall back to the raw WAV.
+  const convert = spawnSync('ffmpeg', ['-y', '-i', rawWav, '-ar', '48000', audioFile], {
+    encoding: 'utf8',
+    timeout: 60000,
+  });
+  if (convert.status !== 0 || !existsSync(audioFile) || statSync(audioFile).size === 0) {
+    console.warn('  ⚠ espeak-ng: ffmpeg re-encode failed, using raw espeak WAV');
+    spawnSync('cp', [rawWav, audioFile]);
+  }
+  try { rmSync(rawWav, { force: true }); } catch {}
+
+  return existsSync(audioFile) && statSync(audioFile).size > 0;
+}
+
+/**
  * Generate narration audio for all segments using a fallback chain:
  *   1. Kokoro-82M (local / KOKORO_SERVER_URL)
  *   2. MeloTTS (Cloudflare, optional)
@@ -872,6 +947,7 @@ export async function generateNarration(segments, outputDir, options = {}) {
   if (providers.kokoro) engines.push('Kokoro-82M');
   if (useMelo) engines.push('MeloTTS');
   if (providers.edgeTts) engines.push('edge-tts');
+  if (providers.espeak) engines.push('espeak-ng');
   console.log(`Generating narration audio (fallback chain: ${engines.join(' → ')})...`);
 
   // Intro silence — matches cold open duration in server-render.mjs (0 in shorts)
@@ -939,6 +1015,19 @@ export async function generateNarration(segments, outputDir, options = {}) {
       );
       if (!success) {
         console.warn(`\n  ⚠ edge-tts failed for segment ${i + 1}`);
+      }
+    }
+
+    // Tier 4: espeak-ng (last-resort offline fallback — robotic but always local).
+    // Used when Kokoro / MeloTTS / edge-tts are all unavailable or failed
+    // (e.g. edge-tts 403 blocked, Kokoro server unreachable).
+    if (!success && providers.espeak) {
+      console.warn(`\n  ⚠ Falling back to espeak-ng (last-resort offline TTS) for segment ${i + 1}`);
+      success = generateEspeakSegment(seg.narration, audioFile, providers.espeakRunner);
+      if (!success) {
+        console.warn(`\n  ⚠ espeak-ng failed for segment ${i + 1}`);
+      } else {
+        console.log(`\n  ✓ espeak-ng generated segment ${i + 1}`);
       }
     }
 

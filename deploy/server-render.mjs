@@ -3219,7 +3219,7 @@ function validateTTSConfiguration() {
   }
 
   const providers = assertTtsAvailable({ cfAccountId, cfApiToken });
-  log('info', `TTS providers: Kokoro-82M=${providers.kokoro ? 'YES' : 'NO'}, MeloTTS=${providers.melo ? 'YES' : 'NO'}, edge-tts=${providers.edgeTts ? 'YES' : 'NO'}`);
+  log('info', `TTS providers: Kokoro-82M=${providers.kokoro ? 'YES' : 'NO'}, MeloTTS=${providers.melo ? 'YES' : 'NO'}, edge-tts=${providers.edgeTts ? 'YES' : 'NO'}, espeak-ng=${providers.espeak ? 'YES' : 'NO'}`);
 
   if (!providers.melo) {
     console.warn('⚠ MeloTTS not configured (optional). Set CF_ACCOUNT_ID and CF_API_TOKEN for MeloTTS fallback.');

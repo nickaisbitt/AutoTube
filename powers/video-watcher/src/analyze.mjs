@@ -3,7 +3,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runServerAIReview } from '../../../deploy/server-render/aiReviewer.mjs';
 import { detectVisualRepetition } from './frame-dedup.mjs';
@@ -15,7 +15,9 @@ import {
   evaluatePlaceholderGate,
 } from '../../../scripts/lib/run-objective-qa.mjs';
 import {
+  applyLocalHookOverlayEvidence,
   auditHookFromScript,
+  detectYellowHookOverlay,
   runBrutalVisionReview,
   runHookVisionReview,
 } from './vision-brutal.mjs';
@@ -191,6 +193,43 @@ export function reconcileHookVision(hookVision, project, overlayHint) {
   const pipelineClaimsOverlay =
     claimed.split(/\s+/).filter(Boolean).length >= 2 ? claimed.slice(0, 80) : null;
   return { ...hookVision, pipelineClaimsOverlay };
+}
+
+/**
+ * A hook-review exception can bypass its local detector. Retry from the JPEGs
+ * already saved by this watch, without trusting the pipeline claim by itself.
+ */
+export async function recoverMissingLocalOverlayFallback(hookVision, frames, outDir) {
+  if (
+    !hookVision?.pipelineClaimsOverlay
+    || hookVision.localOverlayFallback
+    || !outDir
+  ) {
+    return hookVision;
+  }
+  const root = resolve(outDir);
+  const savedHookFramePaths = (Array.isArray(frames) ? frames : [])
+    .filter((frame) => Number.isFinite(frame?.timestampSec) && frame.timestampSec <= 3)
+    .map((frame) => frame?.path)
+    .filter((framePath) => {
+      if (typeof framePath !== 'string' || !existsSync(framePath)) return false;
+      const fromRoot = relative(root, resolve(framePath));
+      return (
+        fromRoot !== ''
+        && fromRoot !== '..'
+        && !fromRoot.startsWith(`..${sep}`)
+        && !isAbsolute(fromRoot)
+      );
+    })
+    .slice(0, 4);
+  if (savedHookFramePaths.length === 0) return hookVision;
+
+  const evidence = await detectYellowHookOverlay(savedHookFramePaths);
+  return applyLocalHookOverlayEvidence(
+    hookVision,
+    hookVision.pipelineClaimsOverlay,
+    evidence,
+  );
 }
 
 /**
@@ -545,6 +584,11 @@ export async function watchVideo(options = {}) {
         resolvedHookOverlay,
       );
     }
+    hookVision = await recoverMissingLocalOverlayFallback(
+      hookVision,
+      framesMeta.frames,
+      outDir,
+    );
     const runBrutalOnce = async () =>
       runBrutalVisionReview(videoPath, dur, apiKey, mode === 'quick' ? 16 : 18, {
         hookVision,

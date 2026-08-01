@@ -1,6 +1,7 @@
 /**
  * Harsh YouTube vision reviews — raw scores (no inflation), hook-specific pass.
  */
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import sharp from 'sharp';
 import { extractFrames } from '../../../deploy/server-render/aiReviewer.mjs';
@@ -144,14 +145,110 @@ function roundedMetric(value) {
   return Math.round(value * 10_000) / 10_000;
 }
 
-async function inspectYellowHookFrame(frame) {
+async function decodeHookFrameWithSharp(frame) {
   const { data, info } = await sharp(frameBuffer(frame), { failOn: 'none' })
     .resize({ width: 320, withoutEnlargement: true })
     .toColourspace('srgb')
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
-  const { width, height, channels } = info;
+  return { data, ...info, decoder: 'sharp' };
+}
+
+function parsePpmRgb(buffer) {
+  let offset = 0;
+  const readToken = () => {
+    while (offset < buffer.length) {
+      const byte = buffer[offset];
+      if (byte === 35) {
+        while (offset < buffer.length && buffer[offset] !== 10) offset += 1;
+      } else if (byte === 9 || byte === 10 || byte === 13 || byte === 32) {
+        offset += 1;
+      } else {
+        break;
+      }
+    }
+    const start = offset;
+    while (offset < buffer.length) {
+      const byte = buffer[offset];
+      if (byte === 35 || byte === 9 || byte === 10 || byte === 13 || byte === 32) break;
+      offset += 1;
+    }
+    return buffer.toString('ascii', start, offset);
+  };
+
+  if (readToken() !== 'P6') throw new Error('ffmpeg returned a non-RGB PPM frame');
+  const width = Number(readToken());
+  const height = Number(readToken());
+  const maxValue = Number(readToken());
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+    throw new Error('ffmpeg returned invalid PPM dimensions');
+  }
+  if (maxValue !== 255) throw new Error('ffmpeg returned unsupported PPM depth');
+  if (buffer[offset] === 13 && buffer[offset + 1] === 10) offset += 2;
+  else if ([9, 10, 13, 32].includes(buffer[offset])) offset += 1;
+  else throw new Error('ffmpeg returned an invalid PPM header');
+
+  const expectedBytes = width * height * 3;
+  if (buffer.length - offset < expectedBytes) throw new Error('ffmpeg returned a truncated PPM frame');
+  return {
+    data: buffer.subarray(offset, offset + expectedBytes),
+    width,
+    height,
+    channels: 3,
+    decoder: 'ffmpeg-ppm',
+  };
+}
+
+function decodeHookFrameWithFfmpeg(frame) {
+  const decoded = spawnSync(
+    'ffmpeg',
+    [
+      '-v',
+      'error',
+      '-i',
+      'pipe:0',
+      '-frames:v',
+      '1',
+      '-vf',
+      "scale=w='min(320,iw)':h=-2",
+      '-pix_fmt',
+      'rgb24',
+      '-f',
+      'image2pipe',
+      '-vcodec',
+      'ppm',
+      'pipe:1',
+    ],
+    {
+      input: frameBuffer(frame),
+      timeout: 20_000,
+      maxBuffer: 8 * 1024 * 1024,
+    },
+  );
+  if (decoded.status !== 0 || !Buffer.isBuffer(decoded.stdout) || decoded.stdout.length === 0) {
+    const detail = Buffer.isBuffer(decoded.stderr)
+      ? decoded.stderr.toString('utf8').trim().slice(-300)
+      : '';
+    throw new Error(`ffmpeg hook-frame decode failed${detail ? `: ${detail}` : ''}`);
+  }
+  return parsePpmRgb(decoded.stdout);
+}
+
+async function inspectYellowHookFrame(frame, { forceFfmpeg = false } = {}) {
+  let decoded;
+  if (forceFfmpeg) {
+    decoded = decodeHookFrameWithFfmpeg(frame);
+  } else {
+    try {
+      decoded = await decodeHookFrameWithSharp(frame);
+    } catch {
+      // libvips/sharp can fail transiently under concurrent render/watch load.
+      // Decode in an isolated ffmpeg process so local overlay proof still runs.
+      decoded = decodeHookFrameWithFfmpeg(frame);
+    }
+  }
+  const { data, width, height, channels, decoder } = decoded;
   if (width < 40 || height < 30 || channels < 3) return null;
 
   // Hook cards are rendered in the upper-middle safe area. Restricting the scan
@@ -232,6 +329,7 @@ async function inspectYellowHookFrame(frame) {
 
   return {
     detected,
+    decoder,
     coverage: roundedMetric(coverage),
     horizontalSpan: roundedMetric(horizontalSpan),
     verticalSpan: roundedMetric(verticalSpan),
@@ -243,15 +341,20 @@ async function inspectYellowHookFrame(frame) {
 /**
  * Cheap local proof that one or more hook frames contain a large yellow,
  * dark-bordered overlay in the hook safe area. This detects pixels, not words.
+ * @param {Array<string | Buffer>} frames
+ * @param {{ forceFfmpeg?: boolean }} [options]
  */
-export async function detectYellowHookOverlay(frames = []) {
+export async function detectYellowHookOverlay(frames = [], options = {}) {
   const measurements = [];
+  let failedFrames = 0;
   for (const frame of frames.slice(0, 4)) {
     try {
-      const measurement = await inspectYellowHookFrame(frame);
+      const measurement = await inspectYellowHookFrame(frame, options);
       if (measurement) measurements.push(measurement);
+      else failedFrames += 1;
     } catch {
       // A corrupt frame should not turn an uncertain hook into a pass.
+      failedFrames += 1;
     }
   }
   const matches = measurements.filter((measurement) => measurement.detected);
@@ -264,7 +367,45 @@ export async function detectYellowHookOverlay(frames = []) {
     detected: matches.length > 0,
     inspectedFrames: measurements.length,
     matchingFrames: matches.length,
+    failedFrames,
+    fallbackFrames: measurements.filter((measurement) => measurement.decoder === 'ffmpeg-ppm').length,
     strongest,
+  };
+}
+
+/**
+ * Apply already-inspected local pixel evidence to a hook review.
+ */
+export function applyLocalHookOverlayEvidence(hookVision, overlayText, evidence) {
+  const current = hookVision && typeof hookVision === 'object' ? hookVision : {};
+  const seenText =
+    typeof current.onScreenText === 'string' ? current.onScreenText.trim() : '';
+  const claim =
+    typeof overlayText === 'string' ? overlayText.replace(/\s+/g, ' ').trim().slice(0, 140) : '';
+  const hasUsableClaim = claim.length >= 8 && claim.split(/\s+/).length >= 2;
+  const normalizedEvidence = {
+    detected: evidence?.detected === true,
+    inspectedFrames: Number.isFinite(evidence?.inspectedFrames) ? evidence.inspectedFrames : 0,
+    matchingFrames: Number.isFinite(evidence?.matchingFrames) ? evidence.matchingFrames : 0,
+    failedFrames: Number.isFinite(evidence?.failedFrames) ? evidence.failedFrames : 0,
+    fallbackFrames: Number.isFinite(evidence?.fallbackFrames) ? evidence.fallbackFrames : 0,
+    strongest: evidence?.strongest || null,
+  };
+  const ocrWasEmpty = seenText.length < 8;
+  const applied = normalizedEvidence.detected && ocrWasEmpty && hasUsableClaim;
+  if (hasUsableClaim && !normalizedEvidence.detected) {
+    console.warn(
+      `[video-watcher] local hook overlay not detected for pipeline claim (${normalizedEvidence.inspectedFrames} inspected, ${normalizedEvidence.failedFrames} failed)`,
+    );
+  }
+  return {
+    ...current,
+    ...(applied ? { onScreenText: claim, hookPass: true } : {}),
+    localOverlayFallback: {
+      method: 'yellow-dark-pixel-overlay',
+      applied,
+      ...normalizedEvidence,
+    },
   };
 }
 
@@ -274,28 +415,8 @@ export async function detectYellowHookOverlay(frames = []) {
  * remains a fail; the detector cannot judge whether correctly read copy is good.
  */
 export async function applyLocalHookOverlayFallback(hookVision, frames, overlayText) {
-  const current = hookVision && typeof hookVision === 'object' ? hookVision : {};
-  const seenText =
-    typeof current.onScreenText === 'string' ? current.onScreenText.trim() : '';
-  const claim =
-    typeof overlayText === 'string' ? overlayText.replace(/\s+/g, ' ').trim().slice(0, 140) : '';
-  const hasUsableClaim = claim.length >= 8 && claim.split(/\s+/).length >= 2;
-  const needsFallback = seenText.length < 8 || current.hookPass !== true;
-  if (!needsFallback || !hasUsableClaim) return current;
-
   const evidence = await detectYellowHookOverlay(frames);
-  const ocrWasEmpty = seenText.length < 8;
-  return {
-    ...current,
-    ...(evidence.detected && ocrWasEmpty
-      ? { onScreenText: claim, hookPass: true }
-      : {}),
-    localOverlayFallback: {
-      method: 'yellow-dark-pixel-overlay',
-      applied: evidence.detected && ocrWasEmpty,
-      ...evidence,
-    },
-  };
+  return applyLocalHookOverlayEvidence(hookVision, overlayText, evidence);
 }
 
 /**

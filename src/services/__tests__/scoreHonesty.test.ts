@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 
 describe('score-honesty', () => {
@@ -154,6 +157,17 @@ describe('score-honesty', () => {
     const evidence = await detectYellowHookOverlay([overlayFrame, overlayFrame]);
     expect(evidence.detected).toBe(true);
     expect(evidence.matchingFrames).toBe(2);
+    const ffmpegEvidence = await detectYellowHookOverlay([overlayFrame], {
+      forceFfmpeg: true,
+    });
+    expect(ffmpegEvidence).toMatchObject({
+      detected: true,
+      inspectedFrames: 1,
+      matchingFrames: 1,
+      failedFrames: 0,
+      fallbackFrames: 1,
+    });
+    expect(ffmpegEvidence.strongest?.decoder).toBe('ffmpeg-ppm');
 
     const recovered = await applyLocalHookOverlayFallback(
       { hookPass: false, onScreenText: '', scrollPastIn3s: false },
@@ -180,6 +194,48 @@ describe('score-honesty', () => {
       applied: false,
     });
 
+    // Metadata is retained even when a model pass means no recovery is applied.
+    const alreadyPassed = await applyLocalHookOverlayFallback(
+      { hookPass: true, onScreenText: claim },
+      [overlayFrame],
+      claim,
+    );
+    expect(alreadyPassed.localOverlayFallback).toMatchObject({
+      detected: true,
+      inspectedFrames: 1,
+      applied: false,
+    });
+
+    // analyze.mjs retries from watch output JPEGs when hook review omitted metadata.
+    const { recoverMissingLocalOverlayFallback } = await import(
+      '../../../powers/video-watcher/src/analyze.mjs'
+    );
+    const watchDir = mkdtempSync(join(tmpdir(), 'autotube-watch-hook-'));
+    try {
+      const savedFrame = join(watchDir, 'frame-0000s.jpg');
+      writeFileSync(savedFrame, overlayJpeg);
+      const recoveredFromSavedFrame = await recoverMissingLocalOverlayFallback(
+        {
+          hookPass: false,
+          onScreenText: '',
+          pipelineClaimsOverlay: claim,
+        },
+        [{ path: savedFrame, timestampSec: 0 }],
+        watchDir,
+      );
+      expect(recoveredFromSavedFrame).toMatchObject({
+        hookPass: true,
+        onScreenText: claim,
+        localOverlayFallback: {
+          detected: true,
+          inspectedFrames: 1,
+          applied: true,
+        },
+      });
+    } finally {
+      rmSync(watchDir, { recursive: true, force: true });
+    }
+
     const flatJpeg = await sharp({
       create: {
         width: 640,
@@ -188,14 +244,23 @@ describe('score-honesty', () => {
         background: { r: 255, g: 225, b: 0 },
       },
     }).jpeg().toBuffer();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const rejected = await applyLocalHookOverlayFallback(
       { hookPass: false, onScreenText: '' },
       [`data:image/jpeg;base64,${flatJpeg.toString('base64')}`],
       claim,
     );
+    const warningCalls = warn.mock.calls;
+    warn.mockRestore();
     expect(rejected.hookPass).toBe(false);
     expect(rejected.onScreenText).toBe('');
-    expect(rejected.localOverlayFallback.detected).toBe(false);
+    expect(rejected.localOverlayFallback).toMatchObject({
+      detected: false,
+      inspectedFrames: 1,
+      applied: false,
+    });
+    expect(warningCalls).toHaveLength(1);
+    expect(warningCalls[0][0]).toMatch(/local hook overlay not detected.*1 inspected/);
   });
 
   it('computeUploadReady ANDs brutal-raw, objective, scene, and hook gates', async () => {

@@ -710,7 +710,7 @@ const SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.4;
 
 const AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
 /** Keyless airline runs fill from Archive.org only, so the motion floor is per-segment. */
-const AIRLINE_KEYLESS_SOFT_PASS_MIN_VIDEOS = 8;
+const AIRLINE_KEYLESS_SOFT_PASS_MIN_VIDEOS = 6;
 const AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
 const AIRLINE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
 

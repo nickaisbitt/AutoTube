@@ -276,7 +276,7 @@ describe('quality waves 2–5 helpers', () => {
     await withoutStockKeys(() => {
       const soft = evaluateHarvestVolumeWithSoftPass(airlineMotionReport(4), project);
       expect(soft.pass).toBe(false);
-      expect(soft.reason).toBe('soft-pass-motion-airline-thin(4/8 videos)');
+      expect(soft.reason).toBe('soft-pass-motion-airline-thin(4/6 videos)');
     });
   });
 
@@ -319,12 +319,12 @@ describe('quality waves 2–5 helpers', () => {
     const project = {
       topic: airlineTopic,
       script: airlineScript(),
-      media: Array.from({ length: 7 }, (_, i) => archiveAirlineVideo(i)),
+      media: Array.from({ length: 5 }, (_, i) => archiveAirlineVideo(i)),
     };
     await withoutStockKeys(() => {
       const soft = evaluateHarvestVolumeWithSoftPass(archiveMotionReport(17), project);
       expect(soft.pass).toBe(false);
-      expect(soft.reason).toBe('soft-pass-motion-airline-thin(7/8 videos)');
+      expect(soft.reason).toBe('soft-pass-motion-airline-thin(5/6 videos)');
     });
   });
 

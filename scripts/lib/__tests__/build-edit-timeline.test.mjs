@@ -593,3 +593,153 @@ describe('buildEditTimeline: rich-pool short holds', () => {
     expect(Math.max(...counts30.values())).toBeLessThanOrEqual(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildEditTimeline: housing / medium-pool first-15s reuse + early motion
+// ---------------------------------------------------------------------------
+
+const HOUSING_CRASH_TOPIC = 'The housing crash they said would never happen';
+
+function makeHousingVideoPool(n, { segDur = 45, prefix = 'hclip' } = {}) {
+  return {
+    topic: HOUSING_CRASH_TOPIC,
+    script: [
+      {
+        id: 'seg1',
+        type: 'body',
+        duration: segDur,
+        narration: 'Landlords and tenants faced eviction notices as the housing market crashed overnight across apartment buildings.',
+        title: 'Body',
+      },
+    ],
+    media: Array.from({ length: n }, (_, i) => ({
+      id: `h${i}`,
+      segmentId: 'seg1',
+      type: 'video',
+      url: `https://example.com/${prefix}${i}.mp4`,
+      alt: `apartment tenant landlord clip ${i} face worried eviction`,
+      query: 'apartment tenant eviction',
+      source: 'Pexels Videos',
+    })),
+  };
+}
+
+describe('buildEditTimeline: housing / medium-pool first-15s reuse caps', () => {
+  it('caps each URL at ≤1 in the first 15s for a medium (8-URL) housing pool', () => {
+    // Keyless housing often lands in the 6–11 URL band — below the rich-pool
+    // threshold of 12 — so first-15s single-use must still apply.
+    const project = makeHousingVideoPool(8, { segDur: 40 });
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25, maxReusePerUrl: 1 });
+    const countsFirst15 = reuseCounts(timeline, 15);
+    expect(countsFirst15.size).toBeGreaterThan(0);
+    expect(Math.max(...countsFirst15.values())).toBeLessThanOrEqual(1);
+    // Full coverage preserved (watch floors untouched).
+    expect(timeline[timeline.length - 1].endSec).toBeGreaterThanOrEqual(39.9);
+  });
+
+  it('honors maxReusePerUrl=1 for housing (hardMax ≤3, no 6× loops)', () => {
+    const project = makeHousingVideoPool(6, { segDur: 60 });
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25, maxReusePerUrl: 1 });
+    const counts = reuseCounts(timeline);
+    expect(Math.max(...counts.values())).toBeLessThanOrEqual(3);
+    expect(timeline[timeline.length - 1].endSec).toBeGreaterThanOrEqual(59.9);
+  });
+
+  it('does not repeat the same car-crash URL in the first 15s when alternatives exist', () => {
+    const project = {
+      topic: HOUSING_CRASH_TOPIC,
+      script: [
+        {
+          id: 'seg1',
+          type: 'body',
+          duration: 20,
+          narration: 'The housing market crash left tenants facing eviction notices from landlords across the city.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'crash',
+          segmentId: 'seg1',
+          type: 'video',
+          url: 'https://example.com/car-crash-dashcam.mp4',
+          alt: 'car crash dashcam highway accident wreck',
+          query: 'car crash dashcam',
+          source: 'Stock footage',
+        },
+        ...Array.from({ length: 5 }, (_, i) => ({
+          id: `apt${i}`,
+          segmentId: 'seg1',
+          type: 'video',
+          url: `https://example.com/apt${i}.mp4`,
+          alt: `apartment tenant face worried eviction clip ${i}`,
+          query: 'apartment tenant eviction',
+          source: 'Pexels Videos',
+        })),
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25, maxReusePerUrl: 1 });
+    const first15 = reuseCounts(timeline, 15);
+    expect(first15.get('crash') || 0).toBeLessThanOrEqual(1);
+  });
+
+  it('prefers video over Ken-Burns stills in the first 15s when videos exist', () => {
+    const project = {
+      topic: HOUSING_CRASH_TOPIC,
+      script: [
+        {
+          id: 'seg1',
+          type: 'body',
+          duration: 16,
+          narration: 'Tenants and landlords faced eviction notices as apartments emptied across the city overnight.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'still1',
+          segmentId: 'seg1',
+          type: 'image',
+          url: 'https://example.com/landscape1.jpg',
+          alt: 'scenic landscape skyline establishing',
+          query: 'landscape',
+        },
+        {
+          id: 'still2',
+          segmentId: 'seg1',
+          type: 'image',
+          url: 'https://example.com/landscape2.jpg',
+          alt: 'scenic countryside mountain vista',
+          query: 'landscape',
+        },
+        ...Array.from({ length: 6 }, (_, i) => ({
+          id: `vid${i}`,
+          segmentId: 'other',
+          type: 'video',
+          url: `https://example.com/motion${i}.mp4`,
+          alt: `apartment tenant face worried eviction clip ${i}`,
+          query: 'apartment tenant',
+          source: 'Pexels Videos',
+        })),
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25, maxReusePerUrl: 1 });
+    const mediaById = Object.fromEntries(project.media.map((m) => [m.id, m]));
+    const first15 = timeline.filter((e) => e.startSec < 15);
+    expect(first15.length).toBeGreaterThan(0);
+    // Stills must not appear until every unused motion URL has been tried once.
+    const videoIds = new Set(project.media.filter((m) => m.type === 'video').map((m) => m.id));
+    const seenVideos = new Set();
+    for (const entry of first15) {
+      const asset = mediaById[entry.assetId];
+      if (asset?.type === 'video') {
+        seenVideos.add(entry.assetId);
+        continue;
+      }
+      expect(seenVideos.size).toBe(videoIds.size);
+    }
+    // Opener itself must be motion, not a Ken-Burns landscape still.
+    expect(mediaById[first15[0].assetId]?.type).toBe('video');
+  });
+});
+

@@ -241,10 +241,13 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     if (isHousingTopic(topic)) {
       // Rewrite + loose reuse regresses housing.
       s.rewriteScript = false;
+      // Zoom-punch interrupts + hard reuse=1 for keyless housing variety.
+      s.patternInterrupts = true;
+      s.harvestVideoFirst = true;
     }
     // Do not raise minAssets (pads images, hurts variety).
     applied.push(
-      `3. visualVariety ${visualVariety}/10 → face/human B-roll reharvest (offset ${s.mediaOffset}, no image pad)`,
+      `3. visualVariety ${visualVariety}/10 → face/human B-roll reharvest (offset ${s.mediaOffset}, maxReuse=1${isHousingTopic(topic) ? ', patternInterrupts' : ''})`,
     );
   }
 

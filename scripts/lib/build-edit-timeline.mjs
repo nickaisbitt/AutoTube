@@ -62,6 +62,17 @@ function isArchiveOrSimStock(asset) {
   return ARCHIVE_SIM_STOCK_RE.test(assetBlob(asset));
 }
 
+/**
+ * Car-crash / generic stock loops. On housing-market stories these read as the
+ * wrong crash; anywhere, repeating one crash URL tanks visualVariety.
+ */
+const CRASH_OR_STOCK_LOOP_RE =
+  /\b(car crash|dash ?cam(?: footage)?|wreck|pile.?up|highway accident|auto accident|stock (?:photo|footage)|getty|pond5)\b|housing\s*market\s*crash\.jpg|will-the-housing-market-crash|neohomeloans|house\s+on\s+(?:a\s+)?rock|floating\s+(?:rock|island)|3d\s+house/i;
+
+function isCrashOrStockLoopVisual(asset) {
+  return CRASH_OR_STOCK_LOOP_RE.test(assetBlob(asset));
+}
+
 const CAMERA_STORY_RE = /\b(cctv|surveillance|security camera|security cameras|cameras?|footage|body ?cam|dash ?cam)\b/i;
 
 function isSurveillanceVisual(asset) {
@@ -344,9 +355,14 @@ export function buildEditTimeline(project, options = {}) {
   /** Rich pool: ≥12 unique URLs (or ≥2× segment count) → tighter hold cap and anti-reuse. */
   const RICH_POOL_URL_THRESHOLD = 12;
   const MAX_BODY_HOLD_RICH_POOL_SEC = 1.5;
-  /** In the first 15s of a rich-pool timeline, prefer ≤1 use per URL when alternatives exist. */
-  const RICH_POOL_FIRST_WINDOW_SEC = 15;
-  const RICH_POOL_STRICT_CAP = 1;
+  /**
+   * Opening window anti-reuse. Rich pools, medium pools (≥6 URLs), and housing
+   * with ≥4 unique URLs use ≤1 use per URL in the first 15s — keyless housing
+   * often lands in the 6–11 URL band that missed the old rich-only gate.
+   */
+  const FIRST_WINDOW_SEC = 15;
+  const FIRST_WINDOW_STRICT_CAP = 1;
+  const MEDIUM_POOL_URL_THRESHOLD = 6;
   // Thin-pool over-reuse guard. A source URL may appear at most twice inside the
   // opening window (and, for short videos, across the whole timeline) whenever
   // an unused alternative still exists — this defeats the "same clip ×4 in the
@@ -367,15 +383,19 @@ export function buildEditTimeline(project, options = {}) {
   // (e.g. 6 clips over 150s) don't trigger rich-pool caps.
   const isRichPool = uniqueUrlCount >= RICH_POOL_URL_THRESHOLD
     || (segmentCount > 0 && uniqueUrlCount >= 8 && uniqueUrlCount >= 2 * segmentCount);
+  const topicIsHousing = !coldEval && isHousingTopic(project.topic || '');
+  const applyFirstWindowStrict = isRichPool
+    || uniqueUrlCount >= MEDIUM_POOL_URL_THRESHOLD
+    || (topicIsHousing && uniqueUrlCount >= 4);
   // Widen the look-back window for rich pools so the same clip can't re-surface
   // after only 4 cuts; leave ≥2 candidates always reachable.
   const richPoolWindow = isRichPool ? Math.min(RECENT_URL_WINDOW + 2, uniqueUrlCount - 2) : RECENT_URL_WINDOW;
   const recentUrlWindow = Math.max(0, Math.min(richPoolWindow, uniqueUrlCount - 2));
   // Keep requested cut for pacing. Dynamic hard-cap: generic topics top out at
-  // 6; airline stories are stricter and lengthen cuts rather than looping.
+  // 6; airline + housing are stricter and lengthen cuts rather than looping.
   const HARD_MAX_REUSE_CEIL = topicIsAirline && coldEval && uniqueVideos.length >= 20
     ? 2
-    : topicIsAirline
+    : (topicIsAirline || topicIsHousing)
       ? 3
       : 6;
   const HARD_MAX_REUSE_FLOOR = Math.min(3, HARD_MAX_REUSE_CEIL);
@@ -389,31 +409,55 @@ export function buildEditTimeline(project, options = {}) {
       HARD_MAX_REUSE_CEIL,
       Math.max(HARD_MAX_REUSE_FLOOR, Math.ceil(clipsNeeded / uniqueVideos.length)),
     );
-    if (!topicIsAirline && coldEval && uniqueVideos.length >= 20) {
+    if (!topicIsAirline && !topicIsHousing && coldEval && uniqueVideos.length >= 20) {
       hardMaxReuse = Math.min(4, hardMaxReuse);
     }
     if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
-      effectiveMaxReuse = Math.min(hardMaxReuse, Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)));
+      // Housing with enough URLs: lengthen holds instead of inflating reuse —
+      // repeating one crash/landscape URL tanks variety. Generic topics still
+      // raise effectiveMaxReuse toward hardMax so thin pools stay covered.
+      const honorMaxReuse = topicIsHousing
+        && uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS;
+      if (!honorMaxReuse) {
+        effectiveMaxReuse = Math.min(
+          hardMaxReuse,
+          Math.max(effectiveMaxReuse, Math.ceil(clipsNeeded / uniqueVideos.length)),
+        );
+      }
     }
     effectiveMaxReuse = Math.min(effectiveMaxReuse, hardMaxReuse);
     const maxSlots = uniqueVideos.length * hardMaxReuse;
     if (totalDur / Math.min(effectiveCut, MAX_BODY_CUT_SEC) > maxSlots) {
-      const holdCeiling = uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS
-        ? MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC
-        : MAX_BODY_CUT_THIN_SEC;
-      effectiveCut = Math.min(holdCeiling, Math.max(cut, totalDur / maxSlots));
+      // Housing honors hardMax=3: allow holds past the snappy 2.5s ceiling when
+      // that is the only way to cover duration without 4× URL loops.
+      const holdNeeded = totalDur / maxSlots;
+      const holdCeiling = topicIsHousing
+        ? Math.max(MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC, holdNeeded)
+        : uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS
+          ? MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC
+          : MAX_BODY_CUT_THIN_SEC;
+      effectiveCut = Math.min(holdCeiling, Math.max(cut, holdNeeded));
     }
-    if (uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS) {
+    if (uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS && !topicIsHousing) {
       effectiveCut = Math.min(effectiveCut, MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC);
     }
-    // Rich pool: tighter hold so a single download-clip source can't dominate.
+    // Rich pool: tighter hold so a single download-clip source can't dominate —
+    // but never so tight that hardMaxReuse would be exceeded for coverage.
     if (isRichPool) {
-      effectiveCut = Math.min(effectiveCut, MAX_BODY_HOLD_RICH_POOL_SEC);
+      const richFloor = totalDur > 0 && maxSlots > 0 ? totalDur / maxSlots : 0;
+      if (richFloor > MAX_BODY_HOLD_RICH_POOL_SEC) {
+        // Need longer holds to stay under hardMax — prefer that over looping.
+        effectiveCut = Math.min(
+          topicIsHousing ? Math.max(MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC, richFloor) : MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC,
+          Math.max(effectiveCut, richFloor),
+        );
+      } else {
+        effectiveCut = Math.min(effectiveCut, MAX_BODY_HOLD_RICH_POOL_SEC);
+      }
     }
   } else {
     hardMaxReuse = HARD_MAX_REUSE_CEIL;
   }
-  const topicIsHousing = !coldEval && isHousingTopic(project.topic || '');
   const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
   const topicIsCameraStory = CAMERA_STORY_RE.test(project.topic || '');
   const introLeadOptions = {
@@ -435,6 +479,9 @@ export function buildEditTimeline(project, options = {}) {
   // it cannot see an alternating pair on its own — ping-pong detection needs
   // the uncapped trail of picked URLs.
   const timelinePickUrlHistory = [];
+  // Opening-window cluster trail for pattern interrupts (force a subject change
+  // after two same-cluster non-human cuts in the first 15s).
+  const timelinePickClusterHistory = [];
   // Cumulative timeline seconds emitted by prior segments — segment-local `t`
   // resets to 0 each segment, so this is what places a pick within the video's
   // opening window for the strict reuse cap.
@@ -507,6 +554,11 @@ export function buildEditTimeline(project, options = {}) {
       // topically. Demote it further on any prior use so a fresher (even
       // lower-scoring) clip wins the slot before the reuse cap is reached.
       if (priorUses >= 1 && isArchiveOrSimStock(a)) reusePenalty -= 12;
+      // Same for crash/stock loop visuals — one car-crash URL must not dominate.
+      if (priorUses >= 1 && isCrashOrStockLoopVisual(a)) reusePenalty -= 14;
+      // Motion-over-still preference is enforced in canUseCandidate for the first
+      // 15s (hard block while unused videos remain) — do not soft-demote stills
+      // here or neutral images fall out of borrowPool (score < 0) and freeze cuts.
       reusePenalty += stillQualityTimelinePenalty(a);
       if (isOffBrandVisual(blob, topicBlob)) return -8;
       if (isGenericStockJunk(blob, topicBlob)) return -8;
@@ -539,6 +591,10 @@ export function buildEditTimeline(project, options = {}) {
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|empty park|people in park|press conference|news desk|office desk/i.test(blob)) return -6;
       // Housing intro: landscape/lake establishing is never a valid hook cut.
       if (isIntro && topicIsHousing && isLandscapeOnlyIntroVisual(a)) return -12;
+      // Housing-market stories: car-crash / dashcam stock is the wrong "crash".
+      if (topicIsHousing && isCrashOrStockLoopVisual(a) && /car crash|dash ?cam|wreck|pile.?up|highway accident|auto accident/i.test(blob)) {
+        return -12;
+      }
       if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
       if (isBackViewDeadAir(a)) return -14;
       if (/microphone|podcast|recording studio|asmr|rode|sequin|fashion runway|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -5;
@@ -620,7 +676,18 @@ export function buildEditTimeline(project, options = {}) {
       .map((a) => ({ ...a, segmentId: seg.id }))
       .filter((a) => scoreAsset(a) >= 0);
     // Intro/outro: motion only when videos exist. Body: mostly video.
-    const ordered = preferVideo && videos.length
+    // When the segment is still-only but the global pool has motion, seed the
+    // early cut list from global videos so the first 15s are not Ken-Burns pads.
+    let earlyMotionSeed = [];
+    if (preferVideo && !videos.length && uniqueVideos.length) {
+      earlyMotionSeed = uniqueAssetsByUrl(
+        uniqueVideos
+          .map((a) => ({ ...a, segmentId: seg.id }))
+          .sort((a, b) => scoreAsset(b) - scoreAsset(a))
+          .filter((a) => scoreAsset(a) >= 0),
+      );
+    }
+    const ordered = preferVideo && (videos.length || earlyMotionSeed.length)
       ? (() => {
           if (isIntro || isOutro) {
             const ranked = bookendCandidates(videos).sort((a, b) => scoreAsset(b) - scoreAsset(a));
@@ -640,7 +707,8 @@ export function buildEditTimeline(project, options = {}) {
             }
             return usable.length ? usable : uniqueAssetsByUrl(ranked.slice(0, 1));
           }
-          const ranked = dropNeverUse(videos).sort((a, b) => scoreAsset(b) - scoreAsset(a));
+          const motionPool = videos.length ? videos : earlyMotionSeed;
+          const ranked = dropNeverUse(motionPool).sort((a, b) => scoreAsset(b) - scoreAsset(a));
           const usable = uniqueAssetsByUrl(ranked.filter((a) => scoreAsset(a) >= 0));
           if (usable.length) return usable;
           const out = [];
@@ -686,6 +754,18 @@ export function buildEditTimeline(project, options = {}) {
       : onlyTwoStillsInSeg
         ? Math.max(effectiveCut, STILL_PAIR_HOLD_SEC)
         : effectiveCut;
+    // Medium/housing first-15s: stretch body cuts only while inside the opening
+    // window so unique URLs can cover ≤1 use each without slowing the whole body.
+    // Stretch medium pools, and housing even when the relative rich-pool gate
+    // trips at 8 URLs (keyless housing-web) — otherwise 1.5s cuts force 2× reuse
+    // inside the first 15s. Non-housing rich pools (≥12 URLs) keep ≤1.5s cuts.
+    const earlyWindowStretch = (
+      applyFirstWindowStrict
+      && (!isRichPool || topicIsHousing)
+      && !isIntro
+      && !isOutro
+      && uniqueUrlCount >= 4
+    ) ? Math.max(effectiveCut, FIRST_WINDOW_SEC / uniqueUrlCount) : interval;
     const maxReuseThisSeg = isIntro || isOutro ? 1 : effectiveMaxReuse;
     const usableBodyVideos = (!isIntro && !isOutro && videos.length)
       ? uniqueAssetsByUrl(videos.filter((a) => scoreAsset(a) >= 0))
@@ -701,8 +781,14 @@ export function buildEditTimeline(project, options = {}) {
     let lastUrl = null;
     let lastCluster = null;
     while (t < duration - 0.05) {
-      const end = Math.min(duration, t + interval);
       const globalStartSec = timelineElapsedSec + t;
+      const cutNow = (
+        !isIntro
+        && !isOutro
+        && applyFirstWindowStrict
+        && globalStartSec < FIRST_WINDOW_SEC
+      ) ? earlyWindowStretch : interval;
+      const end = Math.min(duration, t + cutNow);
       const withinStrictReuseWindow = globalStartSec < STRICT_REUSE_WINDOW_SEC || isShortVideo;
       const activeBeat = beatAtSegmentTime(segBeats, t, duration, seg);
       const introLeadWindow = seg === script[0] && t < 3;
@@ -742,6 +828,38 @@ export function buildEditTimeline(project, options = {}) {
           return uses < hardMaxReuse;
         });
       };
+      // First 15s pattern interrupt: after two same non-human clusters, force a
+      // subject change when a different-cluster alternative exists.
+      const continuesOpeningClusterPattern = (candidate) => {
+        if (globalStartSec >= FIRST_WINDOW_SEC) return false;
+        if (timelinePickClusterHistory.length < 2) return false;
+        const cluster = visualSubjectCluster(candidate);
+        if (cluster === 'other' || isHumanCluster(cluster)) return false;
+        const back1 = timelinePickClusterHistory[timelinePickClusterHistory.length - 1];
+        const back2 = timelinePickClusterHistory[timelinePickClusterHistory.length - 2];
+        if (cluster !== back1 || cluster !== back2) return false;
+        return uniqueAssetsByUrl([...ordered, ...borrowPool]).some((c) => {
+          const cCluster = visualSubjectCluster(c);
+          if (cCluster === cluster || cCluster === 'other') return false;
+          const escapeKey = urlKey(c);
+          if (!escapeKey || escapeKey === lastUrl) return false;
+          if (scoreAsset(c, null, { ignoreReuse: true }) < 0) return false;
+          return reuseCountFor(escapeKey, introOutroReuse) < hardMaxReuse;
+        });
+      };
+      // True only when a *never-used* motion URL remains (not merely under
+      // hardMax). Otherwise a single video would block all stills forever and
+      // freeze the cut via hold-extension.
+      const hasUnusedMotionAlternative = () => uniqueVideos.some((v) => {
+        const vk = urlKey(v);
+        if (!vk || vk === lastUrl) return false;
+        return reuseCountFor(vk, introOutroReuse) === 0;
+      });
+      const hasFreshUrlAlternative = () => globalPool.some((a) => {
+        const k = urlKey(a);
+        if (!k || k === lastUrl) return false;
+        return reuseCountFor(k, introOutroReuse) === 0;
+      });
       const diversityScore = (candidate) => {
         let s = scoreAsset(candidate, activeBeat);
         // Soft anti-repeat of the same subject cluster (not just adjacent URL).
@@ -771,12 +889,35 @@ export function buildEditTimeline(project, options = {}) {
           if (key && recentTimelineUrls.includes(key)) return false;
           if (violatesConsecutiveCluster(candidate)) return false;
           if (continuesTwoClipPingPong(candidate)) return false;
+          if (continuesOpeningClusterPattern(candidate)) return false;
+          // First 15s: prefer motion over Ken-Burns stills while unused videos remain.
+          if (
+            globalStartSec < FIRST_WINDOW_SEC
+            && preferVideo
+            && candidate.type !== 'video'
+            && uniqueVideos.length > 0
+            && hasUnusedMotionAlternative()
+          ) {
+            return false;
+          }
         }
         const uses = reuseCountFor(key, introOutroReuse);
         // Never exceed hard max — even as last resort (stops 9–12× loops).
         if (key && uses >= hardMaxReuse) return false;
+        // Crash/stock URLs: hard-cap at 1 use in the opening window when an
+        // alternative exists (stops the web14 "same car crash ×N" loop).
+        if (
+          !relaxed
+          && key
+          && globalStartSec < FIRST_WINDOW_SEC
+          && uses >= 1
+          && isCrashOrStockLoopVisual(candidate)
+          && hasFreshUrlAlternative()
+        ) {
+          return false;
+        }
         // Strict opening-window / short-video cap: no URL past 2 uses while an
-        // alternative is still reachable. Enforced on every pass except the
+        // alternative is still reachable. Enforced on every pick pass except the
         // final `relaxed` fallback — that one drops the cluster/look-back
         // preferences too, so it can reach a fresh same-cluster clip instead of
         // looping this one, and only relaxes to hardMax when the pool is
@@ -789,13 +930,15 @@ export function buildEditTimeline(project, options = {}) {
         ) {
           return false;
         }
-        // Rich pool: tighter ≤1 reuse in first 15s when alternatives exist.
+        // First 15s ≤1 reuse for rich/medium/housing pools. On the relaxed
+        // path, keep the cap only while a fresh URL still exists — otherwise
+        // thin pools fall through to coverage instead of freezing.
         if (
-          !relaxed
-          && key
-          && isRichPool
-          && globalStartSec < RICH_POOL_FIRST_WINDOW_SEC
-          && uses >= RICH_POOL_STRICT_CAP
+          key
+          && applyFirstWindowStrict
+          && globalStartSec < FIRST_WINDOW_SEC
+          && uses >= FIRST_WINDOW_STRICT_CAP
+          && (!relaxed || hasFreshUrlAlternative())
         ) {
           return false;
         }
@@ -939,7 +1082,25 @@ export function buildEditTimeline(project, options = {}) {
         // archive/sim clip used to loop 4×+ (it wins on intrinsic fit while its
         // reuse is ignored). Picking the least-used URL first — fit only as a
         // tiebreak — keeps coverage varied instead of hammering one clip.
-        asset = (onBrand.length ? onBrand : base).sort((a, b) => {
+        // Stay under hardMax whenever any under-cap clip exists. Only when every
+        // URL is already at hardMax (truly thin pool) may we exceed — and even
+        // then pick the least-used URL so one crash clip cannot run away to 6×.
+        const underHardMax = (onBrand.length ? onBrand : base).filter((c) => {
+          const k = urlKey(c);
+          const uses = reuseCountFor(k, introOutroReuse);
+          if (k && uses >= hardMaxReuse) return false;
+          if (
+            applyFirstWindowStrict
+            && globalStartSec < FIRST_WINDOW_SEC
+            && uses >= FIRST_WINDOW_STRICT_CAP
+            && hasFreshUrlAlternative()
+          ) {
+            return false;
+          }
+          return true;
+        });
+        const coveragePick = underHardMax.length ? underHardMax : (onBrand.length ? onBrand : base);
+        asset = coveragePick.sort((a, b) => {
           const reuseDelta = reuseCountFor(urlKey(a), introOutroReuse) - reuseCountFor(urlKey(b), introOutroReuse);
           if (reuseDelta !== 0) return reuseDelta;
           return intrinsic(b) - intrinsic(a);
@@ -968,6 +1129,7 @@ export function buildEditTimeline(project, options = {}) {
         while (recentTimelineUrls.length > recentUrlWindow) recentTimelineUrls.shift();
       }
       if (assetUrl) timelinePickUrlHistory.push(assetUrl);
+      if (lastCluster) timelinePickClusterHistory.push(lastCluster);
       if (lastUrl) {
         // Always count globally so hardMax is timeline-wide, not per-segment.
         urlUseCount.set(lastUrl, (urlUseCount.get(lastUrl) || 0) + 1);

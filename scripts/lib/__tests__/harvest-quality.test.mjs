@@ -513,6 +513,11 @@ describe('housing off-topic B-roll rejects', () => {
       // web19 contact-sheet / required rejects
       'realtor sign for sale suburban house exterior',
       'real estate sign yard listing open house',
+      // web21 volume-fail junk that still polluted the motion pool
+      'We asked Trump voters at a Pennsylvania rally what would happen',
+      'Meet the Garcias: Homestead Rescue',
+      'Colorado Experience:The Smaldones, Family of Crime',
+      'One Family Fight Struggle Street Episode',
       'LendingTree bar chart housing crash infographic',
       'American Home Mortgage bankruptcy slide graphic',
       'youtuber headset talking head podcast mic subscribe button',

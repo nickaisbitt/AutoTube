@@ -172,6 +172,23 @@ describe('introFaceTier', () => {
     }, { airline: false, housing: true })).toBe(-1);
   });
 
+  it('rejects protest / rent-strike / tribunal openers on housing intro (web20)', () => {
+    expect(introFaceTier({
+      query: 'rent strike',
+      alt: 'parkdale vs the ltb',
+      title: 'parkdale vs the ltb',
+      url: 'https://archive.org/download/parkdale/x.mp4',
+      type: 'video',
+    }, { airline: false, housing: true })).toBe(-1);
+    expect(introFaceTier({
+      query: 'tenant eviction',
+      alt: 'Social Justice Tribunals Ontario tenants reject rent increase gavel',
+      title: 'tribunal protest hearing',
+      url: 'https://archive.org/download/tribunal/x.mp4',
+      type: 'video',
+    }, { airline: false, housing: true })).toBe(-1);
+  });
+
   it('rejects RE/MAX for-sale, headset talking-head, and luxury tour openers on housing intro', () => {
     expect(introFaceTier({
       query: 'housing crash',

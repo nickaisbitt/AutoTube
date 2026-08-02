@@ -2362,11 +2362,11 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'apartment interior',
   'public housing',
   'tenant eviction',
-  'rent strike',
+  // rent strike / landlord hearing → Archive tribunal/protest (housing-web20 opener).
+  'worried couple apartment',
   'housing inspection',
   'moving house boxes',
   'city housing project',
-  'landlord tenant hearing',
   'family kitchen home',
   'slum clearance',
   'urban renewal housing',
@@ -2375,8 +2375,10 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'affordable housing program',
   'city apartment street',
   'family moving day',
-  'rent collection office',
-  'housing court hearing',
+  'tenant packing boxes apartment',
+  'apartment hallway tenant',
+  'foreclosure auction house',
+  'empty house foreclosure',
   'neighborhood housing survey',
 ];
 

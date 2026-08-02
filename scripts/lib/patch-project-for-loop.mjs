@@ -390,10 +390,14 @@ export function promoteIntroFaceVideo(project) {
     if (housing) {
       if (isLandscapeOnlyIntroVisual(asset)) return -8;
       const scoreBlob = evidence || blob;
-      // Webinar / Zoom-chair / home-tour / gov-PR pads must never win the hook.
+      // Demote patterns must see query+evidence (blob). Evidence-only misses
+      // harvest labels like query "rent strike" when alt is "parkdale vs the ltb"
+      // (housing-web20 tribunal/protest opener).
+      const demoteBlob = blob;
+      // Webinar / Zoom-chair / home-tour / gov-PR / protest pads must never win the hook.
       if (
         isHousingTalkingHeadMotion(asset)
-        || /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|protest|picket|rent\s+strike|for\s+sale\s+sign|re\/?max)\b/i.test(scoreBlob)
+        || /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|protest|picket|rent\s+strike|rent\s+increase|tribunal|for\s+sale\s+sign|re\/?max)\b/i.test(demoteBlob)
       ) {
         return -20;
       }

@@ -64,6 +64,40 @@ describe('promoteIntroFaceVideo (housing)', () => {
     expect(out.media.find((m) => m.id === 'lake').segmentId).toBe('body');
   });
 
+  it('does not promote rent-strike / protest pads onto housing intro (web20)', () => {
+    const project = {
+      topic: 'The housing crash they said would never happen',
+      script: [
+        { id: 'intro', type: 'intro', duration: 8, narration: 'They hid the housing crash.', title: 'Intro' },
+        { id: 'body', type: 'body', duration: 20, narration: 'Body.', title: 'Body' },
+      ],
+      media: [
+        {
+          id: 'strike',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://archive.org/download/parkdale/x.mp4',
+          alt: 'parkdale vs the ltb',
+          query: 'rent strike',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'face',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/tenant-face.mp4',
+          alt: 'worried tenant face apartment eviction notice close-up portrait',
+          query: 'shocked face apartment eviction notice',
+          source: 'Bing web video',
+        },
+      ],
+    };
+
+    const out = promoteIntroFaceVideo(project);
+    expect(out.media.find((m) => m.id === 'face').segmentId).toBe('intro');
+    expect(out.media.find((m) => m.id === 'strike').segmentId).toBe('body');
+  });
+
   it('promotes modern apartment motion when it is the best housing signal', () => {
     const project = {
       topic: HOUSING_TOPIC,

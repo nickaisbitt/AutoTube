@@ -14,10 +14,13 @@ import {
   isAirlineRelevantClip,
   isJunkStockClip,
   isSafeStockMotionQuery,
+  isYouTubeMotionCandidate,
   isVisionBudgetSoft,
+  motionCandidateHostRank,
   motionQueryPlan,
   planMotionFetchRounds,
   providerEvidenceText,
+  rankMotionCandidates,
   recordVisionStockUnverified,
   resolveInjectClipProbe,
   resolveMotionFetchBudgetMs,
@@ -28,6 +31,7 @@ import {
   spawnSyncFailureReason,
   restoreMotionRelevancePassed,
   stripJunkDemoVideos,
+  webMotionHostQueryVariants,
   webMotionQueryVariants,
   withDistinctProxyIdentity,
   withArchiveSweepSuffix,
@@ -390,6 +394,11 @@ describe('motionQueryPlan', () => {
       'passenger oxygen mask airplane cabin',
     ]);
     expect(plan.webQueries).toEqual(plan.queries.slice(0, plan.webQueries.length));
+    expect(plan.archiveQueries).toEqual(plan.queries);
+    expect(plan.webHostQueries).toEqual(expect.arrayContaining([
+      expect.stringContaining('site:vimeo.com'),
+      expect.stringContaining('site:dailymotion.com'),
+    ]));
     expect(plan.queries).toEqual(expect.arrayContaining([
       'airliner cabin',
       'aircraft cabin interior',
@@ -472,6 +481,48 @@ describe('webMotionQueryVariants', () => {
   });
 });
 
+describe('non-YouTube motion planning and ranking', () => {
+  it('keeps explicit Vimeo and Dailymotion searches safe and tied to base queries', () => {
+    const queries = webMotionHostQueryVariants([
+      'airliner cabin oxygen mask',
+      'pilot cockpit headset face close-up',
+    ]);
+
+    expect(queries).toEqual([
+      'airliner cabin oxygen mask site:vimeo.com',
+      'airliner cabin oxygen mask site:dailymotion.com',
+    ]);
+    expect(queries.every(isSafeStockMotionQuery)).toBe(true);
+  });
+
+  it('ranks direct files and non-YouTube hosts ahead of a higher-scored YouTube wrapper', () => {
+    const youtube = {
+      url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://youtu.be/abc')}`,
+      score: 100,
+    };
+    const candidates = [
+      youtube,
+      { url: 'https://vimeo.com/12345', score: 1 },
+      { url: 'https://cdn.example.org/cabin.webm', score: 0 },
+      { url: 'https://archive.org/download/cabin/cabin.mp4', score: -5 },
+      { url: 'https://www.dailymotion.com/video/xyz', score: 2 },
+      { url: 'https://giphy.com/gifs/airplane-cabin-xyz', score: 3 },
+    ];
+
+    const ranked = rankMotionCandidates(candidates, (clip) => clip.score);
+    expect(ranked.map((clip) => clip.url)).toEqual([
+      'https://archive.org/download/cabin/cabin.mp4',
+      'https://cdn.example.org/cabin.webm',
+      'https://giphy.com/gifs/airplane-cabin-xyz',
+      'https://www.dailymotion.com/video/xyz',
+      'https://vimeo.com/12345',
+      youtube.url,
+    ]);
+    expect(isYouTubeMotionCandidate(youtube)).toBe(true);
+    expect(motionCandidateHostRank(youtube)).toBeGreaterThan(50);
+  });
+});
+
 describe('fetchWebVideoResults', () => {
   it('uses authenticated server routes and emits distinct local download wrappers', async () => {
     const previousFetch = globalThis.fetch;
@@ -540,10 +591,35 @@ describe('fetchWebVideoResults', () => {
       }),
     }));
     try {
+      for (const query of ['airliner cabin', 'airliner cabin site:vimeo.com']) {
+        const clips = await fetchWebVideoResults('http://localhost:5173', 'bing', query, {
+          topicBlob: AIRLINE_TOPIC,
+        });
+        expect(clips).toEqual([]);
+      }
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('keeps an arbitrary HTTPS direct MP4 instead of routing it through yt-dlp', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        results: [{
+          url: 'https://cdn.example.org/aviation/cabin.mp4',
+          title: 'Airliner cabin oxygen equipment demonstration',
+          duration: '0:30',
+        }],
+      }),
+    }));
+    try {
       const clips = await fetchWebVideoResults('http://localhost:5173', 'bing', 'airliner cabin', {
         topicBlob: AIRLINE_TOPIC,
       });
-      expect(clips).toEqual([]);
+      expect(clips).toHaveLength(1);
+      expect(clips[0].url).toBe('https://cdn.example.org/aviation/cabin.mp4');
     } finally {
       globalThis.fetch = previousFetch;
     }
@@ -737,6 +813,8 @@ describe('formatMotionPathLog', () => {
       motionQueryPoolSize: 30,
       motionPoolSize: 41,
       motionTargetVideos: 30,
+      motionSelectedYouTube: 2,
+      motionSelectedNonYouTube: 25,
       videoTopUp: new Array(27),
     });
     expect(line).toContain('Motion path: keyed');
@@ -744,6 +822,7 @@ describe('formatMotionPathLog', () => {
     expect(line).toContain('bing=5 google=3 ddg=2 archive=1');
     expect(line).toContain('queries-tried=24 query-pack=30');
     expect(line).toContain('injected=27/30');
+    expect(line).toContain('selected(youtube=2 non-youtube=25)');
   });
 
   it('reports how deep a keyed run paged, without keyless archive noise', () => {

@@ -355,6 +355,83 @@ function isProxiedClipUrl(url = '') {
   return (url || '').includes('/api/download-clip');
 }
 
+function proxiedClipTarget(url = '') {
+  if (!isProxiedClipUrl(url)) return '';
+  try {
+    return new URL(url, 'http://autotube.local').searchParams.get('url') || '';
+  } catch {
+    return '';
+  }
+}
+
+function motionCandidateUrls(candidate = {}) {
+  const clip = typeof candidate === 'string' ? { url: candidate } : candidate;
+  const wrappedTarget = proxiedClipTarget(clip.url || '');
+  return [...new Set([
+    wrappedTarget,
+    clip.url || '',
+    clip.sourceUrl || '',
+  ].filter(Boolean))];
+}
+
+function motionUrlHostname(url = '') {
+  try {
+    return new URL(url, 'http://autotube.local').hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+export function isYouTubeMotionCandidate(candidate = {}) {
+  return motionCandidateUrls(candidate).some((url) => {
+    const host = motionUrlHostname(url);
+    return host === 'youtu.be'
+      || host.endsWith('.youtu.be')
+      || host === 'youtube.com'
+      || host.endsWith('.youtube.com')
+      || host === 'youtube-nocookie.com'
+      || host.endsWith('.youtube-nocookie.com');
+  });
+}
+
+/**
+ * Host reliability tier for web-motion selection.
+ *
+ * YouTube remains a last resort: yt-dlp often needs cookies and a JavaScript runtime
+ * in bot-gated environments. Direct files and non-YouTube video hosts are much more
+ * likely to survive the later assembly download.
+ */
+export function motionCandidateHostRank(candidate = {}) {
+  const urls = motionCandidateUrls(candidate);
+  if (isYouTubeMotionCandidate(candidate)) return 100;
+  if (urls.some((url) => {
+    const host = motionUrlHostname(url);
+    return (host === 'archive.org' || host.endsWith('.archive.org')) && isDirectVideoUrl(url);
+  })) return 0;
+  if (urls.some((url) => isDirectVideoUrl(url))) return 1;
+  if (urls.some((url) => {
+    const host = motionUrlHostname(url);
+    return ['vimeo.com', 'dailymotion.com', 'dai.ly', 'giphy.com']
+      .some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+  })) return 2;
+  return 10;
+}
+
+/** Stable host-first ranking; topical score only orders clips within a host tier. */
+export function rankMotionCandidates(candidates = [], score = () => 0) {
+  return candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .sort((left, right) => {
+      const hostDelta =
+        motionCandidateHostRank(left.candidate) - motionCandidateHostRank(right.candidate);
+      if (hostDelta) return hostDelta;
+      const leftScore = Number(score(left.candidate)) || 0;
+      const rightScore = Number(score(right.candidate)) || 0;
+      return rightScore - leftScore || left.index - right.index;
+    })
+    .map(({ candidate }) => candidate);
+}
+
 /**
  * Decide how an inject candidate's liveness is verified before it lands in segment
  * media.
@@ -388,12 +465,9 @@ export function shouldFailOpenWebVisionSkip({ isWebClip = false, hasStrongEviden
 function motionUrlKey(url = '') {
   const raw = String(url || '');
   if (isProxiedClipUrl(raw)) {
-    try {
-      const target = new URL(raw, 'http://autotube.local').searchParams.get('url');
-      if (target) return `download-clip:${target}`;
-    } catch {
-      // Fall back to the full wrapper; never collapse every proxy to one key.
-    }
+    const target = proxiedClipTarget(raw);
+    if (target) return `download-clip:${target}`;
+    // Fall back to the full wrapper; never collapse every proxy to one key.
     return raw;
   }
   return raw.split('?')[0];
@@ -1214,7 +1288,9 @@ function downloadableWebVideoUrl(rawUrl = '') {
     const parsed = new URL(rawUrl);
     if (parsed.protocol !== 'https:') return '';
     const host = parsed.hostname.toLowerCase();
-    if (!WEB_VIDEO_DOWNLOAD_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) {
+    const approvedHost =
+      WEB_VIDEO_DOWNLOAD_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+    if (!approvedHost && !isDirectVideoUrl(parsed.href)) {
       return '';
     }
     return parsed.href;
@@ -1261,6 +1337,7 @@ export async function fetchWebVideoResults(
     const data = await res.json();
     const results = Array.isArray(data) ? data : data?.results;
     if (!Array.isArray(results)) return [];
+    const evidenceQuery = webMotionHostQueryBase(query);
 
     return results
       .map((result) => {
@@ -1270,14 +1347,17 @@ export async function fetchWebVideoResults(
         if (duration > 10 * 60) return null;
         const metadata = providerEvidenceText(
           `${result?.title || ''} ${result?.description || ''}`,
-          { query, topicBlob },
+          { query: evidenceQuery, topicBlob },
         );
         if (!metadata) return null;
+        const directUrl = isDirectVideoUrl(sourceUrl);
         return {
-          url: `${devServer}/api/download-clip?url=${encodeURIComponent(sourceUrl)}&duration=10`,
+          url: directUrl
+            ? sourceUrl
+            : `${devServer}/api/download-clip?url=${encodeURIComponent(sourceUrl)}&duration=10`,
           alt: metadata,
           title: metadata,
-          query,
+          query: evidenceQuery,
           source: provider.source,
           sourceUrl,
           thumbnailUrl: result?.thumbnailUrl || result?.images?.large || result?.image || undefined,
@@ -2248,6 +2328,34 @@ export function webMotionQueryVariants(topicBlob = '', baseQueries = [], limit =
   return out;
 }
 
+const NON_YOUTUBE_WEB_MOTION_HOSTS = ['vimeo.com', 'dailymotion.com'];
+
+/**
+ * Keep explicit non-YouTube searches in the motion plan. Search engines otherwise
+ * return almost entirely YouTube results even when Vimeo/Dailymotion have matching
+ * footage.
+ */
+export function webMotionHostQueryVariants(baseQueries = [], limit = 12) {
+  const out = [];
+  const seen = new Set();
+  for (const base of baseQueries) {
+    for (const host of NON_YOUTUBE_WEB_MOTION_HOSTS) {
+      const query = `${String(base || '').trim()} site:${host}`.trim();
+      const key = query.toLowerCase();
+      if (!seen.has(key) && isSafeStockMotionQuery(query)) {
+        seen.add(key);
+        out.push(query);
+      }
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
+function webMotionHostQueryBase(query = '') {
+  return String(query).replace(/\s+site:(?:vimeo\.com|dailymotion\.com)\s*$/i, '').trim();
+}
+
 /**
  * Archive sweeps re-rank a subject the way archivists label material: raw "footage",
  * an instructional "film", a period "newsreel". Each suffix surfaces a different slice
@@ -2275,6 +2383,7 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   const keyed = options.stockKeyed === true;
   const base = stockMotionQueries(topicBlob, cyberTopic, options).filter(isSafeStockMotionQuery);
   const webQueries = webMotionQueryVariants(topicBlob, base);
+  const webHostQueries = webMotionHostQueryVariants(webQueries);
   const airline = isAirlineTopic(topicBlob);
   const housing = isHousingTopic(topicBlob);
   let boost;
@@ -2309,6 +2418,10 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
     keyed,
     queries,
     webQueries,
+    webHostQueries,
+    // Archive.org has its own direct-MP4 search lane; host-scoped web searches must
+    // never displace these subjects from that lane.
+    archiveQueries: [...queries],
     boostCount: boost.length,
     baseCount: base.length,
   };
@@ -2441,10 +2554,16 @@ export function resolveMotionVolumeTargets({
 export function formatMotionPathLog(report = {}) {
   const mode = report.motionKeyMode || 'unknown';
   const queries =
-    `queries-tried=${report.motionQueriesTried || 0} query-pack=${report.motionQueryPoolSize || 0}`;
+    `queries-tried=${report.motionQueriesTried || 0} query-pack=${report.motionQueryPoolSize || 0}`
+    + ` host-queries=${report.motionWebHostQueriesTried || 0}/${report.motionWebHostQueryPoolSize || 0}`;
+  const selectedYoutube = report.motionSelectedYouTube
+    ?? (report.videoTopUp || []).filter(isYouTubeMotionCandidate).length;
+  const selectedNonYoutube = report.motionSelectedNonYouTube
+    ?? Math.max(0, (report.videoTopUp || []).length - selectedYoutube);
   const tail =
     `clip-pool=${report.motionPoolSize || 0}`
-    + ` injected=${(report.videoTopUp || []).length}/${report.motionTargetVideos || 0}`;
+    + ` injected=${(report.videoTopUp || []).length}/${report.motionTargetVideos || 0}`
+    + ` selected(youtube=${selectedYoutube} non-youtube=${selectedNonYoutube})`;
   const web =
     `bing=${report.bingWebVideoFetched || 0}`
     + ` google=${report.googleWebVideoFetched || 0}`
@@ -2587,6 +2706,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   report.motionKeyPexels = keyMode.pexels;
   report.motionKeyPixabay = keyMode.pixabay;
   report.motionQueryPoolSize = queries.length;
+  report.motionWebHostQueryPoolSize = plan.webHostQueries.length;
   report.motionQueryBoost = plan.boostCount;
   report.motionTargetVideos = targets.minVideos;
 
@@ -2616,20 +2736,28 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // Skip archive.org for cyber topics when stock API keys exist, and don't re-ask
     // archive for page 2 — the proxy only ever returns one page of items per subject.
     const archivePromise =
-      (!cyberTopic || !hasStockKeysEarly) && devServer && page === 1
+      plan.archiveQueries.includes(q)
+      && (!cyberTopic || !hasStockKeysEarly)
+      && devServer
+      && page === 1
         ? fetchArchiveVideoResults(devServer, q, { topicBlob })
         : Promise.resolve([]);
-    const webPromises = !suffix && devServer && page === 1
-      ? WEB_VIDEO_PROVIDERS.map(({ key }) =>
-        fetchWebVideoResults(devServer, key, q, { topicBlob, limit: perProviderPage }))
-      : WEB_VIDEO_PROVIDERS.map(() => Promise.resolve([]));
+    const scopedWebQueries = !suffix && page === 1
+      ? plan.webHostQueries.filter((query) => webMotionHostQueryBase(query) === q)
+      : [];
+    const webSearchQueries = !suffix && devServer && page === 1
+      ? [...scopedWebQueries, q]
+      : [];
+    report.motionWebHostQueriesTried =
+      (report.motionWebHostQueriesTried || 0) + scopedWebQueries.length;
+    const webPromises = webSearchQueries.flatMap((webQuery) =>
+      WEB_VIDEO_PROVIDERS.map(({ key }) =>
+        fetchWebVideoResults(devServer, key, webQuery, { topicBlob, limit: perProviderPage })));
     const [
       fromPexels,
       fromPixabay,
       initialArchive,
-      fromBing,
-      fromGoogle,
-      fromDdg,
+      ...webResults
     ] = await Promise.all([
       suffix ? Promise.resolve([]) : fetchPexelsVideos(q, perProviderPage, page),
       suffix ? Promise.resolve([]) : fetchPixabayVideos(q, perProviderPage, page),
@@ -2655,7 +2783,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       });
     }
     const interleavedProviders = [];
-    const providerLists = [fromBing, fromGoogle, fromDdg, fromPexels, fromPixabay];
+    const providerLists = [...webResults, fromPexels, fromPixabay];
     const maxProviderResults = Math.max(0, ...providerLists.map((items) => items.length));
     for (let i = 0; i < maxProviderResults; i += 1) {
       for (const items of providerLists) {
@@ -2666,10 +2794,10 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       query: q,
       sweep: suffix,
       archiveRaw,
-      candidates: [
+      candidates: rankMotionCandidates([
         ...interleavedProviders,
         ...fromArchive,
-      ],
+      ]),
     };
   };
 
@@ -2861,7 +2989,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     bi += 1;
     if (!progressed) break;
   }
-  pool = interleaved.length ? interleaved : pool;
+  pool = rankMotionCandidates(interleaved.length ? interleaved : pool);
 
   report.motionPoolSize = pool.length;
   if (!pool.length) {
@@ -2931,9 +3059,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     if (/\b(daylight|sunny|bright|well.?lit|documentary|handheld|cctv|surveillance)\b/i.test(blob)) return 1;
     return 0;
   };
-  const picks = pickStockVideos(need + segments.length * 8, mediaOffset, pool)
-    .slice()
-    .sort((a, b) => faceScore(b) - faceScore(a));
+  // Rotate for run-to-run diversity, then consider the whole finite pool. Host tier
+  // wins before topical score, so YouTube is selected only after usable alternatives.
+  const picks = rankMotionCandidates(
+    pickStockVideos(pool.length, mediaOffset, pool),
+    faceScore,
+  );
   let vi = 0;
   const injectClip = async (seg, clip, tag) => {
     const key = motionUrlKey(clip.url);
@@ -2997,6 +3128,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       source: clip.source || 'pool',
       motionRelevancePassed: clip.motionRelevancePassed === true,
     });
+    if (isYouTubeMotionCandidate(clip)) {
+      report.motionSelectedYouTube = (report.motionSelectedYouTube || 0) + 1;
+    } else {
+      report.motionSelectedNonYouTube = (report.motionSelectedNonYouTube || 0) + 1;
+    }
     return true;
   };
 

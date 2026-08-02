@@ -446,9 +446,9 @@ describe('motionQueryPlan', () => {
     const keyless = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
     // Keyless housing is always face-first (exteriors after people/apartment lived-in).
     expect(keyless.queries.slice(0, 3)).toEqual([
-      'worried couple reading letter home',
-      'stressed family apartment interior',
-      'person holding eviction notice paper',
+      'shocked face close up phone',
+      'shocked face apartment eviction notice',
+      'worried couple reading letter apartment',
     ]);
     expect(keyless.queries).toEqual(
       expect.arrayContaining(['apartment building', 'apartment interior', 'public housing']),
@@ -586,10 +586,9 @@ describe('non-YouTube motion planning and ranking', () => {
       housingArchive.url,
       opaqueArchive.url,
     ]);
-    expect(motionCandidateHostRank(housingArchive, { topicBlob: HOUSING_TOPIC }))
-      .toBeGreaterThan(motionCandidateHostRank(bingWeb, { topicBlob: HOUSING_TOPIC }));
-    expect(motionCandidateHostRank(housingArchive, { topicBlob: HOUSING_TOPIC }))
-      .toBeLessThanOrEqual(10);
+    // Strong apartment Archive (5) beats generic Bing/DDG web (10); opaque stays 35.
+    expect(motionCandidateHostRank(housingArchive, { topicBlob: HOUSING_TOPIC })).toBe(5);
+    expect(motionCandidateHostRank(opaqueArchive, { topicBlob: HOUSING_TOPIC })).toBe(35);
     expect(motionCandidateHostRank(housingArchive, { topicBlob: HOUSING_TOPIC }))
       .toBeLessThan(motionCandidateHostRank(
         { url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://news.example/page')}` },

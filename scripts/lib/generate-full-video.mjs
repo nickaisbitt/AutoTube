@@ -1917,23 +1917,25 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   ];
   // Housing+"AI": avoid podcast-mic / cyber B-roll.
   if (housing) {
+    // Shocked-face + apartment first — webinar/chair openers capped watch ~4.6.
     const faces = [
-      'worried couple reading letter home',
+      'shocked face close up phone',
+      'shocked face apartment eviction notice',
+      'worried couple reading letter apartment',
       'stressed family apartment interior',
       'person holding eviction notice paper',
       'tenant packing boxes apartment',
-      'shocked face close up phone',
       'couple arguing bills kitchen table',
       'modern apartment living room daylight people',
       'young couple stressed rent apartment',
     ];
     const topical = [
       'apartment building exterior city',
-      'for rent sign house porch',
+      'apartment interior hallway doors',
+      'for rent sign apartment window',
       'keys lock apartment door',
       'eviction notice paper hands close up',
       'landlord house door knock',
-      'court documents paperwork close up',
       'worried tenant reading letter kitchen',
     ];
     // Always face-first on housing — exteriors/Archive meetings starve variety.
@@ -2554,10 +2556,24 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   const keyed = options.stockKeyed === true;
   const base = stockMotionQueries(topicBlob, cyberTopic, options).filter(isSafeStockMotionQuery);
   const webQueries = webMotionQueryVariants(topicBlob, base);
-  const webHostQueries = webMotionHostQueryVariants(webQueries);
   const airline = isAirlineTopic(topicBlob);
   const housing = isHousingTopic(topicBlob);
   const healthcare = isHealthcareTopic(topicBlob);
+  // Healthcare: lead host-scoped searches with radiology AI on Vimeo (web3 lacked
+  // clinician+screen motion; generic host variants bury it behind corridor queries).
+  const healthcareHostLead = healthcare
+    ? [
+        'radiology AI site:vimeo.com',
+        'ai radiology site:vimeo.com',
+        'doctor mri monitor site:vimeo.com',
+        'surgical robot site:vimeo.com',
+        'ultrasound demonstration site:vimeo.com',
+      ].filter(isSafeStockMotionQuery)
+    : [];
+  const webHostQueries = [
+    ...healthcareHostLead,
+    ...webMotionHostQueryVariants(webQueries),
+  ].filter((query, idx, arr) => arr.findIndex((q) => q.toLowerCase() === query.toLowerCase()) === idx);
   let boost;
   if (keyed) {
     boost = airline ? KEYED_AIRLINE_MOTION_QUERIES : housing ? KEYED_HOUSING_MOTION_QUERIES : [];
@@ -3242,7 +3258,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
     }
     if (isHousingTopic(topicBlob)) {
-      // Low-energy webinar / chair openers tank hook (web17) — reject before Archive fill.
+      // Hard-reject webinar / sitting-in-chair / home-tour static openers (web17 raw 4.6).
+      // score ≤ -20 is dropped by injectClip; timeline also bans them as introLead.
       if (
         /\b(webinar|workshop|rent\s+program|tenant\s+relief|sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call)\b/i.test(blob)
       ) {
@@ -3277,12 +3294,54 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       }
     }
     if (isHealthcareTopic(topicBlob)) {
-      // Archive clinical body filler before title-card demotes (parallel housing).
-      if (/Archive/i.test(clip.source || '')) {
-        return hasHealthcareEvidence(clip) ? 2 : 0;
-      }
-      if (/\b(title\s+card|coursera|stanford\s+online|course\s+trailer|capitol|protest)\b/i.test(blob)) {
+      // Title-card / lecture / protest pads (off-topic also -20 when regex hits).
+      if (/\b(title\s+card|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|capitol|protest|maternity|kapparot|kapores)\b/i.test(blob)) {
         return -8;
+      }
+      // Pure talking-head / news studio without clinician+screen or OR motion —
+      // demote below intro clinical floor (≥2) so AI-talk pads lose the hook.
+      const talkingHeadPad = /\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|studio\s+interview|webinar\s+host|podcast\s+host|lecture\s+(?:host|speaker))\b/i.test(blob);
+      const clinicianScreenOrOr = /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|ultrasound\s+(?:demo|demonstration)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen|mri)|mri\s+(?:monitor|screen)|scan\s*screen|operating\s+room)\b/i.test(blob)
+        || (
+          /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(blob)
+          && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(blob)
+        );
+      if (talkingHeadPad && !clinicianScreenOrOr) return 0;
+      // Boost AI radiology / clinician+screen / surgical robot / ultrasound demo (8–10).
+      if (
+        /\b(ai\s+radiolog|radiolog\w*\s+ai|ai\s+(?:medical\s+)?diagnos)\b/i.test(blob)
+        || (
+          /\b(doctor|clinician|radiologist|physician)\b/i.test(blob)
+          && /\b(mri|radiolog|monitor|scan\s*screen)\b/i.test(blob)
+          && /\b(screen|monitor|pointing|reviewing|ai)\b/i.test(blob)
+        )
+      ) {
+        return 10;
+      }
+      if (
+        /\b(clinician|doctor|physician|radiologist)\b/i.test(blob)
+        && /\b(pointing\s+at|points?\s+at)\b/i.test(blob)
+        && /\b(monitor|screen|mri|scan)\b/i.test(blob)
+      ) {
+        return 9;
+      }
+      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg)\b/i.test(blob)) return 9;
+      if (
+        /\b(ultrasound\s+(?:demo|demonstration|exam|probe)|sonograph)\b/i.test(blob)
+        && /\b(doctor|clinician|technician|sonographer|nurse)\b/i.test(blob)
+      ) {
+        return 8;
+      }
+      // Archive clinical body filler after boosts (parallel housing).
+      // Explainer/interview Archive without screen/OR motion stays below intro floor.
+      if (/Archive/i.test(clip.source || '')) {
+        if (
+          /\b(explainer|lecture|interview|newsreel|talking)\b/i.test(blob)
+          && !clinicianScreenOrOr
+        ) {
+          return 1;
+        }
+        return hasHealthcareEvidence(clip) ? 2 : 0;
       }
       if (
         /\b(face|faces|worried|shocked|doctor|nurse|physician|patient|clinician)\b/i.test(blob)
@@ -3332,6 +3391,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // Housing intro wants face/lived-in (≥2). Weak Archive is deferred by the
     // padding loops (not burned via vi++) so body can still use them.
     if (isIntro && isHousingTopic(topicBlob) && score < 2) return false;
+    // Healthcare intro wants clinical evidence (≥2): AI radiology / clinician+screen
+    // / OR motion. Pure talking-head (0) and Archive explainers (1) stay for body.
+    if (isIntro && isHealthcareTopic(topicBlob) && score < 2) return false;
     if (isIntro && score < 0) return false;
     const unreliable = unreliableWebProxyInjectReason(clip, proxyGate);
     if (unreliable) {
@@ -3428,12 +3490,25 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   /** @type {object[]} */
   const deferredBodyClips = [];
   const takeClip = (forIntro) => {
+    // Housing/healthcare intro: prefer faceScore≥8 (shocked-face / AI radiology /
+    // clinician+screen) when present, even if host-rank put Archive ahead of web.
+    if (forIntro && (isHousingTopic(topicBlob) || isHealthcareTopic(topicBlob))) {
+      for (let i = 0; i < picks.length; i += 1) {
+        const clip = picks[i];
+        const key = motionUrlKey(clip.url);
+        if (key && used.has(key)) continue;
+        if (faceScore(clip) < 8) continue;
+        picks.splice(i, 1);
+        if (i < vi) vi -= 1;
+        return clip;
+      }
+    }
     while (vi < picks.length) {
       const clip = picks[vi];
       vi += 1;
       if (
         forIntro
-        && isHousingTopic(topicBlob)
+        && (isHousingTopic(topicBlob) || isHealthcareTopic(topicBlob))
         && faceScore(clip) < 2
       ) {
         deferredBodyClips.push(clip);

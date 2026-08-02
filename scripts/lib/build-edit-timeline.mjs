@@ -297,8 +297,7 @@ const HEALTHCARE_TOPICAL_VISUAL_RE =
  * Healthcare title-card / Giphy openers are -1.
  */
 export function introFaceTier(asset, { airline = false, housing = false, healthcare = false } = {}) {
-  if (housing && isLandscapeOnlyIntroVisual(asset)) return -1;
-  // Housing webinars / chair openers and healthcare title cards are never tiered up.
+  // Housing landscape / webinar / chair / home-tour and healthcare title cards → -1.
   if (housing && isRejectedIntroLeadVisual(asset, { housing: true })) return -1;
   if (healthcare && isRejectedIntroLeadVisual(asset, { healthcare: true })) return -1;
   if (hasReadableFaceVisual(asset)) {

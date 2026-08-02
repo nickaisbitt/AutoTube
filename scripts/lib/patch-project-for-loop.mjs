@@ -389,6 +389,13 @@ export function promoteIntroFaceVideo(project) {
     if (housing) {
       if (isLandscapeOnlyIntroVisual(asset)) return -8;
       const scoreBlob = evidence || blob;
+      // Webinar / Zoom-chair / home-tour must never win the housing hook (web17).
+      if (
+        isHousingTalkingHeadMotion(asset)
+        || /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call)\b/i.test(scoreBlob)
+      ) {
+        return -20;
+      }
       const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && scoreBlob.includes(w)).length;
       if (
         /\b(face|faces|worried|shocked|stressed|portrait|close.?up|couple|family|tenant)\b/i.test(scoreBlob)
@@ -403,8 +410,6 @@ export function promoteIntroFaceVideo(project) {
         return 9 + Math.min(2, topicHits);
       }
       if (isHousingApartmentMotion(asset)) return 8 + Math.min(2, topicHits);
-      // Tenant/rent webinars are human openers when face keywords are missing (web16).
-      if (isHousingTalkingHeadMotion(asset)) return 8 + Math.min(2, topicHits);
       if (/\bapartment\s+building\b/i.test(scoreBlob) && asset?.type === 'video') return 3;
       // Generic video without face/apartment signal must not win the housing hook.
       return asset?.type === 'video' ? 0 : -1;

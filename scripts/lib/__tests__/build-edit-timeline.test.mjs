@@ -114,6 +114,25 @@ describe('introFaceTier', () => {
     // Still classified as talking-head motion, but never tiered as an intro lead (web17).
     expect(introFaceTier(asset, { airline: false, housing: true })).toBe(-1);
   });
+
+  it('rejects sitting-in-chair and home-tour static openers on housing intro', () => {
+    const chair = {
+      query: 'tenant rent',
+      alt: 'man sitting in a chair talking to camera desk zoom call',
+      title: 'office chair webinar desk',
+      url: 'https://example.com/chair.mp4',
+      type: 'video',
+    };
+    const tour = {
+      query: 'apartment interior',
+      alt: '3bhk luxury apartment home tour walkthrough',
+      title: '3bhk home tour million apartment',
+      url: 'https://example.com/tour.mp4',
+      type: 'video',
+    };
+    expect(introFaceTier(chair, { airline: false, housing: true })).toBe(-1);
+    expect(introFaceTier(tour, { airline: false, housing: true })).toBe(-1);
+  });
 });
 
 // ---------------------------------------------------------------------------

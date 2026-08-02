@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { promoteIntroFaceVideo } from '../patch-project-for-loop.mjs';
+import { capScriptSegmentsForLoop, promoteIntroFaceVideo } from '../patch-project-for-loop.mjs';
 
 const HOUSING_TOPIC = 'The landlord algorithm that evicted tenants from rent-stabilized apartments';
 
@@ -96,6 +96,25 @@ describe('promoteIntroFaceVideo (housing)', () => {
     const out = promoteIntroFaceVideo(project);
     expect(out.media.find((m) => m.id === 'face').segmentId).toBe('intro');
     expect(out.media.find((m) => m.id === 'strike').segmentId).toBe('body');
+  });
+
+  it('caps loop scripts to 4 segments and reassigns dropped media (web21)', () => {
+    const project = {
+      script: Array.from({ length: 7 }, (_, i) => ({
+        id: `s${i}`,
+        title: `Beat ${i}`,
+        narration: `Narration ${i}.`,
+      })),
+      media: [
+        { id: 'm5', segmentId: 's5', type: 'video', url: 'https://example.com/a.mp4' },
+        { id: 'm6', segmentId: 's6', type: 'video', url: 'https://example.com/b.mp4' },
+      ],
+    };
+    const out = capScriptSegmentsForLoop(project, 4);
+    expect(out.script).toHaveLength(4);
+    expect(out.media.every((m) => m.segmentId === 's3')).toBe(true);
+    expect(out.script[3].narration).toMatch(/Narration 3/);
+    expect(out.script[3].narration).toMatch(/Narration 6/);
   });
 
   it('promotes modern apartment motion when it is the best housing signal', () => {

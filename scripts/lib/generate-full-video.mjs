@@ -8,7 +8,7 @@ import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pipelineReliability.mjs';
 import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
-import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
+import { capScriptSegmentsForLoop, patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
 import { dedupeMediaByPHash, VISUAL_DUP_MAX_DISTANCE } from './perceptual-hash.mjs';
 import {
@@ -4684,6 +4684,13 @@ export async function generateFullVideo(options) {
     // place. Returns { ok: true } on pass, or { ok: false, result } carrying the
     // HARVEST_VOLUME_FAIL payload (re-harvest fixState already stamped) on fail.
     const runHarvestVolumeGate = async (gateProject) => {
+      // Cap beats before volume math — 7-segment scripts starve keyless soft-pass
+      // (housing-web21: 17v across 7 segs → volume-hard-fail despite motion pool).
+      const beforeSegs = gateProject.script?.length || 0;
+      capScriptSegmentsForLoop(gateProject, 4);
+      if ((gateProject.script?.length || 0) < beforeSegs) {
+        log(`   ✂️ Script capped for loop volume: ${beforeSegs} → ${gateProject.script.length} segments`);
+      }
       const mediaReport = await sanitizeRealHarvestMedia(gateProject, devServer, outDir, {
         loopMode: true,
         minAssetsPerSegment: fixState.minAssetsPerSegment || 6,

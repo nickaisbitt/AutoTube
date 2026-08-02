@@ -580,9 +580,39 @@ export function balanceMediaAcrossSegments(project, minPerSegment = 4) {
   return project;
 }
 
+/** Cap loop scripts so keyless harvest soft-pass isn't starved by 7+ beats. */
+export function capScriptSegmentsForLoop(project, maxSegments = 4) {
+  if (!project?.script?.length || project.script.length <= maxSegments) return project;
+  const kept = project.script.slice(0, maxSegments);
+  const dropped = project.script.slice(maxSegments);
+  const sink = kept[kept.length - 1];
+  const extraNarration = dropped
+    .map((s) => String(s?.narration || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  if (extraNarration) {
+    sink.narration = `${String(sink.narration || '').trim()} ${extraNarration}`.trim();
+  }
+  const droppedIds = new Set(dropped.map((s) => s.id).filter(Boolean));
+  if (droppedIds.size && Array.isArray(project.media)) {
+    project.media = project.media.map((m) => (
+      droppedIds.has(m.segmentId) ? { ...m, segmentId: sink.id } : m
+    ));
+  }
+  if (droppedIds.size && Array.isArray(project.narration)) {
+    project.narration = project.narration.map((n) => (
+      droppedIds.has(n.segmentId) ? { ...n, segmentId: sink.id } : n
+    ));
+  }
+  project.script = kept;
+  return project;
+}
+
 /** Cap loop iteration runtime so cuts can outpace duplication on limited assets. */
 export function trimProjectForLoop(project, maxTotalSec = 75) {
   if (!project?.script?.length) return project;
+  // housing-web21: OpenRouter emitted 7 beats → 4–5 assets/seg → volume-hard-fail.
+  capScriptSegmentsForLoop(project, 4);
   const segCount = project.script.length;
   const perSegSec = Math.max(15, Math.floor(maxTotalSec / segCount));
   const wordsPerSeg = Math.max(28, Math.floor((perSegSec / 60) * 130));

@@ -132,11 +132,13 @@ export function isPassiveDeskIntroVisual(asset) {
   return PASSIVE_DESK_INTRO_RE.test(assetBlob(asset)) && !hasReadableFaceVisual(asset);
 }
 
-function isRejectedIntroLeadVisual(asset, { airline = false } = {}) {
+function isRejectedIntroLeadVisual(asset, { airline = false, housing = false } = {}) {
   const blob = assetBlob(asset);
   if (/\b(runway|tarmac|fence|sky|clouds?|aerial|from above|distant plane|distant aircraft|plane in (the )?sky|aircraft in (the )?sky|back of head|from behind|rear view|looking through (a )?window|looking out (the )?window|airplane window|plane window|cabin window)\b/.test(blob)) {
     return true;
   }
+  // Housing hooks must not open on lake/mountain/Archive landscape stock.
+  if (housing && isLandscapeOnlyIntroVisual(asset)) return true;
   // Passive paperwork / hands-on-desk never leads the hook on any topic;
   // scarcity fallbacks (relaxed tier / coverage) still admit it when the
   // pool holds nothing else, so thin intros never render as a gap.
@@ -164,16 +166,57 @@ export function hasReadableFaceVisual(asset) {
 const AIRLINE_TOPICAL_VISUAL_RE = /\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|jet|passenger|attendant|hangar|airport|pilot|plane|flight)\b/;
 const HOUSING_TOPICAL_VISUAL_RE = /\b(evict(?:ion|ed)?|landlords?|tenants?|lease|rent(?:al)?|notice|apartment|housing|home|house|keys|court|foreclos\w*)\b/;
 
+/** Nature / establishing stock with no lived-in housing or readable human. */
+const LANDSCAPE_ONLY_INTRO_RE =
+  /\b(landscape|mountain|lake|lakeside|river|forest|nature\s+scenic|scenic\s+view|countryside|wildfire|helicopter|aerial(?:\s+view)?|rolling\s+hills|beach|sunset|ocean|sea\s+waves)\b/;
+
+const HOUSING_LIVED_IN_RE =
+  /\b(modern\s+apartment|apartment\s+interior|living\s+room|kitchen|hallway|tenant|evict(?:ion|ed)?|for\s+rent|packing\s+boxes|lease|landlord|worried\s+(?:couple|family)|family\s+apartment)\b/;
+
+/**
+ * True when metadata is landscape/nature establishing with no apartment or
+ * face signal — never OK as a housing hook opener when better clips exist.
+ */
+export function isLandscapeOnlyIntroVisual(asset) {
+  const blob = assetBlob(asset);
+  if (!LANDSCAPE_ONLY_INTRO_RE.test(blob)) return false;
+  if (hasReadableFaceVisual(asset)) return false;
+  if (HOUSING_LIVED_IN_RE.test(blob) || HOUSING_TOPICAL_VISUAL_RE.test(blob)) return false;
+  if (
+    /\b(face|portrait|close.?up|people|person|couple|family|worried|shocked)\b/.test(blob)
+    && /\b(tenant|landlord|resident|home|house|apartment)\b/.test(blob)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Modern apartment / lived-in housing motion suitable for the hook opener. */
+export function isHousingApartmentMotion(asset) {
+  if (isLandscapeOnlyIntroVisual(asset)) return false;
+  const blob = assetBlob(asset);
+  if (HOUSING_LIVED_IN_RE.test(blob)) return true;
+  return /\bapartment\b/.test(blob)
+    && /\b(people|person|couple|family|interior|room|door|keys|tenant|evict)\b/.test(blob);
+}
+
 /**
  * First-3s priority for airline/housing hooks: a readable human face on a
- * topical frame (2) beats any readable face (1) beats other lead visuals (0).
+ * topical frame (2) beats any readable face or housing apartment motion (1)
+ * beats other lead visuals (0). Landscape-only housing stock is -1.
  */
 export function introFaceTier(asset, { airline = false, housing = false } = {}) {
-  if (!hasReadableFaceVisual(asset)) return 0;
-  const blob = assetBlob(asset);
-  const topical = (airline && AIRLINE_TOPICAL_VISUAL_RE.test(blob))
-    || (housing && HOUSING_TOPICAL_VISUAL_RE.test(blob));
-  return topical ? 2 : 1;
+  if (housing && isLandscapeOnlyIntroVisual(asset)) return -1;
+  if (hasReadableFaceVisual(asset)) {
+    const blob = assetBlob(asset);
+    const topical = (airline && AIRLINE_TOPICAL_VISUAL_RE.test(blob))
+      || (housing && HOUSING_TOPICAL_VISUAL_RE.test(blob));
+    return topical ? 2 : 1;
+  }
+  // Housing: lived-in apartment motion without a strict face tag still beats
+  // landscape / Archive establishing for the opener (web14).
+  if (housing && isHousingApartmentMotion(asset)) return 1;
+  return 0;
 }
 
 function isAirlineIntroLeadVisual(asset) {
@@ -186,12 +229,17 @@ function isAirlineIntroLeadVisual(asset) {
   return hasCockpit || hasCabin || hasPassengerFace || isBrightCabinInterior(asset);
 }
 
-function isIntroLeadVisual(asset, { airline = false, cameraStory = false } = {}) {
+function isIntroLeadVisual(asset, { airline = false, cameraStory = false, housing = false } = {}) {
   if (airline) return isAirlineIntroLeadVisual(asset);
-  if (isRejectedIntroLeadVisual(asset)) return false;
+  if (isRejectedIntroLeadVisual(asset, { housing })) return false;
   // A surveillance frame is the subject on camera stories, not dead air.
   if (cameraStory && isSurveillanceVisual(asset)) return true;
   const blob = assetBlob(asset);
+  if (housing) {
+    return hasReadableFaceVisual(asset)
+      || isHousingApartmentMotion(asset)
+      || /\b(face|faces|person|people|worried|shocked|portrait|close.?up|couple|family|tenant)\b/.test(blob);
+  }
   return /\b(face|faces|person|people|worried|shocked|portrait|close.?up|passenger|pilot|attendant|crew|flight attendant|cabin crew|cockpit|flight deck)\b/.test(blob)
     || isBrightCabinInterior(asset);
 }
@@ -368,7 +416,11 @@ export function buildEditTimeline(project, options = {}) {
   const topicIsHousing = !coldEval && isHousingTopic(project.topic || '');
   const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
   const topicIsCameraStory = CAMERA_STORY_RE.test(project.topic || '');
-  const introLeadOptions = { airline: topicIsAirline, cameraStory: topicIsCameraStory };
+  const introLeadOptions = {
+    airline: topicIsAirline,
+    cameraStory: topicIsCameraStory,
+    housing: topicIsHousing,
+  };
   // Hooks open on a readable face when one exists, on any topic — detected
   // independently of cold-eval so the rule holds in every mode. Camera
   // stories are the one exception: the surveillance frame is the intended
@@ -476,7 +528,7 @@ export function buildEditTimeline(project, options = {}) {
         if (isIntroLeadVisual(a, introLeadOptions)) {
           reusePenalty += 6;
         }
-        if (isRejectedIntroLeadVisual(a, { airline: topicIsAirline })) {
+        if (isRejectedIntroLeadVisual(a, { airline: topicIsAirline, housing: topicIsHousing })) {
           return -12;
         }
       }
@@ -485,6 +537,8 @@ export function buildEditTimeline(project, options = {}) {
         if (!/face|person|people|worried|shocked|portrait|close.?up/i.test(blob)) reusePenalty -= 4;
       }
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|empty park|people in park|press conference|news desk|office desk/i.test(blob)) return -6;
+      // Housing intro: landscape/lake establishing is never a valid hook cut.
+      if (isIntro && topicIsHousing && isLandscapeOnlyIntroVisual(a)) return -12;
       if (topicIsHousing && /moving boxes|packing boxes|cardboard boxes|boxes hallway/i.test(blob)) return -2;
       if (isBackViewDeadAir(a)) return -14;
       if (/microphone|podcast|recording studio|asmr|rode|sequin|fashion runway|puppet|beetle|insect|cartoon|minecraft/i.test(blob)) return -5;
@@ -514,6 +568,7 @@ export function buildEditTimeline(project, options = {}) {
         const rel = scoreAssetRelevance(a, seg, project.topic || '');
         let score = rel < 0.15 ? -4 : Math.round(rel * 5);
         if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court/i.test(blob)) score += 3;
+        if (isIntro && topicIsHousing && isHousingApartmentMotion(a)) score += 4;
         if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 5;
         // Hook needs a face; care/CCTV outranks generic faces on nursing.
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait|eyes/i.test(blob)) {
@@ -521,7 +576,8 @@ export function buildEditTimeline(project, options = {}) {
         }
         // Airline/housing hooks open on an empty establishing shot only when
         // no readable face outranks it; topical faces outrank generic faces.
-        if (isIntro && faceFirstIntroTopic && hasReadableFaceVisual(a)) {
+        // Housing also boosts apartment-motion tier-1 via introFaceTier.
+        if (isIntro && faceFirstIntroTopic && introFaceTier(a, faceTierOptions) > 0) {
           score += 4 + introFaceTier(a, faceTierOptions);
         }
         // Cold intro: beat match outranks establishing stock.
@@ -701,6 +757,15 @@ export function buildEditTimeline(project, options = {}) {
         if (!candidate) return false;
         const key = urlKey(candidate);
         if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
+        // Housing intro 0–3s: landscape-only stays banned even on the relaxed
+        // pass so lake/Archive establishing cannot win the hook opener.
+        if (
+          introLeadWindow
+          && topicIsHousing
+          && isLandscapeOnlyIntroVisual(candidate)
+        ) {
+          return false;
+        }
         if (!relaxed) {
           if (introLeadWindow && !isIntroLeadVisual(candidate, introLeadOptions)) return false;
           if (key && recentTimelineUrls.includes(key)) return false;
@@ -771,10 +836,18 @@ export function buildEditTimeline(project, options = {}) {
             }
           }
           // No strict readable face found (Archive stills often lack role-word metadata).
-          // Promote human-cluster or portrait-like assets before fully relaxing: a partial
-          // face signal beats an aerial/establishing shot for the hook opener.
+          // Housing: prefer apartment/lived-in motion next, then human-cluster /
+          // portrait-like assets — never landscape establishing for the opener.
+          if (topicIsHousing) {
+            for (let j = 0; j < rankedPool.length; j++) {
+              const candidate = rankedPool[(ai + j) % rankedPool.length];
+              if (!isHousingApartmentMotion(candidate)) continue;
+              if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
+            }
+          }
           for (let j = 0; j < rankedPool.length; j++) {
             const candidate = rankedPool[(ai + j) % rankedPool.length];
+            if (topicIsHousing && isLandscapeOnlyIntroVisual(candidate)) continue;
             const cluster = visualSubjectCluster(candidate);
             const blob = assetBlob(candidate);
             const isPortraitLike = isHumanCluster(cluster)

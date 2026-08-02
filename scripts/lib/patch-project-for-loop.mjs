@@ -3,7 +3,12 @@
  */
 import { STOCK_HEALTHCARE_IMAGES, STOCK_MEDIA_POOL, pickStockImages } from './stock-media-urls.mjs';
 import { buildImpactBeatsForTopic, buildShockHookLine, hookClashesWithTopic } from '../../e2e/openRouterMock.mjs';
-import { buildEditTimeline } from './build-edit-timeline.mjs';
+import {
+  buildEditTimeline,
+  hasReadableFaceVisual,
+  isHousingApartmentMotion,
+  isLandscapeOnlyIntroVisual,
+} from './build-edit-timeline.mjs';
 import {
   hookOverlayWords,
   hookOverlayViolation,
@@ -357,8 +362,9 @@ export function promoteIntroFaceVideo(project) {
   const intro = project.script[0];
   if (!intro?.id) return project;
 
+  const housing = isHousingTopic(project.topic || '');
   const faceScore = (asset) => {
-    const blob = `${asset?.query || ''} ${asset?.alt || ''} ${asset?.url || ''}`.toLowerCase();
+    const blob = `${asset?.query || ''} ${asset?.alt || ''} ${asset?.source || ''} ${asset?.url || ''}`.toLowerCase();
     const topic = String(project.topic || '').toLowerCase();
     if (/microphone|podcast|studio|asmr|cartoon|puppet|minecraft|beetle|insect/i.test(blob)) return -5;
     if (/architectural model|conference room|skyline|corporate office|empty park|people in a park/i.test(blob)) {
@@ -367,6 +373,25 @@ export function promoteIntroFaceVideo(project) {
     if (/camcorder|person holding camera|filming with phone|dslr camera/i.test(blob)
       && !/cctv|surveillance|podcast|recording/i.test(topic)) {
       return -3;
+    }
+    // Housing: never promote landscape/lake establishing into the hook when
+    // face or modern-apartment motion exists elsewhere in the pool.
+    if (housing) {
+      if (isLandscapeOnlyIntroVisual(asset)) return -8;
+      const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && blob.includes(w)).length;
+      if (
+        /\b(face|faces|worried|shocked|stressed|portrait|close.?up|couple|family|tenant)\b/i.test(blob)
+        && /\b(apartment|home|kitchen|evict|rent|letter|packing|boxes)\b/i.test(blob)
+      ) {
+        return 12 + Math.min(2, topicHits);
+      }
+      if (hasReadableFaceVisual(asset) || /\b(face|portrait|close.?up|worried|shocked|reaction)\b/i.test(blob)) {
+        return 9 + Math.min(2, topicHits);
+      }
+      if (isHousingApartmentMotion(asset)) return 8 + Math.min(2, topicHits);
+      if (/\bapartment\s+building\b/i.test(blob) && asset?.type === 'video') return 3;
+      // Generic video without face/apartment signal must not win the housing hook.
+      return asset?.type === 'video' ? 0 : -1;
     }
     // Topic keyword overlap on intro beats generic faces.
     const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && blob.includes(w)).length;
@@ -380,7 +405,9 @@ export function promoteIntroFaceVideo(project) {
   const videos = project.media.filter((m) => m.type === 'video');
   if (!videos.length) return project;
   const best = [...videos].sort((a, b) => faceScore(b) - faceScore(a))[0];
-  if (!best || faceScore(best) < 2) return project;
+  // Housing requires a real face/apartment signal (≥3); other topics keep ≥2.
+  const minPromote = housing ? 3 : 2;
+  if (!best || faceScore(best) < minPromote) return project;
 
   const bodySeg = project.script.find((s, i) => i > 0 && s.id !== intro.id)?.id;
   project.media = project.media.map((m) => {
@@ -389,7 +416,7 @@ export function promoteIntroFaceVideo(project) {
       m.segmentId === intro.id
       && m.id !== best.id
       && m.type === 'video'
-      && faceScore(m) < faceScore(best)
+      && (faceScore(m) < faceScore(best) || (housing && isLandscapeOnlyIntroVisual(m)))
       && bodySeg
     ) {
       return { ...m, segmentId: bodySeg };

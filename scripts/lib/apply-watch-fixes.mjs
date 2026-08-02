@@ -170,6 +170,11 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
       s.hookOverlay = buildShortHookOverlay(topic, s.hookLine, { visionFix });
       s.faceSeekBroll = true;
       applied.push(`1. Hook FAIL → overlay: "${s.hookOverlay}" + face-seek intro`);
+      // Housing hooks that opened on landscape/no-human need video-first face/apt.
+      if (isHousingTopic(topic)) {
+        s.harvestVideoFirst = true;
+        applied.push('1c. Housing hook FAIL → video-first face/apartment intro');
+      }
     } else if (before && before !== s.hookLine) {
       applied.push(`1b. Topic-mismatched hook rewritten → "${s.hookLine}"`);
     }

@@ -2,9 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   introFaceTier,
   hasReadableFaceVisual,
+  isHousingApartmentMotion,
+  isLandscapeOnlyIntroVisual,
   visualSubjectCluster,
   buildEditTimeline,
 } from '../build-edit-timeline.mjs';
+
+const HOUSING_TOPIC = 'The landlord algorithm that evicted tenants from rent-stabilized apartments';
 
 // ---------------------------------------------------------------------------
 // introFaceTier
@@ -47,6 +51,28 @@ describe('introFaceTier', () => {
       url: 'https://example.com/tenant.jpg',
     };
     expect(introFaceTier(asset, { airline: false, housing: true })).toBe(2);
+  });
+
+  it('returns 1 for modern apartment motion without a strict face tag (housing)', () => {
+    const asset = {
+      query: 'modern apartment living room daylight',
+      alt: 'modern apartment interior living room daylight',
+      url: 'https://example.com/apt.mp4',
+      type: 'video',
+    };
+    expect(isHousingApartmentMotion(asset)).toBe(true);
+    expect(introFaceTier(asset, { airline: false, housing: true })).toBe(1);
+  });
+
+  it('returns -1 for landscape-only stock on housing topics', () => {
+    const asset = {
+      query: 'scenic lake',
+      alt: 'aerial landscape mountain lake scenic view',
+      url: 'https://archive.org/download/lake/lake.mp4',
+      source: 'Archive.org live',
+    };
+    expect(isLandscapeOnlyIntroVisual(asset)).toBe(true);
+    expect(introFaceTier(asset, { airline: false, housing: true })).toBe(-1);
   });
 });
 
@@ -197,6 +223,98 @@ describe('buildEditTimeline: introFaceTier human-cluster fallback', () => {
     const firstEntry = timeline[0];
     expect(firstEntry).toBeDefined();
     expect(firstEntry.assetId).toBe('human1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildEditTimeline: housing intro face/apartment over landscape
+// ---------------------------------------------------------------------------
+
+describe('buildEditTimeline: housing intro face/apartment over landscape', () => {
+  it('opens the housing hook on a face clip, not landscape Archive', () => {
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 5,
+          narration: 'Your landlord just raised the rent again overnight.',
+          title: 'Intro',
+        },
+        {
+          id: 'body',
+          type: 'body',
+          duration: 10,
+          narration: 'Tenants across the city are facing algorithmic eviction notices.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'lake',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://archive.org/download/lake/lake.mp4',
+          alt: 'scenic mountain lake landscape aerial view',
+          query: 'landscape lake',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'face',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/tenant-face.mp4',
+          alt: 'tenant face worried eviction notice apartment close-up portrait people',
+          query: 'worried tenant apartment',
+          source: 'Bing web video',
+        },
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const first3s = timeline.filter((e) => e.segmentId === 'intro' && e.startSec < 3);
+    expect(first3s.length).toBeGreaterThan(0);
+    expect(first3s.every((e) => e.assetId === 'face')).toBe(true);
+    expect(hasReadableFaceVisual(project.media.find((m) => m.id === 'face'))).toBe(true);
+  });
+
+  it('prefers modern apartment motion over landscape when no strict face exists', () => {
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 5,
+          narration: 'Your landlord just raised the rent again overnight.',
+          title: 'Intro',
+        },
+      ],
+      media: [
+        {
+          id: 'lake',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://archive.org/download/lake/lake.mp4',
+          alt: 'scenic mountain lake landscape aerial view',
+          query: 'landscape lake',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'apt',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/apt-interior.mp4',
+          alt: 'modern apartment interior living room daylight',
+          query: 'modern apartment living room',
+          source: 'Bing web video',
+        },
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const first3s = timeline.filter((e) => e.startSec < 3);
+    expect(first3s.length).toBeGreaterThan(0);
+    expect(first3s.every((e) => e.assetId === 'apt')).toBe(true);
   });
 });
 

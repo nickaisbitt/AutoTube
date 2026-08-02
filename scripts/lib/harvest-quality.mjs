@@ -126,12 +126,18 @@ export function housingOffTopicBrollReason(haystack, contextText = '') {
  * — keep clinical/AI/hospital/doctor/patient/lab motion.
  */
 export const HEALTHCARE_OFF_TOPIC_BROLL_RE =
-  /\b(?:aldous\s+huxley|huxley|george\s+orwell|orwell|brave\s+new\s+world|1984|dystopian?|conspiracy(?:\s*(?:theory|theories|bait|doc(?:umentary)?))?|deep\s+state|new\s+world\s+order|(?:truth|secrets?|agenda|elites?|government)\s+exposed|healthcare\s+exposed|fema|hurricane(?:\s+\w+)?\s+(?:fema|assistance|psa|relief|recovery)|tornado(?:\s+(?:anniversary|coverage|warning|damage|recovery))?|storm\s+(?:recovery|restoration|warning|damage|psa)|community\s+recovery\s+after\s+disaster|disaster\s+(?:recovery|relief|psa|outreach|footage)|cockroach(?:es)?|roach(?:es)?|insects?|peas?\s+meme|green\s+peas?|classical\s+paintings?|oil\s+paintings?|renaissance\s+(?:art|painting|portrait)|baroque\s+painting|museum\s+painting|rembrandt|van\s+gogh|monet|literary\s+festival|book\s+festival|writers?\s+festival|brattleboro|(?:covid|c\s*19|coronavirus)\s+propaganda|propaganda\s+war|sleepy\s+joe|antibody\s+dependent\s+enhancement)\b|\bexposed\s*[:\-]|\bmeme\b[^.]{0,40}\bpeas?\b/i;
+  /\b(?:aldous\s+huxley|huxley|george\s+orwell|orwell|brave\s+new\s+world|1984|dystopian?|conspiracy(?:\s*(?:theory|theories|bait|doc(?:umentary)?))?|deep\s+state|new\s+world\s+order|(?:truth|secrets?|agenda|elites?|government)\s+exposed|healthcare\s+exposed|fema|hurricane(?:\s+\w+)?\s+(?:fema|assistance|psa|relief|recovery)|tornado(?:\s+(?:anniversary|coverage|warning|damage|recovery))?|storm\s+(?:recovery|restoration|warning|damage|psa)|community\s+recovery\s+after\s+disaster|disaster\s+(?:recovery|relief|psa|outreach|footage)|cockroach(?:es)?|roach(?:es)?|insects?|peas?\s+meme|green\s+peas?|classical\s+paintings?|oil\s+paintings?|renaissance\s+(?:art|painting|portrait)|baroque\s+painting|museum\s+painting|rembrandt|van\s+gogh|monet|literary\s+festival|book\s+festival|writers?\s+festival|brattleboro|(?:covid|c\s*19|coronavirus)\s+propaganda|propaganda\s+war|sleepy\s+joe|antibody\s+dependent\s+enhancement|coursera|stanford\s+online|course\s+trailer|title\s+card|capitol(?:\s+building)?|state\s+capitol|protest(?:ers?|ing)?|rally\s+(?:crowd|footage)|political\s+rally)\b|\bexposed\s*[:\-]|\bmeme\b[^.]{0,40}\bpeas?\b/i;
 
 /** Reason string when healthcare harvest media is conspiracy/disaster/meme junk. */
 export function healthcareOffTopicBrollReason(haystack, contextText = '') {
   if (!isHealthcareTopic(contextText)) return '';
-  if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(String(haystack || ''))) {
+  const h = String(haystack || '');
+  // Giphy pads dominate keyless healthcare pools as cartoon/meme motion with
+  // empty titles (healthcare-web2: 9/17 assets) — hard-reject by host.
+  if (/giphy\.com|media\d*\.giphy\.com/i.test(h)) {
+    return 'healthcare off-topic giphy/cartoon B-roll';
+  }
+  if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(h)) {
     return 'healthcare off-topic conspiracy/disaster/meme B-roll';
   }
   return '';

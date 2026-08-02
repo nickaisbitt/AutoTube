@@ -27,6 +27,7 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     ['staged car crash insurance fraud ring exposed', 'FAKE CRASH SCAM EXPOSED'],
     ['fake airport diamond heist fooled the guards', 'THE DIAMONDS ARE GONE'],
     ['hospital ransomware breach leaks patient records', 'PATIENT RECORDS EXPOSED'],
+    ['Why AI will change healthcare', 'AI BEATS YOUR DOCTOR'],
     ['AI voice clone bank scam drains real accounts', 'YOUR BANK ACCOUNT IS EMPTY'],
     ['concert ticket bots scalp fans instantly', 'BOTS STOLE YOUR TICKETS'],
     ['nuclear plant radiation meltdown risk hidden', 'EMERGENCY: THEY HID THE RISK'],

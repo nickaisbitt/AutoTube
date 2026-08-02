@@ -31,6 +31,27 @@ function trimAudioToDuration(inputPath, outputPath, targetSec) {
   return r.status === 0 && existsSync(outputPath);
 }
 
+/** Extend video by cloning the last frame so narration is not truncated. */
+function padVideoToDuration(inputPath, outputPath, targetSec) {
+  const current = probeMediaDuration(inputPath);
+  const padSec = targetSec - current;
+  if (padSec <= 0.05) {
+    const copy = spawnSync('ffmpeg', ['-y', '-i', inputPath, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    return copy.status === 0 && existsSync(outputPath);
+  }
+  const r = spawnSync(
+    'ffmpeg',
+    [
+      '-y', '-i', inputPath,
+      '-vf', `tpad=stop_mode=clone:stop_duration=${padSec.toFixed(3)}`,
+      '-c:v', 'libx264', '-preset', ffmpegPreset(), '-pix_fmt', 'yuv420p',
+      '-an', outputPath,
+    ],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  return r.status === 0 && existsSync(outputPath);
+}
+
 function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
@@ -928,45 +949,62 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     console.log('  [ffmpeg] segment merge used re-encode fallback');
   }
 
-  const videoDurationSec = probeMediaDuration(mergedVideo) || 60;
+  let videoDurationSec = probeMediaDuration(mergedVideo) || 60;
+  const rawVideoSec = videoDurationSec;
   const audioFile = options.mixedAudioPath;
   const audioDurationSec = audioFile && existsSync(audioFile) ? probeMediaDuration(audioFile) : 0;
 
   let audioForMux = audioFile;
   let audioTrimmedSec = 0;
-  const muxDurationSec = videoDurationSec;
+  let tpadSec = 0;
+  let videoForMux = mergedVideo;
+  let muxDurationSec = videoDurationSec;
 
   if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
     const overshootSec = audioDurationSec - videoDurationSec;
-    // Guard: a large overshoot means real narration (not just trailing silence)
-    // would be silently cut off at the mux. Fail loudly instead.
-    const maxTrimSec = Math.max(0, Number(process.env.AUTOTUBE_MAX_AUDIO_TRIM_SEC ?? 2));
-    if (overshootSec > maxTrimSec && process.env.AUTOTUBE_ALLOW_AUDIO_TRIM !== '1') {
-      return {
-        ok: false,
-        error:
-          `A/V timeline mismatch: mux would trim ${overshootSec.toFixed(2)}s of audio `
-          + `(audio ${audioDurationSec.toFixed(2)}s vs video ${videoDurationSec.toFixed(2)}s, allowed ${maxTrimSec}s). `
-          + 'Narration would be cut off. Set AUTOTUBE_ALLOW_AUDIO_TRIM=1 to override.',
-      };
-    }
-    const trimmedAudio = join(workDir, 'narration-trimmed.wav');
-    if (trimAudioToDuration(audioFile, trimmedAudio, videoDurationSec)) {
-      audioForMux = trimmedAudio;
-      audioTrimmedSec = overshootSec;
-      console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s (no video freeze-pad)`);
+    const paddedVideo = join(workDir, 'merged-video-padded.mp4');
+    // Prefer freeze-pad (≤12s) so narration is kept — segment encode drift on
+    // healthcare/espeak runs was failing the trim gate (~2.5–5s short).
+    if (overshootSec <= 12 && padVideoToDuration(mergedVideo, paddedVideo, audioDurationSec)) {
+      videoForMux = paddedVideo;
+      tpadSec = overshootSec;
+      videoDurationSec = probeMediaDuration(paddedVideo) || audioDurationSec;
+      muxDurationSec = audioDurationSec;
+      console.log(
+        `  [ffmpeg] padded video ${rawVideoSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s `
+        + `(tpad ${overshootSec.toFixed(1)}s, keep full narration)`,
+      );
+    } else {
+      // Guard: a large overshoot means real narration would be cut off.
+      const maxTrimSec = Math.max(0, Number(process.env.AUTOTUBE_MAX_AUDIO_TRIM_SEC ?? 2));
+      if (overshootSec > maxTrimSec && process.env.AUTOTUBE_ALLOW_AUDIO_TRIM !== '1') {
+        return {
+          ok: false,
+          error:
+            `A/V timeline mismatch: mux would trim ${overshootSec.toFixed(2)}s of audio `
+            + `(audio ${audioDurationSec.toFixed(2)}s vs video ${rawVideoSec.toFixed(2)}s, allowed ${maxTrimSec}s). `
+            + 'Narration would be cut off. Set AUTOTUBE_ALLOW_AUDIO_TRIM=1 to override.',
+        };
+      }
+      const trimmedAudio = join(workDir, 'narration-trimmed.wav');
+      if (trimAudioToDuration(audioFile, trimmedAudio, rawVideoSec)) {
+        audioForMux = trimmedAudio;
+        audioTrimmedSec = overshootSec;
+        muxDurationSec = rawVideoSec;
+        console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${rawVideoSec.toFixed(1)}s (video pad failed)`);
+      }
     }
   }
 
   if (audioForMux && existsSync(audioForMux)) {
-    muxVideoWithAudio(mergedVideo, audioForMux, outputPath, muxDurationSec, {
+    muxVideoWithAudio(videoForMux, audioForMux, outputPath, muxDurationSec, {
       style: project.style || project.exportSettings?.style,
       backgroundMusic: project.exportSettings?.backgroundMusic !== false,
       musicPreset: project.exportSettings?.musicPreset,
       narrationTimings: options.narrationTimings || [],
     });
   } else {
-    spawnSync('ffmpeg', ['-y', '-i', mergedVideo, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    spawnSync('ffmpeg', ['-y', '-i', videoForMux, '-c', 'copy', outputPath], { encoding: 'utf8' });
   }
 
   if (existsSync(outputPath) && (process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === '1')) {
@@ -1002,7 +1040,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     audioTrimmedSec: Math.round(audioTrimmedSec * 100) / 100,
     introHoldSec,
     outroHoldSec,
-    tpadSec: 0,
+    tpadSec: Math.round(tpadSec * 100) / 100,
     muxDurationSec,
     perSegment,
     cutIntervalSec: options.cutIntervalSec ?? assetCutIntervalSec(project),
@@ -1011,7 +1049,8 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   const manifestPath = join(workDir, 'render-manifest.json');
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(
-    `  [ffmpeg] manifest: ${totalClipCount} clips (${totalPlaceholderClips} placeholders, ${placeholderPct}%), video ${videoDurationSec.toFixed(1)}s, tpad 0s`,
+    `  [ffmpeg] manifest: ${totalClipCount} clips (${totalPlaceholderClips} placeholders, ${placeholderPct}%), `
+    + `video ${videoDurationSec.toFixed(1)}s, tpad ${tpadSec.toFixed(1)}s`,
   );
 
   return {

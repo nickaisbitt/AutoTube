@@ -21,6 +21,7 @@ import {
   isAirlineTopic,
   isBankScamTopic,
   isHealthcareCyberTopic,
+  isHealthcareTopic,
   isHeistTopic,
   isHousingTopic,
   isInsuranceFraudTopic,
@@ -241,6 +242,11 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   }
   if (isHealthcareCyberTopic(topicOnly)) {
     return clampWords('PATIENT RECORDS EXPOSED');
+  }
+  // General AI/medicine healthcare (not cyber): stakes overlay without conspiracy
+  // "… EXPOSED" clickbait that tanks healthcare-web1/web2 hooks.
+  if (isHealthcareTopic(topicOnly)) {
+    return clampWords('AI BEATS YOUR DOCTOR');
   }
   if (
     /port|strike|container|shipping|supply\s*chain|cargo|dock|freight|maritime/i.test(t)
@@ -627,9 +633,10 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     && !hookOverlayViolation(fixState.hookOverlay, { topic, spokenHook: fallbackHookLine || '' })
     ? fixState.hookOverlay
     : undefined;
-  // Housing: karaoke OFF by default — long STT burns over news chyrons tank
-  // captionReadability (web15). Other topics keep karaoke unless fix-state says no.
+  // Housing + healthcare: karaoke OFF by default — long STT burns over news
+  // chyrons / clinical footage tank captionReadability (housing-web15, healthcare-web2).
   const housingTopic = isHousingTopic(topic);
+  const healthcareTopic = isHealthcareTopic(topic);
   project.exportSettings = {
     ...(project.exportSettings || {}),
     quality: 'high',
@@ -637,7 +644,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     musicPreset: 'neutral',
     resolution: '1080p',
     youtubeMode: true,
-    karaokeCaptions: housingTopic ? false : fixState.karaokeCaptions !== false,
+    karaokeCaptions: (housingTopic || healthcareTopic) ? false : fixState.karaokeCaptions !== false,
     hookOverlay: project.exportSettings?.hookOverlay ?? fixStateOverlay,
     hookLine: fallbackHookLine,
   };

@@ -4,8 +4,13 @@
  * When project.visualBeatSheet is present, prefer assets that match the
  * active beat for each time window (narration-aligned semantic placement).
  */
-import { scoreAssetRelevance, isOffBrandVisual, isGenericStockJunk } from './harvest-quality.mjs';
-import { isAirlineTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
+import {
+  scoreAssetRelevance,
+  isOffBrandVisual,
+  isGenericStockJunk,
+  hasHealthcareEvidence,
+} from './harvest-quality.mjs';
+import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
 import { stillQualityTimelinePenalty } from './sanitize-media-quality.mjs';
 
@@ -152,13 +157,23 @@ export function isPassiveDeskIntroVisual(asset) {
   return PASSIVE_DESK_INTRO_RE.test(assetBlob(asset)) && !hasReadableFaceVisual(asset);
 }
 
-function isRejectedIntroLeadVisual(asset, { airline = false, housing = false } = {}) {
+function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, healthcare = false } = {}) {
   const blob = assetBlob(asset);
   if (/\b(runway|tarmac|fence|sky|clouds?|aerial|from above|distant plane|distant aircraft|plane in (the )?sky|aircraft in (the )?sky|back of head|from behind|rear view|looking through (a )?window|looking out (the )?window|airplane window|plane window|cabin window)\b/.test(blob)) {
     return true;
   }
   // Housing hooks must not open on lake/mountain/Archive landscape stock.
   if (housing && isLandscapeOnlyIntroVisual(asset)) return true;
+  // Healthcare AI hooks must not open on course title cards / Giphy / protest pads.
+  if (
+    healthcare
+    && (
+      /giphy\.com|media\d*\.giphy\.com/i.test(blob)
+      || /\b(coursera|stanford\s+online|course\s+trailer|title\s+card|capitol|protest(?:ers?|ing)?|political\s+rally)\b/i.test(blob)
+    )
+  ) {
+    return true;
+  }
   // Passive paperwork / hands-on-desk never leads the hook on any topic;
   // scarcity fallbacks (relaxed tier / coverage) still admit it when the
   // pool holds nothing else, so thin intros never render as a gap.
@@ -264,17 +279,23 @@ export function isHousingTalkingHeadMotion(asset) {
   return HOUSING_TOPICAL_VISUAL_RE.test(evidence) || HOUSING_LIVED_IN_RE.test(evidence);
 }
 
+const HEALTHCARE_TOPICAL_VISUAL_RE =
+  /\b(doctor|physician|clinician|nurse|patient|hospital|clinic|mri|radiology|diagnosis|surgery|surgical|medical|healthcare|lab\s*coat|stethoscope)\b/;
+
 /**
- * First-3s priority for airline/housing hooks: a readable human face on a
+ * First-3s priority for airline/housing/healthcare hooks: a readable human face on a
  * topical frame (2) beats any readable face or housing apartment motion (1)
  * beats other lead visuals (0). Landscape-only housing stock is -1.
+ * Healthcare title-card / Giphy openers are -1.
  */
-export function introFaceTier(asset, { airline = false, housing = false } = {}) {
+export function introFaceTier(asset, { airline = false, housing = false, healthcare = false } = {}) {
   if (housing && isLandscapeOnlyIntroVisual(asset)) return -1;
+  if (healthcare && isRejectedIntroLeadVisual(asset, { healthcare: true })) return -1;
   if (hasReadableFaceVisual(asset)) {
     const blob = assetBlob(asset);
     const topical = (airline && AIRLINE_TOPICAL_VISUAL_RE.test(blob))
-      || (housing && HOUSING_TOPICAL_VISUAL_RE.test(blob));
+      || (housing && HOUSING_TOPICAL_VISUAL_RE.test(blob))
+      || (healthcare && (HEALTHCARE_TOPICAL_VISUAL_RE.test(blob) || hasHealthcareEvidence(asset)));
     return topical ? 2 : 1;
   }
   // Housing: lived-in apartment motion without a strict face tag still beats
@@ -282,6 +303,11 @@ export function introFaceTier(asset, { airline = false, housing = false } = {}) 
   if (housing && isHousingApartmentMotion(asset)) return 1;
   // Housing webinars/workshops are human openers even without face keywords.
   if (housing && isHousingTalkingHeadMotion(asset)) return 1;
+  // Healthcare: clinical evidence motion (MRI/doctor/hospital) without a strict
+  // face tag still beats Coursera/Giphy title cards for the opener.
+  if (healthcare && hasHealthcareEvidence(asset) && (asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) {
+    return 1;
+  }
   return 0;
 }
 
@@ -295,9 +321,9 @@ function isAirlineIntroLeadVisual(asset) {
   return hasCockpit || hasCabin || hasPassengerFace || isBrightCabinInterior(asset);
 }
 
-function isIntroLeadVisual(asset, { airline = false, cameraStory = false, housing = false } = {}) {
+function isIntroLeadVisual(asset, { airline = false, cameraStory = false, housing = false, healthcare = false } = {}) {
   if (airline) return isAirlineIntroLeadVisual(asset);
-  if (isRejectedIntroLeadVisual(asset, { housing })) return false;
+  if (isRejectedIntroLeadVisual(asset, { housing, healthcare })) return false;
   // A surveillance frame is the subject on camera stories, not dead air.
   if (cameraStory && isSurveillanceVisual(asset)) return true;
   const blob = assetBlob(asset);
@@ -305,6 +331,11 @@ function isIntroLeadVisual(asset, { airline = false, cameraStory = false, housin
     return hasReadableFaceVisual(asset)
       || isHousingApartmentMotion(asset)
       || /\b(face|faces|person|people|worried|shocked|portrait|close.?up|couple|family|tenant)\b/.test(blob);
+  }
+  if (healthcare) {
+    return hasReadableFaceVisual(asset)
+      || hasHealthcareEvidence(asset)
+      || HEALTHCARE_TOPICAL_VISUAL_RE.test(blob);
   }
   return /\b(face|faces|person|people|worried|shocked|portrait|close.?up|passenger|pilot|attendant|crew|flight attendant|cabin crew|cockpit|flight deck)\b/.test(blob)
     || isBrightCabinInterior(asset);
@@ -515,16 +546,22 @@ export function buildEditTimeline(project, options = {}) {
   }
   const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
   const topicIsCameraStory = CAMERA_STORY_RE.test(project.topic || '');
+  const topicIsHealthcare = !coldEval && isHealthcareTopic(project.topic || '');
   const introLeadOptions = {
     airline: topicIsAirline,
     cameraStory: topicIsCameraStory,
     housing: topicIsHousing,
+    healthcare: topicIsHealthcare,
   };
   // Hooks open on a readable face when one exists, on any topic — detected
   // independently of cold-eval so the rule holds in every mode. Camera
   // stories are the one exception: the surveillance frame is the intended
   // lead subject there, so it competes with faces on score alone.
-  const faceTierOptions = { airline: topicIsAirline, housing: isHousingTopic(project.topic || '') };
+  const faceTierOptions = {
+    airline: topicIsAirline,
+    housing: topicIsHousing,
+    healthcare: topicIsHealthcare,
+  };
   const faceFirstIntroTopic = !topicIsCameraStory;
   const beatSheet = project.visualBeatSheet;
   const beatsBySeg = new Map();
@@ -635,7 +672,11 @@ export function buildEditTimeline(project, options = {}) {
         if (isIntroLeadVisual(a, introLeadOptions)) {
           reusePenalty += 6;
         }
-        if (isRejectedIntroLeadVisual(a, { airline: topicIsAirline, housing: topicIsHousing })) {
+        if (isRejectedIntroLeadVisual(a, {
+          airline: topicIsAirline,
+          housing: topicIsHousing,
+          healthcare: topicIsHealthcare,
+        })) {
           return -12;
         }
       }
@@ -680,6 +721,8 @@ export function buildEditTimeline(project, options = {}) {
         let score = rel < 0.15 ? -4 : Math.round(rel * 5);
         if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court/i.test(blob)) score += 3;
         if (isIntro && topicIsHousing && isHousingApartmentMotion(a)) score += 4;
+      if (isIntro && topicIsHealthcare && hasHealthcareEvidence(a)) score += 4;
+      if (isIntro && topicIsHealthcare && /giphy\.com|coursera|capitol|protest/i.test(blob)) score -= 12;
         if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance|wheelchair/i.test(blob)) score += 5;
         // Hook needs a face; care/CCTV outranks generic faces on nursing.
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait|eyes/i.test(blob)) {

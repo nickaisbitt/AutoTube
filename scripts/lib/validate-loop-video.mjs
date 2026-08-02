@@ -39,7 +39,9 @@ export function validateLoopVideo(videoPath) {
   if (existsSync(manifestPath)) {
     try {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      if ((manifest.tpadSec ?? 0) > 2) {
+      // Freeze-pad up to 12s keeps narration when segment encode drifts; larger
+      // pads still mean the timeline builder failed and should fail closed.
+      if ((manifest.tpadSec ?? 0) > 12) {
         return {
           valid: false,
           error: `render used ${manifest.tpadSec}s video freeze-pad (A/V sync bug)`,

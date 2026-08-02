@@ -532,6 +532,18 @@ describe('healthcare off-topic B-roll rejects', () => {
     expect(healthcareOffTopicBrollReason('FEMA disaster footage', HOUSING_TOPIC)).toBe('');
     expect(healthcareOffTopicBrollReason('FEMA disaster footage', AIRLINE_TOPIC)).toBe('');
   });
+
+  it('hard-rejects giphy hosts, Coursera title cards, and capitol protest pads', () => {
+    expect(
+      healthcareOffTopicBrollReason('https://media.giphy.com/media/abc/giphy.mp4', HEALTHCARE_TOPIC),
+    ).toMatch(/giphy/);
+    expect(
+      healthcareOffTopicBrollReason('coursera stanford online course trailer title card', HEALTHCARE_TOPIC),
+    ).toMatch(/healthcare off-topic/);
+    expect(
+      healthcareOffTopicBrollReason('utah state capitol protest rally crowd footage', HEALTHCARE_TOPIC),
+    ).toMatch(/healthcare off-topic/);
+  });
 });
 
 describe('healthcare keyless soft-pass-motion (web + Archive)', () => {

@@ -1253,6 +1253,90 @@ describe('spawnSyncFailureReason', () => {
   });
 });
 
+describe('healthcare off-topic conspiracy/FEMA/meme junk', () => {
+  it('isJunkStockClip rejects Huxley/Orwell/FEMA/insect/peas/painting/literary-fest', () => {
+    const cases = [
+      { alt: 'aldous huxley orwell conspiracy EXPOSED title', query: 'healthcare ai' },
+      { alt: 'FEMA fraud and scam awareness', query: 'healthcare' },
+      { alt: 'Hurricane Laura FEMA assistance PSA', query: 'AI doctor' },
+      { alt: 'Tornado anniversary coverage', query: 'diagnose' },
+      { alt: 'cockroach insect close up', query: 'hospital' },
+      { alt: 'green peas meme viral', query: 'healthcare' },
+      { alt: 'classical oil painting renaissance portrait', query: 'medicine' },
+      { alt: 'brattleboro literary festival friendship', query: 'hospital ward' },
+      {
+        alt: 'c 19 propaganda war ade sleepy joe',
+        query: 'covid vaccine antibody dependent enhancement',
+      },
+    ];
+    for (const clip of cases) {
+      expect(isJunkStockClip(clip, HEALTHCARE_AI_TOPIC)).toBe(true);
+    }
+    expect(
+      isJunkStockClip(
+        {
+          alt: 'doctor reviewing AI diagnosis with patient hospital',
+          query: 'clinical AI hospital',
+        },
+        HEALTHCARE_AI_TOPIC,
+      ),
+    ).toBe(false);
+    expect(
+      isJunkStockClip(
+        { alt: 'clinical laboratory microscope blood analysis', query: 'medical lab' },
+        HEALTHCARE_AI_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
+  it('stripJunkStillAssets drops healthcare off-topic stills but keeps clinical faces', () => {
+    const project = {
+      topic: HEALTHCARE_AI_TOPIC,
+      media: [
+        {
+          id: 'orwell',
+          type: 'image',
+          url: 'https://cdn.example.com/orwell-exposed.jpg',
+          alt: 'george orwell 1984 dystopian truth exposed',
+          query: 'healthcare exposed',
+        },
+        {
+          id: 'fema',
+          type: 'image',
+          url: 'https://cdn.example.com/fema-psa.jpg',
+          alt: 'FEMA public outreach storm recovery',
+          query: 'AI doctor',
+        },
+        {
+          id: 'roach',
+          type: 'image',
+          url: 'https://cdn.example.com/cockroach.jpg',
+          alt: 'cockroach insect close up crawling',
+          query: 'hospital',
+        },
+        {
+          id: 'fest',
+          type: 'image',
+          url: 'https://cdn.example.com/literary-fest.jpg',
+          alt: 'literary festival authors on stage',
+          query: 'hospital ward',
+        },
+        {
+          id: 'doctor',
+          type: 'image',
+          url: 'https://cdn.example.com/doctor-ai.jpg',
+          alt: 'doctor reviewing AI diagnosis patient hospital',
+          query: 'clinical AI',
+        },
+      ],
+    };
+    const report = {};
+    stripJunkStillAssets(project, report);
+    expect(project.media.map(({ id }) => id)).toEqual(['doctor']);
+    expect(report.junkStillDropped.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
 describe('housing off-topic crash/council/fire junk', () => {
   it('isJunkStockClip rejects car-crash, fire, council, quake, chart, CAN TV, house-on-rock', () => {
     const cases = [

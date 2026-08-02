@@ -10,6 +10,7 @@ import {
   hasHealthcareEvidence,
   countHealthcareStrongVideos,
   healthcareSoftPassMotionFailureReason,
+  healthcareOffTopicBrollReason,
   housingOffTopicBrollReason,
   isGenericStockJunk,
   isWebNativeMotionSource,
@@ -487,6 +488,45 @@ describe('housing off-topic B-roll rejects', () => {
       housingOffTopicBrollReason('housing market crash documentary apartment tenants', HOUSING_TOPIC),
     ).toBe('');
     expect(housingOffTopicBrollReason('car crash dashcam footage', AIRLINE_TOPIC)).toBe('');
+  });
+});
+
+describe('healthcare off-topic B-roll rejects', () => {
+  it('hard-rejects Huxley/Orwell/FEMA/insect/peas/painting/literary-fest junk', () => {
+    const cases = [
+      'aldous huxley brave new world conspiracy documentary EXPOSED',
+      'george orwell 1984 dystopian truth exposed title card',
+      'FEMA fraud and scam awareness',
+      'Hurricane Laura FEMA assistance PSA',
+      'Tornado anniversary coverage storm recovery',
+      'Community recovery after disaster',
+      'cockroach insect close up crawling',
+      'green peas meme viral clip',
+      'classical oil painting renaissance portrait museum',
+      'brattleboro literary festival two sides of friendship',
+      'c 19 propaganda war ade sleepy joe antibody dependent enhancement',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('keeps clinical/AI/hospital/doctor/patient/lab motion', () => {
+    const keep = [
+      'doctor reviewing patient chart hospital corridor',
+      'AI radiology diagnosis laptop clinician',
+      'nurse workstation hospital ward patients',
+      'clinical laboratory microscope blood analysis',
+      'mri scan medical imaging hospital',
+      'preemie ward neonatal intensive care',
+    ];
+    for (const alt of keep) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
+    }
+    expect(healthcareOffTopicBrollReason('FEMA disaster footage', HOUSING_TOPIC)).toBe('');
+    expect(healthcareOffTopicBrollReason('FEMA disaster footage', AIRLINE_TOPIC)).toBe('');
   });
 });
 

@@ -119,6 +119,24 @@ export function housingOffTopicBrollReason(haystack, contextText = '') {
   return '';
 }
 
+/**
+ * Off-topic conspiracy / disaster / meme / art B-roll that tanks healthcare watch
+ * scores (healthcare-web1 raw 5.2). Hard-reject Huxley/Orwell/EXPOSED clickbait,
+ * FEMA storm PSAs, insects, peas memes, classical paintings, and literary festivals
+ * — keep clinical/AI/hospital/doctor/patient/lab motion.
+ */
+export const HEALTHCARE_OFF_TOPIC_BROLL_RE =
+  /\b(?:aldous\s+huxley|huxley|george\s+orwell|orwell|brave\s+new\s+world|1984|dystopian?|conspiracy(?:\s*(?:theory|theories|bait|doc(?:umentary)?))?|deep\s+state|new\s+world\s+order|(?:truth|secrets?|agenda|elites?|government)\s+exposed|healthcare\s+exposed|fema|hurricane(?:\s+\w+)?\s+(?:fema|assistance|psa|relief|recovery)|tornado(?:\s+(?:anniversary|coverage|warning|damage|recovery))?|storm\s+(?:recovery|restoration|warning|damage|psa)|community\s+recovery\s+after\s+disaster|disaster\s+(?:recovery|relief|psa|outreach|footage)|cockroach(?:es)?|roach(?:es)?|insects?|peas?\s+meme|green\s+peas?|classical\s+paintings?|oil\s+paintings?|renaissance\s+(?:art|painting|portrait)|baroque\s+painting|museum\s+painting|rembrandt|van\s+gogh|monet|literary\s+festival|book\s+festival|writers?\s+festival|brattleboro|(?:covid|c\s*19|coronavirus)\s+propaganda|propaganda\s+war|sleepy\s+joe|antibody\s+dependent\s+enhancement)\b|\bexposed\s*[:\-]|\bmeme\b[^.]{0,40}\bpeas?\b/i;
+
+/** Reason string when healthcare harvest media is conspiracy/disaster/meme junk. */
+export function healthcareOffTopicBrollReason(haystack, contextText = '') {
+  if (!isHealthcareTopic(contextText)) return '';
+  if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(String(haystack || ''))) {
+    return 'healthcare off-topic conspiracy/disaster/meme B-roll';
+  }
+  return '';
+}
+
 /** Street-barber / random lifestyle clips that read as off-topic on investigation topics. */
 export const RANDOM_LIFESTYLE_FILLER_RE =
   /\b(street barber|barber shop|haircut street|musician busking|concert crowd phone|stadium crowd|sports crowd|cheering fans|food truck|coffee shop latte|band playing|orchestra playing|jazz band|live band|musicians on stage)\b/i;
@@ -464,6 +482,8 @@ export function genericStockJunkReason(haystack, contextText = '') {
   }
   const housingOffTopic = housingOffTopicBrollReason(h, ctx);
   if (housingOffTopic) return housingOffTopic;
+  const healthcareOffTopic = healthcareOffTopicBrollReason(h, ctx);
+  if (healthcareOffTopic) return healthcareOffTopic;
   if (
     RANDOM_LIFESTYLE_FILLER_RE.test(h)
     && !/\b(concert|ticket|scalp|music festival|barber)\b/i.test(ctx)
@@ -1569,6 +1589,10 @@ export function airlineSoftPassMotionFailureReason(project, stats = {}) {
 
 /** Hard-reject pads that must not soft-pass a healthcare harvest. */
 const HEALTHCARE_HARD_REJECT_PATTERNS = [
+  {
+    reason: 'healthcare-off-topic-broll',
+    pattern: HEALTHCARE_OFF_TOPIC_BROLL_RE,
+  },
   {
     reason: 'bank-otp-scam',
     pattern:

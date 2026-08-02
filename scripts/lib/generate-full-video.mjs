@@ -44,6 +44,7 @@ import {
   evaluateHarvestVolume,
   evaluateHarvestVolumeWithSoftPass,
   housingOffTopicBrollReason,
+  healthcareOffTopicBrollReason,
   isOffBrandVisual,
   isGenericStockJunk,
   isVolumePaddingAsset,
@@ -997,7 +998,10 @@ function stripJunkStillAssets(project, report) {
       || (isAirlineTopic(topicBlob) && AIRLINE_OFF_TOPIC_RE.test(blob))
       // Housing: crash/fire/council/quake/chart/CAN-TV/house-on-rock stills
       // Ken-Burn into the timeline and tank visualVariety (web7/web14).
-      || Boolean(housingOffTopicBrollReason(blob, topicBlob));
+      || Boolean(housingOffTopicBrollReason(blob, topicBlob))
+      // Healthcare: Huxley/Orwell/FEMA/insect/meme/painting/literary-fest stills
+      // Ken-Burn into the timeline and tank visualVariety (healthcare-web1).
+      || Boolean(healthcareOffTopicBrollReason(blob, topicBlob));
     if (junk) {
       report.junkStillDropped = report.junkStillDropped || [];
       report.junkStillDropped.push({ url: asset.url, reason: 'off-topic/web still junk' });
@@ -1757,6 +1761,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   const topicText = String(topicBlob || '').toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
   if (housingOffTopicBrollReason(blob, topicBlob)) return true;
+  if (healthcareOffTopicBrollReason(blob, topicBlob)) return true;
   if (isGenericStockJunk(blob, topicBlob)) return true;
   const covidTopic = /\b(covid|coronavirus|pandemic|mask mandate|face masks?|surgical masks?|n95)\b/.test(topicText);
   if (
@@ -3174,6 +3179,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // Housing off-topic must hard-reject (-20) before genericStockJunk (-4) and
     // before Archive body-filler scores (0–1), or crash/council/fire slips through.
     if (isHousingTopic(topicBlob) && housingOffTopicBrollReason(blob, topicBlob)) return -20;
+    // Healthcare off-topic must hard-reject (-20) before genericStockJunk (-4),
+    // or FEMA/Huxley/insect/meme/painting/literary-fest pads soft-pass (web1).
+    if (isHealthcareTopic(topicBlob) && healthcareOffTopicBrollReason(blob, topicBlob)) return -20;
     if (isGenericStockJunk(blob, topicBlob)) return -4;
     if (
       !isWorkplaceTopic(topicBlob)
@@ -3260,6 +3268,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const isIntro = seg.type === 'intro' || seg === segments[0];
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
+    // Healthcare: hard-reject conspiracy/FEMA/insect/meme/painting pads (-20).
+    if (isHealthcareTopic(topicBlob) && score <= -20) return false;
     // Housing: hard-reject meeting/disaster/chart junk (-20) and landscapes (-8).
     // Non-junk Archive scores 0–1 and fills body after web (host-rank web-first).
     if (isHousingTopic(topicBlob) && score <= -6) return false;

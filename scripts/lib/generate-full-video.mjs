@@ -3212,12 +3212,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
     // Housing: hard-reject meeting/disaster/chart junk (-20) and landscapes (-8).
-    // Non-junk Archive scores 0–1 and fills after web (host-rank web-first).
+    // Non-junk Archive scores 0–1 and fills body after web (host-rank web-first).
     if (isHousingTopic(topicBlob) && score <= -6) return false;
-    // Do NOT require score>=2 on housing intro: paddingQueue often starts with the
-    // intro segment and the while-retry loop was consuming every Archive (score 0–1)
-    // against that gate before body slots ran — web12 injected=1 with 0 Archive
-    // attempts logged. Ranking still prefers face/web; intro only rejects negatives.
+    // Housing intro wants face/lived-in (≥2). Weak Archive is deferred by the
+    // padding loops (not burned via vi++) so body can still use them.
+    if (isIntro && isHousingTopic(topicBlob) && score < 2) return false;
     if (isIntro && score < 0) return false;
     const unreliable = unreliableWebProxyInjectReason(clip, proxyGate);
     if (unreliable) {
@@ -3308,16 +3307,40 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     return true;
   };
 
+  // Weak housing clips (Archive score 0–1) are parked when the current segment is
+  // intro, then reused for body — otherwise intro padding burns the whole Archive
+  // pool via vi++ (web12) or lets muddy Archive win the hook (web13 raw 4.6).
+  /** @type {object[]} */
+  const deferredBodyClips = [];
+  const takeClip = (forIntro) => {
+    while (vi < picks.length) {
+      const clip = picks[vi];
+      vi += 1;
+      if (
+        forIntro
+        && isHousingTopic(topicBlob)
+        && faceScore(clip) < 2
+      ) {
+        deferredBodyClips.push(clip);
+        continue;
+      }
+      return clip;
+    }
+    if (!forIntro && deferredBodyClips.length) return deferredBodyClips.shift();
+    return null;
+  };
+
   // Volume first: round-robin the finite pool across the thinnest segments. Each
   // queue slot retries candidates until one injects, so a failed direct-URL probe
   // cannot silently consume that segment's padding opportunity.
   let motionPaddingInjected = 0;
-  for (let qi = 0; qi < paddingQueue.length && need > 0 && vi < picks.length; qi += 1) {
+  for (let qi = 0; qi < paddingQueue.length && need > 0; qi += 1) {
     const seg = segments.find((item) => item.id === paddingQueue[qi]);
     if (!seg) continue;
-    while (vi < picks.length) {
-      const clip = picks[vi];
-      vi += 1;
+    const forIntro = seg.type === 'intro' || seg === segments[0];
+    while (need > 0) {
+      const clip = takeClip(forIntro);
+      if (!clip) break;
       if (await injectClip(seg, clip, `p${qi}`)) {
         motionPaddingInjected += 1;
         break;
@@ -3337,10 +3360,10 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const want = Math.max(0, perSegTarget - segVideos);
     // Retry candidates until one injects — a cookieless YT/TT skip must not burn
     // the slot when Archive/direct still remain later in `picks`.
-    for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1) {
-      while (vi < picks.length) {
-        const clip = picks[vi];
-        vi += 1;
+    for (let i = 0; i < want && need > 0; i += 1) {
+      while (need > 0) {
+        const clip = takeClip(isIntro);
+        if (!clip) break;
         if (await injectClip(seg, clip, `s${i}`)) break;
       }
     }
@@ -3348,10 +3371,10 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
 
   // Variety drain: keep assigning unused pool URLs until minVideos is met.
   let drainGuard = 0;
-  while (need > 0 && vi < picks.length && drainGuard < picks.length * 2) {
+  while (need > 0 && drainGuard < (picks.length + deferredBodyClips.length) * 2) {
     drainGuard += 1;
-    const clip = picks[vi];
-    vi += 1;
+    const clip = takeClip(false);
+    if (!clip) break;
     if (!clip?.url || used.has(motionUrlKey(clip.url))) continue;
     const seg = segments[drainGuard % segments.length];
     await injectClip(seg, clip, `d${drainGuard}`);

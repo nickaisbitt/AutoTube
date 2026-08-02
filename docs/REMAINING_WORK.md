@@ -85,7 +85,8 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Housing-web9 (web-first, no Archive) | Exit **0** · 69s · tiktok=9 · archive=0 | Exit **1** · raw **5.4** | TikTok talking-heads/watermarks; tip now skips cookieless TikTok |
 | Housing-web10 (skip TT; Archive −6 bug) | Exit **0** · 78s · injected=1 · soft-pass-aggregate | Exit **1** · raw **5.4** | face-query Archive scored −6 → still pads |
 | Housing-web11 (Archive landscape −8) | Exit **1** | n/a | enriched Archive descriptions hit landscape/newsreel −8; tip scores Archive before that demote + per-seg inject retries |
-| Housing-web12 (intro score≥2 burn) | Exit **1** | n/a | paddingQueue intro burned Archive (score 0–1) before body; tip drops housing intro score≥2 gate |
+| Housing-web12 (intro score≥2 burn) | Exit **1** | n/a | paddingQueue intro burned Archive (score 0–1) before body |
+| Housing-web13 (Archive fills, muddy hook) | Exit **0** · 90s · injected=27 · archive=13 | Exit **1** · raw **4.6** | volume fixed; intro got landscape Archive — tip defers weak clips past intro |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
 Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay). Remaining pack: housing + healthcare.
@@ -110,7 +111,7 @@ web-harvest proof. Open bars are pipeline and gate quality, not key absence:
 | **Web-motion gate recognition** | **CLOSED** (airline) | airline-web8 raw **7.8** / upload-ready YES via Archive+web inject |
 | **CLI top-up diversity** | **PARTIAL** | Airline inject healthy; `HARVEST_VOLUME_FAIL` still open on healthcare/housing-v2 |
 | **Upload-ready YES (≥7)** | **PARTIAL** | Airline **YES**; housing + healthcare still open |
-| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8**; housing best raw **5.8** (web5) / latest web7 **5.6** |
+| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8**; housing best raw **5.8** (web5); latest web13 **4.6** (volume ok, muddy intro) |
 | **3-topic proof pack** | **OPEN** | Need housing + healthcare ≥7 under `test-recordings/dod-proof/` |
 | **9.3 stretch** | **OPEN** (after pack) | `npm run loop:video -- --until-score 9.3` on cold topics |
 

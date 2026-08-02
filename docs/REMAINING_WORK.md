@@ -120,7 +120,7 @@ web-harvest proof. Open bars are pipeline and gate quality, not key absence:
 | Bar | Status | Unblock |
 |-----|--------|---------|
 | **Web-motion gate recognition** | **CLOSED** (airline) | airline-web8 raw **7.8** / upload-ready YES via Archive+web inject |
-| **CLI top-up diversity** | **PARTIAL** | Airline inject healthy; `HARVEST_VOLUME_FAIL` still open on healthcare/housing-v2 |
+| **CLI top-up diversity** | **PARTIAL** | Airline inject healthy; tip has healthcare soft-pass (`e377f25`) but **unproven** until A5 generate; housing-v2 volume historically failed |
 | **Upload-ready YES (≥7)** | **PARTIAL** | Airline **YES**; housing + healthcare still open |
 | **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8**; housing best raw **5.8** (web5); latest web14 **4.6** (volume ok; landscape/crash/council variety tanks) |
 | **3-topic proof pack** | **OPEN** | Need housing + healthcare ≥7 under `test-recordings/dod-proof/` |

@@ -80,6 +80,8 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Housing-web2 (assemble auth) | Exit **0** · 74s · youtube-heavy | Exit **1** · raw **4.8** | browser YouTube kept; Archive stripped |
 | Housing-web5 (Archive slice + no YT) | Exit **0** · 71.7s · archive=11 · fallbacks=0 | Exit **1** · raw **5.8** | hook typo/wrong stakes; variety still open |
 | Housing-web6 (crash hook + 24 inject) | Exit **0** · 82s · archive=14 · youtube=0 · fallbacks=0 | Exit **1** · raw **5.4** | hook honest; muddy Archive B-roll / no face hook |
+| Housing-web7 (apt Archive prefer) | Exit **0** · 69s · archive=10 · youtube=0 | Exit **1** · raw **5.6** | hook PASS; house-graphic×6 + council/quake Archive still tank variety |
+| Housing-web8 (reject all Archive) | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` — web proxies thin; Archive body-filler restored in tip |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
 Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay). Remaining pack: housing + healthcare.
@@ -104,7 +106,7 @@ web-harvest proof. Open bars are pipeline and gate quality, not key absence:
 | **Web-motion gate recognition** | **CLOSED** (airline) | airline-web8 raw **7.8** / upload-ready YES via Archive+web inject |
 | **CLI top-up diversity** | **PARTIAL** | Airline inject healthy; `HARVEST_VOLUME_FAIL` still open on healthcare/housing-v2 |
 | **Upload-ready YES (≥7)** | **PARTIAL** | Airline **YES**; housing + healthcare still open |
-| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8**; housing-web **3.8** |
+| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8**; housing best raw **5.8** (web5) / latest web7 **5.6** |
 | **3-topic proof pack** | **OPEN** | Need housing + healthcare ≥7 under `test-recordings/dod-proof/` |
 | **9.3 stretch** | **OPEN** (after pack) | `npm run loop:video -- --until-score 9.3` on cold topics |
 

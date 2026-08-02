@@ -987,7 +987,15 @@ function stripJunkStillAssets(project, report) {
       isJunkStockClip(asset, topicBlob)
       || isOffBrandVisual(blob, topicBlob)
       || isGenericStockJunk(blob, topicBlob)
-      || (isAirlineTopic(topicBlob) && AIRLINE_OFF_TOPIC_RE.test(blob));
+      || (isAirlineTopic(topicBlob) && AIRLINE_OFF_TOPIC_RE.test(blob))
+      // Housing crash stories: drop 3D “house on a rock” / lender-blog illustrations
+      // that get Ken-Burned into the timeline 5–6× and tank visualVariety.
+      || (
+        isHousingTopic(topicBlob)
+        && /neohomeloans|house\s+on\s+(?:a\s+)?rock|floating\s+(?:rock|island)|3d\s+house|housing\s+market\s+crash\.jpg|will-the-housing-market-crash/i.test(
+          blob,
+        )
+      );
     if (junk) {
       report.junkStillDropped = report.junkStillDropped || [];
       report.junkStillDropped.push({ url: asset.url, reason: 'off-topic/web still junk' });
@@ -1904,6 +1912,8 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'tenant packing boxes apartment',
       'shocked face close up phone',
       'couple arguing bills kitchen table',
+      'modern apartment living room daylight people',
+      'young couple stressed rent apartment',
     ];
     const topical = [
       'apartment building exterior city',
@@ -1914,7 +1924,8 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'court documents paperwork close up',
       'worried tenant reading letter kitchen',
     ];
-    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
+    // Always face-first on housing — exteriors/Archive meetings starve variety.
+    const base = [...faces, ...topical];
     return withFillers(base);
   }
   if (insurance) {
@@ -3192,9 +3203,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const isIntro = seg.type === 'intro' || seg === segments[0];
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
-    // Housing: reject meeting/disaster junk (-20) and all Archive demotions (-2/-6).
-    if (isHousingTopic(topicBlob) && score < 0) return false;
-    // Housing intro needs a face / lived-in apartment signal — not weak exteriors.
+    // Housing: hard-reject meeting/disaster junk (-20) and opaque Archive (-6).
+    // Strong apartment-tagged Archive stays at -2 so it can fill body slots after
+    // web candidates (host-rank still prefers Bing/Vimeo ahead of Archive).
+    if (isHousingTopic(topicBlob) && score <= -6) return false;
+    // Housing intro needs a face / lived-in apartment signal — not Archive filler.
     if (isIntro && isHousingTopic(topicBlob) && score < 2) return false;
     if (isIntro && score < 0) return false;
     const unreliable = unreliableWebProxyInjectReason(clip, proxyGate);

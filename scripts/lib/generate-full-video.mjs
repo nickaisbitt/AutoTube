@@ -3340,7 +3340,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     }
     if (isHealthcareTopic(topicBlob)) {
       // Title-card / lecture / protest pads (off-topic also -20 when regex hits).
-      if (/\b(title\s+card|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|capitol|protest|maternity|kapparot|kapores)\b/i.test(blob)) {
+      if (/\b(title\s+card|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|capitol|protest|maternity|kapparot|kapores|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri)\b/i.test(blob)) {
         return -8;
       }
       // Pure talking-head / news studio without clinician+screen or OR motion —
@@ -3370,7 +3370,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         return 9;
       }
-      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg)\b/i.test(blob)) return 9;
+      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+surgical)\b/i.test(blob)) return 10;
       if (
         /\b(ultrasound\s+(?:demo|demonstration|exam|probe)|sonograph)\b/i.test(blob)
         && /\b(doctor|clinician|technician|sonographer|nurse)\b/i.test(blob)

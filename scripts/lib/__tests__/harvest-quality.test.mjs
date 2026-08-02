@@ -602,6 +602,9 @@ describe('healthcare off-topic B-roll rejects', () => {
       'covid propaganda psa misinfo leftover clip',
       'coursera lecture slides online course mooc',
       'powerpoint lecture slides medical ethics title card',
+      'def con 25 biohacking village presentation slides',
+      'madness and medicine archival reel',
+      'dr samadi prostate cancer sex after prostate surgery',
     ];
     for (const alt of cases) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);

@@ -419,15 +419,21 @@ export function promoteIntroFaceVideo(project) {
     // longevity webinars that won healthcare-web3's hook despite clinical MRI in pool.
     if (healthcare) {
       const scoreBlob = evidence || blob;
-      if (/\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|maternity|kapparot|kapores|lecture\s+slides?|coursera|giphy\.com|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?)\b/i.test(scoreBlob)) {
+      if (/\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|maternity|kapparot|kapores|lecture\s+slides?|coursera|giphy\.com|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri|mri\s+scan\s+and\s+how)\b/i.test(scoreBlob)) {
         return -20;
       }
       const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && scoreBlob.includes(w)).length;
+      // Surgical robot / OR demo beats talking-head MRI explainers for the hook
+      // (healthcare-web8 raw 6.2 — robot shots were strong but lost the opener).
+      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|cnbc.*surgical\s*robot)\b/i.test(scoreBlob)) {
+        return 14 + Math.min(2, topicHits);
+      }
       if (
-        /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|ultrasound\s+(?:demo|demonstration))\b/i.test(scoreBlob)
+        /\b(ai\s+radiolog|radiolog\w*\s+ai|ultrasound\s+(?:demo|demonstration))\b/i.test(scoreBlob)
         || (
           /\b(doctor|clinician|radiologist|physician)\b/i.test(scoreBlob)
           && /\b(monitor|screen|mri|radiolog|scan)\b/i.test(scoreBlob)
+          && !/\b(what\s+is\s+an\s+mri|how\s+mri\s+works)\b/i.test(scoreBlob)
         )
       ) {
         return 12 + Math.min(2, topicHits);

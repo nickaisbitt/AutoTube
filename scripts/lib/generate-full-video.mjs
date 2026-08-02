@@ -3160,11 +3160,20 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   report.pixabayFetched = liveClips.filter((c) => /Pixabay/i.test(c.source || '')).length;
   if (options.faceSeek) report.faceSeekQueries = queries.slice(0, 6);
 
+  // Keyless healthcare: product path is raw web harvest. Mixkit/STOCK_VIDEO_POOL
+  // direct-MP4s win host-rank, fill inject slots, then get relevance-stripped
+  // (healthcare-web4/web5 soft-pass-thin 1–2/6, protected-motion=0). Keep live
+  // Bing/DDG/Vimeo + Archive only when no stock API keys.
+  const healthcareKeyless = isHealthcareTopic(topicBlob) && !hasStockKeysEarly;
   let pool = [
     ...liveClips,
     ...(housingTopic && curatedPacksEnabled() ? STOCK_HOUSING_VIDEOS : []),
-    ...(cyberTopic ? MIXKIT_VIDEO_POOL : []),
-    ...(seriousTopic ? topicalStockVideos(topicBlob, STOCK_VIDEO_POOL) : STOCK_VIDEO_POOL.filter((v) => !(v.tags || []).includes('filler'))),
+    ...(cyberTopic && !healthcareKeyless ? MIXKIT_VIDEO_POOL : []),
+    ...(healthcareKeyless
+      ? []
+      : (seriousTopic
+        ? topicalStockVideos(topicBlob, STOCK_VIDEO_POOL)
+        : STOCK_VIDEO_POOL.filter((v) => !(v.tags || []).includes('filler')))),
   ];
   // Dedupe by URL; drop junk tags.
   const seenPool = new Set();
@@ -3456,9 +3465,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const providerMeta = providerEvidenceText(clip.title || '', { query: safeQuery, topicBlob });
     // Archive items already cleared archiveEvidenceVerdict to enter the pool — treat
     // that as run-local motion proof so post-top-up relevance cannot strip them while
-    // keeping YouTube talking-head harvest.
+    // keeping YouTube talking-head harvest. Healthcare clinical web evidence must
+    // also survive even when host-rank lost the liveClips flag (web4/web5 thin).
     const motionRelevancePassed =
-      clip.motionRelevancePassed === true || archiveClip;
+      clip.motionRelevancePassed === true
+      || archiveClip
+      || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip));
     project.media.push({
       id: `stock-video-${seg.id}-${tag}-${n}`,
       segmentId: seg.id,

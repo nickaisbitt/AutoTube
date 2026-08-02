@@ -475,11 +475,12 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
   });
   if (archiveDirect) {
     // Airline training films on Archive are first-class. Housing-crash stories need
-    // modern face/apartment web clips first — opaque Archive newsreels (rank 0) were
-    // starving intro slots of shocked-face / apartment B-roll and capping watch ~5.x.
+    // modern face/apartment *web* clips first — even "apartment"-tagged Archive is
+    // mostly council meetings / ribbon-cuttings / news graphics (rank must stay
+    // behind generic Bing/DDG web = 10, or those muddy clips starve the pool).
     if (isHousingTopic(options.topicBlob || '')) {
       const blob = `${candidate.alt || ''} ${candidate.title || ''} ${candidate.query || ''} ${candidate.source || ''}`;
-      return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 5 : 35;
+      return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 15 : 35;
     }
     return 0;
   }
@@ -3130,6 +3131,20 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
     }
     if (isHousingTopic(topicBlob)) {
+      // Public-meeting / disaster / station-ID junk masquerades as "apartment" Archive.
+      if (
+        /\b(city\s+council|council\s+meeting|agenda|public\s+hearing|ribbon\s+cutting|earthquake|quake|tsunami|can\s*tv|station\s+id|satellite\s+map|apartments?\s+approved|digital\s+globe)\b/i.test(blob)
+      ) {
+        return -20;
+      }
+      if (/\b(landscape|mountain|helicopter|aerial\s+view|wildfire|title\s+card|newsreel)\b/i.test(blob)) {
+        return -8;
+      }
+      // Archive apartment tags are mostly meetings/ribbon-cuttings — demote before
+      // keyword boosts so they cannot win intro slots over web face/apt clips.
+      if (/Archive/i.test(clip.source || '')) {
+        return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? -2 : -6;
+      }
       // Face-forward / lived-in housing beats charts, landscapes, and title cards.
       if (
         /\b(face|faces|worried|shocked|stressed|crying|reaction|couple|family|tenant)\b/i.test(blob)
@@ -3140,14 +3155,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/\b(shocked|worried|stressed)\s+face|face\s+close\s*up|couple\s+(?:arguing|reading)|family\s+apartment/i.test(blob)) {
         return 9;
       }
-      if (/\b(apartment\s+(?:building|interior)|for\s+rent|eviction\s+notice|packing\s+boxes|mortgage|foreclos)/i.test(blob)) {
+      if (/\b(modern\s+apartment|apartment\s+interior|for\s+rent|eviction\s+notice|packing\s+boxes|mortgage|foreclos)\b/i.test(blob)) {
         return 8;
       }
-      if (/Archive/i.test(clip.source || '') && !HOUSING_ARCHIVE_STRONG_RE.test(blob)) {
-        return -6;
-      }
-      if (/\b(landscape|mountain|helicopter|aerial\s+view|wildfire|title\s+card|newsreel)\b/i.test(blob)) {
-        return -8;
+      // Bare "apartment building" exteriors are weak — keep below face/web preference.
+      if (/\bapartment\s+building\b/i.test(blob)) {
+        return 3;
       }
     }
     if (
@@ -3179,8 +3192,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const isIntro = seg.type === 'intro' || seg === segments[0];
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
-    if (isHousingTopic(topicBlob) && score <= -6) return false;
-    // Housing intro needs a face / lived-in apartment signal — not Archive landscape.
+    // Housing: reject meeting/disaster junk (-20) and all Archive demotions (-2/-6).
+    if (isHousingTopic(topicBlob) && score < 0) return false;
+    // Housing intro needs a face / lived-in apartment signal — not weak exteriors.
     if (isIntro && isHousingTopic(topicBlob) && score < 2) return false;
     if (isIntro && score < 0) return false;
     const unreliable = unreliableWebProxyInjectReason(clip, proxyGate);

@@ -71,6 +71,9 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 |-------|----------|-------|-------|
 | Airline-v2 | Exit **0** · 70.9s · yellowPixels=31761 | Exit **1** · raw **4.4–5.4** · hook PASS on rewatch | web-motion gate ceiling — watcher honest, raw &lt;7 |
 | Airline-v3 (reuse cap) | Exit **0** · 65.9s · yellowPixels=31749 | Exit **1** · raw **2.8–3.6** | thin Archive pool; OCR harden `e3a0642` |
+| Airline-web (Bing/Google/DDG) | Exit **0** · 69.6s · injected=26 | Exit **1** · raw **5.6** | web motion path live; variety/pacing still open |
+| Airline-web4 (rich-pool pacing) | Exit **0** · 73.5s · injected=16 | Exit **1** · raw **4.2** | rich-pool holds ≤1.5s |
+| Housing-web (Bing/Google/DDG) | Exit **0** · 75.0s · injected=13 | Exit **1** · raw **3.8** | archive=0, pure web; variety still weak |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
 Watcher honesty is working: raw &lt;7 → exit 1; thin web harvest → non-zero generate. Floors have **not** been lowered. Scores reflect **web-harvest / Archive-biased CLI gate** failures (motion diversity, segment floors, watcher recognition) — not missing stock keys.

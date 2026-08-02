@@ -85,6 +85,7 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Housing-web9 (web-first, no Archive) | Exit **0** · 69s · tiktok=9 · archive=0 | Exit **1** · raw **5.4** | TikTok talking-heads/watermarks; tip now skips cookieless TikTok |
 | Housing-web10 (skip TT; Archive −6 bug) | Exit **0** · 78s · injected=1 · soft-pass-aggregate | Exit **1** · raw **5.4** | face-query Archive scored −6 → still pads |
 | Housing-web11 (Archive landscape −8) | Exit **1** | n/a | enriched Archive descriptions hit landscape/newsreel −8; tip scores Archive before that demote + per-seg inject retries |
+| Housing-web12 (intro score≥2 burn) | Exit **1** | n/a | paddingQueue intro burned Archive (score 0–1) before body; tip drops housing intro score≥2 gate |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
 Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay). Remaining pack: housing + healthcare.

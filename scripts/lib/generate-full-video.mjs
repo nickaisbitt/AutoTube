@@ -3212,10 +3212,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
     // Housing: hard-reject meeting/disaster/chart junk (-20) and landscapes (-8).
-    // Non-junk Archive scores 0–1 and fills body after web (host-rank web-first).
+    // Non-junk Archive scores 0–1 and fills after web (host-rank web-first).
     if (isHousingTopic(topicBlob) && score <= -6) return false;
-    // Housing intro needs a face / lived-in apartment signal — not Archive filler.
-    if (isIntro && isHousingTopic(topicBlob) && score < 2) return false;
+    // Do NOT require score>=2 on housing intro: paddingQueue often starts with the
+    // intro segment and the while-retry loop was consuming every Archive (score 0–1)
+    // against that gate before body slots ran — web12 injected=1 with 0 Archive
+    // attempts logged. Ranking still prefers face/web; intro only rejects negatives.
     if (isIntro && score < 0) return false;
     const unreliable = unreliableWebProxyInjectReason(clip, proxyGate);
     if (unreliable) {

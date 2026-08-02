@@ -75,7 +75,7 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 |-------|----------|-------|-------|
 | Airline — cabin-pressure failures | Exit **0** · 62.8s · ~24.6 MB | Exit **1** · raw **3.4**/10 · upload-ready **NO** | soft-pass-motion-airline; hang closed past Narration |
 | Housing — crash they said never happen | Exit **0** · 81.9s · ~58 MB | Exit **1** · raw **4.6**/10 · upload-ready **NO** | soft-pass-aggregate after re-pad |
-| Healthcare — Why AI will change healthcare | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (4/6 assets/seg after junk filters) |
+| Healthcare — Why AI will change healthcare | Exit **1** (prior) | n/a | Prior `HARVEST_VOLUME_FAIL`; tip soft-pass proven on healthcare-web1 |
 
 **Quality wave** (hook fontfile + yellow verify, Ken-Burns, face-first fallback, portrait harvest boost, false-empty OCR recovery, reuse cap ≤2 / 30s):
 
@@ -101,6 +101,7 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Housing-web13 (Archive fills, muddy hook) | Exit **0** · 90s · injected=27 · archive=13 | Exit **1** · raw **4.6** | volume fixed; intro got landscape Archive |
 | Housing-web14 (defer weak past intro) | Exit **0** · 84s · injected=25 · archive=11 | Exit **1** · raw **4.6** | volume ok; hook text floor 7 but landscape/crash/council variety still tanks score |
 | Housing-web15 (A1/A2 junk+face intro @ `b95f210`) | Exit **0** · 75.7s · soft-pass-motion(12v/6segs) · youtube=0 | Exit **1** · raw **4.2** | hook text floor 7; landscape intro + webcam/variety/pacing still tank |
+| Healthcare-web1 (A4 soft-pass @ `e377f25`) | Exit **0** · 65.2s · soft-pass-motion-healthcare(15v/3segs) · youtube=0 | Exit **1** · raw **5.2** | volume closed; hook/variety/pacing still open (FEMA/cockroach/clickbait) |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
 Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay). Remaining pack: housing + healthcare.
@@ -123,9 +124,9 @@ web-harvest proof. Open bars are pipeline and gate quality, not key absence:
 | Bar | Status | Unblock |
 |-----|--------|---------|
 | **Web-motion gate recognition** | **CLOSED** (airline) | airline-web8 raw **7.8** / upload-ready YES via Archive+web inject |
-| **CLI top-up diversity** | **PARTIAL** | Airline inject healthy; tip has healthcare soft-pass (`e377f25`) but **unproven** until A5 generate; housing-v2 volume historically failed |
+| **CLI top-up diversity** | **PARTIAL** | Airline + healthcare-web1 soft-pass proven (gen exit 0); housing-v2 volume historically failed |
 | **Upload-ready YES (≥7)** | **PARTIAL** | Airline **YES**; housing + healthcare still open |
-| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8**; housing best raw **5.8** (web5); latest web15 **4.2** (hook ok; webcam/landscape/pacing tank) |
+| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8**; housing best **5.8** (web5) / latest web15 **4.2**; healthcare-web1 raw **5.2** |
 | **3-topic proof pack** | **OPEN** | Need housing + healthcare ≥7 under `test-recordings/dod-proof/` |
 | **9.3 stretch** | **OPEN** (after pack) | `npm run loop:video -- --until-score 9.3` on cold topics |
 

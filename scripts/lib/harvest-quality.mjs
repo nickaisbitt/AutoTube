@@ -479,7 +479,9 @@ export function genericStockJunkReason(haystack, contextText = '') {
   if (
     SCIENCE_LAB_LOOP_RE.test(h)
     && !/\b(lab|science|research|biology|chemistry|physics|experiment|study)\b/i.test(ctx)
+    && !isHealthcareTopic(ctx)
   ) {
+    // AI / hospital stories legitimately use medical-research lab B-roll.
     return 'generic science lab loop';
   }
   if (
@@ -595,6 +597,16 @@ const AIRLINE_AVIATION_EVIDENCE_RE =
   /\b(airplanes?|aeroplanes?|aircrafts?|airliners?|jetliners?|airlines?|aviation|jets?|planes?|cabin|cockpits?|flight\s*decks?|oxygen\s*masks?|hangars?|runways?|tarmac|taxiways?|boarding|jet\s*bridges?|jetways?|flight\s*attendants?|air\s*hostess(?:es)?|cabin\s*crew|fuselages?|airports?|boeing|airbus|embraer|bombardier|turbulence|pressuriz\w*|depressuriz\w*|decompress\w*|cabin\s*altitude|take-?offs?|in-?flight|mid-?air|emergency\s*landings?|flights?|flying)\b/i;
 
 /**
+ * Everyday hospital / clinical / AI-medicine vocabulary. Real Bing/Google/DDG
+ * titles rarely say the exact query we searched; they say hospital, doctor,
+ * nurse, MRI, radiology, diagnosis, EHR, telemedicine, etc. Callers gate on
+ * isHealthcareTopic so the breadth stays on-topic.
+ */
+const HEALTHCARE_EVIDENCE_RE =
+  /\b(hospitals?|clinics?|patients?|doctors?|physicians?|nurses?|surgeons?|surgery|surgical|icu|intensive\s*care|wards?|medical|medicine|healthcare|health\s*care|hipaa|ehr|emr|radiolog\w*|mri|ct\s*scan|ultrasound|diagnos\w*|stethoscope|ambulances?|paramedics?|stretchers?|iv\s*drip|ventilators?|defibrillators?|heart\s*monitors?|ecg|ekg|telemedicine|telehealth|medical\s*records?|exam\s*room|waiting\s*room|hospital\s*(?:corridor|hallway|ward|bed|room)|nurse\s*(?:station|workstation)|physician|oncolog\w*|cardiolog\w*|patholog\w*|ai\s*(?:in\s*)?(?:medicine|healthcare|diagnosis|radiology)|machine\s*learning\s*(?:in\s*)?(?:medicine|healthcare|diagnosis)|clinical\s*ai)\b/i;
+
+
+/**
  * Does an asset carry aviation evidence? Stock clips must prove it from the media
  * itself (alt/title/URL, never the search query). Web-native clips (raw web
  * harvest via Bing/Google/DuckDuckGo/`/api/download-clip`, Vimeo, Dailymotion,
@@ -612,6 +624,19 @@ export function hasAirlineAviationEvidence(asset = {}) {
   }
   return false;
 }
+/**
+ * Healthcare evidence contract — same stock-vs-web split as aviation.
+ * @param {object} asset
+ * @returns {boolean}
+ */
+export function hasHealthcareEvidence(asset = {}) {
+  if (HEALTHCARE_EVIDENCE_RE.test(visualEvidenceBlob(asset))) return true;
+  if (isWebNativeMotionSource(asset) && HEALTHCARE_EVIDENCE_RE.test(webNativeEvidenceBlob(asset))) {
+    return true;
+  }
+  return false;
+}
+
 
 /** The search string an asset was fetched with (synthetic pool queries dropped). */
 export function assetSearchQueryText(asset) {
@@ -685,11 +710,15 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   if (visualTopicHits + visualSegHits === 0) {
     if (isCrimeHeistTopic(topic) && CRIME_HEIST_EVIDENCE_RE.test(visual)) return 0.35;
     if (isAirlineTopic(topic) && AIRLINE_AVIATION_EVIDENCE_RE.test(visual)) return 0.4;
+    // "healthcare"/"AI" topic tokens rarely appear in hospital/doctor titles —
+    // clinical evidence floors keep honest medical motion through the filter.
+    if (isHealthcareTopic(topic) && hasHealthcareEvidence(asset)) return 0.4;
     return 0;
   }
   if (segHits === 0 && topicHits < 2) {
     if (isCrimeHeistTopic(topic) && CRIME_HEIST_EVIDENCE_RE.test(visual)) return 0.3;
     if (isAirlineTopic(topic) && AIRLINE_AVIATION_EVIDENCE_RE.test(visual)) return 0.35;
+    if (isHealthcareTopic(topic) && hasHealthcareEvidence(asset)) return 0.35;
     return 0;
   }
 
@@ -1220,6 +1249,50 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     };
   }
 
+  // Healthcare (hospital / AI-medicine / clinical) — keyless web+Archive path, parallel
+  // to airline. Discounted floor only when a clinical-evidence majority earns it.
+  if (isHealthcareTopic(topicBlob)) {
+    const healthcareSoftFail = healthcareSoftPassMotionFailureReason(project, {
+      genericJunkRatio,
+      genericJunkVideos,
+      uniqueVideos,
+      videoCount,
+    });
+    if (healthcareSoftFail) {
+      return { pass: false, reason: healthcareSoftFail };
+    }
+    const stockKeyHealthcareVideos = Math.max(12, segN * 2);
+    const minHealthcareVideos = hasStockKeys
+      ? stockKeyHealthcareVideos
+      : Math.max(HEALTHCARE_KEYLESS_SOFT_PASS_MIN_VIDEOS, segN);
+    if (videoCount < minHealthcareVideos) {
+      return {
+        pass: false,
+        reason: `soft-pass-motion-healthcare-thin(${videoCount}/${minHealthcareVideos} videos)`,
+      };
+    }
+    if (!hasStockKeys && videoCount < stockKeyHealthcareVideos) {
+      const strongVideos = countHealthcareStrongVideos(uniqueVideos, topicBlob);
+      const strongNeeded = Math.max(
+        HEALTHCARE_SOFT_PASS_MIN_STRONG_VIDEOS,
+        Math.ceil(videoCount / 2),
+      );
+      if (strongVideos < strongNeeded) {
+        return {
+          pass: false,
+          reason: `soft-pass-motion-healthcare-keyless-evidence(${strongVideos}/${strongNeeded} videos)`,
+        };
+      }
+    }
+    if (stockFetched > 0 || topUp >= segN || liveMotionPresent) {
+      return { pass: true, reason: `soft-pass-motion-healthcare(${videoCount}v/${segN}segs)` };
+    }
+    return {
+      pass: false,
+      reason: `soft-pass-motion-healthcare-no-live-motion(${videoCount}v/${segN}segs)`,
+    };
+  }
+
   // No soft-pass may launder a junk-dominated video pool, whichever path would fire.
   if (videoCount > 0 && genericJunkRatio > SOFT_PASS_GENERIC_JUNK_RATIO_MAX) {
     return {
@@ -1294,6 +1367,12 @@ const AIRLINE_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
 const AIRLINE_KEYLESS_SOFT_PASS_MIN_VIDEOS = 6;
 const AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
 const AIRLINE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
+
+const HEALTHCARE_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
+/** Keyless healthcare runs fill from web+Archive; floor matches airline keyless. */
+const HEALTHCARE_KEYLESS_SOFT_PASS_MIN_VIDEOS = 6;
+const HEALTHCARE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
+const HEALTHCARE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
 
 const AIRLINE_HARD_REJECT_PATTERNS = [
   {
@@ -1483,6 +1562,138 @@ export function airlineSoftPassMotionFailureReason(project, stats = {}) {
     : 1;
   if (strongVideos < strongFloor) {
     return `soft-pass-motion-airline-aviation-strong-floor(${strongVideos}/${strongFloor} videos)`;
+  }
+
+  return null;
+}
+
+/** Hard-reject pads that must not soft-pass a healthcare harvest. */
+const HEALTHCARE_HARD_REJECT_PATTERNS = [
+  {
+    reason: 'bank-otp-scam',
+    pattern:
+      /\b(otp|one[\s-]?time\s*pass(?:word|code)?|voice[\s-]?clone|wire\s*transfer|callback\s*scam|bank\s*(?:otp|fraud|scam)|sms\s*otp)\b/i,
+  },
+  {
+    reason: 'mail-mailbox',
+    pattern:
+      /\b(mailbox(?:es)?|mail\s+(?:carrier|truck|delivery|sorting|room|bag|slot)|postal\s+(?:worker|truck|service|delivery)|post\s+office)\b/i,
+  },
+  {
+    reason: 'military-naval',
+    pattern: MILITARY_NAVAL_VISUAL_RE,
+    skipWhen: MILITARY_TOPIC_RE,
+  },
+  {
+    reason: 'airline-cabin',
+    pattern:
+      /\b(?:airplane|aircraft|plane|airline)\s+cabin\b|\bcockpit\b|\bflight\s+deck\b|\boxygen\s*masks?\b|\brunway\b|\btarmac\b/i,
+    skipWhen: /\b(medevac|air\s*ambulance|medical\s*(?:flight|evacuation))\b/i,
+  },
+  {
+    reason: 'nursing-abuse-cctv',
+    pattern:
+      /\b(nursing\s*home\s*(?:abuse|cctv|surveillance)|elder\s*abuse|care\s*home\s*abuse)\b/i,
+    skipWhen: /\bnursing\s*home|elder\s*abuse|care\s*home\b/i,
+  },
+  {
+    reason: 'empty-hospital-bed',
+    pattern: EMPTY_HOSPITAL_BED_RE,
+  },
+  {
+    reason: 'film-strip-graphic',
+    pattern: FILM_STRIP_GRAPHIC_RE,
+    skipWhen: FILM_TOPIC_CONTEXT_RE,
+  },
+  {
+    reason: 'tech-clickbait',
+    pattern: AIRLINE_TECH_CLICKBAIT_JUNK_RE,
+  },
+  {
+    reason: 'sports-pad',
+    pattern: /\b(football|soccer|athlete|stadium\s+crowd|sports\s+crowd|cheering\s+fans)\b/i,
+  },
+];
+
+function healthcareVideoBlob(asset = {}) {
+  return `${asset.alt || ''} ${asset.title || ''} ${asset.source || ''} ${asset.sourceUrl || ''} ${asset.url || ''} ${asset.query || ''}`;
+}
+
+function healthcareHardRejectReason(asset = {}, topicBlob = '') {
+  const blob = healthcareVideoBlob(asset);
+  const ctx = String(topicBlob || '');
+  for (const { reason, pattern, skipWhen } of HEALTHCARE_HARD_REJECT_PATTERNS) {
+    if (skipWhen && skipWhen.test(ctx)) continue;
+    if (pattern.test(blob)) return reason;
+  }
+  return null;
+}
+
+function isHealthcareStrongVideo(asset = {}, topicBlob = '') {
+  const topic = String(topicBlob || '') || 'healthcare hospital';
+  if (
+    healthcareHardRejectReason(asset, topic)
+    || isGenericStockJunk(healthcareVideoBlob(asset), topic)
+  ) {
+    return false;
+  }
+  const visualBlob = visualEvidenceBlob(asset);
+  const blob = isWebNativeMotionSource(asset)
+    ? `${visualBlob} ${webNativeEvidenceBlob(asset)}`.replace(/\s+/g, ' ').trim()
+    : visualBlob;
+  if (!blob) return false;
+  return HEALTHCARE_EVIDENCE_RE.test(blob);
+}
+
+/**
+ * Unique videos carrying real clinical / hospital / AI-medicine evidence.
+ *
+ * @param {object[]} [uniqueVideos]
+ * @param {string} [topicBlob]
+ */
+export function countHealthcareStrongVideos(uniqueVideos = [], topicBlob = '') {
+  return uniqueVideos.filter((asset) => isHealthcareStrongVideo(asset, topicBlob)).length;
+}
+
+export function healthcareSoftPassMotionFailureReason(project, stats = {}) {
+  const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
+  if (!isHealthcareTopic(topicBlob)) return null;
+
+  const uniqueVideos = stats.uniqueVideos || uniqueVideoAssets(project?.media || []);
+  const videoCount = stats.videoCount ?? uniqueVideos.length;
+
+  const hardJunkVideos = uniqueVideos.filter((asset) => healthcareHardRejectReason(asset, topicBlob));
+  const hardJunkRatio = videoCount ? hardJunkVideos.length / videoCount : 0;
+  if (
+    hardJunkVideos.length >= 3
+    || (videoCount > 0 && hardJunkRatio > HEALTHCARE_SOFT_PASS_HARD_JUNK_RATIO_MAX)
+  ) {
+    const reason = healthcareHardRejectReason(hardJunkVideos[0], topicBlob) || 'hard-junk';
+    return `soft-pass-motion-healthcare-junk(${reason}:${hardJunkVideos.length}/${videoCount})`;
+  }
+
+  const cleanVideos = uniqueVideos.filter((asset) => !healthcareHardRejectReason(asset, topicBlob));
+  const genericJunkVideos = stats.genericJunkVideos ?? cleanVideos.filter((asset) => (
+    isGenericStockJunk(healthcareVideoBlob(asset), topicBlob)
+  )).length;
+  const cleanCount = cleanVideos.length || videoCount;
+  const genericJunkRatio = stats.genericJunkRatio ?? (cleanCount ? genericJunkVideos / cleanCount : 0);
+  if (genericJunkRatio > HEALTHCARE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX) {
+    return `soft-pass-motion-healthcare-generic-junk(${genericJunkVideos}/${cleanCount} videos)`;
+  }
+
+  const strongVideos = countHealthcareStrongVideos(cleanVideos, topicBlob);
+  const hasStockKeys = Boolean(
+    process.env.PEXELS_API_KEY
+      || process.env.VITE_PEXELS_KEY
+      || process.env.PIXABAY_API_KEY
+      || process.env.VITE_PIXABAY_KEY,
+  );
+  const strongFloor = hasStockKeys
+    ? HEALTHCARE_SOFT_PASS_MIN_STRONG_VIDEOS
+    : 1;
+  if (strongVideos < strongFloor) {
+    return `soft-pass-motion-healthcare-clinical-strong-floor(${strongVideos}/${strongFloor} videos)`;
   }
 
   return null;

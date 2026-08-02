@@ -3,6 +3,7 @@
  * Rejects obvious off-brand subjects that keyword filters miss (e.g. dung beetles).
  */
 import { openRouterMessageText } from './openRouterMessageText.mjs';
+import { isHealthcareCyberTopic, isHealthcareTopic } from './topic-family.mjs';
 
 const OFF_BRAND_VISION_PROMPT = [
   'You judge ONE stock photo/video thumbnail for a serious news YouTube channel.',
@@ -29,12 +30,21 @@ export function visionPromptForTopic(topicBlob = '') {
       'reject=false for: veteran/military, VA/government office, benefits paperwork, SSN/credit report docs, identity theft victim on phone, dark-web/data-broker laptop (no HUD), worried family.',
     ].join(' ');
   }
-  if (/hospital|healthcare|patient|hipaa|medical.*(hack|breach|leak|records)/i.test(topicBlob)) {
+  // Cyber breach first — then general AI/clinical healthcare (not cyber-only reject rules).
+  if (isHealthcareCyberTopic(topicBlob)) {
     return [
       'You judge ONE stock thumbnail for a hospital / patient-records cyber breach investigation video.',
       'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
       'reject=true if: bank OTP keypad, voice-clone studio mic, nursing-home abuse CCTV only, surgical OR close-up, beetle/insect, puppet, cartoon, sci-fi HUD, blurry/defocused filler, overexposed clip, staged reenactment, produce crate, empty hospital bed only.',
       'reject=false for: hospital corridor with people, medical records laptop, nurse at workstation, server room racks, patient waiting room worried, HIPAA paperwork.',
+    ].join(' ');
+  }
+  if (isHealthcareTopic(topicBlob)) {
+    return [
+      'You judge ONE stock thumbnail for a healthcare / AI-in-medicine documentary video.',
+      'Reply ONLY JSON: {"reject":true|false,"reason":"short"}',
+      'reject=true if: bank OTP keypad, voice-clone studio mic, nursing-home abuse CCTV only, airplane cabin, mailbox/postal, beetle/insect, puppet, cartoon, sci-fi HUD, blurry/defocused filler, overexposed clip, staged reenactment, produce crate, empty hospital bed only, generic corporate handshake.',
+      'reject=false for: hospital corridor with people, doctor or nurse with patient, medical imaging/MRI/CT, nurse at workstation, exam room consultation, telemedicine call, radiology monitors, worried patient or family in waiting room.',
     ].join(' ');
   }
   if (/airline|cabin[-\s]?pressure|cabin\s*pressure|aircraft|aviation|airplane|cockpit|oxygen\s*mask/i.test(topicBlob)) {

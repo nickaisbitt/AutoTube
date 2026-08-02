@@ -127,12 +127,14 @@ export function isHeistTopic(topic) {
 }
 
 /**
- * Broad healthcare (hospital/medical) — excludes pure nursing-home abuse topics.
+ * Broad healthcare (hospital/medical) — excludes pure nursing-home abuse topics
+ * and school/student-record breaches (bare "records" must not pull clinical gates).
  * @param {string} topic
  */
 export function isHealthcareTopic(topic) {
   const t = String(topic || '');
   if (isNursingHomeTopic(t)) return false;
+  if (isSchoolEducationTopic(t)) return false;
   return /hospital|healthcare|patient|medical|hipaa|ehr|clinic|\bnurse\b|\bdoctor\b|records?\b/i.test(t);
 }
 

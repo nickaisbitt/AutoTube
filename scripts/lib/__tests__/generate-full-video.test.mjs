@@ -46,6 +46,7 @@ import { evaluateHarvestVolume } from '../harvest-quality.mjs';
 
 const AIRLINE_TOPIC = 'How a regional airline hid recurring cabin-pressure failures from passengers';
 const HOUSING_TOPIC = 'The landlord algorithm that evicted tenants from rent-stabilized apartments';
+const HEALTHCARE_AI_TOPIC = 'Why AI will change healthcare';
 const HOUSING_CRASH_TOPIC = 'The housing crash they said would never happen';
 
 describe('isAirlineRelevantClip', () => {
@@ -911,6 +912,33 @@ describe('resolveMotionVolumeTargets', () => {
       stockApiVideoCount: 5,
     });
     expect(targets.stockNeed).toBe(targets.minVideos - 5);
+  });
+});
+
+describe('healthcare keyless motion pack + volume chase', () => {
+  it('uses ARCHIVE healthcare subjects for keyless AI-healthcare topics', () => {
+    const plan = motionQueryPlan(HEALTHCARE_AI_TOPIC, false, { stockKeyed: false, faceSeek: true });
+    expect(plan.mode).toBe('keyless');
+    expect(plan.queries).toEqual(expect.arrayContaining([
+      'hospital corridor',
+      'mri scanner',
+      'doctor patient',
+    ]));
+    expect(plan.queries.some((q) => /ai medical diagnosis|radiologist|telemedicine|hospital corridor hallway/i.test(q))).toBe(true);
+  });
+
+  it('chases keyless healthcare volume above the soft-pass floor like airline', () => {
+    const targets = resolveMotionVolumeTargets({
+      segmentCount: 6,
+      segmentDurationSec: 90,
+      cutIntervalSec: 0.85,
+      hasStockKeys: false,
+      topicBlob: HEALTHCARE_AI_TOPIC,
+    });
+    expect(targets.mode).toBe('keyless');
+    expect(targets.minVideos).toBeGreaterThanOrEqual(18);
+    expect(targets.perSegTarget).toBe(3);
+    expect(targets.stockNeed).toBeGreaterThan(0);
   });
 });
 

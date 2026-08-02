@@ -7,6 +7,9 @@ import {
   evaluateHarvestVolumeWithSoftPass,
   filterAssetsByRelevance,
   hasAirlineAviationEvidence,
+  hasHealthcareEvidence,
+  countHealthcareStrongVideos,
+  healthcareSoftPassMotionFailureReason,
   housingOffTopicBrollReason,
   isGenericStockJunk,
   isWebNativeMotionSource,
@@ -16,6 +19,7 @@ import {
 } from '../harvest-quality.mjs';
 
 const AIRLINE_TOPIC = 'Hidden cabin pressure failures at regional airlines';
+const HEALTHCARE_TOPIC = 'Why AI will change healthcare';
 const HOUSING_TOPIC = 'The housing crash they said would never happen';
 
 describe('keyless archive human portrait topical boost', () => {
@@ -478,5 +482,142 @@ describe('housing off-topic B-roll rejects', () => {
       housingOffTopicBrollReason('housing market crash documentary apartment tenants', HOUSING_TOPIC),
     ).toBe('');
     expect(housingOffTopicBrollReason('car crash dashcam footage', AIRLINE_TOPIC)).toBe('');
+  });
+});
+
+describe('healthcare keyless soft-pass-motion (web + Archive)', () => {
+  beforeEach(() => {
+    vi.stubEnv('PEXELS_API_KEY', '');
+    vi.stubEnv('VITE_PEXELS_KEY', '');
+    vi.stubEnv('PIXABAY_API_KEY', '');
+    vi.stubEnv('VITE_PIXABAY_KEY', '');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const makeSegments = (n) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `seg${i}`,
+      title: `Segment ${i}`,
+      narration: 'AI tools are changing how doctors diagnose disease in hospitals.',
+    }));
+
+  const clinicalWebClip = ({ segmentId, title, query, idx }) => ({
+    type: 'video',
+    segmentId,
+    url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent(`https://vimeo.com/${8000 + idx}`)}&duration=10`,
+    alt: title,
+    title,
+    query,
+    source: idx % 2 ? 'Bing web video' : 'Google web video',
+    sourceUrl: `https://vimeo.com/${8000 + idx}`,
+  });
+
+  it('counts clinical web clips as healthcare-strong', () => {
+    const titles = [
+      'Hospital corridor with nurses walking',
+      'Doctor reviewing MRI scan monitors',
+      'AI medical diagnosis computer screen',
+      'Nurse workstation hospital computer',
+      'Patient waiting room clinic daylight',
+      'Telemedicine doctor video call',
+    ];
+    const clips = titles.map((title, i) => clinicalWebClip({
+      segmentId: `seg${i}`,
+      title,
+      query: 'hospital doctor patient',
+      idx: i,
+    }));
+    expect(countHealthcareStrongVideos(clips, HEALTHCARE_TOPIC)).toBe(clips.length);
+    expect(hasHealthcareEvidence(clips[0])).toBe(true);
+  });
+
+  it('soft-passes a keyless healthcare pool with clinical web motion', () => {
+    const segments = makeSegments(3);
+    const titles = [
+      'Hospital corridor with nurses walking',
+      'Doctor reviewing MRI scan monitors',
+      'AI medical diagnosis computer screen',
+      'Nurse workstation hospital computer',
+      'Patient waiting room clinic daylight',
+      'Telemedicine doctor video call',
+    ];
+    const media = titles.map((title, i) => clinicalWebClip({
+      segmentId: segments[i % segments.length].id,
+      title,
+      query: 'hospital doctor patient AI diagnosis',
+      idx: i,
+    }));
+    const project = { topic: HEALTHCARE_TOPIC, title: 'AI Healthcare', script: segments, media };
+    expect(healthcareSoftPassMotionFailureReason(project, {})).toBeNull();
+    const result = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      cyberStockInjected: 0,
+      pexelsFetched: 0,
+      pixabayFetched: 0,
+      archiveLiveFetched: 0,
+      videoTopUp: [],
+    }, project);
+    expect(result.pass).toBe(true);
+    expect(result.reason).toMatch(/^soft-pass-motion-healthcare\(/);
+  });
+
+  it('fails thin keyless healthcare pools below the motion floor', () => {
+    const segments = makeSegments(3);
+    const media = Array.from({ length: 4 }, (_, i) => clinicalWebClip({
+      segmentId: segments[i % 3].id,
+      title: 'Hospital corridor with nurses walking',
+      query: 'hospital corridor',
+      idx: i,
+    }));
+    const project = { topic: HEALTHCARE_TOPIC, title: 'AI Healthcare', script: segments, media };
+    const result = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      archiveLiveFetched: 10,
+      videoTopUp: [],
+    }, project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/soft-pass-motion-healthcare-thin\(4\/6/);
+  });
+
+  it('keeps clinical hospital titles through relevance on AI healthcare topics', () => {
+    const segments = makeSegments(1);
+    const media = [
+      clinicalWebClip({
+        segmentId: 'seg0',
+        title: 'Doctor reviewing MRI radiology monitors in hospital',
+        query: 'mri scan hospital',
+        idx: 1,
+      }),
+    ];
+    const project = { topic: HEALTHCARE_TOPIC, title: 'AI Healthcare', script: segments, media };
+    const { media: kept, dropped } = filterAssetsByRelevance(media, project);
+    expect(kept.length).toBe(1);
+    expect(dropped).toEqual([]);
+  });
+
+  it('rejects bank-otp pads in healthcare soft-pass junk gate', () => {
+    const segments = makeSegments(3);
+    const media = [
+      ...Array.from({ length: 3 }, (_, i) => clinicalWebClip({
+        segmentId: segments[i].id,
+        title: 'Hospital corridor with nurses',
+        query: 'hospital',
+        idx: i,
+      })),
+      ...Array.from({ length: 3 }, (_, i) => ({
+        type: 'video',
+        segmentId: segments[i].id,
+        url: `https://archive.org/download/otp${i}/otp${i}.mp4`,
+        source: 'Archive.org live',
+        alt: 'bank otp keypad sms scam phone',
+        title: 'bank otp keypad sms scam phone',
+        query: 'otp bank',
+      })),
+    ];
+    const project = { topic: HEALTHCARE_TOPIC, script: segments, media };
+    const fail = healthcareSoftPassMotionFailureReason(project, {});
+    expect(fail).toMatch(/soft-pass-motion-healthcare-junk\(bank-otp-scam/);
   });
 });

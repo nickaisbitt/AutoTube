@@ -3157,10 +3157,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/\b(landscape|mountain|helicopter|aerial\s+view|wildfire|title\s+card|newsreel)\b/i.test(blob)) {
         return -8;
       }
-      // Opaque Archive stays rejected. Strong apartment/tenant Archive is body filler
-      // (score 1 < intro gate 2) after web face clips — not talking-head TikTok pads.
+      // Archive on housing is body filler (score < intro gate 2). Do NOT require
+      // HOUSING_ARCHIVE_STRONG_RE here — face-first search queries rarely include
+      // "apartment/tenant" in the clip blob, so a -6 reject emptied the pool on
+      // web10 (108 YT/TT skips, archive injects=0, soft-pass-aggregate stills).
       if (/Archive/i.test(clip.source || '')) {
-        return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 1 : -6;
+        return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 1 : 0;
       }
       // Face-forward / lived-in housing beats charts, landscapes, and title cards.
       if (
@@ -3209,9 +3211,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const isIntro = seg.type === 'intro' || seg === segments[0];
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
-    // Housing: hard-reject meeting/disaster junk (-20) and opaque Archive (-6).
-    // Strong apartment-tagged Archive stays at -2 so it can fill body slots after
-    // web candidates (host-rank still prefers Bing/Vimeo ahead of Archive).
+    // Housing: hard-reject meeting/disaster/chart junk (-20) and landscapes (-8).
+    // Non-junk Archive scores 0–1 and fills body after web (host-rank web-first).
     if (isHousingTopic(topicBlob) && score <= -6) return false;
     // Housing intro needs a face / lived-in apartment signal — not Archive filler.
     if (isIntro && isHousingTopic(topicBlob) && score < 2) return false;

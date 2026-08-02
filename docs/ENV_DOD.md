@@ -74,9 +74,32 @@ web-harvest proof runs; it does **not** block the DoD path.
 
 | Variable | Purpose | Presence |
 |---|---|---|
-| `RAILWAY_API_TOKEN` | `npm run railway:completion-check` — verifies prod deploy/image matches local HEAD | **PRESENT** — cursor-worker *service* credential; rejected by backboard GQL (`Not Authorized`). Needs a Railway personal API token. |
+| `AUTOTUBE_RAILWAY_TOKEN` | Preferred token for `railway:completion-check` / deploy GraphQL (personal or team API token) | **ABSENT** — required to close §C deploy currency on Railway worker VMs |
+| `RAILWAY_API_TOKEN` | Fallback token for Railway scripts | **PRESENT** — cursor-worker *service* credential; rejected by backboard GQL (`Not Authorized`). Do **not** treat as deploy-ready. |
 | `VITE_CF_ACCOUNT_ID` / `VITE_CF_STREAM_TOKEN` | Cloudflare Stream upload in browser | **PRESENT** — invalid/truncated; upload skipped by code guard |
 | `VITE_KOKORO_SERVER_URL` | Kokoro TTS server (external Docker) | **PRESENT** — host returns HTTP 404; TTS falls back to espeak-ng |
+
+### Railway deploy token (human action)
+
+On `railway-AutoTube` / cursor-worker VMs, Railway injects a **runtime service**
+`RAILWAY_API_TOKEN`. That value shows `SET` in `npm run env:debug-railway` but
+cannot call `backboard.railway.app/graphql` (exit **2** from `env:debug-railway`
+when only the worker credential is present; `railway:completion-check` still
+exits **1** with `Not Authorized`).
+
+Unblock §C:
+
+```bash
+# 1) Create Personal/Team token: https://railway.app/account/tokens
+# 2) Prefer a separate env name so the worker runtime token is left alone:
+echo 'AUTOTUBE_RAILWAY_TOKEN=<personal-or-team-token>' >> .env.local
+# 3) Verify:
+npm run env:debug-railway          # should source AUTOTUBE_RAILWAY_TOKEN (exit 0)
+npm run railway:completion-check   # exit 0 only when prod SHA/image == local HEAD
+```
+
+Alternatively set `AUTOTUBE_RAILWAY_TOKEN` as a Cursor Environment secret on
+**railway-AutoTube** and start a new agent (secrets inject at VM boot).
 
 ---
 
@@ -88,7 +111,8 @@ web-harvest proof runs; it does **not** block the DoD path.
 | `npm run generate:video -- "<topic>"` | Full video-generation pipeline (raw web harvest) | `OPENROUTER_API_KEY` (or `VITE_OPENROUTER_KEY`) + `AUTOTUBE_API_KEY` + dev server running + ffmpeg |
 | `npm run watch:video -- <final.mp4>` | Vision-judges a rendered video; exits 0 when upload-ready | `OPENROUTER_API_KEY` + `AUTOTUBE_API_KEY`; scores ≥ 7 require web-harvest motion quality, not stock keys |
 | `npm run dod:watch` | Alias for `watch:video` | Same as above |
-| `npm run railway:completion-check` | Verifies prod deploy matches HEAD | `RAILWAY_API_TOKEN` (personal/team token — service credential fails) |
+| `npm run railway:completion-check` | Verifies prod deploy matches HEAD | `AUTOTUBE_RAILWAY_TOKEN` (preferred) or personal/team `RAILWAY_API_TOKEN` — worker service credential fails |
+| `npm run env:debug-railway` | Token presence + scope hint | Exit **2** when only worker runtime credential is present |
 
 > `dod:check` is fast and requires no API keys.  It does **not** enforce
 > quality bars — those require a real generated video evaluated by
@@ -111,7 +135,8 @@ not shown.
 | `VITE_PEXELS_KEY` | ❌ not set | Optional Pexels BYOK (not required for DoD) |
 | `PIXABAY_API_KEY` | ❌ not set | Optional Pixabay supplement (not required for DoD) |
 | `VITE_PIXABAY_KEY` | ❌ not set | Optional Pixabay BYOK (not required for DoD) |
-| `RAILWAY_API_TOKEN` | ⚠️ present (wrong scope) | `railway:completion-check` (currently fails — Not Authorized) |
+| `AUTOTUBE_RAILWAY_TOKEN` | ❌ not set | Preferred GraphQL/deploy token — **blocks §C** until set |
+| `RAILWAY_API_TOKEN` | ⚠️ present (wrong scope) | Worker service credential; `env:debug-railway` exit 2; `railway:completion-check` Not Authorized |
 | `VITE_CF_ACCOUNT_ID` / `VITE_CF_STREAM_TOKEN` | ⚠️ present (invalid) | Cloudflare Stream upload (skipped by code) |
 | `VITE_KOKORO_SERVER_URL` | ⚠️ present (404) | Kokoro TTS (falls back to espeak-ng) |
 

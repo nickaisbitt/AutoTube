@@ -122,10 +122,13 @@ Do not invent passing scores. Do not claim ≥7 is blocked by missing stock keys
 
 ## §C — Railway / prod deploy currency
 
-`RAILWAY_API_TOKEN` is **present** on this VM ([`ENV_DOD.md`](ENV_DOD.md)). Prod deploy currency is still **OPEN** until:
+**Status: BLOCKED** (Agent A7, 2026-08-02) — no personal/team Railway token on this VM.
+Evidence: [`/tmp/dod-agents/A7-STATUS.md`](/tmp/dod-agents/A7-STATUS.md) and [`ENV_DOD.md`](ENV_DOD.md).
+
+`RAILWAY_API_TOKEN` is **present** but is the cursor-worker **runtime service** credential. `AUTOTUBE_RAILWAY_TOKEN` is **absent**. Prod deploy currency stays **OPEN** until:
 
 ```bash
-npm run env:debug-railway    # token must show SET
+npm run env:debug-railway    # exit 0 with source AUTOTUBE_RAILWAY_TOKEN (exit 2 = worker-only credential)
 npm run railway:completion-check
 ```
 
@@ -133,11 +136,20 @@ Expected when prod image/commit matches local HEAD: exit **0**.
 
 Prod app may still be an **old container** (uptime days) until a fresh deploy from this branch lands. `npm run deploy:status` for live state. Do not claim deploy parity from green CI alone.
 
-### Check run — 2026-08-01 @ branch `cursor/fix-audit-blockers-b466`
+### Check run — 2026-08-02 @ branch `cursor/web-harvest-assemble-auth-4556` (Agent A7)
 
-Local HEAD: `ce8bc57a32b3d73efe25231ea5e074e99d2da7bc`
+Local HEAD: `d627721905235577377be0e9577281bd28bc11d1`
 
-Quality-wave commits since last §C snapshot: `70c1981` (harvest portrait boost), `4449589` (overlays fontfile), `de787b1` (watcher OCR recover), `e46c855` (Ken-Burns presets), `ce8bc57` (introFaceTier fallback).
+#### `npm run env:debug-railway` — token SET but wrong scope
+
+```
+AUTOTUBE_RAILWAY_TOKEN: unset
+RAILWAY_API_TOKEN: SET
+✅ Token present (source: RAILWAY_API_TOKEN)
+⚠️  Likely Railway *runtime/service* credential … exit 2
+```
+
+(Messaging updated so a SET worker credential is no longer mistaken for deploy-ready.)
 
 #### `npm run railway:completion-check` — **FAIL** (exit 1)
 
@@ -148,31 +160,47 @@ Error: Railway GraphQL: Not Authorized.
   then set it as AUTOTUBE_RAILWAY_TOKEN (preferred) or RAILWAY_API_TOKEN in .env.local.
 ```
 
-Root cause: the `RAILWAY_API_TOKEN` injected by Railway's runtime is the cursor-worker **service credential**, not a personal/team API token. The `backboard.railway.app/graphql/v2` API requires a user-scoped personal token; the service token is rejected with `Not Authorized`. `env:debug-railway` confirms `RAILWAY_API_TOKEN: SET` (source: RAILWAY_API_TOKEN) but the token is scoped to the `cursor-self-hosted-worker` project, not AutoTube-Deploy.
-
-`railway-completion-check` now emits the above actionable message and still exits **1** (no fake PASS). Token resolution also prefers `AUTOTUBE_RAILWAY_TOKEN` before falling back to `RAILWAY_API_TOKEN`.
-
-Unblock: create a Railway Personal API Token at `railway.app/account/tokens`, set it as `AUTOTUBE_RAILWAY_TOKEN` (preferred) or `RAILWAY_API_TOKEN` in `.env.local`, and re-run.
+Root cause unchanged: Railway injects a service credential for `cursor-self-hosted-worker` / `cursor-worker`. backboard GraphQL requires a user/team token. Scripts prefer `AUTOTUBE_RAILWAY_TOKEN` before falling back to `RAILWAY_API_TOKEN` (no fake PASS).
 
 #### `npm run railway:smoke` — **PASS** (exit 0)
 
 ```
-Health: {"status":"ok","uptime":1632901,"deploy":{"gitCommit":"3e6f62458c5464e3bb3579751573de3b1a8e80dd","deployImage":"ghcr.io/nickaisbitt/autotube:3e6f62458c5464e3bb3579751573de3b1a8e80dd","sourceConnected":false}}
+Health: {"status":"ok","uptime":1721558,"deploy":{"gitCommit":"3e6f62458c5464e3bb3579751573de3b1a8e80dd","deployImage":"ghcr.io/nickaisbitt/autotube:3e6f62458c5464e3bb3579751573de3b1a8e80dd","sourceConnected":false}}
 ✓ index: HTTP 200
 ✓ api health: HTTP 200
 Smoke passed.
 ```
 
-Prod is **live** but running a **stale image**: commit `3e6f6245` (≈18.9 days old, uptime 1 632 901 s). Local HEAD is `ce8bc57a`. Deploy parity is **NOT met** — prod has not been rebuilt from this branch.
+#### `npm run deploy:status`
+
+Local `d627721` ≠ prod `3e6f6245`; uptime ≈478h; `Local matches prod: NO`.
+
+#### Human unblock (exact)
+
+1. Create a Personal or Team API token at https://railway.app/account/tokens
+2. Add to AutoTube `.env.local` (gitignored): `AUTOTUBE_RAILWAY_TOKEN=<token>`
+   — or set the same name as a Cursor Environment secret on **railway-AutoTube** and start a new agent
+3. Re-run:
+
+```bash
+npm run env:debug-railway
+npm run railway:completion-check
+# when GraphQL works but SHA still mismatches:
+gh workflow run ghcr-image.yml   # wait green
+npm run deploy:railway:registry:pull
+npm run railway:completion-check
+npm run railway:smoke
+```
 
 #### Summary
 
 | Check | Result | Detail |
 |-------|--------|--------|
-| `railway:completion-check` | **FAIL** | Runtime token not authorized for backboard GQL; actionable error now printed |
+| `env:debug-railway` | **WARN** (exit 2) | Worker `RAILWAY_API_TOKEN` SET; `AUTOTUBE_RAILWAY_TOKEN` unset |
+| `railway:completion-check` | **FAIL** | Runtime token Not Authorized for backboard GQL |
 | `railway:smoke` | **PASS** | Prod live HTTP 200 |
-| SHA match (prod vs local HEAD) | **MISMATCH** | prod `3e6f6245` ≠ local `ce8bc57a` |
-| Deploy currency | **OPEN** | Prod has not been rebuilt from this branch |
+| SHA match (prod vs local HEAD) | **MISMATCH** | prod `3e6f6245` ≠ local `d627721` |
+| Deploy currency | **BLOCKED / OPEN** | Needs personal token, then redeploy |
 
 ---
 

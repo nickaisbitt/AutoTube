@@ -41,5 +41,22 @@ if (!token) {
   process.exit(1);
 }
 
+const onWorker = Boolean(process.env.RAILWAY_SERVICE_NAME || process.env.RAILWAY_PROJECT_ID);
+const autotubeTokenSet = Boolean(process.env.AUTOTUBE_RAILWAY_TOKEN?.trim());
+const likelyServiceCredential =
+  onWorker &&
+  !autotubeTokenSet &&
+  (source === 'RAILWAY_API_TOKEN' || source === 'RAILWAY_TOKEN');
+
 console.log(`\n✅ Token present (source: ${source})`);
+if (likelyServiceCredential) {
+  console.log('\n⚠️  Likely Railway *runtime/service* credential (worker project), not a personal/team API token.');
+  console.log('  backboard GraphQL (railway:completion-check / deploy) will return Not Authorized.');
+  console.log('  Fix (human):');
+  console.log('    1. Create a Personal or Team token at https://railway.app/account/tokens');
+  console.log('    2. Set AUTOTUBE_RAILWAY_TOKEN=<token> in .env.local (preferred; do not overwrite the worker RAILWAY_API_TOKEN)');
+  console.log('    3. Re-run: npm run env:debug-railway && npm run railway:completion-check');
+  console.log('  Or inject AUTOTUBE_RAILWAY_TOKEN as a Cursor Environment secret on railway-AutoTube and restart the agent.\n');
+  process.exit(2);
+}
 console.log('Run: npm run railway:connect\n');

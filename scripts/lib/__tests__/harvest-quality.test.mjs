@@ -544,6 +544,37 @@ describe('healthcare off-topic B-roll rejects', () => {
       healthcareOffTopicBrollReason('utah state capitol protest rally crowd footage', HEALTHCARE_TOPIC),
     ).toMatch(/healthcare off-topic/);
   });
+
+  it('hard-rejects Archive maternity, kapparot ritual, news talking-head studio, COVID PSA, lecture slides', () => {
+    const cases = [
+      '1937 maternity ward hospital film archival footage',
+      'maternity hospital childbirth training film',
+      'kapparot ritual chicken atonement ceremony',
+      'news talking head studio interview anchor desk',
+      'news anchor studio desk healthcare segment',
+      'covid propaganda psa misinfo leftover clip',
+      'coursera lecture slides online course mooc',
+      'powerpoint lecture slides medical ethics title card',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('keeps AI radiology / clinician+screen / surgical robot / ultrasound demo motion', () => {
+    const keep = [
+      'ai radiology doctor pointing at monitor screen',
+      'clinician reviewing mri scan monitors hospital',
+      'surgical robot operating room demonstration',
+      'ultrasound demonstration clinician probe exam',
+      'radiologist ai diagnosis laptop screen',
+    ];
+    for (const alt of keep) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
+    }
+  });
 });
 
 describe('healthcare keyless soft-pass-motion (web + Archive)', () => {

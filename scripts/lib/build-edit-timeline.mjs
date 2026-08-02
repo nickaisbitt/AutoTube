@@ -172,12 +172,13 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   ) {
     return true;
   }
-  // Healthcare AI hooks must not open on course title cards / Giphy / protest pads.
+  // Healthcare AI hooks must not open on course title cards / Giphy / protest /
+  // maternity / ritual / news talking-head studio pads (healthcare-web3).
   if (
     healthcare
     && (
       /giphy\.com|media\d*\.giphy\.com/i.test(blob)
-      || /\b(coursera|stanford\s+online|course\s+trailer|title\s+card|capitol|protest(?:ers?|ing)?|political\s+rally)\b/i.test(blob)
+      || /\b(coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|title\s+card|capitol|protest(?:ers?|ing)?|political\s+rally|maternity|childbirth|kapparot|kapores|news\s+talking\s*heads?|talking\s*heads?\s+(?:studio|news|interview)|news\s+(?:anchor|studio|desk)|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?)\b/i.test(blob)
     )
   ) {
     return true;
@@ -300,6 +301,24 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
   // Housing landscape / webinar / chair / home-tour and healthcare title cards → -1.
   if (housing && isRejectedIntroLeadVisual(asset, { housing: true })) return -1;
   if (healthcare && isRejectedIntroLeadVisual(asset, { healthcare: true })) return -1;
+  if (healthcare) {
+    const blob = assetBlob(asset);
+    const clinicianScreenOrOr =
+      /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|ultrasound\s+(?:demo|demonstration)|mri\s+(?:monitor|screen)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen)|operating\s+room)\b/i.test(blob)
+      || (
+        /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(blob)
+        && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(blob)
+      );
+    if (
+      /\b(talking\s*heads?|explainer|lecture|studio\s+interview)\b/i.test(blob)
+      && !clinicianScreenOrOr
+    ) {
+      return 0;
+    }
+    if (clinicianScreenOrOr && (asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) {
+      return 2;
+    }
+  }
   if (hasReadableFaceVisual(asset)) {
     const blob = assetBlob(asset);
     const topical = (airline && AIRLINE_TOPICAL_VISUAL_RE.test(blob))

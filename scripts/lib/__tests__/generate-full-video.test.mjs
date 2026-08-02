@@ -932,6 +932,23 @@ describe('healthcare keyless motion pack + volume chase', () => {
     expect(plan.queries.some((q) => /ai medical diagnosis|radiologist|telemedicine|hospital corridor hallway/i.test(q))).toBe(true);
   });
 
+  it('leads with AI radiology / clinician+screen / OR face-first queries and Vimeo host searches', () => {
+    const plan = motionQueryPlan(HEALTHCARE_AI_TOPIC, false, { stockKeyed: false, faceSeek: true });
+    expect(plan.queries).toEqual(expect.arrayContaining([
+      'ai radiology doctor monitor screen',
+      'clinician pointing at mri monitor',
+      'surgical robot operating room',
+      'ultrasound demonstration clinician',
+      'ai radiology',
+    ]));
+    expect(plan.webHostQueries.some((q) => /radiology\s+ai\s+site:vimeo\.com/i.test(q))).toBe(true);
+    expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:vimeo\.com/i.test(q))).toBe(true);
+    const aiIdx = plan.queries.findIndex((q) => /ai radiology doctor monitor/i.test(q));
+    const corridorIdx = plan.queries.findIndex((q) => /hospital corridor hallway/i.test(q));
+    expect(aiIdx).toBeGreaterThanOrEqual(0);
+    expect(corridorIdx).toBeGreaterThan(aiIdx);
+  });
+
   it('chases keyless healthcare volume above the soft-pass floor like airline', () => {
     const targets = resolveMotionVolumeTargets({
       segmentCount: 6,

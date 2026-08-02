@@ -370,6 +370,7 @@ export function promoteIntroFaceVideo(project) {
   if (!intro?.id) return project;
 
   const housing = isHousingTopic(project.topic || '');
+  const healthcare = isHealthcareTopic(project.topic || '');
   const faceScore = (asset) => {
     // Prefer title/alt evidence so aspirational harvest queries cannot promote
     // Archive war/bay stock as if it were a worried-couple apartment face.
@@ -414,6 +415,29 @@ export function promoteIntroFaceVideo(project) {
       // Generic video without face/apartment signal must not win the housing hook.
       return asset?.type === 'video' ? 0 : -1;
     }
+    // Healthcare: prefer AI radiology / clinician+screen / OR; demote talking-heads /
+    // longevity webinars that won healthcare-web3's hook despite clinical MRI in pool.
+    if (healthcare) {
+      const scoreBlob = evidence || blob;
+      if (/\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|maternity|kapparot|kapores|lecture\s+slides?|coursera|giphy\.com|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?)\b/i.test(scoreBlob)) {
+        return -20;
+      }
+      const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && scoreBlob.includes(w)).length;
+      if (
+        /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|ultrasound\s+(?:demo|demonstration))\b/i.test(scoreBlob)
+        || (
+          /\b(doctor|clinician|radiologist|physician)\b/i.test(scoreBlob)
+          && /\b(monitor|screen|mri|radiolog|scan)\b/i.test(scoreBlob)
+        )
+      ) {
+        return 12 + Math.min(2, topicHits);
+      }
+      if (/\b(hospital|clinic|mri|radiolog|doctor|nurse|patient|medical)\b/i.test(scoreBlob) && asset?.type === 'video') {
+        return 8 + Math.min(2, topicHits);
+      }
+      // Generic lecture/web video without clinical screen must not win the hook.
+      return asset?.type === 'video' ? 0 : -1;
+    }
     // Topic keyword overlap on intro beats generic faces.
     const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && blob.includes(w)).length;
     if (/face|person|people|portrait|close.?up|worried|shocked|reaction|eyes|direct.?camera/i.test(blob)) {
@@ -426,8 +450,9 @@ export function promoteIntroFaceVideo(project) {
   const videos = project.media.filter((m) => m.type === 'video');
   if (!videos.length) return project;
   const best = [...videos].sort((a, b) => faceScore(b) - faceScore(a))[0];
-  // Housing requires a real face/apartment signal (≥3); other topics keep ≥2.
-  const minPromote = housing ? 3 : 2;
+  // Housing requires a real face/apartment signal (≥3); healthcare clinical ≥8;
+  // other topics keep ≥2.
+  const minPromote = housing ? 3 : healthcare ? 8 : 2;
   if (!best || faceScore(best) < minPromote) return project;
 
   const bodySeg = project.script.find((s, i) => i > 0 && s.id !== intro.id)?.id;

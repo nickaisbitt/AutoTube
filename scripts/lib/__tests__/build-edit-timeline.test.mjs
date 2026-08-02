@@ -133,7 +133,40 @@ describe('introFaceTier', () => {
     expect(introFaceTier(chair, { airline: false, housing: true })).toBe(-1);
     expect(introFaceTier(tour, { airline: false, housing: true })).toBe(-1);
   });
+
+  it('tiers AI radiology / clinician+screen as healthcare opener (2)', () => {
+    const asset = {
+      query: 'ai radiology doctor monitor screen',
+      alt: 'clinician pointing at mri monitor ai radiology diagnosis',
+      title: 'clinician pointing at mri monitor ai radiology diagnosis',
+      url: 'https://vimeo.com/12345',
+      type: 'video',
+    };
+    expect(introFaceTier(asset, { healthcare: true })).toBe(2);
+  });
+
+  it('demotes pure talking-head / rejects maternity and news studio for healthcare intro', () => {
+    expect(introFaceTier({
+      alt: 'ai healthcare talking head explainer interview',
+      title: 'ai healthcare talking head explainer interview',
+      url: 'https://archive.org/download/talk/talk.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(0);
+    expect(introFaceTier({
+      alt: '1937 maternity ward hospital film archival',
+      title: '1937 maternity ward hospital film archival',
+      url: 'https://archive.org/download/mat/mat.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'news talking head studio interview anchor desk',
+      title: 'news talking head studio interview anchor desk',
+      url: 'https://example.com/news.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+  });
 });
+
 
 // ---------------------------------------------------------------------------
 // visualSubjectCluster — cluster detection

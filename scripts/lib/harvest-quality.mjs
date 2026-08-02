@@ -1137,9 +1137,11 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   const webNativeMotionVideos = uniqueVideos.filter(isWebNativeMotionSource);
   const webNativeMotionCount = webNativeMotionVideos.length;
   const liveMotionPresent = liveStockPresent || webNativeMotionCount > 0;
-  // The stock anti-slideshow floor stays tied to actual stock (keys or stock/archive
-  // motion) — web-native motion has its own floors below and must not be gated by it.
-  const stockKeyMotionAvailable = hasStockKeys || liveStockPresent;
+  // The Pexels/Pixabay anti-slideshow floor (16 unique topical videos) applies only
+  // when stock API keys are present. Keyless Archive.org + raw-web runs must not
+  // inherit that keyed floor — otherwise rejecting cookieless YouTube (correctly)
+  // makes every Archive-heavy housing harvest fail unique-video-floor(14/16).
+  const stockKeyMotionAvailable = hasStockKeys;
   const genericJunkVideos = uniqueVideos.filter((asset) => {
     const blob = `${asset.alt || ''} ${asset.query || ''} ${asset.source || ''} ${asset.title || ''} ${asset.url || ''}`;
     return isGenericStockJunk(blob, topicBlob);

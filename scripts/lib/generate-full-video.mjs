@@ -2598,7 +2598,7 @@ export function resolveMotionVolumeTargets({
   const keylessFloor = airline
     ? Math.max(16, segN * 3)
     : housing
-      ? Math.max(12, segN * 2)
+      ? Math.max(18, segN * 4)
       : Math.min(segN * 2, 6);
   return {
     mode: 'keyless',

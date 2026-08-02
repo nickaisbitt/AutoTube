@@ -36,6 +36,16 @@ Keyed vs keyless motion packs, topical per-segment floors, edit pacing, E2E auth
 | `npm run dod:check` | **PASS** — `deploy/server` absent; server-render sync OK |
 | `npm run lint` | **PASS** — `tsc --noEmit` exit 0 |
 
+### Closeout wave code (2026-08-02 — not product ≥7)
+
+Shipped on `cursor/web-harvest-assemble-auth-4556` while A3/A5 run gen+watch. **No ≥7 claimed from these commits alone.**
+
+| Commit | What |
+|--------|------|
+| `50d9a49` (A1) | Hard-reject housing crash/fire/council/chart B-roll (`housingOffTopicBrollReason`) |
+| `b95f210` (A2) | Housing intro prefers face/apartment over landscape Archive |
+| `e377f25` (A4) | Healthcare keyless soft-pass-motion + clinical relevance + vision split (cyber vs AI-medicine) |
+
 ### Wave 5 — narration hang fixes (current tip)
 
 Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d`):

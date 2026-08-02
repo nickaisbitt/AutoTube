@@ -447,6 +447,11 @@ export function softProbeYtDlpUrl(url = '', { timeoutMs = 20_000 } = {}) {
   return Boolean(String(result.stdout || '').trim());
 }
 
+/** YouTube clickbait thumbnails used as Ken Burns B-roll when the clip itself is blocked. */
+export function isYouTubeThumbnailStill(url = '') {
+  return /i\.ytimg\.com|img\.youtube\.com|yt3\.ggpht\.com/i.test(String(url || ''));
+}
+
 /**
  * Host reliability tier for web-motion selection.
  *
@@ -3175,6 +3180,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     }
     const n = (report.videoTopUp || []).length;
     const airline = isAirlineTopic(topicBlob);
+    const archiveClip = /Archive/i.test(clip.source || '');
     const safeQuery =
       clip.query
       || (airline ? 'airplane cabin passengers daylight' : `stock-video ${seg.title}`);
@@ -3183,6 +3189,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // clip on what it shows. Nothing aviation-flavoured is invented for empty alts —
     // a clip with no metadata must fail the relevance gate, not borrow a label.
     const providerMeta = providerEvidenceText(clip.title || '', { query: safeQuery, topicBlob });
+    // Archive items already cleared archiveEvidenceVerdict to enter the pool — treat
+    // that as run-local motion proof so post-top-up relevance cannot strip them while
+    // keeping YouTube talking-head harvest.
+    const motionRelevancePassed =
+      clip.motionRelevancePassed === true || archiveClip;
     project.media.push({
       id: `stock-video-${seg.id}-${tag}-${n}`,
       segmentId: seg.id,
@@ -3199,6 +3210,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       source: clip.source || 'Stock video pool',
       duration: 8,
       isFallback: false,
+      motionRelevancePassed,
     });
     used.add(key);
     need -= 1;
@@ -3207,7 +3219,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       segmentId: seg.id,
       url: injectedUrl,
       source: clip.source || 'pool',
-      motionRelevancePassed: clip.motionRelevancePassed === true,
+      motionRelevancePassed,
     });
     if (isYouTubeMotionCandidate(clip)) {
       report.motionSelectedYouTube = (report.motionSelectedYouTube || 0) + 1;
@@ -3275,9 +3287,22 @@ function isJunkHarvestUrl(url) {
 
 async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode = false } = {}) {
   const downloadUrl = resolveVideoDownloadUrl(asset, devServer);
-  const proxied = isProxiedClipUrl(downloadUrl);
+  const proxied = isProxiedClipUrl(downloadUrl) || isProxiedClipUrl(asset.url || '');
   const direct = isDirectVideoUrl(asset.url) && !proxied;
   const reasonPrefix = loopMode ? 'loop mode: ' : '';
+
+  // Browser harvest also wraps YouTube in /api/download-clip. Without cookies those
+  // clips are bot-gated and used to become clickbait thumbnail stills — reject here
+  // the same way CLI inject does, so Archive/direct/web non-YT can fill the slots.
+  const proxyCandidate = {
+    url: downloadUrl || asset.url,
+    sourceUrl: asset.sourceUrl || '',
+  };
+  const unreliable = unreliableWebProxyInjectReason(proxyCandidate);
+  if (unreliable) {
+    report.dropped.push({ url: asset.url, reason: unreliable });
+    return false;
+  }
 
   if (proxied) {
     sanitized.push({ ...asset, type: 'video', url: downloadUrl });
@@ -3355,6 +3380,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     }
 
     if (asset.type !== 'video') {
+      if (isYouTubeThumbnailStill(asset.url) || isYouTubeThumbnailStill(asset.thumbnailUrl)) {
+        report.dropped.push({ url: asset.url, reason: 'youtube-thumbnail-still' });
+        continue;
+      }
       sanitized.push(asset);
       continue;
     }
@@ -3363,7 +3392,24 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       continue;
     }
 
+    // Failed YouTube/TikTok must not launder into ytimg Ken Burns B-roll.
+    const keepFailReason = unreliableWebProxyInjectReason({
+      url: asset.url,
+      sourceUrl: asset.sourceUrl || '',
+    });
+    if (keepFailReason) {
+      // Already recorded in tryKeepVideoAsset when proxied; avoid duplicate noise.
+      if (!report.dropped.some((d) => d.url === asset.url && d.reason === keepFailReason)) {
+        report.dropped.push({ url: asset.url, reason: keepFailReason });
+      }
+      continue;
+    }
+
     const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '') || giphyStillUrl(asset);
+    if (isYouTubeThumbnailStill(thumbnailUrl)) {
+      report.dropped.push({ url: asset.url, thumbnailUrl, reason: 'youtube-thumbnail-still' });
+      continue;
+    }
     if (thumbnailUrl && !isJunkHarvestUrl(thumbnailUrl) && await canFetch(thumbnailUrl, { timeoutMs: 8000 })) {
       sanitized.push({
         ...asset,

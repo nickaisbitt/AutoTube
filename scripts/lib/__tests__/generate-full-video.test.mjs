@@ -19,6 +19,8 @@ import {
   isVisionBudgetSoft,
   hasYtDlpCookies,
   unreliableWebProxyInjectReason,
+  isYouTubeThumbnailStill,
+  restoreMotionRelevancePassed,
   motionCandidateHostRank,
   motionQueryPlan,
   planMotionFetchRounds,
@@ -555,10 +557,30 @@ describe('non-YouTube motion planning and ranking', () => {
       expect(unreliableWebProxyInjectReason(tiktok)).toBe(null);
       expect(unreliableWebProxyInjectReason(tiktok, { tiktokBlocked: true })).toBe('tiktok-circuit-open');
       expect(unreliableWebProxyInjectReason({ url: 'https://archive.org/download/a/a.mp4' })).toBe(null);
+      expect(isYouTubeThumbnailStill('https://i.ytimg.com/vi/abc/maxresdefault.jpg')).toBe(true);
+      expect(isYouTubeThumbnailStill('https://archive.org/download/a/still.jpg')).toBe(false);
     } finally {
       if (prevCookies === undefined) delete process.env.YTDLP_COOKIES;
       else process.env.YTDLP_COOKIES = prevCookies;
     }
+  });
+
+  it('restores Archive injects marked motionRelevancePassed after relevance strips them', () => {
+    const archive = {
+      id: 'stock-video-s1-p0-0',
+      segmentId: 's1',
+      type: 'video',
+      url: 'https://archive.org/download/housing/housing.mp4',
+      source: 'Archive.org live',
+      motionRelevancePassed: true,
+    };
+    const kept = restoreMotionRelevancePassed(
+      [],
+      [archive],
+      [{ segmentId: 's1', url: archive.url, motionRelevancePassed: true }],
+    );
+    expect(kept.media).toHaveLength(1);
+    expect(kept.media[0].url).toBe(archive.url);
   });
 });
 

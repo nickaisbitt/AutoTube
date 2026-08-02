@@ -226,11 +226,41 @@ function assignVideoSourceOffsets(clips) {
   });
 }
 
+/**
+ * Resolve the underlying media target for a fetch URL.
+ *
+ * Harvested web clips are proxied through our own endpoints and are often
+ * wrapped in cache-busting path prefixes such as
+ *   /api/download-clip/.autotube-<seg>-<n>/../../download-clip?url=<target>
+ * WHATWG URL parsing normalises the `..` segments back to /api/download-clip,
+ * so we can recover the real remote target from the `url` query parameter and
+ * key the on-disk cache by it. This guarantees:
+ *   - distinct remote targets → distinct cache files (no visual collapse), and
+ *   - identical remote targets → a single shared download (no wasteful re-fetch),
+ * regardless of the wrapper prefix that made the proxied URL string unique.
+ */
+function targetUrlForCache(url) {
+  let current = url;
+  for (let depth = 0; depth < 4; depth++) {
+    try {
+      const parsed = new URL(current, 'http://local');
+      if (!/\/api\/(download-clip|proxy-image)\b/.test(parsed.pathname)) break;
+      const inner = parsed.searchParams.get('url');
+      if (!inner) break;
+      current = inner;
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
 function cachePathForUrl(url, cacheDir, isVideo) {
-  const hash = createHash('sha1').update(url).digest('hex').slice(0, 16);
+  const cacheKey = targetUrlForCache(url);
+  const hash = createHash('sha1').update(cacheKey).digest('hex').slice(0, 16);
   let ext = '.jpg';
   try {
-    ext = extname(new URL(url, 'http://local').pathname) || ext;
+    ext = extname(new URL(cacheKey, 'http://local').pathname) || ext;
   } catch {
     /* ignore */
   }
@@ -267,9 +297,17 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
     return existsSync(abs) ? abs : null;
   }
 
+  // A harvested web clip is already an absolute URL pointing at one of our own
+  // proxy endpoints (often wrapped in a cache-busting path prefix). Re-wrapping
+  // it in another /api/download-clip call just yields a guaranteed 403 (its host
+  // is localhost, not an allowed media host) and would burn the retry budget, so
+  // fetch it directly.
+  const isProxied = /\/api\/(download-clip|proxy-image)\b/.test(rawUrl);
   const candidates = [];
   if (rawUrl.startsWith('/api/')) {
     candidates.push(`${devServer}${rawUrl}`);
+  } else if (isProxied) {
+    candidates.push(rawUrl);
   } else if (rawUrl.startsWith('http')) {
     if (isVideo) {
       candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);
@@ -288,11 +326,22 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
     if (existsSync(cached) && readFileSync(cached).length > 500) {
       return cached;
     }
-    try {
-      const path = await fetchToCache(fetchUrl, cached, { expectVideo: isVideo });
-      if (path) return path;
-    } catch {
-      /* try next candidate */
+    // Downloading a web clip through yt-dlp (/api/download-clip) is slow and
+    // fails transiently (throttling, cold extractor, partial download). A single
+    // miss must not silently drop this clip and force every slot onto the same
+    // fallback still — retry a few times before moving to the next candidate.
+    const isDownloadClip = fetchUrl.includes('/api/download-clip');
+    const attempts = isDownloadClip ? 3 : isVideo ? 2 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        const path = await fetchToCache(fetchUrl, cached, { expectVideo: isVideo });
+        if (path) return path;
+      } catch {
+        /* retry or fall through to next candidate */
+      }
+      if (attempt < attempts - 1) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      }
     }
   }
   return null;
@@ -435,6 +484,39 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
   const videoOffsets = new Map();
   const videoDurations = new Map();
 
+  // Spread fallbacks across the whole media pool. When many web clips fail to
+  // download at assemble time, a fixed-order search always lands on the first
+  // asset that encodes, so every failed slot renders the identical still (the
+  // "10+ frames of the same plane" collapse). Track per-asset usage so failed
+  // slots rotate through every distinct asset that is actually available.
+  const assetUseCount = new Map();
+  let lastUsedAssetKey = null;
+  function noteAssetUse(key) {
+    if (!key) return;
+    assetUseCount.set(key, (assetUseCount.get(key) || 0) + 1);
+    lastUsedAssetKey = key;
+  }
+  function orderedFallbacks(pool, excludeKey) {
+    const seen = new Set();
+    const list = [];
+    for (const a of pool) {
+      const k = assetKey(a);
+      if (!a || !k || k === excludeKey || seen.has(k)) continue;
+      seen.add(k);
+      list.push(a);
+    }
+    // Least-used assets first so distinct slots draw distinct visuals.
+    list.sort(
+      (a, b) => (assetUseCount.get(assetKey(a)) || 0) - (assetUseCount.get(assetKey(b)) || 0),
+    );
+    // Avoid a back-to-back repeat of the previous visual when a fresh
+    // alternative of equal priority exists.
+    if (list.length > 1 && assetKey(list[0]) === lastUsedAssetKey) {
+      list.push(list.shift());
+    }
+    return list;
+  }
+
   function resolveVideoSeek(asset, localSrc, durationSec, hintOffset = 0) {
     const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
     if (!isVideo) return 0;
@@ -481,32 +563,40 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       return ok;
     };
 
+    let usedAssetKey = null;
     let ok = await tryEncode(asset, 'primary');
+    if (ok) usedAssetKey = assetKey(asset);
     if (!ok) {
-      // Try other segment assets before any synthetic filler.
+      // Try other segment assets before any synthetic filler, rotating across
+      // the pool (least-recently-used first) so a run of failed web clips does
+      // not collapse every slot onto whichever asset encodes first.
       const primaryKey = assetKey(asset);
-      for (const alt of segMedia) {
-        if (!alt || assetKey(alt) === primaryKey) continue;
+      for (const alt of orderedFallbacks(segMedia, primaryKey)) {
         ok = await tryEncode(alt, 'alt');
         if (ok) {
-          console.log(`  [ffmpeg] ${label}: fell back to alternate segment asset`);
+          usedAssetKey = assetKey(alt);
+          console.log(
+            `  [ffmpeg] ${label}: fell back to alternate segment asset (${(usedAssetKey || '').slice(0, 8)})`,
+          );
           break;
         }
       }
     }
     if (!ok && projectMedia.length) {
-      // Any project media beats grain/black blinks.
+      // Any project media beats grain/black blinks — again rotated so distinct
+      // slots draw distinct visuals from the wider pool.
       const primaryKey = assetKey(asset);
       const tried = new Set(
         [asset, ...segMedia].map((a) => assetKey(a)).filter(Boolean),
       );
-      for (const alt of projectMedia) {
-        if (!alt) continue;
-        const k = assetKey(alt);
-        if (k === primaryKey || tried.has(k)) continue;
+      for (const alt of orderedFallbacks(projectMedia, primaryKey)) {
+        if (tried.has(assetKey(alt))) continue;
         ok = await tryEncode(alt, 'project');
         if (ok) {
-          console.log(`  [ffmpeg] ${label}: fell back to project media asset`);
+          usedAssetKey = assetKey(alt);
+          console.log(
+            `  [ffmpeg] ${label}: fell back to project media asset (${(usedAssetKey || '').slice(0, 8)})`,
+          );
           break;
         }
       }
@@ -539,6 +629,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     }
     lastSuccessfulClipPath = clipOut;
     if (options.sharedLastGoodRef) options.sharedLastGoodRef.path = clipOut;
+    if (usedAssetKey) noteAssetUse(usedAssetKey);
     clipPaths.push(clipOut);
     renderedDuration += durationSec;
     return true;

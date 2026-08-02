@@ -36,6 +36,7 @@ import {
   spawnSyncFailureReason,
   restoreMotionRelevancePassed,
   stripJunkDemoVideos,
+  stripJunkStillAssets,
   webMotionHostQueryVariants,
   webMotionQueryVariants,
   withDistinctProxyIdentity,
@@ -45,6 +46,7 @@ import { evaluateHarvestVolume } from '../harvest-quality.mjs';
 
 const AIRLINE_TOPIC = 'How a regional airline hid recurring cabin-pressure failures from passengers';
 const HOUSING_TOPIC = 'The landlord algorithm that evicted tenants from rent-stabilized apartments';
+const HOUSING_CRASH_TOPIC = 'The housing crash they said would never happen';
 
 describe('isAirlineRelevantClip', () => {
   it('rejects opaque Archive.org clips that only match a trusted airline query', () => {
@@ -1220,5 +1222,77 @@ describe('spawnSyncFailureReason', () => {
 
   it('returns no failure reason for status zero', () => {
     expect(spawnSyncFailureReason({ status: 0 }, 'server-render')).toBe('');
+  });
+});
+
+describe('housing off-topic crash/council/fire junk', () => {
+  it('isJunkStockClip rejects car-crash, fire, council, quake, chart, CAN TV, house-on-rock', () => {
+    const cases = [
+      { alt: 'dashcam car crash footage on highway', query: 'housing crash' },
+      { alt: 'traffic accident scene news footage', query: 'market crash' },
+      { alt: 'wildfire burning building fire footage', query: 'housing' },
+      { alt: 'city council meeting apartments approved', query: 'apartment' },
+      { alt: 'earthquake quake damage downtown', query: 'housing crisis' },
+      { alt: 'pie chart poll graphic lendingtree', query: 'rent prices' },
+      { alt: 'CAN TV station id bumper', query: 'public housing' },
+      {
+        alt: '3d floating house illustration',
+        url: 'https://neohomeloans.com/will-the-housing-market-crash.jpg',
+        query: 'housing crash',
+      },
+    ];
+    for (const clip of cases) {
+      expect(isJunkStockClip(clip, HOUSING_CRASH_TOPIC)).toBe(true);
+      expect(isJunkStockClip(clip, HOUSING_TOPIC)).toBe(true);
+    }
+    expect(
+      isJunkStockClip(
+        {
+          alt: 'worried couple reading eviction notice apartment interior',
+          query: 'eviction notice tenant',
+        },
+        HOUSING_CRASH_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
+  it('stripJunkStillAssets drops housing off-topic stills but keeps apartment faces', () => {
+    const project = {
+      topic: HOUSING_CRASH_TOPIC,
+      media: [
+        {
+          id: 'crash',
+          type: 'image',
+          url: 'https://cdn.example.com/car-crash-dashcam.jpg',
+          alt: 'car crash dashcam footage highway',
+          query: 'housing crash',
+        },
+        {
+          id: 'council',
+          type: 'image',
+          url: 'https://cdn.example.com/city-council.jpg',
+          alt: 'city council meeting public hearing',
+          query: 'apartment zoning',
+        },
+        {
+          id: 'rock',
+          type: 'image',
+          url: 'https://neohomeloans.com/housing-market-crash.jpg',
+          alt: 'house on a rock 3d illustration',
+          query: 'housing crash',
+        },
+        {
+          id: 'tenant',
+          type: 'image',
+          url: 'https://cdn.example.com/tenant-letter.jpg',
+          alt: 'worried tenant reading eviction notice apartment interior',
+          query: 'eviction notice',
+        },
+      ],
+    };
+    const report = {};
+    stripJunkStillAssets(project, report);
+    expect(project.media.map(({ id }) => id)).toEqual(['tenant']);
+    expect(report.junkStillDropped.length).toBeGreaterThanOrEqual(3);
   });
 });

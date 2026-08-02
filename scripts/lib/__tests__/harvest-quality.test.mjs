@@ -7,6 +7,7 @@ import {
   evaluateHarvestVolumeWithSoftPass,
   filterAssetsByRelevance,
   hasAirlineAviationEvidence,
+  housingOffTopicBrollReason,
   isGenericStockJunk,
   isWebNativeMotionSource,
   keylessArchiveHumanPortraitScore,
@@ -15,6 +16,7 @@ import {
 } from '../harvest-quality.mjs';
 
 const AIRLINE_TOPIC = 'Hidden cabin pressure failures at regional airlines';
+const HOUSING_TOPIC = 'The housing crash they said would never happen';
 
 describe('keyless archive human portrait topical boost', () => {
   const segment = {
@@ -447,5 +449,34 @@ describe('proxied download-clip web clips (Bing/Google/DuckDuckGo) count as avia
     expect(result.pass).toBe(true);
     expect(result.reason).toMatch(/^soft-pass-motion-airline\(/);
     expect(result.reason).not.toMatch(/aviation-strong-floor|thin/);
+  });
+});
+
+describe('housing off-topic B-roll rejects', () => {
+  it('hard-rejects crash/fire/council/quake/chart/CAN-TV/house-on-rock junk', () => {
+    const cases = [
+      'dashcam car crash footage highway pile-up',
+      'traffic accident scene daylight news',
+      'wildfire smoke aerial fire footage',
+      'city council meeting apartments approved',
+      'earthquake quake damage newsreel',
+      'pie chart poll graphic lendingtree infographic',
+      'CAN TV station id bumper',
+      '3d house on a rock neohomeloans illustration',
+    ];
+    for (const alt of cases) {
+      expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);
+      expect(isGenericStockJunk(alt, HOUSING_TOPIC)).toBe(true);
+    }
+  });
+
+  it('does not reject lived-in apartment B-roll or bare market-crash wording', () => {
+    expect(
+      housingOffTopicBrollReason('worried couple reading eviction notice apartment', HOUSING_TOPIC),
+    ).toBe('');
+    expect(
+      housingOffTopicBrollReason('housing market crash documentary apartment tenants', HOUSING_TOPIC),
+    ).toBe('');
+    expect(housingOffTopicBrollReason('car crash dashcam footage', AIRLINE_TOPIC)).toBe('');
   });
 });

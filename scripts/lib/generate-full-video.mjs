@@ -43,6 +43,7 @@ import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
   evaluateHarvestVolumeWithSoftPass,
+  housingOffTopicBrollReason,
   isOffBrandVisual,
   isGenericStockJunk,
   isVolumePaddingAsset,
@@ -994,14 +995,9 @@ function stripJunkStillAssets(project, report) {
       || isOffBrandVisual(blob, topicBlob)
       || isGenericStockJunk(blob, topicBlob)
       || (isAirlineTopic(topicBlob) && AIRLINE_OFF_TOPIC_RE.test(blob))
-      // Housing crash stories: drop 3D “house on a rock” / lender-blog illustrations
-      // that get Ken-Burned into the timeline 5–6× and tank visualVariety.
-      || (
-        isHousingTopic(topicBlob)
-        && /neohomeloans|house\s+on\s+(?:a\s+)?rock|floating\s+(?:rock|island)|3d\s+house|housing\s+market\s+crash\.jpg|will-the-housing-market-crash/i.test(
-          blob,
-        )
-      );
+      // Housing: crash/fire/council/quake/chart/CAN-TV/house-on-rock stills
+      // Ken-Burn into the timeline and tank visualVariety (web7/web14).
+      || Boolean(housingOffTopicBrollReason(blob, topicBlob));
     if (junk) {
       report.junkStillDropped = report.junkStillDropped || [];
       report.junkStillDropped.push({ url: asset.url, reason: 'off-topic/web still junk' });
@@ -1739,15 +1735,18 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
       blob,
     );
   }
+  // Non-cyber healthcare (AI-medicine, clinical change stories): clinical motion first.
+  if (isHealthcareTopic(topicBlob)) {
+    return /hospital|patient|clinic|nurse|doctor|medical|medicine|healthcare|corridor|ward|mri|ct\s*scan|radiolog|diagnos|telemedicine|telehealth|ehr|emr|ambulance|icu|exam\s*room|waiting\s*room|stethoscope|ai|algorithm|laptop|computer|worried|family/.test(
+      blob,
+    );
+  }
   const topical =
     /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|worried|shock|texting|ransom|leak|breach|records?/.test(
       blob,
     );
   // Office/business/architecture alone is not cyber-relevant.
   if (topical) return true;
-  if (isHealthcareTopic(topicBlob) && /hospital|patient|clinic|nurse|doctor|medical|corridor|ward/.test(blob)) {
-    return true;
-  }
   return false;
 }
 
@@ -1757,6 +1756,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   const blob = `${clip.alt || ''} ${clip.title || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''} ${clip.query || ''}`.toLowerCase();
   const topicText = String(topicBlob || '').toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
+  if (housingOffTopicBrollReason(blob, topicBlob)) return true;
   if (isGenericStockJunk(blob, topicBlob)) return true;
   const covidTopic = /\b(covid|coronavirus|pandemic|mask mandate|face masks?|surgical masks?|n95)\b/.test(topicText);
   if (
@@ -2031,22 +2031,39 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 2), ...faces, ...topical.slice(2)];
     return withFillers(base);
   }
-  if (isHealthcareTopic(topicBlob) && cyberTopic) {
+  // Broad healthcare (AI-medicine, hospital, clinical) — not only cyber breaches.
+  // Cyber topics keep records/server B-roll; general healthcare prefers clinical motion.
+  if (isHealthcareTopic(topicBlob)) {
     const faces = [
       'worried patient looking at phone',
       'stressed nurse looking at computer',
-      'doctor shocked at laptop screen',
+      'doctor reviewing laptop screen hospital',
       'family worried hospital waiting room',
       'person reading medical bill phone',
+      'doctor explaining results to patient',
     ];
-    const topical = [
-      'hospital corridor empty hallway',
-      'medical records laptop paperwork',
-      'hospital computer workstation',
-      'server room data center racks',
-      'hands typing medical keyboard',
+    const clinical = [
+      'hospital corridor hallway people',
+      'nurse workstation hospital computer',
+      'doctor patient exam room consultation',
+      'medical imaging mri ct scan',
+      'hospital waiting room patients',
       ...(preferBright ? ['hospital exterior building day'] : ['hospital exterior building night']),
     ];
+    const cyberPack = cyberTopic || isHealthcareCyberTopic(topicBlob)
+      ? [
+          'medical records laptop paperwork',
+          'hospital computer workstation',
+          'server room data center racks',
+          'hands typing medical keyboard',
+        ]
+      : [
+          'ai medical diagnosis computer screen',
+          'radiologist reviewing scan monitors',
+          'telemedicine doctor video call',
+          'electronic health record laptop',
+        ];
+    const topical = [...clinical, ...cyberPack];
     const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
     return withFillers(base);
   }
@@ -2334,6 +2351,32 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'neighborhood housing survey',
 ];
 
+/** Short Archive.org subjects for hospital / clinical / AI-medicine keyless runs. */
+const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
+  'hospital corridor',
+  'hospital ward',
+  'nurse station',
+  'doctor patient',
+  'medical examination',
+  'hospital waiting room',
+  'ambulance emergency',
+  'operating room',
+  'medical laboratory',
+  'xray radiology',
+  'mri scanner',
+  'intensive care',
+  'nursing care',
+  'hospital exterior',
+  'medical training film',
+  'public health film',
+  'clinical diagnosis',
+  'telemedicine',
+  'electronic medical record',
+  'patient care',
+  'stethoscope doctor',
+  'hospital hallway',
+];
+
 const ARCHIVE_VARIANT_LEAD_STOPWORDS =
   /^(?:worried|shocked|stressed|nervous|scared|crying|real|documentary|authentic|news|bright|sunny|daylight|well|person|people|couple|man|woman|elderly|family|close)\b/i;
 
@@ -2487,6 +2530,7 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   const webHostQueries = webMotionHostQueryVariants(webQueries);
   const airline = isAirlineTopic(topicBlob);
   const housing = isHousingTopic(topicBlob);
+  const healthcare = isHealthcareTopic(topicBlob);
   let boost;
   if (keyed) {
     boost = airline ? KEYED_AIRLINE_MOTION_QUERIES : housing ? KEYED_HOUSING_MOTION_QUERIES : [];
@@ -2495,7 +2539,9 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
       ? ARCHIVE_AIRLINE_MOTION_QUERIES
       : housing
         ? ARCHIVE_HOUSING_MOTION_QUERIES
-        : [...archiveShortQueryVariants(base), ...archiveTopicSubjectQueries(topicBlob, 10)];
+        : healthcare
+          ? ARCHIVE_HEALTHCARE_MOTION_QUERIES
+          : [...archiveShortQueryVariants(base), ...archiveTopicSubjectQueries(topicBlob, 10)];
   }
   boost = boost.filter(isSafeStockMotionQuery);
 
@@ -2610,8 +2656,9 @@ export function resolveMotionVolumeTargets({
   const segN = Math.max(1, segmentCount);
   const airline = isAirlineTopic(topicBlob);
   const housing = isHousingTopic(topicBlob);
+  const healthcare = isHealthcareTopic(topicBlob);
   if (hasStockKeys) {
-    const aggressive = airline || housing;
+    const aggressive = airline || housing || healthcare;
     const stockFloor = Math.max(aggressive ? 24 : 16, segN * (aggressive ? 5 : 4));
     const minVideos = Math.min(
       aggressive ? 42 : 28,
@@ -2635,13 +2682,16 @@ export function resolveMotionVolumeTargets({
     ? Math.max(16, segN * 3)
     : housing
       ? Math.max(18, segN * 4)
-      : Math.min(segN * 2, 6);
+      : healthcare
+        ? Math.max(16, segN * 3)
+        : Math.min(segN * 2, 6);
+  const chaseHard = airline || housing || healthcare;
   return {
     mode: 'keyless',
     minVideos: keylessFloor,
-    stockNeed: airline || housing ? Math.max(0, keylessFloor - stockApiVideoCount) : 0,
-    perSegTarget: airline || housing ? 3 : 2,
-    introTarget: airline || housing ? 4 : 2,
+    stockNeed: chaseHard ? Math.max(0, keylessFloor - stockApiVideoCount) : 0,
+    perSegTarget: chaseHard ? 3 : 2,
+    introTarget: chaseHard ? 4 : 2,
     aggressive: false,
   };
 }
@@ -2751,6 +2801,7 @@ export {
   isAirlineRelevantClip,
   airlineQueryVisionBypass,
   stripJunkDemoVideos,
+  stripJunkStillAssets,
   stripUnsafeMediaAssets,
   injectCyberStockStills,
 };
@@ -2814,10 +2865,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   // Keyed: stock providers plus additive raw-web motion.
   // Keyless: raw web is the primary credential-free path, with Archive.org recall
   // from distinct subjects and sweeps — never from relaxing evidence gates below.
-  const aggressiveTopic = airlineTopicEarly || housingTopic;
+  const healthcareTopicEarly = isHealthcareTopic(topicBlob);
+  const aggressiveTopic = airlineTopicEarly || housingTopic || healthcareTopicEarly;
   const queryCap = hasStockKeysEarly
     ? (aggressiveTopic ? 30 : 20)
-    : (airlineTopicEarly ? 44 : housingTopic ? 34 : 26);
+    : (airlineTopicEarly ? 44 : housingTopic || healthcareTopicEarly ? 34 : 26);
   const liveCap = hasStockKeysEarly ? 200 : 140;
   const perQueryCap = hasStockKeysEarly ? 8 : 10;
   const perProviderPage = hasStockKeysEarly && aggressiveTopic ? 16 : 10;
@@ -3119,6 +3171,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
 
   const faceScore = (clip) => {
     const blob = `${clip.query || ''} ${clip.alt || ''} ${clip.title || ''}`.toLowerCase();
+    // Housing off-topic must hard-reject (-20) before genericStockJunk (-4) and
+    // before Archive body-filler scores (0–1), or crash/council/fire slips through.
+    if (isHousingTopic(topicBlob) && housingOffTopicBrollReason(blob, topicBlob)) return -20;
     if (isGenericStockJunk(blob, topicBlob)) return -4;
     if (
       !isWorkplaceTopic(topicBlob)
@@ -3148,12 +3203,6 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
     }
     if (isHousingTopic(topicBlob)) {
-      // Public-meeting / disaster / station-ID / chart junk masquerades as housing B-roll.
-      if (
-        /\b(city\s+council|council\s+meeting|agenda|public\s+hearing|ribbon\s+cutting|earthquake|quake|tsunami|can\s*tv|station\s+id|satellite\s+map|apartments?\s+approved|digital\s+globe|pie\s+chart|lending\s*tree|poll\s+graphic|infographic)\b/i.test(blob)
-      ) {
-        return -20;
-      }
       // Archive body filler MUST be scored before landscape/newsreel demotes.
       // Enriched Archive descriptions often contain "aerial/landscape/newsreel" and
       // were hard-rejecting (-8) every Archive candidate on web11 (0 Archive inject
@@ -3161,7 +3210,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/Archive/i.test(clip.source || '')) {
         return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 1 : 0;
       }
-      if (/\b(landscape|mountain|helicopter|aerial\s+view|wildfire|title\s+card|newsreel)\b/i.test(blob)) {
+      if (/\b(landscape|mountain|helicopter|aerial\s+view|title\s+card|newsreel)\b/i.test(blob)) {
         return -8;
       }
       // Face-forward / lived-in housing beats charts, landscapes, and title cards.

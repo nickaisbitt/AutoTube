@@ -101,6 +101,24 @@ export const PRESS_MIC_PODCAST_FILLER_RE =
 export const HOUSING_STOCK_LOOP_RE =
   /\b(moving boxes|packing boxes|cardboard boxes|tenant moving boxes|boxes hallway|stress(ed)? (woman|man|person) apartment|for rent sign only|empty apartment room)\b/i;
 
+
+/**
+ * Off-topic disaster / civic / chart B-roll that tanks housing watch scores.
+ * "Housing crash" stories scrape car-crash, wildfire, council, quake, and pie-chart
+ * clips; hard-reject those — never bare "crash" (market-crash query echo).
+ */
+export const HOUSING_OFF_TOPIC_BROLL_RE =
+  /\b(?:car\s+crash|traffic\s+accident|auto(?:mobile)?\s+accident|dashcam(?:\s+(?:crash|footage|video))?|vehicle\s+(?:collision|wreck|crash)|wrecked\s+car|highway\s+accident|road\s+accident|pile[\s-]?up|car\s+wreck|crash\s+footage|accident\s+(?:footage|scene)|wildfire|forest\s+fires?|house\s+fire|building\s+(?:on\s+)?fire|burning\s+(?:building|house|home)|fire\s+footage|city\s+council|council\s+meeting|city\s+hall|public\s+(?:hearing|meeting)|town\s+hall(?:\s+meeting)?|board\s+meeting|ribbon\s+cutting|apartments?\s+approved|earthquake|quake|tsunami|pie\s+chart|poll\s+graphic|opinion\s+poll|infographic|lending\s*tree|bar\s+chart|can\s*tv|station\s+id|satellite\s+map|digital\s+globe|house\s+on\s+(?:a\s+)?rock|floating\s+(?:rock|island)|3d\s+house|neohomeloans|housing\s+market\s+crash\.jpg|will-the-housing-market-crash)\b/i;
+
+/** Reason string when housing harvest media is disaster/meeting/chart junk. */
+export function housingOffTopicBrollReason(haystack, contextText = '') {
+  if (!isHousingTopic(contextText)) return '';
+  if (HOUSING_OFF_TOPIC_BROLL_RE.test(String(haystack || ''))) {
+    return 'housing off-topic disaster/meeting/chart B-roll';
+  }
+  return '';
+}
+
 /** Street-barber / random lifestyle clips that read as off-topic on investigation topics. */
 export const RANDOM_LIFESTYLE_FILLER_RE =
   /\b(street barber|barber shop|haircut street|musician busking|concert crowd phone|stadium crowd|sports crowd|cheering fans|food truck|coffee shop latte|band playing|orchestra playing|jazz band|live band|musicians on stage)\b/i;
@@ -444,6 +462,8 @@ export function genericStockJunkReason(haystack, contextText = '') {
   if (isHousingTopic(ctx) && HOUSING_STOCK_LOOP_RE.test(h) && !/\b(eviction notice|court|lease|landlord|tenant|letter|keys)\b/i.test(h)) {
     return 'generic housing/moving-box loop stock';
   }
+  const housingOffTopic = housingOffTopicBrollReason(h, ctx);
+  if (housingOffTopic) return housingOffTopic;
   if (
     RANDOM_LIFESTYLE_FILLER_RE.test(h)
     && !/\b(concert|ticket|scalp|music festival|barber)\b/i.test(ctx)

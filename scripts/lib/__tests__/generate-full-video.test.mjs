@@ -441,10 +441,11 @@ describe('motionQueryPlan', () => {
       expect.arrayContaining(['apartment kitchen interior daylight', 'apartment building hallway doors']),
     );
     const keyless = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
+    // Keyless housing is always face-first (exteriors after people/apartment lived-in).
     expect(keyless.queries.slice(0, 3)).toEqual([
-      'apartment building exterior city',
-      'for rent sign house porch',
       'worried couple reading letter home',
+      'stressed family apartment interior',
+      'person holding eviction notice paper',
     ]);
     expect(keyless.queries).toEqual(
       expect.arrayContaining(['apartment building', 'apartment interior', 'public housing']),

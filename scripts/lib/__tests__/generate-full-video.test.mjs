@@ -608,8 +608,8 @@ describe('non-YouTube motion planning and ranking', () => {
       expect(hasYtDlpCookies()).toBe(false);
       expect(isTikTokMotionCandidate(tiktok)).toBe(true);
       expect(unreliableWebProxyInjectReason(youtube)).toBe('youtube-without-cookies');
-      expect(unreliableWebProxyInjectReason(tiktok)).toBe(null);
-      expect(unreliableWebProxyInjectReason(tiktok, { tiktokBlocked: true })).toBe('tiktok-circuit-open');
+      expect(unreliableWebProxyInjectReason(tiktok)).toBe('tiktok-without-cookies');
+      expect(unreliableWebProxyInjectReason(tiktok, { tiktokBlocked: true })).toBe('tiktok-without-cookies');
       expect(unreliableWebProxyInjectReason({ url: 'https://archive.org/download/a/a.mp4' })).toBe(null);
       expect(isYouTubeThumbnailStill('https://i.ytimg.com/vi/abc/maxresdefault.jpg')).toBe(true);
       expect(isYouTubeThumbnailStill('https://archive.org/download/a/still.jpg')).toBe(false);

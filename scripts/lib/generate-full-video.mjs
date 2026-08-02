@@ -425,6 +425,12 @@ export function unreliableWebProxyInjectReason(candidate = {}, gate = {}) {
   if (isYouTubeMotionCandidate(candidate) && !hasYtDlpCookies()) {
     return 'youtube-without-cookies';
   }
+  // TikTok soft-probes can pass while assemble still lands watermarked talking-heads
+  // (housing-web9: pink-phone finance bro ×3 → raw 5.4). Without cookies, skip and
+  // let Archive/direct/Vimeo/DM fill volume — same doomed-proxy policy as YouTube.
+  if (isTikTokMotionCandidate(candidate) && !hasYtDlpCookies()) {
+    return 'tiktok-without-cookies';
+  }
   if (isTikTokMotionCandidate(candidate) && gate.tiktokBlocked) {
     return 'tiktok-circuit-open';
   }
@@ -3142,19 +3148,19 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
     }
     if (isHousingTopic(topicBlob)) {
-      // Public-meeting / disaster / station-ID junk masquerades as "apartment" Archive.
+      // Public-meeting / disaster / station-ID / chart junk masquerades as housing B-roll.
       if (
-        /\b(city\s+council|council\s+meeting|agenda|public\s+hearing|ribbon\s+cutting|earthquake|quake|tsunami|can\s*tv|station\s+id|satellite\s+map|apartments?\s+approved|digital\s+globe)\b/i.test(blob)
+        /\b(city\s+council|council\s+meeting|agenda|public\s+hearing|ribbon\s+cutting|earthquake|quake|tsunami|can\s*tv|station\s+id|satellite\s+map|apartments?\s+approved|digital\s+globe|pie\s+chart|lending\s*tree|poll\s+graphic|infographic)\b/i.test(blob)
       ) {
         return -20;
       }
       if (/\b(landscape|mountain|helicopter|aerial\s+view|wildfire|title\s+card|newsreel)\b/i.test(blob)) {
         return -8;
       }
-      // Archive apartment tags are mostly meetings/ribbon-cuttings — demote before
-      // keyword boosts so they cannot win intro slots over web face/apt clips.
+      // Opaque Archive stays rejected. Strong apartment/tenant Archive is body filler
+      // (score 1 < intro gate 2) after web face clips — not talking-head TikTok pads.
       if (/Archive/i.test(clip.source || '')) {
-        return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? -2 : -6;
+        return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 1 : -6;
       }
       // Face-forward / lived-in housing beats charts, landscapes, and title cards.
       if (

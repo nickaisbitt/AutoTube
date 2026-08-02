@@ -293,6 +293,12 @@ export function buildEditTimeline(project, options = {}) {
   const MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC = 2.5;
   const ENOUGH_URLS_FOR_SNAPPY_CUTS = 3;
   const RECENT_URL_WINDOW = 4;
+  /** Rich pool: ≥12 unique URLs (or ≥2× segment count) → tighter hold cap and anti-reuse. */
+  const RICH_POOL_URL_THRESHOLD = 12;
+  const MAX_BODY_HOLD_RICH_POOL_SEC = 1.5;
+  /** In the first 15s of a rich-pool timeline, prefer ≤1 use per URL when alternatives exist. */
+  const RICH_POOL_FIRST_WINDOW_SEC = 15;
+  const RICH_POOL_STRICT_CAP = 1;
   // Thin-pool over-reuse guard. A source URL may appear at most twice inside the
   // opening window (and, for short videos, across the whole timeline) whenever
   // an unused alternative still exists — this defeats the "same clip ×4 in the
@@ -308,7 +314,15 @@ export function buildEditTimeline(project, options = {}) {
   // The look-back must always leave candidates: with a 4-URL pool a 4-wide
   // window bans everything and the previous cut freezes for the whole segment.
   const uniqueUrlCount = new Set(globalPool.map((a) => urlKey(a)).filter(Boolean)).size;
-  const recentUrlWindow = Math.max(0, Math.min(RECENT_URL_WINDOW, uniqueUrlCount - 2));
+  const segmentCount = (project.script || []).length;
+  // Require ≥8 absolute URLs for the relative leg so thin 1-segment pools
+  // (e.g. 6 clips over 150s) don't trigger rich-pool caps.
+  const isRichPool = uniqueUrlCount >= RICH_POOL_URL_THRESHOLD
+    || (segmentCount > 0 && uniqueUrlCount >= 8 && uniqueUrlCount >= 2 * segmentCount);
+  // Widen the look-back window for rich pools so the same clip can't re-surface
+  // after only 4 cuts; leave ≥2 candidates always reachable.
+  const richPoolWindow = isRichPool ? Math.min(RECENT_URL_WINDOW + 2, uniqueUrlCount - 2) : RECENT_URL_WINDOW;
+  const recentUrlWindow = Math.max(0, Math.min(richPoolWindow, uniqueUrlCount - 2));
   // Keep requested cut for pacing. Dynamic hard-cap: generic topics top out at
   // 6; airline stories are stricter and lengthen cuts rather than looping.
   const HARD_MAX_REUSE_CEIL = topicIsAirline && coldEval && uniqueVideos.length >= 20
@@ -343,6 +357,10 @@ export function buildEditTimeline(project, options = {}) {
     }
     if (uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS) {
       effectiveCut = Math.min(effectiveCut, MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC);
+    }
+    // Rich pool: tighter hold so a single download-clip source can't dominate.
+    if (isRichPool) {
+      effectiveCut = Math.min(effectiveCut, MAX_BODY_HOLD_RICH_POOL_SEC);
     }
   } else {
     hardMaxReuse = HARD_MAX_REUSE_CEIL;
@@ -618,7 +636,7 @@ export function buildEditTimeline(project, options = {}) {
       : [];
     const segEnoughUrls = usableBodyVideos.length >= ENOUGH_URLS_FOR_SNAPPY_CUTS;
     const segMaxBodyHoldSec = segEnoughUrls
-      ? MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC
+      ? (isRichPool ? MAX_BODY_HOLD_RICH_POOL_SEC : MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC)
       : MAX_BODY_CUT_THIN_SEC;
     let t = 0;
     let ai = 0;
@@ -703,6 +721,16 @@ export function buildEditTimeline(project, options = {}) {
           && key
           && withinStrictReuseWindow
           && uses >= STRICT_REUSE_CAP
+        ) {
+          return false;
+        }
+        // Rich pool: tighter ≤1 reuse in first 15s when alternatives exist.
+        if (
+          !relaxed
+          && key
+          && isRichPool
+          && globalStartSec < RICH_POOL_FIRST_WINDOW_SEC
+          && uses >= RICH_POOL_STRICT_CAP
         ) {
           return false;
         }

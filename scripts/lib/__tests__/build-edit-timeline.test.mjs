@@ -356,3 +356,122 @@ describe('buildEditTimeline: strict reuse cap (thin keyless pools)', () => {
     expect(counts.get('sim') || 0).toBeLessThanOrEqual(counts.get('fresh') || 0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildEditTimeline: rich-pool short holds (≥12 unique URLs)
+// ---------------------------------------------------------------------------
+
+function makeRichPool(n, { topic = 'airline emergency mystery', segDur = 60 } = {}) {
+  return {
+    topic,
+    script: [
+      {
+        id: 'seg1',
+        type: 'body',
+        duration: segDur,
+        narration: 'The airline flight faced an emergency as the aircraft cabin filled with worried passengers and crew members.',
+        title: 'Body',
+      },
+    ],
+    media: Array.from({ length: n }, (_, i) => ({
+      id: `v${i}`,
+      segmentId: 'seg1',
+      type: 'video',
+      url: `https://example.com/clip${i}.mp4`,
+      alt: `airline b-roll clip ${i} cabin aircraft passenger`,
+      query: 'airline aircraft cabin',
+      source: 'Pexels Videos',
+    })),
+  };
+}
+
+describe('buildEditTimeline: rich-pool short holds', () => {
+  it('caps body holds at ≤1.5s when pool has ≥12 unique video URLs', () => {
+    const project = makeRichPool(14, { segDur: 30 });
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    expect(timeline.length).toBeGreaterThan(0);
+    // With ≥12 URLs, effectiveCut ≤ 1.5s → ≥12 cuts in 30s, not 3–5 long holds
+    const nonFinal = timeline.slice(0, -1);
+    for (const entry of nonFinal) {
+      expect(entry.endSec - entry.startSec).toBeLessThanOrEqual(1.6); // 1.5 + float tolerance
+    }
+    // At 1.5s max per cut, 30s → at least 18 entries
+    expect(timeline.length).toBeGreaterThanOrEqual(18);
+  });
+
+  it('caps body holds at ≤1.5s when pool is ≥2× segment count (relative threshold)', () => {
+    // 3 script segments, 8 unique clips (8 ≥ 8 minimum AND 8 ≥ 2×3=6 → rich pool)
+    const project = {
+      topic: 'airline emergency mystery',
+      script: [
+        { id: 'seg1', type: 'intro', duration: 5, narration: 'Hook here.', title: 'Intro' },
+        { id: 'seg2', type: 'body', duration: 20, narration: 'The airline flight faced an emergency with worried passengers.', title: 'Body' },
+        { id: 'seg3', type: 'outro', duration: 5, narration: 'Subscribe.', title: 'Outro' },
+      ],
+      media: Array.from({ length: 8 }, (_, i) => ({
+        id: `v${i}`,
+        segmentId: i < 4 ? 'seg2' : 'seg2',
+        type: 'video',
+        url: `https://example.com/clip${i}.mp4`,
+        alt: `airline clip ${i} aircraft cabin passenger face`,
+        query: 'airline aircraft',
+        source: 'Pexels Videos',
+      })),
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const bodyEntries = timeline.filter((e) => e.segmentId === 'seg2');
+    const nonFinal = bodyEntries.slice(0, -1);
+    for (const entry of nonFinal) {
+      expect(entry.endSec - entry.startSec).toBeLessThanOrEqual(1.6);
+    }
+    // 20s body at ≤1.5s → at least 12 body entries
+    expect(bodyEntries.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it('does NOT apply rich-pool short-hold cap to a thin pool (< 12 and < 2× seg count)', () => {
+    // 4 unique clips for a body segment — thin pool, should use up to 2.5s holds
+    const project = makeRichPool(4, { segDur: 20 });
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    // Thin pool: hardMaxReuse will stretch holds beyond 1.5s to fill coverage
+    // when all clips hit their per-segment reuse limit; let it — just verify
+    // we still get full coverage.
+    expect(timeline.length).toBeGreaterThan(0);
+    expect(timeline[timeline.length - 1].endSec).toBeGreaterThanOrEqual(19.9);
+  });
+
+  it('no single URL appears more than once in the first 15s of a rich pool', () => {
+    // 16 unique clips, 45s body — rich pool: first 15s must cycle through
+    // fresh clips without repeating any URL.
+    const project = makeRichPool(16, { segDur: 45 });
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const countsFirst15 = reuseCounts(timeline, 15);
+    const maxReuseFirst15 = countsFirst15.size ? Math.max(...countsFirst15.values()) : 0;
+    expect(maxReuseFirst15).toBeLessThanOrEqual(1);
+  });
+
+  it('≤2 cap still holds in first 30s for rich pool (existing contract)', () => {
+    const project = makeRichPool(16, { segDur: 60 });
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const counts30 = reuseCounts(timeline, 30);
+    expect(Math.max(...counts30.values())).toBeLessThanOrEqual(2);
+  });
+
+  it('rich-pool hold cap does not starve coverage on a rich airline-web scenario (26 clips)', () => {
+    // Matches the failing audit scenario: 26 web motion clips injected.
+    const project = makeRichPool(26, { segDur: 120 });
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    // Full coverage
+    expect(timeline[timeline.length - 1].endSec).toBeGreaterThanOrEqual(119.9);
+    // Body holds ≤ 1.5s throughout
+    const nonFinal = timeline.slice(0, -1);
+    for (const entry of nonFinal) {
+      expect(entry.endSec - entry.startSec).toBeLessThanOrEqual(1.6);
+    }
+    // First 15s: each URL used at most once
+    const countsFirst15 = reuseCounts(timeline, 15);
+    expect(Math.max(...countsFirst15.values())).toBeLessThanOrEqual(1);
+    // First 30s: each URL used at most twice
+    const counts30 = reuseCounts(timeline, 30);
+    expect(Math.max(...counts30.values())).toBeLessThanOrEqual(2);
+  });
+});

@@ -1,12 +1,12 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-02T21:33Z** — branch `cursor/web-harvest-assemble-auth-4556` (W2-PACK long-wait finalize: pack **PARTIAL**).
+Last updated: **2026-08-02T21:53Z** — branch `cursor/web-harvest-assemble-auth-4556` (W2-PACK 90m poll finalize: **PACK_OPEN**).
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 
 **Honest score rule:** Do **not** claim brutal raw ≥7 / upload-ready YES unless a fresh `WATCH_REPORT.md` shows it. Airline-web8 remains the only closed ≥7 topic (raw **7.8**). Housing and healthcare have **no** fresh ≥7.
 
-**W2-PACK (2026-08-02T21:33Z):** **PARTIAL** — airline packed at raw **7.8** / upload-ready YES under `test-recordings/dod-proof/airline/` (SHA256 `338468b544d4…`). Housing tip-best this wave **5.2** (housing-web18); hist **5.8** (web5). Healthcare best **5.2** (web1); web4–web7 mostly `HARVEST_VOLUME_FAIL` (no new ≥7 MP4). Floors **not** lowered. See gitignored `test-recordings/dod-proof/SUMMARY.txt` + `/tmp/dod-agents/W2-PACK.md`.
+**W2-PACK (2026-08-02T21:53Z):** **PACK_OPEN** — airline still packed at raw **7.8** / upload-ready YES under `test-recordings/dod-proof/airline/` (NOTES + SHA256 `338468b544d4…`). Housing tip-best this wave **5.2** (housing-web18); web19 **4.4**; web20 **4.8**; hist **5.8** (web5). Healthcare best **5.2** (web1); tip watched **4.6** (web3); web4–web7 `HARVEST_VOLUME_FAIL` / SCRIPT_TIMEOUT. No canonical housing/healthcare promote. §B 9.3 stretch **not started**. Floors **not** lowered. See gitignored `test-recordings/dod-proof/SUMMARY.txt` + `/tmp/dod-agents/W2-PACK.md` (`PACK_OPEN`).
 
 **Keys:** variable names, presence on this VM, and which gates each key unlocks → [`docs/ENV_DOD.md`](ENV_DOD.md).
 
@@ -112,6 +112,7 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Housing-web17 (A3#3 @ `df46921`) | Exit **0** · 69.7s | Exit **1** · raw **4.6** | webinar intro still low-energy; upload-ready **NO** |
 | Housing-web18 (tip `ec994af` shocked-face) | Exit **0** · 84.2s · soft-pass-motion(16v/6segs) | Exit **1** · raw **5.2** | tip-best this wave; static Rolfe opener + Archive junk — still &lt;7 |
 | Housing-web19 (post `f150aa4`/`87cd0ca`) | Exit **0** · 76.3s · soft-pass-motion(18v/6segs) | Exit **1** · raw **4.4** | For-Sale/REMAX opener; celebrity/chart pads |
+| Housing-web20 (post `31f9ee5`) | Exit **0** · 64.5s · soft-pass-motion(11v/4segs) | Exit **1** · raw **4.8** | protest/fire/rent-strike pads; W2 housing cycles exhausted |
 | Healthcare-web1 (A4 soft-pass @ `e377f25`) | Exit **0** · 65.2s · soft-pass-motion-healthcare(15v/3segs) · youtube=0 | Exit **1** · raw **5.2** | volume closed; hook/variety/pacing still open (FEMA/cockroach/clickbait) — healthcare best |
 | Healthcare-web2 (A5#2) | Exit **0** · 80s | Exit **1** · raw **3.4** | EXPOSED hook + Giphy/off-topic junk |
 | Healthcare-web3 (A5#3 @ `a53ba40`) | Exit **0** · 70.8s · soft-pass-motion-healthcare(8v/4segs) | Exit **1** · raw **4.6** | clinical overlay; talking-head Archive — latest watch `video-watch-1785701024379` |
@@ -120,7 +121,7 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 
 Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay) and remains **CLOSED** at raw **7.8** (airline-web8). Remaining pack: housing + healthcare — **no fresh WATCH_REPORT shows ≥7**.
 
-Local proof (gitignored): `test-recordings/dod-proof/` + `SUMMARY.txt` (W2-PACK: **PARTIAL**). Status: `/tmp/dod-agents/W2-PACK.md`.
+Local proof (gitignored): `test-recordings/dod-proof/` + `SUMMARY.txt` (W2-PACK: **PACK_OPEN**). Status: `/tmp/dod-agents/W2-PACK.md`.
 
 **Not done:** housing/healthcare upload-ready YES, brutal raw ≥7 on those topics, 3-topic web-harvest green pack, prod deploy currency. Do not claim these from fixture/mock harvest, thin Archive-only runs, tip code alone, or in-flight generates without a WATCH_REPORT.
 
@@ -140,9 +141,9 @@ web-harvest proof. Open bars are pipeline and gate quality, not key absence:
 | **Web-motion gate recognition** | **CLOSED** (airline) | airline-web8 raw **7.8** / upload-ready YES via Archive+web inject — **still CLOSED** |
 | **CLI top-up diversity** | **PARTIAL** | Airline + healthcare soft-pass proven (web1/web3 gen exit 0); housing tip gens exit 0; housing-v2 volume historically failed |
 | **Upload-ready YES (≥7)** | **PARTIAL** | Airline **YES**; housing + healthcare still **NO** on every fresh WATCH_REPORT |
-| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8** only. Housing: tip-best **5.2** (web18); hist **5.8** (web5). Healthcare: best **5.2** (web1). **No new ≥7.** |
-| **3-topic proof pack** | **PARTIAL** | W2-PACK long-wait: airline YES @ 7.8 packed; housing + healthcare still &lt;7 — see `dod-proof/SUMMARY.txt` |
-| **9.3 stretch** | **OPEN** (after pack) | `npm run loop:video -- --until-score 9.3` on cold topics — **not started** (pack not green) |
+| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8** only. Housing: tip-best **5.2** (web18); web20 **4.8**; hist **5.8** (web5). Healthcare: best **5.2** (web1). **No new ≥7.** |
+| **3-topic proof pack** | **OPEN** | W2-PACK 90m poll → **PACK_OPEN** — airline YES @ 7.8 packed; housing + healthcare still &lt;7 — see `dod-proof/SUMMARY.txt` + `/tmp/dod-agents/W2-PACK.md` |
+| **9.3 stretch** | **OPEN** (after pack) | `npm run loop:video -- --until-score 9.3 --max 1` — **not started** (pack not green); block: `/tmp/dod-wave-f/loop-9.3.log` |
 
 Do not invent passing scores. Do not claim ≥7 from tip commits or failed volume cycles. Do not claim ≥7 is blocked by missing stock keys.
 

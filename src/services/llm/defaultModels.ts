@@ -3,6 +3,13 @@
 export const DEFAULT_LLM_MODEL = 'xiaomi/mimo-v2.5';
 
 /**
+ * Single-shot fallback when the primary model returns HTTP 200 with empty
+ * `content` (common for reasoning models that only fill `reasoning`).
+ * Keep DEFAULT_LLM_MODEL unchanged — quality floors stay on the primary.
+ */
+export const EMPTY_CONTENT_FALLBACK_MODEL = 'openai/gpt-4o-mini';
+
+/**
  * Model used for every multimodal (image_url) call — quality scoring, vision
  * checks, blind review. Must accept image content parts; swapping in a text-only
  * model silently degrades those calls to text-only guesses.

@@ -7,6 +7,7 @@ import {
   buildEditTimeline,
   hasReadableFaceVisual,
   isHousingApartmentMotion,
+  isHousingTalkingHeadMotion,
   isLandscapeOnlyIntroVisual,
 } from './build-edit-timeline.mjs';
 import {
@@ -396,6 +397,8 @@ export function promoteIntroFaceVideo(project) {
         return 9 + Math.min(2, topicHits);
       }
       if (isHousingApartmentMotion(asset)) return 8 + Math.min(2, topicHits);
+      // Tenant/rent webinars are human openers when face keywords are missing (web16).
+      if (isHousingTalkingHeadMotion(asset)) return 8 + Math.min(2, topicHits);
       if (/\bapartment\s+building\b/i.test(scoreBlob) && asset?.type === 'video') return 3;
       // Generic video without face/apartment signal must not win the housing hook.
       return asset?.type === 'video' ? 0 : -1;

@@ -190,8 +190,16 @@ const HOUSING_TOPICAL_VISUAL_RE = /\b(evict(?:ion|ed)?|landlords?|tenants?|lease
 const LANDSCAPE_ONLY_INTRO_RE =
   /\b(landscape|mountain|lake|lakeside|river|forest|nature\s+scenic|scenic\s+view|countryside|wildfire|helicopter|aerial(?:\s+view)?|rolling\s+hills|beach|sunset|ocean|sea\s+waves|subic\s+bay|bay|harbour|harbor|naval|home\s+movie|vietnam|war\s+footage|re[\s-]?supply)\b/;
 
+/** Empty suburban/residential street pads — fine in body, never the housing hook. */
+const HOUSING_STREET_ESTABLISHING_RE =
+  /\b(suburban\s+street|residential\s+street|neighborhood\s+street|quiet\s+street|empty\s+street|tree[\s-]?lined\s+street|palm\s+trees?|stucco\s+homes?|driveway|residential\s+neighborhood)\b/;
+
 const HOUSING_LIVED_IN_RE =
   /\b(modern\s+apartment|apartment\s+interior|living\s+room|kitchen|hallway|tenant|evict(?:ion|ed)?|for\s+rent|packing\s+boxes|lease|landlord|worried\s+(?:couple|family)|family\s+apartment)\b/;
+
+/** Tenant/rent webinars are talking-head motion even when alt omits "face". */
+const HOUSING_TALKING_HEAD_RE =
+  /\b(webinar|workshop|tenant\s+relief|rent\s+program|habitability|tenant[\s-]focused|eviction\s+moratorium)\b/;
 
 /**
  * True when metadata is landscape/nature establishing with no apartment or
@@ -205,6 +213,14 @@ export function isLandscapeOnlyIntroVisual(asset) {
   if (
     HOUSING_WAR_NAVAL_ESTABLISHING_RE.test(evidence || blob)
     && !HOUSING_LIVED_IN_RE.test(evidence)
+  ) {
+    return true;
+  }
+  // Suburban street establishing (web16 opener) — demote unless lived-in/face evidence.
+  if (
+    HOUSING_STREET_ESTABLISHING_RE.test(evidence || blob)
+    && !HOUSING_LIVED_IN_RE.test(evidence)
+    && !hasReadableFaceVisual({ ...asset, query: '' })
   ) {
     return true;
   }
@@ -237,6 +253,18 @@ export function isHousingApartmentMotion(asset) {
 }
 
 /**
+ * Tenant/rent webinar or workshop clips — talking-head B-roll for housing hooks
+ * when Archive titles omit "face"/"portrait" (web16 opened on street pads instead).
+ */
+export function isHousingTalkingHeadMotion(asset) {
+  if (isLandscapeOnlyIntroVisual(asset)) return false;
+  if (!(asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) return false;
+  const evidence = assetEvidenceBlob(asset);
+  if (!HOUSING_TALKING_HEAD_RE.test(evidence)) return false;
+  return HOUSING_TOPICAL_VISUAL_RE.test(evidence) || HOUSING_LIVED_IN_RE.test(evidence);
+}
+
+/**
  * First-3s priority for airline/housing hooks: a readable human face on a
  * topical frame (2) beats any readable face or housing apartment motion (1)
  * beats other lead visuals (0). Landscape-only housing stock is -1.
@@ -252,6 +280,8 @@ export function introFaceTier(asset, { airline = false, housing = false } = {}) 
   // Housing: lived-in apartment motion without a strict face tag still beats
   // landscape / Archive establishing for the opener (web14).
   if (housing && isHousingApartmentMotion(asset)) return 1;
+  // Housing webinars/workshops are human openers even without face keywords.
+  if (housing && isHousingTalkingHeadMotion(asset)) return 1;
   return 0;
 }
 

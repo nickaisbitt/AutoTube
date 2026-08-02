@@ -3,6 +3,7 @@ import {
   introFaceTier,
   hasReadableFaceVisual,
   isHousingApartmentMotion,
+  isHousingTalkingHeadMotion,
   isLandscapeOnlyIntroVisual,
   visualSubjectCluster,
   buildEditTimeline,
@@ -86,6 +87,31 @@ describe('introFaceTier', () => {
     };
     expect(isLandscapeOnlyIntroVisual(asset)).toBe(true);
     expect(introFaceTier(asset, { airline: false, housing: true })).toBe(-1);
+  });
+
+  it('treats suburban street establishing as landscape-only for housing intro', () => {
+    const asset = {
+      query: 'housing market crash phoenix',
+      alt: 'suburban street residential neighborhood palm trees stucco homes',
+      title: 'suburban street residential neighborhood palm trees',
+      url: 'https://example.com/street.mp4',
+      type: 'video',
+    };
+    expect(isLandscapeOnlyIntroVisual(asset)).toBe(true);
+    expect(introFaceTier(asset, { airline: false, housing: true })).toBe(-1);
+  });
+
+  it('tiers tenant/rent webinars as housing talking-head openers', () => {
+    const asset = {
+      query: 'tenant eviction',
+      alt: 'richmond rent program workshop webinar handling habitability problems tenant focused',
+      title: 'richmond rent program workshop webinar handling habitability problems tenant focused',
+      url: 'https://archive.org/download/rent/rent.mp4',
+      source: 'Archive.org live',
+      type: 'video',
+    };
+    expect(isHousingTalkingHeadMotion(asset)).toBe(true);
+    expect(introFaceTier(asset, { airline: false, housing: true })).toBe(1);
   });
 });
 

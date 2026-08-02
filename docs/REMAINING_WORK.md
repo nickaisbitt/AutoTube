@@ -75,10 +75,11 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Airline-web4 (rich-pool pacing) | Exit **0** · 73.5s · injected=16 | Exit **1** · raw **4.2** | rich-pool holds ≤1.5s |
 | Airline-web6 (non-YouTube prefer) | Exit **0** · 62s · youtube=0 non-youtube=16 | Exit **1** · raw **4.8** | TikTok proxies failed → medical still fallback (pre-auth fix) |
 | Airline-web7 (assemble API auth) | Exit **0** · 83s · injected=33 · youtube=16 | Exit **1** · raw **4.8** | medical stills gone; video-first fallbacks; YouTube still doomed without cookies |
+| Airline-web8 (skip doomed proxies) | Exit **0** · 64.9s · injected=17 · youtube=0 · **fallbacks=0** | Exit **0** · raw **7.8** · upload-ready **YES** | Archive-heavy web harvest; no stock keys |
 | Housing-web (Bing/Google/DDG) | Exit **0** · 75.0s · injected=13 | Exit **1** · raw **3.8** | archive=0, pure web; variety still weak |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
-Watcher honesty is working: raw &lt;7 → exit 1; thin web harvest → non-zero generate. Floors have **not** been lowered. Scores reflect **web-harvest / Archive-biased CLI gate** failures (motion diversity, segment floors, watcher recognition) — not missing stock keys.
+Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay). Remaining pack: housing + healthcare.
 
 Local proof (gitignored): `test-recordings/dod-proof/{airline,airline-v2,housing,healthcare}/` + `SUMMARY.txt`.
 
@@ -97,12 +98,12 @@ web-harvest proof. Open bars are pipeline and gate quality, not key absence:
 
 | Bar | Status | Unblock |
 |-----|--------|---------|
-| **Web-motion gate recognition** | **OPEN** | Watcher must score web-harvest motion honestly; current raws **2.8–5.4** on Archive-biased CLI runs |
-| **CLI top-up diversity** | **OPEN** | Segment/asset floors without thin pools; `HARVEST_VOLUME_FAIL` on healthcare/housing-v2 |
-| **Upload-ready YES (≥7)** | **OPEN** | Regenerate + `watch:video` exit **0** on cold topics via web harvest — not stock-key injection |
-| **Brutal raw ≥ 7** | **OPEN** | Observed ceiling **~5.4** (airline-v2); Wave 5 raws **3.4** / **4.6**; do not lower floors |
-| **3-topic proof pack** | **OPEN** | Green (≥7 ×3) on web-harvest runs under `test-recordings/dod-proof/` |
-| **9.3 stretch** | **OPEN** (after ≥7) | `npm run loop:video -- --until-score 9.3` on cold topics |
+| **Web-motion gate recognition** | **CLOSED** (airline) | airline-web8 raw **7.8** / upload-ready YES via Archive+web inject |
+| **CLI top-up diversity** | **PARTIAL** | Airline inject healthy; `HARVEST_VOLUME_FAIL` still open on healthcare/housing-v2 |
+| **Upload-ready YES (≥7)** | **PARTIAL** | Airline **YES**; housing + healthcare still open |
+| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8**; housing-web **3.8** |
+| **3-topic proof pack** | **OPEN** | Need housing + healthcare ≥7 under `test-recordings/dod-proof/` |
+| **9.3 stretch** | **OPEN** (after pack) | `npm run loop:video -- --until-score 9.3` on cold topics |
 
 Do not invent passing scores. Do not claim ≥7 is blocked by missing stock keys.
 

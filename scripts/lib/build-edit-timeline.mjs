@@ -176,7 +176,7 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   // For-Sale/REMAX exteriors, celebrity pollution, crash-illustration stills.
   if (
     housing
-    && /\b(rolfe\s+report|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|propaganda\s+film|ticking\s+time\s+bombs?|dynamite|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|golden\s+valley\s+approves)\b/i.test(blob)
+    && /\b(rolfe\s+report|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|propaganda\s+film|ticking\s+time\s+bombs?|dynamite|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|golden\s+valley\s+approves|landlord\s+tenant\s+act|lawyers?\s+committee|tenant\s+advocacy|square[\s-]?foot|sustainable\s+high\s+rise|may\s+day\s+caravan|livestream\s+archive|business\s+insider)\b/i.test(blob)
   ) {
     return true;
   }
@@ -231,7 +231,7 @@ const HOUSING_LIVED_IN_RE =
 
 /** Tenant/rent webinars are talking-head motion even when alt omits "face". */
 const HOUSING_TALKING_HEAD_RE =
-  /\b(webinar|workshop|tenant\s+relief|rent\s+program|habitability|tenant[\s-]focused|eviction\s+moratorium)\b/;
+  /\b(webinar|workshop|tenant\s+relief|rent\s+program|habitability|tenant[\s-]focused|eviction\s+moratorium|landlord\s+tenant\s+act|tenant\s+advocacy|lawyers?\s+committee|eviction\s+laws?|tenant\s+rights)\b/;
 
 /**
  * True when metadata is landscape/nature establishing with no apartment or

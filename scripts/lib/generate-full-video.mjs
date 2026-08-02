@@ -3281,7 +3281,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Crash-movie scrapes, Progress Center podium, For-Sale/REMAX exteriors,
       // Michael-* celebrity pollution, crash-illustration stills.
       if (
-        /\b(ticking\s+time\s+bombs?|time\s+bombs?|dynamite|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|camp\s+mystic|guadalupe\s+river|ballard|cronenberg|david\s+crosby|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|michael\s+ninn|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|golden\s+valley\s+approves)\b/i.test(blob)
+        /\b(ticking\s+time\s+bombs?|time\s+bombs?|dynamite|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|camp\s+mystic|guadalupe\s+river|ballard|cronenberg|david\s+crosby|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|michael\s+ninn|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|golden\s+valley\s+approves|landlord\s+tenant\s+act|lawyers?\s+committee|tenant\s+advocacy|square[\s-]?foot|sustainable\s+high\s+rise|may\s+day\s+caravan|livestream\s+archive|business\s+insider)\b/i.test(blob)
       ) {
         return -20;
       }

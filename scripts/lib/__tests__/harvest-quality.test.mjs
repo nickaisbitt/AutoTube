@@ -503,6 +503,12 @@ describe('housing off-topic B-roll rejects', () => {
       'August 6 2007 American Home Mortgage mousetrap house illustration',
       'golden valley approves 2 new apartment complexes',
       'WHAT HAPPENS WHEN THE CREDIT HIT MARKET CRASHES crater graphic',
+      'overview of the virginia residential landlord tenant act and eviction laws',
+      'lawyers committee for better housing tenant advocacy during covid 19',
+      '1300-square-foot living room business insider luxury tour',
+      'world s most sustainable high rise apartment building',
+      'may day caravan to cancel rent mortgage livestream archive',
+      'understanding all the eviction ban nonsense constitutional shredding',
     ];
     for (const alt of cases) {
       expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);

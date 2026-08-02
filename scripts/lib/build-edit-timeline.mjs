@@ -187,7 +187,7 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
     healthcare
     && (
       /giphy\.com|media\d*\.giphy\.com/i.test(blob)
-      || /\b(coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|title\s+card|capitol|protest(?:ers?|ing)?|political\s+rally|maternity|childbirth|kapparot|kapores|news\s+talking\s*heads?|talking\s*heads?\s+(?:studio|news|interview)|news\s+(?:anchor|studio|desk)|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?)\b/i.test(blob)
+      || /\b(coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|title\s+card|capitol|protest(?:ers?|ing)?|political\s+rally|maternity|childbirth|kapparot|kapores|news\s+talking\s*heads?|talking\s*heads?\s+(?:studio|news|interview)|news\s+(?:anchor|studio|desk)|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|aerial|drone\s+shot|hospital\s+exterior|establishing\s+shot|legos?|mgtow|hiroshima|atomic\s+bomb|warzone|war\s*zone)\b/i.test(blob)
     )
   ) {
     return true;

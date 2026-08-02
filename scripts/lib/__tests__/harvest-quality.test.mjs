@@ -605,6 +605,10 @@ describe('healthcare off-topic B-roll rejects', () => {
       'def con 25 biohacking village presentation slides',
       'madness and medicine archival reel',
       'dr samadi prostate cancer sex after prostate surgery',
+      'waiting rooms hospital bills lego style explosive iran',
+      'terrible nurses mgtow rant',
+      'hiroshima atomic bomb medical aspect graphic',
+      'warzone in sweden stops ambulance',
     ];
     for (const alt of cases) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);

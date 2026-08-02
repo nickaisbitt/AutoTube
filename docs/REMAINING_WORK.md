@@ -1,8 +1,12 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-02** — branch `cursor/web-harvest-assemble-auth-4556` @ tip (web-harvest quality + Railway token block).
+Last updated: **2026-08-02T20:20Z** — branch `cursor/web-harvest-assemble-auth-4556` @ tip `ec994af` (W2 docs refresh after W2-*.md + dod-proof scan).
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
+
+**Honest score rule:** Do **not** claim brutal raw ≥7 / upload-ready YES unless a fresh `WATCH_REPORT.md` shows it. Airline-web8 remains the only closed ≥7 topic (raw **7.8**). Housing and healthcare have **no** fresh ≥7.
+
+**Tip code (not product ≥7):** `a0bfe41` A/V freeze-pad ≤12s default-safe; `ec994af` housing shocked-face intro + webinar body demote. Housing-web18 generate **in flight** at tip — no WATCH_REPORT yet.
 
 **Keys:** variable names, presence on this VM, and which gates each key unlocks → [`docs/ENV_DOD.md`](ENV_DOD.md).
 
@@ -38,7 +42,7 @@ Keyed vs keyless motion packs, topical per-segment floors, edit pacing, E2E auth
 
 ### Closeout wave code (2026-08-02 — not product ≥7)
 
-Shipped on `cursor/web-harvest-assemble-auth-4556` while A3/A5 run gen+watch. **No ≥7 claimed from these commits alone.**
+Shipped on `cursor/web-harvest-assemble-auth-4556` while A3/A5/W2 run gen+watch. **No ≥7 claimed from these commits alone.**
 
 | Commit | What |
 |--------|------|
@@ -47,6 +51,9 @@ Shipped on `cursor/web-harvest-assemble-auth-4556` while A3/A5 run gen+watch. **
 | `e377f25` (A4) | Healthcare keyless soft-pass-motion + clinical relevance + vision split (cyber vs AI-medicine) |
 | `07027d1` (A8) | Tighter first-15s reuse + motion-first opening for housing/keyless |
 | `6ee63fc` (A3) | Housing: reject fire/war Archive junk; evidence-based landscape intro; karaokeCaptions OFF |
+| `a0bfe41` (W2-AV) | Default-safe A/V freeze-pad ≤12s without `ALLOW_AUDIO_TRIM` (`avTimelinePolicy.mjs`) |
+| `7ac1fc8` (W2-TESTS) | Prefer strong housing Archive over webinar scrapes; webinar opener reject |
+| `ec994af` (tip) | Housing shocked-face intro prefer + webinar body demote |
 
 ### Wave 5 — narration hang fixes (current tip)
 
@@ -87,10 +94,10 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Airline-web4 (rich-pool pacing) | Exit **0** · 73.5s · injected=16 | Exit **1** · raw **4.2** | rich-pool holds ≤1.5s |
 | Airline-web6 (non-YouTube prefer) | Exit **0** · 62s · youtube=0 non-youtube=16 | Exit **1** · raw **4.8** | TikTok proxies failed → medical still fallback (pre-auth fix) |
 | Airline-web7 (assemble API auth) | Exit **0** · 83s · injected=33 · youtube=16 | Exit **1** · raw **4.8** | medical stills gone; video-first fallbacks; YouTube still doomed without cookies |
-| Airline-web8 (skip doomed proxies) | Exit **0** · 64.9s · injected=17 · youtube=0 · **fallbacks=0** | Exit **0** · raw **7.8** · upload-ready **YES** | Archive-heavy web harvest; no stock keys |
+| Airline-web8 (skip doomed proxies) | Exit **0** · 64.9s · injected=17 · youtube=0 · **fallbacks=0** | Exit **0** · raw **7.8** · upload-ready **YES** | Archive-heavy web harvest; no stock keys — **still CLOSED** |
 | Housing-web (Bing/Google/DDG) | Exit **0** · 75.0s · injected=13 | Exit **1** · raw **3.8** | archive=0, pure web; variety still weak |
 | Housing-web2 (assemble auth) | Exit **0** · 74s · youtube-heavy | Exit **1** · raw **4.8** | browser YouTube kept; Archive stripped |
-| Housing-web5 (Archive slice + no YT) | Exit **0** · 71.7s · archive=11 · fallbacks=0 | Exit **1** · raw **5.8** | hook typo/wrong stakes; variety still open |
+| Housing-web5 (Archive slice + no YT) | Exit **0** · 71.7s · archive=11 · fallbacks=0 | Exit **1** · raw **5.8** | hook typo/wrong stakes; variety still open — historical housing best |
 | Housing-web6 (crash hook + 24 inject) | Exit **0** · 82s · archive=14 · youtube=0 · fallbacks=0 | Exit **1** · raw **5.4** | hook honest; muddy Archive B-roll / no face hook |
 | Housing-web7 (apt Archive prefer) | Exit **0** · 69s · archive=10 · youtube=0 | Exit **1** · raw **5.6** | hook PASS; house-graphic×6 + council/quake Archive still tank variety |
 | Housing-web8 (reject all Archive) | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` — web proxies thin; Archive body-filler restored in tip |
@@ -101,14 +108,19 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Housing-web13 (Archive fills, muddy hook) | Exit **0** · 90s · injected=27 · archive=13 | Exit **1** · raw **4.6** | volume fixed; intro got landscape Archive |
 | Housing-web14 (defer weak past intro) | Exit **0** · 84s · injected=25 · archive=11 | Exit **1** · raw **4.6** | volume ok; hook text floor 7 but landscape/crash/council variety still tanks score |
 | Housing-web15 (A1/A2 junk+face intro @ `b95f210`) | Exit **0** · 75.7s · soft-pass-motion(12v/6segs) · youtube=0 | Exit **1** · raw **4.2** | hook text floor 7; landscape intro + webcam/variety/pacing still tank |
-| Healthcare-web1 (A4 soft-pass @ `e377f25`) | Exit **0** · 65.2s · soft-pass-motion-healthcare(15v/3segs) · youtube=0 | Exit **1** · raw **5.2** | volume closed; hook/variety/pacing still open (FEMA/cockroach/clickbait) |
+| Housing-web16 (post `6ee63fc` / A3#2) | Exit **0** · 75.9s | Exit **1** · raw **4.6** | fire/war reject + karaoke-off; still &lt;7 |
+| Housing-web17 (A3#3 @ `df46921`) | Exit **0** · 69.7s | Exit **1** · raw **4.6** | webinar intro still low-energy; upload-ready **NO** |
+| Housing-web18 (tip `ec994af` shocked-face) | **IN FLIGHT** (gen started ~20:19Z) | no `WATCH_REPORT` yet | Do **not** claim ≥7 until watch completes |
+| Healthcare-web1 (A4 soft-pass @ `e377f25`) | Exit **0** · 65.2s · soft-pass-motion-healthcare(15v/3segs) · youtube=0 | Exit **1** · raw **5.2** | volume closed; hook/variety/pacing still open (FEMA/cockroach/clickbait) — healthcare best |
+| Healthcare-web2 (A5#2) | Exit **0** · 80s | Exit **1** · raw **3.4** | EXPOSED hook + Giphy/off-topic junk |
+| Healthcare-web3 (A5#3 @ `a53ba40`) | Exit **0** · 70.8s · soft-pass-motion-healthcare(8v/4segs) | Exit **1** · raw **4.6** | clinical overlay; talking-head Archive — latest watch `video-watch-1785701024379` |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
-Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay). Remaining pack: housing + healthcare.
+Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay) and remains **CLOSED** at raw **7.8** (airline-web8). Remaining pack: housing + healthcare — **no fresh WATCH_REPORT shows ≥7**.
 
-Local proof (gitignored): `test-recordings/dod-proof/{airline,airline-v2,housing,healthcare}/` + `SUMMARY.txt`.
+Local proof (gitignored): `test-recordings/dod-proof/` + `SUMMARY.txt` (A6: `PACK_OPEN`). Orchestrator checklist: `/tmp/dod-agents/REMAINING-CHECKLIST.md`.
 
-**Not done:** upload-ready YES, brutal raw ≥7, 3-topic web-harvest green pack, prod deploy currency. Do not claim these from fixture/mock harvest, thin Archive-only runs, or pre-sweep recordings on other branches.
+**Not done:** housing/healthcare upload-ready YES, brutal raw ≥7 on those topics, 3-topic web-harvest green pack, prod deploy currency. Do not claim these from fixture/mock harvest, thin Archive-only runs, tip code alone, or in-flight generates without a WATCH_REPORT.
 
 ---
 
@@ -123,23 +135,23 @@ web-harvest proof. Open bars are pipeline and gate quality, not key absence:
 
 | Bar | Status | Unblock |
 |-----|--------|---------|
-| **Web-motion gate recognition** | **CLOSED** (airline) | airline-web8 raw **7.8** / upload-ready YES via Archive+web inject |
-| **CLI top-up diversity** | **PARTIAL** | Airline + healthcare-web1 soft-pass proven (gen exit 0); housing-v2 volume historically failed |
-| **Upload-ready YES (≥7)** | **PARTIAL** | Airline **YES**; housing + healthcare still open |
-| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8**; housing best **5.8** (web5) / latest web15 **4.2**; healthcare-web1 raw **5.2** |
-| **3-topic proof pack** | **OPEN** | Need housing + healthcare ≥7 under `test-recordings/dod-proof/` |
+| **Web-motion gate recognition** | **CLOSED** (airline) | airline-web8 raw **7.8** / upload-ready YES via Archive+web inject — **still CLOSED** |
+| **CLI top-up diversity** | **PARTIAL** | Airline + healthcare soft-pass proven (web1/web3 gen exit 0); housing tip gens exit 0; housing-v2 volume historically failed |
+| **Upload-ready YES (≥7)** | **PARTIAL** | Airline **YES**; housing + healthcare still **NO** on every fresh WATCH_REPORT |
+| **Brutal raw ≥ 7** | **PARTIAL** | Airline-web8 raw **7.8** only. Housing: historical best **5.8** (web5); tip best **4.6** (web16/17). Healthcare: best **5.2** (web1); latest web3 **4.6**. **No new ≥7.** |
+| **3-topic proof pack** | **OPEN** | A6 `PACK_OPEN` — need housing + healthcare ≥7 under `test-recordings/dod-proof/` |
 | **9.3 stretch** | **OPEN** (after pack) | `npm run loop:video -- --until-score 9.3` on cold topics |
 
-Do not invent passing scores. Do not claim ≥7 is blocked by missing stock keys.
+Do not invent passing scores. Do not claim ≥7 from tip commits (`a0bfe41`, `ec994af`) or in-flight housing-web18. Do not claim ≥7 is blocked by missing stock keys.
 
 ---
 
 ## §C — Railway / prod deploy currency
 
-**Status: BLOCKED** (Agent A7, 2026-08-02) — no personal/team Railway token on this VM.
-Evidence: [`/tmp/dod-agents/A7-STATUS.md`](/tmp/dod-agents/A7-STATUS.md) and [`ENV_DOD.md`](ENV_DOD.md).
+**Status: BLOCKED** (W2 re-scan 2026-08-02T20:19Z) — no personal/team Railway token on this VM.
+Evidence: [`/tmp/dod-agents/W2-RAILWAY.md`](/tmp/dod-agents/W2-RAILWAY.md), prior [`A7-STATUS.md`](/tmp/dod-agents/A7-STATUS.md), [`ENV_DOD.md`](ENV_DOD.md).
 
-`RAILWAY_API_TOKEN` is **present** but is the cursor-worker **runtime service** credential. `AUTOTUBE_RAILWAY_TOKEN` is **absent**. Prod deploy currency stays **OPEN** until:
+`RAILWAY_API_TOKEN` / `RAILWAY_TOKEN` are **present** but are the cursor-worker **runtime service** credential. `AUTOTUBE_RAILWAY_TOKEN` is **absent** (process env + `.env.local`). **Do not force deploy without auth.** Prod deploy currency stays **OPEN / BLOCKED** until:
 
 ```bash
 npm run env:debug-railway    # exit 0 with source AUTOTUBE_RAILWAY_TOKEN (exit 2 = worker-only credential)
@@ -148,13 +160,21 @@ npm run railway:completion-check
 
 Expected when prod image/commit matches local HEAD: exit **0**.
 
-Prod app may still be an **old container** (uptime days) until a fresh deploy from this branch lands. `npm run deploy:status` for live state. Do not claim deploy parity from green CI alone.
+Prod app is still an **old container** until a fresh deploy from this branch lands. `npm run deploy:status` / `railway:smoke` for live state. Do not claim deploy parity from green CI or HTTP smoke alone.
 
-### Check run — 2026-08-02 @ branch `cursor/web-harvest-assemble-auth-4556` (Agent A7)
+### Re-scan — 2026-08-02T20:19Z @ tip `ec994af`
 
-Local HEAD: `d627721905235577377be0e9577281bd28bc11d1`
+Local HEAD: `ec994afb308263f5a8271b3cb9ac4a58fef1d404`
 
-#### `npm run env:debug-railway` — token SET but wrong scope
+#### Token presence (names only)
+
+| Location | `AUTOTUBE_RAILWAY_TOKEN` | `RAILWAY_API_TOKEN` | `RAILWAY_TOKEN` |
+|----------|--------------------------|---------------------|-----------------|
+| Process env | unset | SET (worker) | SET (same worker value) |
+| `.env.local` | absent | present (worker) | absent |
+| `~/.config/railway/token` | missing | — | — |
+
+#### `npm run env:debug-railway` — exit **2** (worker-only)
 
 ```
 AUTOTUBE_RAILWAY_TOKEN: unset
@@ -163,31 +183,16 @@ RAILWAY_API_TOKEN: SET
 ⚠️  Likely Railway *runtime/service* credential … exit 2
 ```
 
-(Messaging updated so a SET worker credential is no longer mistaken for deploy-ready.)
-
-#### `npm run railway:completion-check` — **FAIL** (exit 1)
+#### `npm run railway:smoke` — **PASS** (exit 0) — stale SHA
 
 ```
-Error: Railway GraphQL: Not Authorized.
-  The active token is a service/runtime credential and cannot call backboard.railway.app/graphql.
-  Fix: create a Personal or Team API token at https://railway.app/account/tokens
-  then set it as AUTOTUBE_RAILWAY_TOKEN (preferred) or RAILWAY_API_TOKEN in .env.local.
-```
-
-Root cause unchanged: Railway injects a service credential for `cursor-self-hosted-worker` / `cursor-worker`. backboard GraphQL requires a user/team token. Scripts prefer `AUTOTUBE_RAILWAY_TOKEN` before falling back to `RAILWAY_API_TOKEN` (no fake PASS).
-
-#### `npm run railway:smoke` — **PASS** (exit 0)
-
-```
-Health: {"status":"ok","uptime":1721558,"deploy":{"gitCommit":"3e6f62458c5464e3bb3579751573de3b1a8e80dd","deployImage":"ghcr.io/nickaisbitt/autotube:3e6f62458c5464e3bb3579751573de3b1a8e80dd","sourceConnected":false}}
+Health: {"status":"ok","uptime":1730016,"deploy":{"gitCommit":"3e6f62458c5464e3bb3579751573de3b1a8e80dd","deployImage":"ghcr.io/nickaisbitt/autotube:3e6f62458c5464e3bb3579751573de3b1a8e80dd","sourceConnected":false}}
 ✓ index: HTTP 200
 ✓ api health: HTTP 200
 Smoke passed.
 ```
 
-#### `npm run deploy:status`
-
-Local `d627721` ≠ prod `3e6f6245`; uptime ≈478h; `Local matches prod: NO`.
+`railway:completion-check` / deploy **not attempted** — would Not Authorize without personal token (prior A7/W2: GraphQL Not Authorized on worker cred).
 
 #### Human unblock (exact)
 
@@ -197,7 +202,7 @@ Local `d627721` ≠ prod `3e6f6245`; uptime ≈478h; `Local matches prod: NO`.
 3. Re-run:
 
 ```bash
-npm run env:debug-railway
+npm run env:debug-railway          # must exit 0, source AUTOTUBE_RAILWAY_TOKEN
 npm run railway:completion-check
 # when GraphQL works but SHA still mismatches:
 gh workflow run ghcr-image.yml   # wait green
@@ -211,10 +216,10 @@ npm run railway:smoke
 | Check | Result | Detail |
 |-------|--------|--------|
 | `env:debug-railway` | **WARN** (exit 2) | Worker `RAILWAY_API_TOKEN` SET; `AUTOTUBE_RAILWAY_TOKEN` unset |
-| `railway:completion-check` | **FAIL** | Runtime token Not Authorized for backboard GQL |
+| `railway:completion-check` | **BLOCKED** (not re-run) | Needs personal token; prior runs Not Authorized |
 | `railway:smoke` | **PASS** | Prod live HTTP 200 |
-| SHA match (prod vs local HEAD) | **MISMATCH** | prod `3e6f6245` ≠ local `d627721` |
-| Deploy currency | **BLOCKED / OPEN** | Needs personal token, then redeploy |
+| SHA match (prod vs local HEAD) | **MISMATCH** | prod `3e6f624` ≠ local `ec994af` |
+| Deploy currency | **BLOCKED / OPEN** | Needs personal `AUTOTUBE_RAILWAY_TOKEN`, then redeploy |
 
 ---
 

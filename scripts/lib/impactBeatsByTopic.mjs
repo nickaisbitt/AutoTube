@@ -5,6 +5,7 @@
 import {
   isBankScamTopic,
   isHealthcareCyberTopic,
+  isHealthcareTopic,
   isHeistTopic,
   isHousingTopic,
   isInsuranceFraudTopic,
@@ -101,6 +102,26 @@ export function buildImpactBeatsForTopic(topic) {
       'IDENTITY RISK',
       'CALL THE DESK',
       'FREEZE ACCESS',
+    ];
+  }
+
+  // General AI-medicine / clinical change (not cyber breach). Must run before the
+  // generic `${topicPhrase} EXPOSED` fallthrough — healthcare-web11 burned
+  // "WILL CHANGE EXPOSED" / "COVER UP FAILS" over surgical-robot B-roll.
+  if (isHealthcareTopic(tl)) {
+    return [
+      'SCAN BEATS MD',
+      'AI READS FIRST',
+      'MISSED ON FILM',
+      'ROBOT IN OR',
+      'DIAGNOSIS FASTER',
+      'HOSPITALS KNOW',
+      'RADIOLOGY SHIFT',
+      'CHARTS AUTOMATED',
+      'ERROR RATE DROP',
+      'SECONDS NOT HOURS',
+      'HUMAN STILL HERE',
+      'YOUR SCAN SCORED',
     ];
   }
 

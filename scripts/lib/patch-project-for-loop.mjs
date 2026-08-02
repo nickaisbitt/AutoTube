@@ -425,13 +425,17 @@ export function promoteIntroFaceVideo(project) {
       const scoreBlob = evidence || blob;
       // healthcare-web11: CNN10 talking-head, breast-implant promo, Vietnam burn-ward
       // poster, Medical City aerial adventure-eight, Scottsdale civic, LTC Lakin politics.
-      if (/\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|maternity|kapparot|kapores|lecture\s+slides?|coursera|giphy\.com|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri|mri\s+scan\s+and\s+how|adventure\s+eight|aerial|drone|hospital\s+exterior|legos?|mgtow|hiroshima|atomic\s+bomb|warzone|cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|medical\s+city\s+arlington|scottsdale.?s?\s+cure\s+corridor|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|amazon\s+pharmacy)\b/i.test(scoreBlob)) {
+      if (/\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|maternity|kapparot|kapores|lecture\s+slides?|coursera|giphy\.com|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri|mri\s+scan\s+and\s+how|adventure\s+eight|aerial|drone|hospital\s+exterior|legos?|mgtow|hiroshima|atomic\s+bomb|warzone|cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|medical\s+city\s+arlington|scottsdale.?s?\s+cure\s+corridor|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot)\b/i.test(scoreBlob)) {
         return -20;
       }
       const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && scoreBlob.includes(w)).length;
       // Surgical robot / OR demo beats talking-head MRI explainers for the hook
       // (healthcare-web8 raw 6.2 — robot shots were strong but lost the opener).
-      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|cnbc.*surgical\s*robot)\b/i.test(scoreBlob)) {
+      // Skip classroom / ISD / overview-slide demos (healthcare-web11 COVER UP FAILS pad).
+      if (
+        /\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|cnbc.*surgical\s*robot)\b/i.test(scoreBlob)
+        && !/\b(classroom|school\s+district|\bisd\b|students?\s+watching|children\s+seated|overview)\b/i.test(scoreBlob)
+      ) {
         return 14 + Math.min(2, topicHits);
       }
       if (

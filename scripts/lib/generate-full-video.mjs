@@ -3348,7 +3348,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       }
       // healthcare-web11 junk that slipped past soft-pass Archive pool.
       if (
-        /\b(cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|medical\s+city\s+arlington|adventure\s+eight|scottsdale.?s?\s+cure\s+corridor|amazon\s+pharmacy)\b/i.test(blob)
+        /\b(cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|medical\s+city\s+arlington|adventure\s+eight|scottsdale.?s?\s+cure\s+corridor|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|kids?\s+(?:classroom|assembly)|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot)\b/i.test(blob)
       ) {
         return -20;
       }
@@ -3379,7 +3379,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         return 9;
       }
-      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+surgical)\b/i.test(blob)) return 10;
+      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+surgical)\b/i.test(blob)
+        && !/\b(classroom|school\s+district|\bisd\b|students?\s+watching|children\s+seated|da\s*vinci\s+surgical\s+system\s+overview)\b/i.test(blob)
+      ) return 10;
       if (
         /\b(ultrasound\s+(?:demo|demonstration|exam|probe)|sonograph)\b/i.test(blob)
         && /\b(doctor|clinician|technician|sonographer|nurse)\b/i.test(blob)

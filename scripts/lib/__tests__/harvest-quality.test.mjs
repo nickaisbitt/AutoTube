@@ -625,7 +625,6 @@ describe('healthcare off-topic B-roll rejects', () => {
       'ultrasound demonstration clinician probe exam',
       'radiologist ai diagnosis laptop screen',
       'cnbc meet the surgical robot that can diagnose lung cancer',
-      'garland isd baylor robotic surgery demo',
     ];
     for (const alt of keep) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
@@ -644,6 +643,10 @@ describe('healthcare off-topic B-roll rejects', () => {
       'adventure eight paging dr ross mayor performs simulated procedure at medical city arlington',
       'scottsdale s cure corridor feature story march 2019 city of scottsdale',
       'amazon pharmacy and healthcare 2023 game change',
+      'garland isd baylor robotic surgery demo',
+      'garland isd baylor robotic surgery demo classroom students watching',
+      'da vinci surgical system overview powerpoint classroom children seated',
+      'neuralink working on the neuralink robot lab demo',
     ];
     for (const alt of cases) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);

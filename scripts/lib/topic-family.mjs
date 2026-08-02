@@ -161,6 +161,12 @@ export function impactBeatsMatchTopic(beats, topic) {
   if (isHealthcareCyberTopic(t)) {
     return /hospital|patient|records|hipaa|breach|charts|er locked/.test(blob);
   }
+  if (isHealthcareTopic(t)) {
+    return (
+      /scan|diagnos|robot|radiolog|hospital|doctor|mri|patient|chart|or\b|ai reads/.test(blob)
+      && !/\bexposed\b|they hid|cover up|proof is out/.test(blob)
+    );
+  }
   if (isHousingTopic(t)) {
     return /lease|evict|rent|credit|blacklist|appeal|lock changed/.test(blob);
   }

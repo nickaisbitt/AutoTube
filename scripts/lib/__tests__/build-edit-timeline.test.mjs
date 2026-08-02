@@ -279,6 +279,12 @@ describe('introFaceTier', () => {
       url: 'https://archive.org/download/adv8/adv8.mp4',
       type: 'video',
     }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'garland isd baylor robotic surgery demo classroom students watching',
+      title: 'da vinci surgical system overview',
+      url: 'https://archive.org/download/garland/garland.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
   });
 });
 

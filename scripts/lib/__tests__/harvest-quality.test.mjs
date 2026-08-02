@@ -592,6 +592,18 @@ describe('healthcare off-topic B-roll rejects', () => {
       expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
     }
   });
+
+  it('does not hard-reject webinar/longevity talks (intro-demote only; volume soft-pass)', () => {
+    // Hard-rejecting these starved healthcare-web4 to soft-pass-thin(1/6).
+    const bodyOk = [
+      'The Two Healthcare Revolutions in Our Lifetime: AI and Longevity',
+      'ai healthcare webinar keynote panel discussion',
+      'tedx talk doctor ai medicine future',
+    ];
+    for (const alt of bodyOk) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+    }
+  });
 });
 
 describe('healthcare keyless soft-pass-motion (web + Archive)', () => {

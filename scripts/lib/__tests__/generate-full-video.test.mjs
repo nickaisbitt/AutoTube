@@ -339,6 +339,20 @@ describe('archiveEvidenceVerdict', () => {
     expect(verdict.reason).toBe('metadata-off-subject');
   });
 
+  it('admits healthcare Archive items with clinical metadata even when topic tokens miss', () => {
+    const verdict = archiveEvidenceVerdict(
+      {
+        source: 'Archive.org live',
+        url: 'https://archive.org/download/x/y.mp4',
+        title: 'hospital corridor nurse station ward',
+        query: 'opaque harvest subject xyz',
+      },
+      { query: 'opaque harvest subject xyz', topicBlob: 'Why AI will change healthcare' },
+    );
+    expect(verdict.ok).toBe(true);
+    expect(verdict.reason).toBe('healthcare-clinical-metadata');
+  });
+
   it('admits items whose own metadata names the subject', () => {
     const verdict = archiveEvidenceVerdict(
       {

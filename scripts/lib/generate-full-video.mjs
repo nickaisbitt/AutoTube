@@ -1246,6 +1246,16 @@ export function archiveEvidenceVerdict(clip = {}, { query = '', topicBlob = '' }
     || (Math.abs(token.length - want.length) <= 3 && (token.startsWith(want) || want.startsWith(token)));
   const matched = evidenceTokens(evidence).filter((token) => [...wanted].some((want) => sameSubject(token, want)));
   if (!matched.length) {
+    // Healthcare Archive titles say MRI/radiology/hospital far more often than the
+    // essay topic ("Why AI will change healthcare"). Clinical metadata is enough
+    // so keyless runs are not trapped on YouTube-only Bing pools (web7: 234 YT
+    // skips, only 4 Archive injects → soft-pass-thin 4/6).
+    if (
+      isHealthcareTopic(topicBlob)
+      && hasHealthcareEvidence({ title: evidence, alt: '', type: 'video', source: 'Archive.org' })
+    ) {
+      return { ok: true, reason: 'healthcare-clinical-metadata', evidence, matched: ['clinical'] };
+    }
     return { ok: false, reason: 'metadata-off-subject', evidence, matched: [] };
   }
   return { ok: true, reason: 'metadata-subject-match', evidence, matched };
@@ -3037,6 +3047,18 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Funnel accounting (fetched → after-junk → after-vision → injected): count every
       // candidate that actually reaches the gates so drop reasons are explainable.
       report.motionCandidatesSeen = (report.motionCandidatesSeen || 0) + 1;
+      // Keyless healthcare: YouTube/TikTok without cookies are doomed at inject
+      // (web7: 234 youtube-without-cookies skips). Do not let them fill liveCap
+      // and starve Archive/Vimeo/DM clinical motion.
+      if (
+        isHealthcareTopic(topicBlob)
+        && !hasStockKeysEarly
+        && unreliableWebProxyInjectReason(clip)
+      ) {
+        report.motionDroppedUnreliableProxy = (report.motionDroppedUnreliableProxy || 0) + 1;
+        report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+        continue;
+      }
       // Archive.org items must say what they show. A topical query plus an opaque
       // identifier is exactly the laundering this gate exists to stop.
       if (/Archive/i.test(clip.source || '')) {

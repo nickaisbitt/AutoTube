@@ -45,6 +45,7 @@ Shipped on `cursor/web-harvest-assemble-auth-4556` while A3/A5 run gen+watch. **
 | `50d9a49` (A1) | Hard-reject housing crash/fire/council/chart B-roll (`housingOffTopicBrollReason`) |
 | `b95f210` (A2) | Housing intro prefers face/apartment over landscape Archive |
 | `e377f25` (A4) | Healthcare keyless soft-pass-motion + clinical relevance + vision split (cyber vs AI-medicine) |
+| `07027d1` (A8) | Tighter first-15s reuse + motion-first opening for housing/keyless |
 
 ### Wave 5 — narration hang fixes (current tip)
 

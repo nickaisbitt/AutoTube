@@ -43,6 +43,7 @@ import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
   evaluateHarvestVolumeWithSoftPass,
+  hasHealthcareEvidence,
   housingOffTopicBrollReason,
   healthcareOffTopicBrollReason,
   isOffBrandVisual,
@@ -2380,6 +2381,12 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   'patient care',
   'stethoscope doctor',
   'hospital hallway',
+  'doctor reviewing charts',
+  'nurse patient bedside',
+  'radiology reading room',
+  'emergency room hospital',
+  'surgical team operating',
+  'ai healthcare documentary',
 ];
 
 const ARCHIVE_VARIANT_LEAD_STOPWORDS =
@@ -3009,7 +3016,15 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       const isWebClip = /web video/i.test(clip.source || '');
       // Search text asks the question; it is not evidence for a web result.
       const evidenceClip = isWebClip ? { ...clip, query: '' } : clip;
-      const strongMotionRelevance = isCyberRelevantClip(evidenceClip, topicBlob);
+      // AI-medicine: web-native evidence may use the deliberate harvest query
+      // (hasHealthcareEvidence web contract). evidenceClip strips query so bare
+      // Bing/DDG hits were motionRelevancePassed=false → post-top-up strip → thin.
+      const strongMotionRelevance =
+        isCyberRelevantClip(evidenceClip, topicBlob)
+        || (
+          isHealthcareTopic(topicBlob)
+          && hasHealthcareEvidence(isWebClip ? clip : evidenceClip)
+        );
       if (isJunkStockClip(evidenceClip, topicBlob, { preferBright: options.preferBright === true })) {
         report.motionDroppedJunk = (report.motionDroppedJunk || 0) + 1;
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
@@ -3022,6 +3037,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           || isNursingHomeTopic(topicBlob)
           || isVeteransBenefitsTopic(topicBlob)
           || isHealthcareCyberTopic(topicBlob)
+          || isHealthcareTopic(topicBlob)
           || schoolCyber
           || isHeistTopic(topicBlob)
           || isAirlineTopic(topicBlob)
@@ -3238,6 +3254,25 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/\bapartment\s+building\b/i.test(blob)) {
         return 3;
       }
+    }
+    if (isHealthcareTopic(topicBlob)) {
+      // Archive clinical body filler before title-card demotes (parallel housing).
+      if (/Archive/i.test(clip.source || '')) {
+        return hasHealthcareEvidence(clip) ? 2 : 0;
+      }
+      if (/\b(title\s+card|coursera|stanford\s+online|course\s+trailer|capitol|protest)\b/i.test(blob)) {
+        return -8;
+      }
+      if (
+        /\b(face|faces|worried|shocked|doctor|nurse|physician|patient|clinician)\b/i.test(blob)
+        && /\b(hospital|clinic|mri|radiology|diagnosis|exam|medical|healthcare)\b/i.test(blob)
+      ) {
+        return 10;
+      }
+      if (/\b(mri|radiology|ct\s*scan|telemedicine|doctor\s+patient|nurse\s+station|hospital\s+ward)\b/i.test(blob)) {
+        return 8;
+      }
+      if (hasHealthcareEvidence(clip)) return 5;
     }
     if (
       (options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1')

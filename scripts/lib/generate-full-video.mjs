@@ -452,20 +452,37 @@ export function isYouTubeThumbnailStill(url = '') {
   return /i\.ytimg\.com|img\.youtube\.com|yt3\.ggpht\.com/i.test(String(url || ''));
 }
 
+/** Housing-relevant Archive evidence — modern crash stories need these, not landscapes. */
+const HOUSING_ARCHIVE_STRONG_RE =
+  /\b(apartment|tenant|evict(?:ion|ed)?|rent(?:al)?|housing|tenement|slum|landlord|foreclos(?:ure|ed)?|mortgage|public\s+housing|housing\s+project|moving\s+(?:day|boxes)|for\s+rent)\b/i;
+
 /**
  * Host reliability tier for web-motion selection.
  *
  * YouTube remains a last resort: yt-dlp often needs cookies and a JavaScript runtime
  * in bot-gated environments. Direct files and non-YouTube video hosts are much more
  * likely to survive the later assembly download.
+ *
+ * @param {object} candidate
+ * @param {{ topicBlob?: string }} [options]
  */
-export function motionCandidateHostRank(candidate = {}) {
+export function motionCandidateHostRank(candidate = {}, options = {}) {
   const urls = motionCandidateUrls(candidate);
   if (isYouTubeMotionCandidate(candidate)) return 100;
-  if (urls.some((url) => {
+  const archiveDirect = urls.some((url) => {
     const host = motionUrlHostname(url);
     return (host === 'archive.org' || host.endsWith('.archive.org')) && isDirectVideoUrl(url);
-  })) return 0;
+  });
+  if (archiveDirect) {
+    // Airline training films on Archive are first-class. Housing-crash stories need
+    // modern face/apartment web clips first — opaque Archive newsreels (rank 0) were
+    // starving intro slots of shocked-face / apartment B-roll and capping watch ~5.x.
+    if (isHousingTopic(options.topicBlob || '')) {
+      const blob = `${candidate.alt || ''} ${candidate.title || ''} ${candidate.query || ''} ${candidate.source || ''}`;
+      return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 5 : 35;
+    }
+    return 0;
+  }
   if (urls.some((url) => isDirectVideoUrl(url))) return 1;
   if (urls.some((url) => {
     const host = motionUrlHostname(url);
@@ -483,12 +500,13 @@ export function motionCandidateHostRank(candidate = {}) {
 }
 
 /** Stable host-first ranking; topical score only orders clips within a host tier. */
-export function rankMotionCandidates(candidates = [], score = () => 0) {
+export function rankMotionCandidates(candidates = [], score = () => 0, options = {}) {
   return candidates
     .map((candidate, index) => ({ candidate, index }))
     .sort((left, right) => {
       const hostDelta =
-        motionCandidateHostRank(left.candidate) - motionCandidateHostRank(right.candidate);
+        motionCandidateHostRank(left.candidate, options)
+        - motionCandidateHostRank(right.candidate, options);
       if (hostDelta) return hostDelta;
       const leftScore = Number(score(left.candidate)) || 0;
       const rightScore = Number(score(right.candidate)) || 0;
@@ -3111,6 +3129,27 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/airline|aircraft|airplane|aviation|cabin|cockpit|passenger|pilot|attendant|flight|mechanic|hangar|faa|oxygen/i.test(blob)) return 3;
       if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
     }
+    if (isHousingTopic(topicBlob)) {
+      // Face-forward / lived-in housing beats charts, landscapes, and title cards.
+      if (
+        /\b(face|faces|worried|shocked|stressed|crying|reaction|couple|family|tenant)\b/i.test(blob)
+        && /\b(apartment|home|kitchen|letter|phone|evict|rent|bills?|packing|boxes)\b/i.test(blob)
+      ) {
+        return 10;
+      }
+      if (/\b(shocked|worried|stressed)\s+face|face\s+close\s*up|couple\s+(?:arguing|reading)|family\s+apartment/i.test(blob)) {
+        return 9;
+      }
+      if (/\b(apartment\s+(?:building|interior)|for\s+rent|eviction\s+notice|packing\s+boxes|mortgage|foreclos)/i.test(blob)) {
+        return 8;
+      }
+      if (/Archive/i.test(clip.source || '') && !HOUSING_ARCHIVE_STRONG_RE.test(blob)) {
+        return -6;
+      }
+      if (/\b(landscape|mountain|helicopter|aerial\s+view|wildfire|title\s+card|newsreel)\b/i.test(blob)) {
+        return -8;
+      }
+    }
     if (
       (options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1')
       && /\b(night|dark|silhouette|low.?light|muddy|underexposed|overexposed|blown.?out|washed.?out)\b/i.test(blob)
@@ -3129,6 +3168,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const picks = rankMotionCandidates(
     pickStockVideos(pool.length, mediaOffset, pool),
     faceScore,
+    { topicBlob },
   );
   let vi = 0;
   /** @type {{ tiktokBlocked: boolean }} */
@@ -3139,6 +3179,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const isIntro = seg.type === 'intro' || seg === segments[0];
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
+    if (isHousingTopic(topicBlob) && score <= -6) return false;
+    // Housing intro needs a face / lived-in apartment signal — not Archive landscape.
+    if (isIntro && isHousingTopic(topicBlob) && score < 2) return false;
     if (isIntro && score < 0) return false;
     const unreliable = unreliableWebProxyInjectReason(clip, proxyGate);
     if (unreliable) {

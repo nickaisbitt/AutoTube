@@ -538,6 +538,45 @@ describe('non-YouTube motion planning and ranking', () => {
     expect(motionCandidateHostRank(tiktok)).toBeLessThan(motionCandidateHostRank(youtube));
   });
 
+  it('demotes opaque Archive behind web face clips on housing topics', () => {
+    const opaqueArchive = {
+      url: 'https://archive.org/download/landscape/landscape.mp4',
+      source: 'Archive.org live',
+      query: 'city street',
+      alt: 'helicopter aerial landscape',
+      score: 100,
+    };
+    const housingArchive = {
+      url: 'https://archive.org/download/apt/apartment.mp4',
+      source: 'Archive.org live',
+      query: 'apartment building',
+      alt: 'public housing apartment building',
+      score: 1,
+    };
+    const webFace = {
+      url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://vimeo.com/face')}`,
+      sourceUrl: 'https://vimeo.com/face',
+      source: 'Bing web video',
+      query: 'shocked face close up phone',
+      alt: 'worried couple reading letter home',
+      score: 0,
+    };
+    const ranked = rankMotionCandidates(
+      [opaqueArchive, housingArchive, webFace],
+      (clip) => clip.score,
+      { topicBlob: HOUSING_TOPIC },
+    );
+    expect(ranked.map((clip) => clip.url)).toEqual([
+      webFace.url,
+      housingArchive.url,
+      opaqueArchive.url,
+    ]);
+    expect(motionCandidateHostRank(opaqueArchive, { topicBlob: HOUSING_TOPIC }))
+      .toBeGreaterThan(motionCandidateHostRank(webFace, { topicBlob: HOUSING_TOPIC }));
+    // Airline topics still prefer Archive first.
+    expect(motionCandidateHostRank(opaqueArchive, { topicBlob: AIRLINE_TOPIC })).toBe(0);
+  });
+
   it('skips YouTube inject without cookies and honors a TikTok circuit breaker', () => {
     const youtube = {
       url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://youtu.be/abc')}`,

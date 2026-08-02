@@ -4,6 +4,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { MAX_FREEZE_PAD_SEC } from '../../deploy/server-render/avTimelinePolicy.mjs';
 
 const MIN_DURATION_SEC = 45;
 const MIN_BYTES = 5 * 1024 * 1024;
@@ -39,9 +40,9 @@ export function validateLoopVideo(videoPath) {
   if (existsSync(manifestPath)) {
     try {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-      // Freeze-pad up to 12s keeps narration when segment encode drifts; larger
-      // pads still mean the timeline builder failed and should fail closed.
-      if ((manifest.tpadSec ?? 0) > 12) {
+      // Freeze-pad up to MAX_FREEZE_PAD_SEC keeps narration when segment encode
+      // drifts; larger pads still mean the timeline builder failed — fail closed.
+      if ((manifest.tpadSec ?? 0) > MAX_FREEZE_PAD_SEC) {
         return {
           valid: false,
           error: `render used ${manifest.tpadSec}s video freeze-pad (A/V sync bug)`,

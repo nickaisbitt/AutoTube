@@ -3,11 +3,19 @@
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, renameSync, statSync } from 'node:fs';
 import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
 import { muxVideoWithAudio } from './audio.mjs';
+import {
+  AV_OVERSHOOT_EPSILON_SEC,
+  DEFAULT_MAX_AUDIO_TRIM_SEC,
+  MAX_FREEZE_PAD_SEC,
+  resolveMuxAvGap,
+} from './avTimelinePolicy.mjs';
+
+export { MAX_FREEZE_PAD_SEC, resolveMuxAvGap } from './avTimelinePolicy.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FPS = 24;
@@ -31,7 +39,93 @@ function trimAudioToDuration(inputPath, outputPath, targetSec) {
   return r.status === 0 && existsSync(outputPath);
 }
 
-/** Extend video by cloning the last frame so narration is not truncated. */
+function isValidPaddedVideo(outputPath, currentSec, padSec) {
+  if (!existsSync(outputPath)) return false;
+  const size = statSync(outputPath).size;
+  const dur = probeMediaDuration(outputPath);
+  // Reject corrupt tpad outputs (historically 48-byte MP4s with no moov).
+  if (size < 50_000 || dur < currentSec + padSec * 0.5) {
+    try {
+      unlinkSync(outputPath);
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+  return true;
+}
+
+/** Last-frame still concat when the tpad filter fails or produces a corrupt file. */
+function padVideoViaLastFrame(inputPath, outputPath, padSec) {
+  const workDir = dirname(outputPath);
+  const lastFrame = join(workDir, 'tpad-last-frame.png');
+  const freezeClip = join(workDir, 'tpad-freeze-clip.mp4');
+  try {
+    unlinkSync(lastFrame);
+  } catch { /* ignore */ }
+  try {
+    unlinkSync(freezeClip);
+  } catch { /* ignore */ }
+
+  const frame = spawnSync(
+    'ffmpeg',
+    ['-y', '-sseof', '-0.15', '-i', inputPath, '-frames:v', '1', lastFrame],
+    { encoding: 'utf8', timeout: 60_000 },
+  );
+  if (frame.status !== 0 || !existsSync(lastFrame) || statSync(lastFrame).size < 100) {
+    return false;
+  }
+
+  const dim = spawnSync(
+    'ffprobe',
+    [
+      '-v', 'error', '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height',
+      '-of', 'csv=p=0:s=x', inputPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  const wh = String(dim.stdout || '').trim().split('x');
+  const w = parseInt(wh[0], 10) || 1280;
+  const h = parseInt(wh[1], 10) || 720;
+
+  const freeze = spawnSync(
+    'ffmpeg',
+    [
+      '-y', '-loop', '1', '-i', lastFrame,
+      '-t', padSec.toFixed(3),
+      '-vf', `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,fps=${FPS}`,
+      '-c:v', 'libx264', '-preset', ffmpegPreset(), '-pix_fmt', 'yuv420p',
+      '-an', freezeClip,
+    ],
+    { encoding: 'utf8', timeout: 120_000 },
+  );
+  if (freeze.status !== 0 || !existsSync(freezeClip)) return false;
+
+  const listFile = join(workDir, 'tpad-concat.txt');
+  writeFileSync(
+    listFile,
+    `file '${escapeConcatPath(inputPath)}'\nfile '${escapeConcatPath(freezeClip)}'\n`,
+  );
+  const concat = spawnSync(
+    'ffmpeg',
+    [
+      '-y', '-f', 'concat', '-safe', '0', '-i', listFile,
+      '-c:v', 'libx264', '-preset', ffmpegPreset(), '-pix_fmt', 'yuv420p',
+      '-an', outputPath,
+    ],
+    { encoding: 'utf8', timeout: 300_000 },
+  );
+  try { unlinkSync(lastFrame); } catch { /* ignore */ }
+  try { unlinkSync(freezeClip); } catch { /* ignore */ }
+  try { unlinkSync(listFile); } catch { /* ignore */ }
+  return concat.status === 0 && existsSync(outputPath);
+}
+
+/**
+ * Extend video by cloning the last frame so narration is not truncated.
+ * Primary: ffmpeg tpad. Fallback: last-frame still concat (covers corrupt tpad).
+ */
 function padVideoToDuration(inputPath, outputPath, targetSec) {
   const current = probeMediaDuration(inputPath);
   const padSec = targetSec - current;
@@ -39,7 +133,8 @@ function padVideoToDuration(inputPath, outputPath, targetSec) {
     const copy = spawnSync('ffmpeg', ['-y', '-i', inputPath, '-c', 'copy', outputPath], { encoding: 'utf8' });
     return copy.status === 0 && existsSync(outputPath);
   }
-  const r = spawnSync(
+
+  const tpad = spawnSync(
     'ffmpeg',
     [
       '-y', '-i', inputPath,
@@ -49,7 +144,16 @@ function padVideoToDuration(inputPath, outputPath, targetSec) {
     ],
     { encoding: 'utf8', timeout: 300_000 },
   );
-  return r.status === 0 && existsSync(outputPath);
+  if (tpad.status === 0 && isValidPaddedVideo(outputPath, current, padSec)) {
+    return true;
+  }
+
+  console.log(`  [ffmpeg] tpad failed or corrupt — trying last-frame freeze (${padSec.toFixed(1)}s)`);
+  if (padVideoViaLastFrame(inputPath, outputPath, padSec)
+      && isValidPaddedVideo(outputPath, current, padSec)) {
+    return true;
+  }
+  return false;
 }
 
 function outputDimensions() {
@@ -960,39 +1064,79 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   let videoForMux = mergedVideo;
   let muxDurationSec = videoDurationSec;
 
-  if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + 0.15) {
+  if (audioFile && existsSync(audioFile) && audioDurationSec > videoDurationSec + AV_OVERSHOOT_EPSILON_SEC) {
     const overshootSec = audioDurationSec - videoDurationSec;
+    const maxTrimSec = Math.max(
+      0,
+      Number(process.env.AUTOTUBE_MAX_AUDIO_TRIM_SEC ?? DEFAULT_MAX_AUDIO_TRIM_SEC),
+    );
+    const decision = resolveMuxAvGap(overshootSec, {
+      allowAudioTrim: process.env.AUTOTUBE_ALLOW_AUDIO_TRIM === '1',
+      maxTrimSec,
+      maxFreezePadSec: MAX_FREEZE_PAD_SEC,
+    });
     const paddedVideo = join(workDir, 'merged-video-padded.mp4');
+
     // Prefer freeze-pad (≤12s) so narration is kept — segment encode drift on
     // healthcare/espeak runs was failing the trim gate (~2.5–5s short).
-    if (overshootSec <= 12 && padVideoToDuration(mergedVideo, paddedVideo, audioDurationSec)) {
-      videoForMux = paddedVideo;
-      tpadSec = overshootSec;
-      videoDurationSec = probeMediaDuration(paddedVideo) || audioDurationSec;
-      muxDurationSec = audioDurationSec;
-      console.log(
-        `  [ffmpeg] padded video ${rawVideoSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s `
-        + `(tpad ${overshootSec.toFixed(1)}s, keep full narration)`,
-      );
-    } else {
-      // Guard: a large overshoot means real narration would be cut off.
-      const maxTrimSec = Math.max(0, Number(process.env.AUTOTUBE_MAX_AUDIO_TRIM_SEC ?? 2));
-      if (overshootSec > maxTrimSec && process.env.AUTOTUBE_ALLOW_AUDIO_TRIM !== '1') {
-        return {
-          ok: false,
-          error:
-            `A/V timeline mismatch: mux would trim ${overshootSec.toFixed(2)}s of audio `
-            + `(audio ${audioDurationSec.toFixed(2)}s vs video ${rawVideoSec.toFixed(2)}s, allowed ${maxTrimSec}s). `
-            + 'Narration would be cut off. Set AUTOTUBE_ALLOW_AUDIO_TRIM=1 to override.',
-        };
+    if (decision.action === 'freeze-pad') {
+      if (padVideoToDuration(mergedVideo, paddedVideo, audioDurationSec)) {
+        videoForMux = paddedVideo;
+        tpadSec = overshootSec;
+        videoDurationSec = probeMediaDuration(paddedVideo) || audioDurationSec;
+        muxDurationSec = audioDurationSec;
+        console.log(
+          `  [ffmpeg] padded video ${rawVideoSec.toFixed(1)}s → ${videoDurationSec.toFixed(1)}s `
+          + `(tpad ${overshootSec.toFixed(1)}s, keep full narration)`,
+        );
+      } else {
+        // Pad should succeed for ≤12s; if both tpad + last-frame fail, fall through
+        // to the trim/fail path rather than silently muxing a short video.
+        console.log(
+          `  [ffmpeg] freeze-pad failed for ${overshootSec.toFixed(1)}s gap — `
+          + 'falling back to audio trim / fail-closed',
+        );
+        if (overshootSec > maxTrimSec && process.env.AUTOTUBE_ALLOW_AUDIO_TRIM !== '1') {
+          return {
+            ok: false,
+            error:
+              `A/V timeline mismatch: mux would trim ${overshootSec.toFixed(2)}s of audio `
+              + `(audio ${audioDurationSec.toFixed(2)}s vs video ${rawVideoSec.toFixed(2)}s, `
+              + `allowed ${maxTrimSec}s; freeze-pad ≤${MAX_FREEZE_PAD_SEC}s also failed). `
+              + 'Narration would be cut off. Set AUTOTUBE_ALLOW_AUDIO_TRIM=1 to override.',
+          };
+        }
+        const trimmedAudio = join(workDir, 'narration-trimmed.wav');
+        if (trimAudioToDuration(audioFile, trimmedAudio, rawVideoSec)) {
+          audioForMux = trimmedAudio;
+          audioTrimmedSec = overshootSec;
+          muxDurationSec = rawVideoSec;
+          console.log(
+            `  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${rawVideoSec.toFixed(1)}s `
+            + '(video pad failed)',
+          );
+        }
       }
+    } else if (decision.action === 'trim-audio') {
       const trimmedAudio = join(workDir, 'narration-trimmed.wav');
       if (trimAudioToDuration(audioFile, trimmedAudio, rawVideoSec)) {
         audioForMux = trimmedAudio;
         audioTrimmedSec = overshootSec;
         muxDurationSec = rawVideoSec;
-        console.log(`  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${rawVideoSec.toFixed(1)}s (video pad failed)`);
+        console.log(
+          `  [ffmpeg] trimmed audio ${audioDurationSec.toFixed(1)}s → ${rawVideoSec.toFixed(1)}s `
+          + `(overshoot ${overshootSec.toFixed(1)}s > freeze-pad ${MAX_FREEZE_PAD_SEC}s)`,
+        );
       }
+    } else if (decision.action === 'fail') {
+      return {
+        ok: false,
+        error:
+          `A/V timeline mismatch: mux would trim ${overshootSec.toFixed(2)}s of audio `
+          + `(audio ${audioDurationSec.toFixed(2)}s vs video ${rawVideoSec.toFixed(2)}s, `
+          + `freeze-pad max ${MAX_FREEZE_PAD_SEC}s, trim allowed ${maxTrimSec}s). `
+          + 'Narration would be cut off. Set AUTOTUBE_ALLOW_AUDIO_TRIM=1 to override.',
+      };
     }
   }
 

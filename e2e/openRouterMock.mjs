@@ -100,6 +100,18 @@ export function buildShockHookLine(topic, override) {
   if (/hospital|patient|healthcare|hipaa/.test(tl) && /hack|breach|leak|records?|data|cyber/.test(tl)) {
     return 'Your medical chart was already in the breach dump.';
   }
+  // General AI-medicine (not cyber): spoken hook must share anchors with
+  // "AI BEATS YOUR DOCTOR" or honesty falls through to generic clickbait
+  // (healthcare-web8 burned spoken "bigger than the headlines").
+  if (
+    /\b(healthcare|hospital|doctor|radiolog|medical|clinic|physician|patient)\b/.test(tl)
+    && /\b(ai|artificial\s+intelligence)\b/.test(tl)
+  ) {
+    return 'AI already beats your doctor on the scan — hospitals know.';
+  }
+  if (/\bhousing\s*(crash|bubble|market)|foreclos|mortgage\s*crash\b/.test(tl)) {
+    return 'They hid the housing crash while your equity vanished.';
+  }
   if (
     isSchoolEducationTopic(tl)
     && /hack|ransom|breach|cyber|leak|data|records/.test(tl)

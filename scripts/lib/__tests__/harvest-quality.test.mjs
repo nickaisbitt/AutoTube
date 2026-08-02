@@ -598,6 +598,7 @@ describe('healthcare off-topic B-roll rejects', () => {
       'maternity hospital childbirth training film',
       'kapparot ritual chicken atonement ceremony',
       'news talking head studio interview anchor desk',
+      'woman green screen christmas tree healthcare webinar',
       'news anchor studio desk healthcare segment',
       'covid propaganda psa misinfo leftover clip',
       'coursera lecture slides online course mooc',

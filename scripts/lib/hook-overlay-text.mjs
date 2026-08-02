@@ -9,7 +9,39 @@
  *     fix-state, watcher suggestion) goes through the same violation check.
  */
 
-import { isAirlineTopic } from './topic-family.mjs';
+import {
+  isAirlineTopic,
+  isHealthcareCyberTopic,
+  isHealthcareTopic,
+  isHousingTopic,
+} from './topic-family.mjs';
+
+/**
+ * Canonical family stakes overlays are topic-true even when a short token like
+ * "AI" is stripped by hookAnchorWords (len≤2). Without this, resolveHonestHookOverlay
+ * rejects "AI BEATS YOUR DOCTOR" for "Why AI will change healthcare" and burns the
+ * generic spoken template instead (healthcare-web8).
+ */
+export function isCanonicalFamilyStakesOverlay(overlayText, topic) {
+  const text = String(overlayText || '').trim().toUpperCase();
+  if (!text || !topic) return false;
+  if (isHousingTopic(topic)) {
+    return (
+      text === 'THE HOUSING CRASH THEY HID'
+      || text === 'THEY EVICTED YOU WITH AI'
+    );
+  }
+  if (isHealthcareCyberTopic(topic)) {
+    return text === 'PATIENT RECORDS EXPOSED';
+  }
+  if (isHealthcareTopic(topic)) {
+    return text === 'AI BEATS YOUR DOCTOR' || text === 'PATIENT RECORDS EXPOSED';
+  }
+  if (isAirlineTopic(topic)) {
+    return /CABIN KEEP FAILING|OXYGEN|PRESSURE/.test(text);
+  }
+  return false;
+}
 
 function splitMergedWordAt(index) {
   return (word) => `${word.slice(0, index)} ${word.slice(index)}`;
@@ -123,6 +155,12 @@ export function hookOverlayViolation(overlayText, context = {}) {
   const spokenHook = String(context.spokenHook || '').trim();
   const reference = `${topic} ${spokenHook}`.trim();
   if (!reference) return null;
+
+  // Family stakes overlays are authored against the topic family — allow even
+  // when short anchors (AI) are filtered out of hookAnchorWords.
+  if (isCanonicalFamilyStakesOverlay(text, topic)) {
+    return null;
+  }
 
   if (!sharesHookAnchor(text, reference)) {
     return 'overlay shares no words with the spoken hook or topic';

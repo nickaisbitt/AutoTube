@@ -36,6 +36,21 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     expect(buildShortHookOverlay(topic, '')).toBe(expected);
   });
 
+  it('keeps AI BEATS YOUR DOCTOR through honesty gate vs generic spoken templates', () => {
+    const topic = 'Why AI will change healthcare';
+    const spoken = 'This is bigger than the headlines admit.';
+    const overlay = buildShortHookOverlay(topic, spoken);
+    expect(overlay).toBe('AI BEATS YOUR DOCTOR');
+    expect(hookOverlayViolation(overlay, { topic, spokenHook: spoken })).toBeNull();
+    const { text, source } = resolveHonestHookOverlay({
+      topic,
+      spokenHook: spoken,
+      candidates: [{ text: overlay, source: 'exportSettings.hookOverlay' }],
+    });
+    expect(text).toBe('AI BEATS YOUR DOCTOR');
+    expect(source).toBe('exportSettings.hookOverlay');
+  });
+
   it('routes clinic ransomware to healthcare overlay, NOT the bank overlay (regression)', () => {
     // "clinic" + "ransomware" previously slipped past the hospital+records guard
     // and landed on YOUR BANK ACCOUNT IS EMPTY — a hook/visual disconnect.

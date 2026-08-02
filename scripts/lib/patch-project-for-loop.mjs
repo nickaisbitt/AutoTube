@@ -199,6 +199,14 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     }
     return clampWords('THE HOUSING CRASH THEY HID');
   }
+  // Healthcare BEFORE preferred/vision — spoken clickbait must not overwrite
+  // the clinical stakes line (healthcare-web8 burned "BIGGER THAN THE HEADLINES").
+  if (isHealthcareCyberTopic(topicOnly)) {
+    return clampWords('PATIENT RECORDS EXPOSED');
+  }
+  if (isHealthcareTopic(topicOnly)) {
+    return clampWords('AI BEATS YOUR DOCTOR');
+  }
 
   const preferred = options.preferredOverlay?.trim();
   if (preferred && !isInstructionOverlay(preferred)) {
@@ -239,14 +247,6 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
   }
   if (/olympic|relay|doping|drug\s*test|coach/i.test(t) && /forge|fake|test|doping|steroid/i.test(t)) {
     return clampWords('FORGED DRUG TESTS EXPOSED');
-  }
-  if (isHealthcareCyberTopic(topicOnly)) {
-    return clampWords('PATIENT RECORDS EXPOSED');
-  }
-  // General AI/medicine healthcare (not cyber): stakes overlay without conspiracy
-  // "… EXPOSED" clickbait that tanks healthcare-web1/web2 hooks.
-  if (isHealthcareTopic(topicOnly)) {
-    return clampWords('AI BEATS YOUR DOCTOR');
   }
   if (
     /port|strike|container|shipping|supply\s*chain|cargo|dock|freight|maritime/i.test(t)
@@ -393,7 +393,7 @@ export function promoteIntroFaceVideo(project) {
       // Webinar / Zoom-chair / home-tour / gov-PR pads must never win the hook.
       if (
         isHousingTalkingHeadMotion(asset)
-        || /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer)\b/i.test(scoreBlob)
+        || /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|protest|picket|rent\s+strike|for\s+sale\s+sign|re\/?max)\b/i.test(scoreBlob)
       ) {
         return -20;
       }

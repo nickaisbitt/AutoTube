@@ -483,13 +483,13 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
     return (host === 'archive.org' || host.endsWith('.archive.org')) && isDirectVideoUrl(url);
   });
   if (archiveDirect) {
-    // Airline training films on Archive are first-class. Housing-crash stories need
-    // modern face/apartment *web* clips first — even "apartment"-tagged Archive is
-    // mostly council meetings / ribbon-cuttings / news graphics (rank must stay
-    // behind generic Bing/DDG web = 10, or those muddy clips starve the pool).
+    // Airline training films on Archive are first-class (rank 0). Housing needs
+    // apartment/tenant Archive for volume like airline-web8, but opaque newsreels
+    // stay last. Strong apartment Archive at 5 beats generic Bing/DDG web (10)
+    // and lost webinar/talking-head scrapes that capped watch ~4.6.
     if (isHousingTopic(options.topicBlob || '')) {
       const blob = `${candidate.alt || ''} ${candidate.title || ''} ${candidate.query || ''} ${candidate.source || ''}`;
-      return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 15 : 35;
+      return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 5 : 35;
     }
     return 0;
   }
@@ -2040,7 +2040,14 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   // Broad healthcare (AI-medicine, hospital, clinical) — not only cyber breaches.
   // Cyber topics keep records/server B-roll; general healthcare prefers clinical motion.
   if (isHealthcareTopic(topicBlob)) {
+    // Face-first AI-medicine: clinician+screen / OR motion — not Archive talking-heads.
     const faces = [
+      'ai radiology doctor monitor screen',
+      'clinician pointing at mri monitor',
+      'doctor reviewing mri scan monitors',
+      'radiologist ai diagnosis screen',
+      'surgical robot operating room',
+      'ultrasound demonstration clinician',
       'worried patient looking at phone',
       'stressed nurse looking at computer',
       'doctor reviewing laptop screen hospital',
@@ -2068,9 +2075,12 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
           'radiologist reviewing scan monitors',
           'telemedicine doctor video call',
           'electronic health record laptop',
+          'radiology AI',
         ];
     const topical = [...clinical, ...cyberPack];
-    const base = faceFirst ? [...faces, ...topical] : [...topical.slice(0, 3), ...faces, ...topical.slice(3)];
+    // Always face-first on healthcare — maternity/ritual/talking-head Archive pads
+    // starve variety when clinical/exteriors lead (healthcare-web3 raw 4.6).
+    const base = [...faces, ...topical];
     return withFillers(base);
   }
   if (airline) {
@@ -2359,6 +2369,12 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
 
 /** Short Archive.org subjects for hospital / clinical / AI-medicine keyless runs. */
 const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
+  'ai radiology',
+  'doctor mri monitor',
+  'clinician computer screen',
+  'surgical robot',
+  'ultrasound demonstration',
+  'radiology reading room',
   'hospital corridor',
   'hospital ward',
   'nurse station',
@@ -2383,7 +2399,6 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   'hospital hallway',
   'doctor reviewing charts',
   'nurse patient bedside',
-  'radiology reading room',
   'emergency room hospital',
   'surgical team operating',
   'ai healthcare documentary',
@@ -3227,6 +3242,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/airport|runway|plane|jet|tarmac/i.test(blob)) return 1;
     }
     if (isHousingTopic(topicBlob)) {
+      // Low-energy webinar / chair openers tank hook (web17) — reject before Archive fill.
+      if (
+        /\b(webinar|workshop|rent\s+program|tenant\s+relief|sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call)\b/i.test(blob)
+      ) {
+        return -20;
+      }
       // Archive body filler MUST be scored before landscape/newsreel demotes.
       // Enriched Archive descriptions often contain "aerial/landscape/newsreel" and
       // were hard-rejecting (-8) every Archive candidate on web11 (0 Archive inject

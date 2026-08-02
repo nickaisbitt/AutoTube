@@ -101,7 +101,7 @@ describe('introFaceTier', () => {
     expect(introFaceTier(asset, { airline: false, housing: true })).toBe(-1);
   });
 
-  it('tiers tenant/rent webinars as housing talking-head openers', () => {
+  it('demotes tenant/rent webinars as low-energy housing openers', () => {
     const asset = {
       query: 'tenant eviction',
       alt: 'richmond rent program workshop webinar handling habitability problems tenant focused',
@@ -111,7 +111,8 @@ describe('introFaceTier', () => {
       type: 'video',
     };
     expect(isHousingTalkingHeadMotion(asset)).toBe(true);
-    expect(introFaceTier(asset, { airline: false, housing: true })).toBe(1);
+    // Still classified as talking-head motion, but never tiered as an intro lead (web17).
+    expect(introFaceTier(asset, { airline: false, housing: true })).toBe(-1);
   });
 });
 

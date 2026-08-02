@@ -164,6 +164,14 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   }
   // Housing hooks must not open on lake/mountain/Archive landscape stock.
   if (housing && isLandscapeOnlyIntroVisual(asset)) return true;
+  // Webinar / sitting-in-chair openers read as low-energy (web17 raw 4.6).
+  if (housing && isHousingTalkingHeadMotion(asset)) return true;
+  if (
+    housing
+    && /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call|talking\s+to\s+camera\s+desk)\b/i.test(blob)
+  ) {
+    return true;
+  }
   // Healthcare AI hooks must not open on course title cards / Giphy / protest pads.
   if (
     healthcare
@@ -268,8 +276,8 @@ export function isHousingApartmentMotion(asset) {
 }
 
 /**
- * Tenant/rent webinar or workshop clips — talking-head B-roll for housing hooks
- * when Archive titles omit "face"/"portrait" (web16 opened on street pads instead).
+ * Tenant/rent webinar or workshop clips — OK as housing *body* filler when face
+ * keywords are missing, but never as the hook opener (web17: static chair → raw 4.6).
  */
 export function isHousingTalkingHeadMotion(asset) {
   if (isLandscapeOnlyIntroVisual(asset)) return false;
@@ -290,6 +298,8 @@ const HEALTHCARE_TOPICAL_VISUAL_RE =
  */
 export function introFaceTier(asset, { airline = false, housing = false, healthcare = false } = {}) {
   if (housing && isLandscapeOnlyIntroVisual(asset)) return -1;
+  // Housing webinars / chair openers and healthcare title cards are never tiered up.
+  if (housing && isRejectedIntroLeadVisual(asset, { housing: true })) return -1;
   if (healthcare && isRejectedIntroLeadVisual(asset, { healthcare: true })) return -1;
   if (hasReadableFaceVisual(asset)) {
     const blob = assetBlob(asset);
@@ -301,8 +311,6 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
   // Housing: lived-in apartment motion without a strict face tag still beats
   // landscape / Archive establishing for the opener (web14).
   if (housing && isHousingApartmentMotion(asset)) return 1;
-  // Housing webinars/workshops are human openers even without face keywords.
-  if (housing && isHousingTalkingHeadMotion(asset)) return 1;
   // Healthcare: clinical evidence motion (MRI/doctor/hospital) without a strict
   // face tag still beats Coursera/Giphy title cards for the opener.
   if (healthcare && hasHealthcareEvidence(asset) && (asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) {
@@ -973,12 +981,12 @@ export function buildEditTimeline(project, options = {}) {
         if (!candidate) return false;
         const key = urlKey(candidate);
         if (candidate.id === lastAssetId || (key && key === lastUrl)) return false;
-        // Housing intro 0–3s: landscape-only stays banned even on the relaxed
-        // pass so lake/Archive establishing cannot win the hook opener.
+        // Housing intro 0–3s: landscape / webinar / chair / home-tour stay banned
+        // even on the relaxed pass so low-energy openers cannot win the hook.
         if (
           introLeadWindow
           && topicIsHousing
-          && isLandscapeOnlyIntroVisual(candidate)
+          && isRejectedIntroLeadVisual(candidate, { housing: true })
         ) {
           return false;
         }

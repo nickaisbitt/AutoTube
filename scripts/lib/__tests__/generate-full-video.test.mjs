@@ -578,7 +578,8 @@ describe('non-YouTube motion planning and ranking', () => {
       (clip) => clip.score,
       { topicBlob: HOUSING_TOPIC },
     );
-    // Direct .mp4 web (1) beats Vimeo (2); both beat housing Archive (15) and opaque (35).
+    // Direct .mp4 web (1) beats Vimeo (2); strong housing Archive (5) beats opaque (35)
+    // and generic Bing web (10) — airline-style Archive volume for apartment evidence.
     expect(ranked.map((clip) => clip.url)).toEqual([
       bingWeb.url,
       webFace.url,
@@ -588,7 +589,12 @@ describe('non-YouTube motion planning and ranking', () => {
     expect(motionCandidateHostRank(housingArchive, { topicBlob: HOUSING_TOPIC }))
       .toBeGreaterThan(motionCandidateHostRank(bingWeb, { topicBlob: HOUSING_TOPIC }));
     expect(motionCandidateHostRank(housingArchive, { topicBlob: HOUSING_TOPIC }))
-      .toBeGreaterThan(10);
+      .toBeLessThanOrEqual(10);
+    expect(motionCandidateHostRank(housingArchive, { topicBlob: HOUSING_TOPIC }))
+      .toBeLessThan(motionCandidateHostRank(
+        { url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://news.example/page')}` },
+        { topicBlob: HOUSING_TOPIC },
+      ));
     expect(motionCandidateHostRank(opaqueArchive, { topicBlob: HOUSING_TOPIC }))
       .toBeGreaterThan(motionCandidateHostRank(webFace, { topicBlob: HOUSING_TOPIC }));
     // Airline topics still prefer Archive first.

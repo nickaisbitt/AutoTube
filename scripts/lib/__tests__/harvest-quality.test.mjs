@@ -462,11 +462,16 @@ describe('housing off-topic B-roll rejects', () => {
       'dashcam car crash footage highway pile-up',
       'traffic accident scene daylight news',
       'wildfire smoke aerial fire footage',
+      'thirteen people displace by apartment fire san diego',
+      'airstrike levelled an apartment building in gaza strip',
+      'vietnam war home movie of subic bay philippines',
+      'county building commission hearing june 2026',
       'city council meeting apartments approved',
       'earthquake quake damage newsreel',
       'pie chart poll graphic lendingtree infographic',
       'CAN TV station id bumper',
       '3d house on a rock neohomeloans illustration',
+      'queen elizabeth ii memorial portrait',
     ];
     for (const alt of cases) {
       expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);

@@ -74,6 +74,19 @@ describe('introFaceTier', () => {
     expect(isLandscapeOnlyIntroVisual(asset)).toBe(true);
     expect(introFaceTier(asset, { airline: false, housing: true })).toBe(-1);
   });
+
+  it('treats Archive bay/war home-movie stock as landscape-only for housing intro', () => {
+    const asset = {
+      query: 'worried couple reading letter home',
+      alt: 'vietnam war home movie of subic bay philippines re supply trip 1966 67',
+      title: 'vietnam war home movie of subic bay philippines re supply trip 1966 67',
+      url: 'https://archive.org/download/Gregg_Arthur_Subic_Bay_1966/Gregg_Arthur_Subic_Bay_1966.mp4',
+      source: 'Archive.org live',
+      type: 'video',
+    };
+    expect(isLandscapeOnlyIntroVisual(asset)).toBe(true);
+    expect(introFaceTier(asset, { airline: false, housing: true })).toBe(-1);
+  });
 });
 
 // ---------------------------------------------------------------------------

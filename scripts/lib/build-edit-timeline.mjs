@@ -19,8 +19,17 @@ function urlKey(asset) {
 }
 
 function assetBlob(asset) {
-  return `${asset?.query || ''} ${asset?.alt || ''} ${asset?.source || ''} ${asset?.url || ''}`.toLowerCase();
+  return `${asset?.query || ''} ${asset?.title || ''} ${asset?.alt || ''} ${asset?.source || ''} ${asset?.url || ''}`.toLowerCase();
 }
+
+/** Title/alt/url only — harvest `query` is aspirational and must not spoof faces. */
+function assetEvidenceBlob(asset) {
+  return `${asset?.title || ''} ${asset?.alt || ''} ${asset?.source || ''} ${asset?.url || ''}`.toLowerCase();
+}
+
+/** Archive war/naval/bay establishing that must never open a housing hook. */
+const HOUSING_WAR_NAVAL_ESTABLISHING_RE =
+  /\b(vietnam|war\s+home\s+movie|subic\s+bay|home\s+movie|naval|re[\s-]?supply|war\s+footage|airstrike|air\s*strike|gaza(?:\s+strip)?)\b/;
 
 function uniqueAssetsByUrl(assets) {
   const seen = new Set();
@@ -179,7 +188,7 @@ const HOUSING_TOPICAL_VISUAL_RE = /\b(evict(?:ion|ed)?|landlords?|tenants?|lease
 
 /** Nature / establishing stock with no lived-in housing or readable human. */
 const LANDSCAPE_ONLY_INTRO_RE =
-  /\b(landscape|mountain|lake|lakeside|river|forest|nature\s+scenic|scenic\s+view|countryside|wildfire|helicopter|aerial(?:\s+view)?|rolling\s+hills|beach|sunset|ocean|sea\s+waves)\b/;
+  /\b(landscape|mountain|lake|lakeside|river|forest|nature\s+scenic|scenic\s+view|countryside|wildfire|helicopter|aerial(?:\s+view)?|rolling\s+hills|beach|sunset|ocean|sea\s+waves|subic\s+bay|bay|harbour|harbor|naval|home\s+movie|vietnam|war\s+footage|re[\s-]?supply)\b/;
 
 const HOUSING_LIVED_IN_RE =
   /\b(modern\s+apartment|apartment\s+interior|living\s+room|kitchen|hallway|tenant|evict(?:ion|ed)?|for\s+rent|packing\s+boxes|lease|landlord|worried\s+(?:couple|family)|family\s+apartment)\b/;
@@ -189,13 +198,29 @@ const HOUSING_LIVED_IN_RE =
  * face signal — never OK as a housing hook opener when better clips exist.
  */
 export function isLandscapeOnlyIntroVisual(asset) {
+  const evidence = assetEvidenceBlob(asset);
   const blob = assetBlob(asset);
-  if (!LANDSCAPE_ONLY_INTRO_RE.test(blob)) return false;
-  if (hasReadableFaceVisual(asset)) return false;
-  if (HOUSING_LIVED_IN_RE.test(blob) || HOUSING_TOPICAL_VISUAL_RE.test(blob)) return false;
+  // War/naval/bay Archive titles win over aspirational face queries ("worried
+  // couple…") and over bare "home" inside "home movie".
   if (
-    /\b(face|portrait|close.?up|people|person|couple|family|worried|shocked)\b/.test(blob)
-    && /\b(tenant|landlord|resident|home|house|apartment)\b/.test(blob)
+    HOUSING_WAR_NAVAL_ESTABLISHING_RE.test(evidence || blob)
+    && !HOUSING_LIVED_IN_RE.test(evidence)
+  ) {
+    return true;
+  }
+  if (!LANDSCAPE_ONLY_INTRO_RE.test(evidence || blob)) return false;
+  // Face / topical escapes must come from evidence, not harvest query spoofing.
+  const evidenceAsset = {
+    ...asset,
+    query: '',
+    title: asset?.title,
+    alt: asset?.alt,
+  };
+  if (hasReadableFaceVisual(evidenceAsset)) return false;
+  if (HOUSING_LIVED_IN_RE.test(evidence) || HOUSING_TOPICAL_VISUAL_RE.test(evidence)) return false;
+  if (
+    /\b(face|portrait|close.?up|people|person|couple|family|worried|shocked)\b/.test(evidence)
+    && /\b(tenant|landlord|resident|home|house|apartment)\b/.test(evidence)
   ) {
     return false;
   }

@@ -364,7 +364,10 @@ export function promoteIntroFaceVideo(project) {
 
   const housing = isHousingTopic(project.topic || '');
   const faceScore = (asset) => {
-    const blob = `${asset?.query || ''} ${asset?.alt || ''} ${asset?.source || ''} ${asset?.url || ''}`.toLowerCase();
+    // Prefer title/alt evidence so aspirational harvest queries cannot promote
+    // Archive war/bay stock as if it were a worried-couple apartment face.
+    const evidence = `${asset?.title || ''} ${asset?.alt || ''} ${asset?.source || ''} ${asset?.url || ''}`.toLowerCase();
+    const blob = `${asset?.query || ''} ${evidence}`;
     const topic = String(project.topic || '').toLowerCase();
     if (/microphone|podcast|studio|asmr|cartoon|puppet|minecraft|beetle|insect/i.test(blob)) return -5;
     if (/architectural model|conference room|skyline|corporate office|empty park|people in a park/i.test(blob)) {
@@ -378,18 +381,22 @@ export function promoteIntroFaceVideo(project) {
     // face or modern-apartment motion exists elsewhere in the pool.
     if (housing) {
       if (isLandscapeOnlyIntroVisual(asset)) return -8;
-      const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && blob.includes(w)).length;
+      const scoreBlob = evidence || blob;
+      const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && scoreBlob.includes(w)).length;
       if (
-        /\b(face|faces|worried|shocked|stressed|portrait|close.?up|couple|family|tenant)\b/i.test(blob)
-        && /\b(apartment|home|kitchen|evict|rent|letter|packing|boxes)\b/i.test(blob)
+        /\b(face|faces|worried|shocked|stressed|portrait|close.?up|couple|family|tenant)\b/i.test(scoreBlob)
+        && /\b(apartment|home|kitchen|evict|rent|letter|packing|boxes)\b/i.test(scoreBlob)
       ) {
         return 12 + Math.min(2, topicHits);
       }
-      if (hasReadableFaceVisual(asset) || /\b(face|portrait|close.?up|worried|shocked|reaction)\b/i.test(blob)) {
+      if (
+        hasReadableFaceVisual({ ...asset, query: '' })
+        || /\b(face|portrait|close.?up|worried|shocked|reaction)\b/i.test(scoreBlob)
+      ) {
         return 9 + Math.min(2, topicHits);
       }
       if (isHousingApartmentMotion(asset)) return 8 + Math.min(2, topicHits);
-      if (/\bapartment\s+building\b/i.test(blob) && asset?.type === 'video') return 3;
+      if (/\bapartment\s+building\b/i.test(scoreBlob) && asset?.type === 'video') return 3;
       // Generic video without face/apartment signal must not win the housing hook.
       return asset?.type === 'video' ? 0 : -1;
     }
@@ -617,6 +624,9 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     && !hookOverlayViolation(fixState.hookOverlay, { topic, spokenHook: fallbackHookLine || '' })
     ? fixState.hookOverlay
     : undefined;
+  // Housing: karaoke OFF by default — long STT burns over news chyrons tank
+  // captionReadability (web15). Other topics keep karaoke unless fix-state says no.
+  const housingTopic = isHousingTopic(topic);
   project.exportSettings = {
     ...(project.exportSettings || {}),
     quality: 'high',
@@ -624,8 +634,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     musicPreset: 'neutral',
     resolution: '1080p',
     youtubeMode: true,
-  // Karaoke on by default in loop.
-  karaokeCaptions: fixState.karaokeCaptions !== false,
+    karaokeCaptions: housingTopic ? false : fixState.karaokeCaptions !== false,
     hookOverlay: project.exportSettings?.hookOverlay ?? fixStateOverlay,
     hookLine: fallbackHookLine,
   };

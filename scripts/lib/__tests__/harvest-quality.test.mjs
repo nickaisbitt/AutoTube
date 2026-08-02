@@ -494,6 +494,15 @@ describe('housing off-topic B-roll rejects', () => {
       'sixth annual fair housing conference april 20 2026',
       'county announces completion of 2 year apartment building inspection initiative',
       'Jerome Fletcher Assistant Chief Administrative Officer montgomery',
+      // housing-web19
+      'RE/MAX FOR SALE sign Kathy Bost suburban house yard sign',
+      'touring a 27 3 million apartment in nyc s one57',
+      'negative space based on a 150 word poem by ron koertge animated film',
+      'The Michael Jackson Interview: The Footage You Were Never Meant to See',
+      'Massie End the Fed fox news still',
+      'August 6 2007 American Home Mortgage mousetrap house illustration',
+      'golden valley approves 2 new apartment complexes',
+      'WHAT HAPPENS WHEN THE CREDIT HIT MARKET CRASHES crater graphic',
     ];
     for (const alt of cases) {
       expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);

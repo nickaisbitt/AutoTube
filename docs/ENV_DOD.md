@@ -117,4 +117,5 @@ not shown.
 
 > Upload-ready ≥ 7 is proven with raw web harvest (Bing/Google/DDG/Archive/
 > yt-dlp), watcher exit 0, and honest brutal raw scores — not by adding
-> stock keys.
+> stock keys. Airline cold-topic proof: airline-web8 raw **7.8** / upload-ready
+> YES (`pexels=0 pixabay=0`, youtube inject skipped without cookies).

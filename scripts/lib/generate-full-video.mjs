@@ -3271,17 +3271,20 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     }
     if (isHousingTopic(topicBlob)) {
       // Hard-reject webinar / sitting-in-chair / home-tour static openers (web17 raw 4.6).
-      // score ≤ -20 is dropped by injectClip; timeline also bans them as introLead.
+      // Headset / podcast-mic / YouTuber talking-heads (web19 contact sheet) even
+      // when alt omits "webinar". score ≤ -20 is dropped by injectClip; timeline
+      // also bans them as introLead.
       if (
-        /\b(webinar|workshop|rent\s+program|tenant\s+relief|sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call)\b/i.test(blob)
+        /\b(webinar|workshop|rent\s+program|tenant\s+relief|sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call|(?:gaming\s+)?headset|podcast\s+mic(?:rophone)?|youtubers?|youtube\s+flag|like\s+and\s+subscribe|subscribe\s+button|streamer\s+(?:setup|headset|mic))\b/i.test(blob)
       ) {
         return -20;
       }
       // housing-web18/19: dynamite, Periscope nests, kids/sitcom, flood maps,
-      // Crash-movie scrapes, Progress Center podium, For-Sale/REMAX exteriors,
-      // Michael-* celebrity pollution, crash-illustration stills.
+      // Crash-movie scrapes, Progress Center podium, For-Sale/REMAX/realtor-sign
+      // exteriors, Michael-* celebrity pollution, crash-illustration stills,
+      // luxury One57 / Business Insider tours without lived-in distress.
       if (
-        /\b(ticking\s+time\s+bombs?|time\s+bombs?|dynamite|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|camp\s+mystic|guadalupe\s+river|ballard|cronenberg|david\s+crosby|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|michael\s+ninn|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|golden\s+valley\s+approves|landlord\s+tenant\s+act|lawyers?\s+committee|tenant\s+advocacy|square[\s-]?foot|sustainable\s+high\s+rise|may\s+day\s+caravan|livestream\s+archive|business\s+insider)\b/i.test(blob)
+        /\b(ticking\s+time\s+bombs?|time\s+bombs?|dynamite|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|camp\s+mystic|guadalupe\s+river|ballard|cronenberg|david\s+crosby|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|realtor\s+sign|real\s+estate\s+sign|yard\s+sign|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|michael\s+ninn|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|mortgage\s+bankruptcy|bankruptcy\s+(?:slide|filing|graphic)|crater\s+graphic|golden\s+valley\s+approves|landlord\s+tenant\s+act|lawyers?\s+committee|tenant\s+advocacy|square[\s-]?foot|sustainable\s+high\s+rise|may\s+day\s+caravan|livestream\s+archive|business\s+insider)\b/i.test(blob)
       ) {
         return -20;
       }

@@ -509,6 +509,13 @@ describe('housing off-topic B-roll rejects', () => {
       'world s most sustainable high rise apartment building',
       'may day caravan to cancel rent mortgage livestream archive',
       'understanding all the eviction ban nonsense constitutional shredding',
+      // web19 contact-sheet / required rejects
+      'realtor sign for sale suburban house exterior',
+      'real estate sign yard listing open house',
+      'LendingTree bar chart housing crash infographic',
+      'American Home Mortgage bankruptcy slide graphic',
+      'youtuber headset talking head podcast mic subscribe button',
+      'gaming headset streamer setup talking to camera',
     ];
     for (const alt of cases) {
       expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);
@@ -524,6 +531,13 @@ describe('housing off-topic B-roll rejects', () => {
       housingOffTopicBrollReason('housing market crash documentary apartment tenants', HOUSING_TOPIC),
     ).toBe('');
     expect(housingOffTopicBrollReason('car crash dashcam footage', AIRLINE_TOPIC)).toBe('');
+    // Archive apartment body volume must stay (not headset/luxury junk).
+    expect(
+      housingOffTopicBrollReason(
+        'tenant left in limbo after landlord was evicted from rental home apartment hallway',
+        HOUSING_TOPIC,
+      ),
+    ).toBe('');
   });
 });
 

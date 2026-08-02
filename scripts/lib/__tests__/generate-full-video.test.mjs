@@ -1383,6 +1383,13 @@ describe('housing off-topic crash/council/fire junk', () => {
       { alt: 'the progress center from affordable housing to self sufficiency', query: 'tenant eviction' },
       { alt: 'sixth annual fair housing conference april 2026', query: 'housing' },
       { alt: 'county announces apartment building inspection initiative', query: 'apartment building' },
+      // housing-web19 required rejects
+      { alt: 'RE/MAX FOR SALE sign suburban house yard sign', query: 'housing crash' },
+      { alt: 'realtor sign real estate sign exterior listing', query: 'for sale' },
+      { alt: 'LendingTree bar chart housing crash infographic', query: 'housing crash' },
+      { alt: 'American Home Mortgage mousetrap bankruptcy slide graphic', query: 'housing crash' },
+      { alt: 'youtuber gaming headset talking head podcast mic', query: 'housing explained' },
+      { alt: 'touring a 27 3 million apartment in nyc s one57 business insider', query: 'apartment tour' },
     ];
     for (const clip of cases) {
       expect(isJunkStockClip(clip, HOUSING_CRASH_TOPIC)).toBe(true);
@@ -1393,6 +1400,17 @@ describe('housing off-topic crash/council/fire junk', () => {
         {
           alt: 'worried couple reading eviction notice apartment interior',
           query: 'eviction notice tenant',
+        },
+        HOUSING_CRASH_TOPIC,
+      ),
+    ).toBe(false);
+    // Keep Archive apartment body volume (lived-in tenant motion).
+    expect(
+      isJunkStockClip(
+        {
+          alt: 'tenant left in limbo apartment hallway packing boxes',
+          query: 'eviction tenant apartment',
+          source: 'Archive.org live',
         },
         HOUSING_CRASH_TOPIC,
       ),

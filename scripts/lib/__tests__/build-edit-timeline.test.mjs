@@ -172,6 +172,45 @@ describe('introFaceTier', () => {
     }, { airline: false, housing: true })).toBe(-1);
   });
 
+  it('rejects RE/MAX for-sale, headset talking-head, and luxury tour openers on housing intro', () => {
+    expect(introFaceTier({
+      query: 'housing crash',
+      alt: 'RE/MAX FOR SALE sign Kathy Bost suburban house yard sign',
+      title: 'remax for sale sign',
+      url: 'https://example.com/remax.jpg',
+      type: 'image',
+    }, { airline: false, housing: true })).toBe(-1);
+    expect(introFaceTier({
+      query: 'housing market',
+      alt: 'realtor sign real estate sign suburban exterior',
+      title: 'realtor yard sign',
+      url: 'https://example.com/realtor.jpg',
+      type: 'image',
+    }, { airline: false, housing: true })).toBe(-1);
+    // Headset / podcast-mic / YouTuber without "webinar" keyword (web19 contact sheet).
+    expect(introFaceTier({
+      query: 'housing crash explained',
+      alt: 'youtuber gaming headset talking to camera podcast mic',
+      title: 'subscribe button streamer setup',
+      url: 'https://example.com/headset.mp4',
+      type: 'video',
+    }, { airline: false, housing: true })).toBe(-1);
+    expect(introFaceTier({
+      query: 'million apartment',
+      alt: 'touring a 27 3 million apartment in nyc s one57 business insider',
+      title: 'one57 luxury tour',
+      url: 'https://archive.org/download/one57/x.mp4',
+      type: 'video',
+    }, { airline: false, housing: true })).toBe(-1);
+    expect(introFaceTier({
+      query: 'housing crash chart',
+      alt: 'LendingTree bar chart housing crash infographic crater graphic',
+      title: 'american home mortgage bankruptcy slide',
+      url: 'https://example.com/chart.jpg',
+      type: 'image',
+    }, { airline: false, housing: true })).toBe(-1);
+  });
+
   it('tiers AI radiology / clinician+screen as healthcare opener (2)', () => {
     const asset = {
       query: 'ai radiology doctor monitor screen',

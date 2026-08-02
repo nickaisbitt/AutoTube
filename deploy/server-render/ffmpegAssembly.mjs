@@ -209,17 +209,20 @@ function assetKey(asset) {
 }
 
 /**
- * Archive.org training/promo films often open on license boards / title cards.
- * Skip a short intro on the first use of each Archive asset.
+ * Archive.org training/promo films often open on license boards / title cards
+ * (PeriscopeFilm.com screens, "Airport in the Jet Age", etc.). Skip past that
+ * window on the first use of each Archive asset.
  */
 function archiveIntroSkipSec(asset, probedDur = 0) {
   const url = asset?.url || '';
   const source = asset?.source || '';
   if (!/archive\.org/i.test(url) && !/Archive\.org/i.test(source)) return 0;
-  const dur = Number(probedDur) || Number(asset?.duration) || 0;
-  if (!(dur >= 20)) return 0;
-  if (dur >= 60) return Math.min(12, Math.max(8, dur * 0.05));
-  return Math.min(5, Math.max(2, dur * 0.12));
+  const dur = Number(probedDur) || 0;
+  // Schedule-time duration is often a synthetic 8s placeholder — still skip a
+  // license-board window so we do not rely on a later probe to save the hook.
+  if (!(dur >= 20)) return 15;
+  if (dur >= 60) return Math.min(22, Math.max(15, dur * 0.04));
+  return Math.min(10, Math.max(5, dur * 0.15));
 }
 
 /** Advance per-asset seek position so video B-roll does not replay t=0 every cut. */
@@ -237,7 +240,10 @@ function assignVideoSourceOffsets(clips) {
     if (offset === undefined) {
       offset = archiveIntroSkipSec(clip.asset, maxSrc);
     }
-    if (offset + clip.durationSec > maxSrc - 0.15) offset = 0;
+    // Wrap past the end back to the intro-skip window — never back to t=0 license boards.
+    if (offset + clip.durationSec > maxSrc - 0.15) {
+      offset = archiveIntroSkipSec(clip.asset, maxSrc);
+    }
     nextOffset.set(key, offset + clip.durationSec);
     return { ...clip, sourceStartSec: offset };
   });
@@ -577,12 +583,18 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     let offset;
     if (videoOffsets.has(key)) {
       offset = videoOffsets.get(key);
-    } else if (hintOffset > 0) {
-      offset = hintOffset;
     } else {
-      offset = archiveIntroSkipSec(asset, total);
+      // Prefer the larger of schedule hint and Archive intro skip using the
+      // *probed* duration — a small schedule hint must not cancel a 15–22s skip.
+      const intro = archiveIntroSkipSec(asset, total);
+      offset = Math.max(Number(hintOffset) || 0, intro);
     }
-    if (offset + durationSec > total - 0.1) offset = 0;
+    if (offset + durationSec > total - 0.1) {
+      const intro = archiveIntroSkipSec(asset, total);
+      offset = intro > 0 && intro + durationSec <= total - 0.1
+        ? intro
+        : Math.max(0, total - durationSec - 0.1);
+    }
     videoOffsets.set(key, offset + durationSec);
     return offset;
   }

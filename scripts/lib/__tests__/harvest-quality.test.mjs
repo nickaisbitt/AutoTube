@@ -74,6 +74,15 @@ describe('keyless archive human portrait topical boost', () => {
     expect(isGenericStockJunk(msnHealth, AIRLINE_TOPIC)).toBe(true);
   });
 
+  it('rejects SlideShare / SaaS pitch decks scraped as airline B-roll', () => {
+    expect(
+      isGenericStockJunk(
+        'Findability Sciences pitch deck image.slidesharecdn.com airline analytics',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+  });
+
   it('keeps aviation archive evidence ahead of portrait-only archive clips on airline topics', () => {
     const aviationScore = scoreAssetRelevance(aviationArchive, segment, AIRLINE_TOPIC);
     const portraitScore = keylessArchiveHumanPortraitScore(portraitArchive, segment, AIRLINE_TOPIC);

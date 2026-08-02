@@ -324,6 +324,10 @@ export const VIRAL_SHORTS_CLICKBAIT_RE =
 export const AIRLINE_POLITICS_PAD_RE =
   /\b(clinton\s+lynch|budget\s+20\d{2}|what\s+budget\s+means|tarmac\s+meeting|judicial\s+watch)\b/i;
 
+/** Slide decks / SaaS pitch walls — retention killers when scraped as B-roll. */
+export const CORPORATE_SLIDE_DECK_JUNK_RE =
+  /\b(slideshare|slide\s*share|pitch\s*deck|powerpoint|keynote\s*slide|findability\s*sciences|corporate\s*slide|saas\s*slide)\b|slidesharecdn\.com/i;
+
 /**
  * Off-topic scrapes that survive keyword overlap on cabin-pressure topics
  * ("pressure", "failures", "hidden").
@@ -357,6 +361,9 @@ export function airlineHarvestJunkReason(haystack, contextText = '') {
   }
   if (AIRLINE_POLITICS_PAD_RE.test(h) && !/\b(clinton|lynch|budget|congress|election)\b/i.test(ctx)) {
     return 'politics/budget pad for airline';
+  }
+  if (CORPORATE_SLIDE_DECK_JUNK_RE.test(h)) {
+    return 'corporate slide deck for airline';
   }
   return null;
 }

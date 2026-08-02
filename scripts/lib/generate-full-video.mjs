@@ -394,6 +394,59 @@ export function isYouTubeMotionCandidate(candidate = {}) {
   });
 }
 
+export function isTikTokMotionCandidate(candidate = {}) {
+  return motionCandidateUrls(candidate).some((url) => {
+    const host = motionUrlHostname(url);
+    return host === 'tiktok.com'
+      || host.endsWith('.tiktok.com')
+      || host === 'vm.tiktok.com';
+  });
+}
+
+/** True when yt-dlp has a cookie jar / browser cookies for bot-gated hosts. */
+export function hasYtDlpCookies() {
+  return Boolean(
+    (process.env.YTDLP_COOKIES || '').trim()
+    || (process.env.YTDLP_COOKIES_FROM_BROWSER || '').trim()
+    || (process.env.YTDLP_COOKIES_FILE || '').trim(),
+  );
+}
+
+/**
+ * Raw-web proxies that will almost certainly 401/bot-fail at assemble and then
+ * collapse every slot onto the same Archive fallback. Skip them at inject so
+ * volume comes from Archive/direct/Vimeo/DM instead of doomed YouTube/TikTok.
+ *
+ * @param {object} candidate
+ * @param {{ tiktokBlocked?: boolean }} [gate]
+ * @returns {string|null} reason when the candidate should not be injected
+ */
+export function unreliableWebProxyInjectReason(candidate = {}, gate = {}) {
+  if (isYouTubeMotionCandidate(candidate) && !hasYtDlpCookies()) {
+    return 'youtube-without-cookies';
+  }
+  if (isTikTokMotionCandidate(candidate) && gate.tiktokBlocked) {
+    return 'tiktok-circuit-open';
+  }
+  return null;
+}
+
+/**
+ * Cheap yt-dlp liveness check (no download). Used once per TikTok host failure
+ * to open a run-level circuit so we stop injecting IP-blocked shorts.
+ */
+export function softProbeYtDlpUrl(url = '', { timeoutMs = 20_000 } = {}) {
+  const target = String(url || '').trim();
+  if (!target) return false;
+  const result = spawnSync(
+    'yt-dlp',
+    ['--skip-download', '--print', 'id', '--no-playlist', target],
+    { encoding: 'utf8', timeout: timeoutMs },
+  );
+  if (result.status !== 0) return false;
+  return Boolean(String(result.stdout || '').trim());
+}
+
 /**
  * Host reliability tier for web-motion selection.
  *
@@ -3073,6 +3126,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     faceScore,
   );
   let vi = 0;
+  /** @type {{ tiktokBlocked: boolean }} */
+  const proxyGate = { tiktokBlocked: false };
   const injectClip = async (seg, clip, tag) => {
     const key = motionUrlKey(clip.url);
     if (!key || used.has(key)) return false;
@@ -3080,6 +3135,25 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
     if (isIntro && score < 0) return false;
+    const unreliable = unreliableWebProxyInjectReason(clip, proxyGate);
+    if (unreliable) {
+      report.videoTopUpFailed = report.videoTopUpFailed || [];
+      report.videoTopUpFailed.push({ url: clip.url, reason: unreliable });
+      report.injectProxySkipped = (report.injectProxySkipped || 0) + 1;
+      return false;
+    }
+    // Soft-probe the first TikTok; on failure open a circuit for the rest of the run.
+    if (isTikTokMotionCandidate(clip) && isProxiedClipUrl(clip.url)) {
+      const target = proxiedClipTarget(clip.url) || clip.sourceUrl || '';
+      const alive = softProbeYtDlpUrl(target);
+      if (!alive) {
+        proxyGate.tiktokBlocked = true;
+        report.videoTopUpFailed = report.videoTopUpFailed || [];
+        report.videoTopUpFailed.push({ url: clip.url, reason: 'tiktok-soft-probe-failed' });
+        report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
+        return false;
+      }
+    }
     const probePlan = resolveInjectClipProbe(clip.url);
     if (probePlan.probe) {
       const ok = await canFetch(clip.url, {

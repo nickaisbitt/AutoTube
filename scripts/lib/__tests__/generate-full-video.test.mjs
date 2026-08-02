@@ -15,7 +15,10 @@ import {
   isJunkStockClip,
   isSafeStockMotionQuery,
   isYouTubeMotionCandidate,
+  isTikTokMotionCandidate,
   isVisionBudgetSoft,
+  hasYtDlpCookies,
+  unreliableWebProxyInjectReason,
   motionCandidateHostRank,
   motionQueryPlan,
   planMotionFetchRounds,
@@ -531,6 +534,31 @@ describe('non-YouTube motion planning and ranking', () => {
     expect(motionCandidateHostRank(youtube)).toBeGreaterThan(50);
     expect(motionCandidateHostRank(tiktok)).toBeGreaterThan(motionCandidateHostRank({ url: 'https://vimeo.com/1' }));
     expect(motionCandidateHostRank(tiktok)).toBeLessThan(motionCandidateHostRank(youtube));
+  });
+
+  it('skips YouTube inject without cookies and honors a TikTok circuit breaker', () => {
+    const youtube = {
+      url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://youtu.be/abc')}`,
+    };
+    const tiktok = {
+      url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://www.tiktok.com/@x/video/1')}`,
+      sourceUrl: 'https://www.tiktok.com/@x/video/1',
+    };
+    const prevCookies = process.env.YTDLP_COOKIES;
+    delete process.env.YTDLP_COOKIES;
+    delete process.env.YTDLP_COOKIES_FROM_BROWSER;
+    delete process.env.YTDLP_COOKIES_FILE;
+    try {
+      expect(hasYtDlpCookies()).toBe(false);
+      expect(isTikTokMotionCandidate(tiktok)).toBe(true);
+      expect(unreliableWebProxyInjectReason(youtube)).toBe('youtube-without-cookies');
+      expect(unreliableWebProxyInjectReason(tiktok)).toBe(null);
+      expect(unreliableWebProxyInjectReason(tiktok, { tiktokBlocked: true })).toBe('tiktok-circuit-open');
+      expect(unreliableWebProxyInjectReason({ url: 'https://archive.org/download/a/a.mp4' })).toBe(null);
+    } finally {
+      if (prevCookies === undefined) delete process.env.YTDLP_COOKIES;
+      else process.env.YTDLP_COOKIES = prevCookies;
+    }
   });
 });
 

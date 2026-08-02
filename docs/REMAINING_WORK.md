@@ -73,6 +73,8 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Airline-v3 (reuse cap) | Exit **0** · 65.9s · yellowPixels=31749 | Exit **1** · raw **2.8–3.6** | thin Archive pool; OCR harden `e3a0642` |
 | Airline-web (Bing/Google/DDG) | Exit **0** · 69.6s · injected=26 | Exit **1** · raw **5.6** | web motion path live; variety/pacing still open |
 | Airline-web4 (rich-pool pacing) | Exit **0** · 73.5s · injected=16 | Exit **1** · raw **4.2** | rich-pool holds ≤1.5s |
+| Airline-web6 (non-YouTube prefer) | Exit **0** · 62s · youtube=0 non-youtube=16 | Exit **1** · raw **4.8** | TikTok proxies failed → medical still fallback (pre-auth fix) |
+| Airline-web7 (assemble API auth) | Exit **0** · 83s · injected=33 · youtube=16 | Exit **1** · raw **4.8** | medical stills gone; video-first fallbacks; YouTube still doomed without cookies |
 | Housing-web (Bing/Google/DDG) | Exit **0** · 75.0s · injected=13 | Exit **1** · raw **3.8** | archive=0, pure web; variety still weak |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 

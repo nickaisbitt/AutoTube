@@ -83,7 +83,8 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Housing-web7 (apt Archive prefer) | Exit **0** · 69s · archive=10 · youtube=0 | Exit **1** · raw **5.6** | hook PASS; house-graphic×6 + council/quake Archive still tank variety |
 | Housing-web8 (reject all Archive) | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` — web proxies thin; Archive body-filler restored in tip |
 | Housing-web9 (web-first, no Archive) | Exit **0** · 69s · tiktok=9 · archive=0 | Exit **1** · raw **5.4** | TikTok talking-heads/watermarks; tip now skips cookieless TikTok |
-| Housing-web10 (skip TT; Archive −6 bug) | Exit **0** · 78s · injected=1 · soft-pass-aggregate | pending | face-query Archive scored −6 → 108 YT/TT skips; tip allows Archive 0–1 |
+| Housing-web10 (skip TT; Archive −6 bug) | Exit **0** · 78s · injected=1 · soft-pass-aggregate | Exit **1** · raw **5.4** | face-query Archive scored −6 → still pads |
+| Housing-web11 (Archive landscape −8) | Exit **1** | n/a | enriched Archive descriptions hit landscape/newsreel −8; tip scores Archive before that demote + per-seg inject retries |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
 Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay). Remaining pack: housing + healthcare.

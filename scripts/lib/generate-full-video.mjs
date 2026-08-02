@@ -3154,15 +3154,15 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         return -20;
       }
-      if (/\b(landscape|mountain|helicopter|aerial\s+view|wildfire|title\s+card|newsreel)\b/i.test(blob)) {
-        return -8;
-      }
-      // Archive on housing is body filler (score < intro gate 2). Do NOT require
-      // HOUSING_ARCHIVE_STRONG_RE here — face-first search queries rarely include
-      // "apartment/tenant" in the clip blob, so a -6 reject emptied the pool on
-      // web10 (108 YT/TT skips, archive injects=0, soft-pass-aggregate stills).
+      // Archive body filler MUST be scored before landscape/newsreel demotes.
+      // Enriched Archive descriptions often contain "aerial/landscape/newsreel" and
+      // were hard-rejecting (-8) every Archive candidate on web11 (0 Archive inject
+      // attempts; 108 YT/TT skips; HARVEST_VOLUME_FAIL).
       if (/Archive/i.test(clip.source || '')) {
         return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 1 : 0;
+      }
+      if (/\b(landscape|mountain|helicopter|aerial\s+view|wildfire|title\s+card|newsreel)\b/i.test(blob)) {
+        return -8;
       }
       // Face-forward / lived-in housing beats charts, landscapes, and title cards.
       if (
@@ -3333,8 +3333,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // Per-seg floor; variety drain below fills up to the key-mode motion target.
     const perSegTarget = isIntro ? targets.introTarget : targets.perSegTarget;
     const want = Math.max(0, perSegTarget - segVideos);
-    for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1, vi += 1) {
-      await injectClip(seg, picks[vi], `s${i}`);
+    // Retry candidates until one injects — a cookieless YT/TT skip must not burn
+    // the slot when Archive/direct still remain later in `picks`.
+    for (let i = 0; i < want && need > 0 && vi < picks.length; i += 1) {
+      while (vi < picks.length) {
+        const clip = picks[vi];
+        vi += 1;
+        if (await injectClip(seg, clip, `s${i}`)) break;
+      }
     }
   }
 

@@ -624,10 +624,30 @@ describe('healthcare off-topic B-roll rejects', () => {
       'surgical robot operating room demonstration',
       'ultrasound demonstration clinician probe exam',
       'radiologist ai diagnosis laptop screen',
+      'cnbc meet the surgical robot that can diagnose lung cancer',
+      'garland isd baylor robotic surgery demo',
     ];
     for (const alt of keep) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
       expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
+    }
+  });
+
+  it('hard-rejects healthcare-web11 CNN10 / breast-implant / Vietnam / civic / political pads', () => {
+    const cases = [
+      'cnn 10 host talking head red studio background',
+      'lowcountry lowdown breast implants technology mathew epps md plastic surgery',
+      'cong hoa hospital burn ward saigon vietnam',
+      'penfield reading room archival lecture',
+      'ltc lakin denied kansas medical license for challenging obama s eligibility',
+      'scooter vs car emergency services respond to collision in venice',
+      'adventure eight paging dr ross mayor performs simulated procedure at medical city arlington',
+      'scottsdale s cure corridor feature story march 2019 city of scottsdale',
+      'amazon pharmacy and healthcare 2023 game change',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
     }
   });
 

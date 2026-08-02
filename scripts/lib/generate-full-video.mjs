@@ -3345,6 +3345,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/\b(title\s+card|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|capitol|protest|maternity|kapparot|kapores|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri)\b/i.test(blob)) {
         return -8;
       }
+      // healthcare-web11 junk that slipped past soft-pass Archive pool.
+      if (
+        /\b(cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|medical\s+city\s+arlington|adventure\s+eight|scottsdale.?s?\s+cure\s+corridor|amazon\s+pharmacy)\b/i.test(blob)
+      ) {
+        return -20;
+      }
       // Pure talking-head / news studio without clinician+screen or OR motion —
       // demote below intro clinical floor (≥2) so AI-talk pads lose the hook.
       const talkingHeadPad = /\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|studio\s+interview|webinar\s+host|podcast\s+host|lecture\s+(?:host|speaker))\b/i.test(blob);

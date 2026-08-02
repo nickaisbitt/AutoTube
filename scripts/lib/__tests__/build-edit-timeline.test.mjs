@@ -259,6 +259,27 @@ describe('introFaceTier', () => {
       type: 'video',
     }, { healthcare: true })).toBe(-1);
   });
+
+  it('rejects healthcare-web11 CNN10 / breast-implant / Vietnam / aerial adventure intro leads', () => {
+    expect(introFaceTier({
+      alt: 'cnn 10 host talking head red studio',
+      title: 'cnn 10 healthcare segment',
+      url: 'https://archive.org/download/cnn10/cnn10.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'breast implants plastic surgery mathew epps',
+      title: 'lowcountry lowdown breast implants',
+      url: 'https://archive.org/download/epps/epps.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'adventure eight paging dr ross medical city arlington aerial',
+      title: 'medical city arlington establishing shot',
+      url: 'https://archive.org/download/adv8/adv8.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+  });
 });
 
 

@@ -509,6 +509,7 @@ describe('housing off-topic B-roll rejects', () => {
       'world s most sustainable high rise apartment building',
       'may day caravan to cancel rent mortgage livestream archive',
       'understanding all the eviction ban nonsense constitutional shredding',
+      '2 alarm fire destroys apartment building in houston',
       // web19 contact-sheet / required rejects
       'realtor sign for sale suburban house exterior',
       'real estate sign yard listing open house',

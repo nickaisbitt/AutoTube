@@ -8,6 +8,7 @@ import {
   filterAssetsByRelevance,
   hasAirlineAviationEvidence,
   hasHealthcareEvidence,
+  hasHousingEvidence,
   countHealthcareStrongVideos,
   healthcareSoftPassMotionFailureReason,
   healthcareOffTopicBrollReason,
@@ -664,5 +665,132 @@ describe('healthcare keyless soft-pass-motion (web + Archive)', () => {
     const project = { topic: HEALTHCARE_TOPIC, script: segments, media };
     const fail = healthcareSoftPassMotionFailureReason(project, {});
     expect(fail).toMatch(/soft-pass-motion-healthcare-junk\(bank-otp-scam/);
+  });
+});
+
+describe('housing evidence floor for abstract script beats', () => {
+  const fearSeg = {
+    id: 'fear',
+    title: 'The Fear Factor',
+    narration: 'People are scared to open the envelope.',
+  };
+  const zillowSeg = {
+    id: 'zillow',
+    title: 'The Zillow Collapse',
+    narration: 'Listings vanished overnight.',
+  };
+
+  const housingWebClip = ({ segmentId, title, query, idx }) => ({
+    type: 'video',
+    segmentId,
+    url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent(`https://vimeo.com/${9000 + idx}`)}&duration=10`,
+    alt: title,
+    title,
+    query,
+    source: 'Bing web video',
+    sourceUrl: `https://vimeo.com/${9000 + idx}`,
+  });
+
+  it('recognizes apartment/eviction/zillow titles as housing evidence', () => {
+    const clip = housingWebClip({
+      segmentId: 'zillow',
+      title: 'Zillow listings crash as eviction notices pile up',
+      query: 'housing market crash',
+      idx: 1,
+    });
+    expect(hasHousingEvidence(clip)).toBe(true);
+  });
+
+  it('floors relevance on Fear Factor when only housing evidence matches', () => {
+    const clip = housingWebClip({
+      segmentId: 'fear',
+      title: 'Tenant reads eviction notice in apartment hallway',
+      query: 'worried tenant eviction',
+      idx: 2,
+    });
+    const score = scoreAssetRelevance(clip, fearSeg, HOUSING_TOPIC);
+    expect(score).toBeGreaterThanOrEqual(VOLUME_PADDING_MIN_RELEVANCE);
+  });
+
+  it('pads Fear Factor topical video from Zillow-segment housing clips', () => {
+    const zillowClip = housingWebClip({
+      segmentId: 'zillow',
+      title: 'Apartment building for rent signs on residential street',
+      query: 'apartment for rent',
+      idx: 3,
+    });
+    const project = {
+      topic: HOUSING_TOPIC,
+      title: 'Housing Crash',
+      script: [fearSeg, zillowSeg],
+      media: [
+        {
+          type: 'image',
+          segmentId: 'fear',
+          url: 'https://example.com/fear-still.jpg',
+          alt: 'generic stock still',
+          title: 'generic stock still',
+        },
+        zillowClip,
+      ],
+    };
+    const coverage = ensureTopicalVideoCoverage(project);
+    expect(coverage.missing).toEqual([]);
+    expect(coverage.padded.some((a) => a.segmentId === 'fear')).toBe(true);
+    const soft = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      cyberStockInjected: 0,
+      pexelsFetched: 0,
+      pixabayFetched: 0,
+      archiveLiveFetched: 4,
+      videoTopUp: Array.from({ length: 6 }, (_, i) => ({ id: `t${i}` })),
+    }, {
+      ...project,
+      // Enough unique housing motion for soft-pass-motion (≥2 videos/seg).
+      media: [
+        ...project.media,
+        ...Array.from({ length: 5 }, (_, i) => housingWebClip({
+          segmentId: i % 2 === 0 ? 'fear' : 'zillow',
+          title: `Landlord tenant rent hearing apartment ${i}`,
+          query: 'landlord tenant rent',
+          idx: 10 + i,
+        })),
+      ],
+    });
+    // Soft-pass must not die on volume-topical-video-empty after evidence floor.
+    expect(soft.reason || '').not.toMatch(/volume-topical-video-empty/);
+  });
+
+  it('keeps housing evidence through relevance on abstract Fear Factor beat', () => {
+    const media = [
+      housingWebClip({
+        segmentId: 'fear',
+        title: 'Foreclosure auction residential neighborhood homes',
+        query: 'foreclosure auction',
+        idx: 4,
+      }),
+    ];
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [fearSeg],
+      media,
+    };
+    const { media: kept, dropped } = filterAssetsByRelevance(media, project);
+    expect(kept.length).toBe(1);
+    expect(dropped).toEqual([]);
+  });
+
+  it('does not treat bare home-movie Archive junk as housing evidence', () => {
+    const warHomeMovie = {
+      type: 'video',
+      segmentId: 'fear',
+      url: 'https://archive.org/download/vietnam-war-home-movie/clip.mp4',
+      source: 'Archive.org live',
+      alt: 'vietnam war home movie of subic bay philippines re supply trip',
+      title: 'vietnam war home movie of subic bay philippines re supply trip',
+      query: 'worried couple reading letter home',
+    };
+    expect(hasHousingEvidence(warHomeMovie)).toBe(false);
+    expect(scoreAssetRelevance(warHomeMovie, fearSeg, HOUSING_TOPIC)).toBe(0);
   });
 });

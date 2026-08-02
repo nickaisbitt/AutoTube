@@ -625,6 +625,17 @@ const AIRLINE_AVIATION_EVIDENCE_RE =
 const HEALTHCARE_EVIDENCE_RE =
   /\b(hospitals?|clinics?|patients?|doctors?|physicians?|nurses?|surgeons?|surgery|surgical|icu|intensive\s*care|wards?|medical|medicine|healthcare|health\s*care|hipaa|ehr|emr|radiolog\w*|mri|ct\s*scan|ultrasound|diagnos\w*|stethoscope|ambulances?|paramedics?|stretchers?|iv\s*drip|ventilators?|defibrillators?|heart\s*monitors?|ecg|ekg|telemedicine|telehealth|medical\s*records?|exam\s*room|waiting\s*room|hospital\s*(?:corridor|hallway|ward|bed|room)|nurse\s*(?:station|workstation)|physician|oncolog\w*|cardiolog\w*|patholog\w*|ai\s*(?:in\s*)?(?:medicine|healthcare|diagnosis|radiology)|machine\s*learning\s*(?:in\s*)?(?:medicine|healthcare|diagnosis)|clinical\s*ai)\b/i;
 
+/**
+ * Everyday housing-market / tenant / eviction vocabulary. Abstract script
+ * beats ("The Fear Factor", "Take Control Now") rarely share keywords with
+ * real Bing/Archive titles (Zillow, eviction, landlord, apartment). Without
+ * an evidence floor those segments starve → volume-topical-video-empty and
+ * soft-pass never runs. Callers gate on isHousingTopic. Avoid bare
+ * "home"/"house" (home-movie / war-footage false positives).
+ */
+const HOUSING_EVIDENCE_RE =
+  /\b(housings?|apartments?|condo(?:minium)?s?|rentals?|landlords?|tenants?|evict(?:ion|ed|ing)?|foreclos\w*|mortgages?|leases?|lessees?|lessors?|rent(?:al|ers?)?|renters?|realtors?|real\s*estate|zillow|redfin|realtor\.com|for\s*rent|for\s*sale|housing\s*market|home\s*prices?|house\s*prices?|property\s*values?|affordable\s*housings?|section\s*8|public\s*housings?|eviction\s*notice|lease\s*agreement|rent\s*(?:hike|spike|crisis|control)|tenant\s*(?:rights?|union)|landlord[\s-]?tenant|moving\s*(?:truck|van)|packing\s*boxes|apartment\s*(?:building|interior|hallway|complex)|suburban\s*homes?|residential\s*(?:street|neighborhood|homes?))\b/i;
+
 
 /**
  * Does an asset carry aviation evidence? Stock clips must prove it from the media
@@ -652,6 +663,18 @@ export function hasAirlineAviationEvidence(asset = {}) {
 export function hasHealthcareEvidence(asset = {}) {
   if (HEALTHCARE_EVIDENCE_RE.test(visualEvidenceBlob(asset))) return true;
   if (isWebNativeMotionSource(asset) && HEALTHCARE_EVIDENCE_RE.test(webNativeEvidenceBlob(asset))) {
+    return true;
+  }
+  return false;
+}
+/**
+ * Housing evidence contract — same stock-vs-web split as aviation/healthcare.
+ * @param {object} asset
+ * @returns {boolean}
+ */
+export function hasHousingEvidence(asset = {}) {
+  if (HOUSING_EVIDENCE_RE.test(visualEvidenceBlob(asset))) return true;
+  if (isWebNativeMotionSource(asset) && HOUSING_EVIDENCE_RE.test(webNativeEvidenceBlob(asset))) {
     return true;
   }
   return false;
@@ -733,12 +756,16 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
     // "healthcare"/"AI" topic tokens rarely appear in hospital/doctor titles —
     // clinical evidence floors keep honest medical motion through the filter.
     if (isHealthcareTopic(topic) && hasHealthcareEvidence(asset)) return 0.4;
+    // Abstract housing beats ("Fear Factor") share no keywords with Zillow /
+    // eviction / apartment titles — evidence floors keep lived-in housing motion.
+    if (isHousingTopic(topic) && hasHousingEvidence(asset)) return 0.4;
     return 0;
   }
   if (segHits === 0 && topicHits < 2) {
     if (isCrimeHeistTopic(topic) && CRIME_HEIST_EVIDENCE_RE.test(visual)) return 0.3;
     if (isAirlineTopic(topic) && AIRLINE_AVIATION_EVIDENCE_RE.test(visual)) return 0.35;
     if (isHealthcareTopic(topic) && hasHealthcareEvidence(asset)) return 0.35;
+    if (isHousingTopic(topic) && hasHousingEvidence(asset)) return 0.35;
     return 0;
   }
 
@@ -792,6 +819,10 @@ export function filterAssetsByRelevance(media, project, options = {}) {
       // web harvest) may also prove it from their real page title and the deliberate
       // harvest query — parallel to Archive.org's evidence verdict — so a Bing/Google
       // "/api/download-clip" aviation clip is not discarded as off-topic.
+      kept.push({ ...asset, relevanceScore: 0.35 });
+    } else if (isHousingTopic(topic) && hasHousingEvidence(asset)) {
+      // Parallel to airline: abstract housing beats drop keyword matches; keep
+      // clips that prove apartment/eviction/rent/landlord evidence themselves.
       kept.push({ ...asset, relevanceScore: 0.35 });
     } else {
       dropped.push({

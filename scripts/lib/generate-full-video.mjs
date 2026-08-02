@@ -1918,25 +1918,26 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   // Housing+"AI": avoid podcast-mic / cyber B-roll.
   if (housing) {
     // Shocked-face + apartment first — webinar/chair openers capped watch ~4.6.
+    // Prefer eviction/foreclosure news motion over "reading letter" (web18 → kids literacy).
     const faces = [
       'shocked face close up phone',
       'shocked face apartment eviction notice',
-      'worried couple reading letter apartment',
-      'stressed family apartment interior',
-      'person holding eviction notice paper',
-      'tenant packing boxes apartment',
+      'person holding eviction notice paper close up',
+      'foreclosure auction house steps crowd',
+      'evicted family packing truck apartment',
+      'stressed tenant crying apartment hallway',
       'couple arguing bills kitchen table',
+      'tenant packing boxes apartment',
       'modern apartment living room daylight people',
-      'young couple stressed rent apartment',
     ];
     const topical = [
-      'apartment building exterior city',
+      'apartment building exterior city skyline',
       'apartment interior hallway doors',
-      'for rent sign apartment window',
-      'keys lock apartment door',
+      'for rent sign apartment window close up',
+      'keys lock apartment door close up',
       'eviction notice paper hands close up',
-      'landlord house door knock',
-      'worried tenant reading letter kitchen',
+      'landlord knocking apartment door',
+      'empty apartment after move out',
     ];
     // Always face-first on housing — exteriors/Archive meetings starve variety.
     const base = [...faces, ...topical];
@@ -3268,9 +3269,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         return -20;
       }
       // housing-web18: dynamite/time-bomb stills, Periscope nests, kids/sitcom
-      // Archive, flood maps, and Crash-movie scrapes tank youtubeReadability.
+      // Archive, flood maps, Crash-movie scrapes, Progress Center / county podium.
       if (
-        /\b(ticking\s+time\s+bombs?|time\s+bombs?|dynamite|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|camp\s+mystic|guadalupe\s+river|ballard|cronenberg|david\s+crosby|rolfe\s+report)\b/i.test(blob)
+        /\b(ticking\s+time\s+bombs?|time\s+bombs?|dynamite|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|camp\s+mystic|guadalupe\s+river|ballard|cronenberg|david\s+crosby|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency)\b/i.test(blob)
       ) {
         return -20;
       }

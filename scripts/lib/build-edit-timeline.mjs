@@ -172,10 +172,11 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   ) {
     return true;
   }
-  // housing-web18: Rolfe Report composites, Periscope nests, kids/sitcom pads.
+  // housing-web18: Rolfe Report composites, Periscope nests, kids/sitcom pads,
+  // Progress Center / fair-housing conference / county podium openers.
   if (
     housing
-    && /\b(rolfe\s+report|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|propaganda\s+film|ticking\s+time\s+bombs?|dynamite)\b/i.test(blob)
+    && /\b(rolfe\s+report|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|propaganda\s+film|ticking\s+time\s+bombs?|dynamite|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency)\b/i.test(blob)
   ) {
     return true;
   }

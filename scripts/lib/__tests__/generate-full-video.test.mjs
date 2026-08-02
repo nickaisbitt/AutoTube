@@ -448,7 +448,7 @@ describe('motionQueryPlan', () => {
     expect(keyless.queries.slice(0, 3)).toEqual([
       'shocked face close up phone',
       'shocked face apartment eviction notice',
-      'worried couple reading letter apartment',
+      'foreclosure auction house steps crowd',
     ]);
     expect(keyless.queries).toEqual(
       expect.arrayContaining(['apartment building', 'apartment interior', 'public housing']),
@@ -1380,6 +1380,9 @@ describe('housing off-topic crash/council/fire junk', () => {
       { alt: 'leapfrog letter factory part 4 kids alphabet', query: 'reading letter' },
       { alt: 'Camp Mystic Guadalupe River texas flooding map', query: 'Florida and Texas' },
       { alt: 'J.G. Ballard David Cronenberg Crash movie', query: 'housing crash' },
+      { alt: 'the progress center from affordable housing to self sufficiency', query: 'tenant eviction' },
+      { alt: 'sixth annual fair housing conference april 2026', query: 'housing' },
+      { alt: 'county announces apartment building inspection initiative', query: 'apartment building' },
     ];
     for (const clip of cases) {
       expect(isJunkStockClip(clip, HOUSING_CRASH_TOPIC)).toBe(true);

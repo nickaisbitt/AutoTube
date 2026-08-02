@@ -390,10 +390,10 @@ export function promoteIntroFaceVideo(project) {
     if (housing) {
       if (isLandscapeOnlyIntroVisual(asset)) return -8;
       const scoreBlob = evidence || blob;
-      // Webinar / Zoom-chair / home-tour must never win the housing hook (web17).
+      // Webinar / Zoom-chair / home-tour / gov-PR pads must never win the hook.
       if (
         isHousingTalkingHeadMotion(asset)
-        || /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call)\b/i.test(scoreBlob)
+        || /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer)\b/i.test(scoreBlob)
       ) {
         return -20;
       }

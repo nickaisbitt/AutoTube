@@ -489,6 +489,11 @@ describe('housing off-topic B-roll rejects', () => {
       'literacy adam finds an apartment leapfrog',
       'THE ROLFE REPORT WITH JOHN ROLFE thumbnail',
       'i got a strike again bowling',
+      // housing-web18 body pads that still survived inject
+      'the progress center from affordable housing to self sufficiency',
+      'sixth annual fair housing conference april 20 2026',
+      'county announces completion of 2 year apartment building inspection initiative',
+      'Jerome Fletcher Assistant Chief Administrative Officer montgomery',
     ];
     for (const alt of cases) {
       expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);

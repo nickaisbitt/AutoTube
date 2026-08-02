@@ -156,6 +156,20 @@ describe('introFaceTier', () => {
       url: 'https://example.com/bomb.jpg',
       type: 'image',
     }, { airline: false, housing: true })).toBe(-1);
+    expect(introFaceTier({
+      query: 'tenant eviction',
+      alt: 'the progress center from affordable housing to self sufficiency',
+      title: 'progress center affordable housing',
+      url: 'https://archive.org/download/progress/x.mp4',
+      type: 'video',
+    }, { airline: false, housing: true })).toBe(-1);
+    expect(introFaceTier({
+      query: 'apartment building',
+      alt: 'county announces completion of apartment building inspection initiative',
+      title: 'administrative officer podium',
+      url: 'https://archive.org/download/county/x.mp4',
+      type: 'video',
+    }, { airline: false, housing: true })).toBe(-1);
   });
 
   it('tiers AI radiology / clinician+screen as healthcare opener (2)', () => {

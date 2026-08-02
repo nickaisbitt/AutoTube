@@ -86,7 +86,8 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Housing-web10 (skip TT; Archive −6 bug) | Exit **0** · 78s · injected=1 · soft-pass-aggregate | Exit **1** · raw **5.4** | face-query Archive scored −6 → still pads |
 | Housing-web11 (Archive landscape −8) | Exit **1** | n/a | enriched Archive descriptions hit landscape/newsreel −8; tip scores Archive before that demote + per-seg inject retries |
 | Housing-web12 (intro score≥2 burn) | Exit **1** | n/a | paddingQueue intro burned Archive (score 0–1) before body |
-| Housing-web13 (Archive fills, muddy hook) | Exit **0** · 90s · injected=27 · archive=13 | Exit **1** · raw **4.6** | volume fixed; intro got landscape Archive — tip defers weak clips past intro |
+| Housing-web13 (Archive fills, muddy hook) | Exit **0** · 90s · injected=27 · archive=13 | Exit **1** · raw **4.6** | volume fixed; intro got landscape Archive |
+| Housing-web14 (defer weak past intro) | Exit **0** · 84s · injected=25 · archive=11 | Exit **1** · raw **4.6** | volume ok; hook text floor 7 but landscape/crash/council variety still tanks score |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
 Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay). Remaining pack: housing + healthcare.

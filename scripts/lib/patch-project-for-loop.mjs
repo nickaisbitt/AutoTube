@@ -419,7 +419,7 @@ export function promoteIntroFaceVideo(project) {
     // longevity webinars that won healthcare-web3's hook despite clinical MRI in pool.
     if (healthcare) {
       const scoreBlob = evidence || blob;
-      if (/\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|maternity|kapparot|kapores|lecture\s+slides?|coursera|giphy\.com|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri|mri\s+scan\s+and\s+how)\b/i.test(scoreBlob)) {
+      if (/\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|maternity|kapparot|kapores|lecture\s+slides?|coursera|giphy\.com|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri|mri\s+scan\s+and\s+how|adventure\s+eight|aerial|drone|hospital\s+exterior|legos?|mgtow|hiroshima|atomic\s+bomb|warzone)\b/i.test(scoreBlob)) {
         return -20;
       }
       const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && scoreBlob.includes(w)).length;

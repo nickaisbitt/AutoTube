@@ -77,6 +77,8 @@ Code shipped on `cursor/fix-audit-blockers-b466` (commits `608ed9d` → `64f261d
 | Airline-web7 (assemble API auth) | Exit **0** · 83s · injected=33 · youtube=16 | Exit **1** · raw **4.8** | medical stills gone; video-first fallbacks; YouTube still doomed without cookies |
 | Airline-web8 (skip doomed proxies) | Exit **0** · 64.9s · injected=17 · youtube=0 · **fallbacks=0** | Exit **0** · raw **7.8** · upload-ready **YES** | Archive-heavy web harvest; no stock keys |
 | Housing-web (Bing/Google/DDG) | Exit **0** · 75.0s · injected=13 | Exit **1** · raw **3.8** | archive=0, pure web; variety still weak |
+| Housing-web2 (assemble auth) | Exit **0** · 74s · youtube-heavy | Exit **1** · raw **4.8** | browser YouTube kept; Archive stripped |
+| Housing-web5 (Archive slice + no YT) | Exit **0** · 71.7s · archive=11 · fallbacks=0 | Exit **1** · raw **5.8** | hook typo/wrong stakes; variety still open |
 | Housing-v2 | Exit **1** | n/a | `HARVEST_VOLUME_FAIL` (7 segs; junk/pHash + thin web pool) |
 
 Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors have **not** been lowered. Airline cold-topic ≥7 landed on **web harvest** (no Pexels/Pixabay). Remaining pack: housing + healthcare.

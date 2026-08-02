@@ -182,7 +182,15 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
     return clampWords('BENEFITS DATA FOR SALE');
   }
   if (isHousingTopic(topicOnly)) {
-    return clampWords('THEY EVICTED YOU WITH AI');
+    // Match the story family so resolveHonestHookOverlay does not reject the
+    // stakes line and fall through to a truncated spoken hook ("HERE S THE").
+    if (/evict|landlord|tenant|rent[-\s]?stabil|algorithm/i.test(t)) {
+      return clampWords('THEY EVICTED YOU WITH AI');
+    }
+    if (/crash|bubble|foreclos|mortgage|market/i.test(t)) {
+      return clampWords('THE HOUSING CRASH THEY HID');
+    }
+    return clampWords('THE HOUSING CRASH THEY HID');
   }
 
   const preferred = options.preferredOverlay?.trim();

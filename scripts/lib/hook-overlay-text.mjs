@@ -33,6 +33,8 @@ export function normalizeHookOverlayText(text, options = {}) {
   return preserveHookWordBoundaries(text)
     .toUpperCase()
     .replace(/&/g, ' AND ')
+    // Strip apostrophes without inserting a space so HERE'S → HERES (not HERE S).
+    .replace(/[''`´‘’]/g, '')
     .replace(/:/g, allowColon ? ':' : ' ')
     .replace(disallowed, ' ')
     .replace(/\s+/g, ' ')

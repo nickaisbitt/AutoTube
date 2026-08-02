@@ -23,6 +23,7 @@ describe('buildShortHookOverlay — topic-matched, never nonsensical', () => {
     ['nursing home cameras caught staff abusing residents', 'CAMERAS CAUGHT THE ABUSE'],
     ['veterans benefits data sold on the dark web', 'BENEFITS DATA FOR SALE'],
     ['landlords use AI to evict tenants without a hearing', 'THEY EVICTED YOU WITH AI'],
+    ['The housing crash they said would never happen', 'THE HOUSING CRASH THEY HID'],
     ['staged car crash insurance fraud ring exposed', 'FAKE CRASH SCAM EXPOSED'],
     ['fake airport diamond heist fooled the guards', 'THE DIAMONDS ARE GONE'],
     ['hospital ransomware breach leaks patient records', 'PATIENT RECORDS EXPOSED'],

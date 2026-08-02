@@ -2074,7 +2074,9 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'doctor patient exam room consultation',
       'medical imaging mri ct scan',
       'hospital waiting room patients',
-      ...(preferBright ? ['hospital exterior building day'] : ['hospital exterior building night']),
+      // Prefer clinical interior motion over exterior establishing (web11 aerial).
+      'operating room surgical lights',
+      'mri scanner room clinical',
     ];
     const cyberPack = cyberTopic || isHealthcareCyberTopic(topicBlob)
       ? [
@@ -2389,23 +2391,22 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   'clinician computer screen',
   'surgical robot',
   'ultrasound demonstration',
-  'radiology reading room',
+  'radiologist workstation',
+  'da vinci surgical system',
   'hospital corridor',
   'hospital ward',
   'nurse station',
   'doctor patient',
   'medical examination',
   'hospital waiting room',
-  'ambulance emergency',
   'operating room',
   'medical laboratory',
   'xray radiology',
   'mri scanner',
   'intensive care',
   'nurse station hospital',
-  'hospital exterior',
-  // Avoid bare "training/public health film" — Archive returns maternity/ritual
-  // archival that soft-passed healthcare-web3 (raw 4.6). Prefer clinical motion.
+  // Avoid bare "hospital exterior" / "reading room" — Archive returns aerial
+  // Medical City + Penfield lecture pads (healthcare-web11 raw 3.6).
   'radiologist workstation monitors',
   'ct scanner hospital',
   'clinical diagnosis',

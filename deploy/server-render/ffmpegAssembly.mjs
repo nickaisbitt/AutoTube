@@ -208,6 +208,20 @@ function assetKey(asset) {
   return asset?.id || asset?.url || '';
 }
 
+/**
+ * Archive.org training/promo films often open on license boards / title cards.
+ * Skip a short intro on the first use of each Archive asset.
+ */
+function archiveIntroSkipSec(asset, probedDur = 0) {
+  const url = asset?.url || '';
+  const source = asset?.source || '';
+  if (!/archive\.org/i.test(url) && !/Archive\.org/i.test(source)) return 0;
+  const dur = Number(probedDur) || Number(asset?.duration) || 0;
+  if (!(dur >= 20)) return 0;
+  if (dur >= 60) return Math.min(12, Math.max(8, dur * 0.05));
+  return Math.min(5, Math.max(2, dur * 0.12));
+}
+
 /** Advance per-asset seek position so video B-roll does not replay t=0 every cut. */
 function assignVideoSourceOffsets(clips) {
   const nextOffset = new Map();
@@ -218,8 +232,11 @@ function assignVideoSourceOffsets(clips) {
     if (!isVideo) {
       return { ...clip, sourceStartSec: 0 };
     }
-    let offset = nextOffset.get(key) || 0;
     const maxSrc = Math.max(clip.asset?.duration || 0, 30);
+    let offset = nextOffset.get(key);
+    if (offset === undefined) {
+      offset = archiveIntroSkipSec(clip.asset, maxSrc);
+    }
     if (offset + clip.durationSec > maxSrc - 0.15) offset = 0;
     nextOffset.set(key, offset + clip.durationSec);
     return { ...clip, sourceStartSec: offset };
@@ -269,11 +286,26 @@ function cachePathForUrl(url, cacheDir, isVideo) {
   return join(cacheDir, `${hash}${ext}`);
 }
 
+function apiAuthHeaders(fetchUrl = '') {
+  const headers = { 'user-agent': 'Mozilla/5.0 AutoTube/1.0' };
+  // Same-origin /api/* (download-clip, proxy-image) requires AUTOTUBE_API_KEY.
+  // Without it every proxied raw-web clip 401s and assemble collapses onto stills.
+  if (/\/api\/(download-clip|proxy-image)\b/.test(fetchUrl)) {
+    const key = (
+      process.env.AUTOTUBE_API_KEY
+      || process.env.VITE_AUTOTUBE_API_KEY
+      || ''
+    ).trim();
+    if (key) headers['X-API-Key'] = key;
+  }
+  return headers;
+}
+
 async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
   const timeoutMs = expectVideo || fetchUrl.includes('/api/download-clip') ? 120_000 : 45_000;
   const res = await fetch(fetchUrl, {
     signal: AbortSignal.timeout(timeoutMs),
-    headers: { 'user-agent': 'Mozilla/5.0 AutoTube/1.0' },
+    headers: apiAuthHeaders(fetchUrl),
   });
   if (!res.ok) return null;
   const buf = Buffer.from(await res.arrayBuffer());
@@ -310,8 +342,17 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
     candidates.push(rawUrl);
   } else if (rawUrl.startsWith('http')) {
     if (isVideo) {
-      candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);
-      candidates.push(rawUrl);
+      // Archive.org (and other) direct MP4s are plain HTTP GETs — prefer them over
+      // yt-dlp so a 401/format miss on /api/download-clip cannot starve the slot.
+      const isDirectHttpVideo = /\.(mp4|webm|mov)(?:[?#]|$)/i.test(rawUrl)
+        || /archive\.org\/download\//i.test(rawUrl);
+      if (isDirectHttpVideo) {
+        candidates.push(rawUrl);
+        candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);
+      } else {
+        candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);
+        candidates.push(rawUrl);
+      }
     }
     candidates.push(`${devServer}/api/proxy-image?url=${encodeURIComponent(rawUrl)}`);
     if (!isVideo) {
@@ -496,6 +537,10 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     assetUseCount.set(key, (assetUseCount.get(key) || 0) + 1);
     lastUsedAssetKey = key;
   }
+  function isVideoAsset(a) {
+    return a?.type === 'video' || /\.(mp4|webm|mov)/i.test(a?.url || '');
+  }
+
   function orderedFallbacks(pool, excludeKey) {
     const seen = new Set();
     const list = [];
@@ -505,10 +550,14 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       seen.add(k);
       list.push(a);
     }
-    // Least-used assets first so distinct slots draw distinct visuals.
-    list.sort(
-      (a, b) => (assetUseCount.get(assetKey(a)) || 0) - (assetUseCount.get(assetKey(b)) || 0),
-    );
+    // Prefer real motion over stills when a web clip fails to download — otherwise
+    // every failed TikTok/YouTube slot collapses onto the same off-topic image.
+    list.sort((a, b) => {
+      const va = isVideoAsset(a) ? 0 : 1;
+      const vb = isVideoAsset(b) ? 0 : 1;
+      if (va !== vb) return va - vb;
+      return (assetUseCount.get(assetKey(a)) || 0) - (assetUseCount.get(assetKey(b)) || 0);
+    });
     // Avoid a back-to-back repeat of the previous visual when a fresh
     // alternative of equal priority exists.
     if (list.length > 1 && assetKey(list[0]) === lastUsedAssetKey) {
@@ -525,7 +574,14 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     }
     const total = videoDurations.get(localSrc);
     const key = assetKey(asset);
-    let offset = videoOffsets.get(key) ?? hintOffset;
+    let offset;
+    if (videoOffsets.has(key)) {
+      offset = videoOffsets.get(key);
+    } else if (hintOffset > 0) {
+      offset = hintOffset;
+    } else {
+      offset = archiveIntroSkipSec(asset, total);
+    }
     if (offset + durationSec > total - 0.1) offset = 0;
     videoOffsets.set(key, offset + durationSec);
     return offset;

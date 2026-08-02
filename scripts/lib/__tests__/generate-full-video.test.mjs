@@ -500,13 +500,20 @@ describe('non-YouTube motion planning and ranking', () => {
       url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://youtu.be/abc')}`,
       score: 100,
     };
+    const tiktok = {
+      url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://www.tiktok.com/@aviation/video/1')}`,
+      sourceUrl: 'https://www.tiktok.com/@aviation/video/1',
+      score: 90,
+    };
     const candidates = [
       youtube,
+      tiktok,
       { url: 'https://vimeo.com/12345', score: 1 },
       { url: 'https://cdn.example.org/cabin.webm', score: 0 },
       { url: 'https://archive.org/download/cabin/cabin.mp4', score: -5 },
       { url: 'https://www.dailymotion.com/video/xyz', score: 2 },
       { url: 'https://giphy.com/gifs/airplane-cabin-xyz', score: 3 },
+      { url: 'https://example.org/page-only', score: 50 },
     ];
 
     const ranked = rankMotionCandidates(candidates, (clip) => clip.score);
@@ -516,10 +523,14 @@ describe('non-YouTube motion planning and ranking', () => {
       'https://giphy.com/gifs/airplane-cabin-xyz',
       'https://www.dailymotion.com/video/xyz',
       'https://vimeo.com/12345',
+      'https://example.org/page-only',
+      tiktok.url,
       youtube.url,
     ]);
     expect(isYouTubeMotionCandidate(youtube)).toBe(true);
     expect(motionCandidateHostRank(youtube)).toBeGreaterThan(50);
+    expect(motionCandidateHostRank(tiktok)).toBeGreaterThan(motionCandidateHostRank({ url: 'https://vimeo.com/1' }));
+    expect(motionCandidateHostRank(tiktok)).toBeLessThan(motionCandidateHostRank(youtube));
   });
 });
 

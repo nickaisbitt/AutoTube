@@ -133,7 +133,7 @@ export const MEDICAL_CLICKBAIT_HOOK_RE =
 
 /** Clickbait art only reads as "medical" when death/illness vocabulary is present. */
 export const MEDICAL_CLICKBAIT_CONTEXT_RE =
-  /\b(deaths?|dying|mortality|fatalities|hospitals?|patients?|doctors?|nurses?|clinic|medical|medicine|disease|diseases|cancer|stroke|heart\s+attack|diabetes|blood\s+pressure|symptoms?|diagnosis|surgery|icu)\b/i;
+  /\b(deaths?|dying|mortality|fatalities|hospitals?|patients?|doctors?|nurses?|clinic|medical|medicine|disease|diseases|cancer|stroke|heart\s+attack|diabetes|blood[\s-]?pressure|hypertension|symptoms?|diagnosis|surgery|icu)\b/i;
 
 const MEDICAL_CLICKBAIT_ANY_RE = new RegExp(
   `${MEDICAL_CLICKBAIT_DEATH_STAT_RE.source}|${MEDICAL_CLICKBAIT_HOOK_RE.source}`,
@@ -159,7 +159,7 @@ export function medicalClickbaitReason(haystack, contextText = '') {
 
 /** Hospital/ICU stock on a civil-aviation story (oxygen *masks* stay allowed). */
 export const AIRLINE_MEDICAL_STOCK_RE =
-  /\b(hospitals?|hospital\s+(?:bed|corridor|room|ward)|patients?|icu|intensive\s*care|nurses?|nursing\s*station|doctors?|surgeons?|surgery|operating\s*room|ambulances?|stretcher|paramedics?|iv\s*drip|infusion|ventilator|defibrillator|nasal\s*cannula|heart\s*monitor|ecg|ekg|medical\s*(?:team|staff|equipment|monitor|attention)|oxygen\s*(?:tank|cylinder|therapy|concentrator))\b/i;
+  /\b(hospitals?|hospital\s+(?:bed|corridor|room|ward)|patients?|icu|intensive\s*care|nurses?|nursing\s*station|doctors?|surgeons?|surgery|operating\s*room|ambulances?|stretcher|paramedics?|iv\s*drip|infusion|ventilator|defibrillator|nasal\s*cannula|heart\s*monitor|ecg|ekg|blood[\s-]?pressure|hypertension|clinic|medical\s*(?:team|staff|equipment|monitor|attention)|oxygen\s*(?:tank|cylinder|therapy|concentrator)|msn\.com\/[^?\s]*\/health)\b/i;
 
 /** Medical-aviation stories (medevac / air ambulance) legitimately mix the two. */
 const MEDICAL_AVIATION_TOPIC_RE =

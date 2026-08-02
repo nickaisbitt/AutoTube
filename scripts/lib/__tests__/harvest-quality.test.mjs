@@ -7,6 +7,7 @@ import {
   evaluateHarvestVolumeWithSoftPass,
   filterAssetsByRelevance,
   hasAirlineAviationEvidence,
+  isGenericStockJunk,
   isWebNativeMotionSource,
   keylessArchiveHumanPortraitScore,
   scoreAssetRelevance,
@@ -62,6 +63,15 @@ describe('keyless archive human portrait topical boost', () => {
       alt: 'hospital patient in bed worried face close-up',
     };
     expect(keylessArchiveHumanPortraitScore(hospitalJunk, segment, AIRLINE_TOPIC)).toBe(0);
+  });
+
+  it('rejects MSN blood-pressure health stills when cabin-pressure queries pull medical clickbait', () => {
+    const msnHealth = [
+      'New scan could help millions dealing with hidden causes of high blood ...',
+      'https://www.msn.com/en-ca/health/other/new-scan-could-help-millions-dealing-with-hidden-causes-of-high-blood-pressure/ar-AA1RpcYS',
+      'Hidden Pressure, Dangers',
+    ].join(' ');
+    expect(isGenericStockJunk(msnHealth, AIRLINE_TOPIC)).toBe(true);
   });
 
   it('keeps aviation archive evidence ahead of portrait-only archive clips on airline topics', () => {

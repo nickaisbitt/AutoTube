@@ -218,11 +218,13 @@ export async function handleDownloadClip(
 
     const rawPath = join(cacheDir, `${hash}-${Date.now()}-raw.%(ext)s`);
 
-    // Step 1: Download with yt-dlp
+    // Step 1: Download with yt-dlp.
+    // Prefer ≤720p landscape, but TikTok/Reels are vertical (height 1024–1920) so a
+    // hard height<=720 filter matches nothing and every raw-web short fails assemble.
     const ytdlp = spawn("yt-dlp", [
       "--no-playlist",
       "-f",
-      "best[height<=720]",
+      "best[height<=720]/best[width<=720]/best[height<=1280]/best",
       "--max-filesize",
       "50M",
       "-o",

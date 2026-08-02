@@ -134,6 +134,30 @@ describe('introFaceTier', () => {
     expect(introFaceTier(tour, { airline: false, housing: true })).toBe(-1);
   });
 
+  it('rejects Rolfe Report / Periscope nest / dynamite openers on housing intro', () => {
+    expect(introFaceTier({
+      query: 'housing crash',
+      alt: 'THE ROLFE REPORT WITH JOHN ROLFE thumbnail composite',
+      title: 'rolfe report housing',
+      url: 'https://example.com/rolfe.jpg',
+      type: 'image',
+    }, { airline: false, housing: true })).toBe(-1);
+    expect(introFaceTier({
+      query: 'for rent sign',
+      alt: 'a ceiling on your home propaganda film periscopefilm bird nest',
+      title: 'periscope film 18384',
+      url: 'https://archive.org/download/18384/x.mp4',
+      type: 'video',
+    }, { airline: false, housing: true })).toBe(-1);
+    expect(introFaceTier({
+      query: 'ticking time bomb',
+      alt: 'sticks of dynamite ticking time bomb alarm clock',
+      title: 'time bomb stock',
+      url: 'https://example.com/bomb.jpg',
+      type: 'image',
+    }, { airline: false, housing: true })).toBe(-1);
+  });
+
   it('tiers AI radiology / clinician+screen as healthcare opener (2)', () => {
     const asset = {
       query: 'ai radiology doctor monitor screen',

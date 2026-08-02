@@ -172,6 +172,13 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   ) {
     return true;
   }
+  // housing-web18: Rolfe Report composites, Periscope nests, kids/sitcom pads.
+  if (
+    housing
+    && /\b(rolfe\s+report|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|propaganda\s+film|ticking\s+time\s+bombs?|dynamite)\b/i.test(blob)
+  ) {
+    return true;
+  }
   // Healthcare AI hooks must not open on course title cards / Giphy / protest /
   // maternity / ritual / news talking-head studio pads (healthcare-web3).
   if (

@@ -1374,6 +1374,12 @@ describe('housing off-topic crash/council/fire junk', () => {
         url: 'https://neohomeloans.com/will-the-housing-market-crash.jpg',
         query: 'housing crash',
       },
+      // housing-web18 query-pollution / wrong Archive slices
+      { alt: 'Ticking Time Bomb dynamite alarm clock stock', query: 'housing crash' },
+      { alt: 'periscopefilm bird nest propaganda film 18384', query: 'for rent sign' },
+      { alt: 'leapfrog letter factory part 4 kids alphabet', query: 'reading letter' },
+      { alt: 'Camp Mystic Guadalupe River texas flooding map', query: 'Florida and Texas' },
+      { alt: 'J.G. Ballard David Cronenberg Crash movie', query: 'housing crash' },
     ];
     for (const clip of cases) {
       expect(isJunkStockClip(clip, HOUSING_CRASH_TOPIC)).toBe(true);

@@ -477,6 +477,18 @@ describe('housing off-topic B-roll rejects', () => {
       'CAN TV station id bumper',
       '3d house on a rock neohomeloans illustration',
       'queen elizabeth ii memorial portrait',
+      // housing-web18: script-query pollution + wrong Archive slices
+      'Why October is Filled with Ticking Time Bombs for Streaming Fans',
+      'Corporate Technical Risk. The Ticking Time Bomb dynamite',
+      'a ceiling on your home 1946 rent price controls propaganda film periscopefilm bird nest',
+      'leapfrog letter factory part 4 480p kids alphabet',
+      'our miss brooks the cafeteria strike mister conklins love nest',
+      'Maps and Diagrams of the Camp Mystic Grounds Guadalupe River texas flooding',
+      'Harnessing Perversity: J.G. Ballard, David Cronenberg, and Crash',
+      'David Crosby: Remember My Name',
+      'literacy adam finds an apartment leapfrog',
+      'THE ROLFE REPORT WITH JOHN ROLFE thumbnail',
+      'i got a strike again bowling',
     ];
     for (const alt of cases) {
       expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);

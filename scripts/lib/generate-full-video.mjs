@@ -3267,6 +3267,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         return -20;
       }
+      // housing-web18: dynamite/time-bomb stills, Periscope nests, kids/sitcom
+      // Archive, flood maps, and Crash-movie scrapes tank youtubeReadability.
+      if (
+        /\b(ticking\s+time\s+bombs?|time\s+bombs?|dynamite|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|camp\s+mystic|guadalupe\s+river|ballard|cronenberg|david\s+crosby|rolfe\s+report)\b/i.test(blob)
+      ) {
+        return -20;
+      }
       // Archive body filler MUST be scored before landscape/newsreel demotes.
       // Enriched Archive descriptions often contain "aerial/landscape/newsreel" and
       // were hard-rejecting (-8) every Archive candidate on web11 (0 Archive inject

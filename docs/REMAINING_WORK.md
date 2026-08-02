@@ -46,6 +46,7 @@ Shipped on `cursor/web-harvest-assemble-auth-4556` while A3/A5 run gen+watch. **
 | `b95f210` (A2) | Housing intro prefers face/apartment over landscape Archive |
 | `e377f25` (A4) | Healthcare keyless soft-pass-motion + clinical relevance + vision split (cyber vs AI-medicine) |
 | `07027d1` (A8) | Tighter first-15s reuse + motion-first opening for housing/keyless |
+| `6ee63fc` (A3) | Housing: reject fire/war Archive junk; evidence-based landscape intro; karaokeCaptions OFF |
 
 ### Wave 5 — narration hang fixes (current tip)
 

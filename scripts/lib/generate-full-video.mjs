@@ -3688,11 +3688,15 @@ export async function generateFullVideo(options) {
       const renderEnv = buildRenderEnvFromFixState(fixState, { devServer, projectPath });
       const renderSnapshot = renderEnvJournalSnapshot(fixState);
       writeFileSync(join(outDir, 'render-env.json'), JSON.stringify(renderSnapshot, null, 2));
+      const keepBestRenderTimeoutMs = Math.max(
+        600_000,
+        Number(process.env.AUTOTUBE_RENDER_TIMEOUT_MS) || 3_600_000,
+      );
       const render = spawnSync('node', ['server-render.mjs', mp4Out], {
         cwd: root,
         env: renderEnv,
         encoding: 'utf8',
-        timeout: 1_800_000,
+        timeout: keepBestRenderTimeoutMs,
         stdio: ['inherit', 'pipe', 'pipe'],
       });
       writeFileSync(join(outDir, 'render.log'), `${render.stdout || ''}\n${render.stderr || ''}`);
@@ -4743,11 +4747,15 @@ export async function generateFullVideo(options) {
     const renderSnapshot = renderEnvJournalSnapshot(fixState);
     writeFileSync(join(outDir, 'render-env.json'), JSON.stringify(renderSnapshot, null, 2));
 
+    const renderTimeoutMs = Math.max(
+      600_000,
+      Number(process.env.AUTOTUBE_RENDER_TIMEOUT_MS) || 3_600_000,
+    );
     const render = spawnSync('node', ['server-render.mjs', mp4Out], {
       cwd: root,
       env: renderEnv,
       encoding: 'utf8',
-      timeout: 1_800_000,
+      timeout: renderTimeoutMs,
       stdio: ['inherit', 'pipe', 'pipe'],
     });
 

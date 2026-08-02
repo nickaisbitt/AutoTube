@@ -3,7 +3,7 @@
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, renameSync } from 'node:fs';
 import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assetCutIntervalSec } from './youtubeProfile.mjs';
@@ -307,6 +307,75 @@ function apiAuthHeaders(fetchUrl = '') {
   return headers;
 }
 
+/**
+ * Archive.org training films are often hundreds of MB / multi-GB. Buffering the
+ * whole file for a 1s B-roll cut blows the server-render wall clock. Pull a short
+ * mid-film slice with ffmpeg instead (HTTP seek when the host supports it).
+ */
+function shouldSliceRemoteVideo(url = '') {
+  const target = targetUrlForCache(url);
+  return /archive\.org\//i.test(target);
+}
+
+function fetchVideoSliceViaFfmpeg(url, cached, { startSec = 15, durationSec = 48 } = {}) {
+  const tmp = `${cached}.partial.mp4`;
+  try {
+    if (existsSync(tmp)) unlinkSync(tmp);
+  } catch {
+    /* ignore */
+  }
+  const r = spawnSync(
+    'ffmpeg',
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-y',
+      '-user_agent',
+      'Mozilla/5.0 AutoTube/1.0',
+      '-ss',
+      String(Math.max(0, startSec)),
+      '-t',
+      String(Math.max(8, durationSec)),
+      '-i',
+      url,
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-an',
+      '-movflags',
+      '+faststart',
+      tmp,
+    ],
+    { encoding: 'utf8', timeout: 180_000 },
+  );
+  if (r.status !== 0 || !existsSync(tmp)) {
+    try {
+      if (existsSync(tmp)) unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+  try {
+    const size = readFileSync(tmp).length;
+    if (size < 500) {
+      unlinkSync(tmp);
+      return null;
+    }
+    renameSync(tmp, cached);
+    return cached;
+  } catch {
+    try {
+      if (existsSync(tmp)) unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+}
+
 async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
   const timeoutMs = expectVideo || fetchUrl.includes('/api/download-clip') ? 120_000 : 45_000;
   const res = await fetch(fetchUrl, {
@@ -370,17 +439,42 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
   for (const fetchUrl of candidates) {
     if (!fetchUrl.startsWith('http')) continue;
     const cached = cachePathForUrl(fetchUrl, cacheDir, isVideo);
-    if (existsSync(cached) && readFileSync(cached).length > 500) {
-      return cached;
+    const isDownloadClip = fetchUrl.includes('/api/download-clip');
+    const preferSlice = isVideo && !isDownloadClip && shouldSliceRemoteVideo(fetchUrl);
+    if (existsSync(cached)) {
+      let size = 0;
+      try {
+        size = readFileSync(cached).length;
+      } catch {
+        size = 0;
+      }
+      // Prior full-film Archive downloads (100MB–GB) starve the render wall clock —
+      // discard and re-fetch a short ffmpeg slice instead.
+      if (preferSlice && size > 80_000_000) {
+        try {
+          unlinkSync(cached);
+        } catch {
+          /* ignore */
+        }
+      } else if (size > 500) {
+        return cached;
+      }
     }
     // Downloading a web clip through yt-dlp (/api/download-clip) is slow and
     // fails transiently (throttling, cold extractor, partial download). A single
     // miss must not silently drop this clip and force every slot onto the same
     // fallback still — retry a few times before moving to the next candidate.
-    const isDownloadClip = fetchUrl.includes('/api/download-clip');
     const attempts = isDownloadClip ? 3 : isVideo ? 2 : 1;
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
+        if (preferSlice) {
+          const startSec = archiveIntroSkipSec(asset, 120) || 15;
+          const sliced = fetchVideoSliceViaFfmpeg(fetchUrl, cached, {
+            startSec,
+            durationSec: 48,
+          });
+          if (sliced) return sliced;
+        }
         const path = await fetchToCache(fetchUrl, cached, { expectVideo: isVideo });
         if (path) return path;
       } catch {

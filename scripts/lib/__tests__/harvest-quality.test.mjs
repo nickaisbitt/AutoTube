@@ -780,6 +780,17 @@ describe('healthcare off-topic B-roll rejects', () => {
     }
   });
 
+  it('hard-rejects standalone HIMSS and trade-show (without floor) — web20 openers', () => {
+    const cases = [
+      'HIMSS annual conference healthcare technology 2024 exhibitor',
+      'medical trade show AI healthcare products exhibitor',
+      'trade show healthcare robotics medical devices vendor',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+    }
+  });
+
   it('keeps OR surgical-robot / radiologist workstation clinical B-roll', () => {
     const keep = [
       'CNBC surgical robot operating room hospital patient',
@@ -1086,6 +1097,20 @@ describe('checkIntroFacePool — healthcare web17 intro preference (Science Nati
       makeVideo({ alt: 'conference booth expo floor business suit stroll healthcare', query: 'healthcare expo' }),
     ];
     for (const video of expoShots) {
+      const result = checkIntroFacePool(project([video]));
+      expect(result.pass).toBe(false);
+      expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+    }
+  });
+
+  it('disqualifies standalone HIMSS / blurry-test-tube from intro tier (web18/web20)', () => {
+    const junkShots = [
+      makeVideo({ alt: 'HIMSS annual conference healthcare technology 2024', query: 'healthcare ai' }),
+      makeVideo({ alt: 'blurry test tube close-up laboratory b-roll stock', query: 'healthcare lab' }),
+      makeVideo({ alt: 'petri dish close-up b-roll stock lab healthcare', query: 'lab healthcare' }),
+      makeVideo({ alt: 'corporate presentation healthcare AI digital health keynote', query: 'healthcare ai' }),
+    ];
+    for (const video of junkShots) {
       const result = checkIntroFacePool(project([video]));
       expect(result.pass).toBe(false);
       expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
@@ -1642,6 +1667,19 @@ describe('checkIntroFacePool — housing aviation/group-photo demote (web30)', (
     ]));
     expect(result.pass).toBe(false);
     expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('fails with INTRO_FACE_FAIL when pool has only static-document / housing-price-chart clips (web31)', () => {
+    const staticDocShots = [
+      makeVideo({ alt: 'static document housing crash hidden report', query: 'housing crash document' }),
+      makeVideo({ alt: 'housing price index chart graphic document only', query: 'housing price index' }),
+      makeVideo({ alt: 'eviction notice only paper text close-up', query: 'eviction document' }),
+    ];
+    for (const video of staticDocShots) {
+      const result = checkIntroFacePool(project([video]));
+      expect(result.pass).toBe(false);
+      expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+    }
   });
 
   it('passes when pool has shocked-face eviction-notice clip despite aviation pad in pool', () => {

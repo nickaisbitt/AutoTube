@@ -549,6 +549,140 @@ describe('introFaceTier', () => {
       expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
     }
   });
+
+  // ---------------------------------------------------------------------------
+  // New DoD tests: housing static document / check / notice openers (web31)
+  // ---------------------------------------------------------------------------
+
+  it('hard-rejects static document / housing-price-index opener on housing intro (web31)', () => {
+    const staticDocCases = [
+      {
+        alt: 'static document housing crash they hid government report',
+        title: 'THE HOUSING CRASH THEY HID static document',
+        url: 'https://archive.org/download/housing_doc/doc.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'housing price index chart graphic document only',
+        title: 'housing price index static document',
+        url: 'https://example.com/hpi.jpg',
+        type: 'image',
+      },
+      {
+        alt: 'housing price chart document',
+        title: 'housing price chart',
+        url: 'https://example.com/hpchart.jpg',
+        type: 'image',
+      },
+      {
+        alt: 'mortgage document paperwork close-up housing',
+        title: 'mortgage document',
+        url: 'https://example.com/mortgage.jpg',
+        type: 'image',
+      },
+    ];
+    for (const asset of staticDocCases) {
+      expect(introFaceTier(asset, { housing: true })).toBe(-1);
+    }
+  });
+
+  it('hard-rejects eviction notice without face on housing intro (web31)', () => {
+    expect(introFaceTier({
+      alt: 'eviction notice paper document close-up text only',
+      title: 'eviction notice only',
+      url: 'https://example.com/eviction.jpg',
+      type: 'image',
+    }, { housing: true })).toBe(-1);
+    // cashier check / rent check without face also rejected
+    expect(introFaceTier({
+      alt: "cashier's check rent payment form document",
+      title: "cashier's check housing",
+      url: 'https://example.com/check.jpg',
+      type: 'image',
+    }, { housing: true })).toBe(-1);
+  });
+
+  it('allows eviction notice WITH readable face on housing intro (web31 eviction-with-face stays OK)', () => {
+    expect(introFaceTier({
+      query: 'tenant eviction notice worried face close-up',
+      alt: 'tenant face worried holding eviction notice portrait people',
+      title: 'worried tenant holding eviction notice',
+      url: 'https://example.com/tenant_notice.mp4',
+      type: 'video',
+    }, { housing: true })).toBeGreaterThanOrEqual(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // New DoD tests: healthcare blurry test-tube / trade-show / Science Nation (web18/20)
+  // ---------------------------------------------------------------------------
+
+  it('hard-rejects blurry test-tube / petri-dish openers on healthcare intro (web18)', () => {
+    const testTubeCases = [
+      {
+        alt: 'blurry test tube laboratory close-up b-roll stock generic',
+        title: 'blurry test tube lab generic',
+        url: 'https://example.com/testtube.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'test tube close-up stock filler healthcare lab',
+        title: 'test tube close up only',
+        url: 'https://vimeo.com/testtube2.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'petri dish close-up b-roll stock lab healthcare',
+        title: 'petri dish stock',
+        url: 'https://example.com/petri.mp4',
+        type: 'video',
+      },
+    ];
+    for (const asset of testTubeCases) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+    }
+  });
+
+  it('hard-rejects standalone HIMSS / trade-show (no floor qualifier) on healthcare intro (web20)', () => {
+    const tradeShowCases = [
+      {
+        alt: 'HIMSS annual conference healthcare technology 2024',
+        title: 'HIMSS healthcare conference',
+        url: 'https://example.com/himss.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'medical trade show healthcare AI products exhibitors',
+        title: 'medical trade show exhibitor',
+        url: 'https://vimeo.com/tradeshow.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'corporate presentation healthcare AI digital health keynote',
+        title: 'corporate healthcare presentation',
+        url: 'https://example.com/corporate.mp4',
+        type: 'video',
+      },
+    ];
+    for (const asset of tradeShowCases) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+    }
+  });
+
+  it('tiers Science Nation clip without qualifier as healthcare opener tier 2 (broadened Science Nation win)', () => {
+    expect(introFaceTier({
+      alt: 'science nation artificial intelligence machine learning hospital',
+      title: 'science nation AI hospital feature',
+      url: 'https://vimeo.com/scination.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(2);
+    // Science Nation without any qualifier also gets tier 2.
+    expect(introFaceTier({
+      alt: 'science nation documentary episode',
+      title: 'science nation',
+      url: 'https://archive.org/download/scination/sn.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(2);
+  });
 });
 
 

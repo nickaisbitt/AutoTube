@@ -1169,6 +1169,97 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
 }
 
 /**
+ * Check whether the media pool contains at least one intro-eligible face/lived-in clip
+ * for housing topics, or at least one clinical/face clip for healthcare topics.
+ *
+ * Housing requires a readable human face + housing-topical context, or a lived-in
+ * apartment interior signal (eviction/packing/tenant). FEMA maps, news graphics,
+ * landscape establishing shots, and webinar talking-heads do NOT qualify.
+ *
+ * Healthcare requires a clinician+screen / OR / surgical-robot clip, or a readable
+ * face + healthcare-topical context. News-desk talking-heads do NOT qualify.
+ *
+ * Returns { pass: true } for non-housing/healthcare topics, or when a suitable clip
+ * is found. Returns { pass: false, reason: 'INTRO_FACE_FAIL: ...' } when none exists,
+ * so the caller fails the soft-pass and triggers a re-harvest with face-first queries.
+ *
+ * @param {object} project
+ * @returns {{ pass: boolean, reason?: string }}
+ */
+export function checkIntroFacePool(project) {
+  const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
+  const housing = isHousingTopic(topicBlob);
+  const healthcare = isHealthcareTopic(topicBlob);
+  if (!housing && !healthcare) return { pass: true };
+
+  const videos = (project?.media || []).filter(
+    (a) => a.type === 'video' || /\.mp4/i.test(a.url || ''),
+  );
+
+  if (housing) {
+    const hasIntroFace = videos.some((asset) => {
+      const blob = [asset?.query, asset?.alt, asset?.title, asset?.source, asset?.url]
+        .filter(Boolean).join(' ').toLowerCase();
+      // Reject known junk intro patterns so they never count as face evidence.
+      if (
+        /\b(landscape|mountain|lake|lakeside|river|forest|aerial|helicopter|fema|world\s*map|disaster\s*map|news\s*map|webinar|workshop|protest|picket|rent\s+strike|sitting\s+in\s+(?:a\s+)?chair|talking\s+to\s+camera|home\s+tour)\b/i.test(blob)
+      ) return false;
+      // Tier-2: readable face + housing-topical (shocked/worried + apartment/eviction).
+      const hasReadableFace =
+        /\b(face|faces|portrait|close.?up|expression|reaction|worried|shocked|crying|stressed)\b/i.test(blob)
+        && /\b(person|people|woman|women|man|men|family|couple|tenant|resident)\b/i.test(blob);
+      const housingTopical =
+        /\b(evict(?:ion|ed)?|landlord|tenant|lease|rent(?:al)?|notice|apartment|housing|foreclos|packing\s+boxes)\b/i.test(blob);
+      if (hasReadableFace && housingTopical) return true;
+      // Tier-1: lived-in apartment interior or strong eviction-evidence motion.
+      if (
+        /\b(modern\s+apartment|apartment\s+interior|living\s+room(?:\s+people)?|tenant\s+(?:face|close|packing)|eviction\s+notice|packing\s+boxes|for\s+rent\s+sign|foreclosure\s+(?:auction|sign|house)|couple\s+(?:arguing|reading|worried)|family\s+apartment)\b/i.test(blob)
+      ) return true;
+      return false;
+    });
+    if (!hasIntroFace) {
+      return {
+        pass: false,
+        reason:
+          'INTRO_FACE_FAIL: no housing face/lived-in clip in pool — only landscape/news/FEMA openers found; re-harvest with face-first queries',
+      };
+    }
+  }
+
+  if (healthcare) {
+    const hasIntroFace = videos.some((asset) => {
+      const blob = [asset?.query, asset?.alt, asset?.title, asset?.source, asset?.url]
+        .filter(Boolean).join(' ').toLowerCase();
+      // Clinician+screen / OR / surgical-robot motion qualifies.
+      const clinicianScreenOrOr =
+        /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|or)|ultrasound\s+(?:demo|demonstration)|mri\s+(?:monitor|screen)|operating\s+room|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing))\b/i.test(blob)
+        || (
+          /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(blob)
+          && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(blob)
+        );
+      if (clinicianScreenOrOr) return true;
+      // Readable face + healthcare topical.
+      const hasReadableFace =
+        /\b(face|faces|portrait|close.?up|expression|reaction|worried|shocked)\b/i.test(blob)
+        && /\b(person|people|woman|man|family|patient)\b/i.test(blob);
+      const healthcareTopical =
+        /\b(doctor|physician|clinician|nurse|patient|hospital|clinic|mri|radiology|diagnosis|surgery|surgical|medical|healthcare)\b/i.test(blob);
+      if (hasReadableFace && healthcareTopical) return true;
+      return false;
+    });
+    if (!hasIntroFace) {
+      return {
+        pass: false,
+        reason:
+          'INTRO_FACE_FAIL: no healthcare clinical/face clip in pool — only news/graphics/talking-head openers found; re-harvest with face-first queries',
+      };
+    }
+  }
+
+  return { pass: true };
+}
+
+/**
  * Soft-pass when curated cyber stills, raw web-harvest motion, or stock-API motion
  * filled a thin harvest. Requires motion-rich timelines (enough videos per segment),
  * not stills alone. Web-native motion (Bing/Google/DuckDuckGo video, Vimeo,
@@ -1190,6 +1281,9 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
           reason: `volume-topical-video-empty(${topicalCoverage.missing.join(',')})`,
         };
       }
+      // Housing/healthcare hard-pass still requires an intro-tier face clip.
+      const introFace = checkIntroFacePool(project);
+      if (!introFace.pass) return introFace;
       return { pass: true, reason: 'volume-hard-pass' };
     }
     // A missing verdict is not a pass: without a volume check there is nothing to soft-pass.
@@ -1348,12 +1442,24 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
       }
     }
     if (stockFetched > 0 || topUp >= segN || liveMotionPresent) {
+      // Require at least one intro-tier clinical/face clip before passing healthcare.
+      const introFace = checkIntroFacePool(project);
+      if (!introFace.pass) return introFace;
       return { pass: true, reason: `soft-pass-motion-healthcare(${videoCount}v/${segN}segs)` };
     }
     return {
       pass: false,
       reason: `soft-pass-motion-healthcare-no-live-motion(${videoCount}v/${segN}segs)`,
     };
+  }
+
+  // Housing — fail-closed on intro face tier. A housing harvest that has enough
+  // volume but only landscape/news/FEMA openers triggers a face-first re-harvest.
+  // Housing falls through to the generic soft-passes for volume; the intro gate fires
+  // here first so the generic paths never ship a FEMA/talking-head opener.
+  if (isHousingTopic(topicBlob)) {
+    const introFace = checkIntroFacePool(project);
+    if (!introFace.pass) return introFace;
   }
 
   // No soft-pass may launder a junk-dominated video pool, whichever path would fire.

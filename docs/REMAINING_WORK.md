@@ -1,12 +1,12 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-03T01:43Z** — branch `cursor/web-harvest-assemble-auth-4556` (continuous gen loop; no cycle cap).
+Last updated: **2026-08-03T03:38Z** — branch `cursor/web-harvest-assemble-auth-4556` (loop3; no cycle cap).
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 
 **Honest score rule:** Do **not** claim brutal raw ≥7 / upload-ready YES unless a fresh `WATCH_REPORT.md` shows it. Airline-web8 remains the only closed ≥7 topic (raw **7.8**). Housing and healthcare have **no** fresh ≥7.
 
-**Continuous closeout (2026-08-03T01:43Z):** **PACK_OPEN** — airline still packed at raw **7.8** / upload-ready YES. Housing tip-best still **5.2** (web18); recent web22–24 raw **4.4–4.6** (name-pollution / talking-head intros — tip `2d8c88f` strips person-name harvest queries). Healthcare recent web11–14 raw **2.8–3.8** (hook overlay OK; Archive talking-head/OR pool still weak). Floors **not** lowered. No stock keys. §C Railway **BLOCKED** without `AUTOTUBE_RAILWAY_TOKEN`. Gen loop continues until housing+healthcare raw ≥7.
+**Continuous closeout (2026-08-03T03:38Z):** **PACK_OPEN** — airline **7.8** YES. Housing tip-wave best **5.4** (web27; Redfin chart opener — rejected tip). Healthcare recent **3.8–4.6** (web16 surgical-robot in pool but weak opener — tip `9184e05` robotics word-boundary + karaoke OFF + Vimeo hosts). Floors **not** lowered. No stock keys. Railway **BLOCKED** without `AUTOTUBE_RAILWAY_TOKEN`.
 
 **Keys:** variable names, presence on this VM, and which gates each key unlocks → [`docs/ENV_DOD.md`](ENV_DOD.md).
 

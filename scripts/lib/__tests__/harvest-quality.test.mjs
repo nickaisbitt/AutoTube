@@ -530,6 +530,12 @@ describe('housing off-topic B-roll rejects', () => {
       'Cummins ISC ISL 8.9L Diesel Engine Rocker arm Housing',
       'Zillow chart graph housing crash',
       '60 Overthinking Quotes To Break Free From The Mental Trap',
+      // web24 script-title pollution → car crash / choir / BronxNet
+      'Man killed after Volkswagen overturns in severe crash with Tesla, Tampa police',
+      'KATHERINE JENKINS SINGS WITH THE MORMON TABERNACLE CHOIR',
+      'the bronx social justice and anti violence forums housing justice for all',
+      'Marco Rubio:We are not members of the ICC',
+      'Auto Insurance Rates Just Dropped Sarah Jenkins',
       'LendingTree bar chart housing crash infographic',
       'American Home Mortgage bankruptcy slide graphic',
       'youtuber headset talking head podcast mic subscribe button',

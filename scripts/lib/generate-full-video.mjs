@@ -843,7 +843,19 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
     ).size;
 
     for (let round = 0; round < searchEndpoints.length && uniqueCount < minPerSegment; round += 1) {
-      const q = `${seg.title} ${topic} ${round > 0 ? 'news photo' : 'photo'}`;
+      // Housing: never search "${seg.title} ${topic}" — character/city beats
+      // ("In Tampa Sarah Jenkins") scrape Tesla crashes + choir pads (web24).
+      const housingSafeQueries = [
+        'worried tenant apartment face close up',
+        'eviction notice paper hands apartment',
+        'family packing boxes apartment hallway',
+        'foreclosure auction house crowd',
+        'modern apartment living room daylight people',
+        'stressed couple kitchen bills paperwork',
+      ];
+      const q = isHousingTopic(topic)
+        ? `${housingSafeQueries[round % housingSafeQueries.length]} housing`
+        : `${seg.title} ${topic} ${round > 0 ? 'news photo' : 'photo'}`;
       const results = await fetchImageSearchResults(devServer, searchEndpoints[round], q);
       const candidates = results
         .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
@@ -865,7 +877,7 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
           segmentId: seg.id,
           type: 'image',
           url: r.url,
-          alt: `${seg.title} ${topic}`,
+          alt: isHousingTopic(topic) ? q : `${seg.title} ${topic}`,
           query: q,
           source: `${r.source || 'Search'} (volume top-up)`,
           duration: 5,
@@ -3535,7 +3547,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const archiveClip = /Archive/i.test(clip.source || '');
     const safeQuery =
       clip.query
-      || (airline ? 'airplane cabin passengers daylight' : `stock-video ${seg.title}`);
+      || (airline
+        ? 'airplane cabin passengers daylight'
+        : isHousingTopic(topicBlob)
+          ? 'worried tenant apartment face close up'
+          : `stock-video ${seg.title}`);
     const injectedUrl = withDistinctProxyIdentity(clip.url, `${seg.id}-${n}`);
     // Provider metadata travels with the asset so downstream evidence gates judge the
     // clip on what it shows. Nothing aviation-flavoured is invented for empty alts —

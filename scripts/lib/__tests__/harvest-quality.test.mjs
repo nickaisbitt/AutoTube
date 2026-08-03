@@ -672,6 +672,26 @@ describe('healthcare off-topic B-roll rejects', () => {
     }
   });
 
+  it('hard-rejects healthcare-web12 school-nurse / war / laparoscopy-romantic / zoo pads', () => {
+    const cases = [
+      'whhi news wendy cummings school nurse report finishing school year',
+      'al funduq curfew doctor denied access to patient',
+      'ukraine pow september 28th 2024',
+      'the anatomy of kissing and love in magnetic resonance imaging mri',
+      'world s first rhino ct scan performed at zoo',
+      'circumcure hospital circumcision surgery staplers',
+      'board of commissioners mtg excerpt october healthcare',
+      'organ harvesting and the illusion of brain death',
+      '15 years of robotic surgery excellence world laparoscopy hospital anniversary celebration',
+      'radiologic x ray technology start a fast paced well paying medical career',
+      'second opinion project hospitals safe from covid 19',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
   it('does not hard-reject webinar/longevity talks (intro-demote only; volume soft-pass)', () => {
     // Hard-rejecting these starved healthcare-web4 to soft-pass-thin(1/6).
     const bodyOk = [

@@ -15,7 +15,11 @@ vi.mock("undici", () => ({
 }));
 
 import { rateLimitMiddleware } from "../middleware/rateLimiter.js";
-import { handleLlmProxy, PROXY_UPSTREAM_TIMEOUT_MS } from "../routes/llmProxy.js";
+import {
+  BUILTIN_SERVER_LLM_MODELS,
+  handleLlmProxy,
+  PROXY_UPSTREAM_TIMEOUT_MS,
+} from "../routes/llmProxy.js";
 import { handleProxyImage } from "../routes/proxyImage.js";
 import { handleRenderVideo } from "../routes/renderVideo.js";
 
@@ -106,6 +110,30 @@ describe("security-sensitive route hardening", () => {
 
     expect(res.statusCode).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("allows empty-content fallback model with the server key", async () => {
+    process.env.OPENROUTER_API_KEY = "server-secret";
+    delete process.env.VITE_OPENROUTER_KEY;
+    delete process.env.AUTOTUBE_ALLOWED_LLM_MODELS;
+    expect(BUILTIN_SERVER_LLM_MODELS).toContain("openai/gpt-4o-mini");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ choices: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const req = streamReq(
+      JSON.stringify({ model: "openai/gpt-4o-mini", messages: [] }),
+    );
+    const res = mockRes();
+    await handleLlmProxy(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: "openai/gpt-4o-mini",
+    });
   });
 
   it("defaults and caps server-funded LLM requests", async () => {

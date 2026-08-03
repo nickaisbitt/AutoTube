@@ -2,6 +2,9 @@
 // Web image search utilities — Bing Images scraper
 // ============================================================================
 
+import { existsSync, readdirSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import { waitForDomain } from './domainRateLimit';
 
 let _puppeteer: any = null;
@@ -18,6 +21,50 @@ async function getPuppeteer() {
     }
   }
   return _puppeteer;
+}
+
+/**
+ * Resolve a real Chrome/Chromium binary. The previous `||` chain always
+ * picked the macOS path string (truthy even when missing), so Linux hosts
+ * never fell through to /usr/bin/chromium or Playwright's cached chrome —
+ * Google Images headless returned 0 forever.
+ */
+export function resolveChromeExecutablePath(): string | undefined {
+  const envCandidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.CHROME_PATH,
+    process.env.CHROME_BIN,
+  ];
+  const staticCandidates = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+  ];
+  const playwrightCandidates: string[] = [];
+  for (const base of [
+    join(homedir(), ".cache", "ms-playwright"),
+    "/root/.cache/ms-playwright",
+  ]) {
+    if (!existsSync(base)) continue;
+    try {
+      for (const entry of readdirSync(base)) {
+        if (!entry.startsWith("chromium-")) continue;
+        playwrightCandidates.push(
+          join(base, entry, "chrome-linux64", "chrome"),
+          join(base, entry, "chrome-mac", "Chromium"),
+          join(base, entry, "chrome-win", "chrome.exe"),
+        );
+      }
+    } catch {
+      // ignore unreadable cache dirs
+    }
+  }
+  for (const candidate of [...envCandidates, ...staticCandidates, ...playwrightCandidates]) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 const USER_AGENTS = [
@@ -485,10 +532,11 @@ async function fetchGoogleImagesHeadless(query: string): Promise<WebImageResult[
   const puppeteer = await getPuppeteer();
   if (!puppeteer) return [];
 
-  const CHROME_PATH = process.env.PUPPETEER_EXECUTABLE_PATH
-    || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-    || "/usr/bin/google-chrome"
-    || "/usr/bin/chromium";
+  const CHROME_PATH = resolveChromeExecutablePath();
+  if (!CHROME_PATH) {
+    console.warn("[Google Images Headless] No Chrome/Chromium binary found; skipping headless scrape");
+    return [];
+  }
 
   const browser = await puppeteer.launch({
     headless: true,

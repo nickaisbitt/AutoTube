@@ -2,6 +2,20 @@ import type { IncomingMessage, ServerResponse } from "http";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_SERVER_MODEL = "xiaomi/mimo-v2.5";
+/**
+ * Built-in models the app itself requests when spending the server key.
+ * Must stay in sync with src/services/llm/defaultModels.ts:
+ * - EMPTY_CONTENT_FALLBACK_MODEL (gpt-4o-mini) — mimo often returns
+ *   reasoning-only empty `content`; without this allow, every fallback
+ *   400s and script gen stalls at pct=15 / scriptLen=0.
+ * - QUALITY_CHECK_JUDGES + DEFAULT_VISION_MODEL — vision/quality panels.
+ */
+export const BUILTIN_SERVER_LLM_MODELS = [
+  DEFAULT_SERVER_MODEL,
+  "openai/gpt-4o-mini",
+  "deepseek/deepseek-v4-flash",
+  "google/gemma-4-31b-it",
+] as const;
 const MAX_LLM_BODY_BYTES = 1024 * 1024;
 const MAX_SERVER_TOKENS = 8192;
 /**
@@ -25,7 +39,7 @@ function allowedServerModels(): Set<string> {
     .map((model) => model.trim())
     .filter(Boolean);
   return new Set([
-    DEFAULT_SERVER_MODEL,
+    ...BUILTIN_SERVER_LLM_MODELS,
     (process.env.OPENROUTER_MODEL || "").trim(),
     ...extra,
   ].filter(Boolean));

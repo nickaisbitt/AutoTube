@@ -974,6 +974,170 @@ describe('healthcare web15 raw 4.4 junk rejects (body-lang / NVIDIA / name-pollu
   });
 });
 
+describe('healthcare web17 raw 5.6 junk rejects — video game, massage pillow, AI Geist/Lynx, ENT lecture', () => {
+  it('hard-rejects Surgeon Simulator game clip', () => {
+    const cases = [
+      'you re in our care now surgeon simulator 2 multiplayer gameplay',
+      'surgeon simulator 2 playing as a surgeon game',
+      'surgeon simulator multiplayer funny moments',
+      'surgeon simulator',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(
+        /healthcare off-topic/,
+        `expected "${alt}" to be rejected`,
+      );
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('does not reject surgical simulation used in real medical training', () => {
+    const keep = [
+      'surgical simulation training laparoscopy OR hospital',
+      'robotic surgery simulation OR training clinical',
+      'zero gravity robot surgery OR simulation innovation',
+      'robotic surgery training OR simulation minimally invasive',
+    ];
+    for (const alt of keep) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
+    }
+  });
+
+  it('hard-rejects electric massage pillow / massage product reviews', () => {
+    const cases = [
+      'father recalled everything about electric massage pillow neck shoulder',
+      'electric massage pillow review unboxing',
+      'massage pillow product demo back neck relief',
+      'electric massage cushion home use review',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(
+        /healthcare off-topic/,
+        `expected "${alt}" to be rejected`,
+      );
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects AI Geist / Lynx report pads', () => {
+    const cases = [
+      'ai geist lynx reports healthcare weekly',
+      'ai geist technology news report',
+      'geist lynx ai reports summary',
+      'lynx reports healthcare innovation brief',
+      'lynx report weekly ai update',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(
+        /healthcare off-topic/,
+        `expected "${alt}" to be rejected`,
+      );
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects ENT examination lecture by Kathmandu Medical College', () => {
+    const cases = [
+      'ent examination video by kathmandu medical college otolaryngology',
+      'ent examination lecture kathmandu medical college',
+      'kathmandu medical college ent otolaryngology training lecture',
+      'ent examination tutorial kathmandu medical college students',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(
+        /healthcare off-topic/,
+        `expected "${alt}" to be rejected`,
+      );
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('keeps Science Nation surgical robotics, zero gravity surgery, MRI/xray clinical content', () => {
+    const keep = [
+      'science nation surgical robotics operating room innovation',
+      'robot zero gravity surgery OR ISS space innovation',
+      'robotic surgery training minimally invasive OR hospital',
+      'science nation robots changing surgery hospital clinical',
+      'mri scan clinical hospital radiology department',
+      'chest x-ray radiology clinical diagnosis hospital',
+      'science nation robot surgery next frontier medicine',
+    ];
+    for (const alt of keep) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
+    }
+  });
+});
+
+describe('checkIntroFacePool — healthcare web17 intro preference (Science Nation over expo suit)', () => {
+  const project = (videos) => ({
+    topic: HEALTHCARE_TOPIC,
+    title: 'AI Healthcare',
+    script: [{ id: 'intro' }, { id: 'body' }],
+    media: videos,
+  });
+
+  it('disqualifies expo/suit/conference floor shots from intro tier', () => {
+    const expoShots = [
+      makeVideo({ alt: 'expo floor suit walking healthcare conference booth', query: 'ai healthcare' }),
+      makeVideo({ alt: 'business suit enter conference floor trade show medical', query: 'healthcare expo' }),
+      makeVideo({ alt: 'suit drop exhibition hall healthcare summit vendor', query: 'healthcare summit' }),
+      makeVideo({ alt: 'conference booth expo floor business suit stroll healthcare', query: 'healthcare expo' }),
+    ];
+    for (const video of expoShots) {
+      const result = checkIntroFacePool(project([video]));
+      expect(result.pass).toBe(false);
+      expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+    }
+  });
+
+  it('accepts Science Nation surgical robotics as tier-0 intro qualifier', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'science nation surgical robotics OR demonstration hospital', query: 'science nation surgery' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('accepts science nation robot surgery clip as intro tier', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'science nation robots changing surgery next frontier medicine', query: 'science nation surgical robot' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('accepts robot zero gravity surgery OR clip as intro tier', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'robot zero gravity surgery operating room OR innovation', query: 'robot surgery OR' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('fails when pool has only expo/suit shots (no Science Nation or clinical clips)', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'expo floor suit walking healthcare summit vendor', query: 'ai healthcare expo' }),
+      makeVideo({ alt: 'exhibition hall conference booth medical trade show healthcare', query: 'healthcare expo floor' }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('passes when pool has expo shot AND Science Nation clip (Science Nation satisfies the gate)', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'expo floor suit walking healthcare summit', query: 'healthcare expo' }),
+      makeVideo({ alt: 'science nation surgical robotics operating room hospital patient', query: 'science nation surgical robot' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('does not disqualify expo-floor surgical robot OR demo (clinical context exempts)', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'da vinci surgical robot operating room patient surgeon expo floor demo', query: 'surgical robot OR' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+});
+
 describe('healthcare keyless soft-pass-motion (web + Archive)', () => {
   beforeEach(() => {
     vi.stubEnv('PEXELS_API_KEY', '');

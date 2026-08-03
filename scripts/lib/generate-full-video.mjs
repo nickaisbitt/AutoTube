@@ -3421,15 +3421,21 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         return 8;
       }
       // Archive clinical body filler after boosts (parallel housing).
-      // Explainer/interview Archive without screen/OR motion stays below intro floor.
+      // Only OR/surgical-robot/radiologist Archive can compete for the intro (≥2).
+      // Generic healthcare Archive is capped at 1 — body-only, deferred by takeClip(forIntro).
+      // Documentary/explainer/lecture/newsreel/panel Archive drops to 0 — safe filler.
       if (/Archive/i.test(clip.source || '')) {
-        if (
-          /\b(explainer|lecture|interview|newsreel|talking)\b/i.test(blob)
-          && !clinicianScreenOrOr
-        ) {
-          return 1;
+        if (clinicianScreenOrOr) {
+          // Real OR / surgical-robot / radiologist Archive: earns intro floor.
+          return hasHealthcareEvidence(clip) ? 3 : 1;
         }
-        return hasHealthcareEvidence(clip) ? 2 : 0;
+        if (
+          /\b(explainer|lecture|interview|newsreel|talking|documentary|panel|presentation)\b/i.test(blob)
+        ) {
+          return 0;
+        }
+        // Generic clinical Archive (hospital/medical vocab): body filler below intro floor.
+        return hasHealthcareEvidence(clip) ? 1 : 0;
       }
       if (
         /\b(face|faces|worried|shocked|doctor|nurse|physician|patient|clinician)\b/i.test(blob)
@@ -3471,8 +3477,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const isIntro = seg.type === 'intro' || seg === segments[0];
     const score = faceScore(clip);
     if (isAirlineTopic(topicBlob) && score <= -20) return false;
-    // Healthcare: hard-reject conspiracy/FEMA/insect/meme/painting pads (-20).
-    if (isHealthcareTopic(topicBlob) && score <= -20) return false;
+    // Healthcare: hard-reject conspiracy/FEMA/insect/meme/painting pads (-20) and
+    // generic stock junk (-4: blurry/low-res/overexposed/AI-looking/monochrome).
+    // Title-card/lecture/protest pads (-8) are also killed by this floor.
+    // Threshold mirrors housing (≤-6) but tighter since generic stock junk is -4.
+    if (isHealthcareTopic(topicBlob) && score <= -4) return false;
     // Housing: hard-reject meeting/disaster/chart junk (-20) and landscapes (-8).
     // Non-junk Archive scores 0–1 and fills body after web (host-rank web-first).
     if (isHousingTopic(topicBlob) && score <= -6) return false;

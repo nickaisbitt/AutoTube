@@ -1503,11 +1503,12 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
         reason: `soft-pass-motion-housing-generic-junk(${genericJunkVideos}/${videoCount} videos)`,
       };
     }
-    // Keyless web28–web32: junk + intro-face gates leave ~5–11 live clips.
-    // Floor at 5 once intro-face already passed (watch floors unchanged).
+    // Keyless web28–web57: junk + intro-face gates leave ~5–11 live clips.
+    // Floor 5 after intro-face (web57 starved at 5/6). Floor 3 (web36) shipped
+    // VHS/map junk — keep junk rejects + intro-face; do NOT go below 5.
     const minHousingVideos = hasStockKeys
       ? Math.max(12, segN * 2)
-      : Math.max(6, segN); // restore floor — web36 3v soft-pass shipped VHS/map junk (raw 3.4)
+      : Math.max(5, segN); // keyless: 5 after intro-face (was 6; web57 thin)
     if (videoCount < minHousingVideos) {
       return {
         pass: false,

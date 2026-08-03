@@ -698,6 +698,22 @@ describe('healthcare off-topic B-roll rejects', () => {
     }
   });
 
+  it('hard-rejects healthcare-web13 mikovits / samadi / liability / local-TV pads', () => {
+    const cases = [
+      'censored scientists dr judy mikovits',
+      'talk of the town dr rachael kermis new clinic ochsner health whhitv',
+      'dr david samadi new prostate cancer tests',
+      'the truth about canadian healthcare 5 minute video',
+      'healthloop how medical liability slows down health care',
+      'bad patient diagnoses perspective',
+      'we talked to an icu nurse working in an overwhelmed covid 19 ward',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
   it('does not hard-reject webinar/longevity talks (intro-demote only; volume soft-pass)', () => {
     // Hard-rejecting these starved healthcare-web4 to soft-pass-thin(1/6).
     const bodyOk = [

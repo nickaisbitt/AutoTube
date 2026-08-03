@@ -720,6 +720,23 @@ describe('healthcare off-topic B-roll rejects', () => {
     }
   });
 
+
+  it('hard-rejects healthcare-web14 samadi-bare / vaccine-politics / hospital-tour pads', () => {
+    const cases = [
+      'the benefits of robotic prostate cancer surgery explained by dr samadi',
+      'sen ron johnson cdc is hiding mrna vaccine injury data ask dr drew',
+      'intestinal injury at attempted abortion by unqualified doctor',
+      'hawthorn walk in center mental health addictions care',
+      'n c doctor sues to break up state enforced medical monopoly',
+      'tour glendale s new hospital st joseph s westgate',
+      'absolute justice watermark conspiracy healthcare',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
   it('does not hard-reject webinar/longevity talks (intro-demote only; volume soft-pass)', () => {
     // Hard-rejecting these starved healthcare-web4 to soft-pass-thin(1/6).
     const bodyOk = [

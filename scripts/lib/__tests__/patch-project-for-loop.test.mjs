@@ -117,6 +117,89 @@ describe('promoteIntroFaceVideo (housing)', () => {
     expect(out.script[3].narration).toMatch(/Narration 6/);
   });
 
+  it('promotes healthcare surgical robot / Science Nation over Archive pad (web16)', () => {
+    const HEALTHCARE_TOPIC =
+      'How AI and surgical robots are transforming modern medicine in hospital operating rooms';
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [
+        { id: 'intro', type: 'intro', duration: 8, narration: 'AI is changing surgery.', title: 'Intro' },
+        { id: 'body', type: 'body', duration: 20, narration: 'Robots in the OR.', title: 'Body' },
+      ],
+      media: [
+        {
+          id: 'archive-pad',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://archive.org/download/generic/pad.mp4',
+          alt: 'generic hospital corridor hallway generic b-roll',
+          query: 'hospital corridor',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'science-nation',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://archive.org/download/science/sn.mp4',
+          alt: 'science nation surgical robotics operating room da Vinci robot',
+          query: 'surgical robot operating room',
+          source: 'Archive.org live',
+        },
+      ],
+    };
+
+    const out = promoteIntroFaceVideo(project);
+    expect(out.media.find((m) => m.id === 'science-nation').segmentId).toBe('intro');
+    expect(out.media.find((m) => m.id === 'archive-pad').segmentId).toBe('body');
+  });
+
+  it('hard-rejects web16 healthcare junk in promoteIntroFaceVideo (MedCram/PA/eclipse/WWI/1972/bilibili)', () => {
+    const HEALTHCARE_TOPIC =
+      'How AI and surgical robots are transforming modern medicine in hospital operating rooms';
+    const junkAlts = [
+      'online medical learning how pa schools can benefit from medcram',
+      'nurses at celebrity eclipse medical facility cruise ship',
+      'maryland women s heritage center honor nurses wwi',
+      'emergency 1972 tv series incomplete old footage',
+      'bilibili chill sakura ai debug pad lofi stream',
+    ];
+    for (const junkAlt of junkAlts) {
+      const project = {
+        topic: HEALTHCARE_TOPIC,
+        script: [
+          { id: 'intro', type: 'intro', duration: 8, narration: 'AI surgery hook.', title: 'Intro' },
+          { id: 'body', type: 'body', duration: 20, narration: 'Body.', title: 'Body' },
+        ],
+        media: [
+          {
+            id: 'pad',
+            segmentId: 'intro',
+            type: 'video',
+            url: 'https://archive.org/download/good/pad.mp4',
+            alt: 'da Vinci surgical robot operating room incision',
+            query: 'surgical robot OR',
+            source: 'Archive.org live',
+          },
+          {
+            id: 'junk',
+            segmentId: 'body',
+            type: 'video',
+            url: 'https://youtube.com/watch?v=junk',
+            alt: junkAlt,
+            query: 'junk query',
+            source: 'Bing web video',
+          },
+        ],
+      };
+
+      const out = promoteIntroFaceVideo(project);
+      expect(out.media.find((m) => m.id === 'junk').segmentId).toBe(
+        'body',
+        `junk clip "${junkAlt}" should NOT be promoted to intro`,
+      );
+    }
+  });
+
   it('promotes modern apartment motion when it is the best housing signal', () => {
     const project = {
       topic: HOUSING_TOPIC,

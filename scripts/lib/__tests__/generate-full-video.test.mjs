@@ -984,8 +984,10 @@ describe('healthcare keyless motion pack + volume chase', () => {
       'ultrasound demonstration clinician',
       'ai radiology',
     ]));
-    expect(plan.webHostQueries.some((q) => /radiology\s+ai\s+site:vimeo\.com/i.test(q))).toBe(true);
+    // 'radiology AI site:vimeo.com' (wrong case) was removed — base 'radiology AI' never
+    // matched lowercase plan.queries. 'ai radiology site:vimeo.com' covers this slot.
     expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:vimeo\.com/i.test(q))).toBe(true);
+    expect(plan.webHostQueries.some((q) => /surgical\s+robot\s+site:vimeo\.com/i.test(q))).toBe(true);
     const aiIdx = plan.queries.findIndex((q) => /ai radiology doctor monitor/i.test(q));
     const corridorIdx = plan.queries.findIndex((q) => /hospital corridor hallway/i.test(q));
     expect(aiIdx).toBeGreaterThanOrEqual(0);

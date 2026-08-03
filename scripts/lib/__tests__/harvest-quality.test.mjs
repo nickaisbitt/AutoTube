@@ -925,6 +925,36 @@ describe('healthcare web15 raw 4.4 junk rejects (body-lang / NVIDIA / name-pollu
     }
   });
 
+  it('hard-rejects web16 junk: MedCram / PA school / celebrity eclipse / WWI heritage / 1972 TV / bilibili', () => {
+    const cases = [
+      'medcram medical education',
+      'online medical learning how pa schools can benefit from medcram',
+      'how can pa schools benefit from online learning',
+      'pa schools benefit from medcram lectures',
+      'nurses at celebrity eclipse medical facility',
+      'celebrity eclipse medical facility staff',
+      'celebrity cruise ship nurse medical facilit',
+      'maryland women s heritage center honor nurses',
+      'women s heritage center nurses wwi tribute',
+      'honor nurses from wwi memorial center',
+      'wwi heritage center nursing history',
+      'emergency 1972 tv series incomplete episode',
+      '1972 tv series incomplete emergency',
+      '1972 television series incomplete',
+      'bilibili chill sakura ai debug pad lofi',
+      'bilibili sakura chill music pad',
+      'sakura chill ai debug music',
+      'chill sakura lofi stream',
+      'ai debug pad ambient music',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(
+        /healthcare off-topic/,
+        `expected "${alt}" to be rejected`,
+      );
+    }
+  });
+
   it('does not reject legitimate clinical content similar to rejected terms', () => {
     const keep = [
       'doctor patient body examination physical assessment',
@@ -934,6 +964,9 @@ describe('healthcare web15 raw 4.4 junk rejects (body-lang / NVIDIA / name-pollu
       'da Vinci robot surgery operating room patient',
       'medical laboratory technician microscope analysis',
       'MRI scanner room hospital clinical',
+      'science nation surgical robotics OR demonstration',
+      'tiny incision big impact the new surgical robot',
+      'hsc first surgical robot minimally invasive',
     ];
     for (const alt of keep) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');

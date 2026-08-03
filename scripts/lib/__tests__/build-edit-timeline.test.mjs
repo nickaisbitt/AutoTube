@@ -483,6 +483,72 @@ describe('introFaceTier', () => {
       expect(introFaceTier(asset, { healthcare: true })).toBe(2);
     }
   });
+
+  it('tiers web16 pool clips (science nation surgical robotics / tiny incision / hsc robot) as tier 2', () => {
+    // These were in the pool during web16 but did NOT win the intro because
+    // "surgical robotics" (with "ics") did not match the old \bsurgical\s*robot\b boundary.
+    const web16Pool = [
+      {
+        alt: 'science nation surgical robotics operating room nst',
+        title: 'science nation surgical robotics',
+        url: 'https://archive.org/download/sn_robot/sn.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'tiny incision big impact the new surgical robot minimally invasive',
+        title: 'tiny incision surgical robot',
+        url: 'https://archive.org/download/tiny_incision/ti.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'hsc s first surgical robot procedure hospital',
+        title: 'hsc first surgical robot',
+        url: 'https://archive.org/download/hsc_robot/hsc.mp4',
+        type: 'video',
+      },
+    ];
+    for (const asset of web16Pool) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(2);
+    }
+  });
+
+  it('hard-rejects web16 junk as healthcare intro (MedCram/PA school/eclipse/WWI/1972/bilibili)', () => {
+    const web16Junk = [
+      {
+        alt: 'online medical learning how pa schools can benefit from medcram lectures',
+        title: 'how pa schools can benefit from medcram',
+        url: 'https://www.youtube.com/watch?v=medcram1',
+        type: 'video',
+      },
+      {
+        alt: 'nurses at celebrity eclipse medical facility cruise ship staff',
+        title: 'celebrity eclipse medical facility nurses',
+        url: 'https://www.youtube.com/watch?v=eclipse1',
+        type: 'video',
+      },
+      {
+        alt: 'maryland women s heritage center honor nurses wwi memorial tribute',
+        title: 'women s heritage center wwi nurses',
+        url: 'https://www.youtube.com/watch?v=wwi1',
+        type: 'video',
+      },
+      {
+        alt: 'emergency 1972 tv series incomplete old footage episode',
+        title: 'emergency 1972 television series incomplete',
+        url: 'https://archive.org/download/emergency72/ep.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'bilibili chill sakura ai debug pad lofi ambient music',
+        title: 'chill sakura ai debug pad bilibili',
+        url: 'https://www.youtube.com/watch?v=bilibili1',
+        type: 'video',
+      },
+    ];
+    for (const asset of web16Junk) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+    }
+  });
 });
 
 

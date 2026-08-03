@@ -95,4 +95,69 @@ describe('visualBeatSheet', () => {
     expect(sheet.beats[0].searchableSubject).toBeTruthy();
     expect(validateVisualBeatSheet(sheet).ok).toBe(true);
   });
+
+  describe('queriesFromBeatSheet — person-name filtering for housing/healthcare', () => {
+    function makeSheet(topic: string, subjects: string[]): Parameters<typeof queriesFromBeatSheet>[0] {
+      return {
+        topic,
+        budget: { min: 1, max: subjects.length, used: subjects.length },
+        warnings: [],
+        beats: subjects.map((s, i) => ({
+          id: `beat-${i + 1}`,
+          segmentId: 's1',
+          role: 'evidence' as const,
+          intent: 'show evidence',
+          searchableSubject: s,
+          narrationExcerpt: `excerpt ${i}`,
+          evidence: 'narration',
+          mustShow: false,
+        })),
+      };
+    }
+
+    it('replaces person-name-only subjects with topical fallbacks on housing topics', () => {
+      const sheet = makeSheet(
+        'The housing crash they said would never happen',
+        ['Sarah Jenkins', 'Katherine Jenkins', 'apartment eviction notice'],
+      );
+      const queries = queriesFromBeatSheet(sheet);
+      // Person names are replaced
+      expect(queries.some((q) => /sarah jenkins/i.test(q))).toBe(false);
+      expect(queries.some((q) => /katherine jenkins/i.test(q))).toBe(false);
+      // Replacement is a housing-topical fallback
+      expect(queries.some((q) => /eviction|tenant|apartment|foreclosure|rent/i.test(q))).toBe(true);
+      // Non-name subject passes through unchanged
+      expect(queries).toContain('apartment eviction notice');
+    });
+
+    it('replaces person-name-only subjects with topical fallbacks on healthcare topics', () => {
+      const sheet = makeSheet(
+        'Why AI will change healthcare forever',
+        ['Robert Samadi', 'doctor patient face clinical'],
+      );
+      const queries = queriesFromBeatSheet(sheet);
+      expect(queries.some((q) => /robert samadi/i.test(q))).toBe(false);
+      expect(queries.some((q) => /doctor|radiolog|hospital|clinic|nurse|mri/i.test(q))).toBe(true);
+      expect(queries).toContain('doctor patient face clinical');
+    });
+
+    it('does NOT replace person names on non-housing/non-healthcare topics', () => {
+      const sheet = makeSheet(
+        'How Elon Musk changed the space industry',
+        ['Elon Musk', 'SpaceX rocket launch'],
+      );
+      const queries = queriesFromBeatSheet(sheet);
+      expect(queries).toContain('Elon Musk');
+    });
+
+    it('does not replace 4+ word subjects even if they look like names', () => {
+      const sheet = makeSheet(
+        'The housing crash they said would never happen',
+        ['Sarah Jenkins Real Estate Agent'],
+      );
+      const queries = queriesFromBeatSheet(sheet);
+      // 4-word subject is not a bare name — passes through
+      expect(queries).toContain('Sarah Jenkins Real Estate Agent');
+    });
+  });
 });

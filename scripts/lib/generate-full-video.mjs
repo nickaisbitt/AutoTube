@@ -2526,7 +2526,14 @@ export function archiveTopicSubjectQueries(topicBlob = '', limit = 8) {
  * pack and literal topic subjects; provider titles remain the admission evidence.
  */
 export function webMotionQueryVariants(topicBlob = '', baseQueries = [], limit = 12) {
-  const literalSubjects = archiveTopicSubjectQueries(topicBlob, 6);
+  // For housing/healthcare topics the literal subject derivation (e.g. "housing crash",
+  // "housing market") produces Bing/Google queries that pull car-crash, police, and
+  // celebrity footage. Skip archiveTopicSubjectQueries for these topics; the
+  // baseQueries from the visual beat sheet are already topically grounded.
+  const literalSubjects =
+    isHousingTopic(topicBlob) || isHealthcareTopic(topicBlob)
+      ? []
+      : archiveTopicSubjectQueries(topicBlob, 6);
   const ordered = [
     ...baseQueries.filter((query) => stockQueryWords(query).length >= 2),
     ...literalSubjects,
@@ -3626,6 +3633,21 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         forIntro
         && (isHousingTopic(topicBlob) || isHealthcareTopic(topicBlob))
         && faceScore(clip) < 2
+      ) {
+        deferredBodyClips.push(clip);
+        continue;
+      }
+      // Housing intro tier-2: prefer apartment/eviction-evidence clips (faceScore≥5)
+      // over news-studio / police-car B-roll (score 2–4) while any score≥5 clips remain
+      // in the un-consumed tail of picks. Falls through to score≥2 when none remain.
+      if (
+        forIntro
+        && isHousingTopic(topicBlob)
+        && faceScore(clip) < 5
+        && picks.slice(vi).some((c) => {
+          const k = motionUrlKey(c.url);
+          return (!k || !used.has(k)) && faceScore(c) >= 5;
+        })
       ) {
         deferredBodyClips.push(clip);
         continue;

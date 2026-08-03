@@ -1113,3 +1113,37 @@ describe('housing evidence floor for abstract script beats', () => {
     expect(scoreAssetRelevance(warHomeMovie, fearSeg, HOUSING_TOPIC)).toBe(0);
   });
 });
+
+describe('housingOffTopicBrollReason — web24 pollution patterns', () => {
+  const ctx = HOUSING_TOPIC;
+
+  const cases = [
+    // car-crash / vehicle pollution (root cause 2)
+    ['Man killed after Volkswagen overturns in severe crash with Tesla Tampa police', 'volkswagen'],
+    ['tesla tampa police severe crash', 'tesla'],
+    ['fatal crash highway 75 officer injured', 'fatal crash highway'],
+    ['police car crash scene footage', 'police car crash'],
+    // auto insurance / insurance ad pollution
+    ['Auto Insurance Rates Just Dropped 2024', 'auto insurance rates'],
+    // political / ICC / Marco Rubio
+    ['Marco Rubio We re not members of the ICC statement', 'marco rubio'],
+    ['ICC international criminal court', 'icc'],
+    // choir / celebrity name pollution (root cause 1 guard at broll level)
+    ['Katherine Jenkins sings You\'ll never walk alone', 'katherine jenkins'],
+    ['Mormon Tabernacle Choir performance', 'mormon tabernacle'],
+    ['Sarah Jenkins interview insurance segment', 'sarah jenkins'],
+    // social-justice / anti-violence forum (root cause 3)
+    ['the bronx social justice and anti violence forums 2023', 'social justice forum'],
+    ['bronxnet anti violence forums community', 'anti violence forums'],
+  ];
+
+  it.each(cases)('rejects "%s"', (haystack) => {
+    expect(housingOffTopicBrollReason(haystack, ctx)).toBeTruthy();
+  });
+
+  it('does not reject on-topic housing content', () => {
+    expect(housingOffTopicBrollReason('family evicted apartment door notice', ctx)).toBe('');
+    expect(housingOffTopicBrollReason('tenant reads eviction letter close up', ctx)).toBe('');
+    expect(housingOffTopicBrollReason('foreclosure sign front yard home sold', ctx)).toBe('');
+  });
+});

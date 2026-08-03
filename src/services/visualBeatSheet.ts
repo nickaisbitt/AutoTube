@@ -221,10 +221,64 @@ export function validateVisualBeatSheet(
 }
 
 /** Convert beats into search query strings for harvest (segment-compatible). */
+
+/**
+ * Returns true when `subject` looks like a 2–3-word proper-noun person name
+ * (e.g. "Sarah Jenkins", "Katherine Jenkins") with no topical anchor word.
+ * Used to prevent character names from leaking into harvest search queries on
+ * housing and healthcare topics.
+ */
+function isPersonNameOnlySubject(subject: string): boolean {
+  const s = (subject || '').trim();
+  if (!s || s.length > 60) return false;
+  const words = s.split(/\s+/);
+  if (words.length < 2 || words.length > 3) return false;
+  if (!words.every((w) => /^[A-Z][a-z]{1,}$/.test(w))) return false;
+  // Allow through if any word is a recognisable topical / place anchor
+  const TOPICAL_RE =
+    /^(Housing|Apartment|Tenant|Landlord|Eviction|Foreclosure|Mortgage|Rent|Home|Court|City|State|Bank|Market|Federal|Hospital|Doctor|Patient|Medical|Clinic|AI|Health|Insurance|Police|Congress|Senate|White|Black|New|North|South|East|West|Street|Avenue|Road|School|College|University|American|National|Center|Centre)$/i;
+  if (words.some((w) => TOPICAL_RE.test(w))) return false;
+  return true;
+}
+
+const HOUSING_PERSON_NAME_FALLBACKS = [
+  'worried tenant eviction notice apartment',
+  'family packing boxes apartment hallway',
+  'rent letter close up hands apartment',
+  'foreclosure family moving truck home',
+];
+
+const HEALTHCARE_PERSON_NAME_FALLBACKS = [
+  'doctor patient face clinical conversation',
+  'radiologist mri monitor screen close up',
+  'hospital corridor nurse patient',
+];
+
 export function queriesFromBeatSheet(sheet: VisualBeatSheet, segmentId?: string): string[] {
+  const topic = (sheet.topic || '').toLowerCase();
+  const isHousing =
+    /\b(housing|apartment|rent|evict|landlord|foreclos|mortgage|tenant)\b/i.test(topic);
+  const isHealthcare =
+    /\b(healthcare|hospital|medical|clinic|doctor|patient|ai.*(medicine|diagnos)|diagnos.*ai)\b/i.test(
+      topic,
+    );
+  const fallbacks = isHousing
+    ? HOUSING_PERSON_NAME_FALLBACKS
+    : isHealthcare
+      ? HEALTHCARE_PERSON_NAME_FALLBACKS
+      : null;
+  let fallbackIdx = 0;
   return (sheet.beats || [])
     .filter((b) => !segmentId || b.segmentId === segmentId)
-    .map((b) => b.searchableSubject)
+    .map((b) => {
+      const subject = b.searchableSubject || '';
+      if (fallbacks && isPersonNameOnlySubject(subject)) {
+        const replacement = fallbacks[fallbackIdx % fallbacks.length];
+        fallbackIdx += 1;
+        return replacement;
+      }
+      return subject;
+    })
     .filter(Boolean)
     .slice(0, 8);
 }

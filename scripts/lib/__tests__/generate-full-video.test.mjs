@@ -502,6 +502,28 @@ describe('webMotionQueryVariants', () => {
     expect(queries.every(isSafeStockMotionQuery)).toBe(true);
     expect(queries.some((query) => /unrelated|viral|trending/i.test(query))).toBe(false);
   });
+
+  it('does NOT include literal topic subjects for housing topics', () => {
+    const queries = webMotionQueryVariants(
+      'The housing crash they said would never happen',
+      ['worried tenant eviction notice apartment', 'family packing boxes moving'],
+    );
+    // baseQueries should pass through
+    expect(queries).toContain('worried tenant eviction notice apartment');
+    // but archiveTopicSubjectQueries literal derivatives like "housing crash" must not appear
+    expect(queries.some((q) => /\bhousing\s+crash\b/i.test(q))).toBe(false);
+    expect(queries.some((q) => /\bhousing\s+market\b/i.test(q))).toBe(false);
+  });
+
+  it('does NOT include literal topic subjects for healthcare topics', () => {
+    const queries = webMotionQueryVariants(
+      'Why AI will change healthcare forever',
+      ['doctor patient face clinical', 'radiologist mri monitor'],
+    );
+    expect(queries).toContain('doctor patient face clinical');
+    // literal "healthcare" / "AI healthcare" subjects from archiveTopicSubjectQueries must not appear
+    expect(queries.some((q) => /\bhealthcare\b/i.test(q) && !/doctor|patient|clinic|hospital|mri|radiolog/i.test(q))).toBe(false);
+  });
 });
 
 describe('non-YouTube motion planning and ranking', () => {

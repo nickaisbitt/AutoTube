@@ -1455,11 +1455,33 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
 
   // Housing — fail-closed on intro face tier. A housing harvest that has enough
   // volume but only landscape/news/FEMA openers triggers a face-first re-harvest.
-  // Housing falls through to the generic soft-passes for volume; the intro gate fires
-  // here first so the generic paths never ship a FEMA/talking-head opener.
+  // Then apply a keyless soft-pass (like healthcare) so thin-but-valid pools
+  // (web28: 11v / avg 4.25) don't volume-hard-fail after junk rejects.
   if (isHousingTopic(topicBlob)) {
     const introFace = checkIntroFacePool(project);
     if (!introFace.pass) return introFace;
+    if (videoCount > 0 && genericJunkRatio > SOFT_PASS_GENERIC_JUNK_RATIO_MAX) {
+      return {
+        pass: false,
+        reason: `soft-pass-motion-housing-generic-junk(${genericJunkVideos}/${videoCount} videos)`,
+      };
+    }
+    const minHousingVideos = hasStockKeys
+      ? Math.max(12, segN * 2)
+      : Math.max(8, segN);
+    if (videoCount < minHousingVideos) {
+      return {
+        pass: false,
+        reason: `soft-pass-motion-housing-thin(${videoCount}/${minHousingVideos} videos)`,
+      };
+    }
+    if (stockFetched > 0 || topUp >= segN || liveMotionPresent) {
+      return { pass: true, reason: `soft-pass-motion-housing(${videoCount}v/${segN}segs)` };
+    }
+    return {
+      pass: false,
+      reason: `soft-pass-motion-housing-no-live-motion(${videoCount}v/${segN}segs)`,
+    };
   }
 
   // No soft-pass may launder a junk-dominated video pool, whichever path would fire.

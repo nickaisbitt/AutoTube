@@ -1,12 +1,12 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-02T21:53Z** — branch `cursor/web-harvest-assemble-auth-4556` (W2-PACK 90m poll finalize: **PACK_OPEN**).
+Last updated: **2026-08-03T01:43Z** — branch `cursor/web-harvest-assemble-auth-4556` (continuous gen loop; no cycle cap).
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 
 **Honest score rule:** Do **not** claim brutal raw ≥7 / upload-ready YES unless a fresh `WATCH_REPORT.md` shows it. Airline-web8 remains the only closed ≥7 topic (raw **7.8**). Housing and healthcare have **no** fresh ≥7.
 
-**W2-PACK (2026-08-02T21:53Z):** **PACK_OPEN** — airline still packed at raw **7.8** / upload-ready YES under `test-recordings/dod-proof/airline/` (NOTES + SHA256 `338468b544d4…`). Housing tip-best this wave **5.2** (housing-web18); web19 **4.4**; web20 **4.8**; hist **5.8** (web5). Healthcare best **5.2** (web1); tip watched **4.6** (web3); web4–web7 `HARVEST_VOLUME_FAIL` / SCRIPT_TIMEOUT. No canonical housing/healthcare promote. §B 9.3 stretch **not started**. Floors **not** lowered. See gitignored `test-recordings/dod-proof/SUMMARY.txt` + `/tmp/dod-agents/W2-PACK.md` (`PACK_OPEN`).
+**Continuous closeout (2026-08-03T01:43Z):** **PACK_OPEN** — airline still packed at raw **7.8** / upload-ready YES. Housing tip-best still **5.2** (web18); recent web22–24 raw **4.4–4.6** (name-pollution / talking-head intros — tip `2d8c88f` strips person-name harvest queries). Healthcare recent web11–14 raw **2.8–3.8** (hook overlay OK; Archive talking-head/OR pool still weak). Floors **not** lowered. No stock keys. §C Railway **BLOCKED** without `AUTOTUBE_RAILWAY_TOKEN`. Gen loop continues until housing+healthcare raw ≥7.
 
 **Keys:** variable names, presence on this VM, and which gates each key unlocks → [`docs/ENV_DOD.md`](ENV_DOD.md).
 

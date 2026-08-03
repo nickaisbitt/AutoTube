@@ -791,6 +791,27 @@ describe('healthcare off-topic B-roll rejects', () => {
     }
   });
 
+  it('hard-rejects Archive query-mismatch junk that tanked healthcare-web43 (raw 3.4)', () => {
+    const cases = [
+      'geekbeat tv 433 at t will unlock your old iphone',
+      'Jackthreads Real Fashion for Guys commercial',
+      'mlk why america may go to hell archival speech',
+      'this or that time for your examination game show',
+      'metro edition medical exam on the wild side',
+      'DAVID & ELIAS - WHY DO I INNOVATE corporate interview',
+      'artas hair transplant robotic surgery marketing',
+      'advanced healthcare facilities at sri ponni medical centre',
+      'bayer logo corporate presentation healthcare keynote',
+      'palestine deepdive podcast earbuds interview',
+      'the bald truth split screen interview podcast',
+      'che guevara imperialism poster graphic',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
   it('keeps OR surgical-robot / radiologist workstation clinical B-roll', () => {
     const keep = [
       'CNBC surgical robot operating room hospital patient',

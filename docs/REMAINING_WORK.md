@@ -1,12 +1,12 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-03T04:50Z** — branch `cursor/web-harvest-assemble-auth-4556` (durable loop; both tip-best **6.2**).
+Last updated: **2026-08-03T22:57Z** — branch `cursor/web-harvest-assemble-auth-4556` (durable loop; both tip-best **6.2**). Script-fallback allowlist + Linux Chrome path + housing soft-pass floor 5 + healthcare-web43 junk rejects shipped; healthcare-web43 raw **3.4** (Archive junk); housing still thin at 4–5v.
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 
 **Honest score rule:** Do **not** claim brutal raw ≥7 / upload-ready YES unless a fresh `WATCH_REPORT.md` shows it. Airline-web8 remains the only closed ≥7 topic (raw **7.8**). Housing and healthcare have **no** fresh ≥7.
 
-**Continuous closeout (2026-08-03T04:50Z):** **PACK_OPEN** — airline **7.8** YES. Housing tip-best **6.2** (web31). Healthcare tip-best **6.2** (web18). Floors **not** lowered. Gap to ≥7 is ~0.8 on both. No stock keys. Railway **BLOCKED** without `AUTOTUBE_RAILWAY_TOKEN`.
+**Continuous closeout (2026-08-03T22:57Z):** **PACK_OPEN** — airline **7.8** YES. Housing tip-best **6.2** (web31). Healthcare tip-best **6.2** (web18). Latest healthcare-web43 raw **3.4** (GeekBeat/Jackthreads/MLK junk — now rejected). Housing soft-pass thin at 4–5v. Floors **not** lowered for watch ≥7. No stock keys. Railway **BLOCKED** without `AUTOTUBE_RAILWAY_TOKEN`.
 
 **Keys:** variable names, presence on this VM, and which gates each key unlocks → [`docs/ENV_DOD.md`](ENV_DOD.md).
 

@@ -2618,15 +2618,21 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   const airline = isAirlineTopic(topicBlob);
   const housing = isHousingTopic(topicBlob);
   const healthcare = isHealthcareTopic(topicBlob);
-  // Healthcare: lead host-scoped searches with radiology AI on Vimeo (web3 lacked
-  // clinician+screen motion; generic host variants bury it behind corridor queries).
+  // Healthcare: lead host-scoped searches with radiology AI / surgical robot on Vimeo
+  // (web3 lacked clinician+screen motion; generic host variants bury it behind corridor
+  // queries). web16: removed 'radiology AI site:vimeo.com' (wrong case — base 'radiology
+  // AI' never matched lowercase plan.queries; 'ai radiology site:vimeo.com' covers it).
+  // Added mri clinician + operating room for direct non-YouTube Vimeo hits.
   const healthcareHostLead = healthcare
     ? [
-        'radiology AI site:vimeo.com',
         'ai radiology site:vimeo.com',
-        'doctor mri monitor site:vimeo.com',
         'surgical robot site:vimeo.com',
+        'mri clinician monitor site:vimeo.com',
+        'operating room surgery site:vimeo.com',
+        'doctor mri monitor site:vimeo.com',
         'ultrasound demonstration site:vimeo.com',
+        'ai radiology site:dailymotion.com',
+        'surgical robot site:dailymotion.com',
       ].filter(isSafeStockMotionQuery)
     : [];
   // Housing: lead Vimeo with shocked-face / eviction-evidence footage so the intro
@@ -3414,16 +3420,17 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // healthcare-web11 junk that slipped past soft-pass Archive pool.
       // Also covers web15 junk: body-language lifestyle, NVIDIA promo, AI Patel
       // channel-name pollution, jada pemble staff intro, helium fun-fact, milestone
-      // celebration (maple grove hospital).
+      // celebration (maple grove hospital). web16: MedCram/PA school, celebrity
+      // cruise nurses, WWI heritage center, 1972 Emergency TV, bilibili sakura pads.
       if (
-        /\b(cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|medical\s+city\s+arlington|adventure\s+eight|scottsdale.?s?\s+cure\s+corridor|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|kids?\s+(?:classroom|assembly)|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot|school\s+nurse|wendy\s+cummings|whhi(?:tv|\s+news)?|world\s+laparoscopy|circumc(?:ision|ure)|organ\s+harvesting|ukraine\s+pow|al\s+funduq|kissing\s+and\s+love|rhino\s+(?:ct|scan)|board\s+of\s+commissioners|anniversary\s+celebration|medical\s+career|judy\s+mikovits|david\s+samadi|\bsamadi\b|healthloop|ron\s+johnson|mrna\s+vaccine|walk\s*in\s+center|medical\s+monopoly|tour\s+glendale|attempted\s+abortion|medical\s+liability|talk\s+of\s+the\s+town|body\s+language\s+(?:healthcare|medical|clinical|edition|coaching|mistakes?)|healthcare\s+edition|nvidia\s+(?:ai\s+)?(?:for\s+)?(?:healthcare|life\s+sciences|health\s+systems?)|ai\s+patel|why\s+ai\s+[a-z]{3,}\s+why\s+ai|jada\s+pemble|meet\s+our\s+[a-z]+\s+[a-z]+\s+[a-z]+\s+medical\s+lab|helium\s+used\s+in\s+(?:the\s+)?medical\s+(?:field|imaging)|not\s+just\s+for\s+balloons\s+helium|milestone\s+celebration|maple\s+grove\s+hospital)\b/i.test(blob)
+        /\b(cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|medical\s+city\s+arlington|adventure\s+eight|scottsdale.?s?\s+cure\s+corridor|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|kids?\s+(?:classroom|assembly)|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot|school\s+nurse|wendy\s+cummings|whhi(?:tv|\s+news)?|world\s+laparoscopy|circumc(?:ision|ure)|organ\s+harvesting|ukraine\s+pow|al\s+funduq|kissing\s+and\s+love|rhino\s+(?:ct|scan)|board\s+of\s+commissioners|anniversary\s+celebration|medical\s+career|judy\s+mikovits|david\s+samadi|\bsamadi\b|healthloop|ron\s+johnson|mrna\s+vaccine|walk\s*in\s+center|medical\s+monopoly|tour\s+glendale|attempted\s+abortion|medical\s+liability|talk\s+of\s+the\s+town|body\s+language\s+(?:healthcare|medical|clinical|edition|coaching|mistakes?)|healthcare\s+edition|nvidia\s+(?:ai\s+)?(?:for\s+)?(?:healthcare|life\s+sciences|health\s+systems?)|ai\s+patel|why\s+ai\s+[a-z]{3,}\s+why\s+ai|jada\s+pemble|meet\s+our\s+[a-z]+\s+[a-z]+\s+[a-z]+\s+medical\s+lab|helium\s+used\s+in\s+(?:the\s+)?medical\s+(?:field|imaging)|not\s+just\s+for\s+balloons\s+helium|milestone\s+celebration|maple\s+grove\s+hospital|medcram(?:\.com)?|(?:online\s+medical\s+learning|how)\s+(?:can\s+)?pa\s+schools?\s+(?:can\s+)?benefit|pa\s+schools?\s+(?:can\s+)?benefit(?:\s+from\s+medcram)?|nurses?\s+at\s+celebrity\s+eclipse|celebrity\s+eclipse\s+(?:medical|medical\s+facility)|celebrity\s+(?:cruise\s+)?(?:ship\s+)?(?:nurse|medical\s+facilit)|(?:maryland\s+)?women.?s?\s+heritage\s+center|honor\s+nurses?\s+(?:from\s+)?wwi|wwi\s+(?:heritage\s+center|nurses?)|emergency\s+1972|1972\s+(?:tv\s+series|television\s+series)\s+incomplete|1972\s+tv\s+series|bilibili\s+(?:chill|sakura|ai\s+debug)|sakura\s+(?:chill|ai\s+debug)|chill\s+sakura|ai\s+debug\s+pad)\b/i.test(blob)
       ) {
         return -20;
       }
       // Pure talking-head / news studio without clinician+screen or OR motion —
       // demote below intro clinical floor (≥2) so AI-talk pads lose the hook.
       const talkingHeadPad = /\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|studio\s+interview|webinar\s+host|podcast\s+host|lecture\s+(?:host|speaker))\b/i.test(blob);
-      const clinicianScreenOrOr = /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|OR)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|onyx\s*rad(?:\s+ai|\s+radiol)?|ultrasound\s+(?:demo|demonstration)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen|mri)|mri\s+(?:monitor|screen)|scan\s*screen|operating\s+room|or\s+(?:suite|table|lights?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing))\b/i.test(blob)
+      const clinicianScreenOrOr = /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|OR)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|onyx\s*rad(?:\s+ai|\s+radiol)?|ultrasound\s+(?:demo|demonstration)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen|mri)|mri\s+(?:monitor|screen)|scan\s*screen|operating\s+room|or\s+(?:suite|table|lights?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing)|tiny\s+incision|hsc.{0,20}surgical\s+robot)\b/i.test(blob)
         || (
           /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(blob)
           && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(blob)
@@ -3447,7 +3454,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         return 9;
       }
-      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|da\s*vinci\s*(?:robot\s+)?operating\s+room|onyx\s*rad(?:\s+ai|\s+radiol)?)\b/i.test(blob)
+      if (/\b(surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|da\s*vinci\s*(?:robot\s+)?operating\s+room|onyx\s*rad(?:\s+ai|\s+radiol)?|tiny\s+incision|hsc.{0,20}surgical\s+robot)\b/i.test(blob)
         && !/\b(classroom|school\s+district|\bisd\b|students?\s+watching|children\s+seated|da\s*vinci\s+surgical\s+system\s+overview|exhibition\s+hall|trade\s*show|conference\s+(?:booth|floor)|expo\s+(?:floor|booth|hall))\b/i.test(blob)
       ) return 10;
       if (
@@ -4065,6 +4072,11 @@ export async function generateFullVideo(options) {
   applyEnvLocalToProcess();
 
   const fixState = { ...(options.fixState || {}) };
+  // Healthcare (like housing): force karaoke OFF at fixState level so render-env.json
+  // snapshot and AUTOTUBE_KARAOKE_CAPTIONS env var both agree with project.exportSettings.
+  if (isHealthcareTopic(topic) && fixState.karaokeCaptions !== false) {
+    fixState.karaokeCaptions = false;
+  }
   if (fixState.reHarvestMedia && !fixState.keepBestMedia) {
     fixState.harvestNonce = (fixState.harvestNonce || 0) + 1;
     fixState.reHarvestMedia = false;

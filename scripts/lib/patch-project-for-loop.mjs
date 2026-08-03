@@ -427,15 +427,19 @@ export function promoteIntroFaceVideo(project) {
       // poster, Medical City aerial adventure-eight, Scottsdale civic, LTC Lakin politics.
       // healthcare-web12: school-nurse WHHI, World Laparoscopy romantic pad, war/POW,
       // Circumcure, kissing-MRI, zoo rhino CT, organ-harvest conspiracy.
-      if (/\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|maternity|kapparot|kapores|lecture\s+slides?|coursera|giphy\.com|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri|mri\s+scan\s+and\s+how|adventure\s+eight|aerial|drone|hospital\s+exterior|legos?|mgtow|hiroshima|atomic\s+bomb|warzone|cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|medical\s+city\s+arlington|scottsdale.?s?\s+cure\s+corridor|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot|school\s+nurse|wendy\s+cummings|whhi(?:tv|\s+news)?|world\s+laparoscopy|circumc(?:ision|ure)|organ\s+harvesting|ukraine\s+pow|al\s+funduq|kissing\s+and\s+love|rhino\s+(?:ct|scan)|board\s+of\s+commissioners|anniversary\s+celebration|judy\s+mikovits|david\s+samadi|\bsamadi\b|healthloop|ron\s+johnson|mrna\s+vaccine|walk\s*in\s+center|medical\s+monopoly|tour\s+glendale|attempted\s+abortion|talk\s+of\s+the\s+town)\b/i.test(scoreBlob)) {
+      if (/\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|maternity|kapparot|kapores|lecture\s+slides?|coursera|giphy\.com|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri|mri\s+scan\s+and\s+how|adventure\s+eight|aerial|drone|hospital\s+exterior|legos?|mgtow|hiroshima|atomic\s+bomb|warzone|cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|medical\s+city\s+arlington|scottsdale.?s?\s+cure\s+corridor|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot|school\s+nurse|wendy\s+cummings|whhi(?:tv|\s+news)?|world\s+laparoscopy|circumc(?:ision|ure)|organ\s+harvesting|ukraine\s+pow|al\s+funduq|kissing\s+and\s+love|rhino\s+(?:ct|scan)|board\s+of\s+commissioners|anniversary\s+celebration|judy\s+mikovits|david\s+samadi|\bsamadi\b|healthloop|ron\s+johnson|mrna\s+vaccine|walk\s*in\s+center|medical\s+monopoly|tour\s+glendale|attempted\s+abortion|talk\s+of\s+the\s+town|medcram(?:\.com)?|(?:online\s+medical\s+learning|how)\s+(?:can\s+)?pa\s+schools?\s+(?:can\s+)?benefit|pa\s+schools?\s+(?:can\s+)?benefit(?:\s+from\s+medcram)?|nurses?\s+at\s+celebrity\s+eclipse|celebrity\s+eclipse\s+(?:medical|medical\s+facility)|(?:maryland\s+)?women.?s?\s+heritage\s+center|honor\s+nurses?\s+(?:from\s+)?wwi|wwi\s+(?:heritage\s+center|nurses?)|emergency\s+1972|1972\s+tv\s+series|bilibili\s+(?:chill|sakura|ai\s+debug)|sakura\s+(?:chill|ai\s+debug)|chill\s+sakura|ai\s+debug\s+pad)\b/i.test(scoreBlob)) {
         return -20;
       }
       const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && scoreBlob.includes(w)).length;
-      // Surgical robot / OR demo beats talking-head MRI explainers for the hook
-      // (healthcare-web8 raw 6.2 — robot shots were strong but lost the opener).
-      // Skip classroom / ISD / overview-slide demos (healthcare-web11 COVER UP FAILS pad).
+      // Surgical robot / OR demo / Science Nation / Onyx RAD beat talking-head MRI
+      // explainers for the hook (healthcare-web8 raw 6.2 — robot shots were strong
+      // but lost the opener). web16: "science nation surgical robotics" and "surgical
+      // robotics" were in pool but scored 0 here because the old pattern required
+      // \bsurgical\s*robot\b which fails on "surgical robotics" (no boundary before
+      // "ics"). Added surgical\s*robotics? and science_nation / onyx_rad patterns.
+      // Skip classroom / ISD / overview-slide demos (healthcare-web11 COVER UP FAILS).
       if (
-        /\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|cnbc.*surgical\s*robot)\b/i.test(scoreBlob)
+        /\b(surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*surg|cnbc.*surgical\s*robot|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|onyx\s*rad(?:\s+ai|\s+radiol)?|tiny\s+incision\b|hsc.{0,20}surgical\s+robot)\b/i.test(scoreBlob)
         && !/\b(classroom|school\s+district|\bisd\b|students?\s+watching|children\s+seated|overview)\b/i.test(scoreBlob)
       ) {
         return 14 + Math.min(2, topicHits);

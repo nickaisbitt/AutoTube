@@ -1436,6 +1436,56 @@ describe('housingOffTopicBrollReason — web24 pollution patterns', () => {
   });
 });
 
+describe('housingOffTopicBrollReason — web30 aviation/jet-engine and group-photo rejects', () => {
+  it('hard-rejects jet-engine / aviation pads on housing topics', () => {
+    const cases = [
+      'jet engine close-up roar sound',
+      'jet engines sound noise aircraft',
+      'turbine engine closeup aviation',
+      'aircraft engine intake pod closeup',
+      'engine nacelle aircraft jet',
+      'airplane taking off taxiing runway',
+      'plane taking off runway departure',
+      'jet taxiing tarmac takeoff runway',
+      'runway aircraft takeoff departure',
+    ];
+    for (const alt of cases) {
+      expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);
+      expect(isGenericStockJunk(alt, HOUSING_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects random group-photo stock without housing vocabulary', () => {
+    const cases = [
+      'group photo diverse people smiling',
+      'team photo office corporate',
+      'office group photo professionals',
+      'corporate team portrait smiling',
+      'group of professionals posing smiling',
+      'group portrait corporate business diverse',
+      'diverse team smiling photo',
+    ];
+    for (const alt of cases) {
+      expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);
+      expect(isGenericStockJunk(alt, HOUSING_TOPIC)).toBe(true);
+    }
+  });
+
+  it('allows group clips that carry housing-topical vocabulary', () => {
+    expect(
+      housingOffTopicBrollReason('tenant group facing eviction outside apartment', HOUSING_TOPIC),
+    ).toBe('');
+    expect(
+      housingOffTopicBrollReason('worried family group reading eviction notice', HOUSING_TOPIC),
+    ).toBe('');
+  });
+
+  it('does not reject aviation/engine on non-housing topics', () => {
+    expect(housingOffTopicBrollReason('jet engine close-up roar sound', AIRLINE_TOPIC)).toBe('');
+    expect(housingOffTopicBrollReason('group photo team smiling', AIRLINE_TOPIC)).toBe('');
+  });
+});
+
 // ── checkIntroFacePool ──────────────────────────────────────────────────────
 
 const makeVideo = (overrides) => ({
@@ -1566,6 +1616,39 @@ describe('checkIntroFacePool — housing', () => {
       archiveLiveFetched: 4,
       videoTopUp: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
+    expect(result.pass).toBe(true);
+  });
+});
+
+describe('checkIntroFacePool — housing aviation/group-photo demote (web30)', () => {
+  const project = (videos) => ({
+    topic: HOUSING_TOPIC,
+    title: 'Housing crash',
+    script: [{ id: 'intro' }, { id: 'body' }],
+    media: videos,
+  });
+
+  it('fails with INTRO_FACE_FAIL when pool has only jet-engine aviation pads', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'jet engine close-up roar sound aircraft', query: 'housing move out packing' }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('fails with INTRO_FACE_FAIL when pool has only group-photo corporate stock', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'group photo diverse people smiling corporate', query: 'housing market people' }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('passes when pool has shocked-face eviction-notice clip despite aviation pad in pool', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'jet engine close-up aircraft', query: 'move out packing' }),
+      makeVideo({ alt: 'shocked face close up eviction notice apartment tenant' }),
+    ]));
     expect(result.pass).toBe(true);
   });
 });

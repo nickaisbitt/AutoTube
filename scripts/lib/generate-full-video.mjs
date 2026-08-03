@@ -2370,8 +2370,6 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'moving house boxes',
   'city housing project',
   'family kitchen home',
-  'slum clearance',
-  'urban renewal housing',
   'tenement building',
   'housing authority film',
   'affordable housing program',
@@ -2382,6 +2380,11 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'foreclosure auction house',
   'empty house foreclosure',
   'neighborhood housing survey',
+  // Additional queries for emotional/face-forward housing footage.
+  'eviction documentary family',
+  'housing crisis documentary',
+  'foreclosure family home',
+  'housing shortage crisis',
 ];
 
 /** Short Archive.org subjects for hospital / clinical / AI-medicine keyless runs. */
@@ -2586,8 +2589,19 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
         'ultrasound demonstration site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
     : [];
+  // Housing: lead Vimeo with eviction/crisis face footage so the body doesn't
+  // fall back to muddy Archive newsreels when web clip slots are thin.
+  const housingHostLead = housing
+    ? [
+        'eviction notice tenant apartment site:vimeo.com',
+        'housing crisis family site:vimeo.com',
+        'tenant packing boxes site:vimeo.com',
+        'foreclosure family home site:vimeo.com',
+      ].filter(isSafeStockMotionQuery)
+    : [];
   const webHostQueries = [
     ...healthcareHostLead,
+    ...housingHostLead,
     ...webMotionHostQueryVariants(webQueries),
   ].filter((query, idx, arr) => arr.findIndex((q) => q.toLowerCase() === query.toLowerCase()) === idx);
   let boost;

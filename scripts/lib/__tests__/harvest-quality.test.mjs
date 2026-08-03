@@ -522,6 +522,15 @@ describe('housing off-topic B-roll rejects', () => {
       'American Home Mortgage bankruptcy slide graphic',
       'youtuber headset talking head podcast mic subscribe button',
       'gaming headset streamer setup talking to camera',
+      // web20 Archive clips fetched under defunct "rent strike" query
+      'parkdale vs the ltb',
+      'first het eten dan de huur nl subs dutch subtitles',
+      'ontario landlord tenant board hearing order',
+      'ltb application review rent tribunal housing tribunal hearing',
+      'general rent strike against landlord rent increase',
+      // web20 price-chart stills laundered through Archive query
+      'median home price chart 2024 housing market',
+      'housing price chart year over year graphic',
     ];
     for (const alt of cases) {
       expect(housingOffTopicBrollReason(alt, HOUSING_TOPIC)).toMatch(/housing off-topic/);
@@ -543,6 +552,10 @@ describe('housing off-topic B-roll rejects', () => {
         'tenant left in limbo after landlord was evicted from rental home apartment hallway',
         HOUSING_TOPIC,
       ),
+    ).toBe('');
+    // Housing court/tribunal that is about housing outcomes stays (not a board hearing).
+    expect(
+      housingOffTopicBrollReason('eviction court ruling family apartment news footage', HOUSING_TOPIC),
     ).toBe('');
   });
 });

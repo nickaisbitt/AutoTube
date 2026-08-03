@@ -37,6 +37,34 @@ import {
   topicFamilyTemplatesEnabled,
 } from './topicFamilyQueries';
 
+/** Lived-in housing visual queries — never character/city beat titles (web24 Tampa/Jenkins). */
+const HOUSING_SAFE_HARVEST_QUERIES = [
+  'shocked face apartment eviction notice',
+  'worried tenant packing boxes apartment',
+  'couple arguing bills kitchen table apartment',
+  'foreclosure auction house steps crowd',
+  'evicted family packing truck apartment',
+  'stressed tenant crying apartment hallway',
+  'modern apartment living room daylight people',
+  'tenant reading lease apartment living room',
+  'landlord knocking apartment door tenant face',
+  'keys lock apartment door close up hands',
+];
+
+function isHousingHarvestTopic(topicContext: TopicContext, segment?: ScriptSegment): boolean {
+  const blob = `${topicContext?.coreSubject || ''} ${topicContext?.topic || ''} ${segment?.title || ''} ${segment?.narration || ''}`;
+  return resolveTopicFamily(blob) === 'landlord' || /\bhousing\s*(crash|bubble|market)|foreclos|mortgage/i.test(blob);
+}
+
+/** Replace narrative beat titles with face/apartment queries for housing harvest. */
+function housingSafeHarvestQuery(rawQuery: string | undefined, index = 0): string {
+  const q = String(rawQuery || '').trim();
+  if (q && /\b(apartment|tenant|evict|foreclos|face|family|packing|kitchen|hallway|lease|landlord)\b/i.test(q)) {
+    return q;
+  }
+  return HOUSING_SAFE_HARVEST_QUERIES[Math.abs(index) % HOUSING_SAFE_HARVEST_QUERIES.length];
+}
+
 function isLoopFastMode(): boolean {
   return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('autotube_loop_fast_mode') === 'true';
 }
@@ -2311,16 +2339,25 @@ export async function sourceSegmentMedia(
     const rawFloor = config.sourceType === 'raw' ? 4 : 2;
     const targetAssetsPerSegment = Math.max(rawFloor, stockDefault);
     const shotCount = Math.max(targetAssetsPerSegment, shotsToHarvest.length);
+    const housingTopic = isHousingHarvestTopic(topicContext, segment);
     const rawPrimaryQuery = shotsToHarvest[0]?.queries[0] || segment.title;
-    const primaryQuery = buildSpecificQuery(rawPrimaryQuery, topicContext);
+    const primaryQuery = buildSpecificQuery(
+      housingTopic ? housingSafeHarvestQuery(rawPrimaryQuery, 0) : rawPrimaryQuery,
+      topicContext,
+    );
     const { candidates, trace } = await harvestMediaWithSafetyNet(primaryQuery, topicContext, config, shotsToHarvest[0]?.vibe, 0, [], signal, progressCallback, segment.narration, segment.title);
 
     // Harvest a second batch with a variation query for visual variety
     const rawVariationQuery = shotsToHarvest[1]?.queries[0]
       || (plan.queries.length > 1 ? plan.queries[1] : null)
-      || `${segment.title} ${topicContext.coreSubject}`;
+      || (housingTopic
+        ? housingSafeHarvestQuery(undefined, 1)
+        : `${segment.title} ${topicContext.coreSubject}`);
     const variationQuery = rawVariationQuery && rawVariationQuery !== primaryQuery
-      ? buildSpecificQuery(rawVariationQuery, topicContext)
+      ? buildSpecificQuery(
+        housingTopic ? housingSafeHarvestQuery(rawVariationQuery, 1) : rawVariationQuery,
+        topicContext,
+      )
       : rawVariationQuery;
     let secondaryCandidates: MediaCandidate[] = [];
     const skipVariationHarvest = isLoopFastMode() && loopMinAssetsPerSegment() <= 2;
@@ -2343,15 +2380,21 @@ export async function sourceSegmentMedia(
       const seenQueries = new Set(
         [primaryQuery, variationQuery].filter(Boolean).map((q) => q.toLowerCase()),
       );
-      const extraQueryPool = [
-        ...(plan.queries || []),
-        ...shotsToHarvest.flatMap((shot) => shot.queries || []),
-        segment.title,
-        `${segment.title} ${topicContext.coreSubject}`,
-        `${topicContext.coreSubject} news`,
-        `${topicContext.coreSubject} documentary`,
-        `${segment.title} b-roll`,
-      ];
+      const extraQueryPool = housingTopic
+        ? [
+            ...(plan.queries || []),
+            ...shotsToHarvest.flatMap((shot) => shot.queries || []),
+            ...HOUSING_SAFE_HARVEST_QUERIES,
+          ]
+        : [
+            ...(plan.queries || []),
+            ...shotsToHarvest.flatMap((shot) => shot.queries || []),
+            segment.title,
+            `${segment.title} ${topicContext.coreSubject}`,
+            `${topicContext.coreSubject} news`,
+            `${topicContext.coreSubject} documentary`,
+            `${segment.title} b-roll`,
+          ];
       let harvestRound = 2;
       const maxExtraRounds = 5;
       while (
@@ -2361,7 +2404,10 @@ export async function sourceSegmentMedia(
         const rawExtra = extraQueryPool.find((q) => q && !seenQueries.has(q.toLowerCase()));
         if (!rawExtra) break;
         seenQueries.add(rawExtra.toLowerCase());
-        const extraQuery = buildSpecificQuery(rawExtra, topicContext);
+        const extraQuery = buildSpecificQuery(
+          housingTopic ? housingSafeHarvestQuery(rawExtra, harvestRound) : rawExtra,
+          topicContext,
+        );
         try {
           const extra = await harvestMediaWithSafetyNet(
             extraQuery,

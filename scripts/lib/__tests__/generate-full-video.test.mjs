@@ -21,6 +21,7 @@ import {
   unreliableWebProxyInjectReason,
   isYouTubeThumbnailStill,
   restoreMotionRelevancePassed,
+  keylessOmitsStockMotionPool,
   motionCandidateHostRank,
   motionQueryPlan,
   planMotionFetchRounds,
@@ -34,7 +35,6 @@ import {
   resolveVisionUnverifiedMax,
   shouldFailOpenWebVisionSkip,
   spawnSyncFailureReason,
-  restoreMotionRelevancePassed,
   stripJunkDemoVideos,
   stripJunkStillAssets,
   webMotionHostQueryVariants,
@@ -686,6 +686,65 @@ describe('non-YouTube motion planning and ranking', () => {
     );
     expect(kept.media).toHaveLength(1);
     expect(kept.media[0].url).toBe(archive.url);
+  });
+
+  it('restores housing Bing/DDG face clips marked motionRelevancePassed after relevance strips them', () => {
+    // housing-web57/58: Mixkit pads lacked this flag → protected-motion=0 → thin unique videos.
+    const webFace = {
+      id: 'stock-video-s1-p0-0',
+      segmentId: 's1',
+      type: 'video',
+      url: 'http://localhost:5173/api/download-clip/.autotube-s1-0/../../download-clip?url='
+        + encodeURIComponent('https://vimeo.com/housing-face-1'),
+      source: 'Bing web video',
+      alt: 'worried tenant face close up packing boxes apartment',
+      query: 'worried tenant apartment face close up',
+      motionRelevancePassed: true,
+    };
+    const mixkitPad = {
+      id: 'stock-video-s1-p0-1',
+      segmentId: 's1',
+      type: 'video',
+      url: 'https://assets.mixkit.co/videos/10052/10052-720.mp4',
+      source: 'pool',
+      motionRelevancePassed: false,
+    };
+    const kept = restoreMotionRelevancePassed(
+      [],
+      [webFace, mixkitPad],
+      [
+        { segmentId: 's1', url: webFace.url, motionRelevancePassed: true },
+        { segmentId: 's1', url: mixkitPad.url, motionRelevancePassed: false },
+      ],
+    );
+    expect(kept.media).toHaveLength(1);
+    expect(kept.media[0].url).toBe(webFace.url);
+  });
+});
+
+describe('keylessOmitsStockMotionPool — housing-web57/58 Mixkit leak', () => {
+  it('omits Mixkit/STOCK fallback for keyless housing and healthcare', () => {
+    expect(keylessOmitsStockMotionPool(HOUSING_CRASH_TOPIC, false)).toBe(true);
+    expect(keylessOmitsStockMotionPool(HOUSING_TOPIC, false)).toBe(true);
+    expect(keylessOmitsStockMotionPool('Why AI will change healthcare forever', false)).toBe(true);
+  });
+
+  it('keeps stock fallback when stock API keys are present or topic is unrelated', () => {
+    expect(keylessOmitsStockMotionPool(HOUSING_CRASH_TOPIC, true)).toBe(false);
+    expect(keylessOmitsStockMotionPool(AIRLINE_TOPIC, false)).toBe(false);
+    expect(keylessOmitsStockMotionPool('bank scam voice clone', false)).toBe(false);
+  });
+
+  it('documents Mixkit host-rank beating Bing/DDG Vimeo (why omit is required)', () => {
+    const mixkit = { url: 'https://assets.mixkit.co/videos/10052/10052-720.mp4', source: 'pool' };
+    const vimeoWeb = {
+      url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://vimeo.com/12345')}`,
+      sourceUrl: 'https://vimeo.com/12345',
+      source: 'Bing web video',
+      alt: 'worried tenant apartment face',
+    };
+    expect(motionCandidateHostRank(mixkit, { topicBlob: HOUSING_CRASH_TOPIC }))
+      .toBeLessThan(motionCandidateHostRank(vimeoWeb, { topicBlob: HOUSING_CRASH_TOPIC }));
   });
 });
 

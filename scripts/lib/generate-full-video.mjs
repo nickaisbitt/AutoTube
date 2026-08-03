@@ -45,6 +45,7 @@ import {
   evaluateHarvestVolume,
   evaluateHarvestVolumeWithSoftPass,
   hasHealthcareEvidence,
+  hasHousingEvidence,
   housingOffTopicBrollReason,
   healthcareOffTopicBrollReason,
   isOffBrandVisual,
@@ -542,6 +543,19 @@ export function rankMotionCandidates(candidates = [], score = () => 0, options =
 export function resolveInjectClipProbe(url = '') {
   if (isProxiedClipUrl(url)) return { probe: false, trust: 'proxy-clip' };
   return { probe: true, trust: null };
+}
+
+/**
+ * Keyless housing/healthcare must not fall back to Mixkit / STOCK_VIDEO_POOL.
+ *
+ * Those direct-MP4 pads win host-rank (tier 1) over Bing/DDG Vimeo proxies (tier 2),
+ * fill inject slots, then fail post-top-up relevance with motionRelevancePassed=false
+ * (housing-web57/58: Mixkit×8 injected, protected-motion=0, soft-pass thin 3–5 videos
+ * despite bing=50+ / ddg=70+ / clip-pool~130). Product path is raw web + Archive.
+ */
+export function keylessOmitsStockMotionPool(topicBlob = '', hasStockKeys = false) {
+  if (hasStockKeys) return false;
+  return isHealthcareTopic(topicBlob) || isHousingTopic(topicBlob);
 }
 
 /**
@@ -1791,7 +1805,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   const topicText = String(topicBlob || '').toLowerCase();
   if (isOffBrandVisual(blob, topicBlob)) return true;
   if (housingOffTopicBrollReason(blob, topicBlob)) return true;
-  if (healthcareOffTopicBrollReason(blob, topicBlob)) return true;
+  if (healthcareOffTopicBrollReason(blob, topicBlob, clip)) return true;
   if (isGenericStockJunk(blob, topicBlob)) return true;
   const covidTopic = /\b(covid|coronavirus|pandemic|mask mandate|face masks?|surgical masks?|n95)\b/.test(topicText);
   if (
@@ -3114,12 +3128,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Funnel accounting (fetched → after-junk → after-vision → injected): count every
       // candidate that actually reaches the gates so drop reasons are explainable.
       report.motionCandidatesSeen = (report.motionCandidatesSeen || 0) + 1;
-      // Keyless healthcare: YouTube/TikTok without cookies are doomed at inject
-      // (web7: 234 youtube-without-cookies skips). Do not let them fill liveCap
-      // and starve Archive/Vimeo/DM clinical motion.
+      // Keyless housing/healthcare: YouTube/TikTok without cookies are doomed at
+      // inject (healthcare-web7: 234 skips; housing-web58: 119 YT/TT skips while
+      // Mixkit filled slots). Do not let them fill liveCap / steal face-first
+      // takeClip retries and starve Archive/Vimeo/DM topical motion.
       if (
-        isHealthcareTopic(topicBlob)
-        && !hasStockKeysEarly
+        keylessOmitsStockMotionPool(topicBlob, hasStockKeysEarly)
         && unreliableWebProxyInjectReason(clip)
       ) {
         report.motionDroppedUnreliableProxy = (report.motionDroppedUnreliableProxy || 0) + 1;
@@ -3139,14 +3153,19 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       const isWebClip = /web video/i.test(clip.source || '');
       // Search text asks the question; it is not evidence for a web result.
       const evidenceClip = isWebClip ? { ...clip, query: '' } : clip;
-      // AI-medicine: web-native evidence may use the deliberate harvest query
-      // (hasHealthcareEvidence web contract). evidenceClip strips query so bare
-      // Bing/DDG hits were motionRelevancePassed=false → post-top-up strip → thin.
+      // AI-medicine / housing: web-native evidence may use the deliberate harvest
+      // query (hasHealthcareEvidence / hasHousingEvidence web contract).
+      // evidenceClip strips query so bare Bing/DDG hits were
+      // motionRelevancePassed=false → post-top-up strip → thin.
       const strongMotionRelevance =
         isCyberRelevantClip(evidenceClip, topicBlob)
         || (
           isHealthcareTopic(topicBlob)
           && hasHealthcareEvidence(isWebClip ? clip : evidenceClip)
+        )
+        || (
+          isHousingTopic(topicBlob)
+          && hasHousingEvidence(isWebClip ? clip : evidenceClip)
         );
       if (isJunkStockClip(evidenceClip, topicBlob, { preferBright: options.preferBright === true })) {
         report.motionDroppedJunk = (report.motionDroppedJunk || 0) + 1;
@@ -3249,16 +3268,17 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   report.pixabayFetched = liveClips.filter((c) => /Pixabay/i.test(c.source || '')).length;
   if (options.faceSeek) report.faceSeekQueries = queries.slice(0, 6);
 
-  // Keyless healthcare: product path is raw web harvest. Mixkit/STOCK_VIDEO_POOL
-  // direct-MP4s win host-rank, fill inject slots, then get relevance-stripped
-  // (healthcare-web4/web5 soft-pass-thin 1–2/6, protected-motion=0). Keep live
-  // Bing/DDG/Vimeo + Archive only when no stock API keys.
-  const healthcareKeyless = isHealthcareTopic(topicBlob) && !hasStockKeysEarly;
+  // Keyless housing/healthcare: product path is raw web harvest.
+  // Mixkit/STOCK_VIDEO_POOL direct-MP4s win host-rank, fill inject slots, then
+  // get relevance-stripped (healthcare-web4/web5; housing-web57/58 Mixkit×8,
+  // protected-motion=0, soft-pass thin 3–5). Keep live Bing/DDG/Vimeo + Archive
+  // only when no stock API keys.
+  const omitStockMotion = keylessOmitsStockMotionPool(topicBlob, hasStockKeysEarly);
   let pool = [
     ...liveClips,
     ...(housingTopic && curatedPacksEnabled() ? STOCK_HOUSING_VIDEOS : []),
-    ...(cyberTopic && !healthcareKeyless ? MIXKIT_VIDEO_POOL : []),
-    ...(healthcareKeyless
+    ...(cyberTopic && !omitStockMotion ? MIXKIT_VIDEO_POOL : []),
+    ...(omitStockMotion
       ? []
       : (seriousTopic
         ? topicalStockVideos(topicBlob, STOCK_VIDEO_POOL)
@@ -3590,12 +3610,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const providerMeta = providerEvidenceText(clip.title || '', { query: safeQuery, topicBlob });
     // Archive items already cleared archiveEvidenceVerdict to enter the pool — treat
     // that as run-local motion proof so post-top-up relevance cannot strip them while
-    // keeping YouTube talking-head harvest. Healthcare clinical web evidence must
-    // also survive even when host-rank lost the liveClips flag (web4/web5 thin).
+    // keeping YouTube talking-head harvest. Healthcare/housing web evidence must
+    // also survive even when host-rank lost the liveClips flag (web4/web5;
+    // housing-web57/58 Mixkit strip → thin).
     const motionRelevancePassed =
       clip.motionRelevancePassed === true
       || archiveClip
-      || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip));
+      || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip))
+      || (isHousingTopic(topicBlob) && hasHousingEvidence(clip));
     project.media.push({
       id: `stock-video-${seg.id}-${tag}-${n}`,
       segmentId: seg.id,

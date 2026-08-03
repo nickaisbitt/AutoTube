@@ -4,6 +4,14 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_SERVER_MODEL = "xiaomi/mimo-v2.5";
 const MAX_LLM_BODY_BYTES = 1024 * 1024;
 const MAX_SERVER_TOKENS = 8192;
+/**
+ * Server-side timeout for the upstream OpenRouter fetch.
+ * Must exceed the client-side callLLM timeoutMs (180 s) so the client's
+ * own timeout fires first — otherwise the proxy returns 504 at 120 s,
+ * the client retries, and all three attempts fail before any real response
+ * arrives ("script died after start" at ~5 min).
+ */
+export const PROXY_UPSTREAM_TIMEOUT_MS = 270_000;
 
 class RequestBodyTooLargeError extends Error {}
 
@@ -156,7 +164,7 @@ export async function handleLlmProxy(
         "X-Title": "AutoTube AI Generator",
       },
       body: JSON.stringify(upstreamBody),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(PROXY_UPSTREAM_TIMEOUT_MS),
     });
 
     const text = await upstream.text();

@@ -15,7 +15,7 @@ vi.mock("undici", () => ({
 }));
 
 import { rateLimitMiddleware } from "../middleware/rateLimiter.js";
-import { handleLlmProxy } from "../routes/llmProxy.js";
+import { handleLlmProxy, PROXY_UPSTREAM_TIMEOUT_MS } from "../routes/llmProxy.js";
 import { handleProxyImage } from "../routes/proxyImage.js";
 import { handleRenderVideo } from "../routes/renderVideo.js";
 
@@ -128,6 +128,15 @@ describe("security-sensitive route hardening", () => {
       max_tokens: 8192,
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  it("proxy upstream timeout exceeds client callLLM timeout (270s > 180s) to prevent mid-flight 504 loops", () => {
+    // Client-side callLLM uses timeoutMs: 180_000. Server timeout must be
+    // LARGER so the client's own AbortSignal fires first — if server < client,
+    // the proxy returns 504 → client retries → all retries fail at ~120s each
+    // → "script died after start" at ~5 min.
+    const CLIENT_SCRIPT_GEN_TIMEOUT_MS = 180_000;
+    expect(PROXY_UPSTREAM_TIMEOUT_MS).toBeGreaterThan(CLIENT_SCRIPT_GEN_TIMEOUT_MS);
   });
 
   it("rejects an oversized image from Content-Length before buffering", async () => {

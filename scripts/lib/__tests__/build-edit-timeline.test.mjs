@@ -464,6 +464,34 @@ describe('introFaceTier', () => {
     }
   });
 
+  it('rejects Elias innovate / Bayer logo-stage as healthcare intro (-1)', () => {
+    expect(introFaceTier({
+      alt: 'DAVID & ELIAS - WHY DO I INNOVATE corporate interview',
+      title: 'why do i innovate',
+      query: 'surgical robot',
+      url: 'https://vimeo.com/1075442788',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'bayer logo stage corporate interview healthcare keynote',
+      title: 'bayer healthcare presentation',
+      query: 'ai radiology',
+      url: 'https://archive.org/download/bayer/bayer.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+  });
+
+  it('does not mint tier-2 from harvest query alone when title is GeekBeat', () => {
+    expect(introFaceTier({
+      alt: 'geekbeat tv unlock your old iphone',
+      title: 'geekbeat tv 433',
+      query: 'surgical robot operating room',
+      url: 'https://archive.org/download/GeekBeat/clip.mp4',
+      type: 'video',
+      source: 'Archive.org live',
+    }, { healthcare: true })).toBe(-1);
+  });
+
   it('tiers Science Nation and Onyx RAD clips as strong healthcare opener (2)', () => {
     const preferredCases = [
       {

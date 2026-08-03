@@ -3,6 +3,7 @@ import {
   airlineQueryVisionBypass,
   archiveEvidenceLookupBudget,
   archiveEvidenceVerdict,
+  preferHealthcareArchiveClinicalQueries,
   archiveIdentifierFromUrl,
   archiveShortQueryVariants,
   archiveTopicSubjectQueries,
@@ -353,6 +354,33 @@ describe('archiveEvidenceVerdict', () => {
     expect(verdict.reason).toBe('healthcare-clinical-metadata');
   });
 
+  it('rejects surgical-robot Archive hits whose titles are GeekBeat / fashion mismatch', () => {
+    const verdict = archiveEvidenceVerdict(
+      {
+        source: 'Archive.org live',
+        url: 'https://archive.org/download/GeekBeat/clip.mp4',
+        title: 'geekbeat tv 433 at t will unlock your old iphone',
+        query: 'surgical robot',
+      },
+      { query: 'surgical robot', topicBlob: 'Why AI will change healthcare' },
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toMatch(/healthcare-query-title-mismatch|healthcare-off-topic/);
+  });
+
+  it('rejects ambiguous laboratory-only Archive match for medical laboratory query', () => {
+    const verdict = archiveEvidenceVerdict(
+      {
+        source: 'Archive.org live',
+        url: 'https://archive.org/download/brookhaven/clip.mp4',
+        title: 'brookhaven spectrum 1967 atomic experiments at brookhaven national laboratory',
+        query: 'medical laboratory',
+      },
+      { query: 'medical laboratory', topicBlob: 'Why AI will change healthcare' },
+    );
+    expect(verdict.ok).toBe(false);
+  });
+
   it('admits items whose own metadata names the subject', () => {
     const verdict = archiveEvidenceVerdict(
       {
@@ -530,6 +558,23 @@ describe('webMotionQueryVariants', () => {
     expect(queries).toContain('doctor patient face clinical');
     // literal "healthcare" / "AI healthcare" subjects from archiveTopicSubjectQueries must not appear
     expect(queries.some((q) => /\bhealthcare\b/i.test(q) && !/doctor|patient|clinic|hospital|mri|radiolog/i.test(q))).toBe(false);
+  });
+});
+
+
+describe('preferHealthcareArchiveClinicalQueries', () => {
+  it('prepends Science Nation / surgical-robot / radiologist leads when archive-only', () => {
+    const biased = preferHealthcareArchiveClinicalQueries(
+      ['hospital ward', 'doctor patient', 'medical examination'],
+      { archiveOnly: true },
+    );
+    expect(biased[0]).toMatch(/Science Nation|surgical robot|radiologist|da vinci|ai radiology/i);
+    expect(biased).toEqual(expect.arrayContaining(['hospital ward']));
+  });
+
+  it('leaves query order unchanged when not archive-only', () => {
+    const qs = ['hospital ward', 'doctor patient'];
+    expect(preferHealthcareArchiveClinicalQueries(qs, { archiveOnly: false })).toEqual(qs);
   });
 });
 
@@ -1027,11 +1072,15 @@ describe('healthcare keyless motion pack + volume chase', () => {
     const plan = motionQueryPlan(HEALTHCARE_AI_TOPIC, false, { stockKeyed: false, faceSeek: true });
     expect(plan.mode).toBe('keyless');
     expect(plan.queries).toEqual(expect.arrayContaining([
-      'hospital corridor',
+      'Science Nation surgical robot',
       'mri scanner',
-      'doctor patient',
+      'radiologist workstation',
+      'surgical robot operating room',
     ]));
-    expect(plan.queries.some((q) => /ai medical diagnosis|radiologist|telemedicine|hospital corridor hallway/i.test(q))).toBe(true);
+    // Clinical leads come first so archive-only (bing=ddg=google=0) burns budget on OR/robot.
+    expect(plan.queries[0]).toMatch(/Science Nation|surgical robot|radiologist|da vinci|ai radiology/i);
+    expect(plan.archiveQueries[0]).toMatch(/Science Nation|surgical robot|radiologist|da vinci|ai radiology/i);
+    expect(plan.queries.some((q) => /radiologist|telemedicine|surgical robot|operating room/i.test(q))).toBe(true);
   });
 
   it('leads with AI radiology / clinician+screen / OR face-first queries and Vimeo host searches', () => {

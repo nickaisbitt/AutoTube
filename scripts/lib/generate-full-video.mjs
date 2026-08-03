@@ -48,6 +48,8 @@ import {
   hasHousingEvidence,
   housingOffTopicBrollReason,
   healthcareOffTopicBrollReason,
+  healthcareArchiveTitleMismatchReason,
+  HEALTHCARE_AMBIGUOUS_ARCHIVE_MATCH_TOKENS,
   isOffBrandVisual,
   isGenericStockJunk,
   isVolumePaddingAsset,
@@ -1029,7 +1031,7 @@ function stripJunkStillAssets(project, report) {
       || Boolean(housingOffTopicBrollReason(blob, topicBlob))
       // Healthcare: Huxley/Orwell/FEMA/insect/meme/painting/literary-fest stills
       // Ken-Burn into the timeline and tank visualVariety (healthcare-web1).
-      || Boolean(healthcareOffTopicBrollReason(blob, topicBlob));
+      || Boolean(healthcareOffTopicBrollReason(blob, topicBlob, asset));
     if (junk) {
       report.junkStillDropped = report.junkStillDropped || [];
       report.junkStillDropped.push({ url: asset.url, reason: 'off-topic/web still junk' });
@@ -1264,7 +1266,9 @@ export function archiveEvidenceVerdict(clip = {}, { query = '', topicBlob = '' }
   if (!evidence) return { ok: false, reason: 'no-provider-metadata', evidence: '', matched: [] };
   const wanted = new Set([
     ...evidenceTokens(query || clip.query || ''),
-    ...evidenceTokens(topicBlob),
+    // Healthcare: do not match topic framing tokens ("will"/"change") against
+    // unrelated Archive titles ("AT&T will unlock…") — query + clinical gates only.
+    ...(isHealthcareTopic(topicBlob) ? [] : evidenceTokens(topicBlob)),
   ]);
   if (!wanted.size) return { ok: true, reason: 'no-subject-to-match', evidence, matched: [] };
   // Prefix matching absorbs plurals and "airline"/"airliner", but not "cabin"/"cabinetry".
@@ -1272,16 +1276,38 @@ export function archiveEvidenceVerdict(clip = {}, { query = '', topicBlob = '' }
     token === want
     || (Math.abs(token.length - want.length) <= 3 && (token.startsWith(want) || want.startsWith(token)));
   const matched = evidenceTokens(evidence).filter((token) => [...wanted].some((want) => sameSubject(token, want)));
-  if (!matched.length) {
+  const strongMatched = matched.filter((token) => !HEALTHCARE_AMBIGUOUS_ARCHIVE_MATCH_TOKENS.has(token));
+  // Healthcare: ambiguous-only overlap (laboratory/hospital/patient) is not enough —
+  // fall through so strong-query mismatch + clinical-metadata gates can reject junk.
+  const subjectOk = matched.length > 0
+    && !(isHealthcareTopic(topicBlob) && strongMatched.length === 0);
+  if (!subjectOk) {
     // Healthcare Archive titles say MRI/radiology/hospital far more often than the
     // essay topic ("Why AI will change healthcare"). Clinical metadata is enough
     // so keyless runs are not trapped on YouTube-only Bing pools (web7: 234 YT
     // skips, only 4 Archive injects → soft-pass-thin 4/6).
-    if (
-      isHealthcareTopic(topicBlob)
-      && hasHealthcareEvidence({ title: evidence, alt: '', type: 'video', source: 'Archive.org' })
-    ) {
-      return { ok: true, reason: 'healthcare-clinical-metadata', evidence, matched: ['clinical'] };
+    // web43/44: still reject strong-query→weak-title mismatches and off-topic titles.
+    if (isHealthcareTopic(topicBlob)) {
+      const mismatch = healthcareArchiveTitleMismatchReason(
+        query || clip.query || '',
+        evidence,
+        topicBlob,
+      );
+      if (mismatch) {
+        return { ok: false, reason: 'healthcare-query-title-mismatch', evidence, matched };
+      }
+      if (healthcareOffTopicBrollReason(evidence, topicBlob)) {
+        return { ok: false, reason: 'healthcare-off-topic-title', evidence, matched };
+      }
+      if (hasHealthcareEvidence({ title: evidence, alt: '', type: 'video', source: 'Archive.org' })) {
+        return { ok: true, reason: 'healthcare-clinical-metadata', evidence, matched: matched.length ? matched : ['clinical'] };
+      }
+      return {
+        ok: false,
+        reason: matched.length ? 'healthcare-ambiguous-subject' : 'metadata-off-subject',
+        evidence,
+        matched,
+      };
     }
     return { ok: false, reason: 'metadata-off-subject', evidence, matched: [] };
   }
@@ -2432,45 +2458,59 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'housing shortage crisis',
 ];
 
-/** Short Archive.org subjects for hospital / clinical / AI-medicine keyless runs. */
+/** Short Archive.org subjects for hospital / clinical / AI-medicine keyless runs.
+ * Lead with Science Nation / OR / surgical-robot / radiologist+screen so archive-only
+ * pools (bing=ddg=google=0) do not fill on nurse-station / medical-examination magnets
+ * that return political/game-show/podcast junk (healthcare-web43/44).
+ */
 const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
-  'ai radiology',
   'Science Nation surgical robot',
+  'Science Nation radiology',
+  'surgical robot operating room',
+  'da vinci surgical system',
+  'radiologist workstation',
+  'radiologist workstation monitors',
+  'ai radiology',
   'Onyx RAD radiology ai',
   'doctor mri monitor',
   'clinician computer screen',
   'surgical robot',
   'ultrasound demonstration',
-  'radiologist workstation',
-  'da vinci surgical system',
-  'hospital corridor',
-  'hospital ward',
-  'nurse station',
-  'doctor patient',
-  'medical examination',
-  'hospital waiting room',
-  'operating room',
-  'medical laboratory',
-  'xray radiology',
-  'mri scanner',
-  'intensive care',
-  'nurse station hospital',
-  // Avoid bare "hospital exterior" / "reading room" — Archive returns aerial
-  // Medical City + Penfield lecture pads (healthcare-web11 raw 3.6).
-  'radiologist workstation monitors',
+  'operating room surgery',
+  'surgical team operating',
+  'mri scanner hospital',
   'ct scanner hospital',
-  'clinical diagnosis',
-  'telemedicine',
-  'electronic medical record',
+  'mri scanner',
+  'xray radiology',
   'patient bedside monitor',
+  'intensive care unit',
+  'hospital ward nurses',
+  'medical laboratory clinical',
+  'clinical diagnosis',
+  'telemedicine clinician',
   'stethoscope doctor',
-  'hospital hallway',
-  'doctor reviewing charts',
   'nurse patient bedside',
   'emergency room hospital',
-  'surgical team operating',
   'ai healthcare documentary',
+  'electronic medical record',
+  // Kept last — weaker magnets; prefer clinical lead above when archive-only.
+  'hospital ward',
+  'operating room',
 ];
+
+/** Clinical-only Archive subjects used when web engines return 0 motion. */
+export const ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES = ARCHIVE_HEALTHCARE_MOTION_QUERIES.slice(0, 18);
+
+/**
+ * When bing/google/ddg all returned 0, bias Archive toward clinical lead subjects
+ * (Science Nation / OR / surgical-robot / radiologist) instead of vague magnets.
+ */
+export function preferHealthcareArchiveClinicalQueries(queries = [], { archiveOnly = false } = {}) {
+  if (!archiveOnly) return [...queries];
+  const lead = ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES.filter(isSafeStockMotionQuery);
+  const rest = queries.filter((q) => !lead.some((l) => l.toLowerCase() === String(q).toLowerCase()));
+  return [...lead, ...rest];
+}
 
 const ARCHIVE_VARIANT_LEAD_STOPWORDS =
   /^(?:worried|shocked|stressed|nervous|scared|crying|real|documentary|authentic|news|bright|sunny|daylight|well|person|people|couple|man|woman|elderly|family|close)\b/i;
@@ -2684,10 +2724,17 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
 
   // Keyed: keep the face head, then the aggressive topical pack, then base fillers.
   // Keyless: web-friendly scenes first, then short Archive subjects and remaining base.
+  // Healthcare keyless: lead with Science Nation / OR / surgical-robot / radiologist
+  // so archive-only runs (bing=ddg=google=0) burn budget on clinical subjects first.
   const headCount = keyed ? Math.min(4, base.length) : 0;
+  const healthcareClinicalLead = (!keyed && healthcare)
+    ? ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES.filter(isSafeStockMotionQuery)
+    : [];
   const ordered = keyed
     ? [...base.slice(0, headCount), ...boost, ...base.slice(headCount)]
-    : [...webQueries, ...boost, ...base];
+    : healthcare
+      ? [...healthcareClinicalLead, ...webQueries, ...boost, ...base]
+      : [...webQueries, ...boost, ...base];
 
   const queries = [];
   const seen = new Set();
@@ -2705,7 +2752,9 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
     webHostQueries,
     // Archive.org has its own direct-MP4 search lane; host-scoped web searches must
     // never displace these subjects from that lane.
-    archiveQueries: [...queries],
+    archiveQueries: healthcare
+      ? preferHealthcareArchiveClinicalQueries(queries, { archiveOnly: true })
+      : [...queries],
     boostCount: boost.length,
     baseCount: base.length,
   };
@@ -3349,7 +3398,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     if (isHousingTopic(topicBlob) && housingOffTopicBrollReason(blob, topicBlob)) return -20;
     // Healthcare off-topic must hard-reject (-20) before genericStockJunk (-4),
     // or FEMA/Huxley/insect/meme/painting/literary-fest pads soft-pass (web1).
-    if (isHealthcareTopic(topicBlob) && healthcareOffTopicBrollReason(blob, topicBlob)) return -20;
+    if (isHealthcareTopic(topicBlob) && healthcareOffTopicBrollReason(blob, topicBlob, clip)) return -20;
     if (isGenericStockJunk(blob, topicBlob)) return -4;
     if (
       !isWorkplaceTopic(topicBlob)

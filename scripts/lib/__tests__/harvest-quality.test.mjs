@@ -13,6 +13,7 @@ import {
   countHealthcareStrongVideos,
   healthcareSoftPassMotionFailureReason,
   healthcareOffTopicBrollReason,
+  healthcareArchiveTitleMismatchReason,
   housingOffTopicBrollReason,
   isGenericStockJunk,
   isWebNativeMotionSource,
@@ -810,6 +811,70 @@ describe('healthcare off-topic B-roll rejects', () => {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
       expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
     }
+  });
+
+  it('hard-rejects archive-only soft-pass junk that still leaked after web43 rejects', () => {
+    const cases = [
+      'Dr. Elias Blind Spot Why AI will change healthcare Vimeo interview',
+      'bayer corporate stage logo interview healthcare',
+      'massachusetts senate passes swine flu martial law bill',
+      'brookhaven spectrum 1967 atomic experiments national laboratory',
+      'four year old boy dies in lebanon after being denied hospital care',
+      'portland clinic drops cancer patient for transgender critical comments',
+      'david daleiden opening statement at congressional hearing',
+      'maple grove high schooler already accepted to medical school',
+      'episode 84 a and osirix podcast',
+      'prcs palestine red crescent mobile operating room gaza',
+      'news storage january 30 february 1 1985 archival',
+      'game show spinning wheel medical examination variety',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('rejects surgical-robot query when Archive title is unrelated (GeekBeat spoof)', () => {
+    expect(
+      healthcareArchiveTitleMismatchReason(
+        'surgical robot',
+        'geekbeat tv 433 at t will unlock your old iphone',
+        HEALTHCARE_TOPIC,
+      ),
+    ).toMatch(/mismatch/);
+    expect(
+      healthcareOffTopicBrollReason(
+        'geekbeat tv unlock iphone',
+        HEALTHCARE_TOPIC,
+        { query: 'surgical robot', alt: 'geekbeat tv unlock iphone', title: '' },
+      ),
+    ).toBeTruthy();
+    expect(
+      healthcareArchiveTitleMismatchReason(
+        'surgical robot',
+        'tiny incision big impact the new surgical robot',
+        HEALTHCARE_TOPIC,
+      ),
+    ).toBe('');
+  });
+
+  it('does not let query=surgical robot spoof GeekBeat into intro face pool', () => {
+    const result = checkIntroFacePool({
+      topic: HEALTHCARE_TOPIC,
+      title: 'AI Healthcare',
+      media: [
+        {
+          type: 'video',
+          url: 'https://archive.org/download/GeekBeat.TV_433/clip.mp4',
+          alt: 'geekbeat tv 433 at t will unlock your old iphone',
+          title: 'geekbeat tv 433 at t will unlock your old iphone',
+          query: 'surgical robot',
+          source: 'Archive.org live',
+        },
+      ],
+    });
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
   });
 
   it('keeps OR surgical-robot / radiologist workstation clinical B-roll', () => {

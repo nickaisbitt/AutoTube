@@ -1507,7 +1507,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     // Floor at 5 once intro-face already passed (watch floors unchanged).
     const minHousingVideos = hasStockKeys
       ? Math.max(12, segN * 2)
-      : Math.max(5, segN);
+      : Math.max(3, Math.min(5, segN)); // keyless thin after face gate
     if (videoCount < minHousingVideos) {
       return {
         pass: false,

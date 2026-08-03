@@ -192,6 +192,16 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   ) {
     return true;
   }
+  // Bare apartment-building-exterior establishing shots (no face, no people) are
+  // weaker than a generic face for the hook. Clips that also carry face evidence
+  // escape via hasReadableFaceVisual → introFaceTier ≥ 1 upstream.
+  if (
+    housing
+    && /\bapartment\s+building\s+exterior\b/i.test(blob)
+    && !hasReadableFaceVisual(asset)
+  ) {
+    return true;
+  }
   // Passive paperwork / hands-on-desk never leads the hook on any topic;
   // scarcity fallbacks (relaxed tier / coverage) still admit it when the
   // pool holds nothing else, so thin intros never render as a gap.

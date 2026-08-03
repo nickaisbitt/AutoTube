@@ -524,6 +524,12 @@ describe('housing off-topic B-roll rejects', () => {
       '2011 moldova construction project presentation',
       'Big satisfed in Real Estate Redfin predictions 2026',
       'soviet flag hammer and sickle sunflower collage',
+      // web23 bathroom / clickbait / ARM pollution
+      'dirty bathroom bucket floor drain moldy tiles',
+      'CRASH IS HERE yellow turban talking head dollar bills',
+      'Cummins ISC ISL 8.9L Diesel Engine Rocker arm Housing',
+      'Zillow chart graph housing crash',
+      '60 Overthinking Quotes To Break Free From The Mental Trap',
       'LendingTree bar chart housing crash infographic',
       'American Home Mortgage bankruptcy slide graphic',
       'youtuber headset talking head podcast mic subscribe button',
@@ -756,6 +762,61 @@ describe('healthcare off-topic B-roll rejects', () => {
     for (const alt of keep) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
       expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
+    }
+  });
+});
+
+describe('healthcare non-clinical ceremony / event rejects (web13)', () => {
+  it('hard-rejects white-coat ceremony / medical graduation / nursing pinning', () => {
+    const cases = [
+      'white coat ceremony medical school class 2024',
+      'medical school graduation convocation ceremony',
+      'nursing pinning ceremony class of 2024',
+      'nursing graduation ceremony celebration day',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects hospital gala / fundraiser benefit events', () => {
+    const cases = [
+      'hospital fundraiser benefit gala evening',
+      'hospital benefit gala annual fundraising dinner',
+      'hospital benefit concert charity event',
+      'hospital anniversary gala fundraising',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects EHR/EMR software product demos and digital health conference floors', () => {
+    const cases = [
+      'EHR demo product demo hospital software keynote',
+      'EMR product demo electronic medical records software',
+      'digital health summit expo floor product demo healthcare',
+      'digital health conference floor vendor booth healthcare IT',
+      'health technology conference floor booth keynote expo',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('keeps clinical content that is not a ceremony or event demo', () => {
+    const keep = [
+      'doctor reviewing MRI results hospital',
+      'radiologist workstation screen monitor hospital',
+      'CNBC surgical robot operating room patient',
+      'medical school anatomy class hands-on lab',
+      'EHR record on hospital computer nurse',
+    ];
+    for (const alt of keep) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
     }
   });
 });

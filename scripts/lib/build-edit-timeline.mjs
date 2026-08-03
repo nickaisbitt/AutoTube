@@ -177,17 +177,19 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   // luxury One57 / Business Insider tours, protest/rent-strike/tribunal openers.
   if (
     housing
-    && /\b(rolfe\s+report|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|propaganda\s+film|ticking\s+time\s+bombs?|dynamite|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|realtor\s+sign|real\s+estate\s+sign|yard\s+sign|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|mortgage\s+bankruptcy|bankruptcy\s+(?:slide|filing|graphic)|crater\s+graphic|golden\s+valley\s+approves|landlord\s+tenant\s+act|lawyers?\s+committee|tenant\s+advocacy|square[\s-]?foot|sustainable\s+high\s+rise|may\s+day\s+caravan|livestream\s+archive|business\s+insider|fire\s+destroys\s+apartment|alarm\s+fire|protest(?:ers?|ing)?|picket|rent\s+strike|rent\s+increase|social\s+justice\s+tribunal|tribunals?\s+ontario|parkdale\s+vs)\b/i.test(blob)
+    && /\b(rolfe\s+report|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|propaganda\s+film|ticking\s+time\s+bombs?|dynamite|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|realtor\s+sign|real\s+estate\s+sign|yard\s+sign|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|mortgage\s+bankruptcy|bankruptcy\s+(?:slide|filing|graphic)|crater\s+graphic|golden\s+valley\s+approves|landlord\s+tenant\s+act|lawyers?\s+committee|tenant\s+advocacy|square[\s-]?foot|sustainable\s+high\s+rise|may\s+day\s+caravan|livestream\s+archive|business\s+insider|fire\s+destroys\s+apartment|alarm\s+fire|protest(?:ers?|ing)?|picket|rent\s+strike|rent\s+increase|social\s+justice\s+tribunal|tribunals?\s+ontario|parkdale\s+vs|cbs\s*6|problem\s+solvers?|odsp|bill\s*60|soviet|hammer\s+and\s+sickle|moldova|redfin\s+predictions?|zillow\s+economist|gaming\s+chair)\b/i.test(blob)
   ) {
     return true;
   }
   // Healthcare AI hooks must not open on course title cards / Giphy / protest /
   // maternity / ritual / news talking-head studio pads (healthcare-web3).
+  // Also reject exhibition-hall / trade-show / conference-booth intros that look
+  // clinical but show a product demo floor, not OR/hospital use (web11 suit opener).
   if (
     healthcare
     && (
       /giphy\.com|media\d*\.giphy\.com/i.test(blob)
-      || /\b(coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|title\s+card|capitol|protest(?:ers?|ing)?|political\s+rally|maternity|childbirth|kapparot|kapores|news\s+talking\s*heads?|talking\s*heads?\s+(?:studio|news|interview)|news\s+(?:anchor|studio|desk)|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|aerial|drone\s+shot|hospital\s+exterior|establishing\s+shot|legos?|mgtow|hiroshima|atomic\s+bomb|warzone|war\s*zone|cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|cong\s+hoa|saigon|burn\s+ward|adventure\s+eight|medical\s+city\s+arlington|scottsdale.?s?\s+cure\s+corridor|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+seated|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot|school\s+nurse|wendy\s+cummings|whhi|world\s+laparoscopy|circumc(?:ision|ure)|organ\s+harvesting|ukraine\s+pow|al\s+funduq|kissing\s+and\s+love|rhino\s+(?:ct|scan)|board\s+of\s+commissioners)\b/i.test(blob)
+      || /\b(coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|title\s+card|capitol|protest(?:ers?|ing)?|political\s+rally|maternity|childbirth|kapparot|kapores|news\s+talking\s*heads?|talking\s*heads?\s+(?:studio|news|interview)|news\s+(?:anchor|studio|desk)|webinar|keynote|ted\s*x?\s*talk|panel\s+discussion|longevity|healthcare\s+revolutions?|aerial|drone\s+shot|hospital\s+exterior|establishing\s+shot|legos?|mgtow|hiroshima|atomic\s+bomb|warzone|war\s*zone|cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|cong\s+hoa|saigon|burn\s+ward|adventure\s+eight|medical\s+city\s+arlington|scottsdale.?s?\s+cure\s+corridor|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+seated|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot|school\s+nurse|wendy\s+cummings|whhi|world\s+laparoscopy|circumc(?:ision|ure)|organ\s+harvesting|ukraine\s+pow|al\s+funduq|kissing\s+and\s+love|rhino\s+(?:ct|scan)|board\s+of\s+commissioners|exhibition\s+hall|trade\s*show\s+floor|conference\s+(?:booth|floor|expo\s+floor)|expo\s+(?:floor|booth|hall)|himss\s+(?:conference|expo|show)|ces\s+(?:20\d{2}|conference|show)|health\s+(?:it\s+)?summit\s+(?:booth|floor|expo)|ai\s+(?:summit|conference)\s+(?:booth|floor|hall|product\s+demo)|medical\s+trade\s+show|healthcare\s+(?:expo|trade\s+show)|suit\s+(?:walk(?:ing)?|stroll(?:ing)?))\b/i.test(blob)
     )
   ) {
     return true;
@@ -322,8 +324,11 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
   if (healthcare && isRejectedIntroLeadVisual(asset, { healthcare: true })) return -1;
   if (healthcare) {
     const blob = assetBlob(asset);
+    // Tier-2 signals: OR/surgical-robot/radiologist-workstation motion.
+    // Broad match captures CNBC titles ("robot that can diagnose"), da Vinci OR,
+    // radiologist at workstation, and any clinician+screen combination.
     const clinicianScreenOrOr =
-      /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|ultrasound\s+(?:demo|demonstration)|mri\s+(?:monitor|screen)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen)|operating\s+room)\b/i.test(blob)
+      /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|OR)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|ultrasound\s+(?:demo|demonstration)|mri\s+(?:monitor|screen)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen)|operating\s+room|or\s+(?:suite|table|lights?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing))\b/i.test(blob)
       || (
         /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(blob)
         && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(blob)

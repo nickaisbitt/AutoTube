@@ -518,6 +518,12 @@ describe('housing off-topic B-roll rejects', () => {
       'Meet the Garcias: Homestead Rescue',
       'Colorado Experience:The Smaldones, Family of Crime',
       'One Family Fight Struggle Street Episode',
+      // web22 opener/body junk
+      'CBS 6 PROBLEM SOLVERS HE IS KIND OF A GHOST gaming chair',
+      'odsp tenant warn bill 60 will push more disable residents',
+      '2011 moldova construction project presentation',
+      'Big satisfed in Real Estate Redfin predictions 2026',
+      'soviet flag hammer and sickle sunflower collage',
       'LendingTree bar chart housing crash infographic',
       'American Home Mortgage bankruptcy slide graphic',
       'youtuber headset talking head podcast mic subscribe button',
@@ -701,6 +707,39 @@ describe('healthcare off-topic B-roll rejects', () => {
     ];
     for (const alt of bodyOk) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+    }
+  });
+
+  it('hard-rejects exhibition-hall / trade-show / conference-booth pads (web11 suit opener)', () => {
+    const cases = [
+      // Exhibition floors scraped via "surgical robot" / "AI healthcare" queries
+      'AI healthcare summit booth floor product demo CES 2024',
+      'HIMSS conference expo floor healthcare IT exhibitor',
+      'medical trade show exhibition hall healthcare AI demo',
+      'healthcare expo trade show surgical robot product demonstration',
+      'suit walking conference floor AI healthcare summit',
+      // Generic conference/expo floor without OR/clinical context
+      'health IT summit booth floor medical vendor demo',
+      'AI summit conference booth product demo robotics',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('keeps OR surgical-robot / radiologist workstation clinical B-roll', () => {
+    const keep = [
+      'CNBC surgical robot operating room hospital patient',
+      'da Vinci robot surgery operating room surgeon',
+      'radiologist workstation MRI screen monitor hospital',
+      'robotic surgery OR lights surgeon operating table',
+      'da Vinci robotic surgery patient procedure',
+      'surgical robot operating room clinical use',
+    ];
+    for (const alt of keep) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
     }
   });
 });

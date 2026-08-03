@@ -394,10 +394,10 @@ export function promoteIntroFaceVideo(project) {
       // harvest labels like query "rent strike" when alt is "parkdale vs the ltb"
       // (housing-web20 tribunal/protest opener).
       const demoteBlob = blob;
-      // Webinar / Zoom-chair / home-tour / gov-PR / protest pads must never win the hook.
+      // Webinar / Zoom-chair / home-tour / gov-PR / protest / local-news chyron pads.
       if (
         isHousingTalkingHeadMotion(asset)
-        || /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|protest|picket|rent\s+strike|rent\s+increase|tribunal|for\s+sale\s+sign|re\/?max)\b/i.test(demoteBlob)
+        || /\b(sitting\s+in\s+(?:a\s+)?chair|office\s+chair|home\s+tour|zoom\s+call|rolfe\s+report|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|protest|picket|rent\s+strike|rent\s+increase|tribunal|for\s+sale\s+sign|re\/?max|cbs\s*6|problem\s+solvers?|odsp|bill\s*60|redfin\s+predictions?|zillow\s+economist|gaming\s+chair|moldova|soviet|hammer\s+and\s+sickle)\b/i.test(demoteBlob)
       ) {
         return -20;
       }

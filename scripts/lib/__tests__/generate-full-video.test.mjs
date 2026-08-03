@@ -459,11 +459,18 @@ describe('motionQueryPlan', () => {
     );
     const keyless = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
     // Keyless housing is always face-first (exteriors after people/apartment lived-in).
-    expect(keyless.queries.slice(0, 3)).toEqual([
+    // First two are always shocked-face / eviction-face leads; foreclosure follows.
+    expect(keyless.queries.slice(0, 2)).toEqual([
       'shocked face close up phone',
       'shocked face apartment eviction notice',
-      'foreclosure auction house steps crowd',
     ]);
+    expect(keyless.queries).toEqual(
+      expect.arrayContaining([
+        'foreclosure auction house steps crowd',
+        'worried face eviction notice apartment',
+        'packing moving boxes evicted apartment',
+      ]),
+    );
     expect(keyless.queries).toEqual(
       expect.arrayContaining(['apartment building', 'apartment interior', 'public housing']),
     );

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   airlineSoftPassMotionFailureReason,
   canonicalMediaKey,
+  checkIntroFacePool,
   countAirlineStrongVideos,
   ensureTopicalVideoCoverage,
   evaluateHarvestVolumeWithSoftPass,
@@ -1235,5 +1236,228 @@ describe('housingOffTopicBrollReason — web24 pollution patterns', () => {
     expect(housingOffTopicBrollReason('family evicted apartment door notice', ctx)).toBe('');
     expect(housingOffTopicBrollReason('tenant reads eviction letter close up', ctx)).toBe('');
     expect(housingOffTopicBrollReason('foreclosure sign front yard home sold', ctx)).toBe('');
+  });
+});
+
+// ── checkIntroFacePool ──────────────────────────────────────────────────────
+
+const makeVideo = (overrides) => ({
+  type: 'video',
+  segmentId: 'intro',
+  url: 'https://example.com/clip.mp4',
+  alt: '',
+  title: '',
+  query: '',
+  source: 'Bing web video',
+  ...overrides,
+});
+
+describe('checkIntroFacePool — housing', () => {
+  const project = (videos) => ({
+    topic: HOUSING_TOPIC,
+    title: 'Housing crash',
+    script: [{ id: 'intro' }, { id: 'body' }],
+    media: videos,
+  });
+
+  it('passes when pool has shocked-face + eviction-notice clip', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'shocked face close up eviction notice apartment tenant' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('passes when pool has worried couple + apartment interior clip', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'worried couple reading letter kitchen apartment eviction' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('passes when pool has packing-boxes lived-in apartment clip', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'packing boxes apartment hallway tenant eviction notice moving' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('passes when pool has foreclosure auction clip (tier-1 lived-in)', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'foreclosure auction house steps crowd family' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('fails with INTRO_FACE_FAIL when pool has only FEMA/news-map graphics', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'fema disaster map flood area', query: 'housing flood map' }),
+      makeVideo({ alt: 'news map united states hurricane impact zone' }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+    expect(result.reason).toMatch(/housing/i);
+  });
+
+  it('fails with INTRO_FACE_FAIL when pool has only landscape/aerial Archive clips', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'aerial view mountain lake landscape', source: 'Archive.org live' }),
+      makeVideo({ alt: 'scenic mountain river forest countryside', source: 'Archive.org live' }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('fails with INTRO_FACE_FAIL when pool has only webinar/talking-head clips', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'housing webinar tenant rights sitting in chair presenter', query: 'webinar housing' }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('returns pass: true for non-housing/non-healthcare topics', () => {
+    const result = checkIntroFacePool({
+      topic: 'crypto market collapse',
+      title: 'Bitcoin crashes',
+      media: [makeVideo({ alt: 'bitcoin chart price drop' })],
+    });
+    expect(result.pass).toBe(true);
+  });
+
+  it('evaluateHarvestVolumeWithSoftPass returns INTRO_FACE_FAIL for housing pool with no face/lived-in clips', () => {
+    const segments = [{ id: 'intro' }, { id: 'body' }, { id: 'outro' }];
+    // Clips are topically relevant (apartment/housing) so ensureTopicalVideoCoverage passes,
+    // but none have a readable human face or lived-in interior signal — INTRO_FACE_FAIL fires.
+    const media = Array.from({ length: 9 }, (_, i) => makeVideo({
+      segmentId: segments[i % 3].id,
+      url: `https://example.com/apt${i}.mp4`,
+      alt: 'apartment building exterior residential neighborhood city street housing',
+      query: 'apartment building exterior housing',
+    }));
+    const proj = { topic: HOUSING_TOPIC, title: 'Housing crash', script: segments, media };
+    const result = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      archiveLiveFetched: 4,
+      videoTopUp: Array.from({ length: 9 }, (_, i) => ({ id: `t${i}` })),
+    }, proj);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('evaluateHarvestVolumeWithSoftPass passes housing pool with face clip', () => {
+    const segments = [{ id: 'intro' }, { id: 'body' }, { id: 'outro' }];
+    const media = [
+      makeVideo({
+        segmentId: 'intro',
+        url: 'https://vimeo.com/face1.mp4',
+        alt: 'worried tenant face close up eviction notice apartment',
+        query: 'worried tenant eviction face',
+        source: 'Bing web video',
+        sourceUrl: 'https://vimeo.com/face1',
+      }),
+      ...Array.from({ length: 7 }, (_, i) => makeVideo({
+        segmentId: segments[i % 3].id,
+        url: `https://example.com/apt${i}.mp4`,
+        alt: 'apartment interior hallway tenant landlord',
+        query: 'apartment eviction',
+        source: 'Bing web video',
+      })),
+    ];
+    const proj = { topic: HOUSING_TOPIC, title: 'Housing crash', script: segments, media };
+    const result = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      archiveLiveFetched: 4,
+      videoTopUp: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
+    }, proj);
+    expect(result.pass).toBe(true);
+  });
+});
+
+describe('checkIntroFacePool — healthcare', () => {
+  const project = (videos) => ({
+    topic: HEALTHCARE_TOPIC,
+    title: 'AI Healthcare',
+    script: [{ id: 'intro' }, { id: 'body' }],
+    media: videos,
+  });
+
+  it('passes when pool has clinician+screen clip', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'doctor pointing at mri monitor radiologist workstation screen' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('passes when pool has surgical-robot OR clip', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'surgical robot operating room da vinci surgery' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('passes when pool has worried patient face + hospital clip', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'worried patient face close up hospital clinic medical exam' }),
+    ]));
+    expect(result.pass).toBe(true);
+  });
+
+  it('fails with INTRO_FACE_FAIL when pool has only news-desk talking-head clips', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'news anchor studio desk talking head healthcare segment' }),
+      makeVideo({ alt: 'webinar host lecture slides healthcare revolution presentation' }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+    expect(result.reason).toMatch(/healthcare/i);
+  });
+
+  it('evaluateHarvestVolumeWithSoftPass returns INTRO_FACE_FAIL for healthcare pool with no clinical/face clips', () => {
+    const segments = [{ id: 'intro' }, { id: 'body' }, { id: 'outro' }];
+    // Clips are topically relevant (hospital/healthcare) so ensureTopicalVideoCoverage passes,
+    // but none have a clinician+screen or readable face + healthcare signal — INTRO_FACE_FAIL fires.
+    const media = Array.from({ length: 9 }, (_, i) => makeVideo({
+      segmentId: segments[i % 3].id,
+      url: `https://example.com/hosp${i}.mp4`,
+      alt: 'hospital corridor hallway medical floor healthcare facility administrative wing',
+      query: 'hospital corridor healthcare',
+      source: 'Bing web video',
+    }));
+    const proj = { topic: HEALTHCARE_TOPIC, title: 'AI Healthcare', script: segments, media };
+    const result = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      archiveLiveFetched: 4,
+      videoTopUp: Array.from({ length: 9 }, (_, i) => ({ id: `t${i}` })),
+    }, proj);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('evaluateHarvestVolumeWithSoftPass passes healthcare pool with surgical-robot clip', () => {
+    const segments = [{ id: 'intro' }, { id: 'body' }, { id: 'outro' }];
+    const media = [
+      makeVideo({
+        segmentId: 'intro',
+        url: 'https://vimeo.com/robot1.mp4',
+        alt: 'da vinci surgical robot operating room surgery hospital',
+        query: 'surgical robot OR',
+        source: 'Bing web video',
+        sourceUrl: 'https://vimeo.com/robot1',
+      }),
+      ...Array.from({ length: 7 }, (_, i) => makeVideo({
+        segmentId: segments[i % 3].id,
+        url: `https://example.com/doc${i}.mp4`,
+        alt: 'doctor hospital clinic medical diagnosis patient',
+        query: 'doctor hospital',
+        source: 'Bing web video',
+      })),
+    ];
+    const proj = { topic: HEALTHCARE_TOPIC, title: 'AI Healthcare', script: segments, media };
+    const result = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      archiveLiveFetched: 4,
+      videoTopUp: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
+    }, proj);
+    expect(result.pass).toBe(true);
   });
 });

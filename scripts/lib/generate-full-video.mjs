@@ -40,6 +40,7 @@ import {
 } from './keep-best.mjs';
 import {
   airlineSoftPassMotionFailureReason,
+  checkIntroFacePool,
   filterAssetsByRelevance,
   evaluateHarvestVolume,
   evaluateHarvestVolumeWithSoftPass,
@@ -1950,11 +1951,16 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     const faces = [
       'shocked face close up phone',
       'shocked face apartment eviction notice',
-      'person holding eviction notice paper close up',
+      'worried face eviction notice apartment',
+      'person holding eviction notice close up',
+      'scared woman reading letter apartment',
+      'shocked man face apartment eviction',
       'foreclosure auction house steps crowd',
       'evicted family packing truck apartment',
+      'packing moving boxes evicted apartment',
       'stressed tenant crying apartment hallway',
       'couple arguing bills kitchen table',
+      'couple reading eviction letter worried',
       'tenant packing boxes apartment',
       'modern apartment living room daylight people',
     ];
@@ -2623,14 +2629,18 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
         'ultrasound demonstration site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
     : [];
-  // Housing: lead Vimeo with eviction/crisis face footage so the body doesn't
-  // fall back to muddy Archive newsreels when web clip slots are thin.
+  // Housing: lead Vimeo with shocked-face / eviction-evidence footage so the intro
+  // cannot be a FEMA graphic or news-desk opener (web26 raw 4.4–5.2).
   const housingHostLead = housing
     ? [
+        'worried tenant face close up site:vimeo.com',
+        'shocked face eviction notice site:vimeo.com',
         'eviction notice tenant apartment site:vimeo.com',
         'housing crisis family site:vimeo.com',
+        'evicted family packing boxes apartment site:vimeo.com',
         'tenant packing boxes site:vimeo.com',
         'foreclosure family home site:vimeo.com',
+        'stressed tenant crying apartment site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
     : [];
   const webHostQueries = [
@@ -4851,17 +4861,29 @@ export async function generateFullVideo(options) {
           mediaReport.volumePass = true;
           mediaReport.volumeSoftPass = soft.reason;
         } else {
+          // INTRO_FACE_FAIL on first check: arm face-seek so the top-up run
+          // prioritises shocked-face / eviction / clinical clips.
+          if ((soft.reason || '').startsWith('INTRO_FACE_FAIL')) {
+            fixState.faceSeekBroll = true;
+          }
           // Last chance: pad thin segments, then re-check soft-pass.
           await topUpHarvestVolume(gateProject, devServer, Math.max(4, Math.floor(loopMinAssets * 0.75)), mediaReport);
           const volume2 = evaluateHarvestVolume(gateProject, loopMinAssets);
           mediaReport.harvestQuality = volume2;
           mediaReport.volumePass = volume2.pass;
           const airlineSoftFail = volume2.pass ? airlineSoftPassMotionFailureReason(gateProject) : null;
+          // Housing/healthcare: even a volume hard-pass must clear the intro face gate —
+          // run checkIntroFacePool inline so the repad path doesn't bypass it.
+          const repadIntroFail = volume2.pass && !airlineSoftFail
+            ? checkIntroFacePool(gateProject)
+            : { pass: true };
           const soft2 = airlineSoftFail
             ? { pass: false, reason: airlineSoftFail }
-            : volume2.pass
+            : (volume2.pass && repadIntroFail.pass)
               ? { pass: true, reason: 'volume-hard-pass-after-repad' }
-              : evaluateHarvestVolumeWithSoftPass(mediaReport, gateProject);
+              : volume2.pass
+                ? repadIntroFail
+                : evaluateHarvestVolumeWithSoftPass(mediaReport, gateProject);
           if (soft2.pass) {
             log(`   ⚠️ Volume recovered after stock re-pad (${soft2.reason})`);
             mediaReport.volumePass = true;
@@ -4877,6 +4899,11 @@ export async function generateFullVideo(options) {
               : `soft-pass rejected after re-pad (${soft2.reason || soft.reason || 'none'})`;
             fixState.reHarvestMedia = true;
             fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+            // INTRO_FACE_FAIL: ensure next pass runs face-first queries for housing/healthcare.
+            const isIntroFaceFail = (soft2.reason || soft.reason || '').startsWith('INTRO_FACE_FAIL');
+            if (isIntroFaceFail) {
+              fixState.faceSeekBroll = true;
+            }
             return {
               ok: false,
               result: {
@@ -4889,6 +4916,28 @@ export async function generateFullVideo(options) {
               },
             };
           }
+        }
+      }
+      // Hard-pass path: volume already passed but housing/healthcare still need an
+      // intro-tier face clip. Fail-closed here so a FEMA-only pool cannot sneak
+      // through when volume is thin-but-sufficient.
+      if (mediaReport.volumePass !== false) {
+        const introFace = checkIntroFacePool(gateProject);
+        if (!introFace.pass) {
+          fixState.reHarvestMedia = true;
+          fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+          fixState.faceSeekBroll = true;
+          return {
+            ok: false,
+            result: {
+              ok: false,
+              error: `HARVEST_VOLUME_FAIL: ${introFace.reason}`,
+              harvestQualityFail: true,
+              topic,
+              outDir,
+              fixState,
+            },
+          };
         }
       }
       return { ok: true };

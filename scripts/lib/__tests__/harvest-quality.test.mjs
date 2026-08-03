@@ -1665,37 +1665,37 @@ describe('checkIntroFacePool — housing', () => {
     expect(result.pass).toBe(true);
   });
 
-  it('keyless housing soft-passes at 5 unique videos after intro-face (web57 thin at 5/6)', () => {
+  it('keyless housing soft-passes at 4 unique videos after intro-face (web58 thin at 4/5)', () => {
     const segments = [{ id: 'intro' }, { id: 'body' }, { id: 'outro' }];
     const media = [
       makeVideo({
         segmentId: 'intro',
-        url: 'https://vimeo.com/face-web57.mp4',
+        url: 'https://vimeo.com/face-web58.mp4',
         alt: 'worried tenant face close up packing boxes apartment',
         query: 'worried tenant face packing',
         source: 'Bing web video',
-        sourceUrl: 'https://vimeo.com/face-web57',
+        sourceUrl: 'https://vimeo.com/face-web58',
       }),
-      ...Array.from({ length: 4 }, (_, i) => makeVideo({
+      ...Array.from({ length: 3 }, (_, i) => makeVideo({
         segmentId: segments[i % 3].id,
-        url: `https://vimeo.com/housing-web57-${i}.mp4`,
+        url: `https://vimeo.com/housing-web58-${i}.mp4`,
         alt: 'apartment interior hallway tenant eviction packing boxes',
         query: 'apartment eviction packing',
         source: 'Bing web video',
-        sourceUrl: `https://vimeo.com/housing-web57-${i}`,
+        sourceUrl: `https://vimeo.com/housing-web58-${i}`,
       })),
     ];
     const proj = { topic: HOUSING_TOPIC, title: 'Housing crash', script: segments, media };
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
       archiveLiveFetched: 4,
-      videoTopUp: Array.from({ length: 5 }, (_, i) => ({ id: `t${i}` })),
+      videoTopUp: Array.from({ length: 4 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(true);
     expect(result.reason).toMatch(/^soft-pass-motion-housing\(/);
   });
 
-  it('keyless housing still fails below 5 unique videos even with intro-face', () => {
+  it('keyless housing still fails below 4 unique videos even with intro-face', () => {
     const segments = [{ id: 'intro' }, { id: 'body' }, { id: 'outro' }];
     const media = [
       makeVideo({
@@ -1706,7 +1706,7 @@ describe('checkIntroFacePool — housing', () => {
         source: 'Bing web video',
         sourceUrl: 'https://vimeo.com/face-thin',
       }),
-      ...Array.from({ length: 3 }, (_, i) => makeVideo({
+      ...Array.from({ length: 2 }, (_, i) => makeVideo({
         segmentId: segments[i % 3].id,
         url: `https://vimeo.com/housing-thin-${i}.mp4`,
         alt: 'apartment interior hallway tenant packing boxes',
@@ -1719,10 +1719,10 @@ describe('checkIntroFacePool — housing', () => {
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
       archiveLiveFetched: 2,
-      videoTopUp: Array.from({ length: 4 }, (_, i) => ({ id: `t${i}` })),
+      videoTopUp: Array.from({ length: 3 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(false);
-    expect(result.reason).toMatch(/soft-pass-motion-housing-thin\(4\/5/);
+    expect(result.reason).toMatch(/soft-pass-motion-housing-thin\(3\/4/);
   });
 });
 

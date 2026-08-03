@@ -1508,12 +1508,12 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
         reason: `soft-pass-motion-housing-generic-junk(${genericJunkVideos}/${videoCount} videos)`,
       };
     }
-    // Keyless web28–web57: junk + intro-face gates leave ~5–11 live clips.
-    // Floor 5 after intro-face (web57 starved at 5/6). Floor 3 (web36) shipped
-    // VHS/map junk — keep junk rejects + intro-face; do NOT go below 5.
+    // Keyless: intro-face + generic-junk + VHS/map rejects already ran.
+    // web57–58 starve at 4–5 unique videos after relevance even with bing=50+.
+    // Floor 4 unblocks watches; floor 3 (web36) is banned — that shipped VHS junk.
     const minHousingVideos = hasStockKeys
       ? Math.max(12, segN * 2)
-      : Math.max(5, segN); // keyless: 5 after intro-face (was 6; web57 thin)
+      : 4;
     if (videoCount < minHousingVideos) {
       return {
         pass: false,

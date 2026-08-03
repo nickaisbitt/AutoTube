@@ -536,6 +536,12 @@ describe('housing off-topic B-roll rejects', () => {
       'the bronx social justice and anti violence forums housing justice for all',
       'Marco Rubio:We are not members of the ICC',
       'Auto Insurance Rates Just Dropped Sarah Jenkins',
+      // web25 music/disaster pollution despite face queries
+      'New Kids On The Block - Crash (Official Lyric Video)',
+      'new jersey apartment complex explosion',
+      'FEMA fraud and scam awareness',
+      'Community recovery after disaster',
+      'News motion footage',
       'LendingTree bar chart housing crash infographic',
       'American Home Mortgage bankruptcy slide graphic',
       'youtuber headset talking head podcast mic subscribe button',

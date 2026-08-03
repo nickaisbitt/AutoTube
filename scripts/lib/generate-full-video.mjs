@@ -2075,6 +2075,8 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     // Prefer CNBC surgical robot / da Vinci OR / radiologist workstation for intro quality.
     const faces = [
       'CNBC surgical robot operating room hospital',
+      'Science Nation surgical robot operating room',
+      'Onyx RAD AI radiology workstation screen',
       'da Vinci robot surgery operating room patient',
       'radiologist workstation MRI screen monitor',
       'ai radiology doctor monitor screen',
@@ -2413,6 +2415,8 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
 /** Short Archive.org subjects for hospital / clinical / AI-medicine keyless runs. */
 const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   'ai radiology',
+  'Science Nation surgical robot',
+  'Onyx RAD radiology ai',
   'doctor mri monitor',
   'clinician computer screen',
   'surgical robot',
@@ -3398,15 +3402,18 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         return -20;
       }
       // healthcare-web11 junk that slipped past soft-pass Archive pool.
+      // Also covers web15 junk: body-language lifestyle, NVIDIA promo, AI Patel
+      // channel-name pollution, jada pemble staff intro, helium fun-fact, milestone
+      // celebration (maple grove hospital).
       if (
-        /\b(cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|medical\s+city\s+arlington|adventure\s+eight|scottsdale.?s?\s+cure\s+corridor|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|kids?\s+(?:classroom|assembly)|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot|school\s+nurse|wendy\s+cummings|whhi(?:tv|\s+news)?|world\s+laparoscopy|circumc(?:ision|ure)|organ\s+harvesting|ukraine\s+pow|al\s+funduq|kissing\s+and\s+love|rhino\s+(?:ct|scan)|board\s+of\s+commissioners|anniversary\s+celebration|medical\s+career|judy\s+mikovits|david\s+samadi|\bsamadi\b|healthloop|ron\s+johnson|mrna\s+vaccine|walk\s*in\s+center|medical\s+monopoly|tour\s+glendale|attempted\s+abortion|medical\s+liability|talk\s+of\s+the\s+town)\b/i.test(blob)
+        /\b(cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|medical\s+city\s+arlington|adventure\s+eight|scottsdale.?s?\s+cure\s+corridor|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|kids?\s+(?:classroom|assembly)|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot|school\s+nurse|wendy\s+cummings|whhi(?:tv|\s+news)?|world\s+laparoscopy|circumc(?:ision|ure)|organ\s+harvesting|ukraine\s+pow|al\s+funduq|kissing\s+and\s+love|rhino\s+(?:ct|scan)|board\s+of\s+commissioners|anniversary\s+celebration|medical\s+career|judy\s+mikovits|david\s+samadi|\bsamadi\b|healthloop|ron\s+johnson|mrna\s+vaccine|walk\s*in\s+center|medical\s+monopoly|tour\s+glendale|attempted\s+abortion|medical\s+liability|talk\s+of\s+the\s+town|body\s+language\s+(?:healthcare|medical|clinical|edition|coaching|mistakes?)|healthcare\s+edition|nvidia\s+(?:ai\s+)?(?:for\s+)?(?:healthcare|life\s+sciences|health\s+systems?)|ai\s+patel|why\s+ai\s+[a-z]{3,}\s+why\s+ai|jada\s+pemble|meet\s+our\s+[a-z]+\s+[a-z]+\s+[a-z]+\s+medical\s+lab|helium\s+used\s+in\s+(?:the\s+)?medical\s+(?:field|imaging)|not\s+just\s+for\s+balloons\s+helium|milestone\s+celebration|maple\s+grove\s+hospital)\b/i.test(blob)
       ) {
         return -20;
       }
       // Pure talking-head / news studio without clinician+screen or OR motion —
       // demote below intro clinical floor (≥2) so AI-talk pads lose the hook.
       const talkingHeadPad = /\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|studio\s+interview|webinar\s+host|podcast\s+host|lecture\s+(?:host|speaker))\b/i.test(blob);
-      const clinicianScreenOrOr = /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|OR)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|ultrasound\s+(?:demo|demonstration)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen|mri)|mri\s+(?:monitor|screen)|scan\s*screen|operating\s+room|or\s+(?:suite|table|lights?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing))\b/i.test(blob)
+      const clinicianScreenOrOr = /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|OR)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|onyx\s*rad(?:\s+ai|\s+radiol)?|ultrasound\s+(?:demo|demonstration)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen|mri)|mri\s+(?:monitor|screen)|scan\s*screen|operating\s+room|or\s+(?:suite|table|lights?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing))\b/i.test(blob)
         || (
           /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(blob)
           && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(blob)
@@ -3430,7 +3437,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         return 9;
       }
-      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+surgical|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|da\s*vinci\s*(?:robot\s+)?operating\s+room)\b/i.test(blob)
+      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|da\s*vinci\s*(?:robot\s+)?operating\s+room|onyx\s*rad(?:\s+ai|\s+radiol)?)\b/i.test(blob)
         && !/\b(classroom|school\s+district|\bisd\b|students?\s+watching|children\s+seated|da\s*vinci\s+surgical\s+system\s+overview|exhibition\s+hall|trade\s*show|conference\s+(?:booth|floor)|expo\s+(?:floor|booth|hall))\b/i.test(blob)
       ) return 10;
       if (

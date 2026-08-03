@@ -850,6 +850,96 @@ describe('healthcare non-clinical ceremony / event rejects (web13)', () => {
   });
 });
 
+describe('healthcare web15 raw 4.4 junk rejects (body-lang / NVIDIA / name-pollution / helium / milestone)', () => {
+  it('hard-rejects body-language lifestyle content with healthcare framing', () => {
+    const cases = [
+      'Mistake 1 Saying the wrong things with your body Healthcare edition',
+      'body language healthcare tips for doctors',
+      'body language medical coaching mistakes',
+      'body language clinical edition communication',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects NVIDIA AI for Healthcare / Life Sciences promo', () => {
+    const cases = [
+      'NVIDIA AI for Healthcare and Life Sciences',
+      'NVIDIA for healthcare solutions AI',
+      'NVIDIA AI healthcare clinical systems',
+      'NVIDIA for life sciences health systems',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects AI Patel YouTube channel name pollution', () => {
+    const cases = [
+      'Why AI Patel Why AI will change healthcare',
+      'AI Patel explains why AI will change medicine',
+      'why ai patel why ai beats your doctor',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects meet-our-staff person-name pollution (jada pemble)', () => {
+    const cases = [
+      'meet our jacks jada pemble medical lab science community assistant',
+      'jada pemble medical laboratory science community assistant',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects helium fun-fact content framed as medical', () => {
+    const cases = [
+      'not just for balloons helium used in medical field',
+      'helium used in the medical field MRI scanners',
+      'helium used in medical imaging hospital',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('hard-rejects hospital milestone celebration events', () => {
+    const cases = [
+      'maple grove hospital robot milestone celebration',
+      'hospital milestone celebration ribbon cutting',
+      'milestone celebration hospital new wing opening',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(true);
+    }
+  });
+
+  it('does not reject legitimate clinical content similar to rejected terms', () => {
+    const keep = [
+      'doctor patient body examination physical assessment',
+      'CNBC surgical robot operating room hospital',
+      'Science Nation surgical robot OR lights',
+      'radiologist workstation MRI screen monitor',
+      'da Vinci robot surgery operating room patient',
+      'medical laboratory technician microscope analysis',
+      'MRI scanner room hospital clinical',
+    ];
+    for (const alt of keep) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+    }
+  });
+});
+
 describe('healthcare keyless soft-pass-motion (web + Archive)', () => {
   beforeEach(() => {
     vi.stubEnv('PEXELS_API_KEY', '');

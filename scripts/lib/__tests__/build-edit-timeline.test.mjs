@@ -419,6 +419,70 @@ describe('introFaceTier', () => {
       expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
     }
   });
+
+  it('hard-rejects web15 junk pads as healthcare intro (body-lang / NVIDIA / AI Patel / helium / milestone)', () => {
+    const web15RejectCases = [
+      {
+        alt: 'Mistake 1 Saying the wrong things with your body Healthcare edition body language coaching',
+        title: 'body language healthcare edition mistakes',
+        url: 'https://www.youtube.com/watch?v=bodylang1',
+        type: 'video',
+      },
+      {
+        alt: 'NVIDIA AI for Healthcare and Life Sciences promo corporate',
+        title: 'NVIDIA AI for Healthcare and Life Sciences',
+        url: 'https://www.youtube.com/watch?v=nvidiahc1',
+        type: 'video',
+      },
+      {
+        alt: 'Why AI Patel Why AI will change healthcare talking head',
+        title: 'AI Patel why AI will change healthcare',
+        url: 'https://www.youtube.com/watch?v=aipatel1',
+        type: 'video',
+      },
+      {
+        alt: 'meet our jacks jada pemble medical lab science community assistant staff intro',
+        title: 'jada pemble medical laboratory science',
+        url: 'https://www.youtube.com/watch?v=jadapemble1',
+        type: 'video',
+      },
+      {
+        alt: 'not just for balloons helium used in the medical field MRI scanners',
+        title: 'helium used in medical field',
+        url: 'https://www.youtube.com/watch?v=helium1',
+        type: 'video',
+      },
+      {
+        alt: 'maple grove hospital robot milestone celebration ribbon cutting event',
+        title: 'maple grove hospital milestone celebration',
+        url: 'https://www.youtube.com/watch?v=maplegr1',
+        type: 'video',
+      },
+    ];
+    for (const asset of web15RejectCases) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+    }
+  });
+
+  it('tiers Science Nation and Onyx RAD clips as strong healthcare opener (2)', () => {
+    const preferredCases = [
+      {
+        alt: 'Science Nation surgical robot operating room hospital NSF',
+        title: 'Science Nation surgical robot documentary',
+        url: 'https://archive.org/download/sciencenation/sn.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'Onyx RAD AI radiology workstation screen monitor diagnosis',
+        title: 'Onyx RAD AI radiology review',
+        url: 'https://vimeo.com/onyxrad1.mp4',
+        type: 'video',
+      },
+    ];
+    for (const asset of preferredCases) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(2);
+    }
+  });
 });
 
 

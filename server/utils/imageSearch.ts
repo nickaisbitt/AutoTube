@@ -49,7 +49,7 @@ export function resolveChromeExecutablePath(): string | undefined {
   ]) {
     if (!existsSync(base)) continue;
     try {
-      for (const entry of readdirSync(base)) {
+      for (const entry of readdirSync(base).sort().reverse()) {
         if (!entry.startsWith("chromium-")) continue;
         playwrightCandidates.push(
           join(base, entry, "chrome-linux64", "chrome"),

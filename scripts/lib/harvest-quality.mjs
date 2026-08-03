@@ -1497,12 +1497,11 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
         reason: `soft-pass-motion-housing-generic-junk(${genericJunkVideos}/${videoCount} videos)`,
       };
     }
-    // Keyless web28/web29: junk rejects leave ~7–11 live clips across 4 segs.
-    // Floor at 6 (not 8) once intro-face gate already passed — volume-hard-fail
-    // on 7/8 starved face-first pools without raising watch floors.
+    // Keyless web28–web32: junk + intro-face gates leave ~5–11 live clips.
+    // Floor at 5 once intro-face already passed (watch floors unchanged).
     const minHousingVideos = hasStockKeys
       ? Math.max(12, segN * 2)
-      : Math.max(6, segN);
+      : Math.max(5, segN);
     if (videoCount < minHousingVideos) {
       return {
         pass: false,

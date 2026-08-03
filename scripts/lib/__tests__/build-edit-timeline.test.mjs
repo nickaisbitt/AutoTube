@@ -352,6 +352,73 @@ describe('introFaceTier', () => {
       expect(introFaceTier(asset, { healthcare: true })).toBe(2);
     }
   });
+
+  it('caps generic healthcare Archive (clinical vocab, no OR) at introFaceTier 1 (body-only)', () => {
+    // Hospital/clinical Archive without OR/surgical/radiologist keywords should be
+    // body filler (tier 1), not intro material (tier 2 needed to clear the floor).
+    const genericArchiveCases = [
+      {
+        alt: 'hospital corridor patients nurses busy ward archive footage',
+        title: 'hospital corridor footage archive 1990s',
+        url: 'https://archive.org/download/hosp1990/hosp.mp4',
+        source: 'Archive.org live',
+        type: 'video',
+      },
+      {
+        alt: 'doctor reviewing patient medical records healthcare clinic',
+        title: 'medical records review clinic archive documentary',
+        url: 'https://archive.org/download/medrecords/doc.mp4',
+        source: 'Archive.org live',
+        type: 'video',
+      },
+    ];
+    for (const asset of genericArchiveCases) {
+      // Not an exhibition-hall reject, not a talking-head reject — just generic clinical.
+      expect(introFaceTier(asset, { healthcare: true })).toBe(1);
+    }
+  });
+
+  it('gives healthcare Archive explainer/documentary tier 0 (talking-head gate)', () => {
+    // Archive explainer/lecture without hard-reject keywords: talking-head soft-gate
+    // returns 0 (not admitted to intro, but passes the hard-reject gate at -1).
+    const talkingHeadCases = [
+      {
+        alt: 'AI in healthcare explainer lecture archive',
+        title: 'AI healthcare explainer lecture archive',
+        url: 'https://archive.org/download/aihealth/doc.mp4',
+        source: 'Archive.org live',
+        type: 'video',
+      },
+      {
+        alt: 'hospital administration healthcare management lecture',
+        title: 'healthcare management lecture archive',
+        url: 'https://archive.org/download/hcmgmt/lec.mp4',
+        source: 'Archive.org live',
+        type: 'video',
+      },
+    ];
+    for (const asset of talkingHeadCases) {
+      // introFaceTier returns 0 for explicit talking-head/explainer/lecture keywords
+      // without clinicianScreenOrOr — below the intro floor (2) but not hard-rejected (-1).
+      expect(introFaceTier(asset, { healthcare: true })).toBe(0);
+    }
+  });
+
+  it('hard-rejects healthcare Archive with news-studio / talking-head-studio keywords (-1)', () => {
+    // "talking head studio" / "webinar" etc. hit isRejectedIntroLeadVisual and return -1.
+    const hardRejectedCases = [
+      {
+        alt: 'healthcare news talking head studio anchor interview',
+        title: 'healthcare news studio anchor',
+        url: 'https://archive.org/download/news/news.mp4',
+        source: 'Archive.org live',
+        type: 'video',
+      },
+    ];
+    for (const asset of hardRejectedCases) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+    }
+  });
 });
 
 

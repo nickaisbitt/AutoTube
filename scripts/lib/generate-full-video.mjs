@@ -1752,7 +1752,13 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
   }
   // Non-cyber healthcare (AI-medicine, clinical change stories): clinical motion first.
   if (isHealthcareTopic(topicBlob)) {
-    return /hospital|patient|clinic|nurse|doctor|medical|medicine|healthcare|corridor|ward|mri|ct\s*scan|radiolog|diagnos|telemedicine|telehealth|ehr|emr|ambulance|icu|exam\s*room|waiting\s*room|stethoscope|ai|algorithm|laptop|computer|worried|family/.test(
+    // Exhibition-hall / trade-show product demos are not clinical B-roll.
+    if (
+      /\b(exhibition\s+hall|trade\s*show|conference\s+(?:booth|floor)|expo\s+(?:floor|booth|hall)|himss\s+(?:conference|expo)|medical\s+trade\s+show|healthcare\s+(?:expo|trade\s+show)|suit\s+walk(?:ing)?)\b/i.test(blob)
+    ) {
+      return false;
+    }
+    return /hospital|patient|clinic|nurse|doctor|medical|medicine|healthcare|corridor|ward|mri|ct\s*scan|radiolog|diagnos|telemedicine|telehealth|ehr|emr|ambulance|icu|exam\s*room|waiting\s*room|stethoscope|ai|algorithm|laptop|computer|worried|family|surgical|robot|or\s+(?:suite|table)|operating\s+room|radiology\s+screen|workstation/.test(
       blob,
     );
   }
@@ -2054,12 +2060,17 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   // Cyber topics keep records/server B-roll; general healthcare prefers clinical motion.
   if (isHealthcareTopic(topicBlob)) {
     // Face-first AI-medicine: clinician+screen / OR motion — not Archive talking-heads.
+    // Prefer CNBC surgical robot / da Vinci OR / radiologist workstation for intro quality.
     const faces = [
+      'CNBC surgical robot operating room hospital',
+      'da Vinci robot surgery operating room patient',
+      'radiologist workstation MRI screen monitor',
       'ai radiology doctor monitor screen',
       'clinician pointing at mri monitor',
       'doctor reviewing mri scan monitors',
       'radiologist ai diagnosis screen',
       'surgical robot operating room',
+      'robotic surgery OR lights surgeon',
       'ultrasound demonstration clinician',
       'worried patient looking at phone',
       'stressed nurse looking at computer',
@@ -3360,6 +3371,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/\b(title\s+card|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|capitol|protest|maternity|kapparot|kapores|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri)\b/i.test(blob)) {
         return -8;
       }
+      // Exhibition-hall / trade-show / conference-booth pads scraped via "surgical robot"
+      // queries but filmed on a product-demo floor, not in a hospital or OR (web11).
+      if (
+        /\b(exhibition\s+hall|trade\s*show\s+floor|conference\s+(?:booth|floor|expo\s+floor)|expo\s+(?:floor|booth|hall)|himss\s+(?:conference|expo|show)|ces\s+(?:20\d{2}|conference|show)|health\s+(?:it\s+)?summit\s+(?:booth|floor|expo)|ai\s+(?:summit|conference)\s+(?:booth|floor|hall|product\s+demo)|medical\s+trade\s+show|healthcare\s+(?:expo|trade\s+show)|suit\s+(?:walk(?:ing)?|stroll(?:ing)?))\b/i.test(blob)
+      ) {
+        return -20;
+      }
       // healthcare-web11 junk that slipped past soft-pass Archive pool.
       if (
         /\b(cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|scooter\s+vs\s+car|medical\s+city\s+arlington|adventure\s+eight|scottsdale.?s?\s+cure\s+corridor|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|kids?\s+(?:classroom|assembly)|da\s*vinci\s+surgical\s+system\s+overview|neuralink\s+robot|school\s+nurse|wendy\s+cummings|whhi|world\s+laparoscopy|circumc(?:ision|ure)|organ\s+harvesting|ukraine\s+pow|al\s+funduq|kissing\s+and\s+love|rhino\s+(?:ct|scan)|board\s+of\s+commissioners|anniversary\s+celebration|medical\s+career)\b/i.test(blob)
@@ -3369,7 +3387,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Pure talking-head / news studio without clinician+screen or OR motion —
       // demote below intro clinical floor (≥2) so AI-talk pads lose the hook.
       const talkingHeadPad = /\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|studio\s+interview|webinar\s+host|podcast\s+host|lecture\s+(?:host|speaker))\b/i.test(blob);
-      const clinicianScreenOrOr = /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|ultrasound\s+(?:demo|demonstration)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen|mri)|mri\s+(?:monitor|screen)|scan\s*screen|operating\s+room)\b/i.test(blob)
+      const clinicianScreenOrOr = /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|OR)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|ultrasound\s+(?:demo|demonstration)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen|mri)|mri\s+(?:monitor|screen)|scan\s*screen|operating\s+room|or\s+(?:suite|table|lights?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing))\b/i.test(blob)
         || (
           /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(blob)
           && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(blob)
@@ -3393,8 +3411,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         return 9;
       }
-      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+surgical)\b/i.test(blob)
-        && !/\b(classroom|school\s+district|\bisd\b|students?\s+watching|children\s+seated|da\s*vinci\s+surgical\s+system\s+overview)\b/i.test(blob)
+      if (/\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+surgical|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|da\s*vinci\s*(?:robot\s+)?operating\s+room)\b/i.test(blob)
+        && !/\b(classroom|school\s+district|\bisd\b|students?\s+watching|children\s+seated|da\s*vinci\s+surgical\s+system\s+overview|exhibition\s+hall|trade\s*show|conference\s+(?:booth|floor)|expo\s+(?:floor|booth|hall))\b/i.test(blob)
       ) return 10;
       if (
         /\b(ultrasound\s+(?:demo|demonstration|exam|probe)|sonograph)\b/i.test(blob)

@@ -286,6 +286,72 @@ describe('introFaceTier', () => {
       type: 'video',
     }, { healthcare: true })).toBe(-1);
   });
+
+  it('rejects exhibition-hall / trade-show / conference-booth openers on healthcare intro (web11 suit)', () => {
+    // Conference-floor product demos — not clinical use — must never lead the hook.
+    const exhibitionCases = [
+      {
+        alt: 'AI healthcare summit booth floor product demo',
+        title: 'health IT summit exhibition hall healthcare AI',
+        url: 'https://vimeo.com/summit123.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'HIMSS conference expo floor healthcare IT booth',
+        title: 'HIMSS 2024 medical technology exhibitor',
+        url: 'https://example.com/himss.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'medical trade show exhibition hall surgical robot product demonstration',
+        title: 'healthcare trade show product demo',
+        url: 'https://archive.org/download/tradeshow/ts.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'suit walking conference floor AI healthcare summit expo booth',
+        title: 'executive suit walk healthcare expo',
+        url: 'https://example.com/suitwalk.mp4',
+        type: 'video',
+      },
+    ];
+    for (const asset of exhibitionCases) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+    }
+  });
+
+  it('tiers OR surgical robot / radiologist workstation as healthcare opener (2)', () => {
+    // CNBC-style titles and real OR clips should reliably get tier 2.
+    const orCases = [
+      {
+        alt: 'CNBC surgical robot operating room hospital cancer diagnosis',
+        title: 'CNBC surgical robot hospital',
+        url: 'https://vimeo.com/cnbc_robot.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'da Vinci robot surgery operating room patient procedure',
+        title: 'da Vinci robotic surgery OR',
+        url: 'https://vimeo.com/davinci.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'radiologist workstation MRI screen monitor reading hospital',
+        title: 'radiologist reviewing MRI workstation',
+        url: 'https://vimeo.com/radwork.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'robotic surgery OR lights surgeon operating table',
+        title: 'robotic surgery operating room',
+        url: 'https://vimeo.com/orsurgeon.mp4',
+        type: 'video',
+      },
+    ];
+    for (const asset of orCases) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(2);
+    }
+  });
 });
 
 

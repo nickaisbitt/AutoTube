@@ -299,15 +299,34 @@ describe('introFaceTier', () => {
 describe('passesHousingTimelineIntroEvidence', () => {
   it('passes tenant/eviction evidence that checkEditTimelineIntroFace accepts', () => {
     expect(passesHousingTimelineIntroEvidence({
+      type: 'video',
       title: 'tenant left in limbo after landlord was evicted',
       alt: 'tenant eviction apartment',
       url: 'https://archive.org/x.mp4',
     })).toBe(true);
     expect(passesHousingTimelineIntroEvidence({
+      type: 'video',
       title: 'worried family distressed eviction notice apartment',
       alt: 'family crying distressed evicted apartment door',
       url: 'https://nypost.com/x',
     })).toBe(true);
+  });
+
+  it('rejects LinkedIn credit-repair flyer stills even with eviction query stamps (housing-web82)', () => {
+    expect(passesHousingTimelineIntroEvidence({
+      type: 'image',
+      title: 'shocked woman face receiving eviction notice apartment',
+      alt: 'shocked woman face receiving eviction notice apartment',
+      url: 'https://media.licdn.com/dms/image/v2/D5622AQGVUYHCH5OaFw/feedshare-image-high-res/x.jpg',
+      source: 'Deep Harvest (www.linkedin.com)',
+      sourceUrl: 'https://www.linkedin.com/posts/rose-m-jones-the-housing-crash',
+    })).toBe(false);
+    expect(passesHousingTimelineIntroEvidence({
+      type: 'video',
+      title: 'mortgage protection plan alliance group',
+      alt: 'mortgage protection a mortgage protection plan is the smartest',
+      url: 'https://example.com/mortgage.mp4',
+    })).toBe(false);
   });
 
   it('rejects bare face/music pads that fail the timeline gate (web3/web4)', () => {

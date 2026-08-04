@@ -259,9 +259,13 @@ export function passesHousingTimelineIntroEvidence(asset) {
   const evidence = assetEvidenceBlob(asset);
   if (!evidence.trim()) return false;
   if (HOUSING_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
-  if (/\b(static\s+document|document\s+only|notice\s+only|price\s+index|chart\s+graphic|paper\s+text)\b/i.test(evidence)) {
+  const urlBlob = `${asset?.url || ''} ${asset?.sourceUrl || ''} ${asset?.source || ''}`;
+  if (/\b(linkedin\.com|licdn\.com|media\.licdn)\b/i.test(urlBlob)) return false;
+  if (/\b(static\s+document|document\s+only|notice\s+only|price\s+index|chart\s+graphic|paper\s+text|credit\s+repair|denied\s+credit|mortgage\s+protection)\b/i.test(evidence)) {
     return false;
   }
+  // housing-web82: promo flyer stills cleared person+eviction stamps — require motion.
+  if (!(asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) return false;
   const hasGateCollocation =
     /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
   const hasEvictionWithPerson =
@@ -1216,15 +1220,14 @@ export function buildEditTimeline(project, options = {}) {
           if (continuesTwoClipPingPong(candidate)) return false;
           if (continuesOpeningClusterPattern(candidate)) return false;
           // First 15s: prefer motion over Ken-Burns stills while unused videos remain.
-          // Housing intro exception: gate-passing stills beat junk motion so
-          // INTRO_FACE_FAIL_TIMELINE does not fire when only stills have tenant/face evidence.
+          // housing-web82: do NOT exempt promo/LinkedIn stills — they cleared
+          // person+eviction stamps and dominated thumbnail-still fallbacks.
           if (
             globalStartSec < FIRST_WINDOW_SEC
             && preferVideo
             && candidate.type !== 'video'
             && uniqueVideos.length > 0
             && hasUnusedMotionAlternative()
-            && !(topicIsHousing && introLeadWindow && passesHousingTimelineIntroEvidence(candidate))
           ) {
             return false;
           }

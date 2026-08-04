@@ -2487,6 +2487,25 @@ describe('checkEditTimelineIntroFace — housing first-segment gate', () => {
       'housing crash eviction',
     )).toBeTruthy();
   });
+
+  it('rejects housing-web82 credit-repair / mortgage-protection / auction promo pads', () => {
+    expect(housingOffTopicBrollReason(
+      'Denied Credit Repair two months rent free housing crash is here',
+      'housing crash eviction',
+    )).toBeTruthy();
+    expect(housingOffTopicBrollReason(
+      'mortgage protection a mortgage protection plan is the smartest',
+      'housing crash eviction',
+    )).toBeTruthy();
+    expect(housingOffTopicBrollReason(
+      'manheim auction how to buy in person are you new to car auctions',
+      'housing crash eviction',
+    )).toBeTruthy();
+    expect(housingOffTopicBrollReason(
+      'mammoth real estate condos mammoth village properties',
+      'housing crash eviction',
+    )).toBeTruthy();
+  });
 });
 
 describe('housingIntroFaceEvidenceMatches — real DDG site:vimeo.com titles (waves 36-60)', () => {

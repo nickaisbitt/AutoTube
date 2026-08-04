@@ -83,5 +83,14 @@ describe('isJunkWebVolumeStillUrl', () => {
     it('blocks wallpapers.com', () => {
       expect(isJunkWebVolumeStillUrl('https://wallpapers.com/images/hd/photo.jpg')).toBe(true);
     });
+
+    it('blocks LinkedIn / licdn promo stills (housing-web82 Denied Credit Repair flyer)', () => {
+      expect(isJunkWebVolumeStillUrl(
+        'https://media.licdn.com/dms/image/v2/D5622AQGVUYHCH5OaFw/feedshare-image-high-res/x.jpg',
+      )).toBe(true);
+      expect(isJunkWebVolumeStillUrl(
+        'https://www.linkedin.com/posts/rose-m-jones-the-housing-crash',
+      )).toBe(true);
+    });
   });
 });

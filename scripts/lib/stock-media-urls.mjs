@@ -431,7 +431,7 @@ export const UNSAFE_MEDIA_URL_RE =
  * investigation videos (Niagara, Discogs, PurePeople, etc.).
  */
 export const JUNK_WEB_STILL_HOST_RE =
-  /\b(niagara|audleytravel|wallpapers\.com|discogs|allmusic|purepeople|howtallis|storagereview|a-z-animals|ariasfriends|pinimg\.com|pinterest\.|lookaside\.fbsbx|filo-question-diagrams|askfilo\.com)\b/i;
+  /\b(niagara|audleytravel|wallpapers\.com|discogs|allmusic|purepeople|howtallis|storagereview|a-z-animals|ariasfriends|pinimg\.com|pinterest\.|lookaside\.fbsbx|filo-question-diagrams|askfilo\.com|linkedin\.com|licdn\.com|media\.licdn)\b/i;
 
 export function isJunkDemoVideoUrl(url = '') {
   return JUNK_VIDEO_HOST_RE.test(url || '');

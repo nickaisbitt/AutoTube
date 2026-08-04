@@ -254,6 +254,26 @@ const HOUSING_TALKING_HEAD_RE =
   /\b(webinar|workshop|tenant\s+relief|rent\s+program|habitability|tenant[\s-]focused|eviction\s+moratorium|landlord\s+tenant\s+act|tenant\s+advocacy|lawyers?\s+committee|eviction\s+laws?|tenant\s+rights)\b/;
 
 /**
+ * Split-screen / news-package / interview-format openers for housing hooks.
+ * These are low-energy "documentary" formats that read as news — not an event.
+ * Matched against evidence only (title/alt/source/url) so a shocked-face close-up
+ * described as "split screen" doesn't escape, but an unlabelled face clip does.
+ */
+const HOUSING_SPLIT_SCREEN_NEWS_RE =
+  /\b(split[\s-]?screen|news\s+(?:package|anchor|studio|segment|format|desk|channel)|talking[\s-]?head\s+(?:interview|format|style|segment)|cbs\s+(?:news|this\s+morning|evening\s+news|morning\s+news|channel)|news\s+interview\s+format|panel\s+discussion\s+(?:format|style)|interview\s+split|dual\s+talking\s+head|side[\s-]by[\s-]side\s+interview)\b/i;
+
+/**
+ * True when the clip's evidence metadata identifies it as a split-screen, news-package,
+ * or talking-head interview format — never the right housing hook opener when face clips exist.
+ * Does not hard-reject (unlike isRejectedIntroLeadVisual); `introFaceTier` returns 0 so
+ * these fall through to the general pool only after all face/apartment clips are exhausted.
+ */
+export function isHousingSplitScreenOrNewsIntro(asset) {
+  const evidence = assetEvidenceBlob(asset);
+  return HOUSING_SPLIT_SCREEN_NEWS_RE.test(evidence);
+}
+
+/**
  * True when metadata is landscape/nature establishing with no apartment or
  * face signal — never OK as a housing hook opener when better clips exist.
  */
@@ -332,11 +352,18 @@ const HEALTHCARE_TOPICAL_VISUAL_RE =
  * topical frame (2) beats any readable face or housing apartment motion (1)
  * beats other lead visuals (0). Landscape-only housing stock is -1.
  * Healthcare title-card / Giphy openers are -1.
+ * Housing split-screen / news-package / talking-head format openers are 0 regardless
+ * of face metadata — they feel like news, not an event, and must lose to face clips.
  */
 export function introFaceTier(asset, { airline = false, housing = false, healthcare = false } = {}) {
   // Housing landscape / webinar / chair / home-tour and healthcare title cards → -1.
   if (housing && isRejectedIntroLeadVisual(asset, { housing: true })) return -1;
   if (healthcare && isRejectedIntroLeadVisual(asset, { healthcare: true })) return -1;
+  // Housing: split-screen / news-package openers → tier-0 (fallback only).
+  // They may carry "face" in metadata but the format is low-energy documentary.
+  // Callers exhaust tier-2 and tier-1 face/apartment clips first; these slip in
+  // only when no better option exists — never hard-rejected, just deprioritized.
+  if (housing && isHousingSplitScreenOrNewsIntro(asset)) return 0;
   if (healthcare) {
     // Evidence only — harvest query must not mint tier-2 from "surgical robot" alone
     // when the title is GeekBeat / Bayer / innovate (web43 opener spoof).
@@ -811,6 +838,31 @@ export function buildEditTimeline(project, options = {}) {
         // Housing also boosts apartment-motion tier-1 via introFaceTier.
         if (isIntro && faceFirstIntroTopic && introFaceTier(a, faceTierOptions) > 0) {
           score += 4 + introFaceTier(a, faceTierOptions);
+        }
+        // Housing intro: shocked/worried face tied to eviction/apartment evidence → extra +4
+        // so these strongly outrank split-screen/news-package/talking-head openers.
+        if (isIntro && topicIsHousing) {
+          const evBlob = assetEvidenceBlob(a);
+          if (
+            /\b(shocked|worried|crying|distressed|desperate|tearful|distraught|panicked)\b/i.test(evBlob)
+            && /\b(evict|tenant|landlord|rent|apartment|foreclos|homeless|housing)\b/i.test(evBlob)
+            && (a?.type === 'video' || /\.mp4/i.test(a?.url || ''))
+          ) {
+            score += 4;
+          }
+          // Penalise split-screen/news-package openers in the intro so face clips rank above them.
+          if (isHousingSplitScreenOrNewsIntro(a)) score -= 6;
+        }
+        // Healthcare intro: worried/focused clinician face at workstation → extra +3
+        // so OR/radiologist clips beat generic vial/lab stock even without OR-keyword evidence.
+        if (isIntro && topicIsHealthcare) {
+          const evBlob = assetEvidenceBlob(a);
+          if (
+            /\b(worried|concerned|focused|examining|reviewing\s+(?:scan|results?)|at\s+workstation)\b/i.test(evBlob)
+            && /\b(doctor|radiologist|physician|surgeon|clinician|nurse)\b/i.test(evBlob)
+          ) {
+            score += 3;
+          }
         }
         // Cold intro: beat match outranks establishing stock.
         if (coldEval && isIntro && beatBoost > 0) score += beatBoost * 2;

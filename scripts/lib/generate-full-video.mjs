@@ -2431,11 +2431,22 @@ const ARCHIVE_AIRLINE_MOTION_QUERIES = [
 ];
 
 const ARCHIVE_HOUSING_MOTION_QUERIES = [
+  // Face/emotion-forward queries — these are the housingHostLead site:vimeo.com base queries
+  // (added in b40b8ab). They MUST appear early so the scoped Vimeo searches fire within
+  // queryCap=34. When these were last, 12 webQueries + 22 earlier boost entries = 34 cap
+  // was hit before any of these 7 executed — all 7 were silently dropped (web63 bing=0 ddg=0).
+  'worried tenant face close up',
+  'shocked face eviction notice',
+  'eviction notice tenant apartment',
+  'housing crisis family',
+  'evicted family packing boxes apartment',
+  'tenant packing boxes',
+  'stressed tenant crying apartment',
+  // Core housing B-roll subjects
   'apartment building',
   'apartment interior',
   'public housing',
   'tenant eviction',
-  // rent strike / landlord hearing → Archive tribunal/protest (housing-web20 opener).
   'worried couple apartment',
   'housing inspection',
   'moving house boxes',
@@ -2451,21 +2462,10 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'foreclosure auction house',
   'empty house foreclosure',
   'neighborhood housing survey',
-  // Additional queries for emotional/face-forward housing footage.
   'eviction documentary family',
   'housing crisis documentary',
   'foreclosure family home',
   'housing shortage crisis',
-  // housing-web61 Bing/DDG 0-result fix: housingHostLead site:vimeo.com queries only
-  // fire when their base query appears in this list (webMotionHostQueryBase match).
-  // Adding each base here ensures the Vimeo-scoped web search is actually executed.
-  'worried tenant face close up',
-  'shocked face eviction notice',
-  'eviction notice tenant apartment',
-  'housing crisis family',
-  'evicted family packing boxes apartment',
-  'tenant packing boxes',
-  'stressed tenant crying apartment',
 ];
 
 /** Short Archive.org subjects for hospital / clinical / AI-medicine keyless runs.

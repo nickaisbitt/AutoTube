@@ -1600,6 +1600,137 @@ describe('housingOffTopicBrollReason — web24 pollution patterns', () => {
   });
 });
 
+describe('housingOffTopicBrollReason — web59/61 meme/ceremony/tiny-house/slides/physio rejects', () => {
+  const ctx = HOUSING_TOPIC;
+
+  it('hard-rejects green-screen shocked-face meme (web61 shopify CDN clip)', () => {
+    const cases = [
+      'shocked face green screen reaction meme apartment',
+      'green screen chroma key housing reaction clip',
+      'meme reaction overlay shocked face',
+      'shocked face meme reaction clip cdn.shopify.com',
+      'https://cdn.shopify.com/s/files/shocked-face-meme.mp4',
+    ];
+    for (const alt of cases) {
+      expect(housingOffTopicBrollReason(alt, ctx)).toMatch(
+        /housing off-topic/,
+        `expected "${alt}" to be rejected`,
+      );
+    }
+  });
+
+  it('hard-rejects vintage title card "HOUSING IN OUR TIME" (web59/61 Archive clip)', () => {
+    const cases = [
+      'housing in our time 1952 archive film',
+      'title card housing documentary archive',
+      'title card vintage film opener archive',
+    ];
+    for (const alt of cases) {
+      expect(housingOffTopicBrollReason(alt, ctx)).toMatch(/housing off-topic/);
+    }
+  });
+
+  it('hard-rejects naturalization ceremony used as courthouse B-roll (web61)', () => {
+    const cases = [
+      'tulsa naturalization ceremony 1945 archive film',
+      'naturalization ceremony courthouse archive',
+      'citizenship ceremony archive film',
+      'naturalization film federal courthouse',
+    ];
+    for (const alt of cases) {
+      expect(housingOffTopicBrollReason(alt, ctx)).toMatch(/housing off-topic/);
+    }
+  });
+
+  it('hard-rejects tiny-house lifestyle B-roll (web59/61 Archive clip)', () => {
+    const cases = [
+      'tiny house revolution documentary lifestyle',
+      'tiny homes movement living community',
+      'tiny home builders lifestyle movement',
+      'small house movement sustainable living',
+    ];
+    for (const alt of cases) {
+      expect(housingOffTopicBrollReason(alt, ctx)).toMatch(/housing off-topic/);
+    }
+  });
+
+  it('hard-rejects "Welcome & introductions" presentation slide (web59)', () => {
+    const cases = [
+      'welcome and introduction presentation slide',
+      'welcome slide opening presentation housing',
+      'introduction slide webinar opener',
+      'presentation slide opening welcome',
+    ];
+    for (const alt of cases) {
+      expect(housingOffTopicBrollReason(alt, ctx)).toMatch(/housing off-topic/);
+    }
+  });
+
+  it('hard-rejects physiotherapy pyramid / resistance band chart (web59 Etsy product)', () => {
+    const cases = [
+      'resistance band exercise pyramid chart etsy.com',
+      'physiotherapy exercise chart poster resistance band',
+      'physical therapy pyramid chart workout',
+      'fitness pyramid exercise chart resistance bands',
+      'https://www.etsy.com/listing/resistance-band-poster',
+    ];
+    for (const alt of cases) {
+      expect(housingOffTopicBrollReason(alt, ctx)).toMatch(/housing off-topic/);
+    }
+  });
+
+  it('does not reject on-topic housing clips with unrelated incidental words', () => {
+    const keep = [
+      'worried tenant reading eviction notice apartment close up',
+      'family packing boxes small apartment eviction landlord',
+      'couple facing foreclosure sign home front yard',
+    ];
+    for (const alt of keep) {
+      expect(housingOffTopicBrollReason(alt, ctx)).toBe('');
+    }
+  });
+});
+
+describe('checkIntroFacePool — housing web59/61 junk pools trigger INTRO_FACE_FAIL', () => {
+  const project = (videos) => ({
+    topic: HOUSING_TOPIC,
+    title: 'Housing crash',
+    script: [{ id: 'intro' }, { id: 'body' }],
+    media: videos,
+  });
+
+  it('fails when pool contains only green-screen meme (web61 Shopify clip)', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({
+        alt: 'shocked face green screen meme reaction',
+        url: 'https://cdn.shopify.com/meme.mp4',
+        source: 'Bing web video',
+      }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('fails when pool contains only naturalization ceremony clip (web61)', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({
+        alt: 'tulsa naturalization ceremony archive film 1945',
+        source: 'Archive.org live',
+      }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+
+  it('fails when pool contains only tiny-house lifestyle clip (web59/61)', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({ alt: 'tiny homes revolution lifestyle community small home movement' }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
+  });
+});
+
 describe('housingOffTopicBrollReason — web30 aviation/jet-engine and group-photo rejects', () => {
   it('hard-rejects jet-engine / aviation pads on housing topics', () => {
     const cases = [

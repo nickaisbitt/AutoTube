@@ -178,9 +178,11 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   // The generic isPassiveDeskIntroVisual gate below (all-topics) already hard-rejects
   // eviction notices/checks without a face; explicit static-document tokens here
   // catch non-standard metadata that slips through the passive-desk keyword list.
+  // housing-web59/61: green-screen meme, vintage title card, naturalization ceremony,
+  // tiny-house lifestyle, welcome/intro slides, physio/resistance-band charts.
   if (
     housing
-    && /\b(rolfe\s+report|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|propaganda\s+film|ticking\s+time\s+bombs?|dynamite|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|realtor\s+sign|real\s+estate\s+sign|yard\s+sign|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|mortgage\s+bankruptcy|bankruptcy\s+(?:slide|filing|graphic)|crater\s+graphic|golden\s+valley\s+approves|landlord\s+tenant\s+act|lawyers?\s+committee|tenant\s+advocacy|square[\s-]?foot|sustainable\s+high\s+rise|may\s+day\s+caravan|livestream\s+archive|business\s+insider|fire\s+destroys\s+apartment|alarm\s+fire|protest(?:ers?|ing)?|picket|rent\s+strike|rent\s+increase|social\s+justice\s+tribunal|tribunals?\s+ontario|parkdale\s+vs|cbs\s*6|problem\s+solvers?|odsp|bill\s*60|soviet|hammer\s+and\s+sickle|moldova|redfin\s+predictions?|zillow\s+economist|gaming\s+chair|bathroom\s+bucket|dirty\s+bathroom|crash\s+is\s+here|yellow\s+turban|cummins|diesel\s+engine|zillow\s+chart|overthinking\s+quotes?|bronxnet|volkswagen|tampa\s+police|marco\s+rubio|katherine\s+jenkins|mormon\s+tabernacle|sarah\s+jenkins|redfin\s+(?:bar\s+)?chart|bar\s+chart|home\s+value\s+index|housing\s+price\s+index|housing\s+price\s+chart|static\s+document|housing\s+(?:crash\s+)?document|mortgage\s+document)\b/i.test(blob)
+    && /\b(rolfe\s+report|periscope\s*film|bird'?s?\s+nests?|leapfrog|letter\s+factory|miss\s+brooks|propaganda\s+film|ticking\s+time\s+bombs?|dynamite|progress\s+center|fair\s+housing\s+conference|county\s+announces|administrative\s+officer|self\s+sufficiency|for\s+sale\s+sign|re\/?max|realtor\s+sign|real\s+estate\s+sign|yard\s+sign|one57|million\s+apartment|negative\s+space|ron\s+koertge|michael\s+jackson|michael\s+bolton|end\s+the\s+fed|mousetrap|american\s+home\s+mortgage|mortgage\s+bankruptcy|bankruptcy\s+(?:slide|filing|graphic)|crater\s+graphic|golden\s+valley\s+approves|landlord\s+tenant\s+act|lawyers?\s+committee|tenant\s+advocacy|square[\s-]?foot|sustainable\s+high\s+rise|may\s+day\s+caravan|livestream\s+archive|business\s+insider|fire\s+destroys\s+apartment|alarm\s+fire|protest(?:ers?|ing)?|picket|rent\s+strike|rent\s+increase|social\s+justice\s+tribunal|tribunals?\s+ontario|parkdale\s+vs|cbs\s*6|problem\s+solvers?|odsp|bill\s*60|soviet|hammer\s+and\s+sickle|moldova|redfin\s+predictions?|zillow\s+economist|gaming\s+chair|bathroom\s+bucket|dirty\s+bathroom|crash\s+is\s+here|yellow\s+turban|cummins|diesel\s+engine|zillow\s+chart|overthinking\s+quotes?|bronxnet|volkswagen|tampa\s+police|marco\s+rubio|katherine\s+jenkins|mormon\s+tabernacle|sarah\s+jenkins|redfin\s+(?:bar\s+)?chart|bar\s+chart|home\s+value\s+index|housing\s+price\s+index|housing\s+price\s+chart|static\s+document|housing\s+(?:crash\s+)?document|mortgage\s+document|green[\s-]?screen|chroma[\s-]?key|reaction\s+meme|meme\s+reaction|shopify\.com|etsy\.com|title\s+card|housing\s+in\s+our\s+time|naturalization\s+(?:ceremony|film)|citizenship\s+ceremony|tiny[\s-]?houses?|tiny[\s-]?homes?|tiny\s+(?:houses?|homes?)\s+(?:revolution|lifestyle|movement)|small\s+house\s+movement|welcome\s+(?:(?:and|&)\s+)?introduction|welcome\s+slide|intro(?:duction)?\s+slide|presentation\s+slide|resistance\s+band|physiotherapy|exercise\s+pyramid|fitness\s+pyramid)\b/i.test(blob)
   ) {
     return true;
   }
@@ -297,7 +299,15 @@ export function isLandscapeOnlyIntroVisual(asset) {
 export function isHousingApartmentMotion(asset) {
   if (isLandscapeOnlyIntroVisual(asset)) return false;
   const blob = assetBlob(asset);
-  if (HOUSING_LIVED_IN_RE.test(blob)) return true;
+  if (HOUSING_LIVED_IN_RE.test(blob)) {
+    // Kitchen-only or hallway-only with no person/face/tenant signal = static
+    // establishing shot — fine as body filler but tier-0, not tier-1, for the hook.
+    if (
+      /\b(?:kitchen|hallway)\b/.test(blob)
+      && !/\b(?:person|people|couple|family|face|tenant|worried|man|woman|evict|landlord)\b/.test(blob)
+    ) return false;
+    return true;
+  }
   return /\bapartment\b/.test(blob)
     && /\b(people|person|couple|family|interior|room|door|keys|tenant|evict)\b/.test(blob);
 }

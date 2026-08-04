@@ -1433,3 +1433,141 @@ describe('introFaceTier — healthcare-web46 hard-rejects (C4I / Moscow Times / 
   });
 });
 
+// ---------------------------------------------------------------------------
+// introFaceTier — housing web59/61 new junk intro rejects
+// ---------------------------------------------------------------------------
+
+describe('introFaceTier — housing web59/61 meme/ceremony/tiny-house/slides/physio rejects', () => {
+  const HOUSING_OPT = { housing: true };
+
+  it('hard-rejects green-screen shocked-face meme (web61 Shopify CDN) as housing intro (-1)', () => {
+    const cases = [
+      {
+        alt: 'shocked face green screen reaction meme',
+        title: 'green screen shocked face housing meme',
+        url: 'https://cdn.shopify.com/s/files/shocked_face.mp4',
+        source: 'Bing web video',
+        type: 'video',
+      },
+      {
+        alt: 'chroma key reaction meme shocked face apartment',
+        url: 'https://example.com/chroma-meme.mp4',
+        type: 'video',
+      },
+    ];
+    for (const asset of cases) {
+      expect(introFaceTier(asset, HOUSING_OPT)).toBe(-1);
+    }
+  });
+
+  it('hard-rejects vintage "HOUSING IN OUR TIME" title card as housing intro (-1)', () => {
+    const asset = {
+      alt: 'housing in our time 1952 archive documentary',
+      title: 'Housing in Our Time — public housing film',
+      url: 'https://archive.org/download/housing-in-our-time/housing.mp4',
+      source: 'Archive.org live',
+      type: 'video',
+    };
+    expect(introFaceTier(asset, HOUSING_OPT)).toBe(-1);
+  });
+
+  it('hard-rejects naturalization ceremony as housing intro (-1)', () => {
+    const asset = {
+      alt: 'tulsa naturalization ceremony archive 1945',
+      title: 'Tulsa Naturalization Ceremony Film',
+      url: 'https://archive.org/download/tulsa-nat/tulsa.mp4',
+      source: 'Archive.org live',
+      type: 'video',
+    };
+    expect(introFaceTier(asset, HOUSING_OPT)).toBe(-1);
+  });
+
+  it('hard-rejects tiny-house lifestyle clip as housing intro (-1)', () => {
+    const asset = {
+      alt: 'tiny house revolution lifestyle documentary movement',
+      title: 'Tiny Homes Revolution — Alternative Living',
+      url: 'https://archive.org/download/tiny-homes/tiny.mp4',
+      source: 'Archive.org live',
+      type: 'video',
+    };
+    expect(introFaceTier(asset, HOUSING_OPT)).toBe(-1);
+  });
+
+  it('hard-rejects "Welcome & introductions" presentation slide as housing intro (-1)', () => {
+    const asset = {
+      alt: 'welcome and introduction presentation slide housing webinar',
+      title: 'Welcome & Introductions — Housing Webinar',
+      url: 'https://archive.org/download/housing-webinar/slide.mp4',
+      type: 'video',
+    };
+    expect(introFaceTier(asset, HOUSING_OPT)).toBe(-1);
+  });
+
+  it('hard-rejects resistance-band / physiotherapy chart as housing intro (-1)', () => {
+    const cases = [
+      {
+        alt: 'resistance band exercise chart etsy product poster',
+        url: 'https://www.etsy.com/listing/resistance-band.jpg',
+        type: 'video',
+      },
+      {
+        alt: 'physiotherapy pyramid chart fitness exercise',
+        url: 'https://mdpi.com/physio-chart.mp4',
+        type: 'video',
+      },
+    ];
+    for (const asset of cases) {
+      expect(introFaceTier(asset, HOUSING_OPT)).toBe(-1);
+    }
+  });
+
+  it('still tier-2 for worried-face tenant + eviction (not demoted)', () => {
+    const asset = {
+      alt: 'worried tenant face close up eviction notice apartment',
+      title: 'Stressed Tenant Reads Eviction Notice',
+      url: 'https://vimeo.com/tenant-eviction.mp4',
+      type: 'video',
+    };
+    expect(introFaceTier(asset, HOUSING_OPT)).toBe(2);
+  });
+});
+
+describe('isHousingApartmentMotion — kitchen-static vs face-bearing kitchen', () => {
+  it('returns false for bare kitchen interior without any person/face/tenant signal', () => {
+    const asset = {
+      alt: 'apartment kitchen interior daylight empty',
+      title: 'Modern Kitchen Interior',
+      url: 'https://example.com/kitchen.mp4',
+      type: 'video',
+    };
+    expect(isHousingApartmentMotion(asset)).toBe(false);
+  });
+
+  it('returns false for bare hallway without person/face signal', () => {
+    const asset = {
+      alt: 'apartment hallway empty corridor',
+      url: 'https://example.com/hallway.mp4',
+      type: 'video',
+    };
+    expect(isHousingApartmentMotion(asset)).toBe(false);
+  });
+
+  it('returns true for kitchen with a tenant/face signal', () => {
+    const asset = {
+      alt: 'worried couple reading letter kitchen apartment',
+      url: 'https://example.com/kitchen-couple.mp4',
+      type: 'video',
+    };
+    expect(isHousingApartmentMotion(asset)).toBe(true);
+  });
+
+  it('returns true for kitchen with eviction context', () => {
+    const asset = {
+      alt: 'family kitchen eviction notice housing crisis',
+      url: 'https://example.com/kitchen-evict.mp4',
+      type: 'video',
+    };
+    expect(isHousingApartmentMotion(asset)).toBe(true);
+  });
+});
+

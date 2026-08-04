@@ -2456,6 +2456,16 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'housing crisis documentary',
   'foreclosure family home',
   'housing shortage crisis',
+  // housing-web61 Bing/DDG 0-result fix: housingHostLead site:vimeo.com queries only
+  // fire when their base query appears in this list (webMotionHostQueryBase match).
+  // Adding each base here ensures the Vimeo-scoped web search is actually executed.
+  'worried tenant face close up',
+  'shocked face eviction notice',
+  'eviction notice tenant apartment',
+  'housing crisis family',
+  'evicted family packing boxes apartment',
+  'tenant packing boxes',
+  'stressed tenant crying apartment',
 ];
 
 /** Short Archive.org subjects for hospital / clinical / AI-medicine keyless runs.

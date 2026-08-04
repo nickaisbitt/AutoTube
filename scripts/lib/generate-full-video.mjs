@@ -40,6 +40,7 @@ import {
 } from './keep-best.mjs';
 import {
   airlineSoftPassMotionFailureReason,
+  checkEditTimelineIntroFace,
   checkIntroFacePool,
   filterAssetsByRelevance,
   evaluateHarvestVolume,
@@ -5313,6 +5314,27 @@ export async function generateFullVideo(options) {
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }
+
+    // Post-build gate: verify the assembled intro (first 3s) has a real
+    // clinical/face video opener. Catches pools that passed pool-level
+    // checkIntroFacePool but whose timeline placed junk first (PI clinic ads,
+    // STEM promos, fundraising appeals). Fail-closed: re-harvest face-first.
+    const introTimelineCheck = checkEditTimelineIntroFace(project);
+    if (!introTimelineCheck.pass) {
+      log(`   ⚠️ ${introTimelineCheck.reason}`);
+      fixState.faceSeekBroll = true;
+      fixState.reHarvestMedia = true;
+      fixState.mediaOffset = (fixState.mediaOffset || 0) + 2;
+      return {
+        ok: false,
+        error: introTimelineCheck.reason,
+        harvestQualityFail: true,
+        topic,
+        outDir,
+        fixState,
+      };
+    }
+
     if (process.env.AUTOTUBE_BROLL_PLACEMENT === '1' && fixState.brollPlacement !== false && !fixState.keepBestMedia) {
       try {
         const { buildBrollPlacementPlanNode } = await import('./broll-placement.mjs');

@@ -3,6 +3,7 @@ import {
   airlineSoftPassMotionFailureReason,
   canonicalMediaKey,
   checkEditTimelineIntroFace,
+  repairEditTimelineIntroFace,
   checkIntroFacePool,
   countAirlineStrongVideos,
   ensureTopicalVideoCoverage,
@@ -2293,8 +2294,9 @@ describe('healthcareOffTopicBrollReason — web65/66 new junk patterns', () => {
   });
   it('keeps legitimate surgical robot clips', () => {
     expect(healthcareOffTopicBrollReason('cnbc meet the surgical robot that can diagnose lung cancer', ctx)).toBe('');
-    expect(healthcareOffTopicBrollReason('versius surgical robotic system cmr surgical cambridge filmworks', ctx)).toBe('');
-    expect(healthcareOffTopicBrollReason('science nation surgical robotics national science foundation', ctx)).toBe('');
+    // web69: cambridge filmworks / versius promo titles are off-topic pads
+    expect(healthcareOffTopicBrollReason('versius surgical robotic system cmr surgical cambridge filmworks', ctx)).toMatch(/off-topic/);
+    expect(healthcareOffTopicBrollReason('science nation surgical robotics operating room hospital', ctx)).toBe('');
   });
   it('keeps da Vinci surgical robot live OR footage', () => {
     expect(healthcareOffTopicBrollReason('the da vinci surgical robot dr richard gallagher operating room', ctx)).toBe('');
@@ -2501,5 +2503,71 @@ describe('healthcareOffTopicBrollReason — web69 medica/filmworks pads', () => 
       'senhance surgical robotic system full length benefits',
       HEALTHCARE_TOPIC,
     )).toMatch(/healthcare off-topic/);
+  });
+});
+
+describe('repairEditTimelineIntroFace — housing-web4/8/10 pool-vs-timeline', () => {
+  it('swaps Chinatown eviction into first cut when dartboard led', () => {
+    const junk = {
+      id: 'junk1',
+      type: 'video',
+      title: 'viper 787 electronic dartboard begin your darts journey',
+      alt: 'dartboard target face',
+      url: 'https://example.com/dart.mp4',
+      query: 'worried tenant face close up',
+    };
+    const good = {
+      id: 'good1',
+      type: 'video',
+      title: 'torres save chinatown fights displacement as iconic dc businesses face eviction for new hotel',
+      alt: 'chinatown fights displacement face eviction',
+      url: 'https://example.com/chinatown.mp4',
+    };
+    const project = {
+      topic: 'The housing crash they said would never happen',
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [junk, good],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 1.3, assetId: 'junk1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 2.6, assetId: 'junk1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('good1');
+    expect(project.editTimeline[0].reason).toBe('intro-face-repair');
+  });
+
+  it('rejects NSF Science Nation branding as healthcare timeline opener (web71)', () => {
+    const brand = {
+      id: 'brand1',
+      type: 'video',
+      title: 'science nation surgical robotics national science foundation nsf science nation sciencenation',
+      alt: 'science nation surgical robotics nsf',
+      url: 'https://archive.org/sn.mp4',
+    };
+    const clinical = {
+      id: 'cnbc1',
+      type: 'video',
+      title: 'cnbc meet the surgical robot that can diagnose lung cancer',
+      alt: 'cnbc surgical robot diagnose lung cancer operating room',
+      url: 'https://example.com/cnbc.mp4',
+    };
+    const project = {
+      topic: 'Why AI will change healthcare',
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [brand, clinical],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 1.3, assetId: 'brand1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 2.6, assetId: 'brand1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('cnbc1');
   });
 });

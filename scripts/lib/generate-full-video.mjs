@@ -41,6 +41,7 @@ import {
 import {
   airlineSoftPassMotionFailureReason,
   checkEditTimelineIntroFace,
+  repairEditTimelineIntroFace,
   checkIntroFacePool,
   filterAssetsByRelevance,
   evaluateHarvestVolume,
@@ -5325,8 +5326,16 @@ export async function generateFullVideo(options) {
     // Post-build gate: verify the assembled intro (first 3s) has a real
     // clinical/face video opener. Catches pools that passed pool-level
     // checkIntroFacePool but whose timeline placed junk first (PI clinic ads,
-    // STEM promos, fundraising appeals). Fail-closed: re-harvest face-first.
-    const introTimelineCheck = checkEditTimelineIntroFace(project);
+    // STEM promos, fundraising appeals). Prefer in-pool repair (swap gate
+    // evidence into first cut) before fail-closed re-harvest (housing-web4/8/10).
+    let introTimelineCheck = checkEditTimelineIntroFace(project);
+    if (!introTimelineCheck.pass) {
+      const repaired = repairEditTimelineIntroFace(project);
+      if (repaired.repaired && repaired.pass) {
+        log('   🩹 Intro-face repair: swapped gate-passing opener into first 3s');
+        introTimelineCheck = repaired;
+      }
+    }
     if (!introTimelineCheck.pass) {
       log(`   ⚠️ ${introTimelineCheck.reason}`);
       fixState.faceSeekBroll = true;

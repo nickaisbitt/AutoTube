@@ -811,20 +811,20 @@ describe('introFaceTier demotions continued', () => {
     }
   });
 
-  it('tiers Science Nation clip without qualifier as healthcare opener tier 2 (broadened Science Nation win)', () => {
+  it('tiers Science Nation only with OR/surgical-robot/patient evidence (web71 NSF branding out)', () => {
     expect(introFaceTier({
-      alt: 'science nation artificial intelligence machine learning hospital',
-      title: 'science nation AI hospital feature',
+      alt: 'science nation surgical robot operating room hospital',
+      title: 'science nation surgical robot documentary',
       url: 'https://vimeo.com/scination.mp4',
       type: 'video',
     }, { healthcare: true })).toBe(2);
-    // Science Nation without any qualifier also gets tier 2.
+    // Bare Science Nation / documentary episode without OR/patient → not tier 2.
     expect(introFaceTier({
       alt: 'science nation documentary episode',
       title: 'science nation',
       url: 'https://archive.org/download/scination/sn.mp4',
       type: 'video',
-    }, { healthcare: true })).toBe(2);
+    }, { healthcare: true })).toBeLessThan(2);
   });
 });
 
@@ -1771,6 +1771,15 @@ describe('introFaceTier — healthcare-web70 Science Nation globe reject', () =>
       alt: 'science nation globe background graphic nsf intro',
       title: 'science nation globe logo title card',
       url: 'https://archive.org/sn-globe.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+  });
+
+  it('hard-rejects web71 NSF sciencenation surgical-robotics branding without OR/patient (-1)', () => {
+    expect(introFaceTier({
+      alt: 'science nation surgical robotics national science foundation nsf science nation sciencenation',
+      title: 'science nation surgical robotics national science foundation nsf science nation sciencenation',
+      url: 'https://archive.org/sn-brand.mp4',
       type: 'video',
     }, { healthcare: true })).toBe(-1);
   });

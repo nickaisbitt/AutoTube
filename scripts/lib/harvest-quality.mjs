@@ -1374,9 +1374,18 @@ export function checkIntroFacePool(project) {
         /\b(expo\s+(?:floor|booth|hall|suit)|exhibition\s+hall|trade\s*show\b|\bhimss\b|conference\s+(?:floor|booth|expo)|suit\s+(?:walk|drop|enter|stroll)|business\s+suit\s+(?:walk|stroll|enter)|blurry\s+test\s*tube|test\s*tube\s+(?:close\s*up|b-?roll|stock|only)|petri\s+dish|corporate\s+presentation)\b/i.test(evidence)
         && !/\b(surgical\s*robot|operating\s+room|or\s+lights?|clinical\s+use|patient|surgeon)\b/i.test(evidence)
       ) return false;
-      // Science Nation documentary / OR / surgical-robot motion qualifies as tier-0 intro.
+      // Science Nation documentary / OR / surgical-robot motion qualifies as tier-0 intro
+      // only with real OR/patient evidence — NSF branding pads (web71) do not.
+      const scienceNationClinical =
+        /\bscience\s+nation\b/i.test(evidence)
+        && /\b(operating\s+room|surgical\s*robot|robot(?:ic)?\s*surger|robots?\s+changing\s+surgery|or\s+lights?|patient|surgeon|da\s*vinci|intraoperative|or\s+demonstration)\b/i.test(evidence)
+        && !(
+          /\b(national\s+science\s+foundation|\bnsf\b)\b/i.test(evidence)
+          && !/\b(operating\s+room|or\s+lights?|patient|surgeon|da\s*vinci|or\s+demonstration)\b/i.test(evidence)
+        );
       const clinicianScreenOrOr =
-        /\b(science\s+nation|ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|or)|ultrasound\s+(?:demo|demonstration)|mri\s+(?:monitor|screen)|operating\s+room|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing))\b/i.test(evidence)
+        scienceNationClinical
+        || /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|or)|ultrasound\s+(?:demo|demonstration)|mri\s+(?:monitor|screen)|operating\s+room|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing))\b/i.test(evidence)
         || (
           /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(evidence)
           && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(evidence)
@@ -1416,6 +1425,47 @@ export function checkIntroFacePool(project) {
  * @param {object} project — must include editTimeline + media
  * @returns {{ pass: boolean, reason?: string }}
  */
+/** Title/alt/source/url only — never harvest `query`. */
+function timelineIntroEvidenceOf(asset) {
+  return [asset?.title, asset?.alt, asset?.source, asset?.url].filter(Boolean).join(' ');
+}
+
+/** NSF / Science Nation branding pads (web70/71 globe-logo intros). */
+function isScienceNationBrandingPad(evidence) {
+  const e = String(evidence || '');
+  // Require the spaced phrase in title/alt — bare /sciencenation/ URL paths alone
+  // must not kill a real OR documentary.
+  if (!/\bscience\s+nation\b/i.test(e)) return false;
+  if (/\b(national\s+science\s+foundation|\bnsf\b|globe|title\s*card|logo|background|graphic|intro)\b/i.test(e)
+    && !/\b(operating\s+room|or\s+lights?|patient|surgeon|da\s*vinci|intraoperative)\b/i.test(e)) {
+    return true;
+  }
+  return false;
+}
+
+function assetPassesHealthcareTimelineIntro(asset) {
+  if (!(asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) return false;
+  const evidence = timelineIntroEvidenceOf(asset);
+  if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
+  if (isScienceNationBrandingPad(evidence)) return false;
+  return /\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci|operating\s+room|mri\s+(?:scan|machine|room|performed)|radiolog\w*|doctor|clinician|physician|surgeon|patient\s+(?:face|close)|worried\s+(?:doctor|clinician|patient)|focused\s+(?:doctor|surgeon|clinician)|science\s+nation.{0,60}(?:operating\s+room|surgical\s*robot|patient|surgeon))\b/i.test(evidence);
+}
+
+function assetPassesHousingTimelineIntro(asset) {
+  const evidence = timelineIntroEvidenceOf(asset);
+  if (!evidence.trim()) return false;
+  if (HOUSING_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
+  if (/\b(static\s+document|document\s+only|notice\s+only|price\s+index|chart\s+graphic|paper\s+text)\b/i.test(evidence)) {
+    return false;
+  }
+  const hasGateCollocation =
+    /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
+  const hasEvictionWithPerson =
+    /\bevict(?:ion|ed|s)?\b/i.test(evidence)
+    && /\b(tenant|family|person|people|woman|man|couple|worried|shocked|face|portrait)\b/i.test(evidence);
+  return hasGateCollocation || hasEvictionWithPerson;
+}
+
 export function checkEditTimelineIntroFace(project) {
   const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
   const housing = isHousingTopic(topicBlob);
@@ -1443,18 +1493,8 @@ export function checkEditTimelineIntroFace(project) {
 
   if (!introAssets.length) return { pass: true };
 
-  // Title/alt/source/url only — never harvest `query` (aspirational face stamps
-  // like "worried tenant face close up" on dartboard/music pads).
-  const evidenceOf = (asset) =>
-    [asset?.title, asset?.alt, asset?.source, asset?.url].filter(Boolean).join(' ');
-
   if (healthcare) {
-    const hasClinicalVideo = introAssets.some((asset) => {
-      if (!(asset.type === 'video' || /\.mp4/i.test(asset.url || ''))) return false;
-      const evidence = evidenceOf(asset);
-      if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
-      return /\b(science\s+nation|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci|operating\s+room|mri\s+(?:scan|machine|room|performed)|radiolog\w*|doctor|clinician|physician|surgeon|patient\s+(?:face|close)|worried\s+(?:doctor|clinician|patient)|focused\s+(?:doctor|surgeon|clinician))\b/i.test(evidence);
-    });
+    const hasClinicalVideo = introAssets.some((asset) => assetPassesHealthcareTimelineIntro(asset));
     if (!hasClinicalVideo) {
       return {
         pass: false,
@@ -1465,24 +1505,7 @@ export function checkEditTimelineIntroFace(project) {
   }
 
   if (housing) {
-    const hasFaceOrLivedIn = introAssets.some((asset) => {
-      const evidence = evidenceOf(asset);
-      if (HOUSING_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
-      // Static doc/chart openers never satisfy the gate (web31).
-      if (/\b(static\s+document|document\s+only|notice\s+only|price\s+index|chart\s+graphic|paper\s+text)\b/i.test(evidence)) {
-        return false;
-      }
-      // Require lived-in / emotional face signal — bare "face"/"crying" match
-      // dartboard "target face", music metadata, and unrelated "Scream Crying"
-      // collection pads (housing-web3/web81). Bare "eviction" alone is not enough
-      // without a person/tenant/family signal (aligns pool + timeline; web4/web8/web10).
-      const hasGateCollocation =
-        /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
-      const hasEvictionWithPerson =
-        /\bevict(?:ion|ed|s)?\b/i.test(evidence)
-        && /\b(tenant|family|person|people|woman|man|couple|worried|shocked|face|portrait)\b/i.test(evidence);
-      return hasGateCollocation || hasEvictionWithPerson;
-    });
+    const hasFaceOrLivedIn = introAssets.some((asset) => assetPassesHousingTimelineIntro(asset));
     if (!hasFaceOrLivedIn) {
       return {
         pass: false,
@@ -1493,6 +1516,63 @@ export function checkEditTimelineIntroFace(project) {
   }
 
   return { pass: true };
+}
+
+/**
+ * When the assembled intro fails checkEditTimelineIntroFace but the media pool
+ * still has a gate-passing asset, swap that asset into the first cut of the
+ * first script segment (housing-web4/8/10: Chinatown eviction sat in pool while
+ * dartboard/music led). Mutates project.editTimeline.
+ *
+ * @param {object} project
+ * @returns {{ repaired: boolean, pass: boolean, reason?: string }}
+ */
+export function repairEditTimelineIntroFace(project) {
+  const before = checkEditTimelineIntroFace(project);
+  if (before.pass) return { repaired: false, pass: true };
+
+  const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
+  const housing = isHousingTopic(topicBlob);
+  const healthcare = isHealthcareTopic(topicBlob);
+  if (!housing && !healthcare) return { repaired: false, ...before };
+
+  const media = project?.media || [];
+  const qualifies = housing
+    ? assetPassesHousingTimelineIntro
+    : assetPassesHealthcareTimelineIntro;
+  // Prefer video, then any gate-passing still (housing still exception).
+  const replacement =
+    media.find((a) => qualifies(a) && (a.type === 'video' || /\.mp4/i.test(a.url || '')))
+    || media.find((a) => qualifies(a));
+  if (!replacement?.id) return { repaired: false, ...before };
+
+  const timeline = Array.isArray(project.editTimeline) ? [...project.editTimeline] : [];
+  const firstSegId = project?.script?.[0]?.id
+    || timeline.find((t) => typeof t?.segmentId === 'string')?.segmentId
+    || null;
+  const idx = timeline.findIndex((t) => {
+    if ((t.startSec ?? 0) >= 3) return false;
+    if (firstSegId && t.segmentId && t.segmentId !== firstSegId) return false;
+    return true;
+  });
+  const endSec = idx >= 0
+    ? Math.max(Number(timeline[idx].endSec) || 1.25, 1.0)
+    : 1.25;
+  const patched = {
+    segmentId: firstSegId || (idx >= 0 ? timeline[idx].segmentId : undefined),
+    startSec: 0,
+    endSec,
+    assetId: replacement.id,
+    reason: 'intro-face-repair',
+  };
+  if (idx >= 0) {
+    timeline[idx] = { ...timeline[idx], ...patched };
+  } else {
+    timeline.unshift(patched);
+  }
+  project.editTimeline = timeline;
+  const after = checkEditTimelineIntroFace(project);
+  return { repaired: after.pass, ...after };
 }
 
 /**

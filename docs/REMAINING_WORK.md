@@ -1,6 +1,6 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-04T02:45Z** — branch `cursor/web-harvest-assemble-auth-4556` (durable loop; tip-best housing **6.2** / healthcare **6.4**).
+Last updated: **2026-08-04T05:40Z** — tip-best housing **6.4** / healthcare **6.4**; durable loop continuing to ≥7.
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 

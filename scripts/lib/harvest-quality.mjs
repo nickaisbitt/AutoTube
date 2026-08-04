@@ -1872,6 +1872,23 @@ export function airlineSoftPassMotionFailureReason(project, stats = {}) {
   return null;
 }
 
+/**
+ * RP/roleplay "mental hospital" Archive.org identifiers scraped via "hospital ward nurses"
+ * queries (healthcare-web48: rpmentalhospital001 + mental_hospital_edit). Both items carry
+ * "hospital" in their titles, which makes them pass HEALTHCARE_EVIDENCE_RE but they are
+ * tabletop-RPG recordings, not clinical footage.
+ */
+export const RP_MENTAL_HOSPITAL_RE =
+  /rpmentalhospital|rp[-_]mental[-_\s]hospital|mental[-_]hospital[-_]edit|RP[-_]Mental[-_]Hospital/i;
+
+/**
+ * YouTube Poop Music Video compilations scraped via "intensive care unit" queries
+ * (healthcare-web48: "intensive care unit compilation youtube poop music videos ytpmv").
+ * These are meme/remix videos, not documentary footage.
+ */
+export const YOUTUBE_POOP_YTPMV_RE =
+  /\b(ytpmv|youtube[\s-]poop|poop\s+music\s+video)\b/i;
+
 /** Hard-reject pads that must not soft-pass a healthcare harvest. */
 const HEALTHCARE_HARD_REJECT_PATTERNS = [
   {
@@ -1921,6 +1938,19 @@ const HEALTHCARE_HARD_REJECT_PATTERNS = [
   {
     reason: 'sports-pad',
     pattern: /\b(football|soccer|athlete|stadium\s+crowd|sports\s+crowd|cheering\s+fans)\b/i,
+  },
+  {
+    // healthcare-web48: "hospital ward nurses" query → rpmentalhospital001 + mental_hospital_edit
+    // (tabletop-RPG recordings). Both carry "hospital" so they pass HEALTHCARE_EVIDENCE_RE
+    // but are not clinical footage.
+    reason: 'rp-roleplay-hospital',
+    pattern: RP_MENTAL_HOSPITAL_RE,
+  },
+  {
+    // healthcare-web48: "intensive care unit" query → "intensive care unit compilation
+    // youtube poop music videos ytpmv". YTPMV clips are meme/remix, not documentary.
+    reason: 'youtube-poop-ytpmv',
+    pattern: YOUTUBE_POOP_YTPMV_RE,
   },
 ];
 

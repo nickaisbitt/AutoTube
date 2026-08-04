@@ -1530,6 +1530,56 @@ describe('introFaceTier — housing web59/61 meme/ceremony/tiny-house/slides/phy
     };
     expect(introFaceTier(asset, HOUSING_OPT)).toBe(2);
   });
+
+  it('hard-rejects housing-web78 luxury tour / packaging / Sudan / treehouse pads (-1)', () => {
+    const cases = [
+      {
+        alt: 'the mansions at canyon springs san antonio first class living',
+        title: 'The Mansions at Canyon Springs',
+        query: 'stressed tenant crying apartment',
+      },
+      {
+        alt: 'six sided packaging of panels and boards packaging various types',
+        title: 'Six Sided Packaging of Panels and Boards',
+        query: 'tenant packing boxes',
+      },
+      {
+        alt: 'sudanese refugees homes beyond borders dignity for sudanese refugees in cairo',
+        title: 'Homes Beyond Borders — Sudan Refugees',
+        query: 'worried face eviction notice apartment',
+      },
+      {
+        alt: 'barcroft tv grandmother faces eviction from paradise treehouse',
+        title: 'Barcroft TV Grandmother Paradise Treehouse',
+        query: 'shocked face eviction notice',
+      },
+    ];
+    for (const asset of cases) {
+      expect(introFaceTier({ ...asset, url: 'https://vimeo.com/x.mp4', type: 'video' }, HOUSING_OPT)).toBe(-1);
+    }
+  });
+});
+
+describe('hasReadableFaceVisual — evidence only (no query spoof)', () => {
+  it('rejects luxury-tour clip whose query claims shocked face (housing-web78)', () => {
+    const asset = {
+      query: 'shocked face apartment eviction notice',
+      alt: 'the mansions at canyon springs first class living lifestyles',
+      title: 'The Mansions at Canyon Springs San Antonio TX',
+      url: 'https://vimeo.com/mansions.mp4',
+    };
+    expect(hasReadableFaceVisual(asset)).toBe(false);
+  });
+
+  it('still accepts real face evidence without relying on query', () => {
+    const asset = {
+      query: 'random stock',
+      alt: 'tenant face worried close-up portrait people eviction notice',
+      title: 'Worried Tenant Close-Up',
+      url: 'https://vimeo.com/tenant-face.mp4',
+    };
+    expect(hasReadableFaceVisual(asset)).toBe(true);
+  });
 });
 
 describe('isHousingApartmentMotion — kitchen-static vs face-bearing kitchen', () => {

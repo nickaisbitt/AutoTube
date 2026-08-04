@@ -2115,3 +2115,39 @@ describe('checkIntroFacePool — healthcare', () => {
     expect(result.pass).toBe(true);
   });
 });
+
+describe('housingOffTopicBrollReason — web78 luxury/packaging/sudan/treehouse rejects', () => {
+  const ctx = HOUSING_TOPIC;
+  const junk = [
+    'the mansions at canyon springs san antonio first class living',
+    'six sided packaging of panels and boards packaging various types',
+    'sudanese refugees homes beyond borders dignity for refugees in cairo',
+    'barcroft tv grandmother faces eviction from paradise treehouse',
+    'volvo - moments that never happen',
+  ];
+  it.each(junk)('rejects "%s"', (haystack) => {
+    expect(housingOffTopicBrollReason(haystack, ctx)).toMatch(/housing off-topic/);
+  });
+  it('keeps on-topic tenant eviction face clips', () => {
+    expect(housingOffTopicBrollReason('worried tenant face close up eviction notice apartment', ctx)).toBe('');
+  });
+});
+
+describe('healthcareOffTopicBrollReason — web61 corporate RSNA/training/slide rejects', () => {
+  const junk = [
+    'ai interoperability and workflow automation at rsna 2025 interview',
+    'mindray n series user training part3 quick keys',
+    'journal of diagnosis case reports 1',
+    'kaggle slide notebook competition healthcare',
+    'guerbet aimed 1 applied radiology',
+    'nih data science and medicine what\'s possibly at the cutting edge',
+    'corporate powerpoint slide presentation healthcare ai',
+  ];
+  it.each(junk)('rejects "%s"', (haystack) => {
+    expect(healthcareOffTopicBrollReason(haystack, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+  });
+  it('keeps clinical OR / MRI motion', () => {
+    expect(healthcareOffTopicBrollReason('da vinci surgical robot operating room patient', HEALTHCARE_TOPIC)).toBe('');
+    expect(healthcareOffTopicBrollReason('mri scanner hospital radiologist clinician', HEALTHCARE_TOPIC)).toBe('');
+  });
+});

@@ -881,7 +881,15 @@ export async function fetchBingVideos(query: string): Promise<WebVideoResult[]> 
   const searchUrl = `https://www.bing.com/videos/search?q=${encodeURIComponent(query)}&FORM=HDRSC3`;
 
   const res = await fetch(searchUrl, {
-    headers: getStealthHeaders("https://www.bing.com/"),
+    headers: {
+      ...getStealthHeaders("https://www.bing.com/"),
+      "Sec-CH-UA": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+      "Sec-CH-UA-Mobile": "?0",
+      "Sec-CH-UA-Platform": '"Windows"',
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "document",
+    },
   });
 
   if (!res.ok) {
@@ -944,6 +952,35 @@ export async function fetchBingVideos(query: string): Promise<WebVideoResult[]> 
       if (!seenUrls.has(url)) {
         seenUrls.add(url);
         results.push({ url, title, duration });
+      }
+    }
+  }
+
+  // Fallback 3: data-uhref attribute (Bing sometimes encodes the click URL here)
+  if (results.length === 0) {
+    const uhrefRegex = /data-uhref="([^"]+)"/g;
+    let uhrefMatch: RegExpExecArray | null;
+    while ((uhrefMatch = uhrefRegex.exec(html)) !== null) {
+      const rawHref = uhrefMatch[1].replace(/&amp;/g, '&').replace(/&quot;/g, '"');
+      const churlMatch = rawHref.match(/churl=([^&]+)/);
+      const url = churlMatch ? decodeURIComponent(churlMatch[1]) : (rawHref.startsWith('https://') ? rawHref : '');
+      if (url && !seenUrls.has(url)) {
+        seenUrls.add(url);
+        results.push({ url, title: query });
+      }
+    }
+  }
+
+  // Fallback 4: extract direct YouTube/Vimeo/Dailymotion URLs from page HTML.
+  // Bing sometimes inlines these in og: or ld+json blocks.
+  if (results.length === 0) {
+    const directUrlRegex = /https?:\/\/(?:(?:www\.)?youtube\.com\/watch\?v=[\w-]{8,}|youtu\.be\/[\w-]{8,}|vimeo\.com\/\d{6,}|dai\.ly\/[\w-]{4,}|(?:www\.)?dailymotion\.com\/video\/[\w-]+)/g;
+    let urlMatch: RegExpExecArray | null;
+    while ((urlMatch = directUrlRegex.exec(html)) !== null) {
+      const url = urlMatch[0];
+      if (!seenUrls.has(url)) {
+        seenUrls.add(url);
+        results.push({ url, title: query });
       }
     }
   }

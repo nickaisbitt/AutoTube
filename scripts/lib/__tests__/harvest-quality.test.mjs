@@ -1830,11 +1830,28 @@ describe('checkIntroFacePool — housing', () => {
     expect(result.pass).toBe(true);
   });
 
-  it('passes when pool has foreclosure auction clip (tier-1 lived-in)', () => {
+  it('passes when pool has foreclosure auction with family distress (timeline-gate aligned)', () => {
     const result = checkIntroFacePool(project([
-      makeVideo({ alt: 'foreclosure auction house steps crowd family' }),
+      makeVideo({ alt: 'family distressed foreclosure eviction auction apartment' }),
     ]));
     expect(result.pass).toBe(true);
+  });
+
+  it('fails when pool has only query-stamped face pads without evidence (web8)', () => {
+    const result = checkIntroFacePool(project([
+      makeVideo({
+        title: 'the weeknd can t feel my face remix',
+        alt: 'the weeknd can t feel my face remix',
+        query: 'worried tenant face close up',
+      }),
+      makeVideo({
+        title: 'viper 787 electronic dartboard',
+        alt: 'viper 787 electronic dartboard',
+        query: 'shocked face eviction notice',
+      }),
+    ]));
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
   });
 
   it('fails with INTRO_FACE_FAIL when pool has only FEMA/news-map graphics', () => {

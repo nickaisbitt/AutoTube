@@ -1327,25 +1327,25 @@ export function checkIntroFacePool(project) {
 
   if (housing) {
     const hasIntroFace = videos.some((asset) => {
-      const blob = [asset?.query, asset?.alt, asset?.title, asset?.source, asset?.url]
+      // Evidence only — harvest query stamps ("worried tenant face") on music/
+      // dartboard pads must not clear the pool when the timeline gate (title/alt
+      // only) will still fail (housing-web4/web8 INTRO_FACE_FAIL_TIMELINE).
+      const evidence = [asset?.alt, asset?.title, asset?.source, asset?.url]
         .filter(Boolean).join(' ').toLowerCase();
+      if (HOUSING_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
       // Reject known junk intro patterns so they never count as face evidence.
       if (
-        /\b(landscape|mountain|lake|lakeside|river|forest|aerial|helicopter|fema|world\s*map|disaster\s*map|news\s*map|webinar|workshop|protest|picket|rent\s+strike|sitting\s+in\s+(?:a\s+)?chair|talking\s+to\s+camera|home\s+tour|jet\s+engine|turbine\s+engine|aircraft\s+engine|engine\s+nacelle|airplane\s+takeoff|plane\s+takeoff|group\s+photo|team\s+photo|office\s+group\s+photo|corporate\s+group|green[\s-]?screen|chroma[\s-]?key|reaction\s+meme|meme\s+reaction|shopify\.com|etsy\.com|title\s+card|housing\s+in\s+our\s+time|naturalization\s+(?:ceremony|film)|citizenship\s+ceremony|tiny[\s-]?houses?|tiny[\s-]?homes?|welcome\s+(?:(?:and|&)\s+)?introduction|presentation\s+slide|resistance\s+band|physiotherapy|split[\s-]?screen\s+talking|split[\s-]?screen\s+kitchen)\b/i.test(blob)
+        /\b(landscape|mountain|lake|lakeside|river|forest|aerial|helicopter|fema|world\s*map|disaster\s*map|news\s*map|webinar|workshop|protest|picket|rent\s+strike|sitting\s+in\s+(?:a\s+)?chair|talking\s+to\s+camera|home\s+tour|jet\s+engine|turbine\s+engine|aircraft\s+engine|engine\s+nacelle|airplane\s+takeoff|plane\s+takeoff|group\s+photo|team\s+photo|office\s+group\s+photo|corporate\s+group|green[\s-]?screen|chroma[\s-]?key|reaction\s+meme|meme\s+reaction|shopify\.com|etsy\.com|title\s+card|housing\s+in\s+our\s+time|naturalization\s+(?:ceremony|film)|citizenship\s+ceremony|tiny[\s-]?houses?|tiny[\s-]?homes?|welcome\s+(?:(?:and|&)\s+)?introduction|presentation\s+slide|resistance\s+band|physiotherapy|split[\s-]?screen\s+talking|split[\s-]?screen\s+kitchen|weeknd|dartboard|maniak|shostakovich|static\s+document|document\s+only|notice\s+only|price\s+index|chart\s+graphic|paper\s+text)\b/i.test(evidence)
       ) return false;
-      // Tier-2: readable face + housing-topical (shocked/worried + apartment/eviction).
-      const hasReadableFace =
-        /\b(face|faces|portrait|close.?up|expression|reaction|worried|shocked|crying|stressed)\b/i.test(blob)
-        && /\b(person|people|woman|women|man|men|family|couple|tenant|resident)\b/i.test(blob);
-      const housingTopical =
-        /\b(evict(?:ion|ed)?|landlord|tenant|lease|rent(?:al)?|notice|apartment|housing|foreclos|packing\s+boxes)\b/i.test(blob);
-      if (hasReadableFace && housingTopical) return true;
-      // Tier-1: lived-in apartment interior or strong eviction-evidence motion.
-      // "eviction notice" alone is NOT tier-1 (could be a static document image);
-      // it requires face evidence (handled by Tier-2) to count as an intro qualifier.
-      if (
-        /\b(modern\s+apartment|apartment\s+interior|living\s+room(?:\s+people)?|tenant\s+(?:face|close|packing)|packing\s+boxes|foreclosure\s+(?:auction|sign|house)|couple\s+(?:arguing|reading|worried)|family\s+apartment)\b/i.test(blob)
-      ) return true;
+      // Align with checkEditTimelineIntroFace — same collocations the post-build
+      // gate requires for the first 3s opener. Bare "eviction notice" paper still
+      // needs a person/tenant/family signal (web31 static-doc openers).
+      const hasGateCollocation =
+        /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
+      const hasEvictionWithPerson =
+        /\bevict(?:ion|ed|s)?\b/i.test(evidence)
+        && /\b(tenant|family|person|people|woman|man|couple|worried|shocked|face|portrait)\b/i.test(evidence);
+      if (hasGateCollocation || hasEvictionWithPerson) return true;
       return false;
     });
     if (!hasIntroFace) {

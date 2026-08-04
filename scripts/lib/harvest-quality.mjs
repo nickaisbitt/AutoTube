@@ -1298,6 +1298,58 @@ export function evaluateHarvestVolume(project, minPerSegment = 6) {
 }
 
 /**
+ * Person/household nouns that count as a housing intro face signal. DDG's
+ * site:vimeo.com results (waves 36-60, after the ':' sanitizeQuery fix) return
+ * real face+eviction stories — "Barcroft TV: Grandmother Faces Eviction From
+ * 'Paradise' Treehouse", "Preview Clip ... 'Evicting the American Dream'",
+ * "Tenants Rise Up! Fighting for Housing Justice" — that a narrow singular
+ * word list (tenant/family/woman/man/couple only) rejected outright: plural
+ * forms ("tenants", "families") fail a bare `\btenant\b` check, and common
+ * kinship/status nouns ("grandmother", "resident", "renter") were never in
+ * the list at all. Broadening this list is what turns those already-returned,
+ * already-downloadable Vimeo clips into gate-passing evidence.
+ */
+const HOUSING_INTRO_PERSON_NOUN_SRC =
+  'tenants?|famil(?:y|ies)|persons?|people|wom[ae]n|man|men|couples?|residents?|renters?'
+  + '|homeowners?|occupants?|households?|grandmothers?|grandfathers?|mothers?|fathers?'
+  + '|widows?|neighbors?|neighbours?';
+
+/** Emotion/reaction words that, paired with a person noun, read as a face opener. */
+const HOUSING_INTRO_EMOTION_WORD_SRC = 'worried|shocked|stressed|distressed|crying';
+
+/**
+ * Does this evidence text (title/alt/source/url — never the harvest query)
+ * describe a housing face/lived-in opener? Shared by the pre-harvest pool
+ * check (checkIntroFacePool) and the post-build timeline check
+ * (checkEditTimelineIntroFace / repairEditTimelineIntroFace) so the two
+ * gates cannot drift out of alignment (housing-web4/8/10).
+ *
+ * `evict\w*` (rather than an enumerated suffix list) matches eviction,
+ * evictions, evicted, evicting, evicts — the enumerated `evict(?:ion|ed|s)?`
+ * this replaces silently dropped "evicting"/"evictions", the two most common
+ * real-world headline forms.
+ *
+ * @param {string} evidence
+ * @returns {boolean}
+ */
+export function housingIntroFaceEvidenceMatches(evidence = '') {
+  const text = String(evidence || '');
+  const personNounRe = new RegExp(`(?:${HOUSING_INTRO_PERSON_NOUN_SRC})`, 'i');
+  const hasGateCollocation = new RegExp(
+    `\\b(?:(?:${HOUSING_INTRO_EMOTION_WORD_SRC})\\s+${personNounRe.source}`
+    + `|${personNounRe.source}\\s+(?:${HOUSING_INTRO_EMOTION_WORD_SRC})`
+    + `|tenants?|apartment\\s+interior|living\\s+room|famil(?:y|ies)\\s+(?:crying|distressed|evict\\w*)`
+    + `|close[\\s-]?up\\s+(?:faces?|tenant|person)|tenants?\\s+faces?|persons?\\s+faces?`
+    + `|people\\s+(?:crying|evict\\w*|distressed))\\b`,
+    'i',
+  ).test(text);
+  const hasEvictionWithPerson =
+    /\bevict\w*\b/i.test(text)
+    && new RegExp(`\\b(?:${HOUSING_INTRO_PERSON_NOUN_SRC}|worried|shocked|faces?|portrait)\\b`, 'i').test(text);
+  return hasGateCollocation || hasEvictionWithPerson;
+}
+
+/**
  * Check whether the media pool contains at least one intro-eligible face/lived-in clip
  * for housing topics, or at least one clinical/face clip for healthcare topics.
  *
@@ -1340,13 +1392,7 @@ export function checkIntroFacePool(project) {
       // Align with checkEditTimelineIntroFace — same collocations the post-build
       // gate requires for the first 3s opener. Bare "eviction notice" paper still
       // needs a person/tenant/family signal (web31 static-doc openers).
-      const hasGateCollocation =
-        /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
-      const hasEvictionWithPerson =
-        /\bevict(?:ion|ed|s)?\b/i.test(evidence)
-        && /\b(tenant|family|person|people|woman|man|couple|worried|shocked|face|portrait)\b/i.test(evidence);
-      if (hasGateCollocation || hasEvictionWithPerson) return true;
-      return false;
+      return housingIntroFaceEvidenceMatches(evidence);
     });
     if (!hasIntroFace) {
       return {
@@ -1458,12 +1504,7 @@ function assetPassesHousingTimelineIntro(asset) {
   if (/\b(static\s+document|document\s+only|notice\s+only|price\s+index|chart\s+graphic|paper\s+text)\b/i.test(evidence)) {
     return false;
   }
-  const hasGateCollocation =
-    /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
-  const hasEvictionWithPerson =
-    /\bevict(?:ion|ed|s)?\b/i.test(evidence)
-    && /\b(tenant|family|person|people|woman|man|couple|worried|shocked|face|portrait)\b/i.test(evidence);
-  return hasGateCollocation || hasEvictionWithPerson;
+  return housingIntroFaceEvidenceMatches(evidence);
 }
 
 export function checkEditTimelineIntroFace(project) {

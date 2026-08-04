@@ -2437,13 +2437,25 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   // (added in b40b8ab). They MUST appear early so the scoped Vimeo searches fire within
   // queryCap=34. When these were last, 12 webQueries + 22 earlier boost entries = 34 cap
   // was hit before any of these 7 executed — all 7 were silently dropped (web63 bing=0 ddg=0).
+  //
+  // 'foreclosure family home' and 'eviction documentary' were added to housingHostLead
+  // below but originally left at their old position ~40 entries into this list — past
+  // queryCap=34, so their site:vimeo.com/site:dailymotion.com variants never fired
+  // (same silent-drop bug the comment above already documents for the other 7). Moved
+  // here so every housingHostLead base query actually executes. Confirmed live via DDG
+  // v.js: 'eviction documentary site:vimeo.com' surfaces genuine face+eviction stories
+  // ("Preview Clip ... 'Evicting the American Dream'", "Tenants Rise Up! Fighting for
+  // Housing Justice") that the intro-face gate now accepts (see
+  // housingIntroFaceEvidenceMatches in harvest-quality.mjs).
   'worried tenant face close up',
   'shocked face eviction notice',
   'eviction notice tenant apartment',
   'housing crisis family',
   'evicted family packing boxes apartment',
   'tenant packing boxes',
+  'foreclosure family home',
   'stressed tenant crying apartment',
+  'eviction documentary',
   // Core housing B-roll subjects
   'apartment building',
   'apartment interior',
@@ -2466,7 +2478,6 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'neighborhood housing survey',
   'eviction documentary family',
   'housing crisis documentary',
-  'foreclosure family home',
   'housing shortage crisis',
 ];
 
@@ -2734,6 +2745,11 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
         'tenant packing boxes site:vimeo.com',
         'foreclosure family home site:vimeo.com',
         'stressed tenant crying apartment site:vimeo.com',
+        // Confirmed live via DDG v.js: surfaces "Evicting the American Dream" preview
+        // clip + "Tenants Rise Up! Fighting for Housing Justice" — real face/eviction
+        // evidence. Its base ('eviction documentary') was moved into the early block of
+        // ARCHIVE_HOUSING_MOTION_QUERIES so this fires within queryCap=34.
+        'eviction documentary site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
     : [];
   const webHostQueries = [

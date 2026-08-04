@@ -12,6 +12,7 @@ import {
   hasAirlineAviationEvidence,
   hasHealthcareEvidence,
   hasHousingEvidence,
+  housingIntroFaceEvidenceMatches,
   countHealthcareStrongVideos,
   healthcareSoftPassMotionFailureReason,
   healthcareOffTopicBrollReason,
@@ -2485,6 +2486,81 @@ describe('checkEditTimelineIntroFace — housing first-segment gate', () => {
       'In Nepal Crash, Pilot Met the Same Fate as Her Husband',
       'housing crash eviction',
     )).toBeTruthy();
+  });
+});
+
+describe('housingIntroFaceEvidenceMatches — real DDG site:vimeo.com titles (waves 36-60)', () => {
+  // These titles are live DuckDuckGo video-search results for the housingHostLead
+  // site:vimeo.com queries after the ':' sanitizeQuery fix (23d3fe9) restored
+  // Bing/Google/DDG hits for site:-scoped searches. They are genuine, downloadable
+  // face+eviction stories the old narrow word list (singular tenant/family/woman/
+  // man/couple only, `evict(?:ion|ed|s)?`) silently dropped.
+  it('accepts real face+eviction Vimeo titles the narrow word list used to miss', () => {
+    const realTitles = [
+      "Barcroft TV: Grandmother Faces Eviction From 'Paradise' Treehouse",
+      'Tenants Rise Up! Fighting for Housing Justice in the Bay Area',
+      "One Man, One City, Three Evictions | The Human Cost of Rio's Growth",
+      'Residents of a Little Havana mobile home are shocked by sudden eviction notice',
+      'Dozens face eviction at downtown Las Vegas transitional housing complex',
+    ];
+    for (const title of realTitles) {
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(true);
+    }
+  });
+
+  it('still rejects weak/off-topic Vimeo titles with no person+eviction signal', () => {
+    const weakTitles = [
+      'Housing Stability - Urban Institute',
+      'Understanding and Preventing the Eviction Process',
+      'D.D. Shostakovich. Piano Concerto No. 2, Andante.',
+      'viper 797 electronic dartboard featuring the regulation target face',
+      'Improving MRI Physics for Radiology Residents: Year One',
+    ];
+    for (const title of weakTitles) {
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(false);
+    }
+  });
+
+  it('matches "evicting"/"evictions" verb and plural forms dropped by the old evict(?:ion|ed|s)? stem', () => {
+    expect(housingIntroFaceEvidenceMatches('family evicting tenants from apartment')).toBe(true);
+    expect(housingIntroFaceEvidenceMatches('tenant faces multiple evictions this year')).toBe(true);
+  });
+
+  it('matches plural family and kinship/status nouns missing from the old singular-only list', () => {
+    expect(housingIntroFaceEvidenceMatches('families evicted from their apartment')).toBe(true);
+    expect(housingIntroFaceEvidenceMatches('grandmother evicted from her home')).toBe(true);
+    expect(housingIntroFaceEvidenceMatches('renter evicted after rent hike')).toBe(true);
+    expect(housingIntroFaceEvidenceMatches('homeowner evicted by bank foreclosure')).toBe(true);
+  });
+
+  it('does not resurrect the already-rejected Barcroft/Paradise-treehouse pad despite matching person+eviction words', () => {
+    // housingOffTopicBrollReason hard-rejects this exact title (tabloid treehouse
+    // human-interest story, not a real housing-crisis eviction) upstream of the
+    // evidence-matcher — evidence broadening must not bypass that reject.
+    const title = "Barcroft TV: Grandmother Faces Eviction From 'Paradise' Treehouse";
+    expect(housingOffTopicBrollReason(title.toLowerCase(), HOUSING_TOPIC)).toBeTruthy();
+    const clip = { id: 'barcroft1', type: 'video', title, alt: title, url: 'https://vimeo.com/200166289' };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [clip],
+      editTimeline: [{ segmentId: 'seg1', startSec: 0, endSec: 2, assetId: 'barcroft1' }],
+    };
+    expect(checkIntroFacePool(project).pass).toBe(false);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+  });
+
+  it('checkIntroFacePool and checkEditTimelineIntroFace both pass on a real un-rejected eviction-notice clip', () => {
+    const title = 'Residents of a Little Havana mobile home are shocked by sudden eviction notice';
+    const clip = { id: 'havana1', type: 'video', title, alt: title, url: 'https://vimeo.com/200000001' };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [clip],
+      editTimeline: [{ segmentId: 'seg1', startSec: 0, endSec: 2, assetId: 'havana1' }],
+    };
+    expect(checkIntroFacePool(project).pass).toBe(true);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
   });
 });
 

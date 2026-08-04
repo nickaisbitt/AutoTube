@@ -26,7 +26,8 @@ export async function handleSearchVideos(
     return;
   }
 
-  const query = qParam.replace(/[^a-zA-Z0-9\s\-_."']/g, "").trim();
+  // Allow ':' so site:vimeo.com / site:dailymotion.com scoped queries reach the engine intact.
+  const query = qParam.replace(/[^a-zA-Z0-9\s\-_."':]/g, "").trim();
   if (!query) {
     res.statusCode = 400;
     res.setHeader("Content-Type", "application/json");

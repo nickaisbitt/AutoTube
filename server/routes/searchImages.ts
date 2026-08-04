@@ -11,7 +11,8 @@ function sanitizeQuery(query: string | null): { valid: boolean; sanitized?: stri
   if (query.length > 200) {
     return { valid: false, error: 'Query too long (maximum 200 characters)' };
   }
-  const sanitized = query.replace(/[^a-zA-Z0-9\s\-_."']/g, "").trim();
+  // Allow ':' so site:vimeo.com / site:dailymotion.com scoped queries reach the engine intact.
+  const sanitized = query.replace(/[^a-zA-Z0-9\s\-_."':]/g, "").trim();
   if (!sanitized) {
     return { valid: false, error: 'Query contains no valid search characters' };
   }

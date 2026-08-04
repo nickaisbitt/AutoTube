@@ -39,6 +39,9 @@ import {
 
 /** Lived-in housing visual queries — never character/city beat titles (web24 Tampa/Jenkins). */
 const HOUSING_SAFE_HARVEST_QUERIES = [
+  'shocked woman face receiving eviction notice apartment',
+  'family crying distressed evicted apartment door',
+  'worried tenant close-up face eviction notice paper',
   'shocked face apartment eviction notice',
   'worried tenant packing boxes apartment',
   'couple arguing bills kitchen table apartment',

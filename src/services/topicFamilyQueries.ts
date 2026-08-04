@@ -19,7 +19,7 @@ export function topicFamilyTemplatesEnabled(): boolean {
 
 /**
  * @param {string} topic
- * @returns {'airline'|'nursing_abuse'|'healthcare_cyber'|'heist_fraud'|'veterans_benefits'|'bank_scam'|'landlord'|'insurance_fraud'|'tickets'|'disaster'|'generic'}
+ * @returns {'airline'|'nursing_abuse'|'healthcare_ai'|'healthcare_cyber'|'heist_fraud'|'veterans_benefits'|'bank_scam'|'landlord'|'insurance_fraud'|'tickets'|'disaster'|'generic'}
  */
 export function resolveTopicFamily(topic: string): string {
   const t = String(topic || '').toLowerCase();
@@ -52,6 +52,19 @@ export function resolveTopicFamily(topic: string): string {
   ) {
     return 'healthcare_cyber';
   }
+  // General healthcare / medical / AI-medicine topics — face+clinical pool, not breach visuals.
+  if (
+    /\b(healthcare|hospital|doctor|patient|medical|medicine|clinic|radiology|surgery|surgical)\b/.test(t)
+    && /\b(ai|artificial\s+intelligence|algorithm|machine\s+learning|diagnostic|diagnosis|mri|scan)\b/.test(t)
+  ) {
+    return 'healthcare_ai';
+  }
+  if (
+    /\b(healthcare|hospital|doctor|physician|patient|clinical|medical)\b/.test(t)
+    && /\b(change|future|transform|impact|revolutionize|improve|crisis|access)\b/.test(t)
+  ) {
+    return 'healthcare_ai';
+  }
   // Veterans benefits / dark-web brokers — not generic bank OTP scam visuals
   if (
     /veteran|va\s+benefits|va\s+records|dark\s*web|data\s*broker|ssn|social\s*security/.test(t)
@@ -72,6 +85,18 @@ export function resolveTopicFamily(topic: string): string {
 
 /** @type {Record<string, string[]>} */
 export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
+  healthcare_ai: [
+    'doctor worried face reviewing mri scan close-up',
+    'radiologist concerned expression mri monitor screen',
+    'surgeon focused operating room close-up face',
+    'patient hospital bed doctor face close-up',
+    'doctor looking at computer screen concerned',
+    'mri scanner patient going through machine',
+    'operating room surgery action close-up',
+    'clinician pointing at scan monitor screen',
+    'radiologist workstation screen reviewing',
+    'doctor patient exam worried expression',
+  ],
   airline: [
     'airplane cabin passenger face worried',
     'pilot cockpit headset face close-up',
@@ -129,12 +154,16 @@ export const TOPIC_FAMILY_QUERIES: Record<string, string[]> = {
     'person checking credit report laptop',
   ],
   landlord: [
-    'worried couple reading letter home',
-    'apartment building exterior city',
-    'eviction notice paper hands',
-    'tenant packing boxes apartment',
-    'keys lock apartment door',
-    'for rent sign house porch',
+    'shocked woman face eviction notice apartment',
+    'family crying distressed being evicted apartment',
+    'worried tenant reading eviction letter close-up',
+    'distressed couple packing boxes apartment eviction',
+    'tenant face apartment door eviction notice handed',
+    'couple arguing bills kitchen table apartment',
+    'eviction notice hands person worried face close-up',
+    'foreclosure family front door distressed',
+    'tenant packing belongings hallway face',
+    'keys apartment door tenant worried',
   ],
   insurance_fraud: [
     'car crash dashcam footage highway',

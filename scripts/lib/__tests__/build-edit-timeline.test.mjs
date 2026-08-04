@@ -1736,3 +1736,31 @@ describe('isHousingApartmentMotion — kitchen-static vs face-bearing kitchen', 
   });
 });
 
+
+describe('introFaceTier — healthcare-web69 medica/filmworks/versius rejects', () => {
+  it('hard-rejects cambridge filmworks / medica / versius-senhance promo pads (-1)', () => {
+    const cases = [
+      {
+        alt: 'versius surgical robotic system cmr surgical cambridge filmworks have partnered',
+        title: 'versius surgical robotic system cmr surgical cambridge filmworks',
+        url: 'https://vimeo.com/versius.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'wide and fsn at medica 2013 here we see the company s new series of smart m',
+        title: 'wide and fsn at medica 2013',
+        url: 'https://archive.org/medica2013.mp4',
+        type: 'video',
+      },
+      {
+        alt: 'senhance surgical robotic system full length benefits this is senhance',
+        title: 'senhance surgical robotic system full length benefits',
+        url: 'https://vimeo.com/senhance.mp4',
+        type: 'video',
+      },
+    ];
+    for (const asset of cases) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+    }
+  });
+});

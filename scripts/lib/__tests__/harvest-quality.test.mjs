@@ -2468,3 +2468,21 @@ describe('checkEditTimelineIntroFace — housing first-segment gate', () => {
     )).toBeTruthy();
   });
 });
+
+describe('healthcareOffTopicBrollReason — web69 medica/filmworks pads', () => {
+  const HEALTHCARE_TOPIC = 'Why AI will change healthcare';
+  it('rejects cambridge filmworks / medica 2013 / versius promo titles', () => {
+    expect(healthcareOffTopicBrollReason(
+      'versius surgical robotic system cmr surgical cambridge filmworks have partnered',
+      HEALTHCARE_TOPIC,
+    )).toMatch(/healthcare off-topic/);
+    expect(healthcareOffTopicBrollReason(
+      'wide and fsn at medica 2013 smart medical series',
+      HEALTHCARE_TOPIC,
+    )).toMatch(/healthcare off-topic/);
+    expect(healthcareOffTopicBrollReason(
+      'senhance surgical robotic system full length benefits',
+      HEALTHCARE_TOPIC,
+    )).toMatch(/healthcare off-topic/);
+  });
+});

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   airlineSoftPassMotionFailureReason,
   canonicalMediaKey,
+  checkEditTimelineIntroFace,
   checkIntroFacePool,
   countAirlineStrongVideos,
   ensureTopicalVideoCoverage,
@@ -2247,5 +2248,108 @@ describe('housingOffTopicBrollReason — FKA Twigs music pad reject', () => {
   });
   it('keeps on-topic housing clips', () => {
     expect(housingOffTopicBrollReason('worried tenant face eviction notice apartment close-up', ctx)).toBe('');
+  });
+});
+
+describe('healthcareOffTopicBrollReason — web65/66 new junk patterns', () => {
+  const ctx = 'AI beats your doctor healthcare hospital';
+  it('rejects personal injury clinic MRI ads', () => {
+    expect(healthcareOffTopicBrollReason('car accident doctor greenville sc mri scan at personal injury clinic', ctx)).toMatch(/off-topic/);
+    expect(healthcareOffTopicBrollReason('personal injury doctor mri scan auto accident', ctx)).toMatch(/off-topic/);
+  });
+  it('rejects cabrini foundation fundraising appeal', () => {
+    expect(healthcareOffTopicBrollReason('cabrini foundation surgical robot appeal', ctx)).toMatch(/off-topic/);
+  });
+  it('rejects veterinary imaging (animals not humans)', () => {
+    expect(healthcareOffTopicBrollReason('veterinary imaging modalities explained x ray ct mri ultrasound', ctx)).toMatch(/off-topic/);
+    expect(healthcareOffTopicBrollReason('veterinary radiology diagnostic imaging dogs cats', ctx)).toMatch(/off-topic/);
+  });
+  it('rejects after effects project templates', () => {
+    expect(healthcareOffTopicBrollReason('doctor presenting medical cosmetic product after effects project template', ctx)).toMatch(/off-topic/);
+  });
+  it('rejects STEM program promos', () => {
+    expect(healthcareOffTopicBrollReason('iamstemak the surgery techs high school program', ctx)).toMatch(/off-topic/);
+    expect(healthcareOffTopicBrollReason('gcsc surgical services programs career education', ctx)).toMatch(/off-topic/);
+  });
+  it('rejects patient portal UI clips', () => {
+    expect(healthcareOffTopicBrollReason('connect patient portal arizona diagnostic radiology arizona diagnostic', ctx)).toMatch(/off-topic/);
+  });
+  it('keeps legitimate surgical robot clips', () => {
+    expect(healthcareOffTopicBrollReason('cnbc meet the surgical robot that can diagnose lung cancer', ctx)).toBe('');
+    expect(healthcareOffTopicBrollReason('versius surgical robotic system cmr surgical cambridge filmworks', ctx)).toBe('');
+    expect(healthcareOffTopicBrollReason('science nation surgical robotics national science foundation', ctx)).toBe('');
+  });
+  it('keeps da Vinci surgical robot live OR footage', () => {
+    expect(healthcareOffTopicBrollReason('the da vinci surgical robot dr richard gallagher operating room', ctx)).toBe('');
+  });
+});
+
+describe('checkEditTimelineIntroFace — healthcare timeline gate', () => {
+  function makeAsset(title, type = 'video') {
+    return { id: title.slice(0, 10), type, title, alt: title, url: `https://archive.org/${title}` };
+  }
+  function makeProject(assets, timelineFirstSec = null) {
+    const media = assets;
+    const editTimeline = timelineFirstSec !== null
+      ? [{ segmentId: 's1', startSec: timelineFirstSec, endSec: timelineFirstSec + 1, assetId: assets[0]?.id }]
+      : assets.map((a, i) => ({ segmentId: 's1', startSec: i * 0.65, endSec: (i + 1) * 0.65, assetId: a.id }));
+    return { topic: 'AI beats your doctor healthcare hospital', media, editTimeline };
+  }
+
+  it('passes when first 3s has a surgical robot video', () => {
+    const project = makeProject([
+      makeAsset('cnbc meet the surgical robot that can diagnose lung cancer'),
+    ]);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+
+  it('passes when first 3s has a da Vinci OR video', () => {
+    const project = makeProject([
+      makeAsset('the da vinci surgical robot dr gallagher operating room'),
+    ]);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+
+  it('fails when first 3s only has a personal injury clinic video', () => {
+    const project = makeProject([
+      makeAsset('car accident doctor mri scan personal injury clinic'),
+    ]);
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+
+  it('fails when first 3s only has cabrini foundation appeal', () => {
+    const project = makeProject([
+      makeAsset('cabrini foundation surgical robot appeal'),
+    ]);
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+
+  it('passes for non-healthcare topics without check', () => {
+    const project = {
+      topic: 'airline cabin pressure failure',
+      media: [makeAsset('random clip')],
+      editTimeline: [{ segmentId: 's1', startSec: 0, endSec: 1, assetId: 'random cli' }],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+
+  it('passes when first 3s has radiologist mentioned in title', () => {
+    const project = makeProject([
+      makeAsset('radiologist reviewing mri scan at workstation monitor'),
+    ]);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+
+  it('fails when first 3s video is the off-topic broll (veterinary imaging)', () => {
+    const project = makeProject([
+      makeAsset('veterinary imaging modalities ct mri ultrasound dogs'),
+    ]);
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
   });
 });

@@ -1209,13 +1209,19 @@ describe('healthcare web17 raw 5.6 junk rejects — video game, massage pillow, 
     }
   });
 
-  it('does not reject legitimate clinical clips that share incidental tokens', () => {
-    const keep = [
+  it('hard-rejects Bronxnet/public-access-TV bright-studio clips (healthcare-web48 caption contrast fix)', () => {
+    // These Bronxnet/OPEN Tuesday clips carry genuine clinical keywords (radiology, breast cancer)
+    // but their bright news-studio set produces poor caption contrast with yellow text (captionReadability 4/10).
+    // They must be rejected so clinical Archive clips with darker backgrounds are preferred.
+    const cases = [
       'bronxnet public access tv ai used to detect breast cancer dr sandra brennan director of radiology',
       'open tuesday ai used to detect breast cancer community media peg bronxnet radiology',
     ];
-    for (const alt of keep) {
-      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(
+        /healthcare off-topic/,
+        `expected "${alt}" to be rejected (bright public-access TV studio kills caption contrast)`,
+      );
     }
   });
 });

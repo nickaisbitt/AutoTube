@@ -2432,6 +2432,23 @@ describe('checkEditTimelineIntroFace — housing first-segment gate', () => {
     expect(checkEditTimelineIntroFace(project).pass).toBe(true);
   });
 
+  it('fails on scream-crying collection opener without tenant face', () => {
+    const junk = {
+      id: 'scream1',
+      type: 'video',
+      title: 'Everyone Crash Lost Scream Crying and Collection',
+      alt: 'scream crying collection',
+      url: 'https://example.com/scream.mp4',
+    };
+    const project = {
+      topic: 'The housing crash they said would never happen',
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [junk],
+      editTimeline: [{ segmentId: 'seg1', startSec: 0, endSec: 2, assetId: 'scream1' }],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+  });
+
   it('rejects housing-web81 junk via off-topic broll', () => {
     expect(housingOffTopicBrollReason(
       '32 ect vs 200 find the best corrugated cardboard box for you',

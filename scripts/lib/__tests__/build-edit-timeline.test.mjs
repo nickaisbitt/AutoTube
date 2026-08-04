@@ -1764,3 +1764,14 @@ describe('introFaceTier — healthcare-web69 medica/filmworks/versius rejects', 
     }
   });
 });
+
+describe('introFaceTier — healthcare-web70 Science Nation globe reject', () => {
+  it('hard-rejects Science Nation globe/logo title-card pads (-1)', () => {
+    expect(introFaceTier({
+      alt: 'science nation globe background graphic nsf intro',
+      title: 'science nation globe logo title card',
+      url: 'https://archive.org/sn-globe.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+  });
+});

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   introFaceTier,
   hasReadableFaceVisual,
+  passesHousingTimelineIntroEvidence,
   isHousingApartmentMotion,
   isHousingTalkingHeadMotion,
   isLandscapeOnlyIntroVisual,
@@ -266,6 +267,93 @@ describe('introFaceTier', () => {
     expect(introFaceTier(robotOnly, { healthcare: true })).toBe(2);
   });
 
+  it('prefers tier-3 clinician face over tier-2 robot in healthcare intro 0–3s', () => {
+    // Picker must exhaust minTier 3 before 2 — otherwise robot-led hooks cap ~6.6.
+    const robot = {
+      id: 'robot',
+      type: 'video',
+      url: 'https://cdn.example/robot.mp4',
+      title: 'senhance surgical robotic system full length benefits',
+      alt: 'senhance surgical robotic system operating room',
+      query: 'surgical robot',
+    };
+    const face = {
+      id: 'face',
+      type: 'video',
+      url: 'https://cdn.example/face.mp4',
+      title: 'worried patient face doctor consultation hospital close-up',
+      alt: 'patient face worried doctor hospital portrait people',
+      query: 'worried patient face doctor',
+    };
+    const project = {
+      topic: 'Why AI will change healthcare',
+      script: [{ id: 's1', narration: 'AI already beats your doctor on the scan.', duration: 8 }],
+      media: [robot, face],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 0.65 });
+    const first = timeline.find((t) => (t.startSec ?? 0) < 3);
+    expect(first?.assetId).toBe('face');
+  });
+});
+
+describe('passesHousingTimelineIntroEvidence', () => {
+  it('passes tenant/eviction evidence that checkEditTimelineIntroFace accepts', () => {
+    expect(passesHousingTimelineIntroEvidence({
+      title: 'tenant left in limbo after landlord was evicted',
+      alt: 'tenant eviction apartment',
+      url: 'https://archive.org/x.mp4',
+    })).toBe(true);
+    expect(passesHousingTimelineIntroEvidence({
+      title: 'worried family distressed eviction notice apartment',
+      alt: 'family crying distressed evicted apartment door',
+      url: 'https://nypost.com/x',
+    })).toBe(true);
+  });
+
+  it('rejects bare face/music pads that fail the timeline gate (web3/web4)', () => {
+    expect(passesHousingTimelineIntroEvidence({
+      title: 'the weeknd can t feel my face remix',
+      alt: 'the weeknd can t feel my face remix',
+      query: 'worried tenant face close up',
+      url: 'https://vimeo.com/x.mp4',
+    })).toBe(false);
+    expect(passesHousingTimelineIntroEvidence({
+      title: 'viper 787 electronic dartboard',
+      alt: 'viper 787 electronic dartboard',
+      query: 'worried tenant face close up',
+      url: 'https://vimeo.com/y.mp4',
+    })).toBe(false);
+  });
+
+  it('prefers timeline-gate evidence over music-pad face in housing intro 0–3s', () => {
+    const junk = {
+      id: 'junk',
+      type: 'video',
+      url: 'https://cdn.example/junk.mp4',
+      title: 'the weeknd can t feel my face remix yeknomusic',
+      alt: 'the weeknd can t feel my face remix',
+      query: 'worried tenant face close up',
+    };
+    const good = {
+      id: 'good',
+      type: 'video',
+      url: 'https://cdn.example/good.mp4',
+      title: 'tenant left in limbo after man believed to be his landlord was evicted',
+      alt: 'tenant left in limbo after eviction',
+      query: 'tenant eviction',
+    };
+    const project = {
+      topic: 'The housing crash they said would never happen',
+      script: [{ id: 's1', narration: 'They hid the housing crash while your equity vanished.', duration: 8 }],
+      media: [junk, good],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 0.65 });
+    const first = timeline.find((t) => (t.startSec ?? 0) < 3);
+    expect(first?.assetId).toBe('good');
+  });
+});
+
+describe('introFaceTier demotions continued', () => {
   it('demotes pure talking-head / rejects maternity and news studio for healthcare intro', () => {
     expect(introFaceTier({
       alt: 'ai healthcare talking head explainer interview',

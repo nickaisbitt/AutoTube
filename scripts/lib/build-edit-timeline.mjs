@@ -9,6 +9,7 @@ import {
   isOffBrandVisual,
   isGenericStockJunk,
   hasHealthcareEvidence,
+  HOUSING_OFF_TOPIC_BROLL_RE,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
@@ -239,6 +240,18 @@ export function hasReadableFaceVisual(asset) {
   const blob = assetEvidenceBlob(asset);
   return /\b(face|faces|portrait|close.?up|eyes|expression|reaction|worried|shocked|crying|smiling)\b/.test(blob)
     && /\b(passengers?|pilots?|attendants?|crew|traveller?s?|person|people|woman|women|man|men|family|couple|tenants?|landlords?|residents?)\b/.test(blob);
+}
+
+/**
+ * Evidence that satisfies checkEditTimelineIntroFace for housing (tenant/evict/
+ * worried-family collocations). Picker must prefer these in the first 3s so the
+ * post-build timeline gate does not fail after a non-gate face won the cut.
+ */
+export function passesHousingTimelineIntroEvidence(asset) {
+  const evidence = assetEvidenceBlob(asset);
+  if (!evidence.trim()) return false;
+  if (HOUSING_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
+  return /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|evict(?:ion|ed)?|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
 }
 
 const AIRLINE_TOPICAL_VISUAL_RE = /\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|jet|passenger|attendant|hangar|airport|pilot|plane|flight)\b/;
@@ -870,15 +883,23 @@ export function buildEditTimeline(project, options = {}) {
           // Penalise split-screen/news-package openers in the intro so face clips rank above them.
           if (isHousingSplitScreenOrNewsIntro(a)) score -= 6;
         }
-        // Healthcare intro: worried/focused clinician face at workstation → extra +3
-        // so OR/radiologist clips beat generic vial/lab stock even without OR-keyword evidence.
+        // Healthcare intro: worried/focused clinician face at workstation → extra +5
+        // so human faces beat faceless robot/OR stock that capped tip-best at 6.6.
         if (isIntro && topicIsHealthcare) {
           const evBlob = assetEvidenceBlob(a);
           if (
-            /\b(worried|concerned|focused|examining|reviewing\s+(?:scan|results?)|at\s+workstation)\b/i.test(evBlob)
-            && /\b(doctor|radiologist|physician|surgeon|clinician|nurse)\b/i.test(evBlob)
+            /\b(worried|concerned|focused|examining|reviewing\s+(?:scan|results?)|at\s+workstation|patient\s+(?:face|close)|doctor\s+face|clinician\s+face)\b/i.test(evBlob)
+            && /\b(doctor|radiologist|physician|surgeon|clinician|nurse|patient)\b/i.test(evBlob)
           ) {
-            score += 3;
+            score += 5;
+          }
+          // Faceless robot/OR without a human role word → soft demote so tier-3
+          // faces win the first beats when both exist in the pool.
+          if (
+            /\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci|senhance|versius)\b/i.test(evBlob)
+            && !/\b(doctor|surgeon|clinician|physician|patient|nurse|radiologist)\b/i.test(evBlob)
+          ) {
+            score -= 3;
           }
         }
         // Cold intro: beat match outranks establishing stock.
@@ -1247,11 +1268,22 @@ export function buildEditTimeline(project, options = {}) {
           ? [...pool].sort((a, b) => diversityScore(b) - diversityScore(a))
           : pool;
         if (!rankedPool.length) return null;
-        // First 3s of airline/housing hooks: exhaust topical readable faces,
-        // then any readable face, before falling through to other lead
-        // visuals. Reuse caps and adjacency rules still apply at every tier.
+        // First 3s of airline/housing/healthcare hooks: exhaust highest face
+        // tiers first. Healthcare face+topical is tier 3 — must beat faceless
+        // surgical-robot tier 2 (web61/68: robot-led hooks capped ~6.6).
+        // Reuse caps and adjacency rules still apply at every tier.
         if (!relaxed && introLeadWindow && faceFirstIntroTopic) {
-          for (const minTier of [2, 1]) {
+          // Housing: clips that satisfy checkEditTimelineIntroFace evidence
+          // (tenant/evict/worried-family collocations) before bare face tags,
+          // so timeline gate and picker stay aligned (web4 INTRO_FACE_FAIL).
+          if (topicIsHousing) {
+            for (let j = 0; j < rankedPool.length; j++) {
+              const candidate = rankedPool[(ai + j) % rankedPool.length];
+              if (!passesHousingTimelineIntroEvidence(candidate)) continue;
+              if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
+            }
+          }
+          for (const minTier of [3, 2, 1]) {
             for (let j = 0; j < rankedPool.length; j++) {
               const candidate = rankedPool[(ai + j) % rankedPool.length];
               if (introFaceTier(candidate, faceTierOptions) < minTier) continue;

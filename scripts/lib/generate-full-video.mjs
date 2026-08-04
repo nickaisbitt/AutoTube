@@ -2475,6 +2475,13 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
  * that return political/game-show/podcast junk (healthcare-web43/44).
  */
 const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
+  // Face-first leads — tip-best 6.6 stalled on faceless robot/OR openers (web61/68).
+  'doctor face patient consultation close up',
+  'worried patient face doctor hospital',
+  'radiologist face reviewing mri screen',
+  'clinician face at workstation monitors',
+  'surgeon face operating room close up',
+  'nurse patient bedside face',
   'Science Nation surgical robot',
   'Science Nation radiology',
   'surgical robot operating room',
@@ -2524,7 +2531,7 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
 ];
 
 /** Clinical-only Archive subjects used when web engines return 0 motion. */
-export const ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES = ARCHIVE_HEALTHCARE_MOTION_QUERIES.slice(0, 18);
+export const ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES = ARCHIVE_HEALTHCARE_MOTION_QUERIES.slice(0, 24);
 
 /**
  * When bing/google/ddg all returned 0, bias Archive toward clinical lead subjects

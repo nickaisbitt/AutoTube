@@ -1381,3 +1381,55 @@ describe('buildEditTimeline: housing / medium-pool first-15s reuse caps', () => 
   });
 });
 
+// ---------------------------------------------------------------------------
+// isRejectedIntroLeadVisual — healthcare-web46 new junk patterns
+// ---------------------------------------------------------------------------
+
+describe('introFaceTier — healthcare-web46 hard-rejects (C4I / Moscow Times / Gaza)', () => {
+  const HEALTHCARE_TOPIC = 'Why AI will change healthcare';
+
+  it('hard-rejects C4I "Call 4 Investigation" public-access TV pad (-1)', () => {
+    const cases = [
+      {
+        alt: 'c4i for may 20 jon kelly patricia shupe inner voices',
+        title: 'c4i for may 20 jon kelly patricia shupe donald t grahn inner voices speech analyst',
+        url: 'https://archive.org/download/scm-408098-c4iformay20/c4i_may_20.mp4',
+        source: 'Archive.org live',
+        type: 'video',
+      },
+      {
+        alt: 'call 4 investigation news segment healthcare',
+        title: 'call 4 investigation archive clip',
+        url: 'https://archive.org/download/c4i_clip/c4i_clip.mp4',
+        source: 'Archive.org live',
+        type: 'video',
+      },
+    ];
+    for (const asset of cases) {
+      expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+    }
+  });
+
+  it('hard-rejects Moscow Times Russian nurses storage room pad (-1)', () => {
+    const asset = {
+      alt: 'sick russian nurses in storage room spark outrage the moscow times',
+      title: 'sick russian nurses in storage room spark outrage the moscow times',
+      url: 'https://archive.org/download/youtube-cwZOaBbVCnw/cwZOaBbVCnw.mp4',
+      source: 'Archive.org live',
+      type: 'video',
+    };
+    expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+  });
+
+  it('hard-rejects al-Ahli hospital Gaza conflict clip (-1)', () => {
+    const asset = {
+      alt: 'dr ghassan abu sitta recounts being forced from al ahli hospital shorts gaza alahli',
+      title: 'dr ghassan abu sitta recounts being forced from al ahli hospital',
+      url: 'https://archive.org/download/youtube-J18xT5FTHCs/J18xT5FTHCs.mp4',
+      source: 'Archive.org live',
+      type: 'video',
+    };
+    expect(introFaceTier(asset, { healthcare: true })).toBe(-1);
+  });
+});
+

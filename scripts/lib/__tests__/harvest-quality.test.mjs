@@ -1165,6 +1165,59 @@ describe('healthcare web17 raw 5.6 junk rejects — video game, massage pillow, 
       expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
     }
   });
+
+  it('hard-rejects C4I "Call 4 Investigation" public-access TV pad (healthcare-web46)', () => {
+    const cases = [
+      'c4i for may 20 jon kelly patricia shupe inner voices speech analyst',
+      'call 4 investigation healthcare segment archive clip',
+      'call for investigation public access tv news',
+      'c4i archive segment interview inner voices',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(
+        /healthcare off-topic/,
+        `expected "${alt}" to be rejected`,
+      );
+    }
+  });
+
+  it('hard-rejects Moscow Times Russian nurses storage room (healthcare-web46)', () => {
+    const cases = [
+      'sick russian nurses in storage room spark outrage the moscow times',
+      'sick nurses in storage room moscow times report',
+      'nurses storage room outrage moscow times',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(
+        /healthcare off-topic/,
+        `expected "${alt}" to be rejected`,
+      );
+    }
+  });
+
+  it('hard-rejects al-Ahli hospital Gaza conflict clip (healthcare-web46)', () => {
+    const cases = [
+      'dr ghassan abu sitta recounts being forced from al ahli hospital shorts gaza alahli',
+      'al ahli hospital forced evacuation conflict zone',
+      'abu sitta hospital gaza clinic',
+    ];
+    for (const alt of cases) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(
+        /healthcare off-topic/,
+        `expected "${alt}" to be rejected`,
+      );
+    }
+  });
+
+  it('does not reject legitimate clinical clips that share incidental tokens', () => {
+    const keep = [
+      'bronxnet public access tv ai used to detect breast cancer dr sandra brennan director of radiology',
+      'open tuesday ai used to detect breast cancer community media peg bronxnet radiology',
+    ];
+    for (const alt of keep) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+    }
+  });
 });
 
 describe('checkIntroFacePool — healthcare web17 intro preference (Science Nation over expo suit)', () => {

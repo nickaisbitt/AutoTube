@@ -2483,6 +2483,10 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   'ai radiology',
   'Onyx RAD radiology ai',
   'doctor mri monitor',
+  // healthcare-web48 Vimeo-scoping fix: 'mri clinician monitor site:vimeo.com' in
+  // healthcareHostLead only fires when its base query appears in plan.queries; add it here
+  // (same pattern as housing-web61 Bing/DDG 0-result fix for site:-scoped searches).
+  'mri clinician monitor',
   'clinician computer screen',
   'surgical robot',
   'ultrasound demonstration',

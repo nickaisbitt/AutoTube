@@ -1,6 +1,6 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-03T22:57Z** — branch `cursor/web-harvest-assemble-auth-4556` (durable loop; both tip-best **6.2**). Script-fallback allowlist + Linux Chrome path + housing soft-pass floor 5 + healthcare-web43 junk rejects shipped; healthcare-web43 raw **3.4** (Archive junk); housing still thin at 4–5v.
+Last updated: **2026-08-04T02:45Z** — branch `cursor/web-harvest-assemble-auth-4556` (durable loop; tip-best housing **6.2** / healthcare **6.4**).
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 

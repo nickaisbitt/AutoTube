@@ -1489,12 +1489,21 @@ function isScienceNationBrandingPad(evidence) {
   return false;
 }
 
+function isHealthcareProductPitchIntro(evidence) {
+  // healthcare-web73: AWBUS / "better choice" ultrasound promo + training series
+  // talking-heads cleared doctor+screen and led the hook ahead of CNBC/OR motion.
+  return /\b(better\s+choice\s+over|hand[\s-]?held\s+ultrasound\s+screening|\bawbus\b|healthcare\s+professional\s+information\s+series|user\s+training\s+part\s*\d|discussing\s+cancer\s+screening\s+with\s+patients|lab\s+interfaces|omnibotics|corin.?s?\s+robotic|shelford\s+surgical\s+training|insertable\s+cardiac\s+monitor|reveal\s+linq)\b/i.test(
+    String(evidence || ''),
+  );
+}
+
 function assetPassesHealthcareTimelineIntro(asset) {
   if (!(asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) return false;
   const evidence = timelineIntroEvidenceOf(asset);
   if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
   if (isScienceNationBrandingPad(evidence)) return false;
-  return /\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci|operating\s+room|mri\s+(?:scan|machine|room|performed)|radiolog\w*|doctor|clinician|physician|surgeon|patient\s+(?:face|close)|worried\s+(?:doctor|clinician|patient)|focused\s+(?:doctor|surgeon|clinician)|science\s+nation.{0,60}(?:operating\s+room|surgical\s*robot|patient|surgeon))\b/i.test(evidence);
+  if (isHealthcareProductPitchIntro(evidence)) return false;
+  return /\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci|operating\s+room|mri\s+(?:scan|machine|room|performed)|radiolog\w*|doctor|clinician|physician|surgeon|patient\s+(?:face|close)|worried\s+(?:doctor|clinician|patient)|focused\s+(?:doctor|surgeon|clinician)|cnbc.{0,48}(?:surgical|robot|da\s*vinci|diagnos)|science\s+nation.{0,60}(?:operating\s+room|surgical\s*robot|patient|surgeon))\b/i.test(evidence);
 }
 
 function assetPassesHousingTimelineIntro(asset) {

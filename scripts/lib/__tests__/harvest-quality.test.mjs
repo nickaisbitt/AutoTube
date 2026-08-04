@@ -2665,4 +2665,35 @@ describe('repairEditTimelineIntroFace — housing-web4/8/10 pool-vs-timeline', (
     expect(repaired.pass).toBe(true);
     expect(project.editTimeline[0].assetId).toBe('cnbc1');
   });
+
+  it('rejects AWBUS product-pitch opener and swaps CNBC surgical robot (web73)', () => {
+    const pitch = {
+      id: 'pitch1',
+      type: 'video',
+      title: 'why is awbus a better choice over hand held ultrasound screening tom stavros md facr',
+      alt: 'awbus better choice hand held ultrasound screening doctor',
+      url: 'https://example.com/awbus.mp4',
+    };
+    const clinical = {
+      id: 'cnbc1',
+      type: 'video',
+      title: 'cnbc meet the surgical robot that can diagnose lung cancer',
+      alt: 'cnbc surgical robot diagnose lung cancer operating room',
+      url: 'https://example.com/cnbc.mp4',
+    };
+    const project = {
+      topic: 'Why AI will change healthcare',
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [pitch, clinical],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 1.3, assetId: 'pitch1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 2.6, assetId: 'pitch1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('cnbc1');
+  });
 });

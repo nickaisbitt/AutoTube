@@ -783,6 +783,14 @@ export function buildEditTimeline(project, options = {}) {
           return -12;
         }
       }
+      // Healthcare outro: apply the same junk gate as intro so corporate slides,
+      // conference interviews, and product promos cannot end the video
+      // (healthcare-web61: guerbet promo / RSNA interview appeared at tail sec).
+      if (isOutro && topicIsHealthcare) {
+        if (isRejectedIntroLeadVisual(a, { healthcare: true })) {
+          return -12;
+        }
+      }
       if (topicIsAirline && !/airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|runway|jet|passenger|attendant|hangar|airport|pilot|plane|flight/i.test(blob)) {
         // Soft demote off-story stock on airline topics (faces still ok).
         if (!/face|person|people|worried|shocked|portrait|close.?up/i.test(blob)) reusePenalty -= 4;
@@ -877,7 +885,19 @@ export function buildEditTimeline(project, options = {}) {
       }
       if (!coldEval && /nursing|elderly|care\s*home|cctv|camera|caregiver|surveillance/i.test(blob)) return 3 + beatBoost + reusePenalty;
       if (topicIsHousing && /beetle|insect|wildlife|macro|spider|bug|larva|caterpillar/i.test(blob)) return -10;
-      if (topicIsHousing && /evict|landlord|tenant|lease|rent|notice|apartment|keys|court|couple|worried/i.test(blob)) return 2 + beatBoost + reusePenalty;
+      // Housing body: use evidence blob (no query) for topicality + face checks.
+      // Prevents query-stamped off-topic clips (e.g. FKA Twigs "ultraviolet song"
+      // harvested with query "shocked face eviction notice") from scoring +3 as if
+      // they were genuine face clips (web78 regression despite good DDG yield).
+      if (topicIsHousing && !coldEval) {
+        const evBlobH = assetEvidenceBlob(a);
+        if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(evBlobH)) return 3 + beatBoost + reusePenalty;
+        if (/evict|landlord|tenant|lease|rent|notice|apartment|keys|court/i.test(evBlobH)) return 2 + beatBoost + reusePenalty;
+        // Zero housing/face evidence in title/url: likely query-stamp pad — demote
+        // so valid clips always outrank off-topic noise without hard-blocking.
+        reusePenalty -= 6;
+        return beatBoost + reusePenalty;
+      }
       // Healthcare body: demote conference-interview / product-promo / facility-tour clips
       // that pass junk gates but read as talking-head news packages, not YouTube-native B-roll.
       if (topicIsHealthcare && !coldEval) {
@@ -899,17 +919,6 @@ export function buildEditTimeline(project, options = {}) {
         return score + beatBoost + reusePenalty;
       }
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(blob)) return 3 + beatBoost + reusePenalty;
-      // Housing body: news-package / split-screen / property-management-channel clips
-      // without housing-topical evidence read as dead air — demote below on-topic clips.
-      if (topicIsHousing && !coldEval) {
-        const evBlob = assetEvidenceBlob(a);
-        if (
-          HOUSING_SPLIT_SCREEN_NEWS_RE.test(evBlob)
-          && !/\b(evict|tenant|landlord|rent|notice|apartment|foreclos|housing)\b/i.test(evBlob)
-        ) {
-          reusePenalty -= 6;
-        }
-      }
       return beatBoost + reusePenalty;
     };
     // Banned subjects stay out even when reuse penalties drag the on-topic

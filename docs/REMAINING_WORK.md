@@ -1,6 +1,6 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-04T19:26Z** — tip-best housing **6.4** / healthcare **6.6**; 90m wave12 TIMEBOX (no BOTH≥7). First-segment intro-face gate + housing-web81/web3 junk rejects shipped (`50c11e0`/`21d6649`). Wave watches: housing-web3 raw **4.8**, healthcare-web68 raw **5.4**. No new ≥6.8.
+Last updated: **2026-08-04T21:00Z** — tip-best housing **6.4** / healthcare **6.6**; 90m wave13 TIMEBOX (no BOTH≥7). Tier-3 clinician-face preference + housing gate-still exception + evidence-only pool (`fde342f`/`838fe9a`). Wave watches: housing-web4/8/10 INTRO_FACE_FAIL; healthcare-web69 raw **5.6**, web70 **3.8**, web71 **3.6**. No new ≥6.8.
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 

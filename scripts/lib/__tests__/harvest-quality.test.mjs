@@ -2146,6 +2146,18 @@ describe('healthcareOffTopicBrollReason — web61 corporate RSNA/training/slide 
   it.each(junk)('rejects "%s"', (haystack) => {
     expect(healthcareOffTopicBrollReason(haystack, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
   });
+  it('rejects web64 ensemble-x / whitney / zero-g / tutorial pads', () => {
+    const more = [
+      'ensemble x your personal stratagem to build ensembled deep learning models',
+      'whitney hatch heart patient interview robotic surgery',
+      'chest x ray interpretation explained clearly how to read a chest xray',
+      'dr richard gallagher gives an overview of the da vinci surgical robot',
+      'onyx rad demonstration video digital imaging xray',
+    ];
+    for (const alt of more) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+    }
+  });
   it('keeps clinical OR / MRI motion', () => {
     expect(healthcareOffTopicBrollReason('da vinci surgical robot operating room patient', HEALTHCARE_TOPIC)).toBe('');
     expect(healthcareOffTopicBrollReason('mri scanner hospital radiologist clinician', HEALTHCARE_TOPIC)).toBe('');

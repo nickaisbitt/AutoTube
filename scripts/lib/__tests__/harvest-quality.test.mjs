@@ -2293,7 +2293,12 @@ describe('checkEditTimelineIntroFace — healthcare timeline gate', () => {
     const editTimeline = timelineFirstSec !== null
       ? [{ segmentId: 's1', startSec: timelineFirstSec, endSec: timelineFirstSec + 1, assetId: assets[0]?.id }]
       : assets.map((a, i) => ({ segmentId: 's1', startSec: i * 0.65, endSec: (i + 1) * 0.65, assetId: a.id }));
-    return { topic: 'AI beats your doctor healthcare hospital', media, editTimeline };
+    return {
+      topic: 'AI beats your doctor healthcare hospital',
+      script: [{ id: 's1', title: 'Hook', duration: 18 }],
+      media,
+      editTimeline,
+    };
   }
 
   it('passes when first 3s has a surgical robot video', () => {
@@ -2351,5 +2356,98 @@ describe('checkEditTimelineIntroFace — healthcare timeline gate', () => {
     const result = checkEditTimelineIntroFace(project);
     expect(result.pass).toBe(false);
     expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+});
+
+describe('checkEditTimelineIntroFace — housing first-segment gate', () => {
+  it('fails when opener is music/dartboard even if a later segment has a face', () => {
+    const junk = {
+      id: 'junk1',
+      type: 'video',
+      title: 'd d shostakovich piano concerto no 2 andante',
+      alt: 'piano concerto',
+      url: 'https://example.com/shostakovich.mp4',
+      query: 'worried tenant face close up',
+    };
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'family crying distressed evicted apartment door',
+      alt: 'family crying distressed',
+      url: 'https://example.com/evict.mp4',
+    };
+    const project = {
+      topic: 'The housing crash they said would never happen',
+      script: [
+        { id: 'seg1', title: 'Hook', duration: 18 },
+        { id: 'seg2', title: 'Body', duration: 18 },
+      ],
+      media: [junk, face],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 1.3, assetId: 'junk1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 2.6, assetId: 'junk1' },
+        // Later segment local startSec < 3 must NOT satisfy the gate
+        { segmentId: 'seg2', startSec: 0, endSec: 1.3, assetId: 'face1' },
+        { segmentId: 'seg2', startSec: 1.3, endSec: 2.6, assetId: 'face1' },
+      ],
+    };
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+
+  it('ignores query-stamped face words on dartboard opener', () => {
+    const dart = {
+      id: 'dart1',
+      type: 'video',
+      title: 'viper 797 electronic dartboard featuring the regulation target face',
+      alt: 'dartboard target face',
+      url: 'https://vimeo.com/178327921',
+      query: 'worried tenant face close up',
+    };
+    const project = {
+      topic: 'The housing crash they said would never happen',
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [dart],
+      editTimeline: [{ segmentId: 'seg1', startSec: 0, endSec: 2, assetId: 'dart1' }],
+    };
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+  });
+
+  it('passes when first segment opens on distressed tenant face', () => {
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'family crying distressed evicted apartment door',
+      alt: 'family crying distressed',
+      url: 'https://example.com/evict.mp4',
+    };
+    const project = {
+      topic: 'The housing crash they said would never happen',
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [face],
+      editTimeline: [{ segmentId: 'seg1', startSec: 0, endSec: 2, assetId: 'face1' }],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+
+  it('rejects housing-web81 junk via off-topic broll', () => {
+    expect(housingOffTopicBrollReason(
+      '32 ect vs 200 find the best corrugated cardboard box for you',
+      'housing crash eviction',
+    )).toBeTruthy();
+    expect(housingOffTopicBrollReason(
+      'vacuum skin packaging machine vsp by kodipak',
+      'housing crash eviction',
+    )).toBeTruthy();
+    expect(housingOffTopicBrollReason(
+      'viper 797 electronic dartboard',
+      'housing crash eviction',
+    )).toBeTruthy();
+    expect(housingOffTopicBrollReason(
+      'In Nepal Crash, Pilot Met the Same Fate as Her Husband',
+      'housing crash eviction',
+    )).toBeTruthy();
   });
 });

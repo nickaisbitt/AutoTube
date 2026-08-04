@@ -2163,3 +2163,89 @@ describe('healthcareOffTopicBrollReason — web61 corporate RSNA/training/slide 
     expect(healthcareOffTopicBrollReason('mri scanner hospital radiologist clinician', HEALTHCARE_TOPIC)).toBe('');
   });
 });
+
+describe('healthcareOffTopicBrollReason — web61 srcpublishers / manuscript today / cassette rejects', () => {
+  it('rejects srcpublishers.com URL', () => {
+    expect(healthcareOffTopicBrollReason('https://srcpublishers.com/manuscript-today-submission', HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+  });
+  it('rejects "manuscript today" promo slides', () => {
+    expect(healthcareOffTopicBrollReason('manuscript today submission guidelines healthcare journal', HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+    expect(healthcareOffTopicBrollReason('MANUSCRIPT TODAY promo slide academic publishing', HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+  });
+  it('rejects cassette glitch pads', () => {
+    expect(healthcareOffTopicBrollReason('vhs cassette tape retro glitch aesthetic', HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+    expect(healthcareOffTopicBrollReason('cassette pad retro aesthetic intro', HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+  });
+});
+
+describe('healthcareSoftPassMotionFailureReason — web61 hard-rejects (kaggle/cassette/guerbet/rsna/srcpublishers)', () => {
+  const makeJunkVideo = (altOverride, idx = 0) => ({
+    type: 'video',
+    segmentId: 'seg0',
+    url: `https://vimeo.com/junk${idx}.mp4`,
+    alt: altOverride,
+    title: altOverride,
+    query: 'healthcare ai',
+    source: 'Bing web video',
+  });
+
+  const makeProject = (videos) => ({
+    topic: HEALTHCARE_TOPIC,
+    title: 'AI Healthcare',
+    script: [{ id: 'seg0', title: 'Intro', narration: 'AI medicine.' }],
+    media: videos,
+  });
+
+  it('flags soft-pass with hard-junk when 3+ kaggle pads dominate', () => {
+    const project = makeProject([
+      makeJunkVideo('kaggle notebook medical imaging classification', 0),
+      makeJunkVideo('kaggle competition healthcare ai radiology', 1),
+      makeJunkVideo('kaggle slide data science medicine', 2),
+    ]);
+    const reason = healthcareSoftPassMotionFailureReason(project, {});
+    // kaggle may match healthcare-off-topic-broll (which lists kaggle) or kaggle-slide;
+    // either way the pool is flagged as junk.
+    expect(reason).toMatch(/soft-pass-motion-healthcare-junk/);
+  });
+
+  it('flags soft-pass with hard-junk when 3+ cassette glitch pads dominate', () => {
+    const project = makeProject([
+      makeJunkVideo('cassette tape vhs glitch retro aesthetic', 0),
+      makeJunkVideo('cassette pad intro animation loop', 1),
+      makeJunkVideo('vhs cassette retro video healthcare promo', 2),
+    ]);
+    const reason = healthcareSoftPassMotionFailureReason(project, {});
+    expect(reason).toMatch(/soft-pass-motion-healthcare-junk/);
+  });
+
+  it('flags soft-pass with hard-junk when 3+ guerbet pads dominate', () => {
+    const project = makeProject([
+      makeJunkVideo('guerbet contrast injection product demo', 0),
+      makeJunkVideo('guerbet aimed applied radiology imaging', 1),
+      makeJunkVideo('guerbet radiology marketing video 2024', 2),
+    ]);
+    const reason = healthcareSoftPassMotionFailureReason(project, {});
+    expect(reason).toMatch(/soft-pass-motion-healthcare-junk/);
+  });
+
+  it('flags soft-pass with hard-junk when 3+ srcpublishers/manuscript pads dominate', () => {
+    const project = makeProject([
+      makeJunkVideo('manuscript today submission medical journal', 0),
+      makeJunkVideo('manuscript today healthcare publishing promo', 1),
+      makeJunkVideo('MANUSCRIPT TODAY guidelines academic publishing', 2),
+    ]);
+    const reason = healthcareSoftPassMotionFailureReason(project, {});
+    expect(reason).toMatch(/soft-pass-motion-healthcare-junk/);
+  });
+});
+
+describe('housingOffTopicBrollReason — FKA Twigs music pad reject', () => {
+  const ctx = HOUSING_TOPIC;
+  it('rejects FKA Twigs music pad', () => {
+    expect(housingOffTopicBrollReason('fka twigs ultraviolet official music video', ctx)).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason('FKA Twigs two weeks music performance', ctx)).toMatch(/housing off-topic/);
+  });
+  it('keeps on-topic housing clips', () => {
+    expect(housingOffTopicBrollReason('worried tenant face eviction notice apartment close-up', ctx)).toBe('');
+  });
+});

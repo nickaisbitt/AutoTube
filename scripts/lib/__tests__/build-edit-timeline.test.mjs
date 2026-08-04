@@ -239,6 +239,33 @@ describe('introFaceTier', () => {
     expect(introFaceTier(asset, { healthcare: true })).toBe(2);
   });
 
+  it('boosts face+healthcare-topical clips to tier 3 (above robot-only tier 2)', () => {
+    // healthcare-web61: patient/clinician face clips should always beat faceless robot/OR
+    // openers when available. Face+topical → 3; robot/OR without face → 2.
+    const patientFace = {
+      alt: 'patient face worried doctor consultation close-up portrait people hospital',
+      title: 'patient worried doctor consultation',
+      url: 'https://vimeo.com/patient1.mp4',
+      type: 'video',
+    };
+    const clinicianFace = {
+      alt: 'doctor clinician face expression people close-up medical healthcare hospital',
+      title: 'clinician people face healthcare hospital',
+      url: 'https://vimeo.com/clinician1.mp4',
+      type: 'video',
+    };
+    expect(introFaceTier(patientFace, { healthcare: true })).toBe(3);
+    expect(introFaceTier(clinicianFace, { healthcare: true })).toBe(3);
+    // Faceless robot/OR clip must remain tier 2 (no face signal).
+    const robotOnly = {
+      alt: 'surgical robot operating room OR lights da vinci hospital',
+      title: 'surgical robot OR',
+      url: 'https://vimeo.com/robot1.mp4',
+      type: 'video',
+    };
+    expect(introFaceTier(robotOnly, { healthcare: true })).toBe(2);
+  });
+
   it('demotes pure talking-head / rejects maternity and news studio for healthcare intro', () => {
     expect(introFaceTier({
       alt: 'ai healthcare talking head explainer interview',

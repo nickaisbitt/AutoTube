@@ -2496,6 +2496,16 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   'ct scanner hospital',
   'mri scanner',
   'xray radiology',
+  // AI-specific clinical subjects — add pool variety beyond standard OR/MRI
+  // so archive-only runs (bing=ddg=google=0) don't cycle the same 10 clips.
+  // healthcare-web53: only 12 assets → each clip appeared 6x (variety 5/10).
+  'ai cancer detection',
+  'machine learning medical imaging',
+  'pathology digital slide',
+  'computer aided detection',
+  'clinical decision support system',
+  'echocardiogram heart scan',
+  'laparoscopic surgery closeup',
   'patient bedside monitor',
   'intensive care unit',
   'hospital ward nurses',

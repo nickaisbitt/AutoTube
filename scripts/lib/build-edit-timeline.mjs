@@ -251,7 +251,15 @@ export function passesHousingTimelineIntroEvidence(asset) {
   const evidence = assetEvidenceBlob(asset);
   if (!evidence.trim()) return false;
   if (HOUSING_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
-  return /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|evict(?:ion|ed)?|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
+  if (/\b(static\s+document|document\s+only|notice\s+only|price\s+index|chart\s+graphic|paper\s+text)\b/i.test(evidence)) {
+    return false;
+  }
+  const hasGateCollocation =
+    /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
+  const hasEvictionWithPerson =
+    /\bevict(?:ion|ed|s)?\b/i.test(evidence)
+    && /\b(tenant|family|person|people|woman|man|couple|worried|shocked|face|portrait)\b/i.test(evidence);
+  return hasGateCollocation || hasEvictionWithPerson;
 }
 
 const AIRLINE_TOPICAL_VISUAL_RE = /\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|jet|passenger|attendant|hangar|airport|pilot|plane|flight)\b/;
@@ -1192,12 +1200,15 @@ export function buildEditTimeline(project, options = {}) {
           if (continuesTwoClipPingPong(candidate)) return false;
           if (continuesOpeningClusterPattern(candidate)) return false;
           // First 15s: prefer motion over Ken-Burns stills while unused videos remain.
+          // Housing intro exception: gate-passing stills beat junk motion so
+          // INTRO_FACE_FAIL_TIMELINE does not fire when only stills have tenant/face evidence.
           if (
             globalStartSec < FIRST_WINDOW_SEC
             && preferVideo
             && candidate.type !== 'video'
             && uniqueVideos.length > 0
             && hasUnusedMotionAlternative()
+            && !(topicIsHousing && introLeadWindow && passesHousingTimelineIntroEvidence(candidate))
           ) {
             return false;
           }

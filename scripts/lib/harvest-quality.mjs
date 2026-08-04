@@ -1468,10 +1468,20 @@ export function checkEditTimelineIntroFace(project) {
     const hasFaceOrLivedIn = introAssets.some((asset) => {
       const evidence = evidenceOf(asset);
       if (HOUSING_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
+      // Static doc/chart openers never satisfy the gate (web31).
+      if (/\b(static\s+document|document\s+only|notice\s+only|price\s+index|chart\s+graphic|paper\s+text)\b/i.test(evidence)) {
+        return false;
+      }
       // Require lived-in / emotional face signal — bare "face"/"crying" match
       // dartboard "target face", music metadata, and unrelated "Scream Crying"
-      // collection pads (housing-web3/web81).
-      return /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|evict(?:ion|ed)?|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
+      // collection pads (housing-web3/web81). Bare "eviction" alone is not enough
+      // without a person/tenant/family signal (aligns pool + timeline; web4/web8/web10).
+      const hasGateCollocation =
+        /\b((?:worried|shocked|stressed|distressed)\s+(?:family|tenant|person|people|woman|man|couple)|(?:family|tenant|person|people|woman|man|couple)\s+(?:worried|shocked|crying|stressed|distressed)|tenant|apartment\s+interior|living\s+room|family\s+(?:crying|distressed|evict)|close[\s-]?up\s+(?:face|tenant|person)|tenant\s+face|person\s+face|people\s+(?:crying|evict|distressed))\b/i.test(evidence);
+      const hasEvictionWithPerson =
+        /\bevict(?:ion|ed|s)?\b/i.test(evidence)
+        && /\b(tenant|family|person|people|woman|man|couple|worried|shocked|face|portrait)\b/i.test(evidence);
+      return hasGateCollocation || hasEvictionWithPerson;
     });
     if (!hasFaceOrLivedIn) {
       return {

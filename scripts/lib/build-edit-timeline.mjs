@@ -538,18 +538,22 @@ export function buildEditTimeline(project, options = {}) {
   const isRichPool = uniqueUrlCount >= RICH_POOL_URL_THRESHOLD
     || (segmentCount > 0 && uniqueUrlCount >= 8 && uniqueUrlCount >= 2 * segmentCount);
   const topicIsHousing = !coldEval && isHousingTopic(project.topic || '');
+  const topicIsHealthcare = !coldEval && isHealthcareTopic(project.topic || '');
   const applyFirstWindowStrict = isRichPool
     || uniqueUrlCount >= MEDIUM_POOL_URL_THRESHOLD
-    || (topicIsHousing && uniqueUrlCount >= 4);
+    || (topicIsHousing && uniqueUrlCount >= 4)
+    || (topicIsHealthcare && uniqueUrlCount >= 4);
   // Widen the look-back window for rich pools so the same clip can't re-surface
   // after only 4 cuts; leave ≥2 candidates always reachable.
   const richPoolWindow = isRichPool ? Math.min(RECENT_URL_WINDOW + 2, uniqueUrlCount - 2) : RECENT_URL_WINDOW;
   const recentUrlWindow = Math.max(0, Math.min(richPoolWindow, uniqueUrlCount - 2));
   // Keep requested cut for pacing. Dynamic hard-cap: generic topics top out at
-  // 6; airline + housing are stricter and lengthen cuts rather than looping.
+  // 6; airline + housing + healthcare are stricter and lengthen cuts rather than
+  // looping. healthcare-web53: only 12 assets → each clip appeared 6× (variety
+  // 5/10). Cap at 3 to force hold extension before reuse, matching housing.
   const HARD_MAX_REUSE_CEIL = topicIsAirline && coldEval && uniqueVideos.length >= 20
     ? 2
-    : (topicIsAirline || topicIsHousing)
+    : (topicIsAirline || topicIsHousing || topicIsHealthcare)
       ? 3
       : 6;
   const HARD_MAX_REUSE_FLOOR = Math.min(3, HARD_MAX_REUSE_CEIL);
@@ -614,7 +618,6 @@ export function buildEditTimeline(project, options = {}) {
   }
   const topicIsWorkplace = isWorkplaceTopic(project.topic || '');
   const topicIsCameraStory = CAMERA_STORY_RE.test(project.topic || '');
-  const topicIsHealthcare = !coldEval && isHealthcareTopic(project.topic || '');
   const introLeadOptions = {
     airline: topicIsAirline,
     cameraStory: topicIsCameraStory,

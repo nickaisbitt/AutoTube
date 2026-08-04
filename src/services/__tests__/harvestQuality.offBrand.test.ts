@@ -1279,3 +1279,97 @@ describe('hook overlay layout + templates', () => {
     }
   });
 });
+
+describe('healthcare-web48 hard-reject patterns (RP hospital + YouTube Poop)', () => {
+  const healthcareTopic = 'Why AI will change healthcare';
+
+  it('RP_MENTAL_HOSPITAL_RE matches all RP/roleplay hospital URL and title variants', async () => {
+    const { RP_MENTAL_HOSPITAL_RE } = await import('../../../scripts/lib/harvest-quality.mjs');
+    // Archive.org identifier in URL
+    expect(RP_MENTAL_HOSPITAL_RE.test('rpmentalhospital001')).toBe(true);
+    expect(RP_MENTAL_HOSPITAL_RE.test('RP-Mental_Hospital_001.mp4')).toBe(true);
+    // Edited variant
+    expect(RP_MENTAL_HOSPITAL_RE.test('mental_hospital_edit.mp4')).toBe(true);
+    expect(RP_MENTAL_HOSPITAL_RE.test('mental-hospital-edit')).toBe(true);
+    // Real clinical "hospital ward" must not match
+    expect(RP_MENTAL_HOSPITAL_RE.test('hospital ward nurses')).toBe(false);
+    expect(RP_MENTAL_HOSPITAL_RE.test('hospital corridor')).toBe(false);
+    expect(RP_MENTAL_HOSPITAL_RE.test('science nation surgical robot')).toBe(false);
+  });
+
+  it('YOUTUBE_POOP_YTPMV_RE matches YTPMV/YouTube Poop compilation tags', async () => {
+    const { YOUTUBE_POOP_YTPMV_RE } = await import('../../../scripts/lib/harvest-quality.mjs');
+    expect(YOUTUBE_POOP_YTPMV_RE.test('ytpmv')).toBe(true);
+    expect(YOUTUBE_POOP_YTPMV_RE.test('youtube poop music videos ytpmv')).toBe(true);
+    expect(YOUTUBE_POOP_YTPMV_RE.test('poop music video')).toBe(true);
+    expect(YOUTUBE_POOP_YTPMV_RE.test('youtube-poop compilation')).toBe(true);
+    // Real ICU footage must not match
+    expect(YOUTUBE_POOP_YTPMV_RE.test('intensive care unit clinical nurses')).toBe(false);
+  });
+
+  it('healthcare hard-reject drops rpmentalhospital and YTPMV assets via healthcareSoftPassMotionFailureReason', async () => {
+    const { healthcareSoftPassMotionFailureReason } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const rpHospitalAsset = {
+      type: 'video',
+      segmentId: 's1',
+      url: 'https://archive.org/download/rpmentalhospital001/RP-Mental_Hospital_001.mp4',
+      alt: 'mental hospital 001',
+      query: 'hospital ward nurses',
+      source: 'Archive.org live',
+    };
+    const ytpmvAsset = {
+      type: 'video',
+      segmentId: 's1',
+      url: 'https://archive.org/download/videoplayback-5-24_202605/videoplayback.mp4',
+      alt: 'intensive care unit compilation youtube poop music videos ytpmv',
+      query: 'intensive care unit',
+      source: 'Archive.org live',
+    };
+    const clinicalAsset = {
+      type: 'video',
+      segmentId: 's1',
+      url: 'https://archive.org/download/ScienceNationSurgicalRobotics_678/Sn-62SurgicalRobotics.mp4',
+      alt: 'science nation surgical robotics national science foundation surgical robots surgery',
+      query: 'Science Nation surgical robot',
+      source: 'Archive.org live',
+    };
+    const project = {
+      topic: healthcareTopic,
+      script: [{ id: 's1', title: 'AI Healthcare', narration: 'AI transforms healthcare and hospital diagnosis.' }],
+      media: [rpHospitalAsset, ytpmvAsset, clinicalAsset],
+    };
+    // A pool dominated by RP + YTPMV junk (2 of 3 videos) should fail the hard-junk ratio gate
+    const reason: string | null = healthcareSoftPassMotionFailureReason(project);
+    expect(reason).toBeTruthy();
+    expect(typeof reason === 'string' ? reason : '').toMatch(/healthcare.*junk|rp-roleplay|youtube-poop/i);
+  });
+
+  it('real clinical archive footage is not caught by the new patterns', async () => {
+    const { healthcareSoftPassMotionFailureReason } = await import(
+      '../../../scripts/lib/harvest-quality.mjs'
+    );
+    const goodAssets = [
+      { type: 'video', segmentId: 's1', url: 'https://archive.org/download/ScienceNationSurgicalRobotics_678/Sn-62SurgicalRobotics.mp4', alt: 'science nation surgical robotics robots help surgeons transcend human limits', query: 'Science Nation surgical robot', source: 'Archive.org live' },
+      { type: 'video', segmentId: 's1', url: 'https://archive.org/download/CNBC_surgical_robot/cnbc-surgical-robot.mp4', alt: 'cnbc meet the surgical robot that can diagnose lung cancer', query: 'surgical robot', source: 'Archive.org live' },
+      { type: 'video', segmentId: 's1', url: 'https://archive.org/download/mri-scan/how-an-mri-mrt-scan-is-performed.mp4', alt: 'how an mri mrt scan is performed mri scanner hospital', query: 'mri scanner hospital', source: 'Archive.org live' },
+      { type: 'video', segmentId: 's2', url: 'https://archive.org/download/ai-radiology/ai-radiology-demo.mp4', alt: 'ai radiology workstation clinician computer screen diagnose', query: 'ai radiology', source: 'Archive.org live' },
+      { type: 'video', segmentId: 's2', url: 'https://archive.org/download/da-vinci/da-vinci-surgical-system.mp4', alt: 'da vinci surgical system operating room surgery', query: 'da vinci surgical system', source: 'Archive.org live' },
+    ];
+    const project = {
+      topic: healthcareTopic,
+      script: [
+        { id: 's1', title: 'AI Healthcare', narration: 'AI transforms healthcare and hospital diagnosis.' },
+        { id: 's2', title: 'Surgical Robots', narration: 'Surgical robots enable precision medicine.' },
+      ],
+      media: goodAssets,
+    };
+    const reason: string | null = healthcareSoftPassMotionFailureReason(project);
+    // Reason must be null (pass) or a non-RP/YTPMV failure — the new patterns
+    // must never fire on real clinical archive content.
+    if (reason !== null) {
+      expect(reason).not.toMatch(/rp-roleplay|youtube-poop/i);
+    }
+  });
+});

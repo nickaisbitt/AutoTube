@@ -1,6 +1,6 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-04T12:57Z** — tip-best housing **6.4** / healthcare **6.6** (web61); web78 query-spoof junk rejected; face evidence-only; durable ops to ≥7.
+Last updated: **2026-08-04T14:45Z** — tip-best housing **6.4** / healthcare **6.6** (web61); 90m ops TIMEBOX (no BOTH_DONE); durable still on housing-web80.
 
 **This file is the only DoD authority** for this branch. Other docs (`FOLLOW_UP_NOW.md`, `SHIP_PLAN_MASTER.md`, `QUALITY_WAVE_SUMMARY.md`) link here for bars and proof commands. Do not mark product quality or deploy currency “complete” anywhere unless every open bar in §B–§C is green on a fresh artifact.
 

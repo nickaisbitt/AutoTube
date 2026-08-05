@@ -2533,6 +2533,25 @@ describe('checkEditTimelineIntroFace — housing first-segment gate', () => {
       'housing crash eviction',
     )).toBe('');
   });
+
+  it('rejects housing-web84 motivational-quote poster + flash-flood gauge pads', () => {
+    expect(housingOffTopicBrollReason(
+      'stop worrying about future events that will never happen salesintroverts.com',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'flash floods how they happen flood gauge feet wqad.com',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'motivational quote poster inspirational graphic hexagon',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'worried tenant face eviction notice apartment close-up',
+      'housing crash eviction',
+    )).toBe('');
+  });
 });
 
 describe('housingIntroFaceEvidenceMatches — real DDG site:vimeo.com titles (waves 36-60)', () => {

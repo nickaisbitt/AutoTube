@@ -195,7 +195,7 @@ export function housingOffTopicBrollReason(haystack, contextText = '') {
  * al-Ahli hospital Gaza shorts.
  */
 export const HEALTHCARE_OFF_TOPIC_BROLL_RE =
-  /\b(?:aldous\s+huxley|huxley|george\s+orwell|orwell|brave\s+new\s+world|1984|dystopian?|conspiracy(?:\s*(?:theory|theories|bait|doc(?:umentary)?))?|deep\s+state|new\s+world\s+order|(?:truth|secrets?|agenda|elites?|government)\s+exposed|healthcare\s+exposed|fema|hurricane(?:\s+\w+)?\s+(?:fema|assistance|psa|relief|recovery)|tornado(?:\s+(?:anniversary|coverage|warning|damage|recovery))?|storm\s+(?:recovery|restoration|warning|damage|psa)|community\s+recovery\s+after\s+disaster|disaster\s+(?:recovery|relief|psa|outreach|footage)|cockroach(?:es)?|roach(?:es)?|insects?|peas?\s+meme|green\s+peas?|classical\s+paintings?|oil\s+paintings?|renaissance\s+(?:art|painting|portrait)|baroque\s+painting|museum\s+painting|rembrandt|van\s+gogh|monet|literary\s+festival|book\s+festival|writers?\s+festival|brattleboro|(?:covid|c[\s-]?19|coronavirus)\s+(?:propaganda|psa|misinfo|hoax)|pandemic\s+propaganda|propaganda\s+war|sleepy\s+joe|antibody\s+dependent\s+enhancement|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|powerpoint\s+lecture|online\s+lecture|mooc(?:\s+lecture)?|title\s+card|capitol(?:\s+building)?|state\s+capitol|protest(?:ers?|ing)?|rally\s+(?:crowd|footage)|political\s+rally|maternity(?:\s+(?:ward|hospital|film|footage|clinic|care|1937|archival|vintage))?|childbirth|child\s*birth|washing\s+breasts?|kapparot|kapores|atonement\s+(?:ritual|ceremony)|ritual\s+(?:chicken|slaughter|atonement|kapparot)|news\s+talking\s*heads?|talking\s*heads?\s+(?:studio|news|interview)|news\s+(?:anchor|studio|desk|storage)|anchor\s+desk|studio\s+(?:interview|talking)|newsroom\s+anchor|christmas\s+tree|xmas\s+tree|green\s+screen|holiday\s+backdrop|chroma\s+key|def\s*con|biohacking\s+village|madness\s+and\s+medicine|sex\s+after\s+(?:prostate|surgery)|prostate\s+(?:cancer\s+)?(?:sex|breaking\s+news)|christmas\s+tree|green\s*screen\s+(?:christmas|holiday)|legos?|mgtow|hiroshima|atomic\s+(?:bomb|experiments?)|warzone|war\s*zone|holiday\s+health\s+tips|terrible\s+nurses|cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|aesthetics?\s+(?:spa|medical)|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|vietnam(?:ese)?\s+(?:war|hospital|archival|medical)|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|challenging\s+obama|scooter\s+vs\s+car|collision\s+in\s+venice|medical\s+city\s+arlington|adventure\s+eight|paging\s+dr\.?\s+ross|scottsdale.?s?\s+cure\s+corridor|city\s+of\s+scottsdale|deadly\s+medicine\s+interactions|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|kids?\s+(?:classroom|assembly)|robotic\s+surgery\s+demo\s+(?:at\s+)?(?:school|isd)|da\s*vinci\s+surgical\s+system\s+overview|neuralink(?:\s+robot|\s+live)?|school\s+nurse|wendy\s+cummings|whhi(?:\s+news)?|al\s+funduq|curfew\s+doctor|ukraine\s+pow|prisoners?\s+of\s+war|kissing\s+and\s+love|rhino\s+(?:ct|scan)|zoo\s+(?:ct|scan|x[\s-]?ray)|circumc(?:ision|ure)|board\s+of\s+commissioners|organ\s+harvesting|brain\s+death|world\s+laparoscopy\s+hospital|anniversary\s+celebration|medical\s+career|well\s+paying\s+medical|allied\s+health\s+radiologic|hospitals?\s+safe\s+from\s+covid|second\s+opinion\s+project|exhibition\s+hall|trade\s*show(?:\s+floor)?|\bhimss\b|conference\s+(?:booth|floor|expo\s+floor)|expo\s+(?:floor|booth|hall)|ces\s+(?:20\d{2}|conference|show)|health\s+(?:it\s+)?summit\s+(?:booth|floor|expo)|ai\s+(?:summit|conference)\s+(?:booth|floor|hall|product\s+demo)|medical\s+trade\s+show|healthcare\s+(?:expo|trade\s+show)|suit\s+(?:walk(?:ing)?|stroll(?:ing)?)|judy\s+mikovits|censored\s+scientists|david\s+samadi|\bsamadi\b|truth\s+about\s+canadian\s+healthcare|medical\s+liability|healthloop|bad\s+patient\s+diagnoses|overwhelmed\s+covid|covid\s*19\s+ward|talk\s+of\s+the\s+town|whhitv|ron\s+johnson|mrna\s+vaccine|vaccine\s+injury|ask\s+dr\s+drew|intestinal\s+injury|attempted\s+abortion|walk\s*in\s+center|mental\s+health\s+addictions|medical\s+monopoly|tour\s+glendale|new\s+hospital\s+st\s+joseph|swift\s+corridor|absolute\s+justice|white\s+coat\s+ceremony|medical\s+school\s+(?:graduation|convocation|white\s+coat)|nursing\s+(?:pinning\s+ceremony|graduation\s+ceremony|celebration\s+day)|hospital\s+(?:fundraiser|benefit\s+gala|benefit\s+concert|anniversary\s+gala)|digital\s+health\s+(?:summit\s+(?:floor|booth|expo)|conference\s+(?:floor|booth|expo))|health\s+(?:tech|information\s+technology)\s+conference\s+(?:floor|booth|expo|keynote)|ehr\s+(?:demo|product\s+demo|software\s+demo|keynote)|emr\s+(?:demo|product\s+demo|software\s+demo)|body\s+language\s+(?:healthcare|medical|clinical|edition|coaching|mistakes?)|healthcare\s+edition|nvidia\s+(?:ai\s+)?(?:for\s+)?(?:healthcare|life\s+sciences|health\s+systems?)|ai\s+patel|why\s+ai\s+[a-z]{3,}\s+why\s+ai|jada\s+pemble|meet\s+our\s+[a-z]+\s+[a-z]+\s+[a-z]+\s+medical\s+lab|helium\s+used\s+in\s+(?:the\s+)?medical\s+(?:field|imaging)|not\s+just\s+for\s+balloons\s+helium|milestone\s+celebration|maple\s+grove\s+(?:hospital|high\s+schooler)|medcram(?:\.com)?|(?:online\s+medical\s+learning|how)\s+(?:can\s+)?pa\s+schools?\s+(?:can\s+)?benefit|pa\s+schools?\s+(?:can\s+)?benefit(?:\s+from\s+medcram)?|nurses?\s+at\s+celebrity\s+eclipse|celebrity\s+eclipse\s+(?:medical|medical\s+facility)|celebrity\s+(?:cruise\s+)?(?:ship\s+)?(?:nurse|medical\s+facilit)|(?:maryland\s+)?women.?s?\s+heritage\s+center|honor\s+nurses?\s+(?:from\s+)?wwi|wwi\s+(?:heritage\s+center|nurses?)|emergency\s+1972|1972\s+(?:tv\s+series|television\s+series)\s+incomplete|1972\s+tv\s+series|bilibili\s+(?:chill|sakura|ai\s+debug)|sakura\s+(?:chill|ai\s+debug)|chill\s+sakura|ai\s+debug\s+pad|surgeon\s+simulator(?:\s+\d+)?(?:\s+multiplayer)?|electric\s+massage(?:\s+pillow|\s+cushion)?|massage\s+pillow|ai\s+geist|geist\s+lynx|lynx\s+reports?|kathmandu\s+medical\s+college|blurry\s+test\s*tubes?|test\s*tube\s+(?:close\s*up|b-?roll|stock)|petri\s+dish\s+(?:b-?roll|stock|close\s*up)|ent\s+examination\s+(?:video|lecture|tutorial)|jackthreads|jack\s*threads|real\s+fashion\s+for\s+guys|geekbeat(?:\.tv)?|unlock(?:ing)?\s+(?:your\s+)?(?:old\s+)?iphone|at\s*&?\s*t\s+will\s+unlock|\bmlk\b|martin\s+luther\s+king|why\s+america\s+may\s+go\s+to\s+hell|this\s+or\s+that|metro\s+edition|che\s+guevara|imperialism|palestine\s+deepdive|palestine\s+red\s+crescent|\bprcs\b|bald\s+truth|why\s+do\s+i\s+innovate|dr\.?\s+elias|elias.?s?\s+blind\s+spot|david\s*(?:&|and)\s*elias|hair\s+transplant|artas\s+hair|sri\s+ponni|\bbayer\b|corporate\s+(?:logo\s+)?(?:interview|presentation|stage|booth)|logo\s+stage|keynote\s+stage|fashion\s+for\s+guys|game\s+show|spinning\s+wheel|martial\s+law|senate\s+passes|congressional\s+hearing|david\s+daleiden|aborted\s+baby|transgender\s+critical|rainbow\s+or\s+die|high\s+schooler|accepted\s+to\s+medical\s+school|brookhaven|dies?\s+in\s+lebanon|denied\s+hospital\s+care|gaza\s+s?\s+wounded|israeli\s+genocide|episode\s+\d+|split[\s-]?screen\s+(?:podcast|interview)|c4i|call\s+4\s+investigation|call\s+for\s+investigation|inner\s+voices|al\s+ahli\s+hospital|abu\s+sitta|moscow\s+times|sick\s+(?:russian\s+)?nurses?\s+in\s+storage|nurses?\s+storage\s+room\s+(?:outrage|spark)|bronxnet|open\s+tuesday\s+(?:ai|health|medical|breast|cancer|bronx|new\s+york)|public\s+access\s+tv|peg\s+(?:tv|channel|media|youtube)|community\s+media\s+(?:peg|bronx|channel)|rsna\s+20\d{2}|ai\s+interoperability\s+and\s+workflow|workflow\s+automation\s+at\s+rsna|mindray\s+n\s+series|user\s+training\s+part\s*\d|journal\s+of\s+diagnosis(?:\s+case\s+reports?)?|kaggle(?:\s+slide|\s+notebook|\s+competition)?|guerbet\s+aimed|\bnih\b\s+data\s+science\s+and\s+medicine|data\s+science\s+and\s+medicine\s+what.?s\s+possibly|corporate\s+(?:slide|powerpoint|deck)|powerpoint\s+(?:slide|deck|presentation)|slide\s+presentation\s+(?:healthcare|medical|ai)|imaging\s+wire|ramsoft\s+ceo|orbis\s+flying\s+eye(?:\s+hospital)?|fedex\s+helps\s+deliver\s+sight|ensemble[\s-]?x|ensembled?\s+deep\s+learning|whitney\s+hatch|heart\s+patient\s+(?:interview|testimonial)|chest\s+x[\s-]?ray\s+interpretation\s+explained|how\s+to\s+read\s+a\s+chest\s+x[\s-]?ray|overview\s+of\s+(?:the\s+)?da\s*vinci|onyx\s+rad\s+demonstration|mri\s+wide\s+bore\s+(?:video|southeastern)|manuscript\s+today|cassette|personal\s+injury\s+(?:clinic|center|doctor|attorney)|cabrini\s+foundation|veterinary\s+(?:imaging|radiology|(?:ct|mri|ultrasound)\s+modalities?)|after\s+effects?\s+(?:project|template)|\biamstemak\b|gcsc\s+surgical|what\s+to\s+expect\s+(?:when\s+)?having\s+(?:an?\s+)?(?:mri|ct\s+scan|mri\s+scan)|connect\s+patient\s+portal|patient\s+portal\s+(?:connect|login|app|software)|acr\s+accreditation|car\s+accident\s+(?:doctor|mri|clinic)|ghanashyam|ecg\s+reading\s+and\s+xray|radiology\s+dvds?|cosmetic\s+product\s+after\s+effects|remote\s+cardiac\s+monitoring\s+rhythm|myrhythmnow|cambridge\s+filmworks|at\s+medica\s+20\d{2}|medica\s+20\d{2}|versius\s+surgical\s+robotic\s+system|senhance\s+surgical\s+robotic\s+system(?:\s+full\s+length)?|full\s+length\s+benefits|smart\s+m(?:onitor|edical)\s+series\s+at\s+medica|science\s+nation|sciencenation|nsf\s+science\s+nation|national\s+science\s+foundation\s+science\s+nation|angry\s+boy\s+part|regen\s+seminar|ultrasound[\s-]?guided\s+injections?\s+(?:seminar|demo|demonstration|training)|why\s+is\s+awbus|\bawbus\b|better\s+choice\s+over\s+hand[\s-]?held|lab\s+interfaces|microwize|medisoft\s+clinical|shelford\s+surgical\s+training|start\s+programme|reveal\s+linq|insertable\s+cardiac\s+monitor|tmini\s+miniature|think\s+surgical|technical\s+overview\s+illustration|healthcare\s+professional\s+information\s+series|discussing\s+cancer\s+screening\s+with\s+patients|talking\s+to\s+family\s+loved\s+ones\s+about\s+lung|diversified\s+radiology\s+breast|patient\s+friendly\s+video\s+was\s+created\s+by\s+(?:acr|radiologist)|stitch\s+a\s+grape|mri\s+how\s+it\s+works\s+part|how\s+an\s+mri\s+mrt\s+scan\s+is\s+performed|philips\s+epiq|lcd\s+monitor\s+removal|omnibotics|corin.?s?\s+robotic\s+assisted|diagnostic\s+mammogram\s+este\s+video|qu[eé]\s+debe\s+saber\s+sobre\s+la\s+mamograf|clinic\s+promo|(?:mri|ct|ultrasound)\s+clinic\s+promo|promo\s+(?:personal\s+injury|clinic\s+mri)|walk[\s-]?in\s+(?:mri|imaging)\s+(?:promo|ad|clinic)|imaging\s+center\s+(?:promo|advertisement|commercial)|free\s+mri\s+(?:consult|consultation|promo))\b|\bexposed\s*[:\-]|\bmeme\b[^.]{0,40}\bpeas?\b|srcpublishers\.com/i;
+  /\b(?:aldous\s+huxley|huxley|george\s+orwell|orwell|brave\s+new\s+world|1984|dystopian?|conspiracy(?:\s*(?:theory|theories|bait|doc(?:umentary)?))?|deep\s+state|new\s+world\s+order|(?:truth|secrets?|agenda|elites?|government)\s+exposed|healthcare\s+exposed|fema|hurricane(?:\s+\w+)?\s+(?:fema|assistance|psa|relief|recovery)|tornado(?:\s+(?:anniversary|coverage|warning|damage|recovery))?|storm\s+(?:recovery|restoration|warning|damage|psa)|community\s+recovery\s+after\s+disaster|disaster\s+(?:recovery|relief|psa|outreach|footage)|cockroach(?:es)?|roach(?:es)?|insects?|peas?\s+meme|green\s+peas?|classical\s+paintings?|oil\s+paintings?|renaissance\s+(?:art|painting|portrait)|baroque\s+painting|museum\s+painting|rembrandt|van\s+gogh|monet|literary\s+festival|book\s+festival|writers?\s+festival|brattleboro|(?:covid|c[\s-]?19|coronavirus)\s+(?:propaganda|psa|misinfo|hoax)|pandemic\s+propaganda|propaganda\s+war|sleepy\s+joe|antibody\s+dependent\s+enhancement|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|powerpoint\s+lecture|online\s+lecture|mooc(?:\s+lecture)?|title\s+card|capitol(?:\s+building)?|state\s+capitol|protest(?:ers?|ing)?|rally\s+(?:crowd|footage)|political\s+rally|maternity(?:\s+(?:ward|hospital|film|footage|clinic|care|1937|archival|vintage))?|childbirth|child\s*birth|washing\s+breasts?|kapparot|kapores|atonement\s+(?:ritual|ceremony)|ritual\s+(?:chicken|slaughter|atonement|kapparot)|news\s+talking\s*heads?|talking\s*heads?\s+(?:studio|news|interview)|news\s+(?:anchor|studio|desk|storage)|anchor\s+desk|studio\s+(?:interview|talking)|newsroom\s+anchor|christmas\s+tree|xmas\s+tree|green\s+screen|holiday\s+backdrop|chroma\s+key|def\s*con|biohacking\s+village|madness\s+and\s+medicine|sex\s+after\s+(?:prostate|surgery)|prostate\s+(?:cancer\s+)?(?:sex|breaking\s+news)|christmas\s+tree|green\s*screen\s+(?:christmas|holiday)|legos?|mgtow|hiroshima|atomic\s+(?:bomb|experiments?)|warzone|war\s*zone|holiday\s+health\s+tips|terrible\s+nurses|cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|aesthetics?\s+(?:spa|medical)|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|vietnam(?:ese)?\s+(?:war|hospital|archival|medical)|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|challenging\s+obama|scooter\s+vs\s+car|collision\s+in\s+venice|medical\s+city\s+arlington|adventure\s+eight|paging\s+dr\.?\s+ross|scottsdale.?s?\s+cure\s+corridor|city\s+of\s+scottsdale|deadly\s+medicine\s+interactions|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|kids?\s+(?:classroom|assembly)|robotic\s+surgery\s+demo\s+(?:at\s+)?(?:school|isd)|da\s*vinci\s+surgical\s+system\s+overview|neuralink(?:\s+robot|\s+live)?|school\s+nurse|wendy\s+cummings|whhi(?:\s+news)?|al\s+funduq|curfew\s+doctor|ukraine\s+pow|prisoners?\s+of\s+war|kissing\s+and\s+love|rhino\s+(?:ct|scan)|zoo\s+(?:ct|scan|x[\s-]?ray)|circumc(?:ision|ure)|board\s+of\s+commissioners|organ\s+harvesting|brain\s+death|world\s+laparoscopy\s+hospital|anniversary\s+celebration|medical\s+career|well\s+paying\s+medical|allied\s+health\s+radiologic|hospitals?\s+safe\s+from\s+covid|second\s+opinion\s+project|exhibition\s+hall|trade\s*show(?:\s+floor)?|\bhimss\b|conference\s+(?:booth|floor|expo\s+floor)|expo\s+(?:floor|booth|hall)|ces\s+(?:20\d{2}|conference|show)|health\s+(?:it\s+)?summit\s+(?:booth|floor|expo)|ai\s+(?:summit|conference)\s+(?:booth|floor|hall|product\s+demo)|medical\s+trade\s+show|healthcare\s+(?:expo|trade\s+show)|suit\s+(?:walk(?:ing)?|stroll(?:ing)?)|judy\s+mikovits|censored\s+scientists|david\s+samadi|\bsamadi\b|truth\s+about\s+canadian\s+healthcare|medical\s+liability|healthloop|bad\s+patient\s+diagnoses|overwhelmed\s+covid|covid\s*19\s+ward|talk\s+of\s+the\s+town|whhitv|ron\s+johnson|mrna\s+vaccine|vaccine\s+injury|ask\s+dr\s+drew|intestinal\s+injury|attempted\s+abortion|walk\s*in\s+center|mental\s+health\s+addictions|medical\s+monopoly|tour\s+glendale|new\s+hospital\s+st\s+joseph|swift\s+corridor|absolute\s+justice|white\s+coat\s+ceremony|medical\s+school\s+(?:graduation|convocation|white\s+coat)|nursing\s+(?:pinning\s+ceremony|graduation\s+ceremony|celebration\s+day)|hospital\s+(?:fundraiser|benefit\s+gala|benefit\s+concert|anniversary\s+gala)|digital\s+health\s+(?:summit\s+(?:floor|booth|expo)|conference\s+(?:floor|booth|expo))|health\s+(?:tech|information\s+technology)\s+conference\s+(?:floor|booth|expo|keynote)|ehr\s+(?:demo|product\s+demo|software\s+demo|keynote)|emr\s+(?:demo|product\s+demo|software\s+demo)|body\s+language\s+(?:healthcare|medical|clinical|edition|coaching|mistakes?)|healthcare\s+edition|nvidia\s+(?:ai\s+)?(?:for\s+)?(?:healthcare|life\s+sciences|health\s+systems?)|ai\s+patel|why\s+ai\s+[a-z]{3,}\s+why\s+ai|jada\s+pemble|meet\s+our\s+[a-z]+\s+[a-z]+\s+[a-z]+\s+medical\s+lab|helium\s+used\s+in\s+(?:the\s+)?medical\s+(?:field|imaging)|not\s+just\s+for\s+balloons\s+helium|milestone\s+celebration|maple\s+grove\s+(?:hospital|high\s+schooler)|medcram(?:\.com)?|(?:online\s+medical\s+learning|how)\s+(?:can\s+)?pa\s+schools?\s+(?:can\s+)?benefit|pa\s+schools?\s+(?:can\s+)?benefit(?:\s+from\s+medcram)?|nurses?\s+at\s+celebrity\s+eclipse|celebrity\s+eclipse\s+(?:medical|medical\s+facility)|celebrity\s+(?:cruise\s+)?(?:ship\s+)?(?:nurse|medical\s+facilit)|(?:maryland\s+)?women.?s?\s+heritage\s+center|honor\s+nurses?\s+(?:from\s+)?wwi|wwi\s+(?:heritage\s+center|nurses?)|emergency\s+1972|1972\s+(?:tv\s+series|television\s+series)\s+incomplete|1972\s+tv\s+series|bilibili\s+(?:chill|sakura|ai\s+debug)|sakura\s+(?:chill|ai\s+debug)|chill\s+sakura|ai\s+debug\s+pad|surgeon\s+simulator(?:\s+\d+)?(?:\s+multiplayer)?|electric\s+massage(?:\s+pillow|\s+cushion)?|massage\s+pillow|ai\s+geist|geist\s+lynx|lynx\s+reports?|kathmandu\s+medical\s+college|blurry\s+test\s*tubes?|test\s*tube\s+(?:close\s*up|b-?roll|stock)|petri\s+dish\s+(?:b-?roll|stock|close\s*up)|ent\s+examination\s+(?:video|lecture|tutorial)|jackthreads|jack\s*threads|real\s+fashion\s+for\s+guys|geekbeat(?:\.tv)?|unlock(?:ing)?\s+(?:your\s+)?(?:old\s+)?iphone|at\s*&?\s*t\s+will\s+unlock|\bmlk\b|martin\s+luther\s+king|why\s+america\s+may\s+go\s+to\s+hell|this\s+or\s+that|metro\s+edition|che\s+guevara|imperialism|palestine\s+deepdive|palestine\s+red\s+crescent|\bprcs\b|bald\s+truth|why\s+do\s+i\s+innovate|dr\.?\s+elias|elias.?s?\s+blind\s+spot|david\s*(?:&|and)\s*elias|hair\s+transplant|artas\s+hair|sri\s+ponni|\bbayer\b|corporate\s+(?:logo\s+)?(?:interview|presentation|stage|booth)|logo\s+stage|keynote\s+stage|fashion\s+for\s+guys|game\s+show|spinning\s+wheel|martial\s+law|senate\s+passes|congressional\s+hearing|david\s+daleiden|aborted\s+baby|transgender\s+critical|rainbow\s+or\s+die|high\s+schooler|accepted\s+to\s+medical\s+school|brookhaven|dies?\s+in\s+lebanon|denied\s+hospital\s+care|gaza\s+s?\s+wounded|gaza\s+(?:war\s+)?hospital|hospital\s+siege|war\s+hospital\s+siege|siege\s+(?:of\s+)?(?:a\s+|the\s+)?(?:gaza\s+)?hospital|thought\s+process\s+of\s+highly\s+successful|highly\s+successful\s+people|cuffless\s+(?:blood\s+)?pressure|blood\s+pressure\s+monitor\s+(?:product|ad|promo|commercial|review|wearable)|aaron\s+judge|bone\s+bruise|israeli\s+genocide|episode\s+\d+|split[\s-]?screen\s+(?:podcast|interview)|c4i|call\s+4\s+investigation|call\s+for\s+investigation|inner\s+voices|al\s+ahli\s+hospital|abu\s+sitta|moscow\s+times|sick\s+(?:russian\s+)?nurses?\s+in\s+storage|nurses?\s+storage\s+room\s+(?:outrage|spark)|bronxnet|open\s+tuesday\s+(?:ai|health|medical|breast|cancer|bronx|new\s+york)|public\s+access\s+tv|peg\s+(?:tv|channel|media|youtube)|community\s+media\s+(?:peg|bronx|channel)|rsna\s+20\d{2}|ai\s+interoperability\s+and\s+workflow|workflow\s+automation\s+at\s+rsna|mindray\s+n\s+series|user\s+training\s+part\s*\d|journal\s+of\s+diagnosis(?:\s+case\s+reports?)?|kaggle(?:\s+slide|\s+notebook|\s+competition)?|guerbet\s+aimed|\bnih\b\s+data\s+science\s+and\s+medicine|data\s+science\s+and\s+medicine\s+what.?s\s+possibly|corporate\s+(?:slide|powerpoint|deck)|powerpoint\s+(?:slide|deck|presentation)|slide\s+presentation\s+(?:healthcare|medical|ai)|imaging\s+wire|ramsoft\s+ceo|orbis\s+flying\s+eye(?:\s+hospital)?|fedex\s+helps\s+deliver\s+sight|ensemble[\s-]?x|ensembled?\s+deep\s+learning|whitney\s+hatch|heart\s+patient\s+(?:interview|testimonial)|chest\s+x[\s-]?ray\s+interpretation\s+explained|how\s+to\s+read\s+a\s+chest\s+x[\s-]?ray|overview\s+of\s+(?:the\s+)?da\s*vinci|onyx\s+rad\s+demonstration|mri\s+wide\s+bore\s+(?:video|southeastern)|manuscript\s+today|cassette|personal\s+injury\s+(?:clinic|center|doctor|attorney)|cabrini\s+foundation|veterinary\s+(?:imaging|radiology|(?:ct|mri|ultrasound)\s+modalities?)|after\s+effects?\s+(?:project|template)|\biamstemak\b|gcsc\s+surgical|what\s+to\s+expect\s+(?:when\s+)?having\s+(?:an?\s+)?(?:mri|ct\s+scan|mri\s+scan)|connect\s+patient\s+portal|patient\s+portal\s+(?:connect|login|app|software)|acr\s+accreditation|car\s+accident\s+(?:doctor|mri|clinic)|ghanashyam|ecg\s+reading\s+and\s+xray|radiology\s+dvds?|cosmetic\s+product\s+after\s+effects|remote\s+cardiac\s+monitoring\s+rhythm|myrhythmnow|cambridge\s+filmworks|at\s+medica\s+20\d{2}|medica\s+20\d{2}|versius\s+surgical\s+robotic\s+system|senhance\s+surgical\s+robotic\s+system(?:\s+full\s+length)?|full\s+length\s+benefits|smart\s+m(?:onitor|edical)\s+series\s+at\s+medica|science\s+nation|sciencenation|nsf\s+science\s+nation|national\s+science\s+foundation\s+science\s+nation|angry\s+boy\s+part|regen\s+seminar|ultrasound[\s-]?guided\s+injections?\s+(?:seminar|demo|demonstration|training)|why\s+is\s+awbus|\bawbus\b|better\s+choice\s+over\s+hand[\s-]?held|lab\s+interfaces|microwize|medisoft\s+clinical|shelford\s+surgical\s+training|start\s+programme|reveal\s+linq|insertable\s+cardiac\s+monitor|tmini\s+miniature|think\s+surgical|technical\s+overview\s+illustration|healthcare\s+professional\s+information\s+series|discussing\s+cancer\s+screening\s+with\s+patients|talking\s+to\s+family\s+loved\s+ones\s+about\s+lung|diversified\s+radiology\s+breast|patient\s+friendly\s+video\s+was\s+created\s+by\s+(?:acr|radiologist)|stitch\s+a\s+grape|mri\s+how\s+it\s+works\s+part|how\s+an\s+mri\s+mrt\s+scan\s+is\s+performed|philips\s+epiq|lcd\s+monitor\s+removal|omnibotics|corin.?s?\s+robotic\s+assisted|diagnostic\s+mammogram\s+este\s+video|qu[eé]\s+debe\s+saber\s+sobre\s+la\s+mamograf|clinic\s+promo|(?:mri|ct|ultrasound)\s+clinic\s+promo|promo\s+(?:personal\s+injury|clinic\s+mri)|walk[\s-]?in\s+(?:mri|imaging)\s+(?:promo|ad|clinic)|imaging\s+center\s+(?:promo|advertisement|commercial)|free\s+mri\s+(?:consult|consultation|promo))\b|\bexposed\s*[:\-]|\bmeme\b[^.]{0,40}\bpeas?\b|srcpublishers\.com/i;
 
 /**
  * Strong clinical subjects we deliberately search Archive for. Query→title gates
@@ -282,6 +282,12 @@ export function healthcareOffTopicBrollReason(haystack, contextText = '', asset 
   // ads scraped via doctor-face queries — drop from pool (junk filter > soft-pass).
   if (isHealthcareIntroBeautyOrClinicJunk(h) && !healthcareIntroClinicalEscape(h)) {
     return 'healthcare: beauty/cosmetic or osteopathy-clinic B-roll';
+  }
+  // healthcare-web201: Gaza hospital siege / "thought process of highly successful
+  // people" brain pads / cuffless BP product ads / Aaron Judge sports bone bruise
+  // rode face/OR soft-pass while real surgical robot sat later in the first 3s.
+  if (isHealthcareIntroPadJunk(h) && !healthcareIntroClinicalEscape(h)) {
+    return 'healthcare: web201 off-topic intro pad';
   }
   // Archive query→title mismatch (surgical robot → GeekBeat / fashion / political).
   if (asset) {
@@ -1540,6 +1546,22 @@ export function isHealthcareIntroBeautyOrClinicJunk(evidence = '') {
 }
 
 /**
+ * healthcare-web201: obvious non-clinical pads still in the harvest pool —
+ * Gaza war-hospital siege news, "thought process of highly successful people"
+ * brain/self-help clips, cuffless BP product ads, Aaron Judge sports bone
+ * bruise. Never count as intro evidence; do NOT reject real surgical robot /
+ * radiologist MRI / doctor-patient consultation.
+ *
+ * @param {string} evidence
+ * @returns {boolean}
+ */
+export function isHealthcareIntroPadJunk(evidence = '') {
+  return /\b(?:gaza\s+(?:war\s+)?hospital|hospital\s+siege|war\s+hospital\s+siege|siege\s+(?:of\s+)?(?:a\s+|the\s+)?(?:gaza\s+)?hospital|thought\s+process\s+of\s+highly\s+successful|highly\s+successful\s+people|cuffless\s+(?:blood\s+)?pressure|blood\s+pressure\s+monitor\s+(?:product|ad|promo|commercial|review|wearable)|aaron\s+judge|bone\s+bruise)\b/i.test(
+    String(evidence || ''),
+  );
+}
+
+/**
  * Strong clinical escape that may override beauty/clinic junk in the same
  * evidence blob (surgeon/OR/MRI/surgical-robot/radiologist+screen/
  * doctor+patient consultation).
@@ -1595,6 +1617,9 @@ export function healthcareIntroFaceEvidenceMatches(evidence = '') {
   // unless a true clinical escape (surgeon/OR/MRI/robot/radiologist+screen/
   // doctor+patient consultation) is present in the same blob.
   if (isHealthcareIntroBeautyOrClinicJunk(text) && !clinicalEscape) return false;
+  // healthcare-web201: Gaza siege / self-help brain / cuffless BP / Aaron Judge
+  // pads never clear intro evidence without a clinical escape.
+  if (isHealthcareIntroPadJunk(text) && !clinicalEscape) return false;
   // Dead-air backs / title-card / walking-away hard-fail unless a true face
   // close-up or visual OR/MRI/robot escape is present in the same blob.
   if (isHealthcareIntroDeadAirOpener(text) && !strong && !face) return false;
@@ -1723,12 +1748,12 @@ export function checkIntroFacePool(project) {
 }
 
 /**
- * Post-build check: does the ASSEMBLED editTimeline have at least one
- * clinical/face video asset in the first 3 seconds?
+ * Post-build check: does the ASSEMBLED editTimeline open on a clinical/face
+ * video as the **earliest** cut of the first script segment?
  *
- * This catches pools that passed checkIntroFacePool (a clip qualifying in the
- * POOL) but whose assembled timeline placed junk first — e.g. a personal-injury
- * MRI clinic or a CGI cancer model before the real surgical-robot footage.
+ * housing-web159 / healthcare-web201: an ANY-in-first-3s soft-pass let junk lead
+ * at startSec=0 while a face/OR clip at 0.65–2s cleared the gate and blocked
+ * repair. The first cut itself must clear intro evidence (and sit near 0).
  *
  * Housing/healthcare only. Returns { pass: true } for all other topics.
  *
@@ -1761,6 +1786,7 @@ function assetPassesHealthcareTimelineIntro(asset) {
   if (!(asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) return false;
   const evidence = timelineIntroEvidenceOf(asset);
   if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
+  if (isHealthcareIntroPadJunk(evidence) && !healthcareIntroClinicalEscape(evidence)) return false;
   if (isScienceNationBrandingPad(evidence)) return false;
   if (isHealthcareProductPitchIntro(evidence)) return false;
   // healthcare-web197/web198: bare "doctor" / corridor / backs / title-card /
@@ -1787,51 +1813,76 @@ function assetPassesHousingTimelineIntro(asset) {
   return housingIntroFaceEvidenceMatches(evidence);
 }
 
+/**
+ * First-segment cuts with startSec < 3, sorted by startSec ascending.
+ * @param {object} project
+ * @returns {object[]}
+ */
+function firstSegmentIntroCuts(project) {
+  const timeline = project?.editTimeline || [];
+  const firstSegId = project?.script?.[0]?.id
+    || timeline.find((t) => typeof t?.segmentId === 'string')?.segmentId
+    || null;
+  return timeline
+    .filter((t) => {
+      if ((t.startSec ?? 0) >= 3) return false;
+      if (firstSegId && t.segmentId && t.segmentId !== firstSegId) return false;
+      return true;
+    })
+    .slice()
+    .sort((a, b) => (a.startSec ?? 0) - (b.startSec ?? 0));
+}
+
 export function checkEditTimelineIntroFace(project) {
   const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
   const housing = isHousingTopic(topicBlob);
   const healthcare = isHealthcareTopic(topicBlob);
   if (!housing && !healthcare) return { pass: true };
 
-  const timeline = project?.editTimeline || [];
   const mediaById = new Map((project?.media || []).map((m) => [m.id, m]));
+  const introCuts = firstSegmentIntroCuts(project);
 
-  // editTimeline startSec is segment-local (resets to 0 each script segment).
-  // Only the first script segment is the video opener — later segments with
-  // local startSec < 3 must not satisfy the gate (housing-web81 false-pass:
-  // Shostakovich/dartboard opener while a face clip lived at seg3 local 2.67s).
-  const firstSegId = project?.script?.[0]?.id
-    || timeline.find((t) => typeof t?.segmentId === 'string')?.segmentId
-    || null;
-  const introAssets = timeline
-    .filter((t) => {
-      if ((t.startSec ?? 0) >= 3) return false;
-      if (firstSegId && t.segmentId && t.segmentId !== firstSegId) return false;
-      return true;
-    })
-    .map((t) => mediaById.get(t.assetId))
-    .filter(Boolean);
+  if (!introCuts.length) return { pass: true };
 
-  if (!introAssets.length) return { pass: true };
+  // Earliest cut must itself clear intro evidence — NOT any asset in the first 3s
+  // (housing-web159 Bull Street @0 + West Sussex @0.65 soft-pass; healthcare-web201
+  // "thought process…" @0 + surgical robot @0.65 soft-pass).
+  const earliest = introCuts[0];
+  if ((earliest.startSec ?? 0) > 0.15) {
+    return {
+      pass: false,
+      reason: housing
+        ? 'INTRO_FACE_FAIL_TIMELINE: earliest first-segment cut does not start near 0 — face/lived-in opener missing at hook; re-harvest face-first'
+        : 'INTRO_FACE_FAIL_TIMELINE: earliest first-segment cut does not start near 0 — doctor/OR/MRI opener missing at hook; re-harvest face-first',
+    };
+  }
+
+  const earliestAsset = mediaById.get(earliest.assetId);
+  if (!earliestAsset) {
+    return {
+      pass: false,
+      reason: housing
+        ? 'INTRO_FACE_FAIL_TIMELINE: first cut has no resolvable media asset; re-harvest face-first'
+        : 'INTRO_FACE_FAIL_TIMELINE: first cut has no resolvable media asset; re-harvest face-first',
+    };
+  }
 
   if (healthcare) {
-    const hasClinicalVideo = introAssets.some((asset) => assetPassesHealthcareTimelineIntro(asset));
-    if (!hasClinicalVideo) {
+    if (!assetPassesHealthcareTimelineIntro(earliestAsset)) {
       return {
         pass: false,
         reason:
-          'INTRO_FACE_FAIL_TIMELINE: first 3s has no doctor/surgeon/patient face or OR/MRI/surgical-robot — corridor/backs/hallway/title-card or archive junk leads the hook; re-harvest face-first',
+          'INTRO_FACE_FAIL_TIMELINE: first cut has no doctor/surgeon/patient face or OR/MRI/surgical-robot — corridor/backs/hallway/title-card or archive junk leads the hook; re-harvest face-first',
       };
     }
   }
 
   if (housing) {
-    const hasFaceOrLivedIn = introAssets.some((asset) => assetPassesHousingTimelineIntro(asset));
-    if (!hasFaceOrLivedIn) {
+    if (!assetPassesHousingTimelineIntro(earliestAsset)) {
       return {
         pass: false,
         reason:
-          'INTRO_FACE_FAIL_TIMELINE: first 3s has no face/lived-in opener for housing hook; re-harvest face-first',
+          'INTRO_FACE_FAIL_TIMELINE: first cut has no face/lived-in opener for housing hook; re-harvest face-first',
       };
     }
   }
@@ -1840,27 +1891,33 @@ export function checkEditTimelineIntroFace(project) {
 }
 
 /**
- * When the assembled intro fails checkEditTimelineIntroFace but the media pool
- * still has a gate-passing asset, swap that asset into the first cut of the
- * first script segment (housing-web4/8/10: Chinatown eviction sat in pool while
- * dartboard/music led). Mutates project.editTimeline.
+ * Promote the best intro-face candidate to startSec=0 of the first script segment.
+ *
+ * Runs when:
+ * - the earliest cut fails checkEditTimelineIntroFace, OR
+ * - the earliest cut's housingIntroRepairRank / healthcareIntroRepairRank is
+ *   strictly less than the best pool candidate (even if a later-in-window clip
+ *   would have soft-passed the old any-in-3s check).
+ *
+ * Mutates project.editTimeline.
  *
  * @param {object} project
  * @returns {{ repaired: boolean, pass: boolean, reason?: string }}
  */
 export function repairEditTimelineIntroFace(project) {
-  const before = checkEditTimelineIntroFace(project);
-  if (before.pass) return { repaired: false, pass: true };
-
   const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
   const housing = isHousingTopic(topicBlob);
   const healthcare = isHealthcareTopic(topicBlob);
-  if (!housing && !healthcare) return { repaired: false, ...before };
+  if (!housing && !healthcare) {
+    return { repaired: false, pass: true };
+  }
 
   const media = project?.media || [];
+  const mediaById = new Map(media.map((m) => [m.id, m]));
   const qualifies = housing
     ? assetPassesHousingTimelineIntro
     : assetPassesHealthcareTimelineIntro;
+  const rankFn = housing ? housingIntroRepairRank : healthcareIntroRepairRank;
   // Prefer video (housing-web82: stills of LinkedIn flyers must not win intro).
   // healthcare-web198: rank face close-up > OR/MRI/surgical-robot > other.
   // housing-web159: rank documentary tenant/grandmother eviction faces over
@@ -1872,34 +1929,59 @@ export function repairEditTimelineIntroFace(project) {
   const pool = videoCandidates.length ? videoCandidates : candidates;
   const replacement = !pool.length
     ? null
-    : healthcare
-      ? [...pool].sort((a, b) => healthcareIntroRepairRank(b) - healthcareIntroRepairRank(a))[0]
-      : housing
-        ? [...pool].sort((a, b) => housingIntroRepairRank(b) - housingIntroRepairRank(a))[0]
-        : pool[0];
-  if (!replacement?.id) return { repaired: false, ...before };
+    : [...pool].sort((a, b) => rankFn(b) - rankFn(a))[0];
 
   const timeline = Array.isArray(project.editTimeline) ? [...project.editTimeline] : [];
   const firstSegId = project?.script?.[0]?.id
     || timeline.find((t) => typeof t?.segmentId === 'string')?.segmentId
     || null;
-  const idx = timeline.findIndex((t) => {
-    if ((t.startSec ?? 0) >= 3) return false;
-    if (firstSegId && t.segmentId && t.segmentId !== firstSegId) return false;
-    return true;
-  });
-  const endSec = idx >= 0
-    ? Math.max(Number(timeline[idx].endSec) || 1.25, 1.0)
+  const introCuts = firstSegmentIntroCuts(project);
+  const earliestCut = introCuts[0] || null;
+  const earliestIdx = earliestCut
+    ? timeline.findIndex((t) => t === earliestCut || (
+      t.assetId === earliestCut.assetId
+      && (t.startSec ?? 0) === (earliestCut.startSec ?? 0)
+      && t.segmentId === earliestCut.segmentId
+    ))
+    : timeline.findIndex((t) => {
+      if ((t.startSec ?? 0) >= 3) return false;
+      if (firstSegId && t.segmentId && t.segmentId !== firstSegId) return false;
+      return true;
+    });
+
+  const earliestAsset = earliestCut ? mediaById.get(earliestCut.assetId) : null;
+  const earliestPasses = earliestAsset ? qualifies(earliestAsset) : false;
+  const earliestStartOk = earliestCut ? (earliestCut.startSec ?? 0) <= 0.15 : false;
+  const earliestRank = earliestAsset && earliestPasses ? rankFn(earliestAsset) : 0;
+  const bestRank = replacement ? rankFn(replacement) : 0;
+  const before = checkEditTimelineIntroFace(project);
+
+  // Always promote when earliest fails, sits off-zero, or is outranked by a
+  // better pool candidate (housing-web159 / healthcare-web201).
+  const needsPromotion = Boolean(replacement?.id) && (
+    !before.pass
+    || !earliestPasses
+    || !earliestStartOk
+    || bestRank > earliestRank
+  );
+
+  if (!needsPromotion) {
+    return { repaired: false, pass: before.pass, reason: before.reason };
+  }
+  if (!replacement?.id) return { repaired: false, ...before };
+
+  const endSec = earliestIdx >= 0
+    ? Math.max(Number(timeline[earliestIdx].endSec) || 1.25, 1.0)
     : 1.25;
   const patched = {
-    segmentId: firstSegId || (idx >= 0 ? timeline[idx].segmentId : undefined),
+    segmentId: firstSegId || (earliestIdx >= 0 ? timeline[earliestIdx].segmentId : undefined),
     startSec: 0,
     endSec,
     assetId: replacement.id,
     reason: 'intro-face-repair',
   };
-  if (idx >= 0) {
-    timeline[idx] = { ...timeline[idx], ...patched };
+  if (earliestIdx >= 0) {
+    timeline[earliestIdx] = { ...timeline[earliestIdx], ...patched };
   } else {
     timeline.unshift(patched);
   }

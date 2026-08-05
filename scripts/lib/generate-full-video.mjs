@@ -6149,17 +6149,18 @@ export async function generateFullVideo(options) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }
 
-    // Post-build gate: verify the assembled intro (first 3s) has a real
-    // clinical/face video opener. Catches pools that passed pool-level
-    // checkIntroFacePool but whose timeline placed junk first (PI clinic ads,
-    // STEM promos, fundraising appeals). Prefer in-pool repair (swap gate
-    // evidence into first cut) before fail-closed re-harvest (housing-web4/8/10).
+    // Post-build gate: first cut of first segment must clear intro-face evidence
+    // (housing-web159 / healthcare-web201: any-in-first-3s soft-pass let junk lead
+    // at 0 while a later face/OR at 0.65 cleared the gate). Always attempt repair
+    // so a higher-ranked pool candidate can still be promoted to startSec=0.
     let introTimelineCheck = checkEditTimelineIntroFace(project);
-    if (!introTimelineCheck.pass) {
+    {
       const repaired = repairEditTimelineIntroFace(project);
       if (repaired.repaired && repaired.pass) {
-        log('   🩹 Intro-face repair: swapped gate-passing opener into first 3s');
+        log('   🩹 Intro-face repair: swapped gate-passing opener into first cut @0');
         introTimelineCheck = repaired;
+      } else {
+        introTimelineCheck = checkEditTimelineIntroFace(project);
       }
     }
     if (!introTimelineCheck.pass) {

@@ -17,6 +17,7 @@ import {
   isHealthcareEstablishingOpener,
   isHealthcareIntroDeadAirOpener,
   isHealthcareIntroBeautyOrClinicJunk,
+  isHealthcareIntroPadJunk,
   healthcareIntroClinicalEscape,
   healthcareIntroRepairRank,
   isHousingIntroJunkPad,
@@ -3547,5 +3548,162 @@ describe('housingOffTopicBrollReason — web159 reality-TV/trailer/geopolitics/m
     const repaired = repairEditTimelineIntroFace(project);
     expect(repaired.pass).toBe(true);
     expect(project.editTimeline[0].assetId).toBe('tenant1');
+  });
+
+  // housing-web159 critical: ANY-in-first-3s soft-pass let Bull Street trailer
+  // lead at 0.00 while West Sussex face at 0.65 cleared the gate — repair never ran.
+  it('FAILS when trailer junk leads at 0 and face sits at 0.65 (web159 earliest-cut)', () => {
+    const trailer = {
+      id: 'trailer1', type: 'video', url: 'https://example.com/tr.mp4',
+      title: 'bull street movie 2024 official trailer grandmother faces eviction',
+      alt: 'bull street movie 2024 official trailer grandmother faces eviction',
+    };
+    const tenant = {
+      id: 'tenant1', type: 'video', url: 'https://example.com/tenant.mp4',
+      title: 'west sussex man faces an eviction order from his littlehampton home',
+      alt: 'west sussex man faces an eviction order from his littlehampton home',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [trailer, tenant],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'trailer1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 2.0, assetId: 'tenant1' },
+      ],
+    };
+    // Old .some()-in-window would PASS; earliest-cut gate MUST FAIL.
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    expect(checkEditTimelineIntroFace(project).reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('tenant1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+
+  it('promotes higher-rank documentary over weak lived-in earliest that soft-passes', () => {
+    const weak = {
+      id: 'weak1', type: 'video', url: 'https://example.com/weak.mp4',
+      title: 'apartment interior living room close-up',
+      alt: 'apartment interior living room close-up',
+    };
+    const documentary = {
+      id: 'doc1', type: 'video', url: 'https://example.com/doc.mp4',
+      title: 'west sussex man faces an eviction order from his littlehampton home documentary news footage',
+      alt: 'west sussex man faces an eviction order documentary news footage',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [weak, documentary],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 1.2, assetId: 'weak1' },
+        { segmentId: 'seg1', startSec: 1.2, endSec: 2.5, assetId: 'doc1' },
+      ],
+    };
+    // Weak lived-in at 0 clears earliest-cut gate, but rank is lower than documentary.
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+    expect(housingIntroRepairRank(documentary)).toBeGreaterThan(housingIntroRepairRank(weak));
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('doc1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+});
+
+describe('healthcare-web201 earliest-cut intro + pad junk', () => {
+  it('rejects Gaza hospital siege / thought-process / cuffless BP / Aaron Judge pads', () => {
+    for (const title of [
+      'gaza war hospital siege wounded civilians',
+      'thought process of highly successful people human brain',
+      'cuffless blood pressure monitor product review wearable',
+      'aaron judge bone bruise sports injury update',
+    ]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(true);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toMatch(/healthcare/);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(false);
+    }
+  });
+
+  it('keeps surgical robot / radiologist MRI / doctor-patient consultation', () => {
+    for (const title of [
+      'cnbc meet the surgical robot that can diagnose lung cancer operating room',
+      'radiologist reviewing mri scan at workstation monitor',
+      'doctor face patient consultation close up hospital',
+    ]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(false);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toBe('');
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(true);
+    }
+  });
+
+  it('FAILS when thought-process junk leads at 0 and surgical robot sits at 0.65', () => {
+    const junk = {
+      id: 'junk1',
+      type: 'video',
+      title: 'thought process of highly successful people human brain',
+      alt: 'thought process of highly successful people human brain',
+      url: 'https://example.com/brain.mp4',
+    };
+    const robot = {
+      id: 'robot1',
+      type: 'video',
+      title: 'cnbc meet the surgical robot that can diagnose lung cancer operating room',
+      alt: 'cnbc surgical robot operating room',
+      url: 'https://example.com/robot.mp4',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [junk, robot],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'junk1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 2.0, assetId: 'robot1' },
+      ],
+    };
+    // Old .some()-in-window would PASS via robot@0.65; earliest-cut MUST FAIL.
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    expect(checkEditTimelineIntroFace(project).reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('robot1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+
+  it('promotes doctor-face consultation over OR when consultation outranks earliest robot', () => {
+    const robot = {
+      id: 'robot1',
+      type: 'video',
+      title: 'surgical robot operating room da vinci',
+      alt: 'surgical robot OR lights',
+      url: 'https://archive.org/robot.mp4',
+    };
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor face patient consultation',
+      url: 'https://archive.org/face.mp4',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [robot, face],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 1.2, assetId: 'robot1' },
+        { segmentId: 'seg1', startSec: 1.2, endSec: 2.5, assetId: 'face1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+    expect(healthcareIntroRepairRank(face)).toBeGreaterThan(healthcareIntroRepairRank(robot));
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('face1');
+    expect(project.editTimeline[0].startSec).toBe(0);
   });
 });

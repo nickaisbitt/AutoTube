@@ -1081,6 +1081,33 @@ describe('healthcare web15 raw 4.4 junk rejects (body-lang / NVIDIA / name-pollu
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
     }
   });
+
+  it('rejects healthcare-web77 product-pitch / muddy-MRI / software pads from harvest', () => {
+    for (const alt of [
+      'why is awbus a better choice over hand held ultrasound screening tom stavros',
+      'lab interfaces by microwize for medisoft clinical',
+      'introduction to the shelford surgical training in advanced robotic technology start programme',
+      'medtronic reveal linq insertable cardiac monitor icm system',
+      'tmini miniature robotic system technical overview illustration think surgical',
+      'discussing cancer screening with patients healthcare professional information series',
+      'talking to family loved ones about lung cancer screening',
+      'how an mri mrt scan is performed',
+      'mri how it works part 2 the different types',
+      'this surgical system can stitch a grape back together',
+      'diversified radiology breast imaging screening diagnostic mammography',
+    ]) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+    }
+    // Keep real clinical OR / Dexter / CNBC leads
+    expect(healthcareOffTopicBrollReason(
+      'a day with the dexter robotic surgery system operating room',
+      HEALTHCARE_TOPIC,
+    )).toBe('');
+    expect(healthcareOffTopicBrollReason(
+      'cnbc meet the surgical robot that can diagnose lung cancer',
+      HEALTHCARE_TOPIC,
+    )).toBe('');
+  });
 });
 
 describe('healthcare web17 raw 5.6 junk rejects — video game, massage pillow, AI Geist/Lynx, ENT lecture', () => {

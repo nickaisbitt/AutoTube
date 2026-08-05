@@ -57,6 +57,7 @@ import {
   isHealthcareIntroDeadAirOpener,
   isHealthcareIntroBeautyOrClinicJunk,
   healthcareIntroClinicalEscape,
+  isHealthcareIntroPadJunk,
   HEALTHCARE_AMBIGUOUS_ARCHIVE_MATCH_TOKENS,
   isOffBrandVisual,
   isGenericStockJunk,
@@ -609,6 +610,9 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
       const blob = `${candidate.alt || ''} ${candidate.title || ''} ${candidate.query || ''} ${candidate.source || ''}`;
       // healthcare-web200: beauty/osteopathy junk never wins Archive inject rank.
       if (isHealthcareIntroBeautyOrClinicJunk(blob) && !healthcareIntroClinicalEscape(blob)) return 35;
+      // healthcare-web211: nurse-prank / ambulance-queue / product-MRI pads
+      // never win Archive inject even when title carries mri/ct tokens.
+      if (isHealthcareIntroPadJunk(blob)) return 35;
       if (healthcareIntroFaceEvidenceMatches(blob)) return 5;
       if (isHealthcareEstablishingOpener(blob) || isHealthcareIntroDeadAirOpener(blob)) return 35;
       // Generic clinical Archive: behind DM (2) / generic web (10), ahead of Vimeo (25).

@@ -17,6 +17,7 @@ import {
   healthcareClinicianOrPatientFace,
   isHealthcareIntroBeautyOrClinicJunk,
   healthcareIntroClinicalEscape,
+  isHealthcareIntroPadJunk,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
@@ -230,6 +231,9 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
           isHealthcareIntroBeautyOrClinicJunk(blob)
           && !healthcareIntroClinicalEscape(blob)
         )
+        // healthcare-web211: nurse-prank / ambulance-queue / product-MRI pads
+        // must never lead or ride mid-intro after a live-OR hold.
+        || isHealthcareIntroPadJunk(blob)
     )
   ) {
     return true;
@@ -440,6 +444,11 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
     }
     // healthcare-web200: beauty/osteopathy clinic junk → -1 even with face noun.
     if (isHealthcareIntroBeautyOrClinicJunk(blob) && !healthcareIntroClinicalEscape(blob)) {
+      return -1;
+    }
+    // healthcare-web211: nurse-prank / ambulance-queue / product-MRI room-cam
+    // pads → -1 even when bare ct/mri tokens would otherwise clear tier-2.
+    if (isHealthcareIntroPadJunk(blob)) {
       return -1;
     }
     const isVideo = asset?.type === 'video' || /\.mp4/i.test(asset?.url || '');

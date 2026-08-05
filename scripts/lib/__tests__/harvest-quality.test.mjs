@@ -4907,3 +4907,112 @@ describe('QUALITY-OVER-7 opener hold + thin inject + named-doc ranks', () => {
     expect(thinInjectVarietyFailReason({}, videos, 'housing')).toBeNull();
   });
 });
+
+describe('healthcare-web211 nurse-prank / ambulance-queue / product-MRI pads', () => {
+  const NURSE_PRANK =
+    'doctor showing nurse a longer thing watch doctor showing nurse a longer thing desimasalapjs on dailymotion';
+  const AMBULANCE_QUEUE =
+    'uk hospital declares critical incident as 15 ambulances queue outside a e university hospitals birmingham nhs trust';
+  const MRI_ROOM_CAM =
+    'mri ct scan room cam video for you watch mri ct scan room cam video for you mri ct scan on dailymotion';
+  const RADIOLOGY_SOLUTION =
+    'complete radiology solution mri pads product demo for imaging centers';
+  const ONLINE_CONSULT =
+    'how to consult with any doctor online latest in english 2019 techno plus';
+
+  it('hard-rejects nurse-prank / ambulance-queue / product-MRI / online-consult pads', () => {
+    for (const title of [NURSE_PRANK, AMBULANCE_QUEUE, MRI_ROOM_CAM, RADIOLOGY_SOLUTION, ONLINE_CONSULT]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(true);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toMatch(/off-topic/);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(healthcareIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/j.mp4',
+      })).toBe(0);
+    }
+  });
+
+  it('keeps Shropshire / Ulster live OR + Imperial MRI / radiologist + consultation face', () => {
+    for (const title of [
+      'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      'state of the art surgical robot demonstrated in ulster hospital theatres',
+      'having an mri scan 7 to 12 year olds imperial nhs',
+      'radiologist reviewing mri scan workstation monitor',
+      'doctor face patient consultation close up hospital',
+    ]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(false);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toBe('');
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(true);
+      expect(healthcareIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/ok.mp4',
+      })).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('FAILS when MRI room-cam leads at 0; repair promotes Shropshire OR with 2.0s hold', () => {
+    const roomCam = {
+      id: 'cam1', type: 'video', url: 'https://example.com/cam.mp4',
+      title: MRI_ROOM_CAM, alt: MRI_ROOM_CAM,
+    };
+    const prank = {
+      id: 'prank1', type: 'video', url: 'https://example.com/prank.mp4',
+      title: NURSE_PRANK, alt: NURSE_PRANK,
+    };
+    const queue = {
+      id: 'queue1', type: 'video', url: 'https://example.com/queue.mp4',
+      title: AMBULANCE_QUEUE, alt: AMBULANCE_QUEUE,
+    };
+    const shropshire = {
+      id: 'shrop1', type: 'video', url: 'https://example.com/shrop.mp4',
+      title: 'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      alt: 'shropshire hospital surgery robot',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [roomCam, prank, queue, shropshire],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'cam1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'prank1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 1.95, assetId: 'queue1' },
+        { segmentId: 'seg1', startSec: 1.95, endSec: 2.6, assetId: 'shrop1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    expect(healthcareIntroRepairRank(roomCam)).toBe(0);
+    expect(healthcareIntroRepairRank(shropshire)).toBe(3);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('shrop1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+    expect(project.editTimeline[0].endSec).toBe(2);
+  });
+
+  it('promotes consultation face over Shropshire when both in pool; holds 2.0s', () => {
+    const shropshire = {
+      id: 'shrop1', type: 'video', url: 'https://example.com/shrop.mp4',
+      title: 'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      alt: 'shropshire hospital surgery robot',
+    };
+    const face = {
+      id: 'face1', type: 'video', url: 'https://example.com/face.mp4',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor patient consultation face',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [shropshire, face],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'shrop1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'face1' },
+      ],
+    };
+    expect(healthcareIntroRepairRank(face)).toBe(4);
+    expect(healthcareIntroRepairRank(shropshire)).toBe(3);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('face1');
+    expect(project.editTimeline[0].endSec).toBe(2);
+  });
+});

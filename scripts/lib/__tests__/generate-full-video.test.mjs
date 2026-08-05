@@ -26,6 +26,8 @@ import {
   isDailymotionMotionCandidate,
   dailymotionVideoIdFromUrl,
   resolveDailymotionProbeUrl,
+  softProbeDailymotionUrl,
+  isHousingNamedDocumentaryBlob,
   isVisionBudgetSoft,
   hasYtDlpCookies,
   unreliableWebProxyInjectReason,
@@ -716,6 +718,71 @@ describe('non-YouTube motion planning and ranking', () => {
     expect(motionCandidateHostRank(opaqueArchive, { topicBlob: AIRLINE_TOPIC })).toBe(0);
   });
 
+  it('housing named-doc Archive ranks 4; preferProbePassHosts demotes flaky directs', () => {
+    // housing-web168: injected=6/18 with probe-fail=3 — random direct .mp4 (rank 1)
+    // beat Archive face (5) then failed canFetch. Named-doc Archive host tier 4
+    // (aligned with housingIntroRepairRank 4) + preferProbePassHosts demotes
+    // non-archive directs behind Archive so probe-pass hosts fill ≥12 slots.
+    const namedDoc = {
+      url: 'https://archive.org/download/dale/dale-farm.mp4',
+      source: 'Archive.org live',
+      title: 'dale farm travellers eviction documentary',
+      alt: 'dale farm eviction family face',
+      query: 'dale farm eviction',
+    };
+    const faceArchive = {
+      url: 'https://archive.org/download/face/eviction.mp4',
+      source: 'Archive.org live',
+      query: 'shocked face eviction notice',
+      alt: 'grandmother faces eviction from apartment',
+    };
+    const flakyDirect = {
+      url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://example.com/dead.mp4')}`,
+      sourceUrl: 'https://example.com/dead.mp4',
+      source: 'DDG web video',
+      query: 'worried couple apartment',
+      alt: 'tenant reading eviction letter',
+    };
+    expect(motionCandidateHostRank(namedDoc, { topicBlob: HOUSING_TOPIC })).toBe(4);
+    expect(motionCandidateHostRank(faceArchive, { topicBlob: HOUSING_TOPIC })).toBe(5);
+    expect(motionCandidateHostRank(flakyDirect, {
+      topicBlob: HOUSING_TOPIC,
+      preferProbePassHosts: true,
+    })).toBe(8);
+    expect(motionCandidateHostRank(flakyDirect, { topicBlob: HOUSING_TOPIC })).toBe(1);
+    const ranked = rankMotionCandidates(
+      [flakyDirect, faceArchive, namedDoc],
+      () => 0,
+      { topicBlob: HOUSING_TOPIC, preferProbePassHosts: true },
+    );
+    expect(ranked.map((c) => c.url)).toEqual([namedDoc.url, faceArchive.url, flakyDirect.url]);
+  });
+
+  it('housing Vimeo/DM circuit pins liveTarget to liveCap so Archive extras run', () => {
+    // housing-web168: web pool already past liveTarget → Archive extras skipped
+    // (archive=4) while clip-pool=121. Pin liveTarget=liveCap for housing.
+    const archive = { url: 'https://archive.org/download/a/a.mp4', source: 'Archive.org live' };
+    const vimeoDead = {
+      url: 'http://localhost:5173/api/download-clip?url=' + encodeURIComponent('https://vimeo.com/1'),
+      sourceUrl: 'https://vimeo.com/1',
+    };
+    const liveClips = [archive, vimeoDead];
+    const widened = openVimeoFetchCircuit(
+      liveClips,
+      { liveCap: 140, perQueryCap: 10, liveTarget: 40 },
+      { housing: true },
+    );
+    expect(widened.liveTarget).toBe(widened.liveCap);
+    expect(widened.liveCap).toBeGreaterThan(140);
+    const dmClips = [archive];
+    const dmWidened = openDailymotionFetchCircuit(
+      dmClips,
+      { liveCap: 140, perQueryCap: 10, liveTarget: 40 },
+      { housing: true },
+    );
+    expect(dmWidened.liveTarget).toBe(dmWidened.liveCap);
+  });
+
   it('skips YouTube inject without cookies and honors a TikTok circuit breaker', () => {
     const youtube = {
       url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://youtu.be/abc')}`,
@@ -800,6 +867,13 @@ describe('non-YouTube motion planning and ranking', () => {
       .toBe('https://www.dailymotion.com/video/x8fmvll');
     expect(resolveDailymotionProbeUrl('https://archive.org/download/a/a.mp4'))
       .toBe('https://archive.org/download/a/a.mp4');
+    // softProbeDailymotionUrl must canonicalize before yt-dlp (housing-web168:
+    // helper existed but was unwired — CDN probes false-tripped the circuit).
+    expect(typeof softProbeDailymotionUrl).toBe('function');
+    expect(isHousingNamedDocumentaryBlob(
+      'west sussex man faces an eviction order from his littlehampton home',
+    )).toBe(true);
+    expect(isHousingNamedDocumentaryBlob('apartment building exterior')).toBe(false);
   });
 
   it('opens the Dailymotion circuit and biases remaining budget to Archive/direct at fetch time', () => {
@@ -1429,13 +1503,17 @@ describe('healthcare keyless motion pack + volume chase', () => {
     );
   });
 
-  it('housing webHostQueries lead with shocked-face / renter-face DM before Vimeo', () => {
+  it('housing webHostQueries lead with named-doc + shocked-face DM before Vimeo', () => {
     const plan = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
-    // housing-web158: first-class site: face/lived-in searches occupy early slots.
+    // housing-web158/168: first-class site: named-doc + face/lived-in occupy early slots.
     expect(plan.queries.slice(0, HOUSING_HOST_FACE_EARLY_COUNT).every(isWebHostScopedQuery)).toBe(true);
-    expect(plan.queries[0]).toMatch(/shocked face eviction notice site:dailymotion\.com/i);
-    expect(plan.webHostQueries[0]).toMatch(/shocked face eviction notice site:dailymotion\.com/i);
+    expect(plan.queries[0]).toMatch(/dale farm eviction site:dailymotion\.com/i);
+    expect(plan.webHostQueries[0]).toMatch(/dale farm eviction site:dailymotion\.com/i);
     expect(plan.webHostQueries).toEqual(expect.arrayContaining([
+      'dale farm eviction site:dailymotion.com',
+      'west sussex eviction site:dailymotion.com',
+      'san francisco tenants eviction site:dailymotion.com',
+      'richmond eviction documentary site:dailymotion.com',
       'worried tenant face close up site:dailymotion.com',
       'renter face eviction notice apartment site:dailymotion.com',
       'family crying eviction apartment site:dailymotion.com',
@@ -1444,14 +1522,17 @@ describe('healthcare keyless motion pack + volume chase', () => {
       'apartment interior living room tenant site:dailymotion.com',
       'shocked face eviction notice site:vimeo.com',
     ]));
+    const dmNamed = plan.webHostQueries.findIndex((q) => /dale farm eviction site:dailymotion/i.test(q));
     const dmFace = plan.webHostQueries.findIndex((q) => /shocked face eviction notice site:dailymotion/i.test(q));
     const vimeoFace = plan.webHostQueries.findIndex((q) => /shocked face eviction notice site:vimeo/i.test(q));
-    expect(dmFace).toBeGreaterThanOrEqual(0);
+    expect(dmNamed).toBe(0);
+    expect(dmFace).toBeGreaterThan(dmNamed);
     expect(vimeoFace).toBeGreaterThan(dmFace);
     expect(plan.archiveQueries.every((q) => !isWebHostScopedQuery(q))).toBe(true);
-    // Cap raised from 34 so first-class site: early + host bases both fit (was truncating).
-    expect(HOUSING_KEYLESS_QUERY_CAP).toBeGreaterThanOrEqual(40);
-    expect(HOUSING_HOST_FACE_EARLY_COUNT).toBeGreaterThanOrEqual(10);
+    expect(plan.archiveQueries.slice(0, 4).join(' ')).toMatch(/dale farm|west sussex|san francisco|richmond/i);
+    // Cap raised so first-class site: early + host bases both fit (was truncating).
+    expect(HOUSING_KEYLESS_QUERY_CAP).toBeGreaterThanOrEqual(44);
+    expect(HOUSING_HOST_FACE_EARLY_COUNT).toBeGreaterThanOrEqual(14);
     const capped = plan.queries.slice(0, HOUSING_KEYLESS_QUERY_CAP).map((q) => q.toLowerCase());
     const hostBases = plan.webHostQueries.map((hq) => hq.replace(/\s+site:(?:vimeo\.com|dailymotion\.com)\s*$/i, '').trim().toLowerCase());
     const uniqueHostBases = [...new Set(hostBases)];

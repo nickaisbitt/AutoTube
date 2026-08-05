@@ -461,6 +461,24 @@ export function resolveDailymotionProbeUrl(url = '') {
   return String(url || '').trim();
 }
 
+/**
+ * Named documentary eviction faces watchers reward (Dale Farm / West Sussex /
+ * SF tenants / Richmond). Shared by inject faceScore + host rank so named-docs
+ * survive both topical score and host-tier ordering.
+ */
+export function isHousingNamedDocumentaryBlob(blob = '') {
+  const text = String(blob || '');
+  return (
+    /\b(?:dale\s+farm|west\s+sussex|burden\s+of\s+richmond)\b/i.test(text)
+    || (/\brichmond\b/i.test(text) && /\bevict\w*\b/i.test(text))
+    || (
+      /\b(?:san\s+francisco|\bsf\b)\b/i.test(text)
+      && /\btenants?\b/i.test(text)
+      && /\bevict\w*\b/i.test(text)
+    )
+  );
+}
+
 /** True when yt-dlp has a cookie jar / browser cookies for bot-gated hosts. */
 export function hasYtDlpCookies() {
   return Boolean(
@@ -526,6 +544,17 @@ export function softProbeYtDlpUrl(url = '', { timeoutMs = 20_000 } = {}) {
   return Boolean(String(result.stdout || '').trim());
 }
 
+/**
+ * Soft-probe Dailymotion via the public page URL (never CDN m3u8).
+ * housing-web153: probing cdndirector…/x8fmvll.m3u8 false-tripped the circuit;
+ * housing-web168: resolveDailymotionProbeUrl existed but was never wired into
+ * soft-probe call sites — DM that would pass on the page URL still opened the
+ * circuit and starved inject of live DM volume.
+ */
+export function softProbeDailymotionUrl(url = '', options = {}) {
+  return softProbeYtDlpUrl(resolveDailymotionProbeUrl(url), options);
+}
+
 /** YouTube clickbait thumbnails used as Ken Burns B-roll when the clip itself is blocked. */
 export function isYouTubeThumbnailStill(url = '') {
   return /i\.ytimg\.com|img\.youtube\.com|yt3\.ggpht\.com/i.test(String(url || ''));
@@ -543,7 +572,7 @@ const HOUSING_ARCHIVE_STRONG_RE =
  * likely to survive the later assembly download.
  *
  * @param {object} candidate
- * @param {{ topicBlob?: string }} [options]
+ * @param {{ topicBlob?: string, preferProbePassHosts?: boolean }} [options]
  */
 export function motionCandidateHostRank(candidate = {}, options = {}) {
   const urls = motionCandidateUrls(candidate);
@@ -562,6 +591,10 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
       // housing-web159: reality-TV / trailer / geopolitics / mental-health junk
       // never wins Archive inject rank even when title collocates grandmother+evict.
       if (housingOffTopicBrollReason(blob, options.topicBlob || '')) return 35;
+      // Named documentary Archive (Dale Farm / West Sussex / SF / Richmond) — host
+      // tier 4 aligns with housingIntroRepairRank 4 so proven openers win inject
+      // ahead of generic face Archive (5) and flaky non-archive directs.
+      if (isHousingNamedDocumentaryBlob(blob)) return 4;
       // housing-web158: prefer clips that clear housingIntroFaceEvidenceMatches in
       // the same strong-Archive tier (5); opaque landscape/FEMA stay 35. Do not
       // demote apartment Archive behind generic web — volume still needs it.
@@ -583,7 +616,19 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
     }
     return 0;
   }
-  if (urls.some((url) => isDirectVideoUrl(url))) return 1;
+  if (urls.some((url) => isDirectVideoUrl(url))) {
+    // housing-web168: random DDG "direct" .mp4 URLs (rank 1) beat Archive face (5),
+    // then fail canFetch → probe-fail waste while archive≈4 never injects. When
+    // Vimeo/DM circuits open (preferProbePassHosts), demote non-archive directs
+    // behind named-doc/face Archive so probe-pass hosts fill ≥12 inject slots.
+    if (
+      options.preferProbePassHosts
+      && isHousingTopic(options.topicBlob || '')
+    ) {
+      return 8;
+    }
+    return 1;
+  }
   // Dailymotion / Giphy stay ahead of generic web. Vimeo is demoted separately:
   // cloud IPs often hit yt-dlp "blocked due to its TLS fingerprint" (housing-web85
   // slideshow collapse; healthcare-web81+ HARVEST_VOLUME_FAIL with
@@ -2558,6 +2603,12 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   // ("Preview Clip ... 'Evicting the American Dream'", "Tenants Rise Up! Fighting for
   // Housing Justice") that the intro-face gate now accepts (see
   // housingIntroFaceEvidenceMatches in harvest-quality.mjs).
+  // housing-web168: named documentary eviction faces must land in Archive face
+  // leads (and host-scoped DM) so inject can reach ≥12 after Vimeo/DM circuits.
+  'dale farm eviction',
+  'west sussex eviction',
+  'san francisco tenants eviction',
+  'richmond eviction documentary',
   'worried tenant face close up',
   'shocked face eviction notice',
   'renter face eviction notice apartment',
@@ -2717,6 +2768,10 @@ export const HEALTHCARE_KEYLESS_QUERY_CAP = 44;
  * motion that can clear housingIntroFaceEvidenceMatches — not landscape/FEMA.
  */
 export const HOUSING_FACE_FIRST_REHARVEST_QUERIES = [
+  'dale farm eviction',
+  'west sussex eviction',
+  'san francisco tenants eviction',
+  'richmond eviction documentary',
   'shocked face eviction notice',
   'worried tenant face close up',
   'renter face eviction notice apartment',
@@ -2735,20 +2790,25 @@ export const HOUSING_FACE_FIRST_REHARVEST_QUERIES = [
   'tenant packing boxes',
 ];
 
-/** How many housing face/lived-in site: host searches to schedule early (web158). */
-export const HOUSING_HOST_FACE_EARLY_COUNT = 12;
+/** How many housing face/lived-in site: host searches to schedule early (web158).
+ * Raised to 16 so named-doc DM leads (Dale Farm / West Sussex / SF / Richmond)
+ * plus face/lived-in bases all fire before queryCap (housing-web168).
+ */
+export const HOUSING_HOST_FACE_EARLY_COUNT = 16;
 /** Extra host-scoped variants beyond housingHostLead. */
 export const HOUSING_HOST_QUERY_VARIANT_LIMIT = 16;
 /** Keyless housing queryCap — raised so face host bases + site: early both fit. */
-export const HOUSING_KEYLESS_QUERY_CAP = 42;
+export const HOUSING_KEYLESS_QUERY_CAP = 46;
 
 /** Clinical-only Archive subjects used when web engines return 0 motion.
  * Face/OR/MRI share expanded (web199) — first 28 are intro-capable leads.
  */
 export const ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES = ARCHIVE_HEALTHCARE_MOTION_QUERIES.slice(0, 28);
 
-/** Face/lived-in Archive subjects used when web engines return 0 / circuits open. */
-export const ARCHIVE_HOUSING_FACE_LEAD_QUERIES = ARCHIVE_HOUSING_MOTION_QUERIES.slice(0, 16);
+/** Face/lived-in Archive subjects used when web engines return 0 / circuits open.
+ * First 20 include named-doc eviction leads (housing-web168).
+ */
+export const ARCHIVE_HOUSING_FACE_LEAD_QUERIES = ARCHIVE_HOUSING_MOTION_QUERIES.slice(0, 20);
 
 /** True when a motion query is already scoped to Vimeo/Dailymotion. */
 export function isWebHostScopedQuery(query = '') {
@@ -2990,6 +3050,10 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   // housingIntroFaceEvidenceMatches after junk rejects landscape/FEMA pads.
   const housingHostLead = housing
     ? [
+        'dale farm eviction site:dailymotion.com',
+        'west sussex eviction site:dailymotion.com',
+        'san francisco tenants eviction site:dailymotion.com',
+        'richmond eviction documentary site:dailymotion.com',
         'shocked face eviction notice site:dailymotion.com',
         'worried tenant face close up site:dailymotion.com',
         'renter face eviction notice apartment site:dailymotion.com',
@@ -3006,6 +3070,8 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
         'tenant packing boxes site:dailymotion.com',
         'foreclosure family home site:dailymotion.com',
         'eviction documentary site:dailymotion.com',
+        'dale farm eviction site:vimeo.com',
+        'west sussex eviction site:vimeo.com',
         'shocked face eviction notice site:vimeo.com',
         'worried tenant face close up site:vimeo.com',
         'grandmother faces eviction apartment site:vimeo.com',
@@ -3170,9 +3236,11 @@ export const DAILYMOTION_CIRCUIT_LIVE_CAP_BOOST = 30;
  *
  * @param {object[]} liveClips
  * @param {{ liveCap: number, perQueryCap: number, liveTarget: number }} budgets
+ * @param {{ housing?: boolean }} [options] - housing-web168: pin liveTarget to liveCap
+ *   so circuit Archive face extras are not skipped after the web pool already filled
  * @returns {{ liveCap: number, perQueryCap: number, liveTarget: number, purged: number }}
  */
-export function openVimeoFetchCircuit(liveClips = [], budgets = {}) {
+export function openVimeoFetchCircuit(liveClips = [], budgets = {}, options = {}) {
   const before = liveClips.length;
   const reliable = liveClips.filter(
     (c) => !(isVimeoMotionCandidate(c) && isProxiedClipUrl(c?.url || '')),
@@ -3181,7 +3249,11 @@ export function openVimeoFetchCircuit(liveClips = [], budgets = {}) {
   liveClips.push(...reliable);
   const liveCap = (Number(budgets.liveCap) || 0) + VIMEO_CIRCUIT_LIVE_CAP_BOOST;
   const perQueryCap = (Number(budgets.perQueryCap) || 0) + VIMEO_CIRCUIT_PER_QUERY_CAP_BOOST;
-  const liveTarget = Math.min(liveCap, (Number(budgets.liveTarget) || 0) + VIMEO_CIRCUIT_LIVE_CAP_BOOST);
+  let liveTarget = Math.min(liveCap, (Number(budgets.liveTarget) || 0) + VIMEO_CIRCUIT_LIVE_CAP_BOOST);
+  // housing-web168: ddg=121 already past liveTarget → Archive extras (`extra:true`)
+  // skipped while archive=4; injected=6<12. Pin liveTarget to the widened liveCap so
+  // Archive face boost keeps running until the pool can actually absorb it.
+  if (options.housing) liveTarget = liveCap;
   return { liveCap, perQueryCap, liveTarget, purged: before - liveClips.length };
 }
 
@@ -3193,9 +3265,10 @@ export function openVimeoFetchCircuit(liveClips = [], budgets = {}) {
  *
  * @param {object[]} liveClips
  * @param {{ liveCap: number, perQueryCap: number, liveTarget: number }} budgets
+ * @param {{ housing?: boolean }} [options] - housing-web168: pin liveTarget to liveCap
  * @returns {{ liveCap: number, perQueryCap: number, liveTarget: number, purged: number }}
  */
-export function openDailymotionFetchCircuit(liveClips = [], budgets = {}) {
+export function openDailymotionFetchCircuit(liveClips = [], budgets = {}, options = {}) {
   const before = liveClips.length;
   const reliable = liveClips.filter(
     (c) => !(isDailymotionMotionCandidate(c) && isProxiedClipUrl(c?.url || '')),
@@ -3204,10 +3277,11 @@ export function openDailymotionFetchCircuit(liveClips = [], budgets = {}) {
   liveClips.push(...reliable);
   const liveCap = (Number(budgets.liveCap) || 0) + DAILYMOTION_CIRCUIT_LIVE_CAP_BOOST;
   const perQueryCap = (Number(budgets.perQueryCap) || 0) + DAILYMOTION_CIRCUIT_PER_QUERY_CAP_BOOST;
-  const liveTarget = Math.min(
+  let liveTarget = Math.min(
     liveCap,
     (Number(budgets.liveTarget) || 0) + DAILYMOTION_CIRCUIT_LIVE_CAP_BOOST,
   );
+  if (options.housing) liveTarget = liveCap;
   return { liveCap, perQueryCap, liveTarget, purged: before - liveClips.length };
 }
 
@@ -3228,7 +3302,7 @@ export const ARCHIVE_CLINICAL_FACE_OR_MRI_LEAD_RE =
 
 /** Face / lived-in / eviction Archive subjects we want first when housing web proxies die. */
 export const ARCHIVE_HOUSING_FACE_LIVED_IN_LEAD_RE =
-  /\b(face|faces?\s+evict|evict\w*|tenant|renter|grandmother|family\s+cry|packing\s+boxes|apartment\s+interior|living\s+room|foreclosure\s+family|lived\s+in|housing\s+crisis\s+family)\b/i;
+  /\b(face|faces?\s+evict|evict\w*|tenant|renter|grandmother|family\s+cry|packing\s+boxes|apartment\s+interior|living\s+room|foreclosure\s+family|lived\s+in|housing\s+crisis\s+family|dale\s+farm|west\s+sussex|richmond\s+evict|san\s+francisco\s+tenants)\b/i;
 
 /**
  * How many Archive clinical subjects to schedule once a web-proxy circuit opens.
@@ -3802,7 +3876,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           proxyGate.vimeoBlocked = true;
           report.vimeoFetchCircuitOpen = true;
           report.vimeoFetchCircuitOpenAtQuery = q;
-          const widened = openVimeoFetchCircuit(liveClips, { liveCap, perQueryCap, liveTarget });
+          const widened = openVimeoFetchCircuit(
+            liveClips,
+            { liveCap, perQueryCap, liveTarget },
+            { housing: housingTopic },
+          );
           liveCap = widened.liveCap;
           perQueryCap = widened.perQueryCap;
           liveTarget = widened.liveTarget;
@@ -3819,11 +3897,15 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
             );
             // Thin admitted pool (after-junk≈6–8 on surviving HC runs) or dual
             // Vimeo+DM death → larger face Archive boost.
-            const boostCount = resolveArchiveClinicalBoostCount({
-              vimeoCircuitOpen: true,
-              dailymotionCircuitOpen: proxyGate.dailymotionBlocked,
-              afterJunk: liveClips.length,
-            });
+            // housing-web168: always use the dual-circuit boost size so Archive
+            // face/named-doc subjects absorb the gap (archive was 4 with pool 121).
+            const boostCount = housingTopic
+              ? DUAL_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT
+              : resolveArchiveClinicalBoostCount({
+                vimeoCircuitOpen: true,
+                dailymotionCircuitOpen: proxyGate.dailymotionBlocked,
+                afterJunk: liveClips.length,
+              });
             const archiveBoost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
               plan.archiveQueries,
               scheduledKeys,
@@ -3859,11 +3941,15 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         dailymotionFetchProbed = true;
         const target = proxiedClipTarget(clip.url) || clip.sourceUrl || '';
-        if (!softProbeYtDlpUrl(target)) {
+        if (!softProbeDailymotionUrl(target)) {
           proxyGate.dailymotionBlocked = true;
           report.dailymotionFetchCircuitOpen = true;
           report.dailymotionFetchCircuitOpenAtQuery = q;
-          const widened = openDailymotionFetchCircuit(liveClips, { liveCap, perQueryCap, liveTarget });
+          const widened = openDailymotionFetchCircuit(
+            liveClips,
+            { liveCap, perQueryCap, liveTarget },
+            { housing: housingTopic },
+          );
           liveCap = widened.liveCap;
           perQueryCap = widened.perQueryCap;
           liveTarget = widened.liveTarget;
@@ -3874,11 +3960,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
             const scheduledKeys = new Set(
               batches.flat().map((a) => String(a.query || '').trim().toLowerCase()),
             );
-            const boostCount = resolveArchiveClinicalBoostCount({
-              vimeoCircuitOpen: proxyGate.vimeoBlocked,
-              dailymotionCircuitOpen: true,
-              afterJunk: liveClips.length,
-            });
+            const boostCount = housingTopic
+              ? DUAL_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT
+              : resolveArchiveClinicalBoostCount({
+                vimeoCircuitOpen: proxyGate.vimeoBlocked,
+                dailymotionCircuitOpen: true,
+                afterJunk: liveClips.length,
+              });
             const archiveBoost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
               plan.archiveQueries,
               scheduledKeys,
@@ -4179,15 +4267,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // housing-web158: prefer intro-face evidence over bare apartment Archive so
       // landscape/FEMA pools cannot empty INTRO_FACE after junk rejects.
       if (/Archive/i.test(clip.source || '')) {
-        const namedHousingDoc =
-          /\b(?:dale\s+farm|west\s+sussex|burden\s+of\s+richmond)\b/i.test(blob)
-          || (/\brichmond\b/i.test(blob) && /\bevict\w*\b/i.test(blob))
-          || (
-            /\b(?:san\s+francisco|\bsf\b)\b/i.test(blob)
-            && /\btenants?\b/i.test(blob)
-            && /\bevict\w*\b/i.test(blob)
-          );
-        if (namedHousingDoc) {
+        if (isHousingNamedDocumentaryBlob(blob)) {
           return 14;
         }
         if (housingIntroFaceEvidenceMatches(blob)) return 10;
@@ -4200,15 +4280,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Align inject boost with housingIntroFaceEvidenceMatches (pool gate).
       // Named documentary eviction faces (Dale Farm / SF / West Sussex / Richmond)
       // outrank generic face hits so inject prefers watch-proven openers.
-      const namedHousingDoc =
-        /\b(?:dale\s+farm|west\s+sussex|burden\s+of\s+richmond)\b/i.test(blob)
-        || (/\brichmond\b/i.test(blob) && /\bevict\w*\b/i.test(blob))
-        || (
-          /\b(?:san\s+francisco|\bsf\b)\b/i.test(blob)
-          && /\btenants?\b/i.test(blob)
-          && /\bevict\w*\b/i.test(blob)
-        );
-      if (namedHousingDoc) {
+      if (isHousingNamedDocumentaryBlob(blob)) {
         return 14;
       }
       if (housingIntroFaceEvidenceMatches(blob)) {
@@ -4372,10 +4444,16 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   };
   // Rotate for run-to-run diversity, then consider the whole finite pool. Host tier
   // wins before topical score, so YouTube is selected only after usable alternatives.
-  const picks = rankMotionCandidates(
+  // housing-web168: once Vimeo/DM circuits open, prefer Archive/DM that survive
+  // probe over flaky non-archive directs (probe-fail waste → injected=6<12).
+  const housingPreferProbePass = () => (
+    isHousingTopic(topicBlob)
+    && (proxyGate.vimeoBlocked || proxyGate.dailymotionBlocked)
+  );
+  let picks = rankMotionCandidates(
     pickStockVideos(pool.length, mediaOffset, pool),
     faceScore,
-    { topicBlob },
+    { topicBlob, preferProbePassHosts: housingPreferProbePass() },
   );
   let vi = 0;
   // `proxyGate` is the same object seeded (and possibly already tripped) during the
@@ -4400,13 +4478,20 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     const firstDm = picks.find((c) => isDailymotionMotionCandidate(c) && isProxiedClipUrl(c.url || ''));
     if (firstDm) {
       const target = proxiedClipTarget(firstDm.url) || firstDm.sourceUrl || '';
-      if (target && !softProbeYtDlpUrl(target)) {
+      if (target && !softProbeDailymotionUrl(target)) {
         proxyGate.dailymotionBlocked = true;
         report.videoTopUpFailed = report.videoTopUpFailed || [];
         report.videoTopUpFailed.push({ url: firstDm.url, reason: 'dailymotion-soft-probe-failed-early' });
         report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
       }
     }
+  }
+  if (housingPreferProbePass()) {
+    picks = rankMotionCandidates(picks, faceScore, {
+      topicBlob,
+      preferProbePassHosts: true,
+    });
+    vi = 0;
   }
   const injectClip = async (seg, clip, tag) => {
     const key = motionUrlKey(clip.url);
@@ -4471,7 +4556,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // DM candidate fails, open the circuit so Archive/direct fill instead.
     if (isDailymotionMotionCandidate(clip) && isProxiedClipUrl(clip.url) && !proxyGate.dailymotionBlocked) {
       const target = proxiedClipTarget(clip.url) || clip.sourceUrl || '';
-      const alive = softProbeYtDlpUrl(target);
+      const alive = softProbeDailymotionUrl(target);
       if (!alive) {
         proxyGate.dailymotionBlocked = true;
         report.videoTopUpFailed = report.videoTopUpFailed || [];
@@ -4720,7 +4805,7 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
       return false;
     }
     const target = proxiedClipTarget(downloadUrl) || asset.sourceUrl || asset.url || '';
-    const alive = softProbeYtDlpUrl(target);
+    const alive = softProbeDailymotionUrl(target);
     if (!alive) {
       gate.dailymotionBlocked = true;
       report.dropped.push({ url: asset.url, reason: 'dailymotion-soft-probe-failed' });

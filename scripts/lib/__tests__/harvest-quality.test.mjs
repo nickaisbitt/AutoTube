@@ -1095,6 +1095,9 @@ describe('healthcare web15 raw 4.4 junk rejects (body-lang / NVIDIA / name-pollu
       'mri how it works part 2 the different types',
       'this surgical system can stitch a grape back together',
       'diversified radiology breast imaging screening diagnostic mammography',
+      'philips epiq 5 7 lcd monitor removal by mxr imaging',
+      'omnibotics corin robotic assisted total knee replacement system',
+      'que debe saber sobre la mamografia de diagnostico diagnostic mammogram este video',
     ]) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
     }

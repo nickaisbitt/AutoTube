@@ -3614,6 +3614,160 @@ describe('housingOffTopicBrollReason — web159 reality-TV/trailer/geopolitics/m
   });
 });
 
+describe('housingOffTopicBrollReason — web160 wedding-cry / farm-tenant / geopolitics / committee / macro junk', () => {
+  const ctx = HOUSING_TOPIC;
+
+  it('rejects Gujarat wedding-cash / crying-outside-banks family+cry false positives', () => {
+    const title =
+      'gujarat women denied cash for weddings in family cry outside banks women crying outside banks as they are unable to withdraw cash for the weddings engagements in their families';
+    expect(housingOffTopicBrollReason(title, ctx)).toMatch(/housing off-topic/);
+    expect(isHousingIntroJunkPad(title)).toBe(true);
+    expect(housingIntroFaceEvidenceMatches(title)).toBe(false);
+  });
+
+  it('rejects UAE farm-owner / rude-tenant watch pads (bare tenants FP)', () => {
+    const title =
+      'trashing property ignoring rules uae farm owners worry about rude tenants amid high demand watch';
+    expect(housingOffTopicBrollReason(title, ctx)).toMatch(/housing off-topic/);
+    expect(isHousingIntroJunkPad(title)).toBe(true);
+    expect(housingIntroFaceEvidenceMatches(title)).toBe(false);
+    expect(housingOffTopicBrollReason(
+      'uae farm owners rude tenants watch trailer khaleej times',
+      ctx,
+    )).toMatch(/housing off-topic/);
+  });
+
+  it('rejects Namibia genocide / chinese-mafia illegal-settlements documentary', () => {
+    const title =
+      'namibia africa s new far west genocide illegal settlements chinese mafia documentary';
+    expect(housingOffTopicBrollReason(title, ctx)).toMatch(/housing off-topic/);
+    expect(isHousingIntroJunkPad(title)).toBe(true);
+    expect(housingIntroFaceEvidenceMatches(title)).toBe(false);
+  });
+
+  it('rejects advisory-board / special-meeting / committee housing pads', () => {
+    const title =
+      'clearwater neighborhood and affordable housing advisory board special meeting march 17 2026';
+    expect(housingOffTopicBrollReason(title, ctx)).toMatch(/housing off-topic/);
+    expect(isHousingIntroJunkPad(title)).toBe(true);
+    expect(housingOffTopicBrollReason(
+      'housing development committee meeting public safety and housing',
+      ctx,
+    )).toMatch(/housing off-topic/);
+  });
+
+  it('rejects China fake middle class jobs/debt/housing-pressure talking-heads', () => {
+    const title =
+      'china s fake middle class wakes up as jobs debt and housing pressure hit';
+    expect(housingOffTopicBrollReason(title, ctx)).toMatch(/housing off-topic/);
+    expect(isHousingIntroJunkPad(title)).toBe(true);
+    expect(housingIntroFaceEvidenceMatches(title)).toBe(false);
+  });
+
+  it('keeps real tenant / grandmother / family eviction faces (floors ≥7 unchanged)', () => {
+    expect(housingOffTopicBrollReason(
+      'west sussex man faces an eviction order',
+      ctx,
+    )).toBe('');
+    expect(housingIntroFaceEvidenceMatches(
+      'west sussex man faces an eviction order',
+    )).toBe(true);
+    expect(isHousingIntroJunkPad(
+      'west sussex man faces an eviction order',
+    )).toBe(false);
+
+    expect(housingOffTopicBrollReason(
+      '670 low income tenants being evicted in san francisco',
+      ctx,
+    )).toBe('');
+    expect(housingIntroFaceEvidenceMatches(
+      '670 low income tenants being evicted in san francisco',
+    )).toBe(true);
+
+    expect(housingOffTopicBrollReason(
+      'grandmother faces eviction apartment',
+      ctx,
+    )).toBe('');
+    expect(housingIntroFaceEvidenceMatches(
+      'grandmother faces eviction apartment',
+    )).toBe(true);
+
+    // Dale Farm traveller eviction is real housing — do not reject bare "farm".
+    expect(housingOffTopicBrollReason(
+      'violent eviction looms traveller families the dale farm community faces what would be the largest eviction',
+      ctx,
+    )).toBe('');
+    expect(housingIntroFaceEvidenceMatches(
+      'violent eviction looms traveller families the dale farm community faces what would be the largest eviction',
+    )).toBe(true);
+  });
+
+  it('FAILS timeline when Gujarat cry pad leads at 0 and SF tenants sit at 0.65', () => {
+    const cry = {
+      id: 'cry1', type: 'video', url: 'https://example.com/cry.mp4',
+      title: 'gujarat women denied cash for weddings in family cry outside banks women crying outside banks',
+      alt: 'gujarat women denied cash for weddings crying outside banks',
+    };
+    const tenants = {
+      id: 'sf1', type: 'video', url: 'https://example.com/sf.mp4',
+      title: '670 low income tenants being evicted in san francisco',
+      alt: '670 low income tenants being evicted in san francisco',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [cry, tenants],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'cry1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 2.0, assetId: 'sf1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('sf1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+
+  it('checkIntroFacePool fails when only web160 junk is in the pool', () => {
+    const junk = [
+      {
+        id: 'j1', type: 'video', url: 'https://example.com/a.mp4',
+        title: 'gujarat women denied cash for weddings crying outside banks',
+        alt: 'gujarat women denied cash for weddings crying outside banks',
+      },
+      {
+        id: 'j2', type: 'video', url: 'https://example.com/b.mp4',
+        title: 'uae farm owners worry about rude tenants amid high demand',
+        alt: 'uae farm owners worry about rude tenants amid high demand',
+      },
+      {
+        id: 'j3', type: 'video', url: 'https://example.com/c.mp4',
+        title: 'namibia genocide illegal settlements chinese mafia documentary',
+        alt: 'namibia genocide illegal settlements chinese mafia documentary',
+      },
+      {
+        id: 'j4', type: 'video', url: 'https://example.com/d.mp4',
+        title: 'clearwater affordable housing advisory board special meeting',
+        alt: 'clearwater affordable housing advisory board special meeting',
+      },
+      {
+        id: 'j5', type: 'video', url: 'https://example.com/e.mp4',
+        title: 'china s fake middle class jobs debt and housing pressure hit',
+        alt: 'china s fake middle class jobs debt and housing pressure hit',
+      },
+    ];
+    const result = checkIntroFacePool({
+      topic: HOUSING_TOPIC,
+      media: junk,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+    });
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL/);
+  });
+});
+
 describe('healthcare-web201 earliest-cut intro + pad junk', () => {
   it('rejects Gaza hospital siege / thought-process / cuffless BP / Aaron Judge pads', () => {
     for (const title of [

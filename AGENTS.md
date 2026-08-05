@@ -36,6 +36,7 @@ ln -sf deploy/server-render server-render
 - **node-canvas** — needs Cairo/Pango dev libraries on fresh Ubuntu hosts (`libcairo2-dev`, `libpango1.0-dev`, `libjpeg-dev`, `libgif-dev`, `librsvg2-dev`, `pkg-config`). See `nixpacks.toml` for the full list used in production builds.
 - **Playwright Chromium** — run `npx playwright install chromium` once per VM (not in the update script).
 - **Video improvement loop (optional)** — `npm run loop:preflight` probes `scenedetect` and `faster-whisper` for scene QA and word-level captions; both are optional and preflight still passes without them. On Debian/Ubuntu VMs: `pip install --break-system-packages scenedetect faster-whisper`. Railway `build:railway` installs them automatically.
+- **yt-dlp Dailymotion** — needs `curl_cffi==0.13.0` (not 0.16 — yt-dlp marks newer builds unsupported). Without it, DM soft-probe fails and the DM circuit falls back to Archive. Pin is in `build:railway` / `nixpacks.toml`.
 
 ### Commands (see `package.json`)
 

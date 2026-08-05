@@ -419,6 +419,31 @@ export function isVimeoMotionCandidate(candidate = {}) {
   });
 }
 
+export function isDailymotionMotionCandidate(candidate = {}) {
+  return motionCandidateUrls(candidate).some((url) => {
+    const host = motionUrlHostname(url);
+    return host === 'dailymotion.com'
+      || host.endsWith('.dailymotion.com')
+      || host === 'dai.ly'
+      || host.endsWith('.dai.ly')
+      || host === 'dmcdn.net'
+      || host.endsWith('.dmcdn.net');
+  });
+}
+
+/**
+ * Canonical Dailymotion video id from page / CDN / proxy URLs.
+ * housing-web152: three cdndirector.dailymotion.com/.../x8fmvll.m3u8?sec=… tokens
+ * looked unique while being the same clip — assemble then A/B-looped two stills.
+ */
+export function dailymotionVideoIdFromUrl(url = '') {
+  const raw = String(url || '');
+  const m = raw.match(
+    /(?:dailymotion\.com\/(?:embed\/)?video\/|dai\.ly\/|cdndirector\.dailymotion\.com\/cdn\/manifest\/video\/|dmcdn\.net\/[^?\s]*\/)([a-z0-9]+)/i,
+  );
+  return m ? String(m[1]).toLowerCase() : '';
+}
+
 /** True when yt-dlp has a cookie jar / browser cookies for bot-gated hosts. */
 export function hasYtDlpCookies() {
   return Boolean(
@@ -434,7 +459,7 @@ export function hasYtDlpCookies() {
  * volume comes from Archive/direct/Vimeo/DM instead of doomed YouTube/TikTok.
  *
  * @param {object} candidate
- * @param {{ tiktokBlocked?: boolean, vimeoBlocked?: boolean }} [gate]
+ * @param {{ tiktokBlocked?: boolean, vimeoBlocked?: boolean, dailymotionBlocked?: boolean }} [gate]
  * @returns {string|null} reason when the candidate should not be injected
  */
 export function unreliableWebProxyInjectReason(candidate = {}, gate = {}) {
@@ -457,6 +482,13 @@ export function unreliableWebProxyInjectReason(candidate = {}, gate = {}) {
   // a blocked TikTok host instead of trusting every remaining proxy clip blind.
   if (isVimeoMotionCandidate(candidate) && gate.vimeoBlocked) {
     return 'vimeo-circuit-open';
+  }
+  // housing-web152: ddg=82 / injected=18 DM proxies after d15a0ad junk-match fix, but
+  // yt-dlp lacked curl_cffi impersonation → every DM download 401'd and ffmpeg
+  // A/B-looped two stills (raw 5.2, upload NO). Same circuit as Vimeo: once soft-probe
+  // fails, stop trusting further DM proxies and let Archive/direct fill.
+  if (isDailymotionMotionCandidate(candidate) && gate.dailymotionBlocked) {
+    return 'dailymotion-circuit-open';
   }
   return null;
 }
@@ -596,8 +628,10 @@ export function shouldFailOpenWebVisionSkip({ isWebClip = false, hasStrongEviden
 /** Keep proxy clips distinct by their decoded target, not the shared route path. */
 function motionUrlKey(url = '') {
   const raw = String(url || '');
+  const target = isProxiedClipUrl(raw) ? (proxiedClipTarget(raw) || '') : raw;
+  const dmId = dailymotionVideoIdFromUrl(target || raw);
+  if (dmId) return `dailymotion:${dmId}`;
   if (isProxiedClipUrl(raw)) {
-    const target = proxiedClipTarget(raw);
     if (target) return `download-clip:${target}`;
     // Fall back to the full wrapper; never collapse every proxy to one key.
     return raw;
@@ -2858,6 +2892,8 @@ const MOTION_FETCH_BUDGET_MS_KEYLESS = 360000;
  */
 export const VIMEO_CIRCUIT_PER_QUERY_CAP_BOOST = 4;
 export const VIMEO_CIRCUIT_LIVE_CAP_BOOST = 30;
+export const DAILYMOTION_CIRCUIT_PER_QUERY_CAP_BOOST = 4;
+export const DAILYMOTION_CIRCUIT_LIVE_CAP_BOOST = 30;
 
 /**
  * Fires exactly once, the moment the fetch-time Vimeo soft-probe fails: purges any
@@ -2883,6 +2919,32 @@ export function openVimeoFetchCircuit(liveClips = [], budgets = {}) {
   const liveCap = (Number(budgets.liveCap) || 0) + VIMEO_CIRCUIT_LIVE_CAP_BOOST;
   const perQueryCap = (Number(budgets.perQueryCap) || 0) + VIMEO_CIRCUIT_PER_QUERY_CAP_BOOST;
   const liveTarget = Math.min(liveCap, (Number(budgets.liveTarget) || 0) + VIMEO_CIRCUIT_LIVE_CAP_BOOST);
+  return { liveCap, perQueryCap, liveTarget, purged: before - liveClips.length };
+}
+
+/**
+ * Same shape as openVimeoFetchCircuit for Dailymotion. housing-web152: DM preferred
+ * (host-rank 2) over strong Archive (rank 5), filled all inject slots, then every
+ * assemble download failed without curl_cffi impersonation — two-still slideshow.
+ * Purge doomed DM proxies and widen budget for Archive/direct.
+ *
+ * @param {object[]} liveClips
+ * @param {{ liveCap: number, perQueryCap: number, liveTarget: number }} budgets
+ * @returns {{ liveCap: number, perQueryCap: number, liveTarget: number, purged: number }}
+ */
+export function openDailymotionFetchCircuit(liveClips = [], budgets = {}) {
+  const before = liveClips.length;
+  const reliable = liveClips.filter(
+    (c) => !(isDailymotionMotionCandidate(c) && isProxiedClipUrl(c?.url || '')),
+  );
+  liveClips.length = 0;
+  liveClips.push(...reliable);
+  const liveCap = (Number(budgets.liveCap) || 0) + DAILYMOTION_CIRCUIT_LIVE_CAP_BOOST;
+  const perQueryCap = (Number(budgets.perQueryCap) || 0) + DAILYMOTION_CIRCUIT_PER_QUERY_CAP_BOOST;
+  const liveTarget = Math.min(
+    liveCap,
+    (Number(budgets.liveTarget) || 0) + DAILYMOTION_CIRCUIT_LIVE_CAP_BOOST,
+  );
   return { liveCap, perQueryCap, liveTarget, purged: before - liveClips.length };
 }
 
@@ -3237,12 +3299,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   // Shared across fetch (this loop) and inject (topUpVideoBroll's injectClip below) so
   // a fetch-time trip is never silently reset — Vimeo must never regain unprobed trust
   // once the circuit is open, whichever phase opened it.
-  /** @type {{ tiktokBlocked: boolean, vimeoBlocked: boolean }} */
-  const proxyGate = { tiktokBlocked: false, vimeoBlocked: false };
-  // Only the FIRST live Vimeo hit is soft-probed at fetch time — bounded to one
-  // spawnSync call regardless of pool size, same "probe once, then gate" cost as the
-  // existing inject-time circuit breaker.
+  /** @type {{ tiktokBlocked: boolean, vimeoBlocked: boolean, dailymotionBlocked: boolean }} */
+  const proxyGate = { tiktokBlocked: false, vimeoBlocked: false, dailymotionBlocked: false };
+  // Only the FIRST live Vimeo/DM hit is soft-probed at fetch time — bounded to one
+  // spawnSync call per host regardless of pool size, same "probe once, then gate"
+  // cost as the existing inject-time circuit breaker.
   let vimeoFetchProbed = false;
+  let dailymotionFetchProbed = false;
   const fetchCandidates = async ({ query: q, sweep: suffix, page }) => {
     // Skip archive.org for cyber topics when stock API keys exist, and don't re-ask
     // archive for page 2 — the proxy only ever returns one page of items per subject.
@@ -3397,6 +3460,51 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
               }
               batches.splice(insertAt, 0, ...chunks);
               report.vimeoCircuitArchiveBoostQueries = archiveBoost.length;
+            }
+          }
+          continue;
+        }
+      }
+      // housing-web152: DM preferred over Archive, soft-pass trusted 18 proxies with no
+      // probe, assemble failed without curl_cffi → two-still slideshow. Soft-probe the
+      // first live DM hit at collection time so a dead DM host opens the circuit before
+      // the rest of the fetch budget is spent on it.
+      if (
+        keylessOmitsStockMotionPool(topicBlob, hasStockKeysEarly)
+        && !proxyGate.dailymotionBlocked
+        && !dailymotionFetchProbed
+        && isDailymotionMotionCandidate(clip)
+        && isProxiedClipUrl(clip.url)
+      ) {
+        dailymotionFetchProbed = true;
+        const target = proxiedClipTarget(clip.url) || clip.sourceUrl || '';
+        if (!softProbeYtDlpUrl(target)) {
+          proxyGate.dailymotionBlocked = true;
+          report.dailymotionFetchCircuitOpen = true;
+          report.dailymotionFetchCircuitOpenAtQuery = q;
+          const widened = openDailymotionFetchCircuit(liveClips, { liveCap, perQueryCap, liveTarget });
+          liveCap = widened.liveCap;
+          perQueryCap = widened.perQueryCap;
+          liveTarget = widened.liveTarget;
+          report.dailymotionFetchCircuitPurged = widened.purged;
+          report.motionDroppedUnreliableProxy = (report.motionDroppedUnreliableProxy || 0) + 1;
+          report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+          if (healthcareTopicEarly) {
+            const scheduledKeys = new Set(
+              batches.flat().map((a) => String(a.query || '').trim().toLowerCase()),
+            );
+            const archiveBoost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
+              plan.archiveQueries,
+              scheduledKeys,
+            );
+            if (archiveBoost.length) {
+              const insertAt = batches.indexOf(plannedBatch) + 1;
+              const chunks = [];
+              for (let i = 0; i < archiveBoost.length; i += fetchBatchSize) {
+                chunks.push(archiveBoost.slice(i, i + fetchBatchSize));
+              }
+              batches.splice(insertAt, 0, ...chunks);
+              report.dailymotionCircuitArchiveBoostQueries = archiveBoost.length;
             }
           }
           continue;
@@ -3828,6 +3936,18 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       }
     }
   }
+  if (!proxyGate.dailymotionBlocked) {
+    const firstDm = picks.find((c) => isDailymotionMotionCandidate(c) && isProxiedClipUrl(c.url || ''));
+    if (firstDm) {
+      const target = proxiedClipTarget(firstDm.url) || firstDm.sourceUrl || '';
+      if (target && !softProbeYtDlpUrl(target)) {
+        proxyGate.dailymotionBlocked = true;
+        report.videoTopUpFailed = report.videoTopUpFailed || [];
+        report.videoTopUpFailed.push({ url: firstDm.url, reason: 'dailymotion-soft-probe-failed-early' });
+        report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
+      }
+    }
+  }
   const injectClip = async (seg, clip, tag) => {
     const key = motionUrlKey(clip.url);
     if (!key || used.has(key)) return false;
@@ -3881,6 +4001,21 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         proxyGate.vimeoBlocked = true;
         report.videoTopUpFailed = report.videoTopUpFailed || [];
         report.videoTopUpFailed.push({ url: clip.url, reason: 'vimeo-soft-probe-failed' });
+        report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
+        return false;
+      }
+    }
+    // Soft-probe Dailymotion the same way: housing-web152 injected 18/18 DM proxy
+    // clips trusted with no probe; without curl_cffi impersonation every assemble
+    // download failed and every slot reused two stills (raw 5.2). Once the first
+    // DM candidate fails, open the circuit so Archive/direct fill instead.
+    if (isDailymotionMotionCandidate(clip) && isProxiedClipUrl(clip.url) && !proxyGate.dailymotionBlocked) {
+      const target = proxiedClipTarget(clip.url) || clip.sourceUrl || '';
+      const alive = softProbeYtDlpUrl(target);
+      if (!alive) {
+        proxyGate.dailymotionBlocked = true;
+        report.videoTopUpFailed = report.videoTopUpFailed || [];
+        report.videoTopUpFailed.push({ url: clip.url, reason: 'dailymotion-soft-probe-failed' });
         report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
         return false;
       }
@@ -4116,6 +4251,23 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
     }
   }
 
+  // housing-web152: keep-path trusted DM CDN manifests with "proxy clip (no probe)"
+  // while assemble failed without curl_cffi — same keep/inject consistency gap as
+  // Vimeo. Soft-probe the first DM proxy so a dead host opens the circuit.
+  if (isDailymotionMotionCandidate(proxyCandidate) && proxied) {
+    if (gate.dailymotionBlocked) {
+      report.dropped.push({ url: asset.url, reason: 'dailymotion-circuit-open' });
+      return false;
+    }
+    const target = proxiedClipTarget(downloadUrl) || asset.sourceUrl || asset.url || '';
+    const alive = softProbeYtDlpUrl(target);
+    if (!alive) {
+      gate.dailymotionBlocked = true;
+      report.dropped.push({ url: asset.url, reason: 'dailymotion-soft-probe-failed' });
+      return false;
+    }
+  }
+
   if (proxied) {
     sanitized.push({ ...asset, type: 'video', url: downloadUrl });
     report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}proxy clip (no probe)` });
@@ -4178,8 +4330,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const sanitized = [];
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
   const qualityCache = new Map();
-  /** @type {{ vimeoBlocked: boolean }} */
-  const keepGate = { vimeoBlocked: false };
+  /** @type {{ vimeoBlocked: boolean, dailymotionBlocked: boolean }} */
+  const keepGate = { vimeoBlocked: false, dailymotionBlocked: false };
 
   for (const asset of project.media) {
     // Videos: junk-check clip URL only (thumbs are often placeholders).

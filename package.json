@@ -11,7 +11,7 @@
     "dod:watch": "node scripts/run-with-status.mjs scripts/watch-video.mjs",
     "dev": "vite",
     "build": "vite build",
-    "build:railway": "NODE_OPTIONS=--max-old-space-size=3072 vite build && rm -rf node_modules && npm ci --omit=dev && node deploy/bootstrap-server-render.mjs && (command -v pip3 >/dev/null && pip3 install --break-system-packages 'edge-tts==7.0.2' scenedetect faster-whisper || true) && node deploy/railway-shrink-runtime.mjs",
+    "build:railway": "NODE_OPTIONS=--max-old-space-size=3072 vite build && rm -rf node_modules && npm ci --omit=dev && node deploy/bootstrap-server-render.mjs && (command -v pip3 >/dev/null && pip3 install --break-system-packages 'edge-tts==7.0.2' 'curl_cffi==0.13.0' scenedetect faster-whisper || true) && node deploy/railway-shrink-runtime.mjs",
     "preview": "vite preview",
     "test": "playwright test",
     "test:app": "PLAYWRIGHT_TEST_DIR=./tests playwright test app.spec.ts",

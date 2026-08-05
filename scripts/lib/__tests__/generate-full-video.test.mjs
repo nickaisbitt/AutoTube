@@ -19,6 +19,8 @@ import {
   isYouTubeMotionCandidate,
   isTikTokMotionCandidate,
   isVimeoMotionCandidate,
+  isDailymotionMotionCandidate,
+  dailymotionVideoIdFromUrl,
   isVisionBudgetSoft,
   hasYtDlpCookies,
   unreliableWebProxyInjectReason,
@@ -28,6 +30,7 @@ import {
   motionCandidateHostRank,
   motionQueryPlan,
   openVimeoFetchCircuit,
+  openDailymotionFetchCircuit,
   planMotionFetchRounds,
   providerEvidenceText,
   rankMotionCandidates,
@@ -737,6 +740,58 @@ describe('non-YouTube motion planning and ranking', () => {
     expect(unreliableWebProxyInjectReason(vimeo, { vimeoBlocked: true })).toBe('vimeo-circuit-open');
     expect(unreliableWebProxyInjectReason({ url: 'https://archive.org/download/a/a.mp4' }, { vimeoBlocked: true }))
       .toBe(null);
+  });
+
+  it('honors a Dailymotion circuit breaker once the soft-probe fails', () => {
+    // housing-web152: ddg=82 / injected=18 DM after d15a0ad junk-match fix, but
+    // yt-dlp lacked curl_cffi impersonation → every assemble download failed and
+    // ffmpeg A/B-looped two stills (raw 5.2). Same circuit shape as Vimeo.
+    const dm = {
+      url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://www.dailymotion.com/video/x8fmvll')}`,
+      sourceUrl: 'https://www.dailymotion.com/video/x8fmvll',
+    };
+    expect(isDailymotionMotionCandidate(dm)).toBe(true);
+    expect(unreliableWebProxyInjectReason(dm)).toBe(null);
+    expect(unreliableWebProxyInjectReason(dm, { dailymotionBlocked: false })).toBe(null);
+    expect(unreliableWebProxyInjectReason(dm, { dailymotionBlocked: true })).toBe('dailymotion-circuit-open');
+    expect(unreliableWebProxyInjectReason({ url: 'https://archive.org/download/a/a.mp4' }, { dailymotionBlocked: true }))
+      .toBe(null);
+  });
+
+  it('dedupes Dailymotion page + CDN manifest URLs to the same video id', () => {
+    expect(dailymotionVideoIdFromUrl('https://www.dailymotion.com/video/x8fmvll')).toBe('x8fmvll');
+    expect(dailymotionVideoIdFromUrl(
+      'https://cdndirector.dailymotion.com/cdn/manifest/video/x8fmvll.m3u8?sec=abc',
+    )).toBe('x8fmvll');
+    expect(dailymotionVideoIdFromUrl(
+      `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://www.dailymotion.com/video/x8fmvll')}`,
+    )).toBe('');
+    // proxied targets are resolved via motionUrlKey; id helper is for raw URLs
+    expect(dailymotionVideoIdFromUrl('https://dai.ly/x8fmvll')).toBe('x8fmvll');
+  });
+
+  it('opens the Dailymotion circuit and biases remaining budget to Archive/direct at fetch time', () => {
+    const archive = { url: 'https://archive.org/download/a/a.mp4', source: 'Archive.org live' };
+    const vimeo = {
+      url: 'http://localhost:5173/api/download-clip?url=' + encodeURIComponent('https://vimeo.com/1'),
+      sourceUrl: 'https://vimeo.com/1',
+    };
+    const dmDead = {
+      url: 'http://localhost:5173/api/download-clip?url=' + encodeURIComponent('https://www.dailymotion.com/video/x1'),
+      sourceUrl: 'https://www.dailymotion.com/video/x1',
+    };
+    const dmAlsoDead = {
+      url: 'http://localhost:5173/api/download-clip?url=' + encodeURIComponent('https://www.dailymotion.com/video/x2'),
+      sourceUrl: 'https://www.dailymotion.com/video/x2',
+    };
+    const liveClips = [archive, dmDead, vimeo, dmAlsoDead];
+    const widened = openDailymotionFetchCircuit(liveClips, { liveCap: 140, perQueryCap: 10, liveTarget: 40 });
+    expect(liveClips).toEqual([archive, vimeo]);
+    expect(widened.purged).toBe(2);
+    expect(widened.liveCap).toBeGreaterThan(140);
+    expect(widened.perQueryCap).toBeGreaterThan(10);
+    expect(widened.liveTarget).toBeGreaterThan(40);
+    expect(widened.liveTarget).toBeLessThanOrEqual(widened.liveCap);
   });
 
   it('opens the Vimeo circuit and biases remaining budget to Archive/Dailymotion/direct at fetch time', () => {

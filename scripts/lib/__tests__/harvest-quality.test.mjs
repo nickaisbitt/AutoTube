@@ -2437,6 +2437,23 @@ describe('housingOffTopicBrollReason — FKA Twigs music pad reject', () => {
   });
 });
 
+describe('housingOffTopicBrollReason — web152 Gwyneth ski-crash celebrity pad', () => {
+  const ctx = HOUSING_TOPIC;
+  it('rejects Gwyneth Paltrow ski-crash court celebrity stills', () => {
+    expect(housingOffTopicBrollReason(
+      'skynews gwyneth paltrow ski crash court case us star slammed',
+      ctx,
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason('gwyneth paltrow ski crash court', ctx)).toMatch(/housing off-topic/);
+  });
+  it('keeps topical eviction stills', () => {
+    expect(housingOffTopicBrollReason(
+      'toledo woman receives eviction notice apartment rent',
+      ctx,
+    )).toBe('');
+  });
+});
+
 describe('healthcareOffTopicBrollReason — web65/66 new junk patterns', () => {
   const ctx = 'AI beats your doctor healthcare hospital';
   it('rejects personal injury clinic MRI ads', () => {

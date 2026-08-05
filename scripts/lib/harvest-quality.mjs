@@ -1482,7 +1482,8 @@ export function housingIntroFaceEvidenceMatches(evidence = '') {
 
 /**
  * Rank housing intro repair candidates (housing-web159):
- * documentary / news tenant·grandmother·family eviction faces (3) >
+ * named documentary eviction faces — Dale Farm / SF / West Sussex / Richmond (4) >
+ * other documentary / news tenant·grandmother·family eviction faces (3) >
  * other person+eviction collocations (2) > weak lived-in (1).
  * Reality-TV / trailer / geopolitics / mental-health junk never ranks (0).
  *
@@ -1494,9 +1495,21 @@ export function housingIntroRepairRank(asset) {
     .filter(Boolean).join(' ');
   if (isHousingIntroJunkPad(evidence) || HOUSING_OFF_TOPIC_BROLL_RE.test(evidence)) return 0;
   if (!housingIntroFaceEvidenceMatches(evidence)) return 0;
+  // Named documentary openers watchers reward — always outrank generic lived-in.
+  const namedDoc =
+    /\b(?:dale\s+farm|west\s+sussex|burden\s+of\s+richmond)\b/i.test(evidence)
+    || (/\brichmond\b/i.test(evidence) && /\bevict\w*\b/i.test(evidence))
+    || (
+      /\b(?:san\s+francisco|\bsf\b)\b/i.test(evidence)
+      && /\btenants?\b/i.test(evidence)
+      && /\bevict\w*\b/i.test(evidence)
+    );
+  if (namedDoc && /\bevict\w*\b/i.test(evidence)) {
+    return 4;
+  }
   // Prefer real tenant-eviction documentary / news faces over generic lived-in.
   if (
-    /\b(?:documentary|news\s+footage|tenants?\s+(?:being\s+)?evict\w*|grandmother\s+(?:faces?\s+)?evict\w*|famil(?:y|ies)\s+(?:faces?\s+|being\s+)?evict\w*|worried\s+tenant|man\s+faces?\s+(?:an?\s+)?eviction\s+order|west\s+sussex\s+man\s+faces)\b/i.test(evidence)
+    /\b(?:documentary|news\s+footage|tenants?\s+(?:being\s+)?evict\w*|grandmother\s+(?:faces?\s+)?evict\w*|famil(?:y|ies)\s+(?:faces?\s+|being\s+)?evict\w*|worried\s+tenant|man\s+faces?\s+(?:an?\s+)?eviction\s+order)\b/i.test(evidence)
   ) {
     return 3;
   }
@@ -1778,9 +1791,10 @@ export function healthcareIntroFaceEvidenceMatches(evidence = '') {
 /**
  * Rank healthcare intro repair candidates (healthcare-web200/web202):
  * clinician/patient face consultation (4) > clinician/patient face (3) >
- * live OR/surgical-robot (2) ≈ MRI/radiologist screen (2) > other qualifying
+ * named live OR — Ulster / Shropshire theatres (3) >
+ * other live OR/surgical-robot (2) ≈ MRI/radiologist screen (2) > other qualifying
  * motion (1). Beauty/clinic/product-robot junk never ranks (0). Repair always
- * promotes the highest rank to startSec=0.
+ * promotes the highest rank to startSec=0 with a 1.5–2.5s hold.
  *
  * @param {object} asset
  * @returns {number}
@@ -1796,9 +1810,14 @@ export function healthcareIntroRepairRank(asset) {
     return 4;
   }
   if (healthcareClinicianOrPatientFace(evidence)) return 3;
+  // Named live OR / surgical-robot documentaries (Ulster / Shropshire) outrank
+  // generic training-OR so repair always lands rank≥2 at startSec=0.
+  const namedLiveOr =
+    /\b(?:ulster\s+hospital|shropshire\s+hospital)\b/i.test(evidence)
+    && /\b(?:surgical\s*robot|surgery\s+robot|da\s*vinci|operating|theatres?)\b/i.test(evidence);
   // healthcare-web203: demote World Laparoscopy Hospital / "journey of
   // innovation" training promos below live OR / da Vinci (Ulster "demonstrated
-  // in" live theatres still ranks 2 via surgical robot + OR motion).
+  // in" live theatres still ranks via surgical robot + OR motion).
   const weakRobotDemo =
     /\b(?:journey\s+of\s+innovation|robotic\s+surgery\s+training|\blaparoscopyhospital\b|world\s+laparoscopy)\b/i.test(
       evidence,
@@ -1807,7 +1826,9 @@ export function healthcareIntroRepairRank(asset) {
     /\b(?:surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|surgery\s+robot|da\s*vinci|operating\s+room|or\s+(?:suite|table|lights?)|intraoperative)\b/i.test(evidence)
     && healthcareStrongClinicalMotion(evidence)
   ) {
-    return weakRobotDemo ? 1 : 2;
+    if (weakRobotDemo) return 1;
+    if (namedLiveOr) return 3;
+    return 2;
   }
   // MRI / radiologist screen — same floor as live OR/robot so soft-pass
   // best-rank < 2 fails do not discard radiologist-workstation openers.
@@ -2149,17 +2170,44 @@ export function repairEditTimelineIntroFace(project) {
   );
 
   if (!needsPromotion) {
+    // Even when the earliest cut already clears the gate, stretch a sub-1.5s
+    // opener to INTRO_FACE_HOLD_SEC so hooks aren't jarring 0.65s slideshows
+    // (housing-web164 West Sussex @0 with endSec=0.65 → raw 6.2).
+    const INTRO_FACE_HOLD_SEC = 2.0;
+    if (
+      before.pass
+      && earliestIdx >= 0
+      && earliestPasses
+      && earliestStartOk
+      && (Number(timeline[earliestIdx].endSec) || 0) < 1.5
+    ) {
+      const holdEnd = INTRO_FACE_HOLD_SEC;
+      timeline[earliestIdx] = {
+        ...timeline[earliestIdx],
+        startSec: 0,
+        endSec: holdEnd,
+        reason: timeline[earliestIdx].reason || 'intro-face-hold',
+      };
+      const segId = timeline[earliestIdx].segmentId;
+      project.editTimeline = timeline.filter((entry, idx) => {
+        if (idx === earliestIdx) return true;
+        if (segId && entry.segmentId && entry.segmentId !== segId) return true;
+        return (entry.startSec ?? 0) >= holdEnd - 0.05;
+      });
+      return { repaired: true, pass: true };
+    }
     return { repaired: false, pass: before.pass, reason: before.reason };
   }
   if (!replacement?.id) return { repaired: false, ...before };
 
-  const endSec = earliestIdx >= 0
-    ? Math.max(Number(timeline[earliestIdx].endSec) || 1.25, 1.0)
-    : 1.25;
+  // Hold the repaired opener 1.5–2.5s so the hook isn't a 0.65s slideshow
+  // (housing-web164 / healthcare-web204/206: face/OR at 0 cut away in <1s).
+  const INTRO_FACE_HOLD_SEC = 2.0;
+  const holdEnd = INTRO_FACE_HOLD_SEC;
   const patched = {
     segmentId: firstSegId || (earliestIdx >= 0 ? timeline[earliestIdx].segmentId : undefined),
     startSec: 0,
-    endSec,
+    endSec: holdEnd,
     assetId: replacement.id,
     reason: 'intro-face-repair',
   };
@@ -2168,7 +2216,16 @@ export function repairEditTimelineIntroFace(project) {
   } else {
     timeline.unshift(patched);
   }
-  project.editTimeline = timeline;
+  // Drop any other first-segment cuts that overlap the held opener window so
+  // assembly does not splice a 0.65s duplicate under the face hold.
+  const segId = patched.segmentId;
+  const cleaned = timeline.filter((entry, idx) => {
+    if (earliestIdx >= 0 ? idx === earliestIdx : idx === 0) return true;
+    if (segId && entry.segmentId && entry.segmentId !== segId) return true;
+    const start = entry.startSec ?? 0;
+    return start >= holdEnd - 0.05;
+  });
+  project.editTimeline = cleaned;
   const after = checkEditTimelineIntroFace(project);
   return { repaired: after.pass, ...after };
 }
@@ -2337,6 +2394,10 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     if (healthcareSoftFail) {
       return { pass: false, reason: healthcareSoftFail };
     }
+    // Don't soft-pass thin inject pools — force faceSeek re-harvest (web204–206
+    // plateaued at raw 6.0 on thin OR/face yield after junk rejects).
+    const thinVariety = thinInjectVarietyFailReason(mediaReport, uniqueVideos, 'healthcare');
+    if (thinVariety) return { pass: false, reason: thinVariety };
     const minHealthcareVideos = hasStockKeys
       ? Math.max(12, segN * 2)
       : HEALTHCARE_KEYLESS_SOFT_PASS_MIN_VIDEOS;
@@ -2373,6 +2434,10 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     if (housingSoftFail) {
       return { pass: false, reason: housingSoftFail };
     }
+    // Don't soft-pass thin inject pools — force faceSeek re-harvest instead of
+    // shipping a 4–6 clip slideshow that plateaus at raw 5–6 (web161–164).
+    const thinVariety = thinInjectVarietyFailReason(mediaReport, uniqueVideos, 'housing');
+    if (thinVariety) return { pass: false, reason: thinVariety };
     // Keyless: intro-face + generic-junk + VHS/map rejects already ran.
     // web57–58 starve at 4–5 unique videos after relevance even with bing=50+.
     // Floor 4 unblocks watches; floor 3 (web36) is banned — that shipped VHS junk.
@@ -2481,6 +2546,43 @@ const HEALTHCARE_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
 const HEALTHCARE_KEYLESS_SOFT_PASS_MIN_VIDEOS = 4;
 const HEALTHCARE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
 const HEALTHCARE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
+
+/**
+ * Block soft-pass when inject yield is thin (1–11) AND variety is thin.
+ * Prefer faceSeek re-harvest over shipping a 4–6 clip slideshow that plateaus
+ * below raw ≥7 (housing-web161–164 / healthcare-web204–206).
+ * Only arms when mediaReport.videoTopUp is a non-empty array (real inject ran
+ * but under-filled). Empty/`undefined` top-up leaves legacy soft-pass floors alone.
+ *
+ * @param {object} mediaReport
+ * @param {object[]} uniqueVideos
+ * @param {string} topicLabel
+ * @returns {string|null}
+ */
+export function thinInjectVarietyFailReason(mediaReport, uniqueVideos = [], topicLabel = '') {
+  if (!Array.isArray(mediaReport?.videoTopUp)) return null;
+  const injected = mediaReport.videoTopUp.length;
+  // injected===0 → inject accounting absent / empty sentinel in unit fixtures.
+  if (injected === 0 || injected >= 12) return null;
+  const hosts = new Set();
+  for (const asset of uniqueVideos) {
+    let host = '';
+    try {
+      const raw = canonicalMediaKey(asset?.url || '') || asset?.url || '';
+      host = new URL(raw, 'http://local').hostname.replace(/^www\./, '');
+    } catch {
+      host = String(asset?.source || asset?.id || 'unknown').slice(0, 48);
+    }
+    if (host && host !== 'local') hosts.add(host);
+  }
+  const videoN = uniqueVideos.length;
+  const thin = videoN < 8 || hosts.size < 3;
+  if (!thin) return null;
+  return (
+    `INTRO_FACE_FAIL: soft-pass blocked — injected=${injected}<12 with thin variety`
+    + ` (${videoN}v/${hosts.size}hosts ${topicLabel}); re-harvest face-first`
+  );
+}
 
 /**
  * Housing junk-ratio ceilings, ported from airline-web8's soft-pass path.

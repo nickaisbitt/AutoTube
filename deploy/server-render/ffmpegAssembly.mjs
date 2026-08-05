@@ -350,6 +350,49 @@ function archiveIntroSkipSec(asset, probedDur = 0) {
   return Math.min(10, Math.max(5, dur * 0.15));
 }
 
+/**
+ * Probe early frames of a local video and return the first timestamp that is
+ * NOT near-black. News/DM trailers often open on black title cards
+ * (housing-web159: 96% near-black @0–0.15s). Seeking past that for sourceStartSec
+ * keeps the hook on real faces/action.
+ *
+ * @param {string} localSrc
+ * @param {number} [maxProbeSec]
+ * @returns {number}
+ */
+export function probeNearBlackSkipSec(localSrc, maxProbeSec = 4) {
+  if (!localSrc || !existsSync(localSrc)) return 0;
+  const samples = [0, 0.35, 0.7, 1.1, 1.6, 2.2, 3.0, 4.0].filter((t) => t <= maxProbeSec);
+  for (const t of samples) {
+    const tmp = join(dirname(localSrc), `.nearblack-probe-${process.pid}-${t}.raw`);
+    try {
+      const r = spawnSync(
+        'ffmpeg',
+        [
+          '-y', '-ss', String(t), '-i', localSrc,
+          '-vframes', '1', '-f', 'rawvideo', '-pix_fmt', 'gray',
+          '-s', '160x90', tmp,
+        ],
+        { encoding: 'utf8', timeout: 12_000 },
+      );
+      if (r.status !== 0 || !existsSync(tmp)) continue;
+      const buf = readFileSync(tmp);
+      if (!buf.length) continue;
+      let near = 0;
+      for (let i = 0; i < buf.length; i += 1) {
+        if (buf[i] < 16) near += 1;
+      }
+      const ratio = near / buf.length;
+      if (ratio < 0.85) return t;
+    } catch {
+      /* ignore probe errors */
+    } finally {
+      try { unlinkSync(tmp); } catch { /* ignore */ }
+    }
+  }
+  return 0;
+}
+
 /** Advance per-asset seek position so video B-roll does not replay t=0 every cut. */
 function assignVideoSourceOffsets(clips) {
   const nextOffset = new Map();
@@ -803,10 +846,13 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
     if (videoOffsets.has(key)) {
       offset = videoOffsets.get(key);
     } else {
-      // Prefer the larger of schedule hint and Archive intro skip using the
-      // *probed* duration — a small schedule hint must not cancel a 15–22s skip.
+      // Prefer the larger of schedule hint, Archive intro skip, and near-black
+      // seek using the *probed* duration — a small schedule hint must not cancel
+      // a 15–22s Archive skip or a title-card black seek (housing-web159).
       const intro = archiveIntroSkipSec(asset, total);
-      offset = Math.max(Number(hintOffset) || 0, intro);
+      const maxBlack = Math.max(0, Math.min(5, total - durationSec - 0.5));
+      const blackSkip = maxBlack > 0.2 ? probeNearBlackSkipSec(localSrc, maxBlack) : 0;
+      offset = Math.max(Number(hintOffset) || 0, intro, blackSkip);
     }
     if (offset + durationSec > total - 0.1) {
       const intro = archiveIntroSkipSec(asset, total);

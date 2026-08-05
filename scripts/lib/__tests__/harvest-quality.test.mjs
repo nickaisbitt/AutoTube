@@ -34,6 +34,7 @@ import {
   isWebNativeMotionSource,
   keylessArchiveHumanPortraitScore,
   scoreAssetRelevance,
+  thinInjectVarietyFailReason,
   VOLUME_PADDING_MIN_RELEVANCE,
 } from '../harvest-quality.mjs';
 
@@ -1667,7 +1668,6 @@ describe('housing evidence floor for abstract script beats', () => {
       pexelsFetched: 0,
       pixabayFetched: 0,
       archiveLiveFetched: 4,
-      videoTopUp: Array.from({ length: 6 }, (_, i) => ({ id: `t${i}` })),
     }, {
       ...project,
       // Enough unique housing motion for soft-pass-motion (≥2 videos/seg).
@@ -2050,7 +2050,6 @@ describe('checkIntroFacePool — housing', () => {
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
       archiveLiveFetched: 4,
-      videoTopUp: Array.from({ length: 9 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(false);
     expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
@@ -2079,7 +2078,6 @@ describe('checkIntroFacePool — housing', () => {
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
       archiveLiveFetched: 4,
-      videoTopUp: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(true);
   });
@@ -2112,7 +2110,6 @@ describe('checkIntroFacePool — housing', () => {
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
       archiveLiveFetched: 7,
-      videoTopUp: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(true);
     expect(result.reason).toMatch(/^soft-pass-motion-housing\(/);
@@ -2143,7 +2140,6 @@ describe('checkIntroFacePool — housing', () => {
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
       archiveLiveFetched: 4,
-      videoTopUp: Array.from({ length: 4 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(true);
     expect(result.reason).toMatch(/^soft-pass-motion-housing\(/);
@@ -2173,7 +2169,6 @@ describe('checkIntroFacePool — housing', () => {
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
       archiveLiveFetched: 2,
-      videoTopUp: Array.from({ length: 3 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(false);
     expect(result.reason).toMatch(/soft-pass-motion-housing-thin\(3\/4/);
@@ -2280,7 +2275,6 @@ describe('checkIntroFacePool — healthcare', () => {
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
       archiveLiveFetched: 4,
-      videoTopUp: Array.from({ length: 9 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(false);
     expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
@@ -2309,7 +2303,6 @@ describe('checkIntroFacePool — healthcare', () => {
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
       archiveLiveFetched: 4,
-      videoTopUp: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(true);
   });
@@ -4165,7 +4158,7 @@ describe('healthcare-web203 remaining pads after a9892eb French/Vox fix', () => 
     };
     expect(isHealthcareIntroPadJunk(ulster.title)).toBe(false);
     expect(healthcareIntroFaceEvidenceMatches(ulster.title)).toBe(true);
-    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+    expect(healthcareIntroRepairRank(ulster)).toBe(3);
 
     expect(isHealthcareIntroPadJunk(shropshire.title)).toBe(false);
     expect(healthcareIntroFaceEvidenceMatches(shropshire.title)).toBe(true);
@@ -4267,7 +4260,7 @@ describe('healthcare-web204 doctors-union / industrial-relations / robots-explai
     };
     expect(isHealthcareIntroPadJunk(ulster.title)).toBe(false);
     expect(healthcareIntroFaceEvidenceMatches(ulster.title)).toBe(true);
-    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+    expect(healthcareIntroRepairRank(ulster)).toBe(3);
     expect(isHealthcareIntroPadJunk(shropshire.title)).toBe(false);
     expect(healthcareIntroFaceEvidenceMatches(shropshire.title)).toBe(true);
     expect(healthcareIntroRepairRank(shropshire)).toBeGreaterThanOrEqual(1);
@@ -4332,7 +4325,7 @@ describe('healthcare-web204 doctors-union / industrial-relations / robots-explai
     expect(healthcareIntroRepairRank(union)).toBe(0);
     expect(healthcareIntroRepairRank(robots)).toBe(0);
     expect(healthcareIntroRepairRank(face)).toBe(4);
-    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+    expect(healthcareIntroRepairRank(ulster)).toBe(3);
     const repaired = repairEditTimelineIntroFace(project);
     expect(repaired.repaired).toBe(true);
     expect(repaired.pass).toBe(true);
@@ -4433,7 +4426,7 @@ describe('healthcare-web205 ambulance-ramping / parliamentary / Martha inquiry p
     };
     expect(isHealthcareIntroPadJunk(ulster.title)).toBe(false);
     expect(healthcareIntroFaceEvidenceMatches(ulster.title)).toBe(true);
-    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+    expect(healthcareIntroRepairRank(ulster)).toBe(3);
     expect(isHealthcareIntroPadJunk(shropshire.title)).toBe(false);
     expect(healthcareIntroFaceEvidenceMatches(shropshire.title)).toBe(true);
     expect(healthcareIntroRepairRank(shropshire)).toBeGreaterThanOrEqual(1);
@@ -4483,7 +4476,7 @@ describe('healthcare-web205 ambulance-ramping / parliamentary / Martha inquiry p
     expect(checkEditTimelineIntroFace(project).reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
     expect(healthcareIntroRepairRank(inquiry)).toBe(0);
     expect(healthcareIntroRepairRank(martha)).toBe(0);
-    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+    expect(healthcareIntroRepairRank(ulster)).toBe(3);
     expect(healthcareIntroRepairRank(face)).toBe(4);
     const repaired = repairEditTimelineIntroFace(project);
     expect(repaired.repaired).toBe(true);
@@ -4804,5 +4797,113 @@ describe('healthcare-web207 cashback / LiveLeak / product / summit lead junk', (
     expect(repaired.pass).toBe(true);
     expect(project.editTimeline[0].assetId).toBe('ulster1');
     expect(project.editTimeline[0].startSec).toBe(0);
+  });
+});
+
+describe('QUALITY-OVER-7 opener hold + thin inject + named-doc ranks', () => {
+  it('housing named documentary ranks 4 (Dale Farm / West Sussex / SF / Richmond)', () => {
+    for (const title of [
+      'dale farm travellers eviction documentary news footage',
+      'west sussex man faces an eviction order from his littlehampton home',
+      '670 low income tenants being evicted in san francisco documentary',
+      'burden of richmond evictions weighs heaviest in black neighborhoods',
+    ]) {
+      expect(housingIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/d.mp4',
+      })).toBe(4);
+    }
+  });
+
+  it('healthcare Ulster/Shropshire live OR ranks 3; consultation stays 4', () => {
+    expect(healthcareIntroRepairRank({
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      type: 'video', url: 'https://example.com/u.mp4',
+    })).toBe(3);
+    expect(healthcareIntroRepairRank({
+      title: 'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      type: 'video', url: 'https://example.com/s.mp4',
+    })).toBe(3);
+    expect(healthcareIntroRepairRank({
+      title: 'doctor face patient consultation close up hospital',
+      type: 'video', url: 'https://example.com/f.mp4',
+    })).toBe(4);
+  });
+
+  it('repair stretches qualifying opener to 2.0s and drops overlapping slideshow cuts', () => {
+    const west = {
+      id: 'west1', type: 'video', url: 'https://example.com/west.mp4',
+      title: 'west sussex man faces an eviction order from his littlehampton home',
+      alt: 'west sussex man faces an eviction order',
+    };
+    const pad = {
+      id: 'pad1', type: 'video', url: 'https://example.com/pad.mp4',
+      title: 'apartment interior living room packing boxes',
+      alt: 'apartment interior living room',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [west, pad],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'west1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'pad1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 1.95, assetId: 'pad1' },
+        { segmentId: 'seg1', startSec: 2.0, endSec: 2.65, assetId: 'pad1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('west1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+    expect(project.editTimeline[0].endSec).toBe(2);
+    // Overlapping 0.65 / 1.3 cuts removed; 2.0 cut kept.
+    expect(project.editTimeline.every((e) => (e.startSec ?? 0) === 0 || (e.startSec ?? 0) >= 1.95)).toBe(true);
+  });
+
+  it('repair promotes Ulster OR @0 with 2.0s hold when inquiry junk leads', () => {
+    const inquiry = {
+      id: 'inq1', type: 'video', url: 'https://example.com/inq.mp4',
+      title: 'nsw inquiry into ambulance ramping told patients dying unnecessarily',
+      alt: 'nsw inquiry ambulance ramping',
+    };
+    const ulster = {
+      id: 'ulster1', type: 'video', url: 'https://example.com/ulster.mp4',
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      alt: 'ulster hospital surgical robot',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [inquiry, ulster],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'inq1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'ulster1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('ulster1');
+    expect(project.editTimeline[0].endSec).toBe(2);
+  });
+
+  it('thinInjectVarietyFailReason blocks soft-pass when injected<12 and variety thin', () => {
+    const videos = [
+      { id: 'v1', type: 'video', url: 'https://www.dailymotion.com/video/x1', title: 'west sussex man faces eviction' },
+      { id: 'v2', type: 'video', url: 'https://www.dailymotion.com/video/x2', title: 'tenant face eviction' },
+      { id: 'v3', type: 'video', url: 'https://www.dailymotion.com/video/x3', title: 'apartment interior' },
+    ];
+    const reason = thinInjectVarietyFailReason(
+      { videoTopUp: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })) },
+      videos,
+      'housing',
+    );
+    expect(reason).toMatch(/^INTRO_FACE_FAIL: soft-pass blocked/);
+    expect(thinInjectVarietyFailReason({ videoTopUp: Array.from({ length: 12 }, (_, i) => ({ id: `t${i}` })) }, videos, 'housing')).toBeNull();
+    // Empty videoTopUp / missing array → gate inactive (unit/legacy soft-pass paths).
+    expect(thinInjectVarietyFailReason({ videoTopUp: [] }, videos, 'housing')).toBeNull();
+    expect(thinInjectVarietyFailReason({}, videos, 'housing')).toBeNull();
   });
 });

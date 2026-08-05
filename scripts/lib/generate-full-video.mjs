@@ -4179,6 +4179,17 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // housing-web158: prefer intro-face evidence over bare apartment Archive so
       // landscape/FEMA pools cannot empty INTRO_FACE after junk rejects.
       if (/Archive/i.test(clip.source || '')) {
+        const namedHousingDoc =
+          /\b(?:dale\s+farm|west\s+sussex|burden\s+of\s+richmond)\b/i.test(blob)
+          || (/\brichmond\b/i.test(blob) && /\bevict\w*\b/i.test(blob))
+          || (
+            /\b(?:san\s+francisco|\bsf\b)\b/i.test(blob)
+            && /\btenants?\b/i.test(blob)
+            && /\bevict\w*\b/i.test(blob)
+          );
+        if (namedHousingDoc) {
+          return 14;
+        }
         if (housingIntroFaceEvidenceMatches(blob)) return 10;
         return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 1 : 0;
       }
@@ -4187,6 +4198,19 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       }
       // Face-forward / lived-in housing beats charts, landscapes, and title cards.
       // Align inject boost with housingIntroFaceEvidenceMatches (pool gate).
+      // Named documentary eviction faces (Dale Farm / SF / West Sussex / Richmond)
+      // outrank generic face hits so inject prefers watch-proven openers.
+      const namedHousingDoc =
+        /\b(?:dale\s+farm|west\s+sussex|burden\s+of\s+richmond)\b/i.test(blob)
+        || (/\brichmond\b/i.test(blob) && /\bevict\w*\b/i.test(blob))
+        || (
+          /\b(?:san\s+francisco|\bsf\b)\b/i.test(blob)
+          && /\btenants?\b/i.test(blob)
+          && /\bevict\w*\b/i.test(blob)
+        );
+      if (namedHousingDoc) {
+        return 14;
+      }
       if (housingIntroFaceEvidenceMatches(blob)) {
         return 10;
       }
@@ -4261,6 +4285,20 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         );
       if (talkingHeadPad && !clinicianScreenOrOr) return 0;
       // Boost AI radiology / clinician+screen / surgical robot / ultrasound demo (8–10).
+      // Named Ulster/Shropshire live OR + doctor-patient consultation outrank
+      // generic clinical so inject lands rank≥2 openers (web204–206 repair path).
+      if (
+        /\b(?:ulster\s+hospital|shropshire\s+hospital)\b/i.test(blob)
+        && /\b(?:surgical\s*robot|surgery\s+robot|da\s*vinci|operating|theatres?)\b/i.test(blob)
+      ) {
+        return 14;
+      }
+      if (
+        healthcareIntroFaceEvidenceMatches(blob)
+        && /\b(?:consultation|consulting|bedside|doctor\s+patient|patient\s+doctor)\b/i.test(blob)
+      ) {
+        return 14;
+      }
       if (
         /\b(ai\s+radiolog|radiolog\w*\s+ai|ai\s+(?:medical\s+)?diagnos)\b/i.test(blob)
         || (

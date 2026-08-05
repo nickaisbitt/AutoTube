@@ -977,14 +977,41 @@ export function buildEditTimeline(project, options = {}) {
           ) {
             score += 4;
           }
+          // Named documentary eviction faces that watchers reward (Dale Farm /
+          // SF tenants / West Sussex / Richmond) — further boost so they win @0.
+          const namedHousingDoc =
+            /\b(?:dale\s+farm|west\s+sussex|burden\s+of\s+richmond)\b/i.test(evBlob)
+            || (/\brichmond\b/i.test(evBlob) && /\bevict\w*\b/i.test(evBlob))
+            || (
+              /\b(?:san\s+francisco|\bsf\b)\b/i.test(evBlob)
+              && /\btenants?\b/i.test(evBlob)
+              && /\bevict\w*\b/i.test(evBlob)
+            );
+          if (namedHousingDoc) {
+            score += 8;
+          }
+          // First-3s: prefer high-motion / high-luma clips over dark title cards.
+          const luma = Number(a?.lumaStdDev) || 0;
+          const lap = Number(a?.laplacianVariance) || 0;
+          if (luma >= 35 || lap >= 40) score += 3;
+          if (/\b(?:handheld|documentary|crowd|moving|rushing|walking|protesters?)\b/i.test(evBlob)) {
+            score += 2;
+          }
+          if (/\b(?:title\s+card|black\s+(?:screen|frame|background)|near[\s-]?black|muddy|underexposed|silhouette)\b/i.test(evBlob)) {
+            score -= 6;
+          }
           // housing-web153: "man faces an eviction order" news packages / radio caller
           // pads cleared person+eviction but read as static talking-heads — demote so
           // shocked-face / crying-tenant Archive+DM leads win the first 3s.
+          // Keep West Sussex "man faces an eviction order" (named documentary) above.
           if (
-            /\bfaces?\s+(?:an?\s+)?eviction\s+order\b/i.test(evBlob)
-            || /\bshocked\s+at\s+caller\b/i.test(evBlob)
-            || /\bconstables?\b/i.test(evBlob)
-            || /\b(radio\s+(?:show|studio|caller)|talk\s+radio)\b/i.test(evBlob)
+            (
+              /\bfaces?\s+(?:an?\s+)?eviction\s+order\b/i.test(evBlob)
+              || /\bshocked\s+at\s+caller\b/i.test(evBlob)
+              || /\bconstables?\b/i.test(evBlob)
+              || /\b(radio\s+(?:show|studio|caller)|talk\s+radio)\b/i.test(evBlob)
+            )
+            && !/\bwest\s+sussex\b/i.test(evBlob)
           ) {
             score -= 5;
           }
@@ -1003,11 +1030,33 @@ export function buildEditTimeline(project, options = {}) {
           ) {
             score += 5;
           }
+          // Ulster / Shropshire live OR + doctor-patient consultation — prefer in first 3s.
+          if (
+            /\b(?:ulster\s+hospital|shropshire\s+hospital)\b/i.test(evBlob)
+            && /\b(?:surgical\s*robot|surgery\s+robot|da\s*vinci|operating|theatres?)\b/i.test(evBlob)
+          ) {
+            score += 8;
+          }
+          if (
+            healthcareClinicianOrPatientFace(evBlob)
+            && /\b(?:consultation|consulting|bedside|doctor\s+patient|patient\s+doctor)\b/i.test(evBlob)
+          ) {
+            score += 8;
+          }
+          const luma = Number(a?.lumaStdDev) || 0;
+          const lap = Number(a?.laplacianVariance) || 0;
+          if (luma >= 35 || lap >= 40) score += 3;
+          if (/\b(?:handheld|intraoperative|live\s+(?:surgery|or)|action)\b/i.test(evBlob)) {
+            score += 2;
+          }
+          if (/\b(?:title\s+card|black\s+(?:screen|frame|background)|near[\s-]?black|muddy|powerpoint|presentation\s+slide)\b/i.test(evBlob)) {
+            score -= 6;
+          }
           // Faceless robot/OR without a human role word → soft demote so tier-3
           // faces win the first beats when both exist in the pool.
           if (
             /\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci|senhance|versius)\b/i.test(evBlob)
-            && !/\b(doctor|surgeon|clinician|physician|patient|nurse|radiologist)\b/i.test(evBlob)
+            && !/\b(doctor|surgeon|clinician|physician|patient|nurse|radiologist|ulster|shropshire)\b/i.test(evBlob)
           ) {
             score -= 3;
           }
@@ -1150,8 +1199,13 @@ export function buildEditTimeline(project, options = {}) {
     const segUniqueUrlSet = new Set(assets.map((a) => urlKey(a)).filter(Boolean));
     const onlyTwoStillsInSeg = !isIntro && !isOutro && segUniqueUrlSet.size <= 2 && videos.length === 0;
     const STILL_PAIR_HOLD_SEC = 4.0;
+    // housing/HC watches plateau at ~6.0–6.8 with 0.65s intro slideshows
+    // (web164/web204/web206): hold the face/OR opener 1.5–2.5s so the hook
+    // lands, then resume rapid cuts for visual change.
+    const INTRO_FACE_HOLD_SEC = 2.0;
+    const INTRO_RAPID_CUT_SEC = 0.65;
     const interval = isIntro
-      ? Math.min(effectiveCut, 0.65)
+      ? INTRO_RAPID_CUT_SEC
       : onlyTwoStillsInSeg
         ? Math.max(effectiveCut, STILL_PAIR_HOLD_SEC)
         : effectiveCut;
@@ -1185,12 +1239,14 @@ export function buildEditTimeline(project, options = {}) {
     let lastCluster = null;
     while (t < duration - 0.05) {
       const globalStartSec = timelineElapsedSec + t;
-      const cutNow = (
-        !isIntro
-        && !isOutro
-        && applyFirstWindowStrict
-        && globalStartSec < FIRST_WINDOW_SEC
-      ) ? earlyWindowStretch : interval;
+      const cutNow = isIntro && t < 0.01
+        ? INTRO_FACE_HOLD_SEC
+        : (
+          !isIntro
+          && !isOutro
+          && applyFirstWindowStrict
+          && globalStartSec < FIRST_WINDOW_SEC
+        ) ? earlyWindowStretch : interval;
       const end = Math.min(duration, t + cutNow);
       const withinStrictReuseWindow = globalStartSec < STRICT_REUSE_WINDOW_SEC || isShortVideo;
       const activeBeat = beatAtSegmentTime(segBeats, t, duration, seg);
@@ -1466,13 +1522,16 @@ export function buildEditTimeline(project, options = {}) {
           .filter((c) => canUseCandidate(c, { allowOverReuse: true, relaxed: true }))
           .sort(leastUsedFirst)[0] || null;
       }
-      if (!asset && segmentEntryCount > 0) {
+      if (!asset && segmentEntryCount > 0 && !isIntro) {
         const prev = entries[entries.length - 1];
         // Cap the hold at ~2–3s only when coverage offers an intrinsically
         // acceptable refresh (never-use and scorer-banned subjects — e.g.
         // airline paperwork/mail clusters past their one global use — do not
         // count). Otherwise holding the current clip beats cutting to a
         // banned subject, and a truly thin pool must not render a gap.
+        // Intro skips this path: the opener already held INTRO_FACE_HOLD_SEC;
+        // extending it to the full segment recreates the slideshow-of-one
+        // that plateaus watches at ~6 (housing-web164).
         const coveragePool = uniqueAssetsByUrl([
           ...ordered,
           ...(isIntro || isOutro ? bookendCandidates(globalPool) : globalPool),

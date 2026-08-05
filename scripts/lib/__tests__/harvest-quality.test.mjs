@@ -2506,6 +2506,33 @@ describe('checkEditTimelineIntroFace — housing first-segment gate', () => {
       'housing crash eviction',
     )).toBeTruthy();
   });
+
+  it('rejects housing-web83 psychology/motel/opioid/student-testimonial pads', () => {
+    expect(housingOffTopicBrollReason(
+      'understanding transcrisis states this presentation is an introduction',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'the last guest of the holloway motel tribeca teaser clip',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'family explores the tension of safety and danger gang culture and the opioid',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'prairie view a m student testimonial project prc helped me stay in school',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'interfaith adopt a family sponsors ellen clayton kershaw',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'worried tenant face eviction notice apartment close-up',
+      'housing crash eviction',
+    )).toBe('');
+  });
 });
 
 describe('housingIntroFaceEvidenceMatches — real DDG site:vimeo.com titles (waves 36-60)', () => {
@@ -2695,5 +2722,20 @@ describe('repairEditTimelineIntroFace — housing-web4/8/10 pool-vs-timeline', (
     expect(repaired.repaired).toBe(true);
     expect(repaired.pass).toBe(true);
     expect(project.editTimeline[0].assetId).toBe('cnbc1');
+  });
+
+  it('rejects healthcare-web75 angry-boy / regen-seminar injection pads', () => {
+    expect(healthcareOffTopicBrollReason(
+      'angry boy part i',
+      'Why AI will change healthcare',
+    )).toMatch(/healthcare off-topic/);
+    expect(healthcareOffTopicBrollReason(
+      'regen seminar ultrasound guided injections ultrasound knee demonstration',
+      'Why AI will change healthcare',
+    )).toMatch(/healthcare off-topic/);
+    expect(healthcareOffTopicBrollReason(
+      'dexter robotic surgery system operating room AI medicine',
+      'Why AI will change healthcare',
+    )).toBe('');
   });
 });

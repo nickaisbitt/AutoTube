@@ -16,6 +16,8 @@ import {
   healthcareIntroFaceEvidenceMatches,
   isHealthcareEstablishingOpener,
   isHealthcareIntroDeadAirOpener,
+  isHealthcareIntroBeautyOrClinicJunk,
+  healthcareIntroClinicalEscape,
   healthcareIntroRepairRank,
   healthcareClinicianOrPatientFace,
   healthcareStrongClinicalMotion,
@@ -2707,7 +2709,7 @@ describe('checkEditTimelineIntroFace — healthcare timeline gate', () => {
     const project = {
       topic: 'Why AI will change healthcare',
       script: [{ id: 's1', title: 'Hook', duration: 18 }],
-      // robot listed before face — repair must still prefer face (rank 3 > 2).
+      // robot listed before face — repair must still prefer face (rank 4 > 2).
       media: [corridor, robot, face],
       editTimeline: [
         { segmentId: 's1', startSec: 0, endSec: 1.5, assetId: 'corr1' },
@@ -2771,12 +2773,92 @@ describe('healthcareIntroFaceEvidenceMatches — web198 backs/title-card contrac
       title: 'doctor face patient consultation close up',
       type: 'video',
       url: 'https://x/a.mp4',
-    })).toBe(3);
+    })).toBe(4);
     expect(healthcareIntroRepairRank({
       title: 'surgical robot operating room da vinci',
       type: 'video',
       url: 'https://x/b.mp4',
     })).toBe(2);
+    expect(healthcareIntroRepairRank({
+      title: 'radiologist reviewing mri scan workstation monitor',
+      type: 'video',
+      url: 'https://x/c.mp4',
+    })).toBe(1);
+  });
+});
+
+describe('healthcareIntroFaceEvidenceMatches — web200 beauty/osteopathy junk', () => {
+  it('rejects pretty woman face beauty stock', () => {
+    expect(isHealthcareIntroBeautyOrClinicJunk(
+      'close up view of pretty woman s face',
+    )).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches(
+      'close up view of pretty woman s face close up view of pretty woman s face',
+    )).toBe(false);
+    expect(healthcareOffTopicBrollReason(
+      'close up view of pretty woman s face',
+      HEALTHCARE_TOPIC,
+    )).toMatch(/beauty|osteopathy/i);
+    expect(healthcareIntroRepairRank({
+      title: 'close up view of pretty woman s face',
+      type: 'video',
+      url: 'https://x/pretty.mp4',
+    })).toBe(0);
+  });
+
+  it('rejects osteopathy / holistic rehab clinic ads', () => {
+    expect(isHealthcareIntroBeautyOrClinicJunk(
+      'holisticrehabclinic osteopathy physiotherapy holborn wc1x',
+    )).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches(
+      'holisticrehabclinic osteopathy physiotherapy holborn wc1x 8nw osteopathy our consultant osteopaths at holistic rehab clinic',
+    )).toBe(false);
+    expect(healthcareOffTopicBrollReason(
+      'holisticrehabclinic osteopathy physiotherapy holborn',
+      HEALTHCARE_TOPIC,
+    )).toMatch(/beauty|osteopathy/i);
+  });
+
+  it('accepts surgeon face OR and radiologist MRI', () => {
+    expect(healthcareIntroFaceEvidenceMatches(
+      'surgeon face operating room close up',
+    )).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches(
+      'radiologist reviewing mri scan workstation monitor',
+    )).toBe(true);
+    expect(isHealthcareIntroBeautyOrClinicJunk(
+      'surgeon face operating room close up',
+    )).toBe(false);
+    expect(healthcareIntroClinicalEscape(
+      'radiologist reviewing mri scan workstation monitor',
+    )).toBe(true);
+  });
+
+  it('ranks consultation face > OR/robot > MRI screen', () => {
+    const consultation = healthcareIntroRepairRank({
+      title: 'doctor face patient consultation close up',
+      type: 'video',
+      url: 'https://x/consult.mp4',
+    });
+    const robot = healthcareIntroRepairRank({
+      title: 'surgical robot operating room da vinci',
+      type: 'video',
+      url: 'https://x/robot.mp4',
+    });
+    const mri = healthcareIntroRepairRank({
+      title: 'radiologist reviewing mri scan workstation monitor',
+      type: 'video',
+      url: 'https://x/mri.mp4',
+    });
+    expect(consultation).toBeGreaterThan(robot);
+    expect(robot).toBeGreaterThan(mri);
+    expect(mri).toBeGreaterThan(0);
+  });
+
+  it('allows clinical escape when beauty junk co-occurs with surgical robot', () => {
+    expect(healthcareIntroFaceEvidenceMatches(
+      'pretty woman face surgical robot operating room da vinci',
+    )).toBe(true);
   });
 });
 

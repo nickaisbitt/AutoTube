@@ -15,6 +15,8 @@ import {
   healthcareIntroFaceEvidenceMatches,
   healthcareStrongClinicalMotion,
   healthcareClinicianOrPatientFace,
+  isHealthcareIntroBeautyOrClinicJunk,
+  healthcareIntroClinicalEscape,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
@@ -222,6 +224,12 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
           (isHealthcareEstablishingOpener(blob) || isHealthcareIntroDeadAirOpener(blob))
           && !healthcareIntroFaceEvidenceMatches(blob)
         )
+        // healthcare-web200: beauty/"pretty woman face" stock + osteopathy/rehab
+        // clinic ads must never lead (rode surgical-robot soft-pass; raw 4.2).
+        || (
+          isHealthcareIntroBeautyOrClinicJunk(blob)
+          && !healthcareIntroClinicalEscape(blob)
+        )
     )
   ) {
     return true;
@@ -428,6 +436,10 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
       (isHealthcareEstablishingOpener(blob) || isHealthcareIntroDeadAirOpener(blob))
       && !healthcareIntroFaceEvidenceMatches(blob)
     ) {
+      return -1;
+    }
+    // healthcare-web200: beauty/osteopathy clinic junk → -1 even with face noun.
+    if (isHealthcareIntroBeautyOrClinicJunk(blob) && !healthcareIntroClinicalEscape(blob)) {
       return -1;
     }
     const isVideo = asset?.type === 'video' || /\.mp4/i.test(asset?.url || '');
@@ -926,6 +938,12 @@ export function buildEditTimeline(project, options = {}) {
             (isHealthcareEstablishingOpener(evBlob) || isHealthcareIntroDeadAirOpener(evBlob))
             && !healthcareIntroFaceEvidenceMatches(evBlob)
           ) {
+            score -= 16;
+          } else if (
+            isHealthcareIntroBeautyOrClinicJunk(evBlob)
+            && !healthcareIntroClinicalEscape(evBlob)
+          ) {
+            // healthcare-web200: pretty-woman / osteopathy never win intro cuts.
             score -= 16;
           } else if (
             /\b(?:hallway|corridor|couloir|from\s+behind|walking[\s-]away|establishing)\b/i.test(evBlob)

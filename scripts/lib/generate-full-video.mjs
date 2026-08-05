@@ -55,6 +55,8 @@ import {
   housingIntroFaceEvidenceMatches,
   isHealthcareEstablishingOpener,
   isHealthcareIntroDeadAirOpener,
+  isHealthcareIntroBeautyOrClinicJunk,
+  healthcareIntroClinicalEscape,
   HEALTHCARE_AMBIGUOUS_ARCHIVE_MATCH_TOKENS,
   isOffBrandVisual,
   isGenericStockJunk,
@@ -569,6 +571,8 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
     // demote corridor/backs/title-card establishing behind DM/web.
     if (isHealthcareTopic(options.topicBlob || '')) {
       const blob = `${candidate.alt || ''} ${candidate.title || ''} ${candidate.query || ''} ${candidate.source || ''}`;
+      // healthcare-web200: beauty/osteopathy junk never wins Archive inject rank.
+      if (isHealthcareIntroBeautyOrClinicJunk(blob) && !healthcareIntroClinicalEscape(blob)) return 35;
       if (healthcareIntroFaceEvidenceMatches(blob)) return 5;
       if (isHealthcareEstablishingOpener(blob) || isHealthcareIntroDeadAirOpener(blob)) return 35;
       // Generic clinical Archive: behind DM (2) / generic web (10), ahead of Vimeo (25).
@@ -4204,6 +4208,18 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Title-card / lecture / protest pads (off-topic also -20 when regex hits).
       if (/\b(title\s+card|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|capitol|protest|maternity|kapparot|kapores|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri)\b/i.test(blob)) {
         return -8;
+      }
+      // healthcare-web200: beauty/"pretty woman face" + osteopathy/rehab clinic ads
+      // must lose inject to clinical face/OR (junk filter > soft-pass then bad watch).
+      if (isHealthcareIntroBeautyOrClinicJunk(blob) && !healthcareIntroClinicalEscape(blob)) {
+        return -20;
+      }
+      // COVID hospital-afflux talking-head pads (French faire-face / news ICU).
+      if (
+        /\b(?:face\s+l['']?\s*afflux|l['']?\s*afflux\s+de\s+patients|covid\s*19\s+face\s+l|hospital\s+afflux|afflux\s+de\s+patients)\b/i.test(blob)
+        && !healthcareIntroFaceEvidenceMatches(blob)
+      ) {
+        return -20;
       }
       // healthcare-web199: corridor / backs / hallway establishing must lose inject
       // scoring to clinical face/OR that clear healthcareIntroFaceEvidenceMatches.

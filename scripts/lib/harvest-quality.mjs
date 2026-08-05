@@ -272,6 +272,11 @@ export function healthcareOffTopicBrollReason(haystack, contextText = '', asset 
   if (/\bcoronavirus\s+inside\b/i.test(h)) {
     return 'healthcare: covid-footage not AI-medicine';
   }
+  // healthcare-web200: beauty/"pretty woman face" stock + osteopathy/rehab clinic
+  // ads scraped via doctor-face queries — drop from pool (junk filter > soft-pass).
+  if (isHealthcareIntroBeautyOrClinicJunk(h) && !healthcareIntroClinicalEscape(h)) {
+    return 'healthcare: beauty/cosmetic or osteopathy-clinic B-roll';
+  }
   // Archive query→title mismatch (surgical robot → GeekBeat / fashion / political).
   if (asset) {
     const mismatch = healthcareArchiveTitleMismatchReason(
@@ -1463,13 +1468,63 @@ export function healthcareClinicianOrPatientFace(evidence = '') {
 }
 
 /**
+ * healthcare-web200: beauty/cosmetic/"pretty woman face" stock and
+ * osteopathy/physio/holistic-rehab clinic ads harvested via doctor-face
+ * queries rode a surgical-robot soft-pass into intro cuts and collapsed
+ * retention (raw 4.2). These never count as intro evidence unless a strong
+ * clinical escape is also present in the same blob.
+ *
+ * @param {string} evidence
+ * @returns {boolean}
+ */
+export function isHealthcareIntroBeautyOrClinicJunk(evidence = '') {
+  return /\b(?:pretty\s+wom[ae]n(?:\s*'?s|\s+s)?\s+face|pretty\s+girl(?:\s*'?s|\s+s)?\s+face|beautiful\s+(?:wom[ae]n|girl|model)(?:\s*'?s|\s+s)?\s+face|close\s+up\s+view\s+of\s+pretty\s+wom[ae]n|beauty\s+(?:stock|model|face|portrait|close[\s-]?up|commercial|ad)|cosmetic(?:s)?\s+(?:stock|model|face|ad|commercial|makeup)|makeup\s+(?:tutorial|close[\s-]?up|model|face|stock|ad)|model\s+face\s+(?:close[\s-]?up|stock|beauty|glamour)|fashion\s+model\s+(?:face|close[\s-]?up)|glamour\s+(?:face|portrait|close[\s-]?up|shot)|holistic\s*rehab(?:\s*clinic)?|holisticrehabclinic|osteopath(?:y|ic|s)?|physiotherap(?:y|ist)s?|physio\s+(?:clinic|ad|promo|commercial|centre|center)|rehab\s+clinic\s+(?:ad|promo|commercial|osteopath|holistic)|(?:osteopathy|physiotherapy)\s+(?:clinic|promo|ad|commercial))\b/i.test(
+    String(evidence || ''),
+  );
+}
+
+/**
+ * Strong clinical escape that may override beauty/clinic junk in the same
+ * evidence blob (surgeon/OR/MRI/surgical-robot/radiologist+screen/
+ * doctor+patient consultation).
+ *
+ * @param {string} evidence
+ * @returns {boolean}
+ */
+export function healthcareIntroClinicalEscape(evidence = '') {
+  const text = String(evidence || '');
+  if (healthcareStrongClinicalMotion(text)) return true;
+  if (
+    /\bsurgeon\s+(?:face|portrait|close[\s-]?up|expression)\b/i.test(text)
+    || /\b(?:face|portrait|close[\s-]?up)\s+(?:of\s+)?(?:a\s+|the\s+)?surgeon\b/i.test(text)
+  ) {
+    return true;
+  }
+  if (
+    healthcareClinicianOrPatientFace(text)
+    && /\b(?:consultation|consulting|bedside)\b/i.test(text)
+  ) {
+    return true;
+  }
+  if (
+    /\bradiologist\b/i.test(text)
+    && /\b(?:screen|monitor|mri|workstation|reviewing)\b/i.test(text)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Shared healthcare intro-face evidence — used by checkIntroFacePool and
  * checkEditTimelineIntroFace / repairEditTimelineIntroFace so pool and timeline
- * cannot drift (healthcare-web197/web198 corridor / backs / title-card soft-pass).
+ * cannot drift (healthcare-web197/web198 corridor / backs / title-card soft-pass;
+ * healthcare-web200 beauty/osteopathy junk).
  *
  * Requires doctor/surgeon/patient(/clinician/radiologist) face OR OR/MRI/surgical-robot
- * (or clinician reviewing screen). Corridor / backs / title-card / blurry-container
- * establishing never qualifies unless a strong clinical escape is also present.
+ * (or clinician reviewing screen). Corridor / backs / title-card / blurry-container /
+ * beauty-stock / osteopathy-clinic establishing never qualifies unless a strong
+ * clinical escape is also present.
  *
  * @param {string} evidence
  * @returns {boolean}
@@ -1479,6 +1534,11 @@ export function healthcareIntroFaceEvidenceMatches(evidence = '') {
   if (!text.trim()) return false;
   const strong = healthcareStrongClinicalMotion(text);
   const face = healthcareClinicianOrPatientFace(text);
+  const clinicalEscape = healthcareIntroClinicalEscape(text);
+  // Beauty / cosmetic / pretty-woman / osteopathy / rehab-clinic ads never clear
+  // unless a true clinical escape (surgeon/OR/MRI/robot/radiologist+screen/
+  // doctor+patient consultation) is present in the same blob.
+  if (isHealthcareIntroBeautyOrClinicJunk(text) && !clinicalEscape) return false;
   // Dead-air backs / title-card / walking-away hard-fail unless a true face
   // close-up or visual OR/MRI/robot escape is present in the same blob.
   if (isHealthcareIntroDeadAirOpener(text) && !strong && !face) return false;
@@ -1487,8 +1547,10 @@ export function healthcareIntroFaceEvidenceMatches(evidence = '') {
 }
 
 /**
- * Rank healthcare intro repair candidates: clinician/patient FACE close-up (3)
- * beats OR/MRI/surgical-robot (2) beats other qualifying motion (1).
+ * Rank healthcare intro repair candidates (healthcare-web200):
+ * clinician/patient face consultation (4) > OR/surgical-robot (3) >
+ * MRI/radiologist screen (2) > other qualifying motion (1). Beauty/clinic junk
+ * never ranks (0).
  *
  * @param {object} asset
  * @returns {number}
@@ -1497,8 +1559,20 @@ export function healthcareIntroRepairRank(asset) {
   const evidence = [asset?.title, asset?.alt, asset?.source, asset?.url]
     .filter(Boolean).join(' ');
   if (!healthcareIntroFaceEvidenceMatches(evidence)) return 0;
+  if (
+    healthcareClinicianOrPatientFace(evidence)
+    && /\b(?:consultation|consulting|bedside|doctor\s+patient|patient\s+doctor)\b/i.test(evidence)
+  ) {
+    return 4;
+  }
   if (healthcareClinicianOrPatientFace(evidence)) return 3;
-  if (healthcareStrongClinicalMotion(evidence)) return 2;
+  if (
+    /\b(?:surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci|operating\s+room|or\s+(?:suite|table|lights?)|intraoperative)\b/i.test(evidence)
+    && healthcareStrongClinicalMotion(evidence)
+  ) {
+    return 2;
+  }
+  if (healthcareStrongClinicalMotion(evidence)) return 1;
   return 1;
 }
 

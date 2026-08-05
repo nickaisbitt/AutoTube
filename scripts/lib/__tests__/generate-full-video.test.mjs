@@ -1400,14 +1400,30 @@ describe('healthcare keyless motion pack + volume chase', () => {
     expect(motionCandidateHostRank(faceArchive, { topicBlob: HEALTHCARE_AI_TOPIC })).toBe(5);
     expect(motionCandidateHostRank(orArchive, { topicBlob: HEALTHCARE_AI_TOPIC })).toBe(5);
     expect(motionCandidateHostRank(corridorArchive, { topicBlob: HEALTHCARE_AI_TOPIC })).toBe(35);
+    const beautyArchive = {
+      url: 'https://archive.org/download/beauty/beauty.mp4',
+      source: 'Archive.org live',
+      alt: 'close up view of pretty woman s face',
+      title: 'close up view of pretty woman s face',
+      score: 0,
+    };
+    const osteoArchive = {
+      url: 'https://archive.org/download/osteo/osteo.mp4',
+      source: 'Archive.org live',
+      alt: 'holisticrehabclinic osteopathy physiotherapy holborn',
+      title: 'holisticrehabclinic osteopathy physiotherapy',
+      score: 0,
+    };
+    expect(motionCandidateHostRank(beautyArchive, { topicBlob: HEALTHCARE_AI_TOPIC })).toBe(35);
+    expect(motionCandidateHostRank(osteoArchive, { topicBlob: HEALTHCARE_AI_TOPIC })).toBe(35);
     const ranked = rankMotionCandidates(
-      [corridorArchive, orArchive, faceArchive, dmFace],
+      [corridorArchive, orArchive, faceArchive, dmFace, beautyArchive],
       (clip) => clip.score,
       { topicBlob: HEALTHCARE_AI_TOPIC },
     );
-    // DM (2) ahead of intro-face Archive (5); corridor establishing last (35).
+    // DM (2) ahead of intro-face Archive (5); corridor/beauty establishing last (35).
     expect(ranked[0].url).toBe(dmFace.url);
-    expect(ranked[ranked.length - 1].url).toBe(corridorArchive.url);
+    expect(ranked[ranked.length - 1].url).toMatch(/corridor|beauty/);
     expect(ranked.slice(1, 3).map((c) => c.url).sort()).toEqual(
       [faceArchive.url, orArchive.url].sort(),
     );

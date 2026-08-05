@@ -10,6 +10,10 @@ import {
   isGenericStockJunk,
   hasHealthcareEvidence,
   HOUSING_OFF_TOPIC_BROLL_RE,
+  isHealthcareEstablishingOpener,
+  healthcareIntroFaceEvidenceMatches,
+  healthcareStrongClinicalMotion,
+  healthcareClinicianOrPatientFace,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
@@ -209,6 +213,12 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
           /\bscience\s+nation\b/i.test(blob)
           && /\b(national\s+science\s+foundation|\bnsf\b)\b/i.test(blob)
           && !/\b(operating\s+room|or\s+lights?|patient|surgeon|da\s*vinci|intraoperative)\b/i.test(blob)
+        )
+        // healthcare-web197: corridor / building exterior / blurry-container openers
+        // must never lead — WATCH raw 4.2 on walking-away corridor + blurry container.
+        || (
+          isHealthcareEstablishingOpener(blob)
+          && !healthcareIntroFaceEvidenceMatches(blob)
         )
     )
   ) {
@@ -410,23 +420,26 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
     // Evidence only — harvest query must not mint tier-2 from "surgical robot" alone
     // when the title is GeekBeat / Bayer / innovate (web43 opener spoof).
     const blob = assetEvidenceBlob(asset);
+    // healthcare-web197: corridor / building / blurry-container establishing → -1
+    // (also covered by isRejectedIntroLeadVisual above; keep evidence-path tight).
+    if (isHealthcareEstablishingOpener(blob) && !healthcareIntroFaceEvidenceMatches(blob)) {
+      return -1;
+    }
+    const isVideo = asset?.type === 'video' || /\.mp4/i.test(asset?.url || '');
+    // Tier-3 first: explicit doctor/surgeon/patient face beats faceless OR/MRI.
+    if (isVideo && healthcareClinicianOrPatientFace(blob)) {
+      return 3;
+    }
     // Tier-2 signals: OR/surgical-robot/radiologist-workstation motion.
-    // Broad match captures CNBC titles ("robot that can diagnose"), da Vinci OR,
-    // radiologist at workstation, and any clinician+screen combination.
     // healthcare-web76: do NOT boost Science Nation — Archive packs stamp logo spam.
-    const clinicianScreenOrOr =
-      /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|OR)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|onyx\s*rad(?:\s+ai|\s+radiol)?|ultrasound\s+(?:demo|demonstration)|mri\s+(?:monitor|screen)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen)|operating\s+room|or\s+(?:suite|table|lights?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing)|tiny\s+incision|hsc.{0,20}surgical\s+robot|robotic\s+surgery\s+live|live\s+robotic\s+surgery|laparoscopic\s+surgery\s+(?:live|OR)|intraoperative|surgical\s+OR\s+lights?)\b/i.test(blob)
-      || (
-        /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(blob)
-        && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(blob)
-      );
+    const clinicianScreenOrOr = healthcareStrongClinicalMotion(blob);
     if (
       /\b(talking\s*heads?|explainer|lecture|studio\s+interview|why\s+do\s+i\s+innovate|blind\s+spot|corporate\s+(?:logo|stage|interview))\b/i.test(blob)
       && !clinicianScreenOrOr
     ) {
       return 0;
     }
-    if (clinicianScreenOrOr && (asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) {
+    if (clinicianScreenOrOr && isVideo) {
       return 2;
     }
   }
@@ -438,13 +451,19 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
     if (!topical) return 1;
     // healthcare-web61: face+topical clips (patient/clinician) beat faceless robot/OR
     // clips (tier 2) so they always lead the intro when available.
-    return healthcare ? 3 : 2;
+    // healthcare-web197: only clinician/patient face collocations reach tier 3;
+    // generic person+hospital faces stay at tier 1 (body), not the hook.
+    if (healthcare) {
+      return healthcareClinicianOrPatientFace(assetEvidenceBlob(asset)) ? 3 : 1;
+    }
+    return 2;
   }
   // Housing: lived-in apartment motion without a strict face tag still beats
   // landscape / Archive establishing for the opener (web14).
   if (housing && isHousingApartmentMotion(asset)) return 1;
   // Healthcare: clinical evidence motion (MRI/doctor/hospital) without a strict
-  // face tag still beats Coursera/Giphy title cards for the opener.
+  // face tag still beats Coursera/Giphy title cards for the opener — but
+  // corridor/establishing is already -1 above. Generic ward/clinic → tier 1 body.
   if (healthcare && hasHealthcareEvidence(asset) && (asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) {
     return 1;
   }
@@ -893,8 +912,13 @@ export function buildEditTimeline(project, options = {}) {
         // Extra boost for strongly clinical intro (OR/MRI/radiologist) over generic healthcare.
         if (isIntro && topicIsHealthcare) {
           const evBlob = assetEvidenceBlob(a);
-          if (/\b(surgical\s*robot(?:ics?)?|operating\s+room|or\s+lights?|onyx\s*rad|mri\s+(?:scan|performed|machine|room)|radiolog\w*\s+(?:ai|demo|demonstrat)|ai\s+radiolog|laparoscop\w*|intraoperative|da\s*vinci\s+surger|doctor\s+face|patient\s+face|surgeon\s+face|radiologist\s+face)\b/i.test(evBlob)) {
-            score += 4;
+          if (healthcareStrongClinicalMotion(evBlob) || healthcareClinicianOrPatientFace(evBlob)) {
+            score += 6;
+          }
+          // healthcare-web197: corridor / building / blurry-container must lose intro
+          // scoring to clinical face / OR / MRI even when hasHealthcareEvidence (+4) fires.
+          if (isHealthcareEstablishingOpener(evBlob) && !healthcareIntroFaceEvidenceMatches(evBlob)) {
+            score -= 10;
           }
         }
         if (isIntro && topicIsHealthcare && /giphy\.com|coursera|capitol|protest/i.test(blob)) score -= 12;
@@ -938,8 +962,10 @@ export function buildEditTimeline(project, options = {}) {
         // so human faces beat faceless robot/OR stock that capped tip-best at 6.6.
         if (isIntro && topicIsHealthcare) {
           const evBlob = assetEvidenceBlob(a);
-          if (
-            /\b(worried|concerned|focused|examining|reviewing\s+(?:scan|results?)|at\s+workstation|patient\s+(?:face|close)|doctor\s+face|clinician\s+face)\b/i.test(evBlob)
+          if (healthcareClinicianOrPatientFace(evBlob)) {
+            score += 6;
+          } else if (
+            /\b(worried|concerned|focused|examining|reviewing\s+(?:scan|results?)|at\s+workstation)\b/i.test(evBlob)
             && /\b(doctor|radiologist|physician|surgeon|clinician|nurse|patient)\b/i.test(evBlob)
           ) {
             score += 5;

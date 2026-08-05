@@ -1296,12 +1296,14 @@ describe('healthcare keyless motion pack + volume chase', () => {
   it('leads with AI radiology / clinician+screen / OR face-first queries and DM/Vimeo host searches', () => {
     const plan = motionQueryPlan(HEALTHCARE_AI_TOPIC, false, { stockKeyed: false, faceSeek: true });
     // Human face leads must outrank corridor establishing shots (tip-best 6.6 stall).
-    expect(plan.queries.slice(0, 4)).toEqual(expect.arrayContaining([
-      'doctor face patient consultation close up',
+    // Short host-lead bases lead (web197); "close up" variants follow in the clinical pack.
+    expect(plan.queries.slice(0, 6)).toEqual(expect.arrayContaining([
+      'doctor face patient consultation',
       'worried patient face doctor hospital',
       'radiologist face reviewing mri screen',
     ]));
     expect(plan.queries).toEqual(expect.arrayContaining([
+      'doctor face patient consultation close up',
       'ai radiology doctor monitor screen',
       'clinician pointing at mri monitor',
       'surgical robot operating room',
@@ -1309,11 +1311,24 @@ describe('healthcare keyless motion pack + volume chase', () => {
       'ai radiology',
     ]));
     // Prefer Dailymotion host leads (Vimeo TLS fingerprint risk); keep Vimeo fallbacks.
+    // Short bases (≤5 content words) so site: variants clear isSafeStockMotionQuery;
+    // motionQueryPlan prepends every host-lead base into early queries (web197).
     expect(plan.webHostQueries[0]).toMatch(/doctor face patient consultation site:dailymotion\.com/i);
+    expect(plan.webHostQueries.some((q) => /surgeon face operating room site:dailymotion\.com/i.test(q))).toBe(true);
+    expect(plan.webHostQueries.some((q) => /clinician face at workstation monitors site:dailymotion\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:dailymotion\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /surgical\s+robot\s+site:dailymotion\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:vimeo\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /surgical\s+robot\s+site:vimeo\.com/i.test(q))).toBe(true);
+    // Every healthcareHostLead base must appear in the early query list so site:
+    // searches fire within queryCap (web197 thin ddg=8 / host-queries=4/23).
+    const queryCap = 34;
+    const capped = plan.queries.slice(0, queryCap).map((q) => q.toLowerCase());
+    const hostBases = plan.webHostQueries.map((hq) => hq.replace(/\s+site:(?:vimeo\.com|dailymotion\.com)\s*$/i, '').trim().toLowerCase());
+    const uniqueHostBases = [...new Set(hostBases)];
+    const fireable = uniqueHostBases.filter((b) => capped.includes(b));
+    expect(fireable.length).toBe(uniqueHostBases.length);
+    expect(plan.queries[0]).toMatch(/doctor face patient consultation/i);
     const faceIdx = plan.queries.findIndex((q) => /doctor face patient consultation/i.test(q));
     const corridorIdx = plan.queries.findIndex((q) => /hospital corridor hallway/i.test(q));
     expect(faceIdx).toBeGreaterThanOrEqual(0);

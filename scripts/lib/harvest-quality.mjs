@@ -1378,6 +1378,84 @@ export function housingIntroFaceEvidenceMatches(evidence = '') {
 }
 
 /**
+ * healthcare-web197: hospital-corridor walking-away / blurry-container openers
+ * soft-passed the timeline gate via bare "doctor"/"radiolog*" tokens and led the
+ * hook with no clinician face / OR / MRI in the first 3s. These establishing
+ * pads must never count as intro evidence unless a strong clinical escape is
+ * also present in the same evidence blob.
+ *
+ * @param {string} evidence
+ * @returns {boolean}
+ */
+export function isHealthcareEstablishingOpener(evidence = '') {
+  return /\b(?:hospital\s+corridor|hospital\s+hallway|corridor\s+(?:walking|empty|people|footage)|hallway\s+(?:walking|empty|footage)|walking\s+(?:away|down|through)\s+(?:(?:a|the|an)\s+)?(?:hospital\s+)?(?:corridor|hallway)|nurses?\s+walking\s+(?:(?:down|through|along)\s+)?(?:(?:a|the)\s+)?(?:corridor|hallway)|hospital\s+(?:building\s+)?exterior|hospital\s+establishing|establishing\s+shot|medical\s+(?:building|campus|center)\s+exterior|blurry\s+containers?|containers?\s+(?:ship|port|yard|blurry|out\s+of\s+focus|aerial)|shipping\s+containers?|cargo\s+containers?|blurry\s+(?:building|facility|exterior|warehouse)|walking[\s-]away\s+(?:(?:from\s+)?(?:camera|hospital|building))?)\b/i.test(
+    String(evidence || ''),
+  );
+}
+
+/**
+ * OR / MRI / surgical-robot / clinician+screen motion that may open a healthcare hook
+ * without an explicit face noun.
+ *
+ * @param {string} evidence
+ * @returns {boolean}
+ */
+export function healthcareStrongClinicalMotion(evidence = '') {
+  const text = String(evidence || '');
+  return /\b(?:surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|or)?|operating\s+room|or\s+(?:suite|table|lights?)|intraoperative|laparoscop\w*|mri\s+(?:scans?|scanners?|machines?|rooms?|performed|monitors?|screens?)|ct\s*(?:scans?|scanners?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing)|radiolog\w*\s+(?:ai|workstation|monitor|screen)|cnbc.{0,48}(?:surgical|robot|da\s*vinci|diagnos))\b/i.test(text)
+    || (
+      /\b(?:doctor|clinician|radiologist|physician|surgeon)\b/i.test(text)
+      && /\b(?:monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(text)
+    );
+}
+
+/**
+ * Doctor / surgeon / patient (or clinician / radiologist) face collocation for the
+ * healthcare intro gate. Bare "doctor" / "person face hospital" / corridor walking
+ * does NOT qualify (healthcare-web197).
+ *
+ * @param {string} evidence
+ * @returns {boolean}
+ */
+export function healthcareClinicianOrPatientFace(evidence = '') {
+  const text = String(evidence || '');
+  if (!/\b(?:doctor|surgeon|physician|clinician|radiologist|patient)s?\b/i.test(text)) {
+    return false;
+  }
+  if (!/\b(?:faces?|portrait|close[\s-]?up|expression)\b/i.test(text)
+    && !/\b(?:worried|concerned|focused|shocked)\s+(?:patient|doctor|clinician|surgeon|physician|radiologist)\b/i.test(text)) {
+    return false;
+  }
+  // Walking-away / back-of-head corridor frames are not readable faces.
+  if (/\b(?:walking\s+away|from\s+behind|back\s+of\s+(?:the\s+)?head|rear\s+view)\b/i.test(text)
+    && !/\b(?:faces?\s+close|close[\s-]?up\s+(?:face|patient|doctor)|portrait)\b/i.test(text)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Shared healthcare intro-face evidence — used by checkIntroFacePool and
+ * checkEditTimelineIntroFace / repairEditTimelineIntroFace so pool and timeline
+ * cannot drift (healthcare-web197 corridor / blurry-container soft-pass).
+ *
+ * Requires doctor/surgeon/patient(/clinician/radiologist) face OR OR/MRI/surgical-robot
+ * (or clinician+screen). Corridor / building exterior / blurry-container establishing
+ * never qualifies unless a strong clinical escape is also present.
+ *
+ * @param {string} evidence
+ * @returns {boolean}
+ */
+export function healthcareIntroFaceEvidenceMatches(evidence = '') {
+  const text = String(evidence || '');
+  if (!text.trim()) return false;
+  const strong = healthcareStrongClinicalMotion(text);
+  const face = healthcareClinicianOrPatientFace(text);
+  if (isHealthcareEstablishingOpener(text) && !strong && !face) return false;
+  return strong || face;
+}
+
+/**
  * Check whether the media pool contains at least one intro-eligible face/lived-in clip
  * for housing topics, or at least one clinical/face clip for healthcare topics.
  *
@@ -1448,28 +1526,17 @@ export function checkIntroFacePool(project) {
         /\b(expo\s+(?:floor|booth|hall|suit)|exhibition\s+hall|trade\s*show\b|\bhimss\b|conference\s+(?:floor|booth|expo)|suit\s+(?:walk|drop|enter|stroll)|business\s+suit\s+(?:walk|stroll|enter)|blurry\s+test\s*tube|test\s*tube\s+(?:close\s*up|b-?roll|stock|only)|petri\s+dish|corporate\s+presentation)\b/i.test(evidence)
         && !/\b(surgical\s*robot|operating\s+room|or\s+lights?|clinical\s+use|patient|surgeon)\b/i.test(evidence)
       ) return false;
-      // healthcare-web76: Science Nation is branding junk — never qualifies intro alone.
-      const clinicianScreenOrOr =
-        /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|or)|ultrasound\s+(?:demo|demonstration)|mri\s+(?:monitor|screen)|operating\s+room|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing))\b/i.test(evidence)
-        || (
-          /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(evidence)
-          && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(evidence)
-        );
-      if (clinicianScreenOrOr) return true;
-      // Readable face + healthcare topical (evidence only).
-      const hasReadableFace =
-        /\b(face|faces|portrait|close.?up|expression|reaction|worried|shocked)\b/i.test(evidence)
-        && /\b(person|people|woman|man|family|patient)\b/i.test(evidence);
-      const healthcareTopical =
-        /\b(doctor|physician|clinician|nurse|patient|hospital|clinic|mri|radiology|diagnosis|surgery|surgical|medical|healthcare)\b/i.test(evidence);
-      if (hasReadableFace && healthcareTopical) return true;
-      return false;
+      if (isScienceNationBrandingPad(evidence)) return false;
+      if (isHealthcareProductPitchIntro(evidence)) return false;
+      // healthcare-web197: shared with timeline gate — corridor/building/blurry-container
+      // out; require doctor/surgeon/patient face OR OR/MRI/surgical-robot.
+      return healthcareIntroFaceEvidenceMatches(evidence);
     });
     if (!hasIntroFace) {
       return {
         pass: false,
         reason:
-          'INTRO_FACE_FAIL: no healthcare clinical/face clip in pool — only news/graphics/talking-head openers found; re-harvest with face-first queries',
+          'INTRO_FACE_FAIL: no healthcare clinical/face clip in pool — only corridor/news/graphics/talking-head openers found; re-harvest with face-first queries',
       };
     }
   }
@@ -1518,7 +1585,9 @@ function assetPassesHealthcareTimelineIntro(asset) {
   if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
   if (isScienceNationBrandingPad(evidence)) return false;
   if (isHealthcareProductPitchIntro(evidence)) return false;
-  return /\b(surgical\s*robot|robot(?:ic)?\s*surger|da\s*vinci|operating\s+room|mri\s+(?:scan|machine|room|performed)|radiolog\w*|doctor|clinician|physician|surgeon|patient\s+(?:face|close)|worried\s+(?:doctor|clinician|patient)|focused\s+(?:doctor|surgeon|clinician)|cnbc.{0,48}(?:surgical|robot|da\s*vinci|diagnos)|science\s+nation.{0,60}(?:operating\s+room|surgical\s*robot|patient|surgeon))\b/i.test(evidence);
+  // healthcare-web197: bare "doctor" / corridor / blurry-container must NOT clear
+  // the first-3s gate — require clinician/patient face or OR/MRI/surgical-robot.
+  return healthcareIntroFaceEvidenceMatches(evidence);
 }
 
 function assetPassesHousingTimelineIntro(asset) {
@@ -1571,7 +1640,7 @@ export function checkEditTimelineIntroFace(project) {
       return {
         pass: false,
         reason:
-          'INTRO_FACE_FAIL_TIMELINE: first 3s has no clinical/face video — faceless robot or archive junk leads the hook; re-harvest face-first',
+          'INTRO_FACE_FAIL_TIMELINE: first 3s has no doctor/surgeon/patient face or OR/MRI/surgical-robot — corridor/building/blurry-container or archive junk leads the hook; re-harvest face-first',
       };
     }
   }

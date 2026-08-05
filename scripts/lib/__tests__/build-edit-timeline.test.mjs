@@ -490,26 +490,42 @@ describe('introFaceTier demotions continued', () => {
   it('caps generic healthcare Archive (clinical vocab, no OR) at introFaceTier 1 (body-only)', () => {
     // Hospital/clinical Archive without OR/surgical/radiologist keywords should be
     // body filler (tier 1), not intro material (tier 2 needed to clear the floor).
-    const genericArchiveCases = [
-      {
-        alt: 'hospital corridor patients nurses busy ward archive footage',
-        title: 'hospital corridor footage archive 1990s',
-        url: 'https://archive.org/download/hosp1990/hosp.mp4',
-        source: 'Archive.org live',
-        type: 'video',
-      },
-      {
-        alt: 'doctor reviewing patient medical records healthcare clinic',
-        title: 'medical records review clinic archive documentary',
-        url: 'https://archive.org/download/medrecords/doc.mp4',
-        source: 'Archive.org live',
-        type: 'video',
-      },
-    ];
-    for (const asset of genericArchiveCases) {
-      // Not an exhibition-hall reject, not a talking-head reject — just generic clinical.
-      expect(introFaceTier(asset, { healthcare: true })).toBe(1);
-    }
+    // healthcare-web197: bare corridor establishing is hard-rejected (-1), not tier 1.
+    expect(introFaceTier({
+      alt: 'hospital corridor patients nurses busy ward archive footage',
+      title: 'hospital corridor footage archive 1990s',
+      url: 'https://archive.org/download/hosp1990/hosp.mp4',
+      source: 'Archive.org live',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'doctor reviewing patient medical records healthcare clinic',
+      title: 'medical records review clinic archive documentary',
+      url: 'https://archive.org/download/medrecords/doc.mp4',
+      source: 'Archive.org live',
+      type: 'video',
+    }, { healthcare: true })).toBe(1);
+  });
+
+  it('hard-rejects healthcare corridor / blurry-container establishing as intro (-1)', () => {
+    expect(introFaceTier({
+      alt: 'hospital corridor walking away blurry hallway nurses',
+      title: 'hospital corridor walking away',
+      url: 'https://archive.org/download/corr/c.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'blurry shipping container yard aerial cargo containers',
+      title: 'blurry container port footage',
+      url: 'https://archive.org/download/cont/c.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'hospital building exterior establishing shot campus',
+      title: 'hospital exterior establishing',
+      url: 'https://archive.org/download/ext/e.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
   });
 
   it('gives healthcare Archive explainer/documentary tier 0 (talking-head gate)', () => {

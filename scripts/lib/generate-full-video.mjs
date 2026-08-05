@@ -2575,10 +2575,14 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
  */
 const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   // Face-first leads — tip-best 6.6 stalled on faceless robot/OR openers (web61/68).
-  'doctor face patient consultation close up',
+  // Short host-lead bases (no "close up") sit first so site:dailymotion/vimeo
+  // variants fire within queryCap (healthcare-web197 host-queries=4/23).
+  'doctor face patient consultation',
   'worried patient face doctor hospital',
   'radiologist face reviewing mri screen',
   'clinician face at workstation monitors',
+  'surgeon face operating room',
+  'doctor face patient consultation close up',
   'surgeon face operating room close up',
   'nurse patient bedside face',
   // Science Nation dropped (healthcare-web76): Archive packs stamp the NSF globe
@@ -2816,10 +2820,14 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   const healthcareHostLead = healthcare
     ? [
         // Face/OR leads first — tip-best 6.6 stalled on faceless robot + corporate slides.
+        // Keep ≤5 content words so `… site:dailymotion.com` stays ≤6 (isSafeStockMotionQuery).
+        // Bases are prepended into plan.queries below so site: searches fire within
+        // queryCap (healthcare-web197 host-queries=4/23 with thin ddg=8).
         'doctor face patient consultation site:dailymotion.com',
         'worried patient face doctor hospital site:dailymotion.com',
         'radiologist face reviewing mri screen site:dailymotion.com',
         'surgeon face operating room site:dailymotion.com',
+        'clinician face at workstation monitors site:dailymotion.com',
         'ai radiology site:dailymotion.com',
         'surgical robot site:dailymotion.com',
         'mri clinician monitor site:dailymotion.com',
@@ -2827,6 +2835,8 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
         'doctor mri monitor site:dailymotion.com',
         'ultrasound demonstration site:dailymotion.com',
         'doctor face patient consultation site:vimeo.com',
+        'worried patient face doctor hospital site:vimeo.com',
+        'surgeon face operating room site:vimeo.com',
         'ai radiology site:vimeo.com',
         'surgical robot site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
@@ -2893,6 +2903,31 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
     if (!key || seen.has(key)) continue;
     seen.add(key);
     queries.push(query);
+  }
+  // healthcare-web197: host-queries stalled at 4/23 because face host-lead bases
+  // ("… close up") sat behind Archive volume and Chrome-budget death. Ensure every
+  // healthcareHostLead base appears in the early query list so site:dailymotion /
+  // site:vimeo fire within queryCap before soft-pass.
+  if (healthcare && healthcareHostLead.length) {
+    const hostBases = [];
+    const hostSeen = new Set();
+    for (const hq of healthcareHostLead) {
+      const base = webMotionHostQueryBase(hq);
+      const key = base.toLowerCase();
+      if (!key || hostSeen.has(key) || !isSafeStockMotionQuery(base)) continue;
+      hostSeen.add(key);
+      hostBases.push(base);
+    }
+    const withoutHost = queries.filter((q) => !hostSeen.has(q.trim().toLowerCase()));
+    const merged = [...hostBases, ...withoutHost];
+    queries.length = 0;
+    const mergeSeen = new Set();
+    for (const q of merged) {
+      const key = q.trim().toLowerCase();
+      if (!key || mergeSeen.has(key)) continue;
+      mergeSeen.add(key);
+      queries.push(q);
+    }
   }
   return {
     mode: keyed ? 'keyed' : 'keyless',
@@ -3415,7 +3450,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         ? fetchArchiveVideoResults(devServer, q, { topicBlob })
         : Promise.resolve([]);
     const scopedWebQueries = !suffix && page === 1
-      ? plan.webHostQueries.filter((query) => webMotionHostQueryBase(query) === q)
+      ? plan.webHostQueries.filter((query) => (
+        webMotionHostQueryBase(query).toLowerCase() === String(q || '').trim().toLowerCase()
+      ))
       : [];
     const webSearchQueries = !suffix && devServer && page === 1
       ? [...scopedWebQueries, q]

@@ -13,6 +13,8 @@ import {
   hasHealthcareEvidence,
   hasHousingEvidence,
   housingIntroFaceEvidenceMatches,
+  healthcareIntroFaceEvidenceMatches,
+  isHealthcareEstablishingOpener,
   countHealthcareStrongVideos,
   healthcareSoftPassMotionFailureReason,
   healthcareOffTopicBrollReason,
@@ -2561,6 +2563,99 @@ describe('checkEditTimelineIntroFace — healthcare timeline gate', () => {
     const result = checkEditTimelineIntroFace(project);
     expect(result.pass).toBe(false);
     expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+
+  // healthcare-web197: soft-pass then WATCH raw 4.2 — corridor / blurry-container openers
+  // with bare "doctor" metadata must fail the first-3s gate.
+  it('fails hospital corridor walking-away opener (web197)', () => {
+    const project = makeProject([
+      makeAsset('hospital corridor walking away nurses hallway footage'),
+    ]);
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+
+  it('fails blurry container opener (web197)', () => {
+    const project = makeProject([
+      makeAsset('blurry shipping container yard cargo containers aerial'),
+    ]);
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+
+  it('fails bare doctor walking corridor without face/OR/MRI (web197)', () => {
+    const project = makeProject([
+      makeAsset('doctor walking down hospital corridor hallway'),
+    ]);
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+
+  it('passes doctor face consultation in first 3s (web197)', () => {
+    const project = makeProject([
+      makeAsset('doctor face patient consultation close up hospital'),
+    ]);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+
+  it('passes MRI scanner room clinical opener (web197)', () => {
+    const project = makeProject([
+      makeAsset('mri scanner room clinical hospital radiology'),
+    ]);
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+  });
+
+  it('repair swaps corridor opener for doctor-face clip in pool (web197)', () => {
+    const corridor = {
+      id: 'corr1',
+      type: 'video',
+      title: 'hospital corridor walking away nurses hallway',
+      alt: 'hospital corridor walking away',
+      url: 'https://archive.org/corr.mp4',
+    };
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor face patient consultation',
+      url: 'https://archive.org/face.mp4',
+    };
+    const project = {
+      topic: 'Why AI will change healthcare forever',
+      script: [{ id: 's1', title: 'Hook', duration: 18 }],
+      media: [corridor, face],
+      editTimeline: [
+        { segmentId: 's1', startSec: 0, endSec: 1.5, assetId: 'corr1' },
+        { segmentId: 's1', startSec: 1.5, endSec: 3.0, assetId: 'corr1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('face1');
+  });
+});
+
+describe('healthcareIntroFaceEvidenceMatches — web197 corridor/face contract', () => {
+  it('rejects corridor / building / blurry-container establishing', () => {
+    expect(isHealthcareEstablishingOpener('hospital corridor walking away nurses')).toBe(true);
+    expect(isHealthcareEstablishingOpener('blurry shipping container yard')).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches('hospital corridor walking away nurses')).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches('doctor walking down hospital corridor')).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches('blurry container port aerial')).toBe(false);
+  });
+
+  it('accepts doctor/surgeon/patient face and OR/MRI/robot', () => {
+    expect(healthcareIntroFaceEvidenceMatches('doctor face patient consultation close up')).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches('worried patient face doctor hospital')).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches('surgeon face operating room close up')).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches('surgical robot operating room da vinci')).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches('mri scanner room clinical hospital')).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches('radiologist reviewing mri scan workstation monitor')).toBe(true);
   });
 });
 

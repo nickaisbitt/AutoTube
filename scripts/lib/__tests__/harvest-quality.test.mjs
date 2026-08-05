@@ -4040,3 +4040,159 @@ describe('healthcare-web202 faceless robot product + pad junk', () => {
     expect(project.editTimeline[0].startSec).toBe(0);
   });
 });
+
+
+describe('housing-web161 mid-video junk after West Sussex face opener', () => {
+  const ctx = HOUSING_TOPIC;
+
+  it('rejects boy-tears / Heartsome / Occupy / ABC15 / LLG / DeMaio pads', () => {
+    for (const title of [
+      'boy breaks into tears after sister returns home heartsome heartsome is a channel',
+      'occupy wall street amazing people reoccupying their foreclosed home',
+      'facing eviction over past due rent what you should do are you facing eviction over past due rent let joe know',
+      '1 29 30 26 social murder political theater disability how is anyone expected to survive llg',
+      'san diego politics carl demaio a jerk at work a possible candidate to takeover dirty old san diego',
+    ]) {
+      expect(isHousingIntroJunkPad(title)).toBe(true);
+      expect(housingOffTopicBrollReason(title, ctx)).toMatch(/housing off-topic/);
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(housingIntroRepairRank({ title, type: 'video', url: 'https://example.com/j.mp4' })).toBe(0);
+    }
+  });
+
+  it('keeps West Sussex / SF tenants / Dale Farm / Richmond eviction documentary', () => {
+    for (const title of [
+      'west sussex man faces an eviction order from his littlehampton home george depass',
+      '670 low income tenants being evicted in san francisco',
+      'violent eviction looms traveller families the dale farm community faces what would be the largest eviction',
+      'burden of richmond evictions weighs heaviest in black neighborhoods retro report',
+    ]) {
+      expect(isHousingIntroJunkPad(title)).toBe(false);
+      expect(housingOffTopicBrollReason(title, ctx)).toBe('');
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(true);
+      expect(housingIntroRepairRank({ title, type: 'video', url: 'https://example.com/ok.mp4' })).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('repair keeps West Sussex at 0 and never promotes Occupy/boy-tears', () => {
+    const west = {
+      id: 'west1', type: 'video', url: 'https://example.com/west.mp4',
+      title: 'west sussex man faces an eviction order from his littlehampton home',
+      alt: 'west sussex man faces an eviction order',
+    };
+    const tears = {
+      id: 'tears1', type: 'video', url: 'https://example.com/tears.mp4',
+      title: 'boy breaks into tears after sister returns home heartsome',
+      alt: 'boy breaks into tears heartsome',
+    };
+    const occupy = {
+      id: 'ows1', type: 'video', url: 'https://example.com/ows.mp4',
+      title: 'occupy wall street amazing people reoccupying their foreclosed home',
+      alt: 'occupy wall street reoccupying foreclosed home',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [west, tears, occupy],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'west1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'tears1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 2.0, assetId: 'ows1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+    expect(housingIntroRepairRank(west)).toBeGreaterThan(housingIntroRepairRank(tears));
+    expect(housingIntroRepairRank(occupy)).toBe(0);
+    repairEditTimelineIntroFace(project);
+    expect(project.editTimeline[0].assetId).toBe('west1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+});
+
+describe('healthcare-web203 remaining pads after a9892eb French/Vox fix', () => {
+  it('rejects Gaza-strip / fiber-optic / pezeshkian / MRI-blow-mind / laparoscopyhospital pads', () => {
+    for (const title of [
+      'palestine hospitals plagued by chronic shotage of medical equipment hospitals in the gaza strip',
+      'doctors work in the dark as hospital in gaza saving lives in the dark courageous doctors of gaza',
+      'fiber optic temperature sensors for medical industry medical technology advances',
+      'iran president pezeshkian performs surgery amid war with u s and israel',
+      'life through an mri will blow your mind mri s or magnetic resonance imaging',
+      'journey of innovation insights from my laparoscopic and robotic surgery training with dr mishra https www laparoscopyhospital com',
+      'smile featurette behind the scenes after witnessing a bizarre traumatic incident',
+      '7 best mobile medical apps for doctors and patients webmd',
+    ]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(true);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toMatch(/healthcare/);
+      expect(healthcareIntroRepairRank({ title, type: 'video', url: 'https://example.com/j.mp4' })).toBe(0);
+    }
+  });
+
+  it('keeps live surgical robot / surgery robot / clinician consultation; prefers face over OR', () => {
+    const ulster = {
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      type: 'video',
+      url: 'https://example.com/ulster.mp4',
+    };
+    const shropshire = {
+      title: 'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      type: 'video',
+      url: 'https://example.com/shrop.mp4',
+    };
+    const face = {
+      title: 'doctor face patient consultation close up hospital',
+      type: 'video',
+      url: 'https://example.com/face.mp4',
+    };
+    expect(isHealthcareIntroPadJunk(ulster.title)).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches(ulster.title)).toBe(true);
+    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+
+    expect(isHealthcareIntroPadJunk(shropshire.title)).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches(shropshire.title)).toBe(true);
+    expect(healthcareIntroRepairRank(shropshire)).toBeGreaterThanOrEqual(1);
+
+    expect(healthcareIntroRepairRank(face)).toBe(4);
+    expect(healthcareIntroRepairRank(face)).toBeGreaterThan(healthcareIntroRepairRank(ulster));
+  });
+
+  it('FAILS when French COVID helicopter pad leads and promotes live OR / face', () => {
+    const french = {
+      id: 'fr1',
+      type: 'video',
+      title: 'h pital comment s organiser face l afflux de patients face l afflux croissant de patients en situation de d tresse en raison du covid 19',
+      alt: 'organiser face l afflux de patients covid 19',
+      url: 'https://example.com/fr.mp4',
+    };
+    const robot = {
+      id: 'robot1',
+      type: 'video',
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      alt: 'surgical robot ulster hospital theatres',
+      url: 'https://example.com/robot.mp4',
+    };
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor face patient consultation',
+      url: 'https://example.com/face.mp4',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [french, robot, face],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'fr1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'robot1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 2.0, assetId: 'face1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('face1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+});

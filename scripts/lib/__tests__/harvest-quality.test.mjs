@@ -3948,6 +3948,7 @@ describe('healthcare-web202 faceless robot product + pad junk', () => {
     expect(healthcareClinicianOrPatientFace(union)).toBe(false);
     expect(isHealthcareIntroPadJunk(union)).toBe(true);
     expect(healthcareIntroFaceEvidenceMatches(union)).toBe(false);
+    expect(healthcareOffTopicBrollReason(union, HEALTHCARE_TOPIC)).toMatch(/web204|off-topic intro pad/i);
     expect(healthcareIntroFaceEvidenceMatches('robots in the medical field robots have been used to assist')).toBe(false);
     // Live OR / surgery robot still clears; worried patient face still clears.
     expect(
@@ -4211,6 +4212,171 @@ describe('healthcare-web203 remaining pads after a9892eb French/Vox fix', () => 
     expect(repaired.repaired).toBe(true);
     expect(repaired.pass).toBe(true);
     expect(project.editTimeline[0].assetId).toBe('face1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+});
+
+describe('healthcare-web204 doctors-union / industrial-relations / robots-explainer', () => {
+  const UNION =
+    'doctors union raises behavioural concerns about nurses conduct at sa health service '
+    + 'south australia s doctors union says its members are concerned patient care is being jeopardised '
+    + 'at the gawler health service the union has raised a litany';
+  const ROBOTS_EXPLAINER =
+    'robots in the medical field robots have been used to assist in medical procedures for quite some time '
+    + 'for example the davinci surgical robot from the us is used to remove tumors from patients with prostate cancer';
+  const MISHRA =
+    'journey of innovation insights from my laparoscopic and robotic surgery training with dr mishra '
+    + 'https www laparoscopyhospital com';
+
+  it('hard-rejects union / nurses-conduct / industrial-relations / robots-explainer / mishra from harvest+intro', () => {
+    for (const title of [
+      UNION,
+      'behavioural concerns about nurses conduct sa health service',
+      'behavioral concerns about nurses conduct hospital staff',
+      'industrial relations dispute nurses strike at sa health',
+      'doctors industrial action over staffing south australia',
+      ROBOTS_EXPLAINER,
+      MISHRA,
+    ]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(true);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(healthcareIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/j.mp4',
+      })).toBe(0);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toMatch(/healthcare/);
+    }
+    // The web204 loophole: "concerned patient care" must NOT count as a face.
+    expect(healthcareClinicianOrPatientFace(UNION)).toBe(false);
+  });
+
+  it('keeps Ulster/Shropshire live OR and consultation face; face outranks OR', () => {
+    const ulster = {
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      type: 'video',
+      url: 'https://example.com/ulster.mp4',
+    };
+    const shropshire = {
+      title: 'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      type: 'video',
+      url: 'https://example.com/shrop.mp4',
+    };
+    const face = {
+      title: 'doctor face patient consultation close up hospital',
+      type: 'video',
+      url: 'https://example.com/face.mp4',
+    };
+    expect(isHealthcareIntroPadJunk(ulster.title)).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches(ulster.title)).toBe(true);
+    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+    expect(isHealthcareIntroPadJunk(shropshire.title)).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches(shropshire.title)).toBe(true);
+    expect(healthcareIntroRepairRank(shropshire)).toBeGreaterThanOrEqual(1);
+    expect(healthcareIntroRepairRank(face)).toBe(4);
+    expect(healthcareIntroRepairRank(face)).toBeGreaterThan(healthcareIntroRepairRank(ulster));
+    // concerned + patient + face noun still clears (real portrait).
+    expect(
+      healthcareIntroFaceEvidenceMatches('concerned patient face close up hospital'),
+    ).toBe(true);
+  });
+
+  it('FAILS when union leads at 0; repair promotes consultation face over Ulster OR', () => {
+    const union = {
+      id: 'union1',
+      type: 'video',
+      title: UNION,
+      alt: UNION,
+      url: 'https://example.com/union.mp4',
+    };
+    const mishra = {
+      id: 'mishra1',
+      type: 'video',
+      title: MISHRA,
+      alt: MISHRA,
+      url: 'https://example.com/mishra.mp4',
+    };
+    const robots = {
+      id: 'robots1',
+      type: 'video',
+      title: ROBOTS_EXPLAINER,
+      alt: ROBOTS_EXPLAINER,
+      url: 'https://example.com/robots.mp4',
+    };
+    const ulster = {
+      id: 'ulster1',
+      type: 'video',
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      alt: 'surgical robot ulster hospital theatres',
+      url: 'https://example.com/ulster.mp4',
+    };
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor face patient consultation',
+      url: 'https://example.com/face.mp4',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [union, mishra, robots, ulster, face],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'union1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'mishra1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 1.95, assetId: 'ulster1' },
+        { segmentId: 'seg1', startSec: 1.95, endSec: 2.6, assetId: 'robots1' },
+      ],
+    };
+    // Pre-fix: concerned patient care → face rank 3 → soft-pass kept union@0.
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    expect(checkEditTimelineIntroFace(project).reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+    expect(healthcareIntroRepairRank(union)).toBe(0);
+    expect(healthcareIntroRepairRank(robots)).toBe(0);
+    expect(healthcareIntroRepairRank(face)).toBe(4);
+    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('face1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+
+  it('promotes Ulster live OR to 0 when pool has no consultation face', () => {
+    const union = {
+      id: 'union1',
+      type: 'video',
+      title: UNION,
+      alt: UNION,
+      url: 'https://example.com/union.mp4',
+    };
+    const ulster = {
+      id: 'ulster1',
+      type: 'video',
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      alt: 'surgical robot ulster hospital theatres',
+      url: 'https://example.com/ulster.mp4',
+    };
+    const shropshire = {
+      id: 'shrop1',
+      type: 'video',
+      title: 'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      alt: 'shropshire hospital surgery robot',
+      url: 'https://example.com/shrop.mp4',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [union, ulster, shropshire],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'union1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'ulster1' },
+        { segmentId: 'seg1', startSec: 2.6, endSec: 3.25, assetId: 'shrop1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(['ulster1', 'shrop1']).toContain(project.editTimeline[0].assetId);
     expect(project.editTimeline[0].startSec).toBe(0);
   });
 });

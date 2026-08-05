@@ -1,6 +1,6 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-05T15:18Z** — tip `2ea80de` (HC corridor opener reject). Housing **7.0**/upload **NO**; healthcare **6.6**/upload **NO**. web198 EXIT0 on tip (watches pending/in log). Floors unchanged. Loop continuing.
+Last updated: **2026-08-05T15:44Z** — tip `9baccc7`. Housing **7.0**/NO; healthcare **6.6**/NO. web199 correctly **INTRO_FACE_FAIL** (corridor pool empty of face/OR) — gate honest, need face-query yield. Floors unchanged. Loop continuing.
 
 **housing-web152 root cause found + fixed (code + VM dep):** ddg=82 / archive=30 / clip-pool=108 / injected=18/18 (DM prefer after `d15a0ad`) but `render.log` showed every clip "fell back to alternate segment asset" between two hashes — watcher correctly flagged "same two clips on a loop" (SWNS woman + Toledo eviction still). Root: yt-dlp Dailymotion extractor requires curl_cffi impersonation; without it soft-probe/download 401. Also three `cdndirector…/x8fmvll.m3u8?sec=…` CDN tokens looked unique while being one video. Shipped: (1) pin `curl_cffi==0.13.0` in `build:railway`/`nixpacks` (0.16 is unsupported by yt-dlp); (2) DM soft-probe circuit at fetch/inject/keep (`openDailymotionFetchCircuit`, same shape as Vimeo) so a dead DM host falls back to Archive instead of trusting 18 doomed proxies; (3) `dailymotionVideoIdFromUrl` / `motionUrlKey` dedupe; (4) hard-reject Gwyneth/ski-crash celebrity pads. **≥7 floors unchanged.** No new score claimed until fresh watch. **Housing remains open.**
 

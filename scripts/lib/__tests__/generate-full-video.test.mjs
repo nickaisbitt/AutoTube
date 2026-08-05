@@ -17,6 +17,7 @@ import {
   isSafeStockMotionQuery,
   isYouTubeMotionCandidate,
   isTikTokMotionCandidate,
+  isVimeoMotionCandidate,
   isVisionBudgetSoft,
   hasYtDlpCookies,
   unreliableWebProxyInjectReason,
@@ -713,6 +714,25 @@ describe('non-YouTube motion planning and ranking', () => {
       if (prevCookies === undefined) delete process.env.YTDLP_COOKIES;
       else process.env.YTDLP_COOKIES = prevCookies;
     }
+  });
+
+  it('honors a Vimeo circuit breaker once the soft-probe fails', () => {
+    // housing-web85: 18/18 injected Vimeo proxy clips were trusted with no probe,
+    // every one failed yt-dlp ("blocked due to its TLS fingerprint") at render time,
+    // and every slot silently reused a thumbnail still (raw tip-best 7.0, upload-ready
+    // NO — LLM-detected two-image slideshow). Vimeo has no cookie requirement, so it
+    // is not skipped up front like YouTube/TikTok — it opens the same circuit-breaker
+    // once a soft-probe actually fails.
+    const vimeo = {
+      url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://vimeo.com/1051353744')}`,
+      sourceUrl: 'https://vimeo.com/1051353744',
+    };
+    expect(isVimeoMotionCandidate(vimeo)).toBe(true);
+    expect(unreliableWebProxyInjectReason(vimeo)).toBe(null);
+    expect(unreliableWebProxyInjectReason(vimeo, { vimeoBlocked: false })).toBe(null);
+    expect(unreliableWebProxyInjectReason(vimeo, { vimeoBlocked: true })).toBe('vimeo-circuit-open');
+    expect(unreliableWebProxyInjectReason({ url: 'https://archive.org/download/a/a.mp4' }, { vimeoBlocked: true }))
+      .toBe(null);
   });
 
   it('restores Archive injects marked motionRelevancePassed after relevance strips them', () => {

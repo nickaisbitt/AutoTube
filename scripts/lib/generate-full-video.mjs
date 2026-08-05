@@ -412,6 +412,13 @@ export function isTikTokMotionCandidate(candidate = {}) {
   });
 }
 
+export function isVimeoMotionCandidate(candidate = {}) {
+  return motionCandidateUrls(candidate).some((url) => {
+    const host = motionUrlHostname(url);
+    return host === 'vimeo.com' || host.endsWith('.vimeo.com');
+  });
+}
+
 /** True when yt-dlp has a cookie jar / browser cookies for bot-gated hosts. */
 export function hasYtDlpCookies() {
   return Boolean(
@@ -427,7 +434,7 @@ export function hasYtDlpCookies() {
  * volume comes from Archive/direct/Vimeo/DM instead of doomed YouTube/TikTok.
  *
  * @param {object} candidate
- * @param {{ tiktokBlocked?: boolean }} [gate]
+ * @param {{ tiktokBlocked?: boolean, vimeoBlocked?: boolean }} [gate]
  * @returns {string|null} reason when the candidate should not be injected
  */
 export function unreliableWebProxyInjectReason(candidate = {}, gate = {}) {
@@ -442,6 +449,14 @@ export function unreliableWebProxyInjectReason(candidate = {}, gate = {}) {
   }
   if (isTikTokMotionCandidate(candidate) && gate.tiktokBlocked) {
     return 'tiktok-circuit-open';
+  }
+  // housing-web85: 18/18 injected Vimeo proxy clips failed yt-dlp ("blocked due to its
+  // TLS fingerprint") and every slot silently fell back to a reused thumbnail still,
+  // rendering a 2–3-image slideshow while harvest-quality reported videoCount 5–7/segment
+  // (raw tip-best 7.0, upload-ready NO). Once the circuit opens, treat Vimeo exactly like
+  // a blocked TikTok host instead of trusting every remaining proxy clip blind.
+  if (isVimeoMotionCandidate(candidate) && gate.vimeoBlocked) {
+    return 'vimeo-circuit-open';
   }
   return null;
 }
@@ -3641,8 +3656,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     { topicBlob },
   );
   let vi = 0;
-  /** @type {{ tiktokBlocked: boolean }} */
-  const proxyGate = { tiktokBlocked: false };
+  /** @type {{ tiktokBlocked: boolean, vimeoBlocked: boolean }} */
+  const proxyGate = { tiktokBlocked: false, vimeoBlocked: false };
   const injectClip = async (seg, clip, tag) => {
     const key = motionUrlKey(clip.url);
     if (!key || used.has(key)) return false;
@@ -3679,6 +3694,23 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         proxyGate.tiktokBlocked = true;
         report.videoTopUpFailed = report.videoTopUpFailed || [];
         report.videoTopUpFailed.push({ url: clip.url, reason: 'tiktok-soft-probe-failed' });
+        report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
+        return false;
+      }
+    }
+    // Soft-probe Vimeo the same way: housing-web85 injected 18/18 Vimeo proxy clips
+    // trusted with no probe, every one failed yt-dlp's TLS-fingerprint check at
+    // render time, and every slot silently reused a thumbnail still instead
+    // (raw 7.0, upload-ready NO). Once the first Vimeo candidate fails, open the
+    // circuit so the rest of the run sources motion from Archive/direct/DM instead
+    // of trusting more doomed Vimeo proxy clips.
+    if (isVimeoMotionCandidate(clip) && isProxiedClipUrl(clip.url) && !proxyGate.vimeoBlocked) {
+      const target = proxiedClipTarget(clip.url) || clip.sourceUrl || '';
+      const alive = softProbeYtDlpUrl(target);
+      if (!alive) {
+        proxyGate.vimeoBlocked = true;
+        report.videoTopUpFailed = report.videoTopUpFailed || [];
+        report.videoTopUpFailed.push({ url: clip.url, reason: 'vimeo-soft-probe-failed' });
         report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
         return false;
       }
@@ -3876,7 +3908,7 @@ function isJunkHarvestUrl(url) {
   );
 }
 
-async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode = false } = {}) {
+async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode = false, gate = {} } = {}) {
   const downloadUrl = resolveVideoDownloadUrl(asset, devServer);
   const proxied = isProxiedClipUrl(downloadUrl) || isProxiedClipUrl(asset.url || '');
   const direct = isDirectVideoUrl(asset.url) && !proxied;
@@ -3889,10 +3921,29 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
     url: downloadUrl || asset.url,
     sourceUrl: asset.sourceUrl || '',
   };
-  const unreliable = unreliableWebProxyInjectReason(proxyCandidate);
+  const unreliable = unreliableWebProxyInjectReason(proxyCandidate, gate);
   if (unreliable) {
     report.dropped.push({ url: asset.url, reason: unreliable });
     return false;
+  }
+
+  // housing-web85: keep-path Vimeo was trusted with no probe here while the inject
+  // (top-up) path only got the same fix — the exact "keep must stay consistent with
+  // inject" gap the comment above `resolveInjectClipProbe` warned about. Soft-probe
+  // the first Vimeo proxy clip so a fully TLS-fingerprint-blocked run doesn't keep
+  // trusting doomed clips that render as reused thumbnail stills.
+  if (isVimeoMotionCandidate(proxyCandidate) && proxied) {
+    if (gate.vimeoBlocked) {
+      report.dropped.push({ url: asset.url, reason: 'vimeo-circuit-open' });
+      return false;
+    }
+    const target = proxiedClipTarget(downloadUrl) || asset.sourceUrl || asset.url || '';
+    const alive = softProbeYtDlpUrl(target);
+    if (!alive) {
+      gate.vimeoBlocked = true;
+      report.dropped.push({ url: asset.url, reason: 'vimeo-soft-probe-failed' });
+      return false;
+    }
   }
 
   if (proxied) {
@@ -3957,6 +4008,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const sanitized = [];
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
   const qualityCache = new Map();
+  /** @type {{ vimeoBlocked: boolean }} */
+  const keepGate = { vimeoBlocked: false };
 
   for (const asset of project.media) {
     // Videos: junk-check clip URL only (thumbs are often placeholders).
@@ -3979,15 +4032,15 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       continue;
     }
 
-    if (await tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode })) {
+    if (await tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode, gate: keepGate })) {
       continue;
     }
 
-    // Failed YouTube/TikTok must not launder into ytimg Ken Burns B-roll.
+    // Failed YouTube/TikTok/Vimeo must not launder into ytimg Ken Burns B-roll.
     const keepFailReason = unreliableWebProxyInjectReason({
       url: asset.url,
       sourceUrl: asset.sourceUrl || '',
-    });
+    }, keepGate);
     if (keepFailReason) {
       // Already recorded in tryKeepVideoAsset when proxied; avoid duplicate noise.
       if (!report.dropped.some((d) => d.url === asset.url && d.reason === keepFailReason)) {

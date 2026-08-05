@@ -1635,7 +1635,7 @@ export function isHealthcareIntroPadJunk(evidence = '') {
   // healthcare-web205: Martha's Rule news packages are political/patient-safety
   // talking-heads — never intro evidence unless the same blob is genuine live
   // OR / surgical-robot / MRI clinical motion.
-  if (/\bmartha'?s?\s+rule\b/i.test(text) && !healthcareStrongClinicalMotion(text)) {
+  if (/\bmartha(?:'?s|\s+s)?\s+rule\b/i.test(text) && !healthcareStrongClinicalMotion(text)) {
     return true;
   }
   // healthcare-web203: French hospital "face l'afflux de patients" titles (no

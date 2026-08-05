@@ -1483,14 +1483,52 @@ describe('healthcare keyless soft-pass-motion (web + Archive)', () => {
     expect(media.some((a) => /vimeo\.com/i.test(`${a.url} ${a.sourceUrl || ''}`))).toBe(false);
   });
 
-  it('fails thin keyless healthcare pools below the motion floor', () => {
+  it('keyless healthcare mirrors housing floor 4 (not 6) once a clinical intro clip qualifies', () => {
+    // Post-Vimeo-purge (openVimeoFetchCircuit), a thin-but-valid Archive+Dailymotion
+    // pool must clear the same floor housing does — never re-litigate the raised
+    // 6-video airline-style floor once the intro-face + junk/strong-evidence gates
+    // above already vetted the pool.
     const segments = makeSegments(3);
-    const media = Array.from({ length: 4 }, (_, i) => clinicalWebClip({
-      segmentId: segments[i % 3].id,
-      title: 'Hospital corridor with nurses walking',
-      query: 'hospital corridor',
-      idx: i,
-    }));
+    const media = [
+      clinicalWebClip({
+        segmentId: segments[0].id,
+        title: 'Doctor reviewing MRI scan monitors',
+        query: 'doctor mri monitor',
+        idx: 0,
+      }),
+      ...Array.from({ length: 3 }, (_, i) => clinicalWebClip({
+        segmentId: segments[i % 3].id,
+        title: 'Hospital corridor with nurses walking',
+        query: 'hospital corridor',
+        idx: i + 1,
+      })),
+    ];
+    const project = { topic: HEALTHCARE_TOPIC, title: 'AI Healthcare', script: segments, media };
+    const result = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      archiveLiveFetched: 10,
+      videoTopUp: [],
+    }, project);
+    expect(result.pass).toBe(true);
+    expect(result.reason).toMatch(/^soft-pass-motion-healthcare\(/);
+  });
+
+  it('fails thin keyless healthcare pools below the housing-mirrored floor of 4', () => {
+    const segments = makeSegments(3);
+    const media = [
+      clinicalWebClip({
+        segmentId: segments[0].id,
+        title: 'Doctor reviewing MRI scan monitors',
+        query: 'doctor mri monitor',
+        idx: 0,
+      }),
+      ...Array.from({ length: 2 }, (_, i) => clinicalWebClip({
+        segmentId: segments[i % 3].id,
+        title: 'Hospital corridor with nurses walking',
+        query: 'hospital corridor',
+        idx: i + 1,
+      })),
+    ];
     const project = { topic: HEALTHCARE_TOPIC, title: 'AI Healthcare', script: segments, media };
     const result = evaluateHarvestVolumeWithSoftPass({
       volumePass: false,
@@ -1498,7 +1536,7 @@ describe('healthcare keyless soft-pass-motion (web + Archive)', () => {
       videoTopUp: [],
     }, project);
     expect(result.pass).toBe(false);
-    expect(result.reason).toMatch(/soft-pass-motion-healthcare-thin\(4\/6/);
+    expect(result.reason).toMatch(/soft-pass-motion-healthcare-thin\(3\/4/);
   });
 
   it('keeps clinical hospital titles through relevance on AI healthcare topics', () => {

@@ -1784,9 +1784,14 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     };
   }
 
-  // Healthcare (hospital / AI-medicine / clinical) — keyless web+Archive path, parallel
-  // to airline. Discounted floor only when a clinical-evidence majority earns it.
+  // Healthcare (hospital / AI-medicine / clinical) — keyless web+Archive path, mirrored
+  // on housing's structure: fail-closed on intro face first, then the shared junk-ratio
+  // + topical-strong-video-floor gate, then a keyless thin-pool floor of 4 (not 6) so a
+  // thin-but-valid Archive+Dailymotion pool clears post-Vimeo-purge the same way housing
+  // does, without re-trusting Vimeo or loosening the junk/strong-evidence gates above.
   if (isHealthcareTopic(topicBlob)) {
+    const introFace = checkIntroFacePool(project);
+    if (!introFace.pass) return introFace;
     const healthcareSoftFail = healthcareSoftPassMotionFailureReason(project, {
       genericJunkRatio,
       genericJunkVideos,
@@ -1796,33 +1801,16 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     if (healthcareSoftFail) {
       return { pass: false, reason: healthcareSoftFail };
     }
-    const stockKeyHealthcareVideos = Math.max(12, segN * 2);
     const minHealthcareVideos = hasStockKeys
-      ? stockKeyHealthcareVideos
-      : Math.max(HEALTHCARE_KEYLESS_SOFT_PASS_MIN_VIDEOS, segN);
+      ? Math.max(12, segN * 2)
+      : HEALTHCARE_KEYLESS_SOFT_PASS_MIN_VIDEOS;
     if (videoCount < minHealthcareVideos) {
       return {
         pass: false,
         reason: `soft-pass-motion-healthcare-thin(${videoCount}/${minHealthcareVideos} videos)`,
       };
     }
-    if (!hasStockKeys && videoCount < stockKeyHealthcareVideos) {
-      const strongVideos = countHealthcareStrongVideos(uniqueVideos, topicBlob);
-      const strongNeeded = Math.max(
-        HEALTHCARE_SOFT_PASS_MIN_STRONG_VIDEOS,
-        Math.ceil(videoCount / 2),
-      );
-      if (strongVideos < strongNeeded) {
-        return {
-          pass: false,
-          reason: `soft-pass-motion-healthcare-keyless-evidence(${strongVideos}/${strongNeeded} videos)`,
-        };
-      }
-    }
     if (stockFetched > 0 || topUp >= segN || liveMotionPresent) {
-      // Require at least one intro-tier clinical/face clip before passing healthcare.
-      const introFace = checkIntroFacePool(project);
-      if (!introFace.pass) return introFace;
       return { pass: true, reason: `soft-pass-motion-healthcare(${videoCount}v/${segN}segs)` };
     }
     return {
@@ -1946,8 +1934,15 @@ const AIRLINE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
 const AIRLINE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
 
 const HEALTHCARE_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
-/** Keyless healthcare runs fill from web+Archive; floor matches airline keyless. */
-const HEALTHCARE_KEYLESS_SOFT_PASS_MIN_VIDEOS = 6;
+/**
+ * Keyless healthcare runs fill from web+Archive, same as housing once the Vimeo
+ * fetch-time circuit purges doomed proxy clips (openVimeoFetchCircuit). The floor
+ * mirrors housing's keyless floor (4) rather than airline's (6) — after intro-face
+ * + junk-ratio + strong-video-floor(1) already ran in healthcareSoftPassMotionFailureReason,
+ * a thin-but-valid Archive+Dailymotion pool should clear the same way housing does,
+ * instead of stalling on soft-pass-motion-healthcare-thin(3-5/6) post-purge.
+ */
+const HEALTHCARE_KEYLESS_SOFT_PASS_MIN_VIDEOS = 4;
 const HEALTHCARE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
 const HEALTHCARE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
 

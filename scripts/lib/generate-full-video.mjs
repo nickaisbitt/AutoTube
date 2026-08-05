@@ -1924,12 +1924,20 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
   if (/\b(black and white|b&w|monochrome|grayscale)\b/i.test(blob) && preferBright) {
     return true;
   }
+  // Lifestyle/storefront junk is judged on title/alt/query only — never on
+  // sourceUrl/url. A bare `dailymotion` token here matched every DM host URL and
+  // zeroed DDG site:dailymotion.com harvests after 4c19bf5/1b95c7a DM-prefer
+  // (healthcare-web81+ / housing Archive-only: bing=ddg=0 despite live DM SERPs).
+  const lifestyleEvidence = `${clip.alt || ''} ${clip.title || ''} ${clip.query || ''}`.toLowerCase();
   const lifestyleJunk =
-    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|dailymotion|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
-      blob,
+    /wash.?your.?hands|rotate.?your.?phone|piggy|hygiene|soap|water tap|faucet|ocean|sea|waves|yacht|storm|overlay|black background|megaphone|protest|freedom and peace|minecraft|fortnite|gameplay|binance|cash.?app|verified.?account|usa it shop|dog|puppy|cat|pet|animal|garden|nature|forest|flower|bird|wildlife|landscape|mountain|beach|sunset|cooking|recipe|food|kitchen|yoga|fitness workout|sports? highlight|turtle|kingfisher|noble house|mini series|despair|sequin|fashion show|runway|macro flower|hud graphic|hud interface|sci.?fi hud/.test(
+      lifestyleEvidence,
     );
   if (lifestyleJunk) {
-    const aviationRunway = isAirlineTopic(topicText) && /\brunway\b/i.test(blob) && AIRLINE_STRONG_RE.test(blob);
+    const aviationRunway =
+      isAirlineTopic(topicText)
+      && /\brunway\b/i.test(lifestyleEvidence)
+      && AIRLINE_STRONG_RE.test(blob);
     if (!aviationRunway) return true;
   }
   // Reject muddy/night/overexposed stock when preferBright is on.
@@ -2878,6 +2886,45 @@ export function openVimeoFetchCircuit(liveClips = [], budgets = {}) {
   return { liveCap, perQueryCap, liveTarget, purged: before - liveClips.length };
 }
 
+/** How many extra Archive-only clinical subjects to schedule the moment the Vimeo circuit opens. */
+const VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT = 16;
+
+/**
+ * The instant the healthcare Vimeo circuit opens, queryCap has already truncated
+ * `plan.queries` (and therefore the scheduled batches) well before every clinical
+ * Archive subject in `plan.archiveQueries` got a turn. Rather than let the widened
+ * liveCap/perQueryCap budget from openVimeoFetchCircuit sit on whatever web queries
+ * queryCap happened to leave scheduled, pull in more not-yet-scheduled Archive
+ * clinical subjects so Archive — not another round of the Vimeo-heavy web queries —
+ * absorbs the gap immediately.
+ *
+ * Pure and order-preserving: returns fetch attempts only for `archiveQueries` entries
+ * not already present (case-insensitively) in `scheduledQueryKeys`, capped at
+ * `extraCount`. Never touches Vimeo trust — every returned attempt still runs through
+ * the same archive-evidence / proxy gates as the rest of the plan.
+ *
+ * @param {string[]} archiveQueries - plan.archiveQueries (clinical-lead-first for healthcare)
+ * @param {Set<string>} scheduledQueryKeys - lowercased queries already in the batch plan
+ * @param {number} [extraCount]
+ * @returns {{ query: string, subject: string, sweep: string, page: number, extra: boolean }[]}
+ */
+export function extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
+  archiveQueries = [],
+  scheduledQueryKeys = new Set(),
+  extraCount = VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT,
+) {
+  const attempts = [];
+  const seen = new Set();
+  for (const query of archiveQueries) {
+    if (attempts.length >= extraCount) break;
+    const key = String(query || '').trim().toLowerCase();
+    if (!key || seen.has(key) || scheduledQueryKeys.has(key)) continue;
+    seen.add(key);
+    attempts.push({ query, subject: query, sweep: '', page: 1, extra: true });
+  }
+  return attempts;
+}
+
 /**
  * Wall-clock ceiling on the search phase. A keyless plan can be ~100 Archive.org
  * queries at ~10s each, so the wider plan needs a stop that is not "ran out of
@@ -3330,6 +3377,28 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           report.vimeoFetchCircuitPurged = widened.purged;
           report.motionDroppedUnreliableProxy = (report.motionDroppedUnreliableProxy || 0) + 1;
           report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+          // Healthcare: the freed budget above should not just ride out whatever query
+          // order queryCap happened to leave scheduled — schedule more Archive clinical
+          // subjects queryCap truncated, right after the current batch, so Archive fills
+          // the gap Vimeo can no longer supply instead of more Vimeo-heavy web queries.
+          if (healthcareTopicEarly) {
+            const scheduledKeys = new Set(
+              batches.flat().map((a) => String(a.query || '').trim().toLowerCase()),
+            );
+            const archiveBoost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
+              plan.archiveQueries,
+              scheduledKeys,
+            );
+            if (archiveBoost.length) {
+              const insertAt = batches.indexOf(plannedBatch) + 1;
+              const chunks = [];
+              for (let i = 0; i < archiveBoost.length; i += fetchBatchSize) {
+                chunks.push(archiveBoost.slice(i, i + fetchBatchSize));
+              }
+              batches.splice(insertAt, 0, ...chunks);
+              report.vimeoCircuitArchiveBoostQueries = archiveBoost.length;
+            }
+          }
           continue;
         }
       }

@@ -1668,3 +1668,51 @@ describe('housing off-topic crash/council/fire junk', () => {
     expect(report.junkStillDropped.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('Dailymotion host must not trip lifestyleJunk (DM-prefer)', () => {
+  it('keeps topical DM clips whose only dailymotion token is the host URL', () => {
+    // Pre-fix: lifestyleJunk matched bare `dailymotion` against sourceUrl/url and
+    // zeroed every site:dailymotion.com hit (healthcare HARVEST_VOLUME_FAIL / housing
+    // Archive-only despite live DDG DM SERPs after 4c19bf5/1b95c7a).
+    expect(
+      isJunkStockClip(
+        {
+          alt: 'a new surgical robot unveiled at medway maritime hospital',
+          title: 'a new surgical robot unveiled at medway maritime hospital',
+          query: 'surgical robot',
+          source: 'DuckDuckGo web video',
+          sourceUrl: 'https://www.dailymotion.com/video/x85pxfx',
+          url: 'http://127.0.0.1:5173/api/download-clip?url=https%3A%2F%2Fwww.dailymotion.com%2Fvideo%2Fx85pxfx&duration=10',
+        },
+        HEALTHCARE_AI_TOPIC,
+      ),
+    ).toBe(false);
+    expect(
+      isJunkStockClip(
+        {
+          alt: 'evictions spike across the united states as protections disappear',
+          title: 'evictions spike across the united states as protections disappear',
+          query: 'eviction documentary',
+          source: 'DuckDuckGo web video',
+          sourceUrl: 'https://www.dailymotion.com/video/x9abcde',
+          url: 'http://127.0.0.1:5173/api/download-clip?url=https%3A%2F%2Fwww.dailymotion.com%2Fvideo%2Fx9abcde&duration=10',
+        },
+        HOUSING_CRASH_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
+  it('still rejects usa-it-shop storefront spam in title/alt', () => {
+    expect(
+      isJunkStockClip(
+        {
+          alt: 'usa it shop verified account cash app',
+          title: 'usa it shop dailymotion promo',
+          query: 'surgical robot',
+          sourceUrl: 'https://www.dailymotion.com/video/xspam',
+        },
+        HEALTHCARE_AI_TOPIC,
+      ),
+    ).toBe(true);
+  });
+});

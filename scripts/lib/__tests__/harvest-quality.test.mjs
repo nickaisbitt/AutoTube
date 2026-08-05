@@ -2634,6 +2634,42 @@ describe('checkEditTimelineIntroFace — housing first-segment gate', () => {
       'housing crash eviction',
     )).toBe('');
   });
+
+  it('rejects AI-generated illustration/digital-art pads by content tell, not just domain', () => {
+    // housing-web85: shortform.com's blog illustration ("Evicted" door scene, digital
+    // painting, no camera texture) was already domain-blocked, but the same digital-art
+    // "family evicted" pad from a DIFFERENT blog/stock host must also be caught — the
+    // domain allowlist alone would let the next AI-art blog straight back into the pool.
+    expect(housingOffTopicBrollReason(
+      'AI-generated illustration of a family evicted from their home',
+      'housing crash eviction',
+    )).toMatch(/AI-generated illustration/);
+    expect(housingOffTopicBrollReason(
+      'midjourney render evicted family standing at door',
+      'housing crash eviction',
+    )).toMatch(/AI-generated illustration/);
+    expect(housingOffTopicBrollReason(
+      'digital painting family looking at eviction notice',
+      'housing crash eviction',
+    )).toMatch(/AI-generated illustration/);
+    expect(housingOffTopicBrollReason(
+      "artist's impression of an evicted family outside their apartment",
+      'housing crash eviction',
+    )).toMatch(/AI-generated illustration/);
+    expect(housingOffTopicBrollReason(
+      'stable diffusion image of a family packing boxes',
+      'housing crash eviction',
+    )).toMatch(/AI-generated illustration/);
+    // Real photojournalism must not be caught by the illustration reject.
+    expect(housingOffTopicBrollReason(
+      'family photo sitting on couch after wall collapsed in their home',
+      'housing crash eviction',
+    )).toBe('');
+    expect(housingOffTopicBrollReason(
+      'moving day photo family carrying boxes into u-haul truck',
+      'housing crash eviction',
+    )).toBe('');
+  });
 });
 
 describe('housingIntroFaceEvidenceMatches — real DDG site:vimeo.com titles (waves 36-60)', () => {

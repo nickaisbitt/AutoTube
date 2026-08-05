@@ -587,8 +587,8 @@ describe('non-YouTube motion planning and ranking', () => {
     ]);
 
     expect(queries).toEqual([
-      'airliner cabin oxygen mask site:vimeo.com',
       'airliner cabin oxygen mask site:dailymotion.com',
+      'airliner cabin oxygen mask site:vimeo.com',
     ]);
     expect(queries.every(isSafeStockMotionQuery)).toBe(true);
   });
@@ -615,13 +615,14 @@ describe('non-YouTube motion planning and ranking', () => {
     ];
 
     const ranked = rankMotionCandidates(candidates, (clip) => clip.score);
+    // Vimeo demoted to 25 (TLS fingerprint risk) — after generic web (10), before TikTok (40).
     expect(ranked.map((clip) => clip.url)).toEqual([
       'https://archive.org/download/cabin/cabin.mp4',
       'https://cdn.example.org/cabin.webm',
       'https://giphy.com/gifs/airplane-cabin-xyz',
       'https://www.dailymotion.com/video/xyz',
-      'https://vimeo.com/12345',
       'https://example.org/page-only',
+      'https://vimeo.com/12345',
       tiktok.url,
       youtube.url,
     ]);
@@ -667,12 +668,13 @@ describe('non-YouTube motion planning and ranking', () => {
       (clip) => clip.score,
       { topicBlob: HOUSING_TOPIC },
     );
-    // Direct .mp4 web (1) beats Vimeo (2); strong housing Archive (5) beats opaque (35)
-    // and generic Bing web (10) — airline-style Archive volume for apartment evidence.
+    // Direct .mp4 web (1) beats strong housing Archive (5); Vimeo demoted to 25
+    // (after Archive strong) so Archive/DM fill when TLS fingerprint kills Vimeo.
+    // Opaque Archive stays last at 35.
     expect(ranked.map((clip) => clip.url)).toEqual([
       bingWeb.url,
-      webFace.url,
       housingArchive.url,
+      webFace.url,
       opaqueArchive.url,
     ]);
     // Strong apartment Archive (5) beats generic Bing/DDG web (10); opaque stays 35.
@@ -1103,7 +1105,7 @@ describe('healthcare keyless motion pack + volume chase', () => {
     expect(plan.queries.some((q) => /radiologist|telemedicine|surgical robot|operating room/i.test(q))).toBe(true);
   });
 
-  it('leads with AI radiology / clinician+screen / OR face-first queries and Vimeo host searches', () => {
+  it('leads with AI radiology / clinician+screen / OR face-first queries and DM/Vimeo host searches', () => {
     const plan = motionQueryPlan(HEALTHCARE_AI_TOPIC, false, { stockKeyed: false, faceSeek: true });
     expect(plan.queries).toEqual(expect.arrayContaining([
       'ai radiology doctor monitor screen',
@@ -1112,8 +1114,9 @@ describe('healthcare keyless motion pack + volume chase', () => {
       'ultrasound demonstration clinician',
       'ai radiology',
     ]));
-    // 'radiology AI site:vimeo.com' (wrong case) was removed — base 'radiology AI' never
-    // matched lowercase plan.queries. 'ai radiology site:vimeo.com' covers this slot.
+    // Prefer Dailymotion host leads (Vimeo TLS fingerprint risk); keep Vimeo fallbacks.
+    expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:dailymotion\.com/i.test(q))).toBe(true);
+    expect(plan.webHostQueries.some((q) => /surgical\s+robot\s+site:dailymotion\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:vimeo\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /surgical\s+robot\s+site:vimeo\.com/i.test(q))).toBe(true);
     const aiIdx = plan.queries.findIndex((q) => /ai radiology doctor monitor/i.test(q));

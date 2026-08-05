@@ -515,13 +515,18 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
     return 0;
   }
   if (urls.some((url) => isDirectVideoUrl(url))) return 1;
+  // Dailymotion / Giphy stay ahead of generic web. Vimeo is demoted separately:
+  // cloud IPs often hit yt-dlp "blocked due to its TLS fingerprint" (housing-web85
+  // slideshow collapse; healthcare-web81+ HARVEST_VOLUME_FAIL with
+  // vimeo-circuit-open×19). Archive/direct/DM must fill volume instead.
   if (urls.some((url) => {
     const host = motionUrlHostname(url);
-    return ['vimeo.com', 'dailymotion.com', 'dai.ly', 'giphy.com']
+    return ['dailymotion.com', 'dai.ly', 'giphy.com']
       .some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
   })) return 2;
+  if (isVimeoMotionCandidate(candidate)) return 25;
   // TikTok / Instagram are raw-web hits but often IP-blocked or vertical-only in
-  // headless VMs. Keep them above YouTube, below Archive/direct/Vimeo/DM.
+  // headless VMs. Keep them above YouTube, below Archive/direct/DM/generic web.
   if (urls.some((url) => {
     const host = motionUrlHostname(url);
     return ['tiktok.com', 'vm.tiktok.com', 'instagram.com', 'cdninstagram.com']
@@ -2682,7 +2687,9 @@ export function webMotionQueryVariants(topicBlob = '', baseQueries = [], limit =
   return out;
 }
 
-const NON_YOUTUBE_WEB_MOTION_HOSTS = ['vimeo.com', 'dailymotion.com'];
+// Dailymotion first: Vimeo proxy downloads often die on cloud TLS fingerprint
+// blocks (4fd0875 circuit). Prefer DM/Archive fill for housing + healthcare volume.
+const NON_YOUTUBE_WEB_MOTION_HOSTS = ['dailymotion.com', 'vimeo.com'];
 
 /**
  * Keep explicit non-YouTube searches in the motion plan. Search engines otherwise
@@ -2740,39 +2747,35 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   const airline = isAirlineTopic(topicBlob);
   const housing = isHousingTopic(topicBlob);
   const healthcare = isHealthcareTopic(topicBlob);
-  // Healthcare: lead host-scoped searches with radiology AI / surgical robot on Vimeo
-  // (web3 lacked clinician+screen motion; generic host variants bury it behind corridor
-  // queries). web16: removed 'radiology AI site:vimeo.com' (wrong case — base 'radiology
-  // AI' never matched lowercase plan.queries; 'ai radiology site:vimeo.com' covers it).
-  // Added mri clinician + operating room for direct non-YouTube Vimeo hits.
+  // Healthcare: lead host-scoped searches with radiology AI / surgical robot.
+  // Prefer Dailymotion — Vimeo yt-dlp TLS fingerprint blocks on cloud IPs collapse
+  // inject to soft-pass-thin (healthcare-web81+). Keep a few Vimeo fallbacks after DM.
   const healthcareHostLead = healthcare
     ? [
-        'ai radiology site:vimeo.com',
-        'surgical robot site:vimeo.com',
-        'mri clinician monitor site:vimeo.com',
-        'operating room surgery site:vimeo.com',
-        'doctor mri monitor site:vimeo.com',
-        'ultrasound demonstration site:vimeo.com',
         'ai radiology site:dailymotion.com',
         'surgical robot site:dailymotion.com',
+        'mri clinician monitor site:dailymotion.com',
+        'operating room surgery site:dailymotion.com',
+        'doctor mri monitor site:dailymotion.com',
+        'ultrasound demonstration site:dailymotion.com',
+        'ai radiology site:vimeo.com',
+        'surgical robot site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
     : [];
-  // Housing: lead Vimeo with shocked-face / eviction-evidence footage so the intro
-  // cannot be a FEMA graphic or news-desk opener (web26 raw 4.4–5.2).
+  // Housing: lead DM with shocked-face / eviction-evidence (Vimeo secondary after
+  // TLS fingerprint circuit opens — housing-web85 slideshow). web26 raw 4.4–5.2
+  // needed face openers; DM/Archive must supply them when Vimeo is dead.
   const housingHostLead = housing
     ? [
+        'worried tenant face close up site:dailymotion.com',
+        'shocked face eviction notice site:dailymotion.com',
+        'eviction notice tenant apartment site:dailymotion.com',
+        'housing crisis family site:dailymotion.com',
+        'evicted family packing boxes apartment site:dailymotion.com',
+        'tenant packing boxes site:dailymotion.com',
+        'foreclosure family home site:dailymotion.com',
+        'eviction documentary site:dailymotion.com',
         'worried tenant face close up site:vimeo.com',
-        'shocked face eviction notice site:vimeo.com',
-        'eviction notice tenant apartment site:vimeo.com',
-        'housing crisis family site:vimeo.com',
-        'evicted family packing boxes apartment site:vimeo.com',
-        'tenant packing boxes site:vimeo.com',
-        'foreclosure family home site:vimeo.com',
-        'stressed tenant crying apartment site:vimeo.com',
-        // Confirmed live via DDG v.js: surfaces "Evicting the American Dream" preview
-        // clip + "Tenants Rise Up! Fighting for Housing Justice" — real face/eviction
-        // evidence. Its base ('eviction documentary') was moved into the early block of
-        // ARCHIVE_HOUSING_MOTION_QUERIES so this fires within queryCap=34.
         'eviction documentary site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
     : [];
@@ -3658,6 +3661,21 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   let vi = 0;
   /** @type {{ tiktokBlocked: boolean, vimeoBlocked: boolean }} */
   const proxyGate = { tiktokBlocked: false, vimeoBlocked: false };
+  // Soft-probe one Vimeo candidate up front so padding does not burn its first N
+  // retries on doomed TLS-fingerprint Vimeo before the circuit opens — Archive/DM
+  // then fill (healthcare-web81+ volume fail with vimeo-circuit-open×19).
+  {
+    const firstVimeo = picks.find((c) => isVimeoMotionCandidate(c) && isProxiedClipUrl(c.url || ''));
+    if (firstVimeo) {
+      const target = proxiedClipTarget(firstVimeo.url) || firstVimeo.sourceUrl || '';
+      if (target && !softProbeYtDlpUrl(target)) {
+        proxyGate.vimeoBlocked = true;
+        report.videoTopUpFailed = report.videoTopUpFailed || [];
+        report.videoTopUpFailed.push({ url: firstVimeo.url, reason: 'vimeo-soft-probe-failed-early' });
+        report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
+      }
+    }
+  }
   const injectClip = async (seg, clip, tag) => {
     const key = motionUrlKey(clip.url);
     if (!key || used.has(key)) return false;

@@ -11,6 +11,7 @@ import {
   hasHealthcareEvidence,
   HOUSING_OFF_TOPIC_BROLL_RE,
   isHealthcareEstablishingOpener,
+  isHealthcareIntroDeadAirOpener,
   healthcareIntroFaceEvidenceMatches,
   healthcareStrongClinicalMotion,
   healthcareClinicianOrPatientFace,
@@ -214,10 +215,11 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
           && /\b(national\s+science\s+foundation|\bnsf\b)\b/i.test(blob)
           && !/\b(operating\s+room|or\s+lights?|patient|surgeon|da\s*vinci|intraoperative)\b/i.test(blob)
         )
-        // healthcare-web197: corridor / building exterior / blurry-container openers
-        // must never lead — WATCH raw 4.2 on walking-away corridor + blurry container.
+        // healthcare-web197/web198: corridor / backs / hallway / title-card /
+        // blurry-container openers must never lead — WATCH raw 4.2 on medics-from-behind
+        // hallway + title card (no clinician face / OR / MRI).
         || (
-          isHealthcareEstablishingOpener(blob)
+          (isHealthcareEstablishingOpener(blob) || isHealthcareIntroDeadAirOpener(blob))
           && !healthcareIntroFaceEvidenceMatches(blob)
         )
     )
@@ -420,9 +422,12 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
     // Evidence only — harvest query must not mint tier-2 from "surgical robot" alone
     // when the title is GeekBeat / Bayer / innovate (web43 opener spoof).
     const blob = assetEvidenceBlob(asset);
-    // healthcare-web197: corridor / building / blurry-container establishing → -1
+    // healthcare-web197/web198: corridor / backs / hallway / title-card establishing → -1
     // (also covered by isRejectedIntroLeadVisual above; keep evidence-path tight).
-    if (isHealthcareEstablishingOpener(blob) && !healthcareIntroFaceEvidenceMatches(blob)) {
+    if (
+      (isHealthcareEstablishingOpener(blob) || isHealthcareIntroDeadAirOpener(blob))
+      && !healthcareIntroFaceEvidenceMatches(blob)
+    ) {
       return -1;
     }
     const isVideo = asset?.type === 'video' || /\.mp4/i.test(asset?.url || '');
@@ -915,10 +920,20 @@ export function buildEditTimeline(project, options = {}) {
           if (healthcareStrongClinicalMotion(evBlob) || healthcareClinicianOrPatientFace(evBlob)) {
             score += 6;
           }
-          // healthcare-web197: corridor / building / blurry-container must lose intro
-          // scoring to clinical face / OR / MRI even when hasHealthcareEvidence (+4) fires.
-          if (isHealthcareEstablishingOpener(evBlob) && !healthcareIntroFaceEvidenceMatches(evBlob)) {
-            score -= 10;
+          // healthcare-web197/web198: corridor / backs / hallway / title-card must lose
+          // intro scoring to clinical face / OR / MRI even when hasHealthcareEvidence (+4).
+          if (
+            (isHealthcareEstablishingOpener(evBlob) || isHealthcareIntroDeadAirOpener(evBlob))
+            && !healthcareIntroFaceEvidenceMatches(evBlob)
+          ) {
+            score -= 16;
+          } else if (
+            /\b(?:hallway|corridor|couloir|from\s+behind|walking[\s-]away|establishing)\b/i.test(evBlob)
+            && !healthcareClinicianOrPatientFace(evBlob)
+            && !healthcareStrongClinicalMotion(evBlob)
+          ) {
+            // Soft hallway/establishing demotion even when not full establishing match.
+            score -= 8;
           }
         }
         if (isIntro && topicIsHealthcare && /giphy\.com|coursera|capitol|protest/i.test(blob)) score -= 12;

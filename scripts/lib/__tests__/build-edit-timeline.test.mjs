@@ -528,6 +528,60 @@ describe('introFaceTier demotions continued', () => {
     }, { healthcare: true })).toBe(-1);
   });
 
+  it('hard-rejects web198 medics-backs / from-behind / title-card / French couloir openers (-1)', () => {
+    expect(introFaceTier({
+      alt: 'medics from behind hospital hallway walking away',
+      title: 'medics backs to camera hallway',
+      url: 'https://archive.org/download/backs/b.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'title card only healthcare presentation slide',
+      title: 'title card ai beats doctor',
+      url: 'https://archive.org/download/title/t.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'covid 19 face l afflux de patients dans un couloir pour faire face',
+      title: 'covid 19 face l afflux de patients dans un couloir pour faire face',
+      url: 'https://www.dailymotion.com/video/x807tic',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'recorded call radiologist mri error american health imaging',
+      title: 'recorded call radiologist mri error',
+      url: 'https://www.dailymotion.com/video/xak0t4a',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+  });
+
+  it('prefers doctor-face over hallway establishing in healthcare intro timeline (web198)', () => {
+    const hallway = {
+      id: 'hall',
+      type: 'video',
+      url: 'https://cdn.example/hall.mp4',
+      title: 'medics from behind hospital hallway walking away',
+      alt: 'medics backs hallway establishing',
+      query: 'worried patient face doctor hospital',
+    };
+    const face = {
+      id: 'face',
+      type: 'video',
+      url: 'https://cdn.example/face.mp4',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor face close up portrait',
+      query: 'doctor face patient consultation',
+    };
+    const project = {
+      topic: 'Why AI will change healthcare',
+      script: [{ id: 's1', narration: 'AI already beats your doctor on the scan.', duration: 8 }],
+      media: [hallway, face],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 0.65 });
+    const first = timeline.find((t) => (t.startSec ?? 0) < 3);
+    expect(first?.assetId).toBe('face');
+  });
+
   it('gives healthcare Archive explainer/documentary tier 0 (talking-head gate)', () => {
     // Archive explainer/lecture without hard-reject keywords: talking-head soft-gate
     // returns 0 (not admitted to intro, but passes the hard-reject gate at -1).

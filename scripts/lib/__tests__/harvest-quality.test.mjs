@@ -15,6 +15,10 @@ import {
   housingIntroFaceEvidenceMatches,
   healthcareIntroFaceEvidenceMatches,
   isHealthcareEstablishingOpener,
+  isHealthcareIntroDeadAirOpener,
+  healthcareIntroRepairRank,
+  healthcareClinicianOrPatientFace,
+  healthcareStrongClinicalMotion,
   countHealthcareStrongVideos,
   healthcareSoftPassMotionFailureReason,
   healthcareOffTopicBrollReason,
@@ -2638,6 +2642,84 @@ describe('checkEditTimelineIntroFace — healthcare timeline gate', () => {
     expect(repaired.pass).toBe(true);
     expect(project.editTimeline[0].assetId).toBe('face1');
   });
+
+  // healthcare-web198: tip 2ea80de corridor reject still insufficient — French
+  // "faire face" + patients / recorded-call MRI / medics-backs / title-card led
+  // the hook (WATCH raw 4.2). Hard-fail these metadata patterns.
+  it('fails French faire-face + patients couloir opener (web198)', () => {
+    const project = makeProject([
+      makeAsset(
+        'covid 19 face l afflux de patients l h pital de villeneuve saint georges '
+        + 'une unit de r animation temporaire dans un couloir pour faire face l arriv e',
+      ),
+    ]);
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+
+  it('fails recorded-call radiologist + mri error title card (web198)', () => {
+    const project = makeProject([
+      makeAsset(
+        'recorded call american health imaging refuses to correct million dollar '
+        + 'head injury mri error radiologist dr angus baird',
+      ),
+    ]);
+    const result = checkEditTimelineIntroFace(project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+  });
+
+  it('fails medics backs / from behind / hallway walking openers (web198)', () => {
+    for (const title of [
+      'medics from behind hospital hallway walking away',
+      'doctors backs to camera hospital corridor',
+      'nurses walking away down hallway establishing shot',
+      'title card only healthcare ai presentation slide',
+    ]) {
+      const project = makeProject([makeAsset(title)]);
+      expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    }
+  });
+
+  it('repair prefers doctor-face close-up over OR/MRI when both in pool (web198)', () => {
+    const corridor = {
+      id: 'corr1',
+      type: 'video',
+      title: 'medics from behind hospital hallway walking away',
+      alt: 'medics backs hallway',
+      url: 'https://archive.org/corr.mp4',
+    };
+    const robot = {
+      id: 'robot1',
+      type: 'video',
+      title: 'surgical robot operating room da vinci',
+      alt: 'surgical robot OR lights',
+      url: 'https://archive.org/robot.mp4',
+    };
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor face close up',
+      url: 'https://archive.org/face.mp4',
+    };
+    const project = {
+      topic: 'Why AI will change healthcare',
+      script: [{ id: 's1', title: 'Hook', duration: 18 }],
+      // robot listed before face — repair must still prefer face (rank 3 > 2).
+      media: [corridor, robot, face],
+      editTimeline: [
+        { segmentId: 's1', startSec: 0, endSec: 1.5, assetId: 'corr1' },
+        { segmentId: 's1', startSec: 1.5, endSec: 3.0, assetId: 'corr1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('face1');
+    expect(healthcareIntroRepairRank(face)).toBeGreaterThan(healthcareIntroRepairRank(robot));
+  });
 });
 
 describe('healthcareIntroFaceEvidenceMatches — web197 corridor/face contract', () => {
@@ -2656,6 +2738,45 @@ describe('healthcareIntroFaceEvidenceMatches — web197 corridor/face contract',
     expect(healthcareIntroFaceEvidenceMatches('surgical robot operating room da vinci')).toBe(true);
     expect(healthcareIntroFaceEvidenceMatches('mri scanner room clinical hospital')).toBe(true);
     expect(healthcareIntroFaceEvidenceMatches('radiologist reviewing mri scan workstation monitor')).toBe(true);
+  });
+});
+
+describe('healthcareIntroFaceEvidenceMatches — web198 backs/title-card contract', () => {
+  it('rejects from-behind / medics-backs / title-card / French faire-face', () => {
+    expect(isHealthcareIntroDeadAirOpener('medics from behind hospital hallway')).toBe(true);
+    expect(isHealthcareIntroDeadAirOpener('doctors backs to camera corridor')).toBe(true);
+    expect(isHealthcareIntroDeadAirOpener('title card only presentation slide')).toBe(true);
+    expect(isHealthcareEstablishingOpener('dans un couloir pour faire face')).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches(
+      'covid 19 face l afflux de patients dans un couloir pour faire face',
+    )).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches(
+      'recorded call radiologist mri error american health imaging',
+    )).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches('medics from behind walking away hallway')).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches('title card healthcare ai beats doctor')).toBe(false);
+    expect(healthcareClinicianOrPatientFace(
+      'covid 19 face l afflux de patients dans un couloir',
+    )).toBe(false);
+    expect(healthcareStrongClinicalMotion(
+      'recorded call radiologist mri error',
+    )).toBe(false);
+  });
+
+  it('still accepts collocated face and visual OR/MRI/robot', () => {
+    expect(healthcareClinicianOrPatientFace('doctor face close up hospital')).toBe(true);
+    expect(healthcareStrongClinicalMotion('mri scanner room clinical')).toBe(true);
+    expect(healthcareStrongClinicalMotion('surgical robot operating room')).toBe(true);
+    expect(healthcareIntroRepairRank({
+      title: 'doctor face patient consultation close up',
+      type: 'video',
+      url: 'https://x/a.mp4',
+    })).toBe(3);
+    expect(healthcareIntroRepairRank({
+      title: 'surgical robot operating room da vinci',
+      type: 'video',
+      url: 'https://x/b.mp4',
+    })).toBe(2);
   });
 });
 

@@ -4380,3 +4380,263 @@ describe('healthcare-web204 doctors-union / industrial-relations / robots-explai
     expect(project.editTimeline[0].startSec).toBe(0);
   });
 });
+
+describe('healthcare-web205 ambulance-ramping / parliamentary / Martha inquiry pads', () => {
+  const NSW_INQUIRY =
+    'nsw inquiry into ambulance ramping told patients dying unnecessarily '
+    + 'a state parliamentary inquiry into ambulance ramping';
+  const MARTHA =
+    'martha s rule news package bbc patient safety campaign hospital talking head';
+
+  it('hard-rejects NSW ambulance-ramping / parliamentary inquiry / Martha news packages', () => {
+    for (const title of [
+      NSW_INQUIRY,
+      'ambulance ramping inquiry patients dying unnecessarily',
+      'state parliamentary inquiry into emergency department delays',
+      MARTHA,
+      'martha\'s rule campaign news package sky news',
+    ]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(true);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(healthcareIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/j.mp4',
+      })).toBe(0);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toMatch(/healthcare/);
+    }
+  });
+
+  it('Martha\'s Rule with live OR / surgical robot escapes pad-junk', () => {
+    const marthaOr =
+      'martha\'s rule demonstrated during surgical robot operating room da vinci theatres';
+    expect(isHealthcareIntroPadJunk(marthaOr)).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches(marthaOr)).toBe(true);
+    expect(healthcareIntroRepairRank({
+      title: marthaOr, type: 'video', url: 'https://example.com/martha-or.mp4',
+    })).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps Ulster/Shropshire live OR and consultation face', () => {
+    const ulster = {
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      type: 'video',
+      url: 'https://example.com/ulster.mp4',
+    };
+    const shropshire = {
+      title: 'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      type: 'video',
+      url: 'https://example.com/shrop.mp4',
+    };
+    const face = {
+      title: 'doctor face patient consultation close up hospital',
+      type: 'video',
+      url: 'https://example.com/face.mp4',
+    };
+    expect(isHealthcareIntroPadJunk(ulster.title)).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches(ulster.title)).toBe(true);
+    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+    expect(isHealthcareIntroPadJunk(shropshire.title)).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches(shropshire.title)).toBe(true);
+    expect(healthcareIntroRepairRank(shropshire)).toBeGreaterThanOrEqual(1);
+    expect(healthcareIntroRepairRank(face)).toBe(4);
+  });
+
+  it('FAILS when NSW inquiry leads at 0; repair promotes Ulster OR / face', () => {
+    const inquiry = {
+      id: 'inq1',
+      type: 'video',
+      title: NSW_INQUIRY,
+      alt: NSW_INQUIRY,
+      url: 'https://example.com/inquiry.mp4',
+    };
+    const martha = {
+      id: 'martha1',
+      type: 'video',
+      title: MARTHA,
+      alt: MARTHA,
+      url: 'https://example.com/martha.mp4',
+    };
+    const ulster = {
+      id: 'ulster1',
+      type: 'video',
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      alt: 'surgical robot ulster hospital theatres',
+      url: 'https://example.com/ulster.mp4',
+    };
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor face patient consultation',
+      url: 'https://example.com/face.mp4',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [inquiry, martha, ulster, face],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'inq1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'martha1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 2.0, assetId: 'ulster1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    expect(checkEditTimelineIntroFace(project).reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+    expect(healthcareIntroRepairRank(inquiry)).toBe(0);
+    expect(healthcareIntroRepairRank(martha)).toBe(0);
+    expect(healthcareIntroRepairRank(ulster)).toBe(2);
+    expect(healthcareIntroRepairRank(face)).toBe(4);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('face1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+
+  it('promotes Ulster live OR to 0 when inquiry leads and no consultation face in pool', () => {
+    const inquiry = {
+      id: 'inq1',
+      type: 'video',
+      title: NSW_INQUIRY,
+      alt: NSW_INQUIRY,
+      url: 'https://example.com/inquiry.mp4',
+    };
+    const ulster = {
+      id: 'ulster1',
+      type: 'video',
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      alt: 'surgical robot ulster hospital theatres',
+      url: 'https://example.com/ulster.mp4',
+    };
+    const shropshire = {
+      id: 'shrop1',
+      type: 'video',
+      title: 'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      alt: 'shropshire hospital surgery robot',
+      url: 'https://example.com/shrop.mp4',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [inquiry, ulster, shropshire],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'inq1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 1.95, assetId: 'ulster1' },
+        { segmentId: 'seg1', startSec: 1.95, endSec: 2.6, assetId: 'shrop1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(['ulster1', 'shrop1']).toContain(project.editTimeline[0].assetId);
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+});
+
+describe('housing-web163 prank / daily-tip furniture / flooded-apartment pads', () => {
+  const DAILY_TIP =
+    '123 the daily tip angelo surmelis home furniture decorating tips for your living room';
+  const PRANK =
+    'getting evicted noise complaints funny pranks youtube prank video';
+  const FLOODED =
+    'single mother cries looking at her flooded apartment after the storm';
+
+  it('hard-rejects funny pranks / Angelo Surmelis daily-tip furniture / flooded apartment', () => {
+    for (const title of [DAILY_TIP, PRANK, FLOODED, 'home decor furniture makeover show daily tip']) {
+      expect(isHousingIntroJunkPad(title)).toBe(true);
+      expect(housingOffTopicBrollReason(title, HOUSING_TOPIC)).toMatch(/housing off-topic/);
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(housingIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/j.mp4',
+      })).toBe(0);
+    }
+  });
+
+  it('keeps West Sussex / SF tenant eviction; flooded+eviction still clears', () => {
+    for (const title of [
+      'west sussex man faces an eviction order from his littlehampton home george depass',
+      '670 low income tenants being evicted in san francisco',
+      'grandmother faces eviction from flooded apartment after landlord neglect',
+    ]) {
+      expect(isHousingIntroJunkPad(title)).toBe(false);
+      expect(housingOffTopicBrollReason(title, HOUSING_TOPIC)).toBe('');
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(true);
+      expect(housingIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/ok.mp4',
+      })).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('FAILS when prank leads at 0; repair promotes West Sussex eviction face', () => {
+    const prank = {
+      id: 'prank1', type: 'video', url: 'https://example.com/prank.mp4',
+      title: PRANK, alt: PRANK,
+    };
+    const tip = {
+      id: 'tip1', type: 'video', url: 'https://example.com/tip.mp4',
+      title: DAILY_TIP, alt: DAILY_TIP,
+    };
+    const flooded = {
+      id: 'flood1', type: 'video', url: 'https://example.com/flood.mp4',
+      title: FLOODED, alt: FLOODED,
+    };
+    const west = {
+      id: 'west1', type: 'video', url: 'https://example.com/west.mp4',
+      title: 'west sussex man faces an eviction order from his littlehampton home',
+      alt: 'west sussex man faces an eviction order',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [prank, tip, flooded, west],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'prank1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'tip1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 1.95, assetId: 'flood1' },
+        { segmentId: 'seg1', startSec: 1.95, endSec: 2.6, assetId: 'west1' },
+      ],
+    };
+    // Prank collocates "getting evicted" — old gate would soft-pass; must FAIL.
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    expect(housingIntroRepairRank(prank)).toBe(0);
+    expect(housingIntroRepairRank(tip)).toBe(0);
+    expect(housingIntroRepairRank(flooded)).toBe(0);
+    expect(housingIntroRepairRank(west)).toBeGreaterThanOrEqual(2);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('west1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+
+  it('keeps West Sussex at 0 and never promotes prank/tip/flood mid-window junk', () => {
+    const west = {
+      id: 'west1', type: 'video', url: 'https://example.com/west.mp4',
+      title: 'west sussex man faces an eviction order from his littlehampton home',
+      alt: 'west sussex man faces an eviction order',
+    };
+    const prank = {
+      id: 'prank1', type: 'video', url: 'https://example.com/prank.mp4',
+      title: PRANK, alt: PRANK,
+    };
+    const tip = {
+      id: 'tip1', type: 'video', url: 'https://example.com/tip.mp4',
+      title: DAILY_TIP, alt: DAILY_TIP,
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [west, prank, tip],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'west1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'prank1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 2.0, assetId: 'tip1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+    expect(housingIntroRepairRank(west)).toBeGreaterThan(housingIntroRepairRank(prank));
+    repairEditTimelineIntroFace(project);
+    expect(project.editTimeline[0].assetId).toBe('west1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+});

@@ -26,6 +26,7 @@ import {
   keylessOmitsStockMotionPool,
   motionCandidateHostRank,
   motionQueryPlan,
+  openVimeoFetchCircuit,
   planMotionFetchRounds,
   providerEvidenceText,
   rankMotionCandidates,
@@ -735,6 +736,40 @@ describe('non-YouTube motion planning and ranking', () => {
     expect(unreliableWebProxyInjectReason(vimeo, { vimeoBlocked: true })).toBe('vimeo-circuit-open');
     expect(unreliableWebProxyInjectReason({ url: 'https://archive.org/download/a/a.mp4' }, { vimeoBlocked: true }))
       .toBe(null);
+  });
+
+  it('opens the Vimeo circuit and biases remaining budget to Archive/Dailymotion/direct at fetch time', () => {
+    // healthcare-web81+/housing-web85: the Vimeo circuit only opened at inject time,
+    // after the entire fetch/collection budget had already been spent admitting doomed
+    // Vimeo proxy clips into the live pool — so once inject rejected all of them, there
+    // was no remaining fetch budget left to backfill from Archive/Dailymotion/direct
+    // (HARVEST_VOLUME_FAIL). openVimeoFetchCircuit purges the already-admitted Vimeo
+    // clips (they are exactly as doomed as the one that just failed the probe) and
+    // widens the caps so the freed budget goes to hosts that actually survive assembly.
+    const archive = { url: 'https://archive.org/download/a/a.mp4', source: 'Archive.org live' };
+    const dailymotion = {
+      url: 'http://localhost:5173/api/download-clip?url=' + encodeURIComponent('https://www.dailymotion.com/video/x1'),
+      sourceUrl: 'https://www.dailymotion.com/video/x1',
+    };
+    const vimeoDead = {
+      url: 'http://localhost:5173/api/download-clip?url=' + encodeURIComponent('https://vimeo.com/1051353744'),
+      sourceUrl: 'https://vimeo.com/1051353744',
+    };
+    const vimeoAlsoDead = {
+      url: 'http://localhost:5173/api/download-clip?url=' + encodeURIComponent('https://vimeo.com/999'),
+      sourceUrl: 'https://vimeo.com/999',
+    };
+    const liveClips = [archive, vimeoDead, dailymotion, vimeoAlsoDead];
+    const widened = openVimeoFetchCircuit(liveClips, { liveCap: 140, perQueryCap: 10, liveTarget: 40 });
+    // Both already-admitted Vimeo clips are purged from the pool in place...
+    expect(liveClips).toEqual([archive, dailymotion]);
+    expect(widened.purged).toBe(2);
+    // ...and the remaining budget widens, never shrinks, so Archive/Dailymotion/direct
+    // absorb what Vimeo can no longer supply.
+    expect(widened.liveCap).toBeGreaterThan(140);
+    expect(widened.perQueryCap).toBeGreaterThan(10);
+    expect(widened.liveTarget).toBeGreaterThan(40);
+    expect(widened.liveTarget).toBeLessThanOrEqual(widened.liveCap);
   });
 
   it('restores Archive injects marked motionRelevancePassed after relevance strips them', () => {

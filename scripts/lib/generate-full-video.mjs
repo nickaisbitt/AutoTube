@@ -2852,6 +2852,33 @@ export const VIMEO_CIRCUIT_PER_QUERY_CAP_BOOST = 4;
 export const VIMEO_CIRCUIT_LIVE_CAP_BOOST = 30;
 
 /**
+ * Fires exactly once, the moment the fetch-time Vimeo soft-probe fails: purges any
+ * Vimeo proxy clips already admitted into the live motion pool (they are exactly as
+ * doomed as the one that just failed) and widens the remaining per-query/live-cap
+ * budget so Archive/Dailymotion/direct — not a host that is about to be rejected at
+ * inject anyway — absorb what Vimeo can no longer supply.
+ *
+ * Mutates `liveClips` in place (keeps its array identity so callers holding the same
+ * reference see the purge) and returns the widened budget.
+ *
+ * @param {object[]} liveClips
+ * @param {{ liveCap: number, perQueryCap: number, liveTarget: number }} budgets
+ * @returns {{ liveCap: number, perQueryCap: number, liveTarget: number, purged: number }}
+ */
+export function openVimeoFetchCircuit(liveClips = [], budgets = {}) {
+  const before = liveClips.length;
+  const reliable = liveClips.filter(
+    (c) => !(isVimeoMotionCandidate(c) && isProxiedClipUrl(c?.url || '')),
+  );
+  liveClips.length = 0;
+  liveClips.push(...reliable);
+  const liveCap = (Number(budgets.liveCap) || 0) + VIMEO_CIRCUIT_LIVE_CAP_BOOST;
+  const perQueryCap = (Number(budgets.perQueryCap) || 0) + VIMEO_CIRCUIT_PER_QUERY_CAP_BOOST;
+  const liveTarget = Math.min(liveCap, (Number(budgets.liveTarget) || 0) + VIMEO_CIRCUIT_LIVE_CAP_BOOST);
+  return { liveCap, perQueryCap, liveTarget, purged: before - liveClips.length };
+}
+
+/**
  * Wall-clock ceiling on the search phase. A keyless plan can be ~100 Archive.org
  * queries at ~10s each, so the wider plan needs a stop that is not "ran out of
  * subjects" — whatever has been gathered by then still goes through the same gates.
@@ -3296,20 +3323,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           proxyGate.vimeoBlocked = true;
           report.vimeoFetchCircuitOpen = true;
           report.vimeoFetchCircuitOpenAtQuery = q;
-          perQueryCap += VIMEO_CIRCUIT_PER_QUERY_CAP_BOOST;
-          liveCap += VIMEO_CIRCUIT_LIVE_CAP_BOOST;
-          liveTarget = Math.min(liveCap, liveTarget + VIMEO_CIRCUIT_LIVE_CAP_BOOST);
-          // Any Vimeo already admitted earlier in this same run is just as doomed as
-          // the one that just failed the probe — purge it now so the "is the pool deep
-          // enough" checks above (liveTarget/liveCap) and the pool built below reflect
-          // only reliable Archive/Dailymotion/direct/generic-web supply, not clips that
-          // will only be rejected later at inject.
-          const reliableSoFar = liveClips.filter(
-            (c) => !(isVimeoMotionCandidate(c) && isProxiedClipUrl(c.url || '')),
-          );
-          report.vimeoFetchCircuitPurged = liveClips.length - reliableSoFar.length;
-          liveClips.length = 0;
-          liveClips.push(...reliableSoFar);
+          const widened = openVimeoFetchCircuit(liveClips, { liveCap, perQueryCap, liveTarget });
+          liveCap = widened.liveCap;
+          perQueryCap = widened.perQueryCap;
+          liveTarget = widened.liveTarget;
+          report.vimeoFetchCircuitPurged = widened.purged;
           report.motionDroppedUnreliableProxy = (report.motionDroppedUnreliableProxy || 0) + 1;
           report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
           continue;

@@ -1435,6 +1435,54 @@ describe('healthcare keyless soft-pass-motion (web + Archive)', () => {
     expect(result.reason).toMatch(/^soft-pass-motion-healthcare\(/);
   });
 
+  it('passes a healthcare pool sourced entirely from Archive.org + Dailymotion with clinical intro evidence (no Vimeo)', () => {
+    // healthcare-web81+: HARVEST_VOLUME_FAIL fired with vimeo-circuit-open×19 once the
+    // Vimeo probe circuit-breaker opened, because too much of the DDG pool was Vimeo.
+    // The fetch-time circuit breaker (4fd0875/4c19bf5) now biases the remaining budget
+    // to Archive/Dailymotion/direct instead — prove the healthcare soft-pass still
+    // clears on a pool that never had any Vimeo supply at all.
+    const segments = makeSegments(3);
+    const media = [
+      {
+        type: 'video',
+        segmentId: segments[0].id,
+        url: 'https://www.dailymotion.com/video/or-web81',
+        alt: 'surgical robot operating room da vinci clinical use close up',
+        title: 'surgical robot operating room da vinci clinical use close up',
+        query: 'surgical robot operating room',
+        source: 'Bing web video',
+        sourceUrl: 'https://www.dailymotion.com/video/or-web81',
+      },
+      ...[
+        'Hospital corridor with nurses walking',
+        'Doctor reviewing MRI scan monitors',
+        'AI medical diagnosis computer screen',
+        'Nurse workstation hospital computer',
+        'Patient waiting room clinic daylight',
+      ].map((title, i) => ({
+        type: 'video',
+        segmentId: segments[i % segments.length].id,
+        url: `https://archive.org/download/clinical${i}/clinical${i}.mp4`,
+        alt: title,
+        title,
+        query: 'hospital doctor patient AI diagnosis',
+        source: 'Archive.org live',
+      })),
+    ];
+    const project = { topic: HEALTHCARE_TOPIC, title: 'AI Healthcare', script: segments, media };
+    const result = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      cyberStockInjected: 0,
+      pexelsFetched: 0,
+      pixabayFetched: 0,
+      archiveLiveFetched: 5,
+      videoTopUp: [],
+    }, project);
+    expect(result.pass).toBe(true);
+    expect(result.reason).toMatch(/^soft-pass-motion-healthcare\(/);
+    expect(media.some((a) => /vimeo\.com/i.test(`${a.url} ${a.sourceUrl || ''}`))).toBe(false);
+  });
+
   it('fails thin keyless healthcare pools below the motion floor', () => {
     const segments = makeSegments(3);
     const media = Array.from({ length: 4 }, (_, i) => clinicalWebClip({
@@ -1984,6 +2032,41 @@ describe('checkIntroFacePool — housing', () => {
       videoTopUp: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
     }, proj);
     expect(result.pass).toBe(true);
+  });
+
+  it('passes a housing pool sourced entirely from Archive.org + Dailymotion with an intro-face clip (no Vimeo)', () => {
+    // housing-web85: the DDG pool skewed almost entirely Vimeo, and the fetch-time
+    // circuit breaker (4fd0875/4c19bf5) now biases the remaining budget to Archive/
+    // Dailymotion/direct once Vimeo dies. The housing soft-pass must never have
+    // depended on Vimeo supply in the first place — prove an Archive+Dailymotion-only
+    // pool with a qualifying intro-face clip still clears it.
+    const segments = [{ id: 'intro' }, { id: 'body' }, { id: 'outro' }];
+    const media = [
+      makeVideo({
+        segmentId: 'intro',
+        url: 'https://www.dailymotion.com/video/face-web85',
+        alt: 'worried tenant face close up eviction notice apartment',
+        query: 'worried tenant eviction face',
+        source: 'Bing web video',
+        sourceUrl: 'https://www.dailymotion.com/video/face-web85',
+      }),
+      ...Array.from({ length: 7 }, (_, i) => makeVideo({
+        segmentId: segments[i % 3].id,
+        url: `https://archive.org/download/apt${i}/apt${i}.mp4`,
+        alt: 'apartment interior hallway tenant landlord eviction',
+        query: 'apartment eviction',
+        source: 'Archive.org live',
+      })),
+    ];
+    const proj = { topic: HOUSING_TOPIC, title: 'Housing crash', script: segments, media };
+    const result = evaluateHarvestVolumeWithSoftPass({
+      volumePass: false,
+      archiveLiveFetched: 7,
+      videoTopUp: Array.from({ length: 8 }, (_, i) => ({ id: `t${i}` })),
+    }, proj);
+    expect(result.pass).toBe(true);
+    expect(result.reason).toMatch(/^soft-pass-motion-housing\(/);
+    expect(media.some((a) => /vimeo\.com/i.test(`${a.url} ${a.sourceUrl || ''}`))).toBe(false);
   });
 
   it('keyless housing soft-passes at 4 unique videos after intro-face (web58 thin at 4/5)', () => {

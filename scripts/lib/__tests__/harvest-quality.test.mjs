@@ -19,6 +19,8 @@ import {
   isHealthcareIntroBeautyOrClinicJunk,
   healthcareIntroClinicalEscape,
   healthcareIntroRepairRank,
+  isHousingIntroJunkPad,
+  housingIntroRepairRank,
   healthcareClinicianOrPatientFace,
   healthcareStrongClinicalMotion,
   countHealthcareStrongVideos,
@@ -3384,5 +3386,166 @@ describe('repairEditTimelineIntroFace — housing-web4/8/10 pool-vs-timeline', (
       'dexter robotic surgery system operating room AI medicine',
       'Why AI will change healthcare',
     )).toBe('');
+  });
+});
+
+describe('housingOffTopicBrollReason — web159 reality-TV/trailer/geopolitics/mental-health junk', () => {
+  const ctx = HOUSING_TOPIC;
+
+  it('rejects Bigg Boss / BBOTT / OTT reality-show eviction pads', () => {
+    expect(housingOffTopicBrollReason(
+      'bbott2 manisha rani father entry bigg boss eviction bigg boss ott2 bigg boss ott2 manisha rani s father will come in family week',
+      ctx,
+    )).toMatch(/housing off-topic/);
+    expect(isHousingIntroJunkPad(
+      'bbott2 manisha rani father entry bigg boss eviction',
+    )).toBe(true);
+  });
+
+  it('rejects movie / official trailers that borrow eviction metaphors', () => {
+    expect(housingOffTopicBrollReason(
+      'bull street movie 2024 official trailer a woman faces the battle of her life when her estranged father s family tries to evict her and her grandmother',
+      ctx,
+    )).toMatch(/housing off-topic/);
+    expect(housingIntroFaceEvidenceMatches(
+      'bull street movie 2024 official trailer a woman faces the battle of her life when her estranged father s family tries to evict her and her grandmother',
+    )).toBe(false);
+  });
+
+  it('rejects israeli-police / riot geopolitics and Vice/Flint charged-Russian pads', () => {
+    expect(housingOffTopicBrollReason(
+      'riot israeli police violence during salame 6 eviction on oct 4 2011',
+      ctx,
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'flint charged russian eviction vice news tonight hbo',
+      ctx,
+    )).toMatch(/housing off-topic/);
+  });
+
+  it('rejects men\'s mental-health crisis pads scraped via housing crisis family', () => {
+    expect(housingOffTopicBrollReason(
+      'men s mental health a silent crisis with karen straughan london feb 27 2018',
+      ctx,
+    )).toMatch(/housing off-topic/);
+  });
+
+  it('rejects mortgage-fraud / timber-chronicles talking-head pads', () => {
+    expect(housingOffTopicBrollReason(
+      'your mortgage financing your home without falling for fraud with marie mcdonnell',
+      ctx,
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'mortgage foreclosure rescue scams documentary video',
+      ctx,
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      '57 bill barnum s chronicles from eureka s timber roots to housing hurdles and sustainable futures',
+      ctx,
+    )).toMatch(/housing off-topic/);
+  });
+
+  it('keeps real tenant / grandmother / family eviction faces', () => {
+    expect(housingOffTopicBrollReason('grandmother faces eviction apartment', ctx)).toBe('');
+    expect(housingIntroFaceEvidenceMatches('grandmother faces eviction apartment')).toBe(true);
+    expect(housingOffTopicBrollReason('west sussex man faces eviction', ctx)).toBe('');
+    expect(housingIntroFaceEvidenceMatches('west sussex man faces eviction')).toBe(true);
+    expect(housingOffTopicBrollReason(
+      'worried tenant face close up eviction notice apartment',
+      ctx,
+    )).toBe('');
+    expect(housingIntroFaceEvidenceMatches(
+      'worried tenant face close up eviction notice apartment',
+    )).toBe(true);
+  });
+
+  it('checkIntroFacePool fails when only web159 junk is in the pool', () => {
+    const junk = [
+      {
+        id: 'j1', type: 'video', url: 'https://example.com/a.mp4',
+        title: 'bbott2 manisha rani bigg boss eviction',
+        alt: 'bbott2 manisha rani bigg boss eviction',
+      },
+      {
+        id: 'j2', type: 'video', url: 'https://example.com/b.mp4',
+        title: 'bull street movie 2024 official trailer grandmother evict',
+        alt: 'bull street movie 2024 official trailer grandmother evict',
+      },
+      {
+        id: 'j3', type: 'video', url: 'https://example.com/c.mp4',
+        title: 'men s mental health a silent crisis with karen straughan',
+        alt: 'men s mental health a silent crisis with karen straughan',
+      },
+    ];
+    const result = checkIntroFacePool({
+      topic: HOUSING_TOPIC,
+      media: junk,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+    });
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL/);
+  });
+
+  it('checkIntroFacePool passes with west sussex / grandmother tenant faces', () => {
+    const result = checkIntroFacePool({
+      topic: HOUSING_TOPIC,
+      media: [
+        {
+          id: 'good1', type: 'video', url: 'https://example.com/good.mp4',
+          title: 'west sussex man faces an eviction order from his littlehampton home',
+          alt: 'west sussex man faces an eviction order from his littlehampton home',
+        },
+      ],
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+    });
+    expect(result.pass).toBe(true);
+  });
+
+  it('housingIntroRepairRank prefers documentary tenant eviction over weak lived-in', () => {
+    const documentary = {
+      id: 'doc1', type: 'video', url: 'https://example.com/doc.mp4',
+      title: '670 low income tenants being evicted in san francisco documentary news footage',
+      alt: '670 low income tenants being evicted in san francisco documentary news footage',
+    };
+    const weak = {
+      id: 'weak1', type: 'video', url: 'https://example.com/weak.mp4',
+      title: 'apartment interior living room close-up',
+      alt: 'apartment interior living room close-up',
+    };
+    const trailer = {
+      id: 'tr1', type: 'video', url: 'https://example.com/tr.mp4',
+      title: 'bull street movie 2024 official trailer grandmother faces eviction',
+      alt: 'bull street movie 2024 official trailer grandmother faces eviction',
+    };
+    expect(housingIntroRepairRank(documentary)).toBeGreaterThan(housingIntroRepairRank(weak));
+    expect(housingIntroRepairRank(trailer)).toBe(0);
+    expect(housingIntroRepairRank(documentary)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('repairEditTimelineIntroFace swaps documentary tenant face ahead of trailer junk lead', () => {
+    const trailer = {
+      id: 'trailer1', type: 'video', url: 'https://example.com/tr.mp4',
+      title: 'bull street movie 2024 official trailer grandmother faces eviction',
+      alt: 'bull street movie 2024 official trailer grandmother faces eviction',
+    };
+    const tenant = {
+      id: 'tenant1', type: 'video', url: 'https://example.com/tenant.mp4',
+      title: 'west sussex man faces an eviction order from his littlehampton home',
+      alt: 'west sussex man faces an eviction order from his littlehampton home',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [trailer, tenant],
+      editTimeline: [
+        // Trailer alone in the first 3s — tenant sits later so timeline gate fails.
+        { segmentId: 'seg1', startSec: 0, endSec: 2.5, assetId: 'trailer1' },
+        { segmentId: 'seg1', startSec: 4, endSec: 7, assetId: 'tenant1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('tenant1');
   });
 });

@@ -559,6 +559,9 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
     // and lost webinar/talking-head scrapes that capped watch ~4.6.
     if (isHousingTopic(options.topicBlob || '')) {
       const blob = `${candidate.alt || ''} ${candidate.title || ''} ${candidate.query || ''} ${candidate.source || ''}`;
+      // housing-web159: reality-TV / trailer / geopolitics / mental-health junk
+      // never wins Archive inject rank even when title collocates grandmother+evict.
+      if (housingOffTopicBrollReason(blob, options.topicBlob || '')) return 35;
       // housing-web158: prefer clips that clear housingIntroFaceEvidenceMatches in
       // the same strong-Archive tier (5); opaque landscape/FEMA stay 35. Do not
       // demote apartment Archive behind generic web — volume still needs it.

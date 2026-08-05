@@ -563,12 +563,12 @@ describe('webMotionQueryVariants', () => {
 
 
 describe('preferHealthcareArchiveClinicalQueries', () => {
-  it('prepends Science Nation / surgical-robot / radiologist leads when archive-only', () => {
+  it('prepends face-first / surgical-robot / radiologist leads when archive-only', () => {
     const biased = preferHealthcareArchiveClinicalQueries(
       ['hospital ward', 'doctor patient', 'medical examination'],
       { archiveOnly: true },
     );
-    expect(biased[0]).toMatch(/Science Nation|surgical robot|radiologist|da vinci|ai radiology/i);
+    expect(biased[0]).toMatch(/face|surgical robot|radiologist|da vinci|ai radiology/i);
     expect(biased).toEqual(expect.arrayContaining(['hospital ward']));
   });
 
@@ -1072,14 +1072,14 @@ describe('healthcare keyless motion pack + volume chase', () => {
     const plan = motionQueryPlan(HEALTHCARE_AI_TOPIC, false, { stockKeyed: false, faceSeek: true });
     expect(plan.mode).toBe('keyless');
     expect(plan.queries).toEqual(expect.arrayContaining([
-      'Science Nation surgical robot',
+      'dexter robotic surgery system',
       'mri scanner',
       'radiologist workstation',
       'surgical robot operating room',
     ]));
     // Clinical leads come first so archive-only (bing=ddg=google=0) burns budget on OR/robot.
-    expect(plan.queries[0]).toMatch(/Science Nation|surgical robot|radiologist|da vinci|ai radiology/i);
-    expect(plan.archiveQueries[0]).toMatch(/Science Nation|surgical robot|radiologist|da vinci|ai radiology/i);
+    expect(plan.queries[0]).toMatch(/face|surgical robot|radiologist|da vinci|ai radiology/i);
+    expect(plan.archiveQueries[0]).toMatch(/face|surgical robot|radiologist|da vinci|ai radiology/i);
     expect(plan.queries.some((q) => /radiologist|telemedicine|surgical robot|operating room/i.test(q))).toBe(true);
   });
 

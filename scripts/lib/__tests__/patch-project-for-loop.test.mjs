@@ -117,7 +117,7 @@ describe('promoteIntroFaceVideo (housing)', () => {
     expect(out.script[3].narration).toMatch(/Narration 6/);
   });
 
-  it('promotes healthcare surgical robot / Science Nation over Archive pad (web16)', () => {
+  it('promotes healthcare surgical robot / da Vinci OR over Archive pad (web16)', () => {
     const HEALTHCARE_TOPIC =
       'How AI and surgical robots are transforming modern medicine in hospital operating rooms';
     const project = {
@@ -137,11 +137,11 @@ describe('promoteIntroFaceVideo (housing)', () => {
           source: 'Archive.org live',
         },
         {
-          id: 'science-nation',
+          id: 'da-vinci-or',
           segmentId: 'body',
           type: 'video',
-          url: 'https://archive.org/download/science/sn.mp4',
-          alt: 'science nation surgical robotics operating room da Vinci robot',
+          url: 'https://archive.org/download/davinci/or.mp4',
+          alt: 'da Vinci surgical robot operating room surgeon',
           query: 'surgical robot operating room',
           source: 'Archive.org live',
         },
@@ -149,7 +149,7 @@ describe('promoteIntroFaceVideo (housing)', () => {
     };
 
     const out = promoteIntroFaceVideo(project);
-    expect(out.media.find((m) => m.id === 'science-nation').segmentId).toBe('intro');
+    expect(out.media.find((m) => m.id === 'da-vinci-or').segmentId).toBe('intro');
     expect(out.media.find((m) => m.id === 'archive-pad').segmentId).toBe('body');
   });
 

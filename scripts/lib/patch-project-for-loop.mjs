@@ -431,15 +431,18 @@ export function promoteIntroFaceVideo(project) {
         return -20;
       }
       const topicHits = topic.split(/\s+/).filter((w) => w.length > 4 && scoreBlob.includes(w)).length;
-      // Surgical robot / OR demo / Science Nation / Onyx RAD beat talking-head MRI
-      // explainers for the hook (healthcare-web8 raw 6.2 — robot shots were strong
-      // but lost the opener). web16: "science nation surgical robotics" and "surgical
-      // robotics" were in pool but scored 0 here because the old pattern required
-      // \bsurgical\s*robot\b which fails on "surgical robotics" (no boundary before
-      // "ics"). Added surgical\s*robotics? and science_nation / onyx_rad patterns.
+      // Surgical robot / OR demo / Onyx RAD beat talking-head MRI explainers for the
+      // hook (healthcare-web8 raw 6.2 — robot shots were strong but lost the opener).
+      // web16: "surgical robotics" was in pool but scored 0 here because the old
+      // pattern required \bsurgical\s*robot\b which fails on "surgical robotics" (no
+      // boundary before "ics"). Added surgical\s*robotics? and onyx_rad patterns.
+      // Science Nation intentionally excluded (healthcare-web76): Archive packs
+      // stamp the NSF globe logo repeatedly regardless of title, so
+      // harvest-quality.mjs hard-rejects it — promoting it here would only get it
+      // swapped back out by repairEditTimelineIntroFace downstream.
       // Skip classroom / ISD / overview-slide demos (healthcare-web11 COVER UP FAILS).
       if (
-        /\b(surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*surg|cnbc.*surgical\s*robot|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|onyx\s*rad(?:\s+ai|\s+radiol)?|tiny\s+incision\b|hsc.{0,20}surgical\s+robot)\b/i.test(scoreBlob)
+        /\b(surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*surg|cnbc.*surgical\s*robot|onyx\s*rad(?:\s+ai|\s+radiol)?|tiny\s+incision\b|hsc.{0,20}surgical\s+robot)\b/i.test(scoreBlob)
         && !/\b(classroom|school\s+district|\bisd\b|students?\s+watching|children\s+seated|overview)\b/i.test(scoreBlob)
       ) {
         return 14 + Math.min(2, topicHits);

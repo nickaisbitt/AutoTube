@@ -2121,9 +2121,13 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
   if (isHealthcareTopic(topicBlob)) {
     // Face-first AI-medicine: clinician+screen / OR motion — not Archive talking-heads.
     // Prefer CNBC surgical robot / da Vinci OR / radiologist workstation for intro quality.
+    // Science Nation dropped (healthcare-web76): Archive packs stamp the NSF globe
+    // logo repeatedly regardless of title — querying it only wastes harvest slots
+    // on content harvest-quality.mjs now hard-rejects wholesale. Dexter/HSC surgical
+    // robot documentaries are validated clean clinical-OR alternatives.
     const faces = [
       'CNBC surgical robot operating room hospital',
-      'Science Nation surgical robot operating room',
+      'dexter robotic surgery system operating room',
       'Onyx RAD AI radiology workstation screen',
       'da Vinci robot surgery operating room patient',
       'radiologist workstation MRI screen monitor',
@@ -2482,7 +2486,7 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
 ];
 
 /** Short Archive.org subjects for hospital / clinical / AI-medicine keyless runs.
- * Lead with Science Nation / OR / surgical-robot / radiologist+screen so archive-only
+ * Lead with face-first / OR / surgical-robot / radiologist+screen so archive-only
  * pools (bing=ddg=google=0) do not fill on nurse-station / medical-examination magnets
  * that return political/game-show/podcast junk (healthcare-web43/44).
  */
@@ -2494,8 +2498,13 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   'clinician face at workstation monitors',
   'surgeon face operating room close up',
   'nurse patient bedside face',
-  'Science Nation surgical robot',
-  'Science Nation radiology',
+  // Science Nation dropped (healthcare-web76): Archive packs stamp the NSF globe
+  // logo repeatedly regardless of title, so harvest-quality.mjs now hard-rejects
+  // every science-nation asset — querying it only burns archive-only budget on
+  // content that is guaranteed to be discarded. Dexter/HSC/"tiny incision" robot
+  // documentaries are validated clean clinical-OR alternatives (no logo spam).
+  'dexter robotic surgery system',
+  'tiny incision surgical robot',
   'surgical robot operating room',
   'da vinci surgical system',
   'radiologist workstation',
@@ -2547,7 +2556,7 @@ export const ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES = ARCHIVE_HEALTHCARE_MOTIO
 
 /**
  * When bing/google/ddg all returned 0, bias Archive toward clinical lead subjects
- * (Science Nation / OR / surgical-robot / radiologist) instead of vague magnets.
+ * (face-first / OR / surgical-robot / radiologist) instead of vague magnets.
  */
 export function preferHealthcareArchiveClinicalQueries(queries = [], { archiveOnly = false } = {}) {
   if (!archiveOnly) return [...queries];
@@ -2773,7 +2782,7 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
 
   // Keyed: keep the face head, then the aggressive topical pack, then base fillers.
   // Keyless: web-friendly scenes first, then short Archive subjects and remaining base.
-  // Healthcare keyless: lead with Science Nation / OR / surgical-robot / radiologist
+  // Healthcare keyless: lead with face-first / OR / surgical-robot / radiologist
   // so archive-only runs (bing=ddg=google=0) burn budget on clinical subjects first.
   const headCount = keyed ? Math.min(4, base.length) : 0;
   const healthcareClinicalLead = (!keyed && healthcare)
@@ -3548,7 +3557,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Pure talking-head / news studio without clinician+screen or OR motion —
       // demote below intro clinical floor (≥2) so AI-talk pads lose the hook.
       const talkingHeadPad = /\b(talking\s*heads?|news\s*(?:anchor|studio|desk)|studio\s+interview|webinar\s+host|podcast\s+host|lecture\s+(?:host|speaker))\b/i.test(blob);
-      const clinicianScreenOrOr = /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|OR)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|onyx\s*rad(?:\s+ai|\s+radiol)?|ultrasound\s+(?:demo|demonstration)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen|mri)|mri\s+(?:monitor|screen)|scan\s*screen|operating\s+room|or\s+(?:suite|table|lights?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing)|tiny\s+incision|hsc.{0,20}surgical\s+robot)\b/i.test(blob)
+      // Note: Science Nation is not boosted here — it is caught by the healthcare
+      // off-topic -20 short-circuit above (harvest-quality.mjs hard-rejects it).
+      const clinicianScreenOrOr = /\b(ai\s+radiolog|radiolog\w*\s+ai|surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*(?:surg|robot|OR)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|onyx\s*rad(?:\s+ai|\s+radiol)?|ultrasound\s+(?:demo|demonstration)|pointing\s+at\s+(?:the\s+)?(?:monitor|screen|mri)|mri\s+(?:monitor|screen)|scan\s*screen|operating\s+room|or\s+(?:suite|table|lights?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing)|tiny\s+incision|hsc.{0,20}surgical\s+robot)\b/i.test(blob)
         || (
           /\b(doctor|clinician|radiologist|physician|surgeon)\b/i.test(blob)
           && /\b(monitor|screen|mri|radiolog|ultrasound|scan)\b/i.test(blob)
@@ -3572,7 +3583,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       ) {
         return 9;
       }
-      if (/\b(surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*surg|science\s+nation\s+(?:surgical|robot|radiol|hospital|medical)|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|da\s*vinci\s*(?:robot\s+)?operating\s+room|onyx\s*rad(?:\s+ai|\s+radiol)?|tiny\s+incision|hsc.{0,20}surgical\s+robot)\b/i.test(blob)
+      if (/\b(surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci\s*surg|cnbc\s+(?:surgical|robot|da\s*vinci|diagnos)|da\s*vinci\s*(?:robot\s+)?operating\s+room|onyx\s*rad(?:\s+ai|\s+radiol)?|tiny\s+incision|hsc.{0,20}surgical\s+robot)\b/i.test(blob)
         && !/\b(classroom|school\s+district|\bisd\b|students?\s+watching|children\s+seated|da\s*vinci\s+surgical\s+system\s+overview|exhibition\s+hall|trade\s*show|conference\s+(?:booth|floor)|expo\s+(?:floor|booth|hall))\b/i.test(blob)
       ) return 10;
       if (

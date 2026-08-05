@@ -2883,6 +2883,80 @@ describe('housingIntroFaceEvidenceMatches — real DDG site:vimeo.com titles (wa
     expect(checkIntroFacePool(project).pass).toBe(true);
     expect(checkEditTimelineIntroFace(project).pass).toBe(true);
   });
+
+  it('rejects housing-web153 false-positive intro-face pads (constable / radio caller)', () => {
+    // Bare "face"/"shocked" + eviction used to clear these political/news pads.
+    expect(housingIntroFaceEvidenceMatches(
+      'constables face dangers while serving eviction notices maricopa county',
+    )).toBe(false);
+    expect(housingIntroFaceEvidenceMatches(
+      'maajid nawaz shocked at caller s eviction over political views',
+    )).toBe(false);
+    // Still accept real emotion+face and person+eviction forms.
+    expect(housingIntroFaceEvidenceMatches(
+      'shocked face eviction notice apartment tenant',
+    )).toBe(true);
+    expect(housingIntroFaceEvidenceMatches(
+      'west sussex man faces an eviction order from his littlehampton home',
+    )).toBe(true);
+    expect(housingIntroFaceEvidenceMatches(
+      'Dozens face eviction at downtown Las Vegas transitional housing complex',
+    )).toBe(true);
+  });
+});
+
+describe('housingOffTopicBrollReason — web153 DM/Archive junk that soft-passed', () => {
+  const ctx = HOUSING_TOPIC;
+  it('rejects electric-shock / box-destruction / millionaire clickbait DM pads', () => {
+    for (const alt of [
+      'man gets electric shock watch man gets electric shock worldtalk on dailymotion',
+      '16 seconds of moving box destruction watch 16 seconds of moving box destruction emjr',
+      'millionaire returned home pretending to be poor to test his family what they did shocked him',
+    ]) {
+      expect(housingOffTopicBrollReason(alt, ctx)).toMatch(/housing off-topic/);
+    }
+  });
+
+  it('rejects noida assault / mariupol war / committee-meeting / smart-growth promo pads', () => {
+    for (const alt of [
+      'when security guards assaulted a resident these visuals from a swanky noida apartment complex',
+      'more than 100 turkish citizens are in occupied by russian military city mariupol',
+      'comm services public safety and housing development committee meeting 9 12 2023',
+      'a smart growth approach to affordable housing',
+      'how affordable housing is transforming lives in cambridge 106 new units',
+      'project connect glendale 2014',
+      'constables face dangers while serving eviction notices maricopa county',
+      'maajid nawaz shocked at caller s eviction over political views',
+      'foreclosure illinois naperville naperville community television nctv17 public access tv',
+    ]) {
+      expect(housingOffTopicBrollReason(alt, ctx)).toMatch(/housing off-topic/);
+    }
+  });
+
+  it('keeps real eviction/tenant face motion', () => {
+    expect(housingOffTopicBrollReason(
+      'worried tenant face close up eviction notice apartment',
+      ctx,
+    )).toBe('');
+    expect(housingOffTopicBrollReason(
+      'family crying eviction apartment packing boxes',
+      ctx,
+    )).toBe('');
+  });
+});
+
+describe('healthcareOffTopicBrollReason — clinic promo pads', () => {
+  const ctx = 'Why AI will change healthcare';
+  it('rejects clinic promo / imaging-center ad junk', () => {
+    expect(healthcareOffTopicBrollReason('clinic promo personal injury MRI', ctx)).toMatch(/off-topic/);
+    expect(healthcareOffTopicBrollReason('imaging center promo advertisement commercial MRI', ctx)).toMatch(/off-topic/);
+    expect(healthcareOffTopicBrollReason('free mri consultation promo walk-in', ctx)).toMatch(/off-topic/);
+  });
+  it('keeps clinical OR/MRI/face motion', () => {
+    expect(healthcareOffTopicBrollReason('doctor face patient consultation close up hospital', ctx)).toBe('');
+    expect(healthcareOffTopicBrollReason('radiologist face reviewing mri screen', ctx)).toBe('');
+    expect(healthcareOffTopicBrollReason('surgical robot operating room patient', ctx)).toBe('');
+  });
 });
 
 describe('healthcareOffTopicBrollReason — web69 medica/filmworks pads', () => {

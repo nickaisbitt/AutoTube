@@ -2067,6 +2067,8 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
       'shocked face close up phone',
       'shocked face apartment eviction notice',
       'worried face eviction notice apartment',
+      'renter face eviction notice close up',
+      'family crying eviction apartment door',
       'person holding eviction notice close up',
       'scared woman reading letter apartment',
       'shocked man face apartment eviction',
@@ -2199,6 +2201,12 @@ function stockMotionQueries(topicBlob, cyberTopic, options = {}) {
     // on content harvest-quality.mjs now hard-rejects wholesale. Dexter/HSC surgical
     // robot documentaries are validated clean clinical-OR alternatives.
     const faces = [
+      // Human face leads first — tip-best 6.6 (web61) stalled on faceless robot/OR + slides.
+      'doctor face patient consultation close up',
+      'worried patient face doctor hospital',
+      'radiologist face reviewing mri screen',
+      'surgeon face operating room close up',
+      'nurse patient bedside face close up',
       'CNBC surgical robot operating room hospital',
       'dexter robotic surgery system operating room',
       'Onyx RAD AI radiology workstation screen',
@@ -2526,6 +2534,8 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   // housingIntroFaceEvidenceMatches in harvest-quality.mjs).
   'worried tenant face close up',
   'shocked face eviction notice',
+  'renter face eviction notice apartment',
+  'family crying eviction apartment',
   'eviction notice tenant apartment',
   'housing crisis family',
   'evicted family packing boxes apartment',
@@ -2805,12 +2815,18 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   // inject to soft-pass-thin (healthcare-web81+). Keep a few Vimeo fallbacks after DM.
   const healthcareHostLead = healthcare
     ? [
+        // Face/OR leads first — tip-best 6.6 stalled on faceless robot + corporate slides.
+        'doctor face patient consultation site:dailymotion.com',
+        'worried patient face doctor hospital site:dailymotion.com',
+        'radiologist face reviewing mri screen site:dailymotion.com',
+        'surgeon face operating room site:dailymotion.com',
         'ai radiology site:dailymotion.com',
         'surgical robot site:dailymotion.com',
         'mri clinician monitor site:dailymotion.com',
         'operating room surgery site:dailymotion.com',
         'doctor mri monitor site:dailymotion.com',
         'ultrasound demonstration site:dailymotion.com',
+        'doctor face patient consultation site:vimeo.com',
         'ai radiology site:vimeo.com',
         'surgical robot site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
@@ -2818,16 +2834,21 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   // Housing: lead DM with shocked-face / eviction-evidence (Vimeo secondary after
   // TLS fingerprint circuit opens — housing-web85 slideshow). web26 raw 4.4–5.2
   // needed face openers; DM/Archive must supply them when Vimeo is dead.
+  // housing-web153: political-radio / constable / millionaire / war pads filled
+  // DM slots — keep face+renter leads first so queryCap burns on real openers.
   const housingHostLead = housing
     ? [
-        'worried tenant face close up site:dailymotion.com',
         'shocked face eviction notice site:dailymotion.com',
+        'worried tenant face close up site:dailymotion.com',
+        'renter face eviction notice apartment site:dailymotion.com',
+        'family crying eviction apartment site:dailymotion.com',
         'eviction notice tenant apartment site:dailymotion.com',
         'housing crisis family site:dailymotion.com',
         'evicted family packing boxes apartment site:dailymotion.com',
         'tenant packing boxes site:dailymotion.com',
         'foreclosure family home site:dailymotion.com',
         'eviction documentary site:dailymotion.com',
+        'shocked face eviction notice site:vimeo.com',
         'worried tenant face close up site:vimeo.com',
         'eviction documentary site:vimeo.com',
       ].filter(isSafeStockMotionQuery)

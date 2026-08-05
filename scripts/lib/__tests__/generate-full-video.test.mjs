@@ -1240,6 +1240,12 @@ describe('healthcare keyless motion pack + volume chase', () => {
 
   it('leads with AI radiology / clinician+screen / OR face-first queries and DM/Vimeo host searches', () => {
     const plan = motionQueryPlan(HEALTHCARE_AI_TOPIC, false, { stockKeyed: false, faceSeek: true });
+    // Human face leads must outrank corridor establishing shots (tip-best 6.6 stall).
+    expect(plan.queries.slice(0, 4)).toEqual(expect.arrayContaining([
+      'doctor face patient consultation close up',
+      'worried patient face doctor hospital',
+      'radiologist face reviewing mri screen',
+    ]));
     expect(plan.queries).toEqual(expect.arrayContaining([
       'ai radiology doctor monitor screen',
       'clinician pointing at mri monitor',
@@ -1248,14 +1254,30 @@ describe('healthcare keyless motion pack + volume chase', () => {
       'ai radiology',
     ]));
     // Prefer Dailymotion host leads (Vimeo TLS fingerprint risk); keep Vimeo fallbacks.
+    expect(plan.webHostQueries[0]).toMatch(/doctor face patient consultation site:dailymotion\.com/i);
     expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:dailymotion\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /surgical\s+robot\s+site:dailymotion\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:vimeo\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /surgical\s+robot\s+site:vimeo\.com/i.test(q))).toBe(true);
-    const aiIdx = plan.queries.findIndex((q) => /ai radiology doctor monitor/i.test(q));
+    const faceIdx = plan.queries.findIndex((q) => /doctor face patient consultation/i.test(q));
     const corridorIdx = plan.queries.findIndex((q) => /hospital corridor hallway/i.test(q));
-    expect(aiIdx).toBeGreaterThanOrEqual(0);
-    expect(corridorIdx).toBeGreaterThan(aiIdx);
+    expect(faceIdx).toBeGreaterThanOrEqual(0);
+    expect(corridorIdx).toBeGreaterThan(faceIdx);
+  });
+
+  it('housing webHostQueries lead with shocked-face / renter-face DM before Vimeo', () => {
+    const plan = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
+    expect(plan.webHostQueries[0]).toMatch(/shocked face eviction notice site:dailymotion\.com/i);
+    expect(plan.webHostQueries).toEqual(expect.arrayContaining([
+      'worried tenant face close up site:dailymotion.com',
+      'renter face eviction notice apartment site:dailymotion.com',
+      'family crying eviction apartment site:dailymotion.com',
+      'shocked face eviction notice site:vimeo.com',
+    ]));
+    const dmFace = plan.webHostQueries.findIndex((q) => /shocked face eviction notice site:dailymotion/i.test(q));
+    const vimeoFace = plan.webHostQueries.findIndex((q) => /shocked face eviction notice site:vimeo/i.test(q));
+    expect(dmFace).toBeGreaterThanOrEqual(0);
+    expect(vimeoFace).toBeGreaterThan(dmFace);
   });
 
   it('chases keyless healthcare volume above the soft-pass floor like airline', () => {

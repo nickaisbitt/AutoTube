@@ -4640,3 +4640,169 @@ describe('housing-web163 prank / daily-tip furniture / flooded-apartment pads', 
     expect(project.editTimeline[0].startSec).toBe(0);
   });
 });
+
+describe('housing-web165 FILMIBEAT / flick-vault / campfire movie-promo pads', () => {
+  const FILMIBEAT =
+    'molkki episode spoiler sakshi purvi virendra filmibeat molkki episode spoiler sakshi s next evil plan on purvi';
+  const FLICK_VAULT =
+    'double bunk full hd movies for free flick vault youtube video film animation double bunk 1961 comedy';
+  const CAMPFIRE =
+    'campfire eviction stories from the mission district';
+
+  it('hard-rejects FILMIBEAT / flick-vault / full-hd-movies / campfire pads', () => {
+    for (const title of [FILMIBEAT, FLICK_VAULT, CAMPFIRE, 'full hd movies for free flick vault']) {
+      expect(isHousingIntroJunkPad(title)).toBe(true);
+      expect(housingOffTopicBrollReason(title, HOUSING_TOPIC)).toMatch(/housing off-topic/);
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(housingIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/j.mp4',
+      })).toBe(0);
+    }
+  });
+
+  it('keeps West Sussex / Dale Farm / SF tenant eviction faces', () => {
+    for (const title of [
+      'west sussex man faces an eviction order from his littlehampton home george depass',
+      'violent eviction looms traveller families the dale farm community faces',
+      '670 low income tenants being evicted in san francisco',
+    ]) {
+      expect(isHousingIntroJunkPad(title)).toBe(false);
+      expect(housingOffTopicBrollReason(title, HOUSING_TOPIC)).toBe('');
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(true);
+      expect(housingIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/ok.mp4',
+      })).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('FAILS when flick-vault leads at 0; repair promotes West Sussex face', () => {
+    const junk = {
+      id: 'flick1', type: 'video', url: 'https://example.com/flick.mp4',
+      title: FLICK_VAULT, alt: FLICK_VAULT,
+    };
+    const filmibeat = {
+      id: 'filmi1', type: 'video', url: 'https://example.com/filmi.mp4',
+      title: FILMIBEAT, alt: FILMIBEAT,
+    };
+    const campfire = {
+      id: 'camp1', type: 'video', url: 'https://example.com/camp.mp4',
+      title: CAMPFIRE, alt: CAMPFIRE,
+    };
+    const west = {
+      id: 'west1', type: 'video', url: 'https://example.com/west.mp4',
+      title: 'west sussex man faces an eviction order from his littlehampton home',
+      alt: 'west sussex man faces an eviction order',
+    };
+    const dale = {
+      id: 'dale1', type: 'video', url: 'https://example.com/dale.mp4',
+      title: 'violent eviction looms traveller families the dale farm community faces',
+      alt: 'dale farm eviction',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [junk, filmibeat, campfire, west, dale],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'flick1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'filmi1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 1.95, assetId: 'camp1' },
+        { segmentId: 'seg1', startSec: 1.95, endSec: 2.6, assetId: 'west1' },
+        { segmentId: 'seg1', startSec: 2.6, endSec: 3.25, assetId: 'dale1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    expect(housingIntroRepairRank(junk)).toBe(0);
+    expect(housingIntroRepairRank(filmibeat)).toBe(0);
+    expect(housingIntroRepairRank(campfire)).toBe(0);
+    expect(housingIntroRepairRank(west)).toBeGreaterThanOrEqual(2);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(['west1', 'dale1']).toContain(project.editTimeline[0].assetId);
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+});
+
+describe('healthcare-web207 cashback / LiveLeak / product / summit lead junk', () => {
+  const ZOYLO =
+    '50 cash back on doctor consultation through zoylo stop burning a hole in your pocket';
+  const LIVELEAK =
+    'girl and doctor in clinic liveleak videos live leak videos';
+  const EXO =
+    'a pocket ultrasound with ai simplicity exo echo iris point of care ultrasound system';
+  const GRAPES =
+    'from grapes to gowns the unexpected training tool that builds surgical precision';
+  const VIBE =
+    'The 2025 VIBE Summit highlighted how collaboration innovation and technology are advancing healthcare across Mayo Clinic';
+  const TELEHEALTH =
+    'tech startups increasingly offering access to health care telehealth became a feature of the pandemic';
+  const TAMPA =
+    'breast ultrasounds in tampa bay 813 964 8439 bayview radiology';
+  const AI_CASES =
+    'most common use cases for ai in radiology radiology is evolving quickly';
+
+  it('hard-rejects web207 cashback / LiveLeak / product / summit / telehealth pads', () => {
+    for (const title of [ZOYLO, LIVELEAK, EXO, GRAPES, VIBE, TELEHEALTH, TAMPA, AI_CASES]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(true);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(healthcareIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/j.mp4',
+      })).toBe(0);
+    }
+  });
+
+  it('keeps Imperial MRI / Ulster / Shropshire surgical-robot clinical openers', () => {
+    for (const title of [
+      'having an mri scan 7 to 12 year olds imperial nhs',
+      'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      'state of the art surgical robot demonstrated in ulster hospital theatres',
+    ]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(false);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toBe('');
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(true);
+      expect(healthcareIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/ok.mp4',
+      })).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('FAILS when Zoylo cashback leads at 0; repair promotes Ulster OR', () => {
+    const cash = {
+      id: 'cash1', type: 'video', url: 'https://example.com/cash.mp4',
+      title: ZOYLO, alt: ZOYLO,
+    };
+    const leak = {
+      id: 'leak1', type: 'video', url: 'https://example.com/leak.mp4',
+      title: LIVELEAK, alt: LIVELEAK,
+    };
+    const tele = {
+      id: 'tele1', type: 'video', url: 'https://example.com/tele.mp4',
+      title: TELEHEALTH, alt: TELEHEALTH,
+    };
+    const ulster = {
+      id: 'ulster1', type: 'video', url: 'https://example.com/ulster.mp4',
+      title: 'state of the art surgical robot demonstrated in ulster hospital theatres',
+      alt: 'ulster hospital surgical robot',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [cash, leak, tele, ulster],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'cash1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 1.3, assetId: 'leak1' },
+        { segmentId: 'seg1', startSec: 1.3, endSec: 1.95, assetId: 'tele1' },
+        { segmentId: 'seg1', startSec: 1.95, endSec: 2.6, assetId: 'ulster1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    expect(healthcareIntroRepairRank(cash)).toBe(0);
+    expect(healthcareIntroRepairRank(ulster)).toBeGreaterThanOrEqual(2);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('ulster1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+});

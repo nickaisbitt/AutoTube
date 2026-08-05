@@ -668,11 +668,11 @@ export function buildEditTimeline(project, options = {}) {
           : MAX_BODY_CUT_THIN_SEC;
       effectiveCut = Math.min(holdCeiling, Math.max(cut, holdNeeded));
     }
-    // housing-web153: watcher pacing ≤5 ("TV news package") — housing was excluded
-    // from the snappy hold cap, so rich DM/Archive pools still froze at 2.5–4s
-    // holds. Apply the same enough-URL cap as other topics; rich pools still
-    // tighten further below. Thin housing pools keep longer holds via holdCeiling.
-    if (uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS) {
+    // housing-web153: rich DM/Archive pools (≥12 URLs) were excluded from the
+    // snappy hold cap and felt like a TV news package. Cap rich housing like
+    // other topics; medium housing (4–11 URLs) still lengthens holds so the
+    // first-15s ≤1-reuse gate can cover without 2× loops.
+    if (uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS && (!topicIsHousing || isRichPool)) {
       effectiveCut = Math.min(effectiveCut, MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC);
     }
     // Rich pool: tighter hold so a single download-clip source can't dominate —
@@ -681,8 +681,6 @@ export function buildEditTimeline(project, options = {}) {
       const richFloor = totalDur > 0 && maxSlots > 0 ? totalDur / maxSlots : 0;
       if (richFloor > MAX_BODY_HOLD_RICH_POOL_SEC) {
         // Need longer holds to stay under hardMax — prefer that over looping.
-        // Prefer coverage over looping, but still prefer ≤2.5s when the math allows
-        // (housing-web153 upload-ready gap was lethargic pacing, not reuse).
         effectiveCut = Math.min(
           MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC,
           Math.max(effectiveCut, richFloor),
@@ -1098,14 +1096,16 @@ export function buildEditTimeline(project, options = {}) {
       : onlyTwoStillsInSeg
         ? Math.max(effectiveCut, STILL_PAIR_HOLD_SEC)
         : effectiveCut;
-    // Medium first-15s: stretch body cuts only while inside the opening window
-    // so unique URLs can cover ≤1 use each without slowing the whole body.
-    // Rich pools (≥12 URLs) — including keyless housing — keep ≤1.5s cuts
-    // (housing-web153: stretching rich housing made the opener feel like a TV
-    // news package). Medium non-rich pools still stretch.
+    // Medium/housing first-15s: stretch body cuts only while inside the opening
+    // window so unique URLs can cover ≤1 use each without slowing the whole body.
+    // Stretch medium pools, and housing even when the relative rich-pool gate
+    // trips at 8 URLs (keyless housing-web) — otherwise 1.5s cuts force 2× reuse
+    // inside the first 15s. Non-housing rich pools (≥12 URLs) keep ≤1.5s cuts.
+    // Rich housing stretch is ≈ max(1.5, 15/n) which stays ≤1.5 when n≥12, so
+    // housing-web153 snappy pacing is preserved for rich pools.
     const earlyWindowStretch = (
       applyFirstWindowStrict
-      && !isRichPool
+      && (!isRichPool || topicIsHousing)
       && !isIntro
       && !isOutro
       && uniqueUrlCount >= 4

@@ -444,6 +444,17 @@ export function dailymotionVideoIdFromUrl(url = '') {
   return m ? String(m[1]).toLowerCase() : '';
 }
 
+/**
+ * yt-dlp soft-probe must use the public page URL — CDN m3u8 manifests
+ * (`cdndirector.dailymotion.com/.../x8fmvll.m3u8`) fail the probe even when the
+ * page URL works (housing-web153: false-tripped dailymotion-circuit-open ×3).
+ */
+export function resolveDailymotionProbeUrl(url = '') {
+  const id = dailymotionVideoIdFromUrl(url);
+  if (id) return `https://www.dailymotion.com/video/${id}`;
+  return String(url || '').trim();
+}
+
 /** True when yt-dlp has a cookie jar / browser cookies for bot-gated hosts. */
 export function hasYtDlpCookies() {
   return Boolean(

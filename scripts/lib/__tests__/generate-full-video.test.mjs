@@ -21,6 +21,7 @@ import {
   isVimeoMotionCandidate,
   isDailymotionMotionCandidate,
   dailymotionVideoIdFromUrl,
+  resolveDailymotionProbeUrl,
   isVisionBudgetSoft,
   hasYtDlpCookies,
   unreliableWebProxyInjectReason,
@@ -768,6 +769,18 @@ describe('non-YouTube motion planning and ranking', () => {
     )).toBe('');
     // proxied targets are resolved via motionUrlKey; id helper is for raw URLs
     expect(dailymotionVideoIdFromUrl('https://dai.ly/x8fmvll')).toBe('x8fmvll');
+  });
+
+  it('maps CDN m3u8 manifests to the public page URL for soft-probe', () => {
+    // housing-web153: probing cdndirector…/x8fmvll.m3u8 returned false and
+    // false-tripped the DM circuit while the page URL soft-probes true.
+    expect(resolveDailymotionProbeUrl(
+      'https://cdndirector.dailymotion.com/cdn/manifest/video/x8fmvll.m3u8?sec=abc',
+    )).toBe('https://www.dailymotion.com/video/x8fmvll');
+    expect(resolveDailymotionProbeUrl('https://www.dailymotion.com/video/x8fmvll'))
+      .toBe('https://www.dailymotion.com/video/x8fmvll');
+    expect(resolveDailymotionProbeUrl('https://archive.org/download/a/a.mp4'))
+      .toBe('https://archive.org/download/a/a.mp4');
   });
 
   it('opens the Dailymotion circuit and biases remaining budget to Archive/direct at fetch time', () => {

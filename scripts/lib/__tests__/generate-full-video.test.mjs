@@ -53,6 +53,10 @@ import {
   webMotionQueryVariants,
   withDistinctProxyIdentity,
   withArchiveSweepSuffix,
+  HEALTHCARE_FACE_FIRST_REHARVEST_QUERIES,
+  HEALTHCARE_HOST_FACE_EARLY_COUNT,
+  HEALTHCARE_KEYLESS_QUERY_CAP,
+  isWebHostScopedQuery,
 } from '../generate-full-video.mjs';
 import { evaluateHarvestVolume } from '../harvest-quality.mjs';
 
@@ -1297,12 +1301,12 @@ describe('healthcare keyless motion pack + volume chase', () => {
     const plan = motionQueryPlan(HEALTHCARE_AI_TOPIC, false, { stockKeyed: false, faceSeek: true });
     // Human face leads must outrank corridor establishing shots (tip-best 6.6 stall).
     // Short host-lead bases lead (web197); "close up" variants follow in the clinical pack.
-    expect(plan.queries.slice(0, 6)).toEqual(expect.arrayContaining([
-      'doctor face patient consultation',
-      'worried patient face doctor hospital',
-      'radiologist face reviewing mri screen',
-    ]));
+    // healthcare-web199: first-class site: face searches occupy early slots so DM/Vimeo
+    // face leads run before Archive enrichment burns the batch budget (was 8/25).
+    expect(plan.queries.slice(0, HEALTHCARE_HOST_FACE_EARLY_COUNT).every(isWebHostScopedQuery)).toBe(true);
+    expect(plan.queries[0]).toMatch(/doctor face patient consultation site:dailymotion\.com/i);
     expect(plan.queries).toEqual(expect.arrayContaining([
+      'doctor face patient consultation',
       'doctor face patient consultation close up',
       'ai radiology doctor monitor screen',
       'clinician pointing at mri monitor',
@@ -1318,21 +1322,84 @@ describe('healthcare keyless motion pack + volume chase', () => {
     expect(plan.webHostQueries.some((q) => /clinician face at workstation monitors site:dailymotion\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:dailymotion\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /surgical\s+robot\s+site:dailymotion\.com/i.test(q))).toBe(true);
+    expect(plan.webHostQueries.some((q) => /mri scanner room clinical site:dailymotion\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /ai\s+radiology\s+site:vimeo\.com/i.test(q))).toBe(true);
     expect(plan.webHostQueries.some((q) => /surgical\s+robot\s+site:vimeo\.com/i.test(q))).toBe(true);
+    // Host pool grew past web199's 25 so more face/OR site: leads are available.
+    expect(plan.webHostQueries.length).toBeGreaterThanOrEqual(30);
+    // site: searches stay out of the Archive lane.
+    expect(plan.archiveQueries.every((q) => !isWebHostScopedQuery(q))).toBe(true);
     // Every healthcareHostLead base must appear in the early query list so site:
-    // searches fire within queryCap (web197 thin ddg=8 / host-queries=4/23).
-    const queryCap = 34;
-    const capped = plan.queries.slice(0, queryCap).map((q) => q.toLowerCase());
+    // searches fire within queryCap (web197 thin ddg=8 / host-queries=4/23;
+    // web199 raised cap so first-class site: + bases both fit).
+    const capped = plan.queries.slice(0, HEALTHCARE_KEYLESS_QUERY_CAP).map((q) => q.toLowerCase());
     const hostBases = plan.webHostQueries.map((hq) => hq.replace(/\s+site:(?:vimeo\.com|dailymotion\.com)\s*$/i, '').trim().toLowerCase());
     const uniqueHostBases = [...new Set(hostBases)];
     const fireable = uniqueHostBases.filter((b) => capped.includes(b));
     expect(fireable.length).toBe(uniqueHostBases.length);
-    expect(plan.queries[0]).toMatch(/doctor face patient consultation/i);
     const faceIdx = plan.queries.findIndex((q) => /doctor face patient consultation/i.test(q));
     const corridorIdx = plan.queries.findIndex((q) => /hospital corridor hallway/i.test(q));
     expect(faceIdx).toBeGreaterThanOrEqual(0);
     expect(corridorIdx).toBeGreaterThan(faceIdx);
+  });
+
+  it('uses dedicated face/OR/MRI pack when faceSeek (INTRO_FACE_FAIL re-harvest)', () => {
+    const plan = motionQueryPlan(HEALTHCARE_AI_TOPIC, false, { stockKeyed: false, faceSeek: true });
+    expect(plan.faceSeek).toBe(true);
+    // Face-first reharvest pack subjects appear before ward/corridor magnets.
+    for (const q of HEALTHCARE_FACE_FIRST_REHARVEST_QUERIES.slice(0, 8)) {
+      expect(plan.queries.some((p) => p.toLowerCase() === q.toLowerCase())).toBe(true);
+    }
+    const facePackLast = Math.max(
+      ...HEALTHCARE_FACE_FIRST_REHARVEST_QUERIES.map((q) =>
+        plan.queries.findIndex((p) => p.toLowerCase() === q.toLowerCase())),
+    );
+    const wardIdx = plan.queries.findIndex((q) => /^hospital ward$/i.test(q));
+    if (wardIdx >= 0) expect(wardIdx).toBeGreaterThan(facePackLast);
+  });
+
+  it('prefers Archive clinical face/OR over corridor establishing on healthcare', () => {
+    const faceArchive = {
+      url: 'https://archive.org/download/face/face.mp4',
+      source: 'Archive.org live',
+      alt: 'doctor face patient consultation close up hospital',
+      title: 'doctor face patient consultation',
+      score: 0,
+    };
+    const orArchive = {
+      url: 'https://archive.org/download/or/or.mp4',
+      source: 'Archive.org live',
+      alt: 'surgical robot operating room da vinci clinical',
+      title: 'surgical robot operating room',
+      score: 0,
+    };
+    const corridorArchive = {
+      url: 'https://archive.org/download/corridor/corridor.mp4',
+      source: 'Archive.org live',
+      alt: 'hospital corridor walking away nurses hallway',
+      title: 'hospital corridor footage',
+      score: 100,
+    };
+    const dmFace = {
+      url: 'https://www.dailymotion.com/video/face1',
+      source: 'DuckDuckGo web video',
+      alt: 'worried patient face doctor hospital',
+      score: 0,
+    };
+    expect(motionCandidateHostRank(faceArchive, { topicBlob: HEALTHCARE_AI_TOPIC })).toBe(5);
+    expect(motionCandidateHostRank(orArchive, { topicBlob: HEALTHCARE_AI_TOPIC })).toBe(5);
+    expect(motionCandidateHostRank(corridorArchive, { topicBlob: HEALTHCARE_AI_TOPIC })).toBe(35);
+    const ranked = rankMotionCandidates(
+      [corridorArchive, orArchive, faceArchive, dmFace],
+      (clip) => clip.score,
+      { topicBlob: HEALTHCARE_AI_TOPIC },
+    );
+    // DM (2) ahead of intro-face Archive (5); corridor establishing last (35).
+    expect(ranked[0].url).toBe(dmFace.url);
+    expect(ranked[ranked.length - 1].url).toBe(corridorArchive.url);
+    expect(ranked.slice(1, 3).map((c) => c.url).sort()).toEqual(
+      [faceArchive.url, orArchive.url].sort(),
+    );
   });
 
   it('housing webHostQueries lead with shocked-face / renter-face DM before Vimeo', () => {

@@ -51,6 +51,9 @@ import {
   housingOffTopicBrollReason,
   healthcareOffTopicBrollReason,
   healthcareArchiveTitleMismatchReason,
+  healthcareIntroFaceEvidenceMatches,
+  isHealthcareEstablishingOpener,
+  isHealthcareIntroDeadAirOpener,
   HEALTHCARE_AMBIGUOUS_ARCHIVE_MATCH_TOKENS,
   isOffBrandVisual,
   isGenericStockJunk,
@@ -554,6 +557,17 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
     if (isHousingTopic(options.topicBlob || '')) {
       const blob = `${candidate.alt || ''} ${candidate.title || ''} ${candidate.query || ''} ${candidate.source || ''}`;
       return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 5 : 35;
+    }
+    // healthcare-web199: archive=22 but intro-face pool empty after corridor/backs
+    // rejects — bare Archive rank 0 let establishing pads fill inject ahead of
+    // clinical face/OR. Prefer items that clear healthcareIntroFaceEvidenceMatches;
+    // demote corridor/backs/title-card establishing behind DM/web.
+    if (isHealthcareTopic(options.topicBlob || '')) {
+      const blob = `${candidate.alt || ''} ${candidate.title || ''} ${candidate.query || ''} ${candidate.source || ''}`;
+      if (healthcareIntroFaceEvidenceMatches(blob)) return 5;
+      if (isHealthcareEstablishingOpener(blob) || isHealthcareIntroDeadAirOpener(blob)) return 35;
+      // Generic clinical Archive: behind DM (2) / generic web (10), ahead of Vimeo (25).
+      return 15;
     }
     return 0;
   }
@@ -2576,7 +2590,8 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
 const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   // Face-first leads — tip-best 6.6 stalled on faceless robot/OR openers (web61/68).
   // Short host-lead bases (no "close up") sit first so site:dailymotion/vimeo
-  // variants fire within queryCap (healthcare-web197 host-queries=4/23).
+  // variants fire within queryCap (healthcare-web197 host-queries=4/23;
+  // healthcare-web199 host-queries=8/25 — raise face share + first-class site: slots).
   'doctor face patient consultation',
   'worried patient face doctor hospital',
   'radiologist face reviewing mri screen',
@@ -2585,6 +2600,8 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   'doctor face patient consultation close up',
   'surgeon face operating room close up',
   'nurse patient bedside face',
+  'doctor face close up hospital',
+  'patient face doctor consultation',
   // Science Nation dropped (healthcare-web76): Archive packs stamp the NSF globe
   // logo repeatedly regardless of title, so harvest-quality.mjs now hard-rejects
   // every science-nation asset — querying it only burns archive-only budget on
@@ -2603,12 +2620,13 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   // healthcareHostLead only fires when its base query appears in plan.queries; add it here
   // (same pattern as housing-web61 Bing/DDG 0-result fix for site:-scoped searches).
   'mri clinician monitor',
+  'mri scanner room clinical',
+  'mri scanner hospital',
   'clinician computer screen',
   'surgical robot',
   'ultrasound demonstration',
   'operating room surgery',
   'surgical team operating',
-  'mri scanner hospital',
   'ct scanner hospital',
   'mri scanner',
   'xray radiology',
@@ -2638,8 +2656,53 @@ const ARCHIVE_HEALTHCARE_MOTION_QUERIES = [
   'operating room',
 ];
 
-/** Clinical-only Archive subjects used when web engines return 0 motion. */
-export const ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES = ARCHIVE_HEALTHCARE_MOTION_QUERIES.slice(0, 24);
+/**
+ * Face/OR/MRI-only pack for INTRO_FACE_FAIL re-harvest (faceSeek).
+ * Narrower than the full clinical lead so re-harvest burns budget on motion that
+ * can clear healthcareIntroFaceEvidenceMatches — not corridor/ward magnets.
+ */
+export const HEALTHCARE_FACE_FIRST_REHARVEST_QUERIES = [
+  'doctor face patient consultation',
+  'worried patient face doctor hospital',
+  'radiologist face reviewing mri screen',
+  'surgeon face operating room',
+  'clinician face at workstation monitors',
+  'doctor face patient consultation close up',
+  'surgeon face operating room close up',
+  'nurse patient bedside face',
+  'doctor face close up hospital',
+  'patient face doctor consultation',
+  'surgical robot operating room',
+  'da vinci surgical system',
+  'mri clinician monitor',
+  'mri scanner room clinical',
+  'operating room surgery',
+  'doctor mri monitor',
+  'mri scanner hospital',
+  'radiologist workstation monitors',
+  'ultrasound demonstration',
+  'tiny incision surgical robot',
+  'dexter robotic surgery system',
+  'surgical robot',
+  'ai radiology',
+];
+
+/** How many face/OR/MRI site: host searches to schedule as first-class early queries. */
+export const HEALTHCARE_HOST_FACE_EARLY_COUNT = 14;
+/** Extra host-scoped variants beyond healthcareHostLead (webQueries × site:). */
+export const HEALTHCARE_HOST_QUERY_VARIANT_LIMIT = 20;
+/** Keyless healthcare queryCap — raised so more face host bases run (web199: 8/25). */
+export const HEALTHCARE_KEYLESS_QUERY_CAP = 42;
+
+/** Clinical-only Archive subjects used when web engines return 0 motion.
+ * Face/OR/MRI share expanded (web199) — first 28 are intro-capable leads.
+ */
+export const ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES = ARCHIVE_HEALTHCARE_MOTION_QUERIES.slice(0, 28);
+
+/** True when a motion query is already scoped to Vimeo/Dailymotion. */
+export function isWebHostScopedQuery(query = '') {
+  return /\bsite:(?:vimeo\.com|dailymotion\.com)\b/i.test(String(query || ''));
+}
 
 /**
  * When bing/google/ddg all returned 0, bias Archive toward clinical lead subjects
@@ -2809,6 +2872,7 @@ export function withArchiveSweepSuffix(query, suffix = '') {
  */
 export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   const keyed = options.stockKeyed === true;
+  const faceSeek = options.faceSeek === true;
   const base = stockMotionQueries(topicBlob, cyberTopic, options).filter(isSafeStockMotionQuery);
   const webQueries = webMotionQueryVariants(topicBlob, base);
   const airline = isAirlineTopic(topicBlob);
@@ -2822,23 +2886,36 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
         // Face/OR leads first — tip-best 6.6 stalled on faceless robot + corporate slides.
         // Keep ≤5 content words so `… site:dailymotion.com` stays ≤6 (isSafeStockMotionQuery).
         // Bases are prepended into plan.queries below so site: searches fire within
-        // queryCap (healthcare-web197 host-queries=4/23 with thin ddg=8).
+        // queryCap (healthcare-web197 host-queries=4/23; web199 host-queries=8/25).
         'doctor face patient consultation site:dailymotion.com',
         'worried patient face doctor hospital site:dailymotion.com',
         'radiologist face reviewing mri screen site:dailymotion.com',
         'surgeon face operating room site:dailymotion.com',
         'clinician face at workstation monitors site:dailymotion.com',
+        'doctor face close up hospital site:dailymotion.com',
+        'patient face doctor consultation site:dailymotion.com',
+        'surgical robot operating room site:dailymotion.com',
+        'mri scanner room clinical site:dailymotion.com',
         'ai radiology site:dailymotion.com',
         'surgical robot site:dailymotion.com',
         'mri clinician monitor site:dailymotion.com',
         'operating room surgery site:dailymotion.com',
         'doctor mri monitor site:dailymotion.com',
+        'da vinci surgical system site:dailymotion.com',
         'ultrasound demonstration site:dailymotion.com',
+        'mri scanner hospital site:dailymotion.com',
         'doctor face patient consultation site:vimeo.com',
         'worried patient face doctor hospital site:vimeo.com',
         'surgeon face operating room site:vimeo.com',
+        'radiologist face reviewing mri screen site:vimeo.com',
+        'clinician face at workstation monitors site:vimeo.com',
+        'doctor face close up hospital site:vimeo.com',
+        'surgical robot operating room site:vimeo.com',
+        'mri scanner room clinical site:vimeo.com',
         'ai radiology site:vimeo.com',
         'surgical robot site:vimeo.com',
+        'operating room surgery site:vimeo.com',
+        'mri clinician monitor site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
     : [];
   // Housing: lead DM with shocked-face / eviction-evidence (Vimeo secondary after
@@ -2866,7 +2943,10 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   const webHostQueries = [
     ...healthcareHostLead,
     ...housingHostLead,
-    ...webMotionHostQueryVariants(webQueries),
+    ...webMotionHostQueryVariants(
+      webQueries,
+      healthcare ? HEALTHCARE_HOST_QUERY_VARIANT_LIMIT : 12,
+    ),
   ].filter((query, idx, arr) => arr.findIndex((q) => q.toLowerCase() === query.toLowerCase()) === idx);
   let boost;
   if (keyed) {
@@ -2886,9 +2966,13 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   // Keyless: web-friendly scenes first, then short Archive subjects and remaining base.
   // Healthcare keyless: lead with face-first / OR / surgical-robot / radiologist
   // so archive-only runs (bing=ddg=google=0) burn budget on clinical subjects first.
+  // INTRO_FACE_FAIL re-harvest (faceSeek): use the dedicated face/OR/MRI pack only.
   const headCount = keyed ? Math.min(4, base.length) : 0;
   const healthcareClinicalLead = (!keyed && healthcare)
-    ? ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES.filter(isSafeStockMotionQuery)
+    ? (faceSeek
+        ? HEALTHCARE_FACE_FIRST_REHARVEST_QUERIES
+        : ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES
+      ).filter(isSafeStockMotionQuery)
     : [];
   const ordered = keyed
     ? [...base.slice(0, headCount), ...boost, ...base.slice(headCount)]
@@ -2908,18 +2992,30 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   // ("… close up") sat behind Archive volume and Chrome-budget death. Ensure every
   // healthcareHostLead base appears in the early query list so site:dailymotion /
   // site:vimeo fire within queryCap before soft-pass.
-  if (healthcare && healthcareHostLead.length) {
+  // healthcare-web199: even with bases early, only the first batch (~4 bases → 8
+  // host piggybacks) ran before budget — schedule top face/OR/MRI site: searches
+  // as first-class early queries (web-only) so DM/Vimeo face leads get their own
+  // fetch slots without waiting on Archive enrichment of every base. Also keep
+  // every webHostQueries base (including webQuery variants) inside queryCap.
+  if (healthcare && webHostQueries.length) {
     const hostBases = [];
     const hostSeen = new Set();
-    for (const hq of healthcareHostLead) {
-      const base = webMotionHostQueryBase(hq);
-      const key = base.toLowerCase();
-      if (!key || hostSeen.has(key) || !isSafeStockMotionQuery(base)) continue;
+    for (const hq of webHostQueries) {
+      const hostBase = webMotionHostQueryBase(hq);
+      const key = hostBase.toLowerCase();
+      if (!key || hostSeen.has(key) || !isSafeStockMotionQuery(hostBase)) continue;
       hostSeen.add(key);
-      hostBases.push(base);
+      hostBases.push(hostBase);
     }
-    const withoutHost = queries.filter((q) => !hostSeen.has(q.trim().toLowerCase()));
-    const merged = [...hostBases, ...withoutHost];
+    const hostScopedEarly = healthcareHostLead
+      .filter(isSafeStockMotionQuery)
+      .slice(0, HEALTHCARE_HOST_FACE_EARLY_COUNT);
+    const hostScopedKeys = new Set(hostScopedEarly.map((q) => q.trim().toLowerCase()));
+    const withoutHost = queries.filter((q) => {
+      const key = q.trim().toLowerCase();
+      return !hostSeen.has(key) && !hostScopedKeys.has(key);
+    });
+    const merged = [...hostScopedEarly, ...hostBases, ...withoutHost];
     queries.length = 0;
     const mergeSeen = new Set();
     for (const q of merged) {
@@ -2929,6 +3025,11 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
       queries.push(q);
     }
   }
+  // site: host searches must not displace Archive.org subjects — strip them from
+  // the archive lane (they are web-only face/OR yield).
+  const archiveSourceQueries = healthcare
+    ? queries.filter((q) => !isWebHostScopedQuery(q))
+    : [...queries];
   return {
     mode: keyed ? 'keyed' : 'keyless',
     keyed,
@@ -2938,10 +3039,11 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
     // Archive.org has its own direct-MP4 search lane; host-scoped web searches must
     // never displace these subjects from that lane.
     archiveQueries: healthcare
-      ? preferHealthcareArchiveClinicalQueries(queries, { archiveOnly: true })
+      ? preferHealthcareArchiveClinicalQueries(archiveSourceQueries, { archiveOnly: true })
       : [...queries],
     boostCount: boost.length,
     baseCount: base.length,
+    faceSeek,
   };
 }
 
@@ -3409,7 +3511,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const aggressiveTopic = airlineTopicEarly || housingTopic || healthcareTopicEarly;
   const queryCap = hasStockKeysEarly
     ? (aggressiveTopic ? 30 : 20)
-    : (airlineTopicEarly ? 44 : housingTopic || healthcareTopicEarly ? 34 : 26);
+    : (airlineTopicEarly
+      ? 44
+      : housingTopic
+        ? 34
+        : healthcareTopicEarly
+          ? HEALTHCARE_KEYLESS_QUERY_CAP
+          : 26);
   // liveCap/perQueryCap/liveTarget widen once the Vimeo circuit opens (below), so a
   // Vimeo-dominated DDG pool does not starve Archive/Dailymotion/direct of the budget
   // Vimeo can no longer spend (housing-web85: 18/18 injected Vimeo clips were doomed;
@@ -3454,11 +3562,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         webMotionHostQueryBase(query).toLowerCase() === String(q || '').trim().toLowerCase()
       ))
       : [];
+    // healthcare-web199: first-class site: face queries are themselves host searches
+    // (not piggybacks). Count them so host-queriesTried reflects DM/Vimeo face yield.
+    const hostScopedDirect = !suffix && page === 1 && isWebHostScopedQuery(q) ? 1 : 0;
     const webSearchQueries = !suffix && devServer && page === 1
       ? [...scopedWebQueries, q]
       : [];
     report.motionWebHostQueriesTried =
-      (report.motionWebHostQueriesTried || 0) + scopedWebQueries.length;
+      (report.motionWebHostQueriesTried || 0) + scopedWebQueries.length + hostScopedDirect;
     const webPromises = webSearchQueries.flatMap((webQuery) =>
       WEB_VIDEO_PROVIDERS.map(({ key }) =>
         fetchWebVideoResults(devServer, key, webQuery, { topicBlob, limit: perProviderPage })));
@@ -3965,6 +4076,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       if (/\b(title\s+card|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|capitol|protest|maternity|kapparot|kapores|def\s*con|biohacking|madness\s+and\s+medicine|what\s+is\s+an\s+mri)\b/i.test(blob)) {
         return -8;
       }
+      // healthcare-web199: corridor / backs / hallway establishing must lose inject
+      // scoring to clinical face/OR that clear healthcareIntroFaceEvidenceMatches.
+      if (
+        (isHealthcareEstablishingOpener(blob) || isHealthcareIntroDeadAirOpener(blob))
+        && !healthcareIntroFaceEvidenceMatches(blob)
+      ) {
+        return -8;
+      }
       // Exhibition-hall / trade-show / conference-booth pads scraped via "surgical robot"
       // queries but filmed on a product-demo floor, not in a hospital or OR (web11).
       if (
@@ -4021,10 +4140,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         return 8;
       }
       // Archive clinical body filler after boosts (parallel housing).
+      // Prefer intro-face evidence (face/OR/MRI) over generic clinical / establishing.
       // Only OR/surgical-robot/radiologist Archive can compete for the intro (≥2).
       // Generic healthcare Archive is capped at 1 — body-only, deferred by takeClip(forIntro).
       // Documentary/explainer/lecture/newsreel/panel Archive drops to 0 — safe filler.
       if (/Archive/i.test(clip.source || '')) {
+        if (healthcareIntroFaceEvidenceMatches(blob)) {
+          return 8;
+        }
         if (clinicianScreenOrOr) {
           // Real OR / surgical-robot / radiologist Archive: earns intro floor.
           return hasHealthcareEvidence(clip) ? 3 : 1;

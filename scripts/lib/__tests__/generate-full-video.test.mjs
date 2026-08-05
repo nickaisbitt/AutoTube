@@ -506,11 +506,10 @@ describe('motionQueryPlan', () => {
       expect.arrayContaining(['apartment kitchen interior daylight', 'apartment building hallway doors']),
     );
     const keyless = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
-    // housing-web158: first-class DM site: face/lived-in leads occupy early slots
-    // (mirrors healthcare-web199) so shocked-face/eviction fire within queryCap.
+    // housing-web168: named-doc DM leads first, then shocked-face / lived-in.
     expect(keyless.queries.slice(0, 2)).toEqual([
-      'shocked face eviction notice site:dailymotion.com',
-      'worried tenant face close up site:dailymotion.com',
+      'dale farm eviction site:dailymotion.com',
+      'west sussex eviction site:dailymotion.com',
     ]);
     expect(keyless.queries).toEqual(
       expect.arrayContaining([
@@ -2064,11 +2063,13 @@ describe('Dailymotion host must not trip lifestyleJunk (DM-prefer)', () => {
     // Pre-fix: lifestyleJunk matched bare `dailymotion` against sourceUrl/url and
     // zeroed every site:dailymotion.com hit (healthcare HARVEST_VOLUME_FAIL / housing
     // Archive-only despite live DDG DM SERPs after 4c19bf5/1b95c7a).
+    // Fixture uses live Ulster OR (not medway product-pad) so web202 faceless-robot
+    // reject does not mask the host-URL lifestyleJunk regression this test guards.
     expect(
       isJunkStockClip(
         {
-          alt: 'a new surgical robot unveiled at medway maritime hospital',
-          title: 'a new surgical robot unveiled at medway maritime hospital',
+          alt: 'ulster hospital surgical robot operating theatre live surgery',
+          title: 'ulster hospital surgical robot operating theatre live surgery',
           query: 'surgical robot',
           source: 'DuckDuckGo web video',
           sourceUrl: 'https://www.dailymotion.com/video/x85pxfx',
@@ -2080,8 +2081,8 @@ describe('Dailymotion host must not trip lifestyleJunk (DM-prefer)', () => {
     expect(
       isJunkStockClip(
         {
-          alt: 'evictions spike across the united states as protections disappear',
-          title: 'evictions spike across the united states as protections disappear',
+          alt: 'west sussex man faces an eviction order from his littlehampton home',
+          title: 'west sussex man faces an eviction order from his littlehampton home',
           query: 'eviction documentary',
           source: 'DuckDuckGo web video',
           sourceUrl: 'https://www.dailymotion.com/video/x9abcde',

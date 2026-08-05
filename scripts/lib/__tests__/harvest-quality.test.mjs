@@ -2569,6 +2569,41 @@ describe('checkEditTimelineIntroFace — housing first-segment gate', () => {
       'housing crash eviction',
     )).toBe('');
   });
+
+  it('rejects housing-web85 uganda/NSFW/promo/blog pads that looped as slideshow B-roll', () => {
+    expect(housingOffTopicBrollReason(
+      "love is a message from uganda's gay transgender community",
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      "girlfriend's wetting by cianiemoo on vimeo",
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'social media addiction isnt just kids these days',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'dharavi diary official trailer redevelopers are destroying the slum',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'national faith home buyers bernadine family testimonial',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'safe families for children introducing the merritts',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'shortform.com blog the cycle of poverty family crying',
+      'housing crash eviction',
+    )).toMatch(/housing off-topic/);
+    expect(housingOffTopicBrollReason(
+      'worried tenant face eviction notice apartment close-up',
+      'housing crash eviction',
+    )).toBe('');
+  });
 });
 
 describe('housingIntroFaceEvidenceMatches — real DDG site:vimeo.com titles (waves 36-60)', () => {

@@ -1828,16 +1828,21 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
 
   // Housing — fail-closed on intro face tier. A housing harvest that has enough
   // volume but only landscape/news/FEMA openers triggers a face-first re-harvest.
-  // Then apply a keyless soft-pass (like healthcare) so thin-but-valid pools
-  // (web28: 11v / avg 4.25) don't volume-hard-fail after junk rejects.
+  // Then apply the same junk-ratio + topical-evidence-majority gate airline and
+  // healthcare already earn ≥7 with (housing previously only checked a looser
+  // 0.4 generic-junk ratio and no strong-evidence floor at all — the highest-
+  // leverage structural gap vs. airline-web8's junk-demotion path).
   if (isHousingTopic(topicBlob)) {
     const introFace = checkIntroFacePool(project);
     if (!introFace.pass) return introFace;
-    if (videoCount > 0 && genericJunkRatio > SOFT_PASS_GENERIC_JUNK_RATIO_MAX) {
-      return {
-        pass: false,
-        reason: `soft-pass-motion-housing-generic-junk(${genericJunkVideos}/${videoCount} videos)`,
-      };
+    const housingSoftFail = housingSoftPassMotionFailureReason(project, {
+      genericJunkRatio,
+      genericJunkVideos,
+      uniqueVideos,
+      videoCount,
+    });
+    if (housingSoftFail) {
+      return { pass: false, reason: housingSoftFail };
     }
     // Keyless: intro-face + generic-junk + VHS/map rejects already ran.
     // web57–58 starve at 4–5 unique videos after relevance even with bing=50+.
@@ -1940,6 +1945,18 @@ const HEALTHCARE_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
 const HEALTHCARE_KEYLESS_SOFT_PASS_MIN_VIDEOS = 6;
 const HEALTHCARE_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
 const HEALTHCARE_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
+
+/**
+ * Housing junk-ratio ceilings, ported from airline-web8's soft-pass path.
+ * Previously housing only checked the shared 0.4 SOFT_PASS_GENERIC_JUNK_RATIO_MAX
+ * (looser than airline/healthcare's 0.25) and had no hard-junk-ratio gate or
+ * topical-evidence-majority floor at all — the highest-leverage structural
+ * gap that let junk-heavy pools ("split-screen news package", inconsistent
+ * webcam quality) clear soft-pass and land at raw 6.4 instead of ≥7.
+ */
+const HOUSING_SOFT_PASS_MIN_STRONG_VIDEOS = 4;
+const HOUSING_SOFT_PASS_GENERIC_JUNK_RATIO_MAX = 0.25;
+const HOUSING_SOFT_PASS_HARD_JUNK_RATIO_MAX = 0.12;
 
 const AIRLINE_HARD_REJECT_PATTERNS = [
   {
@@ -2329,6 +2346,98 @@ export function healthcareSoftPassMotionFailureReason(project, stats = {}) {
     : 1;
   if (strongVideos < strongFloor) {
     return `soft-pass-motion-healthcare-clinical-strong-floor(${strongVideos}/${strongFloor} videos)`;
+  }
+
+  return null;
+}
+
+function housingVideoBlob(asset = {}) {
+  return `${asset.alt || ''} ${asset.title || ''} ${asset.source || ''} ${asset.sourceUrl || ''} ${asset.url || ''} ${asset.query || ''}`;
+}
+
+/**
+ * Housing already has a comprehensive off-topic-B-roll regex
+ * (HOUSING_OFF_TOPIC_BROLL_RE / HOUSING_AVIATION_PAD_RE / HOUSING_GROUP_PHOTO_JUNK_RE,
+ * wired through housingOffTopicBrollReason) that plays the same role as
+ * AIRLINE_HARD_REJECT_PATTERNS / HEALTHCARE_HARD_REJECT_PATTERNS — reuse it
+ * directly rather than duplicating a second junk-pattern list.
+ */
+function housingHardRejectReason(asset = {}, topicBlob = '') {
+  const blob = housingVideoBlob(asset);
+  return housingOffTopicBrollReason(blob, topicBlob) || null;
+}
+
+function isHousingStrongVideo(asset = {}, topicBlob = '') {
+  const topic = String(topicBlob || '') || 'housing eviction tenant';
+  if (
+    housingHardRejectReason(asset, topic)
+    || isGenericStockJunk(housingVideoBlob(asset), topic)
+  ) {
+    return false;
+  }
+  return hasHousingEvidence(asset);
+}
+
+/**
+ * Unique videos carrying real housing/tenant/eviction/mortgage evidence.
+ *
+ * @param {object[]} [uniqueVideos]
+ * @param {string} [topicBlob]
+ */
+export function countHousingStrongVideos(uniqueVideos = [], topicBlob = '') {
+  return uniqueVideos.filter((asset) => isHousingStrongVideo(asset, topicBlob)).length;
+}
+
+/**
+ * Housing soft-pass junk gate, ported from airline/healthcare: a hard-junk-ratio
+ * ceiling, a tightened generic-junk-ratio ceiling on the clean pool (0.25, not
+ * the shared 0.4), and a topical-evidence-majority floor. Housing previously had
+ * none of the last two, letting junk-heavy or off-topic-majority pools clear
+ * soft-pass and land at raw 6.4 (housing-web69) instead of ≥7 like airline-web8.
+ *
+ * @param {object} project
+ * @param {object} [stats]
+ * @returns {string|null}
+ */
+export function housingSoftPassMotionFailureReason(project, stats = {}) {
+  const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
+  if (!isHousingTopic(topicBlob)) return null;
+
+  const uniqueVideos = stats.uniqueVideos || uniqueVideoAssets(project?.media || []);
+  const videoCount = stats.videoCount ?? uniqueVideos.length;
+
+  const hardJunkVideos = uniqueVideos.filter((asset) => housingHardRejectReason(asset, topicBlob));
+  const hardJunkRatio = videoCount ? hardJunkVideos.length / videoCount : 0;
+  if (
+    hardJunkVideos.length >= 3
+    || (videoCount > 0 && hardJunkRatio > HOUSING_SOFT_PASS_HARD_JUNK_RATIO_MAX)
+  ) {
+    const reason = housingHardRejectReason(hardJunkVideos[0], topicBlob) || 'hard-junk';
+    return `soft-pass-motion-housing-junk(${reason}:${hardJunkVideos.length}/${videoCount})`;
+  }
+
+  const cleanVideos = uniqueVideos.filter((asset) => !housingHardRejectReason(asset, topicBlob));
+  const genericJunkVideos = stats.genericJunkVideos ?? cleanVideos.filter((asset) => (
+    isGenericStockJunk(housingVideoBlob(asset), topicBlob)
+  )).length;
+  const cleanCount = cleanVideos.length || videoCount;
+  const genericJunkRatio = stats.genericJunkRatio ?? (cleanCount ? genericJunkVideos / cleanCount : 0);
+  if (genericJunkRatio > HOUSING_SOFT_PASS_GENERIC_JUNK_RATIO_MAX) {
+    return `soft-pass-motion-housing-generic-junk(${genericJunkVideos}/${cleanCount} videos)`;
+  }
+
+  const strongVideos = countHousingStrongVideos(cleanVideos, topicBlob);
+  const hasStockKeys = Boolean(
+    process.env.PEXELS_API_KEY
+      || process.env.VITE_PEXELS_KEY
+      || process.env.PIXABAY_API_KEY
+      || process.env.VITE_PIXABAY_KEY,
+  );
+  const strongFloor = hasStockKeys
+    ? HOUSING_SOFT_PASS_MIN_STRONG_VIDEOS
+    : 1;
+  if (strongVideos < strongFloor) {
+    return `soft-pass-motion-housing-topical-strong-floor(${strongVideos}/${strongFloor} videos)`;
   }
 
   return null;

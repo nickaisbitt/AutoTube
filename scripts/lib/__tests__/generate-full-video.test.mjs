@@ -9,6 +9,7 @@ import {
   archiveTopicSubjectQueries,
   buildMotionPaddingQueue,
   decideStockVisionGate,
+  extraArchiveClinicalAttemptsOnVimeoCircuitOpen,
   fetchWebVideoResults,
   formatMotionDropFunnel,
   formatMotionPathLog,
@@ -770,6 +771,35 @@ describe('non-YouTube motion planning and ranking', () => {
     expect(widened.perQueryCap).toBeGreaterThan(10);
     expect(widened.liveTarget).toBeGreaterThan(40);
     expect(widened.liveTarget).toBeLessThanOrEqual(widened.liveCap);
+  });
+
+  it('schedules more Archive clinical subjects once the healthcare Vimeo circuit opens', () => {
+    // healthcare-web81+: queryCap truncates plan.queries (and the batches built from
+    // it) long before every clinical Archive subject in plan.archiveQueries gets a
+    // turn. Once the circuit opens, the widened budget from openVimeoFetchCircuit
+    // should go to more Archive clinical subjects — not another round of the same
+    // Vimeo-heavy web queries queryCap already scheduled.
+    const archiveQueries = [
+      'surgical robot',
+      'ultrasound demonstration',
+      'operating room surgery',
+      'mri scanner hospital',
+      'ai cancer detection',
+    ];
+    const scheduledKeys = new Set(['surgical robot', 'ultrasound demonstration']);
+    const boost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(archiveQueries, scheduledKeys);
+    expect(boost.map((a) => a.query)).toEqual([
+      'operating room surgery',
+      'mri scanner hospital',
+      'ai cancer detection',
+    ]);
+    expect(boost.every((a) => a.extra === true && a.page === 1 && a.sweep === '')).toBe(true);
+  });
+
+  it('caps and dedupes the Vimeo-circuit Archive clinical boost', () => {
+    const archiveQueries = ['a', 'A', 'b', 'c'];
+    const boost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(archiveQueries, new Set(), 2);
+    expect(boost.map((a) => a.query)).toEqual(['a', 'b']);
   });
 
   it('restores Archive injects marked motionRelevancePassed after relevance strips them', () => {

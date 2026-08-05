@@ -843,6 +843,19 @@ export function buildEditTimeline(project, options = {}) {
         // Soft demote off-story stock on airline topics (faces still ok).
         if (!/face|person|people|worried|shocked|portrait|close.?up/i.test(blob)) reusePenalty -= 4;
       }
+      // Port of the airline off-story soft demotion above: housing/healthcare
+      // pools that clear the junk hard-bans above can still be dominated by
+      // impersonal/generic B-roll (housing-web69: "generic corporate" stock;
+      // healthcare-web61: "impersonal tech footage / corporate slides"). Nudge
+      // non-topical, non-face clips down throughout the body — not just the
+      // intro — so on-story and face motion wins ties without ever excluding
+      // a thin pool's only options (still ≥ -8 above the hard-junk floor).
+      if (topicIsHousing && !HOUSING_TOPICAL_VISUAL_RE.test(blob)) {
+        if (!/face|person|people|worried|shocked|portrait|close.?up/i.test(blob)) reusePenalty -= 4;
+      }
+      if (topicIsHealthcare && !HEALTHCARE_TOPICAL_VISUAL_RE.test(blob) && !hasHealthcareEvidence(a)) {
+        if (!/face|person|people|worried|shocked|portrait|close.?up/i.test(blob)) reusePenalty -= 4;
+      }
       if (/architectural model|architecture model|scale model|conference room|skyline|corporate office|business district|empty park|people in park|press conference|news desk|office desk/i.test(blob)) return -6;
       // Housing intro: landscape/lake establishing is never a valid hook cut.
       if (isIntro && topicIsHousing && isLandscapeOnlyIntroVisual(a)) return -12;

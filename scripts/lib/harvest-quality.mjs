@@ -289,11 +289,16 @@ export function healthcareOffTopicBrollReason(haystack, contextText = '', asset 
   if (isHealthcareIntroBeautyOrClinicJunk(h) && !healthcareIntroClinicalEscape(h)) {
     return 'healthcare: beauty/cosmetic or osteopathy-clinic B-roll';
   }
-  // healthcare-web201: Gaza hospital siege / "thought process of highly successful
-  // people" brain pads / cuffless BP product ads / Aaron Judge sports bone bruise
-  // rode face/OR soft-pass while real surgical robot sat later in the first 3s.
+  // healthcare-web202: faceless Mira/unveiled/Andrew-Chung robot *product* pads
+  // must drop from the pool — bare "surgical robot" must not launder them.
+  if (isHealthcareFacelessRobotProductPad(h)) {
+    return 'healthcare: web202 faceless robot product pad';
+  }
+  // healthcare-web201/web202: Gaza hospital siege / "thought process…" brain /
+  // cuffless BP / Aaron Judge / leopard / COVID-wave / CSC-Seva / medical-computer
+  // pads rode face/OR soft-pass while real consultation/OR sat later (or never).
   if (isHealthcareIntroPadJunk(h) && !healthcareIntroClinicalEscape(h)) {
-    return 'healthcare: web201 off-topic intro pad';
+    return 'healthcare: web201/web202 off-topic intro pad';
   }
   // Archive query→title mismatch (surgical robot → GeekBeat / fashion / political).
   if (asset) {
@@ -1556,19 +1561,51 @@ export function isHealthcareIntroBeautyOrClinicJunk(evidence = '') {
 }
 
 /**
- * healthcare-web201: obvious non-clinical pads still in the harvest pool —
- * Gaza war-hospital siege news, "thought process of highly successful people"
- * brain/self-help clips, cuffless BP product ads, Aaron Judge sports bone
- * bruise. Never count as intro evidence; do NOT reject real surgical robot /
+ * healthcare-web201/web202: obvious non-clinical pads still in the harvest
+ * pool — Gaza war-hospital siege news (incl. "gaza s hospitals" possessive
+ * scrape), "thought process of highly successful people" brain/self-help,
+ * cuffless BP product ads (words between cuffless→pressure), Aaron Judge
+ * sports bone bruise, COVID hospital-wave news, leopard/wildlife WooGlobe,
+ * Online Seva/CSC consultation promo, "medical computer solutions" product
+ * pitch, face-transplant explainers, radiology-guide title slides. Never
+ * count as intro evidence; do NOT reject real live-OR surgical robot /
  * radiologist MRI / doctor-patient consultation.
  *
  * @param {string} evidence
  * @returns {boolean}
  */
 export function isHealthcareIntroPadJunk(evidence = '') {
-  return /\b(?:gaza\s+(?:war\s+)?hospital|hospital\s+siege|war\s+hospital\s+siege|siege\s+(?:of\s+)?(?:a\s+|the\s+)?(?:gaza\s+)?hospital|thought\s+process\s+of\s+highly\s+successful|highly\s+successful\s+people|cuffless\s+(?:blood\s+)?pressure|blood\s+pressure\s+monitor\s+(?:product|ad|promo|commercial|review|wearable)|aaron\s+judge|bone\s+bruise)\b/i.test(
-    String(evidence || ''),
+  const text = String(evidence || '');
+  return /\b(?:gaza(?:[''\u2019]?s)?\s+(?:war\s+)?hospitals?|gaza\s+s\s+hospitals?|collapse\s+of\s+gaza|under\s+siege.{0,48}hospital|hospital\s+siege|war\s+hospital\s+siege|siege\s+(?:of\s+)?(?:a\s+|the\s+)?(?:gaza\s+)?hospital|thought\s+process\s+of\s+highly\s+successful|highly\s+successful\s+people|cuffless\b[\s\w]{0,40}\b(?:blood\s+)?pressure|panasonic\b[\s\w]{0,40}\bblood\s+pressure\s+monitor|blood\s+pressure\s+monitor\s+(?:product|ad|promo|commercial|review|wearable)|aaron\s+judge|bone\s+bruise|leopards?\b|maasai\s+mara|\bwooglobe\b|wildlife\s+(?:mating|close[\s-]?up|footage)|online\s+seva|\bcsc\s+cent(?:er|re)s?\b|online\s+(?:medical\s+)?consultation[\s\w]{0,60}(?:\bcsc\b|seva|ayush|apollo)|medical\s+computer\s+solutions|face\s+transplant\s+surgery\s+explained|radiology\s+guide\s+featuring|dr\s+wessam|covid[\s-]?19[\s\w]{0,80}(?:h[oô]pitaux?|hospitals?|patients?|afflux|vague|épidémie|epidemie)|(?:vague|wave)\s+de\s+covid|les\s+h[oô]pitaux\s+face|recorded\s+call[\s\w]{0,40}(?:mri|imaging|health)|amazon\.com[\s\w./?=&\-]{0,80}(?:blood\s+pressure|monitor))\b/i.test(
+    text,
   );
+}
+
+/**
+ * healthcare-web202: faceless surgical-robot *product* pads (Mira platform /
+ * "robot unveiled" / Ballarat installed / Dr Andrew Chung spine promo) cleared
+ * healthcareIntroFaceEvidenceMatches via bare "surgical robot" strong motion
+ * and led the hook at raw 3.4. These never count as intro evidence unless the
+ * same blob also names live OR / da Vinci / surgeon|patient face.
+ *
+ * @param {string} evidence
+ * @returns {boolean}
+ */
+export function isHealthcareFacelessRobotProductPad(evidence = '') {
+  const text = String(evidence || '');
+  if (!text.trim()) return false;
+  const productTell = /\b(?:surgical\s+robotic\s+platform|mira\s+surgical|\bxataka\b|robot(?:ics?)?(?:\s+\w+){0,6}\s+unveiled|futuristic\s+surgical\s+robot\s+installed|drandrewchung\.com|www\.drandrewchung|robotic\s+spine\s+surgery\s+arizona|dr\.?\s+andrew\s+chung)\b/i.test(
+    text,
+  );
+  if (!productTell) return false;
+  // Live OR / da Vinci / clinician|patient face escapes the product-tell.
+  if (
+    /\b(?:operating\s+room|or\s+(?:suite|table|lights?)|intraoperative|da\s*vinci)\b/i.test(text)
+    || healthcareClinicianOrPatientFace(text)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -1581,6 +1618,11 @@ export function isHealthcareIntroPadJunk(evidence = '') {
  */
 export function healthcareIntroClinicalEscape(evidence = '') {
   const text = String(evidence || '');
+  // Dead-air recorded-call / title-card / backs pads must not escape pad-junk
+  // drops via bare radiologist+mri tokens (web198/web202 recorded-call MRI error).
+  if (isHealthcareIntroDeadAirOpener(text)) {
+    return healthcareStrongClinicalMotion(text);
+  }
   if (healthcareStrongClinicalMotion(text)) return true;
   if (
     /\bsurgeon\s+(?:face|portrait|close[\s-]?up|expression)\b/i.test(text)
@@ -1620,6 +1662,10 @@ export function healthcareIntroClinicalEscape(evidence = '') {
 export function healthcareIntroFaceEvidenceMatches(evidence = '') {
   const text = String(evidence || '');
   if (!text.trim()) return false;
+  // healthcare-web202: faceless Mira/unveiled/Andrew-Chung robot *product* pads
+  // must not clear via bare "surgical robot" strong motion — no clinicalEscape
+  // override (that escape *is* the strong-motion path that soft-passed web202).
+  if (isHealthcareFacelessRobotProductPad(text)) return false;
   const strong = healthcareStrongClinicalMotion(text);
   const face = healthcareClinicianOrPatientFace(text);
   const clinicalEscape = healthcareIntroClinicalEscape(text);
@@ -1627,8 +1673,9 @@ export function healthcareIntroFaceEvidenceMatches(evidence = '') {
   // unless a true clinical escape (surgeon/OR/MRI/robot/radiologist+screen/
   // doctor+patient consultation) is present in the same blob.
   if (isHealthcareIntroBeautyOrClinicJunk(text) && !clinicalEscape) return false;
-  // healthcare-web201: Gaza siege / self-help brain / cuffless BP / Aaron Judge
-  // pads never clear intro evidence without a clinical escape.
+  // healthcare-web201/web202: Gaza siege / self-help brain / cuffless BP /
+  // Aaron Judge / leopard / COVID-wave / CSC-Seva / medical-computer pads never
+  // clear intro evidence without a clinical escape.
   if (isHealthcareIntroPadJunk(text) && !clinicalEscape) return false;
   // Dead-air backs / title-card / walking-away hard-fail unless a true face
   // close-up or visual OR/MRI/robot escape is present in the same blob.
@@ -1638,10 +1685,11 @@ export function healthcareIntroFaceEvidenceMatches(evidence = '') {
 }
 
 /**
- * Rank healthcare intro repair candidates (healthcare-web200):
- * clinician/patient face consultation (4) > OR/surgical-robot (3) >
- * MRI/radiologist screen (2) > other qualifying motion (1). Beauty/clinic junk
- * never ranks (0).
+ * Rank healthcare intro repair candidates (healthcare-web200/web202):
+ * clinician/patient face consultation (4) > clinician/patient face (3) >
+ * live OR/surgical-robot (2) ≈ MRI/radiologist screen (2) > other qualifying
+ * motion (1). Beauty/clinic/product-robot junk never ranks (0). Repair always
+ * promotes the highest rank to startSec=0.
  *
  * @param {object} asset
  * @returns {number}
@@ -1660,6 +1708,17 @@ export function healthcareIntroRepairRank(asset) {
   if (
     /\b(?:surgical\s*robot(?:ics?)?|robot(?:ic)?\s*surger|da\s*vinci|operating\s+room|or\s+(?:suite|table|lights?)|intraoperative)\b/i.test(evidence)
     && healthcareStrongClinicalMotion(evidence)
+  ) {
+    return 2;
+  }
+  // MRI / radiologist screen — same floor as live OR/robot so soft-pass
+  // best-rank < 2 fails do not discard radiologist-workstation openers.
+  if (
+    /\b(?:mri\s+(?:scans?|scanners?|machines?|rooms?|monitors?|screens?)|ct\s*(?:scans?|scanners?)|radiologist\s+(?:workstation|screen|monitor|reads?|reviewing)|radiolog\w*\s+(?:ai|workstation|monitor|screen))\b/i.test(evidence)
+    || (
+      /\bradiologist\b/i.test(evidence)
+      && /\b(?:screen|monitor|mri|workstation|reviewing)\b/i.test(evidence)
+    )
   ) {
     return 2;
   }
@@ -1741,6 +1800,7 @@ export function checkIntroFacePool(project) {
       ) return false;
       if (isScienceNationBrandingPad(evidence)) return false;
       if (isHealthcareProductPitchIntro(evidence)) return false;
+      if (isHealthcareFacelessRobotProductPad(evidence)) return false;
       // healthcare-web197: shared with timeline gate — corridor/building/blurry-container
       // out; require doctor/surgeon/patient face OR OR/MRI/surgical-robot.
       return healthcareIntroFaceEvidenceMatches(evidence);
@@ -1750,6 +1810,20 @@ export function checkIntroFacePool(project) {
         pass: false,
         reason:
           'INTRO_FACE_FAIL: no healthcare clinical/face clip in pool — only corridor/news/graphics/talking-head openers found; re-harvest with face-first queries',
+      };
+    }
+    // healthcare-web202: soft-pass with only rank-1 leftovers (or faceless product
+    // robots that previously ranked 2) still shipped chaos. Require best repair
+    // rank ≥ 2 (consultation/face/OR/robot/MRI-screen tier).
+    const bestRank = videos.reduce(
+      (best, asset) => Math.max(best, healthcareIntroRepairRank(asset)),
+      0,
+    );
+    if (bestRank < 2) {
+      return {
+        pass: false,
+        reason:
+          'INTRO_FACE_FAIL: best healthcare intro repair rank < 2 — need consultation face, live OR/robot, or MRI/radiologist screen; re-harvest face-first',
       };
     }
   }
@@ -1796,6 +1870,7 @@ function assetPassesHealthcareTimelineIntro(asset) {
   if (!(asset?.type === 'video' || /\.mp4/i.test(asset?.url || ''))) return false;
   const evidence = timelineIntroEvidenceOf(asset);
   if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(evidence)) return false;
+  if (isHealthcareFacelessRobotProductPad(evidence)) return false;
   if (isHealthcareIntroPadJunk(evidence) && !healthcareIntroClinicalEscape(evidence)) return false;
   if (isScienceNationBrandingPad(evidence)) return false;
   if (isHealthcareProductPitchIntro(evidence)) return false;

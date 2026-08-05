@@ -18,6 +18,7 @@ import {
   isHealthcareIntroDeadAirOpener,
   isHealthcareIntroBeautyOrClinicJunk,
   isHealthcareIntroPadJunk,
+  isHealthcareFacelessRobotProductPad,
   healthcareIntroClinicalEscape,
   healthcareIntroRepairRank,
   isHousingIntroJunkPad,
@@ -2786,7 +2787,7 @@ describe('healthcareIntroFaceEvidenceMatches — web198 backs/title-card contrac
       title: 'radiologist reviewing mri scan workstation monitor',
       type: 'video',
       url: 'https://x/c.mp4',
-    })).toBe(1);
+    })).toBe(2);
   });
 });
 
@@ -2837,7 +2838,7 @@ describe('healthcareIntroFaceEvidenceMatches — web200 beauty/osteopathy junk',
     )).toBe(true);
   });
 
-  it('ranks consultation face > OR/robot > MRI screen', () => {
+  it('ranks consultation face > OR/robot >= MRI screen', () => {
     const consultation = healthcareIntroRepairRank({
       title: 'doctor face patient consultation close up',
       type: 'video',
@@ -2854,8 +2855,8 @@ describe('healthcareIntroFaceEvidenceMatches — web200 beauty/osteopathy junk',
       url: 'https://x/mri.mp4',
     });
     expect(consultation).toBeGreaterThan(robot);
-    expect(robot).toBeGreaterThan(mri);
-    expect(mri).toBeGreaterThan(0);
+    expect(robot).toBeGreaterThanOrEqual(mri);
+    expect(mri).toBe(2);
   });
 
   it('allows clinical escape when beauty junk co-occurs with surgical robot', () => {
@@ -3830,6 +3831,161 @@ describe('healthcare-web201 earliest-cut intro + pad junk', () => {
   });
 
   it('promotes doctor-face consultation over OR when consultation outranks earliest robot', () => {
+    const robot = {
+      id: 'robot1',
+      type: 'video',
+      title: 'surgical robot operating room da vinci',
+      alt: 'surgical robot OR lights',
+      url: 'https://archive.org/robot.mp4',
+    };
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor face patient consultation',
+      url: 'https://archive.org/face.mp4',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [robot, face],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 1.2, assetId: 'robot1' },
+        { segmentId: 'seg1', startSec: 1.2, endSec: 2.5, assetId: 'face1' },
+      ],
+    };
+    expect(checkEditTimelineIntroFace(project).pass).toBe(true);
+    expect(healthcareIntroRepairRank(face)).toBeGreaterThan(healthcareIntroRepairRank(robot));
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('face1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+});
+
+describe('healthcare-web202 faceless robot product + pad junk', () => {
+  it('rejects Mira/unveiled/Ballarat/Andrew-Chung faceless robot product pads', () => {
+    for (const title of [
+      'mira surgical robotic platform ver mira surgical robotic platform xataka en dailymotion',
+      'a new surgical robot s unveiled at medway maritime hospital',
+      'futuristic surgical robot installed at ballarat base hospital attracting doctors',
+      'robotic spine surgery arizona during https www drandrewchung com robotic spine surgery',
+    ]) {
+      expect(isHealthcareFacelessRobotProductPad(title)).toBe(true);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(healthcareIntroRepairRank({
+        title,
+        type: 'video',
+        url: 'https://example.com/robot-product.mp4',
+      })).toBe(0);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toMatch(/web202|robot product/i);
+    }
+  });
+
+  it('keeps live OR / da Vinci surgical robot and radiologist MRI', () => {
+    for (const title of [
+      'cnbc meet the surgical robot that can diagnose lung cancer operating room',
+      'surgical robot operating room da vinci',
+      'radiologist reviewing mri scan workstation monitor',
+      'doctor face patient consultation close up hospital',
+    ]) {
+      expect(isHealthcareFacelessRobotProductPad(title)).toBe(false);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(true);
+      expect(healthcareIntroRepairRank({
+        title,
+        type: 'video',
+        url: 'https://example.com/clinical.mp4',
+      })).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('rejects web202 Gaza possessive / leopard / COVID-wave / cuffless-gap / CSC-Seva pads', () => {
+    for (const title of [
+      'under siege the collapse of gaza s hospitals the last two remaining hospitals in northern gaza',
+      'head turning close up shots of leopards mating in maasai mara wooglobe',
+      'cinqui me vague de covid 19 les h pitaux face un nombre croissant de patients',
+      'covid 19 face l afflux de patients l h pital de villeneuve saint georges',
+      'panasonic ew3153w cuffless upper arm blood pressure monitor with wireless display',
+      'online medical consultation from experience doctors at csc centers online seva',
+      'medical computer solutions used in ct mri x ray and other image processing',
+      'face transplant surgery explained procedure risks recovery success stories',
+      'dr wessam bou assaly radiology guide featuring dr wessam bouassaly insights',
+    ]) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(true);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toMatch(/healthcare/);
+    }
+  });
+
+  it('FAILS INTRO_FACE pool when only faceless Mira robot products remain', () => {
+    const result = checkIntroFacePool({
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [
+        {
+          id: 'mira1',
+          type: 'video',
+          title: 'mira surgical robotic platform xataka en dailymotion',
+          alt: 'mira surgical robotic platform',
+          url: 'https://example.com/mira.mp4',
+        },
+        {
+          id: 'leopard1',
+          type: 'video',
+          title: 'head turning close up shots of leopards mating in maasai mara',
+          alt: 'leopards mating wooglobe',
+          url: 'https://example.com/leopard.mp4',
+        },
+        {
+          id: 'gaza1',
+          type: 'video',
+          title: 'under siege the collapse of gaza s hospitals northern gaza',
+          alt: 'gaza s hospitals under siege',
+          url: 'https://example.com/gaza.mp4',
+        },
+      ],
+    });
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/INTRO_FACE_FAIL/);
+  });
+
+  it('FAILS timeline when Mira product leads at 0; repair promotes consultation face', () => {
+    const mira = {
+      id: 'mira1',
+      type: 'video',
+      title: 'mira surgical robotic platform xataka en dailymotion',
+      alt: 'mira surgical robotic platform',
+      url: 'https://example.com/mira.mp4',
+    };
+    const face = {
+      id: 'face1',
+      type: 'video',
+      title: 'doctor face patient consultation close up hospital',
+      alt: 'doctor face patient consultation',
+      url: 'https://example.com/face.mp4',
+    };
+    const project = {
+      topic: HEALTHCARE_TOPIC,
+      script: [{ id: 'seg1', title: 'Hook', duration: 18 }],
+      media: [mira, face],
+      editTimeline: [
+        { segmentId: 'seg1', startSec: 0, endSec: 0.65, assetId: 'mira1' },
+        { segmentId: 'seg1', startSec: 0.65, endSec: 2.0, assetId: 'face1' },
+      ],
+    };
+    // web202 shipped Mira@0 and soft-passed; earliest-cut must now FAIL.
+    expect(checkEditTimelineIntroFace(project).pass).toBe(false);
+    expect(checkEditTimelineIntroFace(project).reason).toMatch(/INTRO_FACE_FAIL_TIMELINE/);
+    expect(healthcareIntroRepairRank(face)).toBe(4);
+    expect(healthcareIntroRepairRank(mira)).toBe(0);
+    const repaired = repairEditTimelineIntroFace(project);
+    expect(repaired.repaired).toBe(true);
+    expect(repaired.pass).toBe(true);
+    expect(project.editTimeline[0].assetId).toBe('face1');
+    expect(project.editTimeline[0].startSec).toBe(0);
+  });
+
+  it('promotes consultation face (rank 4) over live OR robot when both qualify', () => {
     const robot = {
       id: 'robot1',
       type: 'video',

@@ -1059,17 +1059,26 @@ describe('healthcare web15 raw 4.4 junk rejects (body-lang / NVIDIA / name-pollu
     const keep = [
       'doctor patient body examination physical assessment',
       'CNBC surgical robot operating room hospital',
-      'Science Nation surgical robot OR lights',
       'radiologist workstation MRI screen monitor',
       'da Vinci robot surgery operating room patient',
       'medical laboratory technician microscope analysis',
       'MRI scanner room hospital clinical',
-      'science nation surgical robotics OR demonstration',
       'tiny incision big impact the new surgical robot',
       'hsc first surgical robot minimally invasive',
+      'a day with the dexter robotic surgery system operating room',
     ];
     for (const alt of keep) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
+    }
+  });
+
+  it('rejects Science Nation / NSF branding pads (healthcare-web76 logo spam)', () => {
+    for (const alt of [
+      'Science Nation surgical robot OR lights',
+      'science nation surgical robotics OR demonstration',
+      'science nation surgical robotics national science foundation nsf',
+    ]) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
     }
   });
 });
@@ -1153,19 +1162,24 @@ describe('healthcare web17 raw 5.6 junk rejects — video game, massage pillow, 
     }
   });
 
-  it('keeps Science Nation surgical robotics, zero gravity surgery, MRI/xray clinical content', () => {
+  it('keeps zero gravity surgery, MRI/xray clinical content; rejects Science Nation branding', () => {
     const keep = [
-      'science nation surgical robotics operating room innovation',
       'robot zero gravity surgery OR ISS space innovation',
       'robotic surgery training minimally invasive OR hospital',
-      'science nation robots changing surgery hospital clinical',
       'mri scan clinical hospital radiology department',
       'chest x-ray radiology clinical diagnosis hospital',
-      'science nation robot surgery next frontier medicine',
+      'cnbc meet the surgical robot that can diagnose lung cancer',
     ];
     for (const alt of keep) {
       expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toBe('');
       expect(isGenericStockJunk(alt, HEALTHCARE_TOPIC)).toBe(false);
+    }
+    for (const alt of [
+      'science nation surgical robotics operating room innovation',
+      'science nation robots changing surgery hospital clinical',
+      'science nation robot surgery next frontier medicine',
+    ]) {
+      expect(healthcareOffTopicBrollReason(alt, HEALTHCARE_TOPIC)).toMatch(/healthcare off-topic/);
     }
   });
 
@@ -1265,18 +1279,20 @@ describe('checkIntroFacePool — healthcare web17 intro preference (Science Nati
     }
   });
 
-  it('accepts Science Nation surgical robotics as tier-0 intro qualifier', () => {
+  it('rejects Science Nation-only pool as intro (healthcare-web76 branding)', () => {
     const result = checkIntroFacePool(project([
       makeVideo({ alt: 'science nation surgical robotics OR demonstration hospital', query: 'science nation surgery' }),
     ]));
-    expect(result.pass).toBe(true);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
   });
 
-  it('accepts science nation robot surgery clip as intro tier', () => {
+  it('rejects science nation robot surgery clip as intro tier', () => {
     const result = checkIntroFacePool(project([
       makeVideo({ alt: 'science nation robots changing surgery next frontier medicine', query: 'science nation surgical robot' }),
     ]));
-    expect(result.pass).toBe(true);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
   });
 
   it('accepts robot zero gravity surgery OR clip as intro tier', () => {
@@ -1286,7 +1302,7 @@ describe('checkIntroFacePool — healthcare web17 intro preference (Science Nati
     expect(result.pass).toBe(true);
   });
 
-  it('fails when pool has only expo/suit shots (no Science Nation or clinical clips)', () => {
+  it('fails when pool has only expo/suit shots (no clinical clips)', () => {
     const result = checkIntroFacePool(project([
       makeVideo({ alt: 'expo floor suit walking healthcare summit vendor', query: 'ai healthcare expo' }),
       makeVideo({ alt: 'exhibition hall conference booth medical trade show healthcare', query: 'healthcare expo floor' }),
@@ -1295,10 +1311,10 @@ describe('checkIntroFacePool — healthcare web17 intro preference (Science Nati
     expect(result.reason).toMatch(/^INTRO_FACE_FAIL/);
   });
 
-  it('passes when pool has expo shot AND Science Nation clip (Science Nation satisfies the gate)', () => {
+  it('passes when pool has expo shot AND CNBC surgical robot (clinical satisfies the gate)', () => {
     const result = checkIntroFacePool(project([
       makeVideo({ alt: 'expo floor suit walking healthcare summit', query: 'healthcare expo' }),
-      makeVideo({ alt: 'science nation surgical robotics operating room hospital patient', query: 'science nation surgical robot' }),
+      makeVideo({ alt: 'cnbc meet the surgical robot that can diagnose lung cancer operating room', query: 'surgical robot' }),
     ]));
     expect(result.pass).toBe(true);
   });
@@ -2297,7 +2313,8 @@ describe('healthcareOffTopicBrollReason — web65/66 new junk patterns', () => {
     expect(healthcareOffTopicBrollReason('cnbc meet the surgical robot that can diagnose lung cancer', ctx)).toBe('');
     // web69: cambridge filmworks / versius promo titles are off-topic pads
     expect(healthcareOffTopicBrollReason('versius surgical robotic system cmr surgical cambridge filmworks', ctx)).toMatch(/off-topic/);
-    expect(healthcareOffTopicBrollReason('science nation surgical robotics operating room hospital', ctx)).toBe('');
+    // healthcare-web76: Science Nation Archive packs stamp logo spam
+    expect(healthcareOffTopicBrollReason('science nation surgical robotics operating room hospital', ctx)).toMatch(/off-topic/);
   });
   it('keeps da Vinci surgical robot live OR footage', () => {
     expect(healthcareOffTopicBrollReason('the da vinci surgical robot dr richard gallagher operating room', ctx)).toBe('');

@@ -626,36 +626,36 @@ describe('introFaceTier demotions continued', () => {
     }, { healthcare: true })).toBe(-1);
   });
 
-  it('tiers Science Nation and Onyx RAD clips as strong healthcare opener (2)', () => {
-    const preferredCases = [
-      {
-        alt: 'Science Nation surgical robot operating room hospital NSF',
-        title: 'Science Nation surgical robot documentary',
-        url: 'https://archive.org/download/sciencenation/sn.mp4',
-        type: 'video',
-      },
-      {
-        alt: 'Onyx RAD AI radiology workstation screen monitor diagnosis',
-        title: 'Onyx RAD AI radiology review',
-        url: 'https://vimeo.com/onyxrad1.mp4',
-        type: 'video',
-      },
-    ];
-    for (const asset of preferredCases) {
-      expect(introFaceTier(asset, { healthcare: true })).toBe(2);
-    }
+  it('tiers Onyx RAD / CNBC as strong healthcare opener (2); Science Nation rejected (-1)', () => {
+    expect(introFaceTier({
+      alt: 'Science Nation surgical robot operating room hospital NSF',
+      title: 'Science Nation surgical robot documentary',
+      url: 'https://archive.org/download/sciencenation/sn.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    expect(introFaceTier({
+      alt: 'Onyx RAD AI radiology workstation screen monitor diagnosis',
+      title: 'Onyx RAD AI radiology review',
+      url: 'https://vimeo.com/onyxrad1.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(2);
+    expect(introFaceTier({
+      alt: 'cnbc meet the surgical robot that can diagnose lung cancer',
+      title: 'cnbc surgical robot diagnose',
+      url: 'https://example.com/cnbc.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(2);
   });
 
-  it('tiers web16 pool clips (science nation surgical robotics / tiny incision / hsc robot) as tier 2', () => {
-    // These were in the pool during web16 but did NOT win the intro because
-    // "surgical robotics" (with "ics") did not match the old \bsurgical\s*robot\b boundary.
-    const web16Pool = [
-      {
-        alt: 'science nation surgical robotics operating room nst',
-        title: 'science nation surgical robotics',
-        url: 'https://archive.org/download/sn_robot/sn.mp4',
-        type: 'video',
-      },
+  it('tiers web16 pool clips (tiny incision / hsc robot) as tier 2; Science Nation -1', () => {
+    // "surgical robotics" (with "ics") must still match; Science Nation branding out (web76).
+    expect(introFaceTier({
+      alt: 'science nation surgical robotics operating room nst',
+      title: 'science nation surgical robotics',
+      url: 'https://archive.org/download/sn_robot/sn.mp4',
+      type: 'video',
+    }, { healthcare: true })).toBe(-1);
+    for (const asset of [
       {
         alt: 'tiny incision big impact the new surgical robot minimally invasive',
         title: 'tiny incision surgical robot',
@@ -668,8 +668,7 @@ describe('introFaceTier demotions continued', () => {
         url: 'https://archive.org/download/hsc_robot/hsc.mp4',
         type: 'video',
       },
-    ];
-    for (const asset of web16Pool) {
+    ]) {
       expect(introFaceTier(asset, { healthcare: true })).toBe(2);
     }
   });
@@ -830,20 +829,19 @@ describe('introFaceTier demotions continued', () => {
     }
   });
 
-  it('tiers Science Nation only with OR/surgical-robot/patient evidence (web71 NSF branding out)', () => {
+  it('hard-rejects all Science Nation branding as healthcare intro (web76)', () => {
     expect(introFaceTier({
       alt: 'science nation surgical robot operating room hospital',
       title: 'science nation surgical robot documentary',
       url: 'https://vimeo.com/scination.mp4',
       type: 'video',
-    }, { healthcare: true })).toBe(2);
-    // Bare Science Nation / documentary episode without OR/patient → not tier 2.
+    }, { healthcare: true })).toBe(-1);
     expect(introFaceTier({
       alt: 'science nation documentary episode',
       title: 'science nation',
       url: 'https://archive.org/download/scination/sn.mp4',
       type: 'video',
-    }, { healthcare: true })).toBeLessThan(2);
+    }, { healthcare: true })).toBe(-1);
   });
 });
 

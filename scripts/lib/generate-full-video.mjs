@@ -2843,6 +2843,15 @@ const MOTION_FETCH_BUDGET_MS_KEYED = 240000;
 const MOTION_FETCH_BUDGET_MS_KEYLESS = 360000;
 
 /**
+ * Once the fetch-time Vimeo circuit opens (housing-web85), the pool budget Vimeo can
+ * no longer spend is handed to Archive/Dailymotion/direct instead of sitting unused:
+ * a wider per-query admission ceiling and a wider live pool/target so extra
+ * archive-sweep rounds keep running until the backfill actually lands.
+ */
+export const VIMEO_CIRCUIT_PER_QUERY_CAP_BOOST = 4;
+export const VIMEO_CIRCUIT_LIVE_CAP_BOOST = 30;
+
+/**
  * Wall-clock ceiling on the search phase. A keyless plan can be ~100 Archive.org
  * queries at ~10s each, so the wider plan needs a stop that is not "ran out of
  * subjects" — whatever has been gathered by then still goes through the same gates.
@@ -3132,10 +3141,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const queryCap = hasStockKeysEarly
     ? (aggressiveTopic ? 30 : 20)
     : (airlineTopicEarly ? 44 : housingTopic || healthcareTopicEarly ? 34 : 26);
-  const liveCap = hasStockKeysEarly ? 200 : 140;
-  const perQueryCap = hasStockKeysEarly ? 8 : 10;
+  // liveCap/perQueryCap/liveTarget widen once the Vimeo circuit opens (below), so a
+  // Vimeo-dominated DDG pool does not starve Archive/Dailymotion/direct of the budget
+  // Vimeo can no longer spend (housing-web85: 18/18 injected Vimeo clips were doomed;
+  // the freed slots must go to hosts that actually survive assembly).
+  let liveCap = hasStockKeysEarly ? 200 : 140;
+  let perQueryCap = hasStockKeysEarly ? 8 : 10;
   const perProviderPage = hasStockKeysEarly && aggressiveTopic ? 16 : 10;
-  const liveTarget = Math.min(liveCap, Math.max(targets.minVideos * 2, targets.minVideos + 8));
+  let liveTarget = Math.min(liveCap, Math.max(targets.minVideos * 2, targets.minVideos + 8));
   // Keyed runs page deeper into the same topical subjects; keyless runs re-rank each
   // subject with archive labels. Both extra rounds stop as soon as the pool is deep
   // enough — recall is what widens here, never the gate the clips still have to pass.
@@ -3147,6 +3160,15 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
   const deadline = Date.now() + resolveMotionFetchBudgetMs(hasStockKeysEarly);
   const usedUrls = new Set((project.media || []).map((a) => motionUrlKey(a.url)).filter(Boolean));
   const deadSubjects = new Set();
+  // Shared across fetch (this loop) and inject (topUpVideoBroll's injectClip below) so
+  // a fetch-time trip is never silently reset — Vimeo must never regain unprobed trust
+  // once the circuit is open, whichever phase opened it.
+  /** @type {{ tiktokBlocked: boolean, vimeoBlocked: boolean }} */
+  const proxyGate = { tiktokBlocked: false, vimeoBlocked: false };
+  // Only the FIRST live Vimeo hit is soft-probed at fetch time — bounded to one
+  // spawnSync call regardless of pool size, same "probe once, then gate" cost as the
+  // existing inject-time circuit breaker.
+  let vimeoFetchProbed = false;
   const fetchCandidates = async ({ query: q, sweep: suffix, page }) => {
     // Skip archive.org for cyber topics when stock API keys exist, and don't re-ask
     // archive for page 2 — the proxy only ever returns one page of items per subject.
@@ -3253,13 +3275,55 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Funnel accounting (fetched → after-junk → after-vision → injected): count every
       // candidate that actually reaches the gates so drop reasons are explainable.
       report.motionCandidatesSeen = (report.motionCandidatesSeen || 0) + 1;
+      // housing-web85: waiting until inject to soft-probe Vimeo let the fetch/collection
+      // loop spend its entire per-query/live-cap budget admitting doomed Vimeo clips
+      // before a single probe ever ran (Vimeo was most of the DDG pool → HARVEST_VOLUME_
+      // FAIL once inject rejected them all). Soft-probe the first live Vimeo hit here,
+      // at collection time, so a dead Vimeo host opens the circuit before the rest of
+      // the fetch budget is spent on it — the freed liveCap/perQueryCap goes to
+      // Archive/Dailymotion/direct via the boost below. Bounded to exactly one
+      // spawnSync call: once probed (pass or fail), never probed again at fetch time.
+      if (
+        keylessOmitsStockMotionPool(topicBlob, hasStockKeysEarly)
+        && !proxyGate.vimeoBlocked
+        && !vimeoFetchProbed
+        && isVimeoMotionCandidate(clip)
+        && isProxiedClipUrl(clip.url)
+      ) {
+        vimeoFetchProbed = true;
+        const target = proxiedClipTarget(clip.url) || clip.sourceUrl || '';
+        if (!softProbeYtDlpUrl(target)) {
+          proxyGate.vimeoBlocked = true;
+          report.vimeoFetchCircuitOpen = true;
+          report.vimeoFetchCircuitOpenAtQuery = q;
+          perQueryCap += VIMEO_CIRCUIT_PER_QUERY_CAP_BOOST;
+          liveCap += VIMEO_CIRCUIT_LIVE_CAP_BOOST;
+          liveTarget = Math.min(liveCap, liveTarget + VIMEO_CIRCUIT_LIVE_CAP_BOOST);
+          // Any Vimeo already admitted earlier in this same run is just as doomed as
+          // the one that just failed the probe — purge it now so the "is the pool deep
+          // enough" checks above (liveTarget/liveCap) and the pool built below reflect
+          // only reliable Archive/Dailymotion/direct/generic-web supply, not clips that
+          // will only be rejected later at inject.
+          const reliableSoFar = liveClips.filter(
+            (c) => !(isVimeoMotionCandidate(c) && isProxiedClipUrl(c.url || '')),
+          );
+          report.vimeoFetchCircuitPurged = liveClips.length - reliableSoFar.length;
+          liveClips.length = 0;
+          liveClips.push(...reliableSoFar);
+          report.motionDroppedUnreliableProxy = (report.motionDroppedUnreliableProxy || 0) + 1;
+          report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+          continue;
+        }
+      }
       // Keyless housing/healthcare: YouTube/TikTok without cookies are doomed at
       // inject (healthcare-web7: 234 skips; housing-web58: 119 YT/TT skips while
       // Mixkit filled slots). Do not let them fill liveCap / steal face-first
-      // takeClip retries and starve Archive/Vimeo/DM topical motion.
+      // takeClip retries and starve Archive/Dailymotion/direct topical motion. A
+      // fetch-time Vimeo circuit trip (above) is carried in `proxyGate` so a Vimeo
+      // clip found later in this same run is rejected the same way, never re-trusted.
       if (
         keylessOmitsStockMotionPool(topicBlob, hasStockKeysEarly)
-        && unreliableWebProxyInjectReason(clip)
+        && unreliableWebProxyInjectReason(clip, proxyGate)
       ) {
         report.motionDroppedUnreliableProxy = (report.motionDroppedUnreliableProxy || 0) + 1;
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
@@ -3659,12 +3723,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     { topicBlob },
   );
   let vi = 0;
-  /** @type {{ tiktokBlocked: boolean, vimeoBlocked: boolean }} */
-  const proxyGate = { tiktokBlocked: false, vimeoBlocked: false };
-  // Soft-probe one Vimeo candidate up front so padding does not burn its first N
-  // retries on doomed TLS-fingerprint Vimeo before the circuit opens — Archive/DM
-  // then fill (healthcare-web81+ volume fail with vimeo-circuit-open×19).
-  {
+  // `proxyGate` is the same object seeded (and possibly already tripped) during the
+  // fetch/collection loop above — reusing it here, instead of a fresh
+  // `{ vimeoBlocked: false }`, is what stops a fetch-time trip from being silently
+  // forgotten by the time inject runs. If fetch never saw a live Vimeo candidate
+  // (e.g. all of it got filtered earlier, or ranking surfaced a different one first),
+  // soft-probe once more here before padding burns retries on it.
+  if (!proxyGate.vimeoBlocked) {
     const firstVimeo = picks.find((c) => isVimeoMotionCandidate(c) && isProxiedClipUrl(c.url || ''));
     if (firstVimeo) {
       const target = proxiedClipTarget(firstVimeo.url) || firstVimeo.sourceUrl || '';

@@ -4273,9 +4273,11 @@ export async function generateFullVideo(options) {
       const renderEnv = buildRenderEnvFromFixState(fixState, { devServer, projectPath });
       const renderSnapshot = renderEnvJournalSnapshot(fixState);
       writeFileSync(join(outDir, 'render-env.json'), JSON.stringify(renderSnapshot, null, 2));
+      // Keyless web harvest assemblies often need >60m (yt-dlp per clip); housing-web83
+      // died at the old 3_600_000 default mid-segment with SIGTERM.
       const keepBestRenderTimeoutMs = Math.max(
         600_000,
-        Number(process.env.AUTOTUBE_RENDER_TIMEOUT_MS) || 3_600_000,
+        Number(process.env.AUTOTUBE_RENDER_TIMEOUT_MS) || 7_200_000,
       );
       const render = spawnSync('node', ['server-render.mjs', mp4Out], {
         cwd: root,
@@ -5407,9 +5409,10 @@ export async function generateFullVideo(options) {
     const renderSnapshot = renderEnvJournalSnapshot(fixState);
     writeFileSync(join(outDir, 'render-env.json'), JSON.stringify(renderSnapshot, null, 2));
 
+    // Default 120m — keyless yt-dlp assemblies routinely exceed 60m (housing-web83 SIGTERM).
     const renderTimeoutMs = Math.max(
       600_000,
-      Number(process.env.AUTOTUBE_RENDER_TIMEOUT_MS) || 3_600_000,
+      Number(process.env.AUTOTUBE_RENDER_TIMEOUT_MS) || 7_200_000,
     );
     const render = spawnSync('node', ['server-render.mjs', mp4Out], {
       cwd: root,

@@ -1526,6 +1526,14 @@ export function healthcareStrongClinicalMotion(evidence = '') {
  */
 export function healthcareClinicianOrPatientFace(evidence = '') {
   const text = String(evidence || '');
+  // healthcare-web203: French "face l'afflux de patients" titles repeat into
+  // "...patients face l'afflux..." which matched role↔face (`patients`+`face`)
+  // without any readable clinician/patient portrait. Reject faire-face / afflux.
+  if (
+    /\b(?:face\s+l[''\u2019]?\s*afflux|afflux\s+(?:croissant\s+)?de\s+patients|patients?\s+face\s+l[''\u2019]?\s*afflux|faire\s+face\s+(?:à|a|l[''\u2019]?))\b/i.test(text)
+  ) {
+    return false;
+  }
   const role = '(?:doctor|surgeon|physician|clinician|radiologist|patient)s?';
   const faceNoun = '(?:faces?|portrait|close[\\s-]?up|expression)';
   const collocated =
@@ -1576,7 +1584,11 @@ export function isHealthcareIntroBeautyOrClinicJunk(evidence = '') {
  */
 export function isHealthcareIntroPadJunk(evidence = '') {
   const text = String(evidence || '');
-  return /\b(?:gaza(?:[''\u2019]?s)?\s+(?:war\s+)?hospitals?|gaza\s+s\s+hospitals?|collapse\s+of\s+gaza|under\s+siege.{0,48}hospital|hospital\s+siege|war\s+hospital\s+siege|siege\s+(?:of\s+)?(?:a\s+|the\s+)?(?:gaza\s+)?hospital|thought\s+process\s+of\s+highly\s+successful|highly\s+successful\s+people|cuffless\b[\s\w]{0,40}\b(?:blood\s+)?pressure|panasonic\b[\s\w]{0,40}\bblood\s+pressure\s+monitor|blood\s+pressure\s+monitor\s+(?:product|ad|promo|commercial|review|wearable)|aaron\s+judge|bone\s+bruise|leopards?\b|maasai\s+mara|\bwooglobe\b|wildlife\s+(?:mating|close[\s-]?up|footage)|online\s+seva|\bcsc\s+cent(?:er|re)s?\b|online\s+(?:medical\s+)?consultation[\s\w]{0,60}(?:\bcsc\b|seva|ayush|apollo)|medical\s+computer\s+solutions|face\s+transplant\s+surgery\s+explained|radiology\s+guide\s+featuring|dr\s+wessam|covid[\s-]?19[\s\w]{0,80}(?:h[oô]pitaux?|hospitals?|patients?|afflux|vague|épidémie|epidemie)|(?:vague|wave)\s+de\s+covid|les\s+h[oô]pitaux\s+face|recorded\s+call[\s\w]{0,40}(?:mri|imaging|health)|amazon\.com[\s\w./?=&\-]{0,80}(?:blood\s+pressure|monitor))\b/i.test(
+  // healthcare-web203: French hospital "face l'afflux de patients" titles (no
+  // "covid" token) concatenated into "patients face l'afflux" and falsely
+  // cleared healthcareClinicianOrPatientFace via role↔face. Also Vox NSFW
+  // warning cards, Smile featurette, WebMD app listicles, helicopter stock.
+  return /\b(?:gaza(?:[''\u2019]?s)?\s+(?:war\s+)?hospitals?|gaza\s+s\s+hospitals?|collapse\s+of\s+gaza|under\s+siege.{0,48}hospital|hospital\s+siege|war\s+hospital\s+siege|siege\s+(?:of\s+)?(?:a\s+|the\s+)?(?:gaza\s+)?hospital|thought\s+process\s+of\s+highly\s+successful|highly\s+successful\s+people|cuffless\b[\s\w]{0,40}\b(?:blood\s+)?pressure|panasonic\b[\s\w]{0,40}\bblood\s+pressure\s+monitor|blood\s+pressure\s+monitor\s+(?:product|ad|promo|commercial|review|wearable)|aaron\s+judge|bone\s+bruise|leopards?\b|maasai\s+mara|\bwooglobe\b|wildlife\s+(?:mating|close[\s-]?up|footage)|online\s+seva|\bcsc\s+cent(?:er|re)s?\b|online\s+(?:medical\s+)?consultation[\s\w]{0,60}(?:\bcsc\b|seva|ayush|apollo)|medical\s+computer\s+solutions|face\s+transplant\s+surgery\s+explained|radiology\s+guide\s+featuring|dr\s+wessam|covid[\s-]?19[\s\w]{0,80}(?:h[oô]pitaux?|hospitals?|patients?|afflux|vague|épidémie|epidemie)|(?:vague|wave)\s+de\s+covid|les\s+h[oô]pitaux\s+face|face\s+l[''\u2019]?\s*afflux|afflux\s+(?:croissant\s+)?de\s+patients|patients?\s+face\s+l[''\u2019]?\s*afflux|faire\s+face\s+(?:à|a|l[''\u2019]?)\s*(?:l[''\u2019]?\s*)?(?:afflux|arriv)|organiser\s+face\s+l|sexually\s+explicit\s+images?|\bvox\b[\s\w]{0,40}warning|warning[\s\w]{0,40}sexually\s+explicit|smile\s+featurette|behind\s+the\s+scenes.{0,40}traumatic\s+incident|best\s+mobile\s+medical\s+apps|\bwebmd\b|medical\s+helicopter|helicopter\s+(?:stock|landing|helipad)|recorded\s+call[\s\w]{0,40}(?:mri|imaging|health)|amazon\.com[\s\w./?=&\-]{0,80}(?:blood\s+pressure|monitor))\b/i.test(
     text,
   );
 }

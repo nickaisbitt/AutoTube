@@ -3917,6 +3917,29 @@ describe('healthcare-web202 faceless robot product + pad junk', () => {
     }
   });
 
+  it('rejects web203 French afflux-without-covid + Vox NSFW warning (patients face false-positive)', () => {
+    // Concatenated French titles create "...patients face l'afflux..." which
+    // previously cleared healthcareClinicianOrPatientFace via role↔face.
+    const frenchAfflux =
+      'h pital comment s organiser face l afflux de patients face l afflux croissant de patients en situation de d tr';
+    expect(healthcareClinicianOrPatientFace(frenchAfflux)).toBe(false);
+    expect(isHealthcareIntroPadJunk(frenchAfflux)).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches(frenchAfflux)).toBe(false);
+
+    const voxNsfw = 'Warning: This video contains sexually explicit images. Vox';
+    expect(isHealthcareIntroPadJunk(voxNsfw)).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches(voxNsfw)).toBe(false);
+    expect(healthcareOffTopicBrollReason(voxNsfw, HEALTHCARE_TOPIC)).toMatch(/healthcare/);
+
+    // Real clinician face + consultation still clears.
+    expect(
+      healthcareIntroFaceEvidenceMatches('doctor face patient consultation close up hospital'),
+    ).toBe(true);
+    expect(
+      healthcareIntroFaceEvidenceMatches('surgeon face operating room close up'),
+    ).toBe(true);
+  });
+
   it('FAILS INTRO_FACE pool when only faceless Mira robot products remain', () => {
     const result = checkIntroFacePool({
       topic: HEALTHCARE_TOPIC,

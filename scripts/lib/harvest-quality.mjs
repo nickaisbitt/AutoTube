@@ -1545,11 +1545,21 @@ export function healthcareClinicianOrPatientFace(evidence = '') {
   }
   const role = '(?:doctor|surgeon|physician|clinician|radiologist|patient)s?';
   const faceNoun = '(?:faces?|portrait|close[\\s-]?up|expression)';
+  // healthcare-web204: "concerned patient care is being jeopardised" (doctors
+  // union talking-head) matched emotion+role without any face portrait. Require
+  // a face noun after emotion+role, or reject "patient care" / "patient safety".
   const collocated =
     new RegExp(`\\b${role}\\s+${faceNoun}\\b`, 'i').test(text)
     || new RegExp(`\\b${faceNoun}\\s+(?:(?:of\\s+)?(?:a\\s+|the\\s+)?)${role}\\b`, 'i').test(text)
-    || new RegExp(`\\b(?:worried|concerned|focused|shocked)\\s+${role}\\b`, 'i').test(text)
-    || new RegExp(`\\b${role}\\s+(?:worried|concerned|focused|shocked)\\s+faces?\\b`, 'i').test(text);
+    || new RegExp(`\\b(?:worried|concerned|focused|shocked)\\s+${role}\\s+${faceNoun}\\b`, 'i').test(text)
+    || new RegExp(`\\b${role}\\s+(?:worried|concerned|focused|shocked)\\s+faces?\\b`, 'i').test(text)
+    || (
+      new RegExp(`\\b(?:worried|concerned|focused|shocked)\\s+${role}\\b`, 'i').test(text)
+      && !/\b(?:patient|patients)\s+care\b/i.test(text)
+      && !/\b(?:patient|patients)\s+safety\b/i.test(text)
+      && !/\bdoctors?\s+union\b/i.test(text)
+      && !/\bnurses?\s+conduct\b/i.test(text)
+    );
   if (!collocated) return false;
   // Walking-away / back-of-head / medic-backs corridor frames are not readable faces.
   if (
@@ -1601,7 +1611,10 @@ export function isHealthcareIntroPadJunk(evidence = '') {
   // news, fiber-optic sensor product, pezeshkian geopolitics OR, "life through
   // an MRI" explainer, World Laparoscopy Hospital / laparoscopyhospital.com
   // training promos — drop those so clinician face / live OR can lead.
-  return /\b(?:gaza(?:[''\u2019]?s)?\s+(?:war\s+)?hospitals?|gaza\s+s\s+hospitals?|collapse\s+of\s+gaza|under\s+siege.{0,48}hospital|hospital\s+siege|war\s+hospital\s+siege|siege\s+(?:of\s+)?(?:a\s+|the\s+)?(?:gaza\s+)?hospital|hospitals?\s+in\s+(?:the\s+)?gaza|hospital\s+in\s+gaza|palestine\s+hospitals?|doctors?\s+(?:of|in)\s+gaza|courageous\s+doctors?\s+of\s+gaza|gaza\s+strip.{0,80}(?:hospital|medical|shortage|shotage)|(?:hospital|medical).{0,80}gaza\s+strip|thought\s+process\s+of\s+highly\s+successful|highly\s+successful\s+people|cuffless\b[\s\w]{0,40}\b(?:blood\s+)?pressure|panasonic\b[\s\w]{0,40}\bblood\s+pressure\s+monitor|blood\s+pressure\s+monitor\s+(?:product|ad|promo|commercial|review|wearable)|aaron\s+judge|bone\s+bruise|leopards?\b|maasai\s+mara|\bwooglobe\b|wildlife\s+(?:mating|close[\s-]?up|footage)|online\s+seva|\bcsc\s+cent(?:er|re)s?\b|online\s+(?:medical\s+)?consultation[\s\w]{0,60}(?:\bcsc\b|seva|ayush|apollo)|medical\s+computer\s+solutions|face\s+transplant\s+surgery\s+explained|radiology\s+guide\s+featuring|dr\s+wessam|covid[\s-]?19[\s\w]{0,80}(?:h[oô]pitaux?|hospitals?|patients?|afflux|vague|épidémie|epidemie)|(?:vague|wave)\s+de\s+covid|les\s+h[oô]pitaux\s+face|face\s+l[''\u2019]?\s*afflux|afflux\s+(?:croissant\s+)?de\s+patients|patients?\s+face\s+l[''\u2019]?\s*afflux|faire\s+face\s+(?:à|a|l[''\u2019]?)\s*(?:l[''\u2019]?\s*)?(?:afflux|arriv)|organiser\s+face\s+l|sexually\s+explicit\s+images?|\bvox\b[\s\w]{0,40}warning|warning[\s\w]{0,40}sexually\s+explicit|smile\s+featurette|behind\s+the\s+scenes.{0,40}traumatic\s+incident|best\s+mobile\s+medical\s+apps|\bwebmd\b|medical\s+helicopter|helicopter\s+(?:stock|landing|helipad)|\bhelipad\b|\bsamu\b|recorded\s+call[\s\w]{0,40}(?:mri|imaging|health)|amazon\.com[\s\w./?=&\-]{0,80}(?:blood\s+pressure|monitor)|fiber\s+optic\s+temperature\s+sensors?|pezeshkian|iran\s+president.{0,60}(?:surgery|operat)|life\s+through\s+an\s+mri|mri.{0,40}blow\s+your\s+mind|blow\s+your\s+mind.{0,40}mri|\blaparoscopyhospital\b|laparoscopy\s*hospital\s*com|journey\s+of\s+innovation.{0,80}(?:laparoscop|robotic\s+surgery\s+training)|world\s+laparoscopy\s+hospital)\b/i.test(
+  // healthcare-web204: doctors-union / nurses-conduct talking-heads cleared via
+  // "concerned patient care" emotion+role false-positive; also generic
+  // "robots in the medical field" explainers. Prefer Ulster/Shropshire OR.
+  return /\b(?:gaza(?:[''\u2019]?s)?\s+(?:war\s+)?hospitals?|gaza\s+s\s+hospitals?|collapse\s+of\s+gaza|under\s+siege.{0,48}hospital|hospital\s+siege|war\s+hospital\s+siege|siege\s+(?:of\s+)?(?:a\s+|the\s+)?(?:gaza\s+)?hospital|hospitals?\s+in\s+(?:the\s+)?gaza|hospital\s+in\s+gaza|palestine\s+hospitals?|doctors?\s+(?:of|in)\s+gaza|courageous\s+doctors?\s+of\s+gaza|gaza\s+strip.{0,80}(?:hospital|medical|shortage|shotage)|(?:hospital|medical).{0,80}gaza\s+strip|thought\s+process\s+of\s+highly\s+successful|highly\s+successful\s+people|cuffless\b[\s\w]{0,40}\b(?:blood\s+)?pressure|panasonic\b[\s\w]{0,40}\bblood\s+pressure\s+monitor|blood\s+pressure\s+monitor\s+(?:product|ad|promo|commercial|review|wearable)|aaron\s+judge|bone\s+bruise|leopards?\b|maasai\s+mara|\bwooglobe\b|wildlife\s+(?:mating|close[\s-]?up|footage)|online\s+seva|\bcsc\s+cent(?:er|re)s?\b|online\s+(?:medical\s+)?consultation[\s\w]{0,60}(?:\bcsc\b|seva|ayush|apollo)|medical\s+computer\s+solutions|face\s+transplant\s+surgery\s+explained|radiology\s+guide\s+featuring|dr\s+wessam|covid[\s-]?19[\s\w]{0,80}(?:h[oô]pitaux?|hospitals?|patients?|afflux|vague|épidémie|epidemie)|(?:vague|wave)\s+de\s+covid|les\s+h[oô]pitaux\s+face|face\s+l[''\u2019]?\s*afflux|afflux\s+(?:croissant\s+)?de\s+patients|patients?\s+face\s+l[''\u2019]?\s*afflux|faire\s+face\s+(?:à|a|l[''\u2019]?)\s*(?:l[''\u2019]?\s*)?(?:afflux|arriv)|organiser\s+face\s+l|sexually\s+explicit\s+images?|\bvox\b[\s\w]{0,40}warning|warning[\s\w]{0,40}sexually\s+explicit|smile\s+featurette|behind\s+the\s+scenes.{0,40}traumatic\s+incident|best\s+mobile\s+medical\s+apps|\bwebmd\b|medical\s+helicopter|helicopter\s+(?:stock|landing|helipad)|\bhelipad\b|\bsamu\b|recorded\s+call[\s\w]{0,40}(?:mri|imaging|health)|amazon\.com[\s\w./?=&\-]{0,80}(?:blood\s+pressure|monitor)|fiber\s+optic\s+temperature\s+sensors?|pezeshkian|iran\s+president.{0,60}(?:surgery|operat)|life\s+through\s+an\s+mri|mri.{0,40}blow\s+your\s+mind|blow\s+your\s+mind.{0,40}mri|\blaparoscopyhospital\b|laparoscopy\s*hospital\s*com|journey\s+of\s+innovation.{0,80}(?:laparoscop|robotic\s+surgery\s+training)|world\s+laparoscopy\s+hospital|doctors?\s+union|nurses?\s+conduct|behavioural\s+concerns?\s+about\s+nurses|patient\s+care\s+is\s+being\s+jeopardised|sa\s+health\s+service|robots?\s+in\s+the\s+medical\s+field|robots?\s+have\s+been\s+used\s+to\s+assist)\b/i.test(
     text,
   );
 }

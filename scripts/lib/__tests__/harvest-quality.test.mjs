@@ -3940,6 +3940,24 @@ describe('healthcare-web202 faceless robot product + pad junk', () => {
     ).toBe(true);
   });
 
+  it('rejects web204 doctors-union concerned-patient-care false-positive', () => {
+    const union =
+      'doctors union raises behavioural concerns about nurses conduct at sa health service '
+      + 'south australia s doctors union says its members are concerned patient care is being jeopardised '
+      + 'at the gawler health service the union has raised a litany';
+    expect(healthcareClinicianOrPatientFace(union)).toBe(false);
+    expect(isHealthcareIntroPadJunk(union)).toBe(true);
+    expect(healthcareIntroFaceEvidenceMatches(union)).toBe(false);
+    expect(healthcareIntroFaceEvidenceMatches('robots in the medical field robots have been used to assist')).toBe(false);
+    // Live OR / surgery robot still clears; worried patient face still clears.
+    expect(
+      healthcareIntroFaceEvidenceMatches('state of the art surgical robot demonstrated in ulster hospital theatres'),
+    ).toBe(true);
+    expect(
+      healthcareIntroFaceEvidenceMatches('worried patient face doctor hospital'),
+    ).toBe(true);
+  });
+
   it('FAILS INTRO_FACE pool when only faceless Mira robot products remain', () => {
     const result = checkIntroFacePool({
       topic: HEALTHCARE_TOPIC,

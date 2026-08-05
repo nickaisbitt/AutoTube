@@ -52,6 +52,7 @@ import {
   healthcareOffTopicBrollReason,
   healthcareArchiveTitleMismatchReason,
   healthcareIntroFaceEvidenceMatches,
+  housingIntroFaceEvidenceMatches,
   isHealthcareEstablishingOpener,
   isHealthcareIntroDeadAirOpener,
   HEALTHCARE_AMBIGUOUS_ARCHIVE_MATCH_TOKENS,
@@ -556,7 +557,11 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
     // and lost webinar/talking-head scrapes that capped watch ~4.6.
     if (isHousingTopic(options.topicBlob || '')) {
       const blob = `${candidate.alt || ''} ${candidate.title || ''} ${candidate.query || ''} ${candidate.source || ''}`;
-      return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 5 : 35;
+      // housing-web158: prefer clips that clear housingIntroFaceEvidenceMatches in
+      // the same strong-Archive tier (5); opaque landscape/FEMA stay 35. Do not
+      // demote apartment Archive behind generic web — volume still needs it.
+      if (housingIntroFaceEvidenceMatches(blob) || HOUSING_ARCHIVE_STRONG_RE.test(blob)) return 5;
+      return 35;
     }
     // healthcare-web199: archive=22 but intro-face pool empty after corridor/backs
     // rejects — bare Archive rank 0 let establishing pads fill inject ahead of
@@ -2550,12 +2555,17 @@ const ARCHIVE_HOUSING_MOTION_QUERIES = [
   'shocked face eviction notice',
   'renter face eviction notice apartment',
   'family crying eviction apartment',
+  'grandmother faces eviction apartment',
+  'tenants faces eviction apartment',
+  'family faces eviction home',
   'eviction notice tenant apartment',
   'housing crisis family',
   'evicted family packing boxes apartment',
   'tenant packing boxes',
   'foreclosure family home',
   'stressed tenant crying apartment',
+  'apartment interior living room tenant',
+  'lived in apartment interior family',
   'eviction documentary',
   // Core housing B-roll subjects
   'apartment building',
@@ -2688,16 +2698,50 @@ export const HEALTHCARE_FACE_FIRST_REHARVEST_QUERIES = [
 ];
 
 /** How many face/OR/MRI site: host searches to schedule as first-class early queries. */
-export const HEALTHCARE_HOST_FACE_EARLY_COUNT = 14;
+export const HEALTHCARE_HOST_FACE_EARLY_COUNT = 16;
 /** Extra host-scoped variants beyond healthcareHostLead (webQueries × site:). */
 export const HEALTHCARE_HOST_QUERY_VARIANT_LIMIT = 20;
 /** Keyless healthcare queryCap — raised so more face host bases run (web199: 8/25). */
-export const HEALTHCARE_KEYLESS_QUERY_CAP = 42;
+export const HEALTHCARE_KEYLESS_QUERY_CAP = 44;
+
+/**
+ * Face/lived-in/eviction pack for INTRO_FACE_FAIL re-harvest (faceSeek).
+ * Narrower than the full housing Archive pack so re-harvest burns budget on
+ * motion that can clear housingIntroFaceEvidenceMatches — not landscape/FEMA.
+ */
+export const HOUSING_FACE_FIRST_REHARVEST_QUERIES = [
+  'shocked face eviction notice',
+  'worried tenant face close up',
+  'renter face eviction notice apartment',
+  'family crying eviction apartment',
+  'grandmother faces eviction apartment',
+  'tenants faces eviction apartment',
+  'family faces eviction home',
+  'eviction notice tenant apartment',
+  'stressed tenant crying apartment',
+  'evicted family packing boxes apartment',
+  'apartment interior living room tenant',
+  'lived in apartment interior family',
+  'foreclosure family home',
+  'eviction documentary',
+  'housing crisis family',
+  'tenant packing boxes',
+];
+
+/** How many housing face/lived-in site: host searches to schedule early (web158). */
+export const HOUSING_HOST_FACE_EARLY_COUNT = 12;
+/** Extra host-scoped variants beyond housingHostLead. */
+export const HOUSING_HOST_QUERY_VARIANT_LIMIT = 16;
+/** Keyless housing queryCap — raised so face host bases + site: early both fit. */
+export const HOUSING_KEYLESS_QUERY_CAP = 42;
 
 /** Clinical-only Archive subjects used when web engines return 0 motion.
  * Face/OR/MRI share expanded (web199) — first 28 are intro-capable leads.
  */
 export const ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES = ARCHIVE_HEALTHCARE_MOTION_QUERIES.slice(0, 28);
+
+/** Face/lived-in Archive subjects used when web engines return 0 / circuits open. */
+export const ARCHIVE_HOUSING_FACE_LEAD_QUERIES = ARCHIVE_HOUSING_MOTION_QUERIES.slice(0, 16);
 
 /** True when a motion query is already scoped to Vimeo/Dailymotion. */
 export function isWebHostScopedQuery(query = '') {
@@ -2711,6 +2755,17 @@ export function isWebHostScopedQuery(query = '') {
 export function preferHealthcareArchiveClinicalQueries(queries = [], { archiveOnly = false } = {}) {
   if (!archiveOnly) return [...queries];
   const lead = ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES.filter(isSafeStockMotionQuery);
+  const rest = queries.filter((q) => !lead.some((l) => l.toLowerCase() === String(q).toLowerCase()));
+  return [...lead, ...rest];
+}
+
+/**
+ * When web engines return 0 or circuits open, bias Archive toward face/lived-in /
+ * eviction subjects that can clear housingIntroFaceEvidenceMatches (housing-web158).
+ */
+export function preferHousingArchiveFaceQueries(queries = [], { archiveOnly = false } = {}) {
+  if (!archiveOnly) return [...queries];
+  const lead = ARCHIVE_HOUSING_FACE_LEAD_QUERIES.filter(isSafeStockMotionQuery);
   const rest = queries.filter((q) => !lead.some((l) => l.toLowerCase() === String(q).toLowerCase()));
   return [...lead, ...rest];
 }
@@ -2923,13 +2978,22 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   // needed face openers; DM/Archive must supply them when Vimeo is dead.
   // housing-web153: political-radio / constable / millionaire / war pads filled
   // DM slots — keep face+renter leads first so queryCap burns on real openers.
+  // housing-web158: INTRO_FACE_FAIL despite ddg≈88 — schedule first-class site:
+  // face/lived-in leads (grandmother/tenants/faces eviction) so the pool clears
+  // housingIntroFaceEvidenceMatches after junk rejects landscape/FEMA pads.
   const housingHostLead = housing
     ? [
         'shocked face eviction notice site:dailymotion.com',
         'worried tenant face close up site:dailymotion.com',
         'renter face eviction notice apartment site:dailymotion.com',
         'family crying eviction apartment site:dailymotion.com',
+        'grandmother faces eviction apartment site:dailymotion.com',
+        'tenants faces eviction apartment site:dailymotion.com',
+        'family faces eviction home site:dailymotion.com',
         'eviction notice tenant apartment site:dailymotion.com',
+        'stressed tenant crying apartment site:dailymotion.com',
+        'apartment interior living room tenant site:dailymotion.com',
+        'lived in apartment interior family site:dailymotion.com',
         'housing crisis family site:dailymotion.com',
         'evicted family packing boxes apartment site:dailymotion.com',
         'tenant packing boxes site:dailymotion.com',
@@ -2937,6 +3001,9 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
         'eviction documentary site:dailymotion.com',
         'shocked face eviction notice site:vimeo.com',
         'worried tenant face close up site:vimeo.com',
+        'grandmother faces eviction apartment site:vimeo.com',
+        'tenants faces eviction apartment site:vimeo.com',
+        'apartment interior living room tenant site:vimeo.com',
         'eviction documentary site:vimeo.com',
       ].filter(isSafeStockMotionQuery)
     : [];
@@ -2945,7 +3012,11 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
     ...housingHostLead,
     ...webMotionHostQueryVariants(
       webQueries,
-      healthcare ? HEALTHCARE_HOST_QUERY_VARIANT_LIMIT : 12,
+      healthcare
+        ? HEALTHCARE_HOST_QUERY_VARIANT_LIMIT
+        : housing
+          ? HOUSING_HOST_QUERY_VARIANT_LIMIT
+          : 12,
     ),
   ].filter((query, idx, arr) => arr.findIndex((q) => q.toLowerCase() === query.toLowerCase()) === idx);
   let boost;
@@ -2967,6 +3038,7 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   // Healthcare keyless: lead with face-first / OR / surgical-robot / radiologist
   // so archive-only runs (bing=ddg=google=0) burn budget on clinical subjects first.
   // INTRO_FACE_FAIL re-harvest (faceSeek): use the dedicated face/OR/MRI pack only.
+  // Housing faceSeek: face/lived-in/eviction pack only (housing-web158).
   const headCount = keyed ? Math.min(4, base.length) : 0;
   const healthcareClinicalLead = (!keyed && healthcare)
     ? (faceSeek
@@ -2974,11 +3046,19 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
         : ARCHIVE_HEALTHCARE_CLINICAL_LEAD_QUERIES
       ).filter(isSafeStockMotionQuery)
     : [];
+  const housingFaceLead = (!keyed && housing)
+    ? (faceSeek
+        ? HOUSING_FACE_FIRST_REHARVEST_QUERIES
+        : ARCHIVE_HOUSING_FACE_LEAD_QUERIES
+      ).filter(isSafeStockMotionQuery)
+    : [];
   const ordered = keyed
     ? [...base.slice(0, headCount), ...boost, ...base.slice(headCount)]
     : healthcare
       ? [...healthcareClinicalLead, ...webQueries, ...boost, ...base]
-      : [...webQueries, ...boost, ...base];
+      : housing
+        ? [...housingFaceLead, ...webQueries, ...boost, ...base]
+        : [...webQueries, ...boost, ...base];
 
   const queries = [];
   const seen = new Set();
@@ -2992,12 +3072,17 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
   // ("… close up") sat behind Archive volume and Chrome-budget death. Ensure every
   // healthcareHostLead base appears in the early query list so site:dailymotion /
   // site:vimeo fire within queryCap before soft-pass.
-  // healthcare-web199: even with bases early, only the first batch (~4 bases → 8
-  // host piggybacks) ran before budget — schedule top face/OR/MRI site: searches
-  // as first-class early queries (web-only) so DM/Vimeo face leads get their own
-  // fetch slots without waiting on Archive enrichment of every base. Also keep
-  // every webHostQueries base (including webQuery variants) inside queryCap.
-  if (healthcare && webHostQueries.length) {
+  // healthcare-web199 / housing-web158: even with bases early, only the first batch
+  // (~4 bases → 8 host piggybacks) ran before budget — schedule top face site:
+  // searches as first-class early queries (web-only) so DM/Vimeo face leads get
+  // their own fetch slots without waiting on Archive enrichment of every base.
+  const hostLead = healthcare ? healthcareHostLead : housing ? housingHostLead : [];
+  const hostFaceEarlyCount = healthcare
+    ? HEALTHCARE_HOST_FACE_EARLY_COUNT
+    : housing
+      ? HOUSING_HOST_FACE_EARLY_COUNT
+      : 0;
+  if (hostLead.length && webHostQueries.length && hostFaceEarlyCount > 0) {
     const hostBases = [];
     const hostSeen = new Set();
     for (const hq of webHostQueries) {
@@ -3007,9 +3092,9 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
       hostSeen.add(key);
       hostBases.push(hostBase);
     }
-    const hostScopedEarly = healthcareHostLead
+    const hostScopedEarly = hostLead
       .filter(isSafeStockMotionQuery)
-      .slice(0, HEALTHCARE_HOST_FACE_EARLY_COUNT);
+      .slice(0, hostFaceEarlyCount);
     const hostScopedKeys = new Set(hostScopedEarly.map((q) => q.trim().toLowerCase()));
     const withoutHost = queries.filter((q) => {
       const key = q.trim().toLowerCase();
@@ -3026,8 +3111,8 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
     }
   }
   // site: host searches must not displace Archive.org subjects — strip them from
-  // the archive lane (they are web-only face/OR yield).
-  const archiveSourceQueries = healthcare
+  // the archive lane (they are web-only face/OR/lived-in yield).
+  const archiveSourceQueries = (healthcare || housing)
     ? queries.filter((q) => !isWebHostScopedQuery(q))
     : [...queries];
   return {
@@ -3040,7 +3125,9 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
     // never displace these subjects from that lane.
     archiveQueries: healthcare
       ? preferHealthcareArchiveClinicalQueries(archiveSourceQueries, { archiveOnly: true })
-      : [...queries],
+      : housing
+        ? preferHousingArchiveFaceQueries(archiveSourceQueries, { archiveOnly: true })
+        : [...queries],
     boostCount: boost.length,
     baseCount: base.length,
     faceSeek,
@@ -3132,6 +3219,10 @@ export const THIN_AFTER_JUNK_ARCHIVE_BOOST_FLOOR = 12;
 export const ARCHIVE_CLINICAL_FACE_OR_MRI_LEAD_RE =
   /\b(doctor\s+face|patient\s+face|surgeon\s+face|radiologist\s+face|clinician\s+face|nurse\s+patient\s+bedside\s+face|operating\s+room|surgical\s+(?:robot|team)|da\s*vinci|mri|ct\s+scanner|ultrasound\s+demonstration|radiologist\s+workstation)\b/i;
 
+/** Face / lived-in / eviction Archive subjects we want first when housing web proxies die. */
+export const ARCHIVE_HOUSING_FACE_LIVED_IN_LEAD_RE =
+  /\b(face|faces?\s+evict|evict\w*|tenant|renter|grandmother|family\s+cry|packing\s+boxes|apartment\s+interior|living\s+room|foreclosure\s+family|lived\s+in|housing\s+crisis\s+family)\b/i;
+
 /**
  * How many Archive clinical subjects to schedule once a web-proxy circuit opens.
  * Dual Vimeo+DM death (or thin after-junk) gets the larger budget so Archive
@@ -3181,6 +3272,27 @@ export function prioritizeArchiveClinicalFaceOrMriLeads(archiveQueries = []) {
 }
 
 /**
+ * Prefer face/lived-in/eviction Archive subjects for housing circuit-open boost
+ * (housing-web158 INTRO_FACE_FAIL with landscape/FEMA-only pool).
+ *
+ * @param {string[]} archiveQueries
+ * @returns {string[]}
+ */
+export function prioritizeArchiveHousingFaceLeads(archiveQueries = []) {
+  const leads = [];
+  const rest = [];
+  const seen = new Set();
+  for (const query of archiveQueries) {
+    const key = String(query || '').trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    if (ARCHIVE_HOUSING_FACE_LIVED_IN_LEAD_RE.test(query)) leads.push(query);
+    else rest.push(query);
+  }
+  return [...leads, ...rest];
+}
+
+/**
  * The instant the healthcare Vimeo circuit opens, queryCap has already truncated
  * `plan.queries` (and therefore the scheduled batches) well before every clinical
  * Archive subject in `plan.archiveQueries` got a turn. Rather than let the widened
@@ -3202,16 +3314,20 @@ export function prioritizeArchiveClinicalFaceOrMriLeads(archiveQueries = []) {
  * @param {string[]} archiveQueries - plan.archiveQueries (clinical-lead-first for healthcare)
  * @param {Set<string>} scheduledQueryKeys - lowercased queries already in the batch plan
  * @param {number} [extraCount]
+ * @param {(queries: string[]) => string[]} [prioritize] - order leads before weaker subjects
  * @returns {{ query: string, subject: string, sweep: string, page: number, extra: boolean }[]}
  */
 export function extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
   archiveQueries = [],
   scheduledQueryKeys = new Set(),
   extraCount = VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT,
+  prioritize = prioritizeArchiveClinicalFaceOrMriLeads,
 ) {
   const attempts = [];
   const seen = new Set();
-  const ordered = prioritizeArchiveClinicalFaceOrMriLeads(archiveQueries);
+  const ordered = typeof prioritize === 'function'
+    ? prioritize(archiveQueries)
+    : prioritizeArchiveClinicalFaceOrMriLeads(archiveQueries);
   for (const query of ordered) {
     if (attempts.length >= extraCount) break;
     const key = String(query || '').trim().toLowerCase();
@@ -3514,7 +3630,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     : (airlineTopicEarly
       ? 44
       : housingTopic
-        ? 34
+        ? HOUSING_KEYLESS_QUERY_CAP
         : healthcareTopicEarly
           ? HEALTHCARE_KEYLESS_QUERY_CAP
           : 26);
@@ -3686,16 +3802,16 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           report.vimeoFetchCircuitPurged = widened.purged;
           report.motionDroppedUnreliableProxy = (report.motionDroppedUnreliableProxy || 0) + 1;
           report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
-          // Healthcare: the freed budget above should not just ride out whatever query
-          // order queryCap happened to leave scheduled — schedule more Archive clinical
-          // subjects queryCap truncated, right after the current batch, so Archive fills
-          // the gap Vimeo can no longer supply instead of more Vimeo-heavy web queries.
-          if (healthcareTopicEarly) {
+          // Healthcare / housing: the freed budget above should not just ride out
+          // whatever queryCap left scheduled — schedule more Archive face leads
+          // (clinical OR/MRI for HC; face/lived-in/eviction for housing) so Archive
+          // fills the gap Vimeo can no longer supply instead of more Vimeo-heavy web.
+          if (healthcareTopicEarly || housingTopic) {
             const scheduledKeys = new Set(
               batches.flat().map((a) => String(a.query || '').trim().toLowerCase()),
             );
             // Thin admitted pool (after-junk≈6–8 on surviving HC runs) or dual
-            // Vimeo+DM death → larger face/OR/MRI Archive boost.
+            // Vimeo+DM death → larger face Archive boost.
             const boostCount = resolveArchiveClinicalBoostCount({
               vimeoCircuitOpen: true,
               dailymotionCircuitOpen: proxyGate.dailymotionBlocked,
@@ -3705,6 +3821,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
               plan.archiveQueries,
               scheduledKeys,
               boostCount,
+              healthcareTopicEarly
+                ? prioritizeArchiveClinicalFaceOrMriLeads
+                : prioritizeArchiveHousingFaceLeads,
             );
             if (archiveBoost.length) {
               const insertAt = batches.indexOf(plannedBatch) + 1;
@@ -3744,7 +3863,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           report.dailymotionFetchCircuitPurged = widened.purged;
           report.motionDroppedUnreliableProxy = (report.motionDroppedUnreliableProxy || 0) + 1;
           report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
-          if (healthcareTopicEarly) {
+          if (healthcareTopicEarly || housingTopic) {
             const scheduledKeys = new Set(
               batches.flat().map((a) => String(a.query || '').trim().toLowerCase()),
             );
@@ -3757,6 +3876,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
               plan.archiveQueries,
               scheduledKeys,
               boostCount,
+              healthcareTopicEarly
+                ? prioritizeArchiveClinicalFaceOrMriLeads
+                : prioritizeArchiveHousingFaceLeads,
             );
             if (archiveBoost.length) {
               const insertAt = batches.indexOf(plannedBatch) + 1;
@@ -4047,13 +4169,20 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Enriched Archive descriptions often contain "aerial/landscape/newsreel" and
       // were hard-rejecting (-8) every Archive candidate on web11 (0 Archive inject
       // attempts; 108 YT/TT skips; HARVEST_VOLUME_FAIL).
+      // housing-web158: prefer intro-face evidence over bare apartment Archive so
+      // landscape/FEMA pools cannot empty INTRO_FACE after junk rejects.
       if (/Archive/i.test(clip.source || '')) {
+        if (housingIntroFaceEvidenceMatches(blob)) return 10;
         return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 1 : 0;
       }
       if (/\b(landscape|mountain|helicopter|aerial\s+view|title\s+card|newsreel)\b/i.test(blob)) {
         return -8;
       }
       // Face-forward / lived-in housing beats charts, landscapes, and title cards.
+      // Align inject boost with housingIntroFaceEvidenceMatches (pool gate).
+      if (housingIntroFaceEvidenceMatches(blob)) {
+        return 10;
+      }
       if (
         /\b(face|faces|worried|shocked|stressed|crying|reaction|couple|family|tenant)\b/i.test(blob)
         && /\b(apartment|home|kitchen|letter|phone|evict|rent|bills?|packing|boxes)\b/i.test(blob)

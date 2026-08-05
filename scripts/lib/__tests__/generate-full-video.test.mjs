@@ -56,6 +56,9 @@ import {
   HEALTHCARE_FACE_FIRST_REHARVEST_QUERIES,
   HEALTHCARE_HOST_FACE_EARLY_COUNT,
   HEALTHCARE_KEYLESS_QUERY_CAP,
+  HOUSING_FACE_FIRST_REHARVEST_QUERIES,
+  HOUSING_HOST_FACE_EARLY_COUNT,
+  HOUSING_KEYLESS_QUERY_CAP,
   isWebHostScopedQuery,
 } from '../generate-full-video.mjs';
 import { evaluateHarvestVolume } from '../harvest-quality.mjs';
@@ -501,11 +504,11 @@ describe('motionQueryPlan', () => {
       expect.arrayContaining(['apartment kitchen interior daylight', 'apartment building hallway doors']),
     );
     const keyless = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
-    // Keyless housing is always face-first (exteriors after people/apartment lived-in).
-    // First two are always shocked-face / eviction-face leads; foreclosure follows.
+    // housing-web158: first-class DM site: face/lived-in leads occupy early slots
+    // (mirrors healthcare-web199) so shocked-face/eviction fire within queryCap.
     expect(keyless.queries.slice(0, 2)).toEqual([
-      'shocked face close up phone',
-      'shocked face apartment eviction notice',
+      'shocked face eviction notice site:dailymotion.com',
+      'worried tenant face close up site:dailymotion.com',
     ]);
     expect(keyless.queries).toEqual(
       expect.arrayContaining([
@@ -661,6 +664,13 @@ describe('non-YouTube motion planning and ranking', () => {
       alt: 'public housing apartment building',
       score: 1,
     };
+    const faceArchive = {
+      url: 'https://archive.org/download/face/eviction.mp4',
+      source: 'Archive.org live',
+      query: 'shocked face eviction notice',
+      alt: 'grandmother faces eviction from apartment',
+      score: 2,
+    };
     const webFace = {
       url: `http://localhost:5173/api/download-clip?url=${encodeURIComponent('https://vimeo.com/face')}`,
       sourceUrl: 'https://vimeo.com/face',
@@ -678,20 +688,21 @@ describe('non-YouTube motion planning and ranking', () => {
       score: 0,
     };
     const ranked = rankMotionCandidates(
-      [opaqueArchive, housingArchive, webFace, bingWeb],
+      [opaqueArchive, housingArchive, faceArchive, webFace, bingWeb],
       (clip) => clip.score,
       { topicBlob: HOUSING_TOPIC },
     );
-    // Direct .mp4 web (1) beats strong housing Archive (5); Vimeo demoted to 25
-    // (after Archive strong) so Archive/DM fill when TLS fingerprint kills Vimeo.
-    // Opaque Archive stays last at 35.
+    // Direct .mp4 web (1) beats strong housing Archive (5); within Archive tier,
+    // higher topical score (face) wins. Vimeo demoted to 25; opaque stays 35.
     expect(ranked.map((clip) => clip.url)).toEqual([
       bingWeb.url,
+      faceArchive.url,
       housingArchive.url,
       webFace.url,
       opaqueArchive.url,
     ]);
-    // Strong apartment Archive (5) beats generic Bing/DDG web (10); opaque stays 35.
+    // Strong apartment + intro-face Archive share tier 5; opaque stays 35.
+    expect(motionCandidateHostRank(faceArchive, { topicBlob: HOUSING_TOPIC })).toBe(5);
     expect(motionCandidateHostRank(housingArchive, { topicBlob: HOUSING_TOPIC })).toBe(5);
     expect(motionCandidateHostRank(opaqueArchive, { topicBlob: HOUSING_TOPIC })).toBe(35);
     expect(motionCandidateHostRank(housingArchive, { topicBlob: HOUSING_TOPIC }))
@@ -1335,7 +1346,7 @@ describe('healthcare keyless motion pack + volume chase', () => {
     const capped = plan.queries.slice(0, HEALTHCARE_KEYLESS_QUERY_CAP).map((q) => q.toLowerCase());
     const hostBases = plan.webHostQueries.map((hq) => hq.replace(/\s+site:(?:vimeo\.com|dailymotion\.com)\s*$/i, '').trim().toLowerCase());
     const uniqueHostBases = [...new Set(hostBases)];
-    const fireable = uniqueHostBases.filter((b) => capped.includes(b));
+    const fireable = uniqueHostBases.filter((b) => capped.includes(b) || capped.some((q) => q.startsWith(`${b} site:`)));
     expect(fireable.length).toBe(uniqueHostBases.length);
     const faceIdx = plan.queries.findIndex((q) => /doctor face patient consultation/i.test(q));
     const corridorIdx = plan.queries.findIndex((q) => /hospital corridor hallway/i.test(q));
@@ -1404,17 +1415,42 @@ describe('healthcare keyless motion pack + volume chase', () => {
 
   it('housing webHostQueries lead with shocked-face / renter-face DM before Vimeo', () => {
     const plan = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false });
+    // housing-web158: first-class site: face/lived-in searches occupy early slots.
+    expect(plan.queries.slice(0, HOUSING_HOST_FACE_EARLY_COUNT).every(isWebHostScopedQuery)).toBe(true);
+    expect(plan.queries[0]).toMatch(/shocked face eviction notice site:dailymotion\.com/i);
     expect(plan.webHostQueries[0]).toMatch(/shocked face eviction notice site:dailymotion\.com/i);
     expect(plan.webHostQueries).toEqual(expect.arrayContaining([
       'worried tenant face close up site:dailymotion.com',
       'renter face eviction notice apartment site:dailymotion.com',
       'family crying eviction apartment site:dailymotion.com',
+      'grandmother faces eviction apartment site:dailymotion.com',
+      'tenants faces eviction apartment site:dailymotion.com',
+      'apartment interior living room tenant site:dailymotion.com',
       'shocked face eviction notice site:vimeo.com',
     ]));
     const dmFace = plan.webHostQueries.findIndex((q) => /shocked face eviction notice site:dailymotion/i.test(q));
     const vimeoFace = plan.webHostQueries.findIndex((q) => /shocked face eviction notice site:vimeo/i.test(q));
     expect(dmFace).toBeGreaterThanOrEqual(0);
     expect(vimeoFace).toBeGreaterThan(dmFace);
+    expect(plan.archiveQueries.every((q) => !isWebHostScopedQuery(q))).toBe(true);
+    // Cap raised from 34 so first-class site: early + host bases both fit (was truncating).
+    expect(HOUSING_KEYLESS_QUERY_CAP).toBeGreaterThanOrEqual(40);
+    expect(HOUSING_HOST_FACE_EARLY_COUNT).toBeGreaterThanOrEqual(10);
+    const capped = plan.queries.slice(0, HOUSING_KEYLESS_QUERY_CAP).map((q) => q.toLowerCase());
+    const hostBases = plan.webHostQueries.map((hq) => hq.replace(/\s+site:(?:vimeo\.com|dailymotion\.com)\s*$/i, '').trim().toLowerCase());
+    const uniqueHostBases = [...new Set(hostBases)];
+    const fireable = uniqueHostBases.filter((b) => capped.includes(b) || capped.some((q) => q.startsWith(`${b} site:`)));
+    expect(fireable.length).toBe(uniqueHostBases.length);
+    expect(capped.filter((q) => isWebHostScopedQuery(q)).length)
+      .toBeGreaterThanOrEqual(HOUSING_HOST_FACE_EARLY_COUNT);
+  });
+
+  it('uses dedicated housing face/lived-in pack when faceSeek (INTRO_FACE_FAIL re-harvest)', () => {
+    const plan = motionQueryPlan(HOUSING_TOPIC, false, { stockKeyed: false, faceSeek: true });
+    expect(plan.faceSeek).toBe(true);
+    for (const q of HOUSING_FACE_FIRST_REHARVEST_QUERIES.slice(0, 8)) {
+      expect(plan.queries.some((p) => p.toLowerCase() === q.toLowerCase())).toBe(true);
+    }
   });
 
   it('chases keyless healthcare volume above the soft-pass floor like airline', () => {

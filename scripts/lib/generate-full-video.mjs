@@ -2981,7 +2981,67 @@ export function openDailymotionFetchCircuit(liveClips = [], budgets = {}) {
 }
 
 /** How many extra Archive-only clinical subjects to schedule the moment the Vimeo circuit opens. */
-const VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT = 16;
+export const VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT = 16;
+/** When Vimeo AND Dailymotion are both dead (or after-junk is thin), push harder into Archive. */
+export const DUAL_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT = 28;
+/** after-junk below this → treat volume as thin and use the dual-circuit boost size. */
+export const THIN_AFTER_JUNK_ARCHIVE_BOOST_FLOOR = 12;
+
+/**
+ * Face / OR / MRI Archive subjects we want first when web proxies die.
+ * Clinic-promo / corporate-slide junk stays rejected downstream — these leads
+ * are the motion we still need for intro-face + soft-pass volume.
+ */
+export const ARCHIVE_CLINICAL_FACE_OR_MRI_LEAD_RE =
+  /\b(doctor\s+face|patient\s+face|surgeon\s+face|radiologist\s+face|clinician\s+face|nurse\s+patient\s+bedside\s+face|operating\s+room|surgical\s+(?:robot|team)|da\s*vinci|mri|ct\s+scanner|ultrasound\s+demonstration|radiologist\s+workstation)\b/i;
+
+/**
+ * How many Archive clinical subjects to schedule once a web-proxy circuit opens.
+ * Dual Vimeo+DM death (or thin after-junk) gets the larger budget so Archive
+ * face/OR/MRI leads absorb the gap instead of another Vimeo-heavy web round.
+ *
+ * @param {{ vimeoCircuitOpen?: boolean, dailymotionCircuitOpen?: boolean, afterJunk?: number|null }} opts
+ * @returns {number}
+ */
+export function resolveArchiveClinicalBoostCount({
+  vimeoCircuitOpen = false,
+  dailymotionCircuitOpen = false,
+  afterJunk = null,
+} = {}) {
+  const dual = Boolean(vimeoCircuitOpen && dailymotionCircuitOpen);
+  const thin =
+    Number.isFinite(afterJunk)
+    && afterJunk !== null
+    && afterJunk >= 0
+    && afterJunk < THIN_AFTER_JUNK_ARCHIVE_BOOST_FLOOR;
+  if (dual || thin) return DUAL_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT;
+  if (vimeoCircuitOpen || dailymotionCircuitOpen) {
+    return VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT;
+  }
+  return VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT;
+}
+
+/**
+ * Prefer face/OR/MRI Archive subjects, then the remaining clinical list.
+ * Order-preserving within each tier. Used when Vimeo/DM circuits open so the
+ * boosted budget lands on motion that can still clear intro-face + junk gates.
+ *
+ * @param {string[]} archiveQueries
+ * @returns {string[]}
+ */
+export function prioritizeArchiveClinicalFaceOrMriLeads(archiveQueries = []) {
+  const leads = [];
+  const rest = [];
+  const seen = new Set();
+  for (const query of archiveQueries) {
+    const key = String(query || '').trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    if (ARCHIVE_CLINICAL_FACE_OR_MRI_LEAD_RE.test(query)) leads.push(query);
+    else rest.push(query);
+  }
+  return [...leads, ...rest];
+}
 
 /**
  * The instant the healthcare Vimeo circuit opens, queryCap has already truncated
@@ -2992,10 +3052,15 @@ const VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT = 16;
  * clinical subjects so Archive — not another round of the Vimeo-heavy web queries —
  * absorbs the gap immediately.
  *
- * Pure and order-preserving: returns fetch attempts only for `archiveQueries` entries
- * not already present (case-insensitively) in `scheduledQueryKeys`, capped at
- * `extraCount`. Never touches Vimeo trust — every returned attempt still runs through
- * the same archive-evidence / proxy gates as the rest of the plan.
+ * Face/OR/MRI leads are scheduled before weaker clinical subjects so thin HC
+ * pools (after-junk≈6–8) still get intro-capable motion. Clinic-promo /
+ * corporate-slide junk is still rejected by harvest-quality gates.
+ *
+ * Pure and order-preserving within each priority tier: returns fetch attempts
+ * only for `archiveQueries` entries not already present (case-insensitively) in
+ * `scheduledQueryKeys`, capped at `extraCount`. Never touches Vimeo trust —
+ * every returned attempt still runs through the same archive-evidence / proxy
+ * gates as the rest of the plan.
  *
  * @param {string[]} archiveQueries - plan.archiveQueries (clinical-lead-first for healthcare)
  * @param {Set<string>} scheduledQueryKeys - lowercased queries already in the batch plan
@@ -3009,7 +3074,8 @@ export function extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
 ) {
   const attempts = [];
   const seen = new Set();
-  for (const query of archiveQueries) {
+  const ordered = prioritizeArchiveClinicalFaceOrMriLeads(archiveQueries);
+  for (const query of ordered) {
     if (attempts.length >= extraCount) break;
     const key = String(query || '').trim().toLowerCase();
     if (!key || seen.has(key) || scheduledQueryKeys.has(key)) continue;
@@ -3480,9 +3546,17 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
             const scheduledKeys = new Set(
               batches.flat().map((a) => String(a.query || '').trim().toLowerCase()),
             );
+            // Thin admitted pool (after-junk≈6–8 on surviving HC runs) or dual
+            // Vimeo+DM death → larger face/OR/MRI Archive boost.
+            const boostCount = resolveArchiveClinicalBoostCount({
+              vimeoCircuitOpen: true,
+              dailymotionCircuitOpen: proxyGate.dailymotionBlocked,
+              afterJunk: liveClips.length,
+            });
             const archiveBoost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
               plan.archiveQueries,
               scheduledKeys,
+              boostCount,
             );
             if (archiveBoost.length) {
               const insertAt = batches.indexOf(plannedBatch) + 1;
@@ -3492,6 +3566,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
               }
               batches.splice(insertAt, 0, ...chunks);
               report.vimeoCircuitArchiveBoostQueries = archiveBoost.length;
+              report.archiveClinicalBoostCount = boostCount;
             }
           }
           continue;
@@ -3525,9 +3600,15 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
             const scheduledKeys = new Set(
               batches.flat().map((a) => String(a.query || '').trim().toLowerCase()),
             );
+            const boostCount = resolveArchiveClinicalBoostCount({
+              vimeoCircuitOpen: proxyGate.vimeoBlocked,
+              dailymotionCircuitOpen: true,
+              afterJunk: liveClips.length,
+            });
             const archiveBoost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
               plan.archiveQueries,
               scheduledKeys,
+              boostCount,
             );
             if (archiveBoost.length) {
               const insertAt = batches.indexOf(plannedBatch) + 1;
@@ -3537,6 +3618,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
               }
               batches.splice(insertAt, 0, ...chunks);
               report.dailymotionCircuitArchiveBoostQueries = archiveBoost.length;
+              report.archiveClinicalBoostCount = boostCount;
             }
           }
           continue;

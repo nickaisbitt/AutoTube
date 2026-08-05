@@ -10,6 +10,10 @@ import {
   buildMotionPaddingQueue,
   decideStockVisionGate,
   extraArchiveClinicalAttemptsOnVimeoCircuitOpen,
+  prioritizeArchiveClinicalFaceOrMriLeads,
+  resolveArchiveClinicalBoostCount,
+  DUAL_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT,
+  VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT,
   fetchWebVideoResults,
   formatMotionDropFunnel,
   formatMotionPathLog,
@@ -868,6 +872,57 @@ describe('non-YouTube motion planning and ranking', () => {
     const archiveQueries = ['a', 'A', 'b', 'c'];
     const boost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(archiveQueries, new Set(), 2);
     expect(boost.map((a) => a.query)).toEqual(['a', 'b']);
+  });
+
+  it('raises Archive clinical boost when Vimeo+DM are both dead or after-junk is thin', () => {
+    // Surviving HC runs often HARVEST_VOLUME_FAIL with after-junk≈6–8 once web
+    // proxies die — dual-circuit / thin volume must schedule more face/OR/MRI.
+    expect(resolveArchiveClinicalBoostCount({
+      vimeoCircuitOpen: true,
+      dailymotionCircuitOpen: true,
+    })).toBe(DUAL_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT);
+    expect(resolveArchiveClinicalBoostCount({
+      vimeoCircuitOpen: true,
+      afterJunk: 7,
+    })).toBe(DUAL_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT);
+    expect(resolveArchiveClinicalBoostCount({
+      vimeoCircuitOpen: true,
+      dailymotionCircuitOpen: false,
+      afterJunk: 40,
+    })).toBe(VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT);
+    expect(DUAL_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT).toBeGreaterThan(
+      VIMEO_CIRCUIT_ARCHIVE_CLINICAL_BOOST_COUNT,
+    );
+  });
+
+  it('prioritizes face/OR/MRI Archive leads ahead of weaker clinical subjects', () => {
+    const ordered = prioritizeArchiveClinicalFaceOrMriLeads([
+      'hospital ward nurses',
+      'doctor face patient consultation close up',
+      'medical laboratory clinical',
+      'mri scanner hospital',
+      'operating room surgery',
+      'stethoscope doctor',
+    ]);
+    expect(ordered.slice(0, 3)).toEqual([
+      'doctor face patient consultation close up',
+      'mri scanner hospital',
+      'operating room surgery',
+    ]);
+    const boost = extraArchiveClinicalAttemptsOnVimeoCircuitOpen(
+      [
+        'hospital ward nurses',
+        'stethoscope doctor',
+        'doctor face patient consultation close up',
+        'operating room surgery',
+      ],
+      new Set(['hospital ward nurses']),
+      2,
+    );
+    expect(boost.map((a) => a.query)).toEqual([
+      'doctor face patient consultation close up',
+      'operating room surgery',
+    ]);
   });
 
   it('restores Archive injects marked motionRelevancePassed after relevance strips them', () => {

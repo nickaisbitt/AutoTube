@@ -24,47 +24,247 @@ async function getPuppeteer() {
 }
 
 /**
- * Resolve a real Chrome/Chromium binary. The previous `||` chain always
- * picked the macOS path string (truthy even when missing), so Linux hosts
- * never fell through to /usr/bin/chromium or Playwright's cached chrome —
- * Google Images headless returned 0 forever.
+ * Puppeteer/Chrome disconnects that must not abort the whole harvest.
+ * healthcare-web193–195: mid-harvest EXIT 143/137 with
+ * "Target page, context or browser has been closed".
  */
-export function resolveChromeExecutablePath(): string | undefined {
-  const envCandidates = [
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    process.env.CHROME_PATH,
-    process.env.CHROME_BIN,
-  ];
-  const staticCandidates = [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+export function isBrowserClosedError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  // Playwright/Puppeteer: "Target page, context or browser has been closed"
+  return /Target page,? context or browser has been closed|Target (?:page|context|browser) has been closed|browser has (?:been )?disconnected|Session closed|Protocol error.*(?:Session closed|Target closed)|Connection closed|Navigating frame was detached|Execution context was destroyed|Browser\.close|TargetCloseError/i.test(
+    msg,
+  );
+}
+
+/** Platform-ordered static Chrome/Chromium install paths (env overrides still win). */
+export function chromeStaticCandidatesForPlatform(
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const linux = [
     "/usr/bin/google-chrome-stable",
     "/usr/bin/google-chrome",
     "/usr/bin/chromium-browser",
     "/usr/bin/chromium",
+    "/snap/bin/chromium",
   ];
+  const mac = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  ];
+  const win = [
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  ];
+  if (platform === "linux") return [...linux, ...mac, ...win];
+  if (platform === "darwin") return [...mac, ...linux, ...win];
+  if (platform === "win32") return [...win, ...linux, ...mac];
+  return [...linux, ...mac, ...win];
+}
+
+/**
+ * Resolve a real Chrome/Chromium binary. The previous `||` chain always
+ * picked the macOS path string (truthy even when missing), so Linux hosts
+ * never fell through to /usr/bin/chromium or Playwright's cached chrome —
+ * Google Images headless returned 0 forever.
+ *
+ * Prefer env → platform-native static paths → Playwright cache (linux64 first
+ * on Linux so a stale macOS string never shadows a real binary).
+ */
+export function resolveChromeExecutablePath(
+  exists: (p: string) => boolean = existsSync,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string | undefined {
+  const envCandidates = [
+    env.PUPPETEER_EXECUTABLE_PATH,
+    env.CHROME_PATH,
+    env.CHROME_BIN,
+  ];
+  const staticCandidates = chromeStaticCandidatesForPlatform(platform);
   const playwrightCandidates: string[] = [];
-  for (const base of [
-    join(homedir(), ".cache", "ms-playwright"),
+  const playwrightBases = [
+    join(home, ".cache", "ms-playwright"),
     "/root/.cache/ms-playwright",
-  ]) {
-    if (!existsSync(base)) continue;
+  ];
+  // Prefer the platform-native Playwright chrome layout first.
+  const playwrightRelPaths =
+    platform === "darwin"
+      ? ["chrome-mac/Chromium", "chrome-linux64/chrome", "chrome-win/chrome.exe"]
+      : platform === "win32"
+        ? ["chrome-win/chrome.exe", "chrome-linux64/chrome", "chrome-mac/Chromium"]
+        : ["chrome-linux64/chrome", "chrome-mac/Chromium", "chrome-win/chrome.exe"];
+  for (const base of playwrightBases) {
+    if (!exists(base)) continue;
     try {
       for (const entry of readdirSync(base).sort().reverse()) {
         if (!entry.startsWith("chromium-")) continue;
-        playwrightCandidates.push(
-          join(base, entry, "chrome-linux64", "chrome"),
-          join(base, entry, "chrome-mac", "Chromium"),
-          join(base, entry, "chrome-win", "chrome.exe"),
-        );
+        for (const rel of playwrightRelPaths) {
+          playwrightCandidates.push(join(base, entry, rel));
+        }
       }
     } catch {
       // ignore unreadable cache dirs
     }
   }
   for (const candidate of [...envCandidates, ...staticCandidates, ...playwrightCandidates]) {
-    if (candidate && existsSync(candidate)) return candidate;
+    if (candidate && exists(candidate)) return candidate;
   }
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Shared Puppeteer browser — one Chrome for headless image scrapes.
+// Launching a fresh browser per Google Images query OOMs the harvest host
+// (EXIT 137/143) and kills the Playwright UI page mid-run.
+// ---------------------------------------------------------------------------
+
+let _sharedSearchBrowser: any = null;
+let _sharedBrowserLaunch: Promise<any> | null = null;
+/** Serialize headless scrapes so concurrent hybrid fetches share one Chrome. */
+let _headlessSearchTail: Promise<unknown> = Promise.resolve();
+
+const CHROME_LAUNCH_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-accelerated-2d-canvas',
+  '--disable-gpu',
+  '--window-size=1920,1080',
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--mute-audio',
+];
+
+/** Test/reset hook — closes any shared browser and clears launch state. */
+export async function resetSharedSearchBrowserForTests(): Promise<void> {
+  const browser = _sharedSearchBrowser;
+  _sharedSearchBrowser = null;
+  _sharedBrowserLaunch = null;
+  _headlessSearchTail = Promise.resolve();
+  if (browser) {
+    try {
+      await browser.close();
+    } catch {
+      /* already dead */
+    }
+  }
+}
+
+async function launchSearchBrowser(puppeteer: any): Promise<any> {
+  const CHROME_PATH = resolveChromeExecutablePath();
+  if (!CHROME_PATH) {
+    throw new Error("No Chrome/Chromium binary found for headless image search");
+  }
+  const browser = await puppeteer.launch({
+    headless: true,
+    executablePath: CHROME_PATH,
+    args: CHROME_LAUNCH_ARGS,
+  });
+  browser.once?.("disconnected", () => {
+    if (_sharedSearchBrowser === browser) {
+      _sharedSearchBrowser = null;
+      _sharedBrowserLaunch = null;
+    }
+  });
+  return browser;
+}
+
+async function getSharedSearchBrowser(puppeteer: any, { forceNew = false } = {}): Promise<any> {
+  if (!forceNew && _sharedSearchBrowser?.isConnected?.()) {
+    return _sharedSearchBrowser;
+  }
+  if (!forceNew && _sharedBrowserLaunch) {
+    return _sharedBrowserLaunch;
+  }
+  if (_sharedSearchBrowser) {
+    try {
+      await _sharedSearchBrowser.close();
+    } catch {
+      /* ignore */
+    }
+    _sharedSearchBrowser = null;
+  }
+  _sharedBrowserLaunch = launchSearchBrowser(puppeteer)
+    .then((browser) => {
+      _sharedSearchBrowser = browser;
+      return browser;
+    })
+    .catch((err) => {
+      _sharedBrowserLaunch = null;
+      throw err;
+    });
+  return _sharedBrowserLaunch;
+}
+
+/**
+ * Run `operation` with a fresh page on the shared browser. On closed-browser
+ * errors, relaunch Chrome once and retry. Never rethrows closed-browser errors
+ * to callers — returns `fallback` so one dead page cannot abort the harvest.
+ */
+export async function withResilientSearchPage<T>(
+  operation: (page: any) => Promise<T>,
+  fallback: T,
+): Promise<T> {
+  const puppeteer = await getPuppeteer();
+  if (!puppeteer) return fallback;
+
+  const runOnce = async (forceNew: boolean): Promise<T> => {
+    const browser = await getSharedSearchBrowser(puppeteer, { forceNew });
+    const page = await browser.newPage();
+    try {
+      return await operation(page);
+    } finally {
+      try {
+        await page.close();
+      } catch {
+        /* page may already be closed */
+      }
+    }
+  };
+
+  return recoverFromClosedBrowserOnce(runOnce, fallback);
+}
+
+/**
+ * Closed-browser recovery primitive (unit-testable without launching Chrome).
+ * First attempt with forceNew=false; on closed error, retry once with
+ * forceNew=true; on second closed error return fallback (never throw closed).
+ */
+export async function recoverFromClosedBrowserOnce<T>(
+  runOnce: (forceNew: boolean) => Promise<T>,
+  fallback: T,
+  warn: (msg: string, err: unknown) => void = (msg, err) =>
+    console.warn(msg, err instanceof Error ? err.message : err),
+): Promise<T> {
+  try {
+    return await runOnce(false);
+  } catch (err) {
+    if (!isBrowserClosedError(err)) throw err;
+    warn('[Google Images Headless] Browser/page closed — relaunching Chrome once:', err);
+    try {
+      return await runOnce(true);
+    } catch (err2) {
+      if (isBrowserClosedError(err2)) {
+        warn(
+          '[Google Images Headless] Browser still closed after relaunch — skipping this query:',
+          err2,
+        );
+        return fallback;
+      }
+      throw err2;
+    }
+  }
+}
+
+/** Queue headless work so concurrent scrapes reuse one Chrome instead of forking N. */
+function enqueueHeadlessSearch<T>(task: () => Promise<T>): Promise<T> {
+  const run = _headlessSearchTail.then(task, task);
+  _headlessSearchTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 const USER_AGENTS = [
@@ -526,134 +726,110 @@ export async function fetchGoogleImages(query: string): Promise<WebImageResult[]
 /**
  * Headless browser scraper for Google Images using Puppeteer.
  * Renders the full JS page and extracts image URLs from the DOM.
+ *
+ * Uses a shared Chrome + closed-page recovery so one dead tab (or an OOM'd
+ * Chrome) cannot abort the whole harvest mid-query.
  */
 async function fetchGoogleImagesHeadless(query: string): Promise<WebImageResult[]> {
   if (process.env.AUTOTUBE_DISABLE_BROWSER_SEARCH === '1') return [];
-  const puppeteer = await getPuppeteer();
-  if (!puppeteer) return [];
-
-  const CHROME_PATH = resolveChromeExecutablePath();
-  if (!CHROME_PATH) {
+  if (!resolveChromeExecutablePath()) {
     console.warn("[Google Images Headless] No Chrome/Chromium binary found; skipping headless scrape");
     return [];
   }
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: CHROME_PATH,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--disable-gpu',
-      '--window-size=1920,1080',
-    ],
-  });
+  return enqueueHeadlessSearch(() =>
+    withResilientSearchPage(async (page) => {
+      await page.setViewport({ width: 1920, height: 1080 });
+      await page.setUserAgent(
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      );
 
-  try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=2`;
+      await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 30_000 });
 
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=2`;
-    await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 30_000 });
+      try {
+        await page.waitForSelector('img', { timeout: 15_000 });
+      } catch {
+        console.warn('[Google Images Headless] No img tags found, trying anyway...');
+      }
 
-    // Wait for any image results to appear - use a very generous timeout
-    // and catch timeout errors gracefully
-    try {
-      await page.waitForSelector('img', { timeout: 15_000 });
-    } catch {
-      console.warn('[Google Images Headless] No img tags found, trying anyway...');
-    }
+      for (let i = 0; i < 4; i++) {
+        await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+        await new Promise(r => setTimeout(r, 1000));
+      }
 
-    // Scroll down to trigger lazy loading
-    for (let i = 0; i < 4; i++) {
-      await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-      await new Promise(r => setTimeout(r, 1000));
-    }
+      await new Promise(r => setTimeout(r, 2000));
 
-    // Give extra time for lazy-loaded images
-    await new Promise(r => setTimeout(r, 2000));
+      const imageData = await page.evaluate(() => {
+        const results: Array<{ url: string; title: string; width?: number; height?: number }> = [];
+        const seen = new Set<string>();
 
-    // Extract image URLs from the rendered DOM
-    const imageData = await page.evaluate(() => {
-      const results: Array<{ url: string; title: string; width?: number; height?: number }> = [];
-      const seen = new Set<string>();
+        const addUrl = (url: string, title = '', width?: number, height?: number) => {
+          if (!url || !url.startsWith('http') || seen.has(url)) return;
+          if (url.includes('gstatic.com') || url.includes('google.com/images')) return;
+          if (url.includes('data:image')) return;
+          if (url.includes('google.com/logos') || url.includes('google.com/favicon')) return;
+          seen.add(url);
+          results.push({ url, title, width, height });
+        };
 
-      const addUrl = (url: string, title = '', width?: number, height?: number) => {
-        if (!url || !url.startsWith('http') || seen.has(url)) return;
-        if (url.includes('gstatic.com') || url.includes('google.com/images')) return;
-        if (url.includes('data:image')) return;
-        if (url.includes('google.com/logos') || url.includes('google.com/favicon')) return;
-        seen.add(url);
-        results.push({ url, title, width, height });
-      };
-
-      // Strategy 1: Find links that contain imgurl parameter (actual source URLs)
-      const links = document.querySelectorAll('a[href*="imgurl"]');
-      for (const a of links) {
-        const href = a.getAttribute('href');
-        if (!href) continue;
-        const match = href.match(/[?&]imgurl=([^&]+)/);
-        if (match) {
-          try {
-            const url = decodeURIComponent(match[1]);
-            const title = a.getAttribute('title')
-              || a.querySelector('img')?.getAttribute('alt')
-              || '';
-            addUrl(url, title);
-          } catch {
-            // ignore decode errors
+        const links = document.querySelectorAll('a[href*="imgurl"]');
+        for (const a of links) {
+          const href = a.getAttribute('href');
+          if (!href) continue;
+          const match = href.match(/[?&]imgurl=([^&]+)/);
+          if (match) {
+            try {
+              const url = decodeURIComponent(match[1]);
+              const title = a.getAttribute('title')
+                || a.querySelector('img')?.getAttribute('alt')
+                || '';
+              addUrl(url, title);
+            } catch {
+              // ignore decode errors
+            }
           }
         }
-      }
 
-      // Strategy 2: Find img tags with data-src or src
-      const imgs = document.querySelectorAll('img');
-      for (const img of imgs) {
-        const src = img.getAttribute('data-src') || img.getAttribute('src');
-        if (src) {
-          const title = img.getAttribute('alt') || '';
-          const width = img.naturalWidth || undefined;
-          const height = img.naturalHeight || undefined;
-          addUrl(src, title, width, height);
-        }
-      }
-
-      // Strategy 3: Look for elements with data-ved containing images
-      const vedElements = document.querySelectorAll('[data-ved]');
-      for (const el of vedElements) {
-        const img = el.querySelector('img');
-        if (img) {
+        const imgs = document.querySelectorAll('img');
+        for (const img of imgs) {
           const src = img.getAttribute('data-src') || img.getAttribute('src');
           if (src) {
             const title = img.getAttribute('alt') || '';
-            addUrl(src, title);
+            const width = img.naturalWidth || undefined;
+            const height = img.naturalHeight || undefined;
+            addUrl(src, title, width, height);
           }
         }
-      }
 
-      // Strategy 4: Look for any a tags with href containing image URLs
-      const allLinks = document.querySelectorAll('a[href*=".jpg"], a[href*=".png"], a[href*=".webp"]');
-      for (const a of allLinks) {
-        const href = a.getAttribute('href');
-        if (href && href.startsWith('http')) {
-          const title = a.getAttribute('title') || a.textContent || '';
-          addUrl(href, title);
+        const vedElements = document.querySelectorAll('[data-ved]');
+        for (const el of vedElements) {
+          const img = el.querySelector('img');
+          if (img) {
+            const src = img.getAttribute('data-src') || img.getAttribute('src');
+            if (src) {
+              const title = img.getAttribute('alt') || '';
+              addUrl(src, title);
+            }
+          }
         }
-      }
 
-      return results;
-    });
+        const allLinks = document.querySelectorAll('a[href*=".jpg"], a[href*=".png"], a[href*=".webp"]');
+        for (const a of allLinks) {
+          const href = a.getAttribute('href');
+          if (href && href.startsWith('http')) {
+            const title = a.getAttribute('title') || a.textContent || '';
+            addUrl(href, title);
+          }
+        }
 
-    console.log(`[Google Images Headless] Extracted ${imageData.length} images from DOM`);
-    return imageData;
-  } finally {
-    await browser.close();
-  }
+        return results;
+      });
+
+      console.log(`[Google Images Headless] Extracted ${imageData.length} images from DOM`);
+      return imageData as WebImageResult[];
+    }, []),
+  );
 }
 
 function extractGoogleImageData(data: unknown, depth = 0): WebImageResult[] {

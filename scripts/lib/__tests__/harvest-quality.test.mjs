@@ -5016,3 +5016,93 @@ describe('healthcare-web211 nurse-prank / ambulance-queue / product-MRI pads', (
     expect(project.editTimeline[0].endSec).toBe(2);
   });
 });
+
+describe('housing-web172 Ken O\'Keefe / ceilidh / Bull City / pigeon-palace pads', () => {
+  const JUNK = [
+    'truth lies why dale farm matters promo ken o keefe',
+    'truth lies why dale farm matters ken o keefe part 3 of 3',
+    'soas ceilidh band dale farm the eviction tate modern',
+    'bull city today june 1 2017 ep 103',
+    'pigeon palace highlights pigeon palace highlights displacement eviction san francisco',
+    'the fall of the i hotel 1983 asian american film the fall of the i hotel',
+  ];
+  const KEEP = [
+    'west sussex man faces an eviction order from his littlehampton home george depass',
+    '670 low income tenants being evicted in san francisco',
+    'family crying distressed evicted apartment door',
+    'eviction clashes and fires at dale farm police in full riot gear',
+  ];
+
+  it('hard-rejects activism/concert/local-TV/film pads from pool + intro', () => {
+    for (const title of JUNK) {
+      expect(isHousingIntroJunkPad(title)).toBe(true);
+      expect(housingOffTopicBrollReason(title, HOUSING_TOPIC)).toMatch(/off-topic/);
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(housingIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/j.mp4',
+      })).toBe(0);
+    }
+  });
+
+  it('keeps West Sussex / SF mass eviction / crying family / Dale Farm riot news', () => {
+    for (const title of KEEP) {
+      expect(isHousingIntroJunkPad(title)).toBe(false);
+      expect(housingOffTopicBrollReason(title, HOUSING_TOPIC)).toBe('');
+    }
+    // Face openers must still clear intro evidence; Dale Farm riot news is
+    // mid-video B-roll (not required to clear face gate).
+    for (const title of [
+      'west sussex man faces an eviction order from his littlehampton home george depass',
+      '670 low income tenants being evicted in san francisco',
+      'family crying distressed evicted apartment door',
+    ]) {
+      expect(housingIntroFaceEvidenceMatches(title)).toBe(true);
+      expect(housingIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/ok.mp4',
+      })).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
+describe('healthcare-web214 botox/homeopathy/Jacono/Omron/molest/crane pads', () => {
+  const JUNK = [
+    'worried about looking frozen after botox let s uncover the truth',
+    'exercise instructions for patients with crf dr lubna kamal nano homeopathy',
+    'dr andrew jacono reviews this person is a 16 year old female who always disapproved the appeal of the width of her nose',
+    'doctor sexually molests patients under anesthesia canadian doctor george doodnaught',
+    'omron bp742n 5 series upper arm blood pressure monitor pack of 2',
+    'mri unit lifted into bassetlaw hospital by crane a state of the art mri unit',
+    'i discuss trust issues denied mri referral with christ health ceo dr robert record md part 6',
+    'fl dept of health will not take action vs md who failed to acknowledge broke skull in mri review part 2',
+    'female doctors spent more time with patients and are paid less than their male colleagues',
+  ];
+  const KEEP = [
+    'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+    'state of the art surgical robot demonstrated in ulster hospital theatres',
+    'having an mri scan 7 to 12 year olds imperial nhs',
+    'radiologist reviewing mri scan workstation monitor',
+    'doctor face patient consultation close up hospital',
+  ];
+
+  it('hard-rejects web214 mid-junk from pool + intro', () => {
+    for (const title of JUNK) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(true);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toMatch(/off-topic/);
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(false);
+      expect(healthcareIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/j.mp4',
+      })).toBe(0);
+    }
+  });
+
+  it('keeps Shropshire / Ulster OR + Imperial MRI / radiologist / consultation', () => {
+    for (const title of KEEP) {
+      expect(isHealthcareIntroPadJunk(title)).toBe(false);
+      expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toBe('');
+      expect(healthcareIntroFaceEvidenceMatches(title)).toBe(true);
+      expect(healthcareIntroRepairRank({
+        title, type: 'video', url: 'https://example.com/ok.mp4',
+      })).toBeGreaterThanOrEqual(2);
+    }
+  });
+});

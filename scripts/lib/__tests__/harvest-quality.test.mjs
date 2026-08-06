@@ -5021,15 +5021,18 @@ describe('housing-web172 Ken O\'Keefe / ceilidh / Bull City / pigeon-palace pads
   const JUNK = [
     'truth lies why dale farm matters promo ken o keefe',
     'truth lies why dale farm matters ken o keefe part 3 of 3',
+    'dale farm repels eviction september 19 2011 ken o keefe tjp',
     'soas ceilidh band dale farm the eviction tate modern',
     'bull city today june 1 2017 ep 103',
     'pigeon palace highlights pigeon palace highlights displacement eviction san francisco',
     'the fall of the i hotel 1983 asian american film the fall of the i hotel',
+    'dalefarm travellers youtube video nonprofits activism simonabonomo dalefarm travellers eviction',
   ];
   const KEEP = [
     'west sussex man faces an eviction order from his littlehampton home george depass',
     '670 low income tenants being evicted in san francisco',
     'family crying distressed evicted apartment door',
+    'burden of richmond evictions weighs heaviest in black neighborhoods retro report',
     'eviction clashes and fires at dale farm police in full riot gear',
   ];
 
@@ -5044,7 +5047,7 @@ describe('housing-web172 Ken O\'Keefe / ceilidh / Bull City / pigeon-palace pads
     }
   });
 
-  it('keeps West Sussex / SF mass eviction / crying family / Dale Farm riot news', () => {
+  it('keeps West Sussex / SF mass eviction / crying family / Richmond / Dale Farm riot news', () => {
     for (const title of KEEP) {
       expect(isHousingIntroJunkPad(title)).toBe(false);
       expect(housingOffTopicBrollReason(title, HOUSING_TOPIC)).toBe('');
@@ -5055,12 +5058,19 @@ describe('housing-web172 Ken O\'Keefe / ceilidh / Bull City / pigeon-palace pads
       'west sussex man faces an eviction order from his littlehampton home george depass',
       '670 low income tenants being evicted in san francisco',
       'family crying distressed evicted apartment door',
+      'burden of richmond evictions weighs heaviest in black neighborhoods retro report',
     ]) {
       expect(housingIntroFaceEvidenceMatches(title)).toBe(true);
       expect(housingIntroRepairRank({
         title, type: 'video', url: 'https://example.com/ok.mp4',
       })).toBeGreaterThanOrEqual(2);
     }
+    // Dale Farm riot news remains pool-eligible (sparingly) after Ken O'Keefe drop.
+    expect(housingIntroRepairRank({
+      title: 'eviction clashes and fires at dale farm police in full riot gear',
+      type: 'video',
+      url: 'https://example.com/dale.mp4',
+    })).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -5082,6 +5092,7 @@ describe('healthcare-web214 botox/homeopathy/Jacono/Omron/molest/crane pads', ()
     'having an mri scan 7 to 12 year olds imperial nhs',
     'radiologist reviewing mri scan workstation monitor',
     'doctor face patient consultation close up hospital',
+    'mount sinai ai radiology medical imaging',
   ];
 
   it('hard-rejects web214 mid-junk from pool + intro', () => {
@@ -5095,14 +5106,24 @@ describe('healthcare-web214 botox/homeopathy/Jacono/Omron/molest/crane pads', ()
     }
   });
 
-  it('keeps Shropshire / Ulster OR + Imperial MRI / radiologist / consultation', () => {
+  it('keeps Shropshire / Ulster OR + Imperial MRI / radiologist / consultation / Mount Sinai', () => {
     for (const title of KEEP) {
       expect(isHealthcareIntroPadJunk(title)).toBe(false);
       expect(healthcareOffTopicBrollReason(title, HEALTHCARE_TOPIC)).toBe('');
+    }
+    for (const title of [
+      'i got to meet shropshire hospital s surgery robot and hear how it is transforming operations',
+      'state of the art surgical robot demonstrated in ulster hospital theatres',
+      'having an mri scan 7 to 12 year olds imperial nhs',
+      'radiologist reviewing mri scan workstation monitor',
+      'doctor face patient consultation close up hospital',
+    ]) {
       expect(healthcareIntroFaceEvidenceMatches(title)).toBe(true);
       expect(healthcareIntroRepairRank({
         title, type: 'video', url: 'https://example.com/ok.mp4',
       })).toBeGreaterThanOrEqual(2);
     }
+    // Mount Sinai AI stills stay pool-eligible (not required to clear face gate).
+    expect(isHealthcareIntroPadJunk('mount sinai ai radiology medical imaging')).toBe(false);
   });
 });

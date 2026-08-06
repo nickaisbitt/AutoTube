@@ -480,6 +480,21 @@ export function isHousingNamedDocumentaryBlob(blob = '') {
   );
 }
 
+/**
+ * housing-web172: Dale Farm clips oversaturated the first 15s after a West Sussex
+ * face opener. Demote Dale-Farm-only named docs behind West Sussex / SF / Richmond
+ * in inject host scoring — do NOT touch housingIntroRepairRank (intro-face gate).
+ *
+ * @param {string} blob
+ * @returns {boolean}
+ */
+export function isHousingDaleFarmOnlyNamedBlob(blob = '') {
+  const text = String(blob || '');
+  if (!/\bdale\s*farm\b/i.test(text)) return false;
+  if (/\b(?:west\s+sussex|san\s+francisco|\bsf\b|richmond|670)\b/i.test(text)) return false;
+  return true;
+}
+
 /** True when yt-dlp has a cookie jar / browser cookies for bot-gated hosts. */
 export function hasYtDlpCookies() {
   return Boolean(
@@ -595,7 +610,11 @@ export function motionCandidateHostRank(candidate = {}, options = {}) {
       // Named documentary Archive (Dale Farm / West Sussex / SF / Richmond) — host
       // tier 4 aligns with housingIntroRepairRank 4 so proven openers win inject
       // ahead of generic face Archive (5) and flaky non-archive directs.
-      if (isHousingNamedDocumentaryBlob(blob)) return 4;
+      // housing-web172: Dale-Farm-only → tier 5 (still ahead of opaque 35) so
+      // West Sussex / SF / Richmond outrank Dale Farm early without breaking face.
+      if (isHousingNamedDocumentaryBlob(blob)) {
+        return isHousingDaleFarmOnlyNamedBlob(blob) ? 5 : 4;
+      }
       // housing-web158: prefer clips that clear housingIntroFaceEvidenceMatches in
       // the same strong-Archive tier (5); opaque landscape/FEMA stay 35. Do not
       // demote apartment Archive behind generic web — volume still needs it.
@@ -4272,7 +4291,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // landscape/FEMA pools cannot empty INTRO_FACE after junk rejects.
       if (/Archive/i.test(clip.source || '')) {
         if (isHousingNamedDocumentaryBlob(blob)) {
-          return 14;
+          // housing-web172: Dale-Farm-only behind West Sussex/SF/Richmond (14).
+          return isHousingDaleFarmOnlyNamedBlob(blob) ? 11 : 14;
         }
         if (housingIntroFaceEvidenceMatches(blob)) return 10;
         return HOUSING_ARCHIVE_STRONG_RE.test(blob) ? 1 : 0;
@@ -4284,8 +4304,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Align inject boost with housingIntroFaceEvidenceMatches (pool gate).
       // Named documentary eviction faces (Dale Farm / SF / West Sussex / Richmond)
       // outrank generic face hits so inject prefers watch-proven openers.
+      // housing-web172: Dale-Farm-only → 11 so SF/West Sussex/Richmond fill early.
       if (isHousingNamedDocumentaryBlob(blob)) {
-        return 14;
+        return isHousingDaleFarmOnlyNamedBlob(blob) ? 11 : 14;
       }
       if (housingIntroFaceEvidenceMatches(blob)) {
         return 10;

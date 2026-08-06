@@ -28,6 +28,7 @@ import {
   resolveDailymotionProbeUrl,
   softProbeDailymotionUrl,
   isHousingNamedDocumentaryBlob,
+  isHousingDaleFarmOnlyNamedBlob,
   isVisionBudgetSoft,
   hasYtDlpCookies,
   unreliableWebProxyInjectReason,
@@ -717,17 +718,26 @@ describe('non-YouTube motion planning and ranking', () => {
     expect(motionCandidateHostRank(opaqueArchive, { topicBlob: AIRLINE_TOPIC })).toBe(0);
   });
 
-  it('housing named-doc Archive ranks 4; preferProbePassHosts demotes flaky directs', () => {
+  it('housing named-doc Archive: West Sussex/SF/Richmond rank 4; Dale-Farm-only demoted to 5 (web172)', () => {
     // housing-web168: injected=6/18 with probe-fail=3 — random direct .mp4 (rank 1)
     // beat Archive face (5) then failed canFetch. Named-doc Archive host tier 4
     // (aligned with housingIntroRepairRank 4) + preferProbePassHosts demotes
     // non-archive directs behind Archive so probe-pass hosts fill ≥12 slots.
-    const namedDoc = {
+    // housing-web172: Dale-Farm-only demoted to 5 so West Sussex / SF / Richmond
+    // outrank early Dale Farm oversaturation without breaking intro-face gates.
+    const daleFarmOnly = {
       url: 'https://archive.org/download/dale/dale-farm.mp4',
       source: 'Archive.org live',
       title: 'dale farm travellers eviction documentary',
       alt: 'dale farm eviction family face',
       query: 'dale farm eviction',
+    };
+    const westSussex = {
+      url: 'https://archive.org/download/ws/west-sussex.mp4',
+      source: 'Archive.org live',
+      title: 'west sussex man faces an eviction order from his littlehampton home',
+      alt: 'west sussex eviction face',
+      query: 'west sussex eviction',
     };
     const faceArchive = {
       url: 'https://archive.org/download/face/eviction.mp4',
@@ -742,7 +752,10 @@ describe('non-YouTube motion planning and ranking', () => {
       query: 'worried couple apartment',
       alt: 'tenant reading eviction letter',
     };
-    expect(motionCandidateHostRank(namedDoc, { topicBlob: HOUSING_TOPIC })).toBe(4);
+    expect(isHousingDaleFarmOnlyNamedBlob(daleFarmOnly.title)).toBe(true);
+    expect(isHousingDaleFarmOnlyNamedBlob(westSussex.title)).toBe(false);
+    expect(motionCandidateHostRank(westSussex, { topicBlob: HOUSING_TOPIC })).toBe(4);
+    expect(motionCandidateHostRank(daleFarmOnly, { topicBlob: HOUSING_TOPIC })).toBe(5);
     expect(motionCandidateHostRank(faceArchive, { topicBlob: HOUSING_TOPIC })).toBe(5);
     expect(motionCandidateHostRank(flakyDirect, {
       topicBlob: HOUSING_TOPIC,
@@ -750,11 +763,16 @@ describe('non-YouTube motion planning and ranking', () => {
     })).toBe(8);
     expect(motionCandidateHostRank(flakyDirect, { topicBlob: HOUSING_TOPIC })).toBe(1);
     const ranked = rankMotionCandidates(
-      [flakyDirect, faceArchive, namedDoc],
+      [flakyDirect, faceArchive, daleFarmOnly, westSussex],
       () => 0,
       { topicBlob: HOUSING_TOPIC, preferProbePassHosts: true },
     );
-    expect(ranked.map((c) => c.url)).toEqual([namedDoc.url, faceArchive.url, flakyDirect.url]);
+    expect(ranked.map((c) => c.url)).toEqual([
+      westSussex.url,
+      faceArchive.url,
+      daleFarmOnly.url,
+      flakyDirect.url,
+    ]);
   });
 
   it('housing Vimeo/DM circuit pins liveTarget to liveCap so Archive extras run', () => {

@@ -594,7 +594,7 @@ export const AIRLINE_CABIN_LIFE_ESCAPE_RE =
  * cabin-pressure investigations (airline-web8 top-fix #3).
  */
 export const AIRLINE_GENERIC_RETAIL_SHELF_RE =
-  /\b(?:(?:woman|man|person|shopper|customer|shopper)\s+(?:at|by|near|browsing|stocking|facing)\s+(?:the\s+)?(?:shelf|shelves|aisle|store\s+shelf)|(?:supermarket|grocery|retail|convenience\s+store|big[\s-]?box|department\s+store)\s+(?:shelf|shelves|aisle|stock|interior)|stocking\s+(?:shelves?|aisle)|(?:woman|man)\s+(?:at|by)\s+(?:the\s+)?shelf|product\s+shelf\s+(?:stock|b-?roll|footage)|retail\s+store\s+(?:interior|aisle|shelf))\b/i;
+  /\b(?:(?:woman|man|person|shopper|customer)\s+(?:at|by|near|browsing|stocking|facing)\s+(?:the\s+)?(?:shelf|shelves|aisle|store\s+shelf)|(?:supermarket|grocery|retail|convenience\s+store|big[\s-]?box|department\s+store)\s+(?:shelf|shelves|aisle|stock|interior)|stocking\s+(?:shelves?|aisle)|(?:woman|man)\s+(?:at|by)\s+(?:the\s+)?shelf|product\s+shelf\s+(?:stock|b-?roll|footage)|retail\s+store\s+(?:interior|aisle|shelf))\b/i;
 
 /**
  * News-desk / corporate-office / talking-head studio pads that make cabin-

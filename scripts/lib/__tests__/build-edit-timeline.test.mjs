@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   introFaceTier,
   hasReadableFaceVisual,
+  hasAirlineOxygenMaskFaceVisual,
+  hasAirlineHookFaceVisual,
   passesHousingTimelineIntroEvidence,
   isHousingApartmentMotion,
   isHousingTalkingHeadMotion,
@@ -2415,6 +2417,136 @@ describe('buildEditTimeline: airline hook follow-through (web8 stretch)', () => 
       alt: 'passengers boarding airplane jet bridge gate',
       url: 'https://example.com/boarding.mp4',
     })).toBe('boarding-only');
+  });
+
+  it('treats oxygen-mask passenger clips as airline hook faces (airline-s85-4)', () => {
+    const oxygen = {
+      type: 'video',
+      alt: 'oxygen masks deployed on jet airways flight as passengers complain of nosebleeds',
+      url: 'https://example.com/oxygen-jet.mp4',
+    };
+    expect(hasAirlineOxygenMaskFaceVisual(oxygen)).toBe(true);
+    expect(hasAirlineHookFaceVisual(oxygen)).toBe(true);
+    expect(introFaceTier(oxygen, { airline: true })).toBe(2);
+    // Query alone must not mint an oxygen-mask face.
+    expect(hasAirlineOxygenMaskFaceVisual({
+      type: 'video',
+      query: 'oxygen mask deploy airplane cabin',
+      alt: 'empty hangar establishing stock',
+      url: 'https://example.com/hangar.mp4',
+    })).toBe(false);
+  });
+
+  it('opens on oxygen-mask face — never boarding, hangar, or training slides in first 8s (airline-s85-4)', () => {
+    const project = {
+      topic: AIRLINE_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 4,
+          narration: 'Why did the cabin keep failing?',
+          title: 'Intro',
+        },
+        {
+          id: 'body',
+          type: 'body',
+          duration: 20,
+          narration: 'They buried every pressure report while oxygen masks sat unused.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'oxygen-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/oxygen-passengers.mp4',
+          alt: 'oxygen masks deployed airplane cabin passengers wearing masks cabin pressure drop',
+          query: 'oxygen mask cabin',
+          source: 'Bing web video',
+        },
+        {
+          id: 'boarding',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/boarding.mp4',
+          alt: 'passengers boarding airplane jet bridge gate queue airport',
+          query: 'boarding airplane',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'hangar',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/hangar-ribbon.mp4',
+          alt: 'boeing hangar ribbon cutting',
+          query: 'aircraft hangar',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'training-slide',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/physiology.mp4',
+          alt: 'physiology of flight ups and downs of cabin pressurization',
+          query: 'cabin pressurization',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'cpat-slide',
+          segmentId: 'body',
+          type: 'image',
+          url: 'https://example.com/cpat.jpg',
+          alt: 'Embraer EMB175 Aircraft Systems for Cabin Crew - CPAT Global',
+          query: 'cabin crew systems',
+          source: 'DuckDuckGo Images',
+        },
+        {
+          id: 'bright',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/bright-cabin.mp4',
+          alt: 'bright daylight airplane cabin interior well-lit aisle passengers seated',
+          query: 'bright cabin daylight',
+          source: 'Bing web video',
+        },
+        {
+          id: 'oxygen-2',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/oxygen-2.mp4',
+          alt: 'worried passenger face close-up oxygen masks deployed cabin pressure drop people',
+          query: 'passenger face oxygen',
+          source: 'Bing web video',
+        },
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.0 });
+    const ids = timeline.map((e) => e.assetId);
+    expect(ids).not.toContain('training-slide');
+    expect(ids).not.toContain('cpat-slide');
+    expect(ids).not.toContain('hangar');
+    const introDur = 4;
+    const first8 = timeline.filter((e) => {
+      const global = e.segmentId === 'intro' ? e.startSec : introDur + e.startSec;
+      return global < 8;
+    });
+    expect(first8.map((e) => e.assetId)).not.toContain('boarding');
+    expect(first8.map((e) => e.assetId)).not.toContain('hangar');
+    expect(first8.map((e) => e.assetId)).not.toContain('training-slide');
+    expect(first8[0].assetId === 'oxygen-face' || first8[0].assetId === 'oxygen-2').toBe(true);
+  });
+
+  it('clusters training-slide for airline limited reuse (s85-4)', () => {
+    expect(visualSubjectCluster({
+      alt: 'physiology of flight ups and downs of cabin pressurization',
+      url: 'https://example.com/phys.mp4',
+    })).toBe('training-slide');
+    expect(visualSubjectCluster({
+      alt: 'Embraer Aircraft Systems for Cabin Crew CPAT Global',
+      url: 'https://example.com/cpat.jpg',
+    })).toBe('training-slide');
   });
 
   it('keeps denser airline rich-pool holds after first 15s (airline-s85-2 pacing)', () => {

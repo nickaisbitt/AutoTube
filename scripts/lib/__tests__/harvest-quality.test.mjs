@@ -32,6 +32,9 @@ import {
   housingOffTopicBrollReason,
   isGenericStockJunk,
   isAirlineBoardingOnlyWeakOpener,
+  isAirlineHangarTaxiWeakOpener,
+  isAirlineTrainingSlidePad,
+  airlineVarietyPadJunkReason,
   isWebNativeMotionSource,
   keylessArchiveHumanPortraitScore,
   scoreAssetRelevance,
@@ -306,6 +309,61 @@ describe('keyless archive human portrait topical boost', () => {
     expect(isGenericStockJunk('passengers boarding airplane jet bridge gate', AIRLINE_TOPIC)).toBe(false);
   });
 
+  it('hard-rejects training slides / manuals / cabin-safety cards (airline-s85-4)', () => {
+    expect(
+      isGenericStockJunk(
+        'Embraer EMB175 Aircraft Systems for Cabin Crew - CPAT Global',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'physiology of flight ups and downs of cabin pressurization',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'airline training manual cabin pressurization diagram',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'training slide cabin safety briefing card powerpoint',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(isAirlineTrainingSlidePad('cabin safety card powerpoint slide')).toBe(true);
+    expect(
+      airlineVarietyPadJunkReason('physiology of flight ups and downs of cabin pressurization'),
+    ).toMatch(/training-slide/);
+    // Real oxygen-mask incident footage still survives (not a training slide).
+    expect(
+      isGenericStockJunk(
+        'oxygen masks deployed airplane cabin pressure drop worried passengers',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+    // Real oxygen equipment training FILM (motion) is not a slide/manual pad.
+    expect(
+      isAirlineTrainingSlidePad(
+        'cabin pressurization and oxygen equipment training film 1958',
+      ),
+    ).toBe(false);
+  });
+
+  it('flags hangar/taxi establishing as weak early opener (airline-s85-4)', () => {
+    expect(isAirlineHangarTaxiWeakOpener('aircraft hangar timelapse')).toBe(true);
+    expect(isAirlineHangarTaxiWeakOpener('boeing hangar ribbon cutting')).toBe(true);
+    expect(isAirlineHangarTaxiWeakOpener('planes taxiing on the tarmac stock')).toBe(true);
+    expect(
+      isAirlineHangarTaxiWeakOpener(
+        'maintenance hangar mechanic oxygen masks deployed cabin pressure',
+      ),
+    ).toBe(false);
+  });
+
   it('soft-pass hard-junk gate counts auto-mechanic pads (airline-s85-3)', () => {
     const media = Array.from({ length: 6 }, (_, i) => ({
       id: `v${i}`,
@@ -327,7 +385,7 @@ describe('keyless archive human portrait topical boost', () => {
   it('keeps on-topic cabin pressurization / oxygen evidence', () => {
     expect(
       isGenericStockJunk(
-        'physiology of flight ups and downs of cabin pressurization oxygen masks',
+        'airplane cabin depressurization oxygen masks deployed above worried passengers',
         AIRLINE_TOPIC,
       ),
     ).toBe(false);

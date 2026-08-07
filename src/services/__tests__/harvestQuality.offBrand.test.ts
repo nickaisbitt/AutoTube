@@ -1244,7 +1244,7 @@ describe('airline harvest junk (wildfire/Google/booking/false-pressure)', () => 
       scoreAssetRelevance(
         {
           type: 'video',
-          alt: 'physiology of flight ups and downs of cabin pressurization faa',
+          alt: 'oxygen masks deployed airplane cabin pressure drop worried passengers',
           query: 'cabin pressurization',
           url: 'https://archive.org/download/gov.faa.safety/cabin.mp4',
         },

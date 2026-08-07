@@ -34,7 +34,10 @@ import {
   AIRLINE_STAKES_ESCAPE_RE,
   AIRLINE_AUTO_MECHANIC_PAD_RE,
   AIRLINE_BOARDING_ONLY_PAD_RE,
+  AIRLINE_TRAINING_SLIDE_PAD_RE,
   isAirlineBoardingOnlyWeakOpener,
+  isAirlineHangarTaxiWeakOpener,
+  isAirlineTrainingSlidePad,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
@@ -115,6 +118,7 @@ const AIRLINE_LIMITED_CLUSTERS = new Set([
   'hangar-taxi',
   'boarding-only',
   'auto-mechanic',
+  'training-slide',
 ]);
 
 /** Subjects that must never carry a story, whatever the reuse pressure. */
@@ -159,6 +163,9 @@ export function visualSubjectCluster(asset) {
   const blob = assetBlob(asset);
   if (AIRLINE_AUTO_MECHANIC_PAD_RE.test(blob)) return 'auto-mechanic';
   if (AIRLINE_NEWS_CHANNEL_LOGO_RE.test(blob)) return 'news-logo';
+  if (AIRLINE_TRAINING_SLIDE_PAD_RE.test(blob) || isAirlineTrainingSlidePad(blob)) {
+    return 'training-slide';
+  }
   if (AIRLINE_FABRIC_SWATCH_PAD_RE.test(blob)) return 'fabric-swatch';
   if (AIRLINE_GOLF_PAD_RE.test(blob)) return 'golf';
   if (AIRLINE_ANIMATED_COURSE_PAD_RE.test(blob)) return 'animated-course';
@@ -171,6 +178,7 @@ export function visualSubjectCluster(asset) {
   if (
     AIRLINE_HANGAR_TAXI_ESTABLISHING_RE.test(blob)
     || AIRLINE_HANGAR_TAXI_DEMOTE_RE.test(blob)
+    || isAirlineHangarTaxiWeakOpener(blob)
   ) {
     return 'hangar-taxi';
   }
@@ -332,6 +340,8 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
     || AIRLINE_NEWS_CHANNEL_LOGO_RE.test(blob)
     || AIRLINE_AUTO_MECHANIC_PAD_RE.test(blob)
     || isAirlineBoardingOnlyWeakOpener(blob)
+    || isAirlineHangarTaxiWeakOpener(blob)
+    || isAirlineTrainingSlidePad(blob)
     || (
       AIRLINE_CORPORATE_NEWS_PAD_RE.test(blob)
       && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
@@ -371,6 +381,31 @@ export function hasReadableFaceVisual(asset) {
   const blob = assetEvidenceBlob(asset);
   return /\b(face|faces|portrait|close.?up|eyes|expression|reaction|worried|shocked|crying|smiling)\b/.test(blob)
     && /\b(passengers?|pilots?|attendants?|crew|traveller?s?|person|people|woman|women|man|men|family|couple|tenants?|landlords?|residents?)\b/.test(blob);
+}
+
+/**
+ * Oxygen masks on passengers/crew count as a readable "face" for airline hooks
+ * (airline-s85-4: face-or-oxygen opener beats boarding/hangar even when metadata
+ * lacks the word "face"). Evidence only — query must not spoof.
+ *
+ * @param {object} asset
+ * @returns {boolean}
+ */
+export function hasAirlineOxygenMaskFaceVisual(asset) {
+  if (isBackViewDeadAir(asset)) return false;
+  const blob = assetEvidenceBlob(asset);
+  if (!/\boxygen\s*masks?\b/i.test(blob)) return false;
+  return /\b(passengers?|pilots?|attendants?|crew|traveller?s?|person|people|woman|women|man|men|family|wearing|deployed|faces?|worried|shocked|nosebleeds?)\b/i.test(blob);
+}
+
+/**
+ * Airline intro / early-window face signal: readable face OR oxygen-mask face.
+ *
+ * @param {object} asset
+ * @returns {boolean}
+ */
+export function hasAirlineHookFaceVisual(asset) {
+  return hasReadableFaceVisual(asset) || hasAirlineOxygenMaskFaceVisual(asset);
 }
 
 /**
@@ -580,6 +615,10 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
     }
     return 2;
   }
+  // airline-s85-4: oxygen-mask-on-passenger motion is face-equivalent for the hook.
+  if (airline && hasAirlineOxygenMaskFaceVisual(asset)) {
+    return AIRLINE_TOPICAL_VISUAL_RE.test(assetBlob(asset)) ? 2 : 1;
+  }
   // Housing: lived-in apartment motion without a strict face tag still beats
   // landscape / Archive establishing for the opener (web14).
   if (housing && isHousingApartmentMotion(asset)) return 1;
@@ -597,10 +636,15 @@ function isAirlineIntroLeadVisual(asset) {
   const blob = assetBlob(asset);
   // Bare educational "cabin pressurization" titles are not enough for the hook —
   // require face, oxygen/pressure stakes, cockpit, or bright cabin with life.
-  const hasPassengerFace = /\b(passenger|pilot|attendant|crew|traveler|person|people|woman|man|family)\b/.test(blob)
-    && /\b(face|faces|worried|shocked|reaction|portrait|close.?up|eyes)\b/.test(blob);
+  // Training slides / manuals never lead (airline-s85-4).
+  if (isAirlineTrainingSlidePad(blob)) return false;
+  const hasPassengerFace = hasAirlineHookFaceVisual(asset)
+    || (
+      /\b(passenger|pilot|attendant|crew|traveler|person|people|woman|man|family)\b/.test(blob)
+      && /\b(face|faces|worried|shocked|reaction|portrait|close.?up|eyes)\b/.test(blob)
+    );
   const hasCockpit = /\b(cockpit|flight deck)\b/.test(blob);
-  const hasStakes = AIRLINE_HOOK_STAKES_RE.test(blob);
+  const hasStakes = AIRLINE_HOOK_STAKES_RE.test(blob) && !isAirlineTrainingSlidePad(blob);
   const brightWithLife = isBrightCabinInterior(asset)
     && /\b(passenger|passengers|seated|flight\s+attendant|cabin\s+crew|oxygen|worried|shocked|face)\b/i.test(blob);
   return hasCockpit || hasPassengerFace || hasStakes || brightWithLife;
@@ -992,6 +1036,11 @@ export function buildEditTimeline(project, options = {}) {
       if (topicIsAirline && isAirlineBoardingOnlyWeakOpener(blob)) {
         reusePenalty -= 12;
       }
+      // Hangar/taxi establishing without stakes — soft demote mid-body; hard-banned
+      // in early window when face/oxygen alternatives exist (airline-s85-4).
+      if (topicIsAirline && isAirlineHangarTaxiWeakOpener(blob)) {
+        reusePenalty -= 12;
+      }
       // Corporate / news-desk / retail shelf / sterile hangar-taxi — soft demote
       // so oxygen/face stakes win ties (airline-s85-2).
       if (
@@ -1146,11 +1195,12 @@ export function buildEditTimeline(project, options = {}) {
         // Airline first-cuts: prefer face / oxygen / pressure / bright cabin
         // evidence so the hook does not cut to empty/dark stock (web8).
         // Extra stakes boost over bare FA/educational cabin (airline-stretch1).
+        // Oxygen-mask face is face-equivalent (airline-s85-4).
         if (topicIsAirline && (isIntro || isBrightCabinInterior(a) || AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob))) {
-          if (hasReadableFaceVisual(a) && AIRLINE_TOPICAL_VISUAL_RE.test(blob)) score += 5;
-          if (AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob)) score += 4;
-          if (AIRLINE_HOOK_STAKES_RE.test(blob)) score += 5;
-          if (hasReadableFaceVisual(a) && AIRLINE_HOOK_STAKES_RE.test(blob)) score += 3;
+          if (hasAirlineHookFaceVisual(a) && AIRLINE_TOPICAL_VISUAL_RE.test(blob)) score += 5;
+          if (AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob) && !isAirlineTrainingSlidePad(blob)) score += 4;
+          if (AIRLINE_HOOK_STAKES_RE.test(blob) && !isAirlineTrainingSlidePad(blob)) score += 5;
+          if (hasAirlineHookFaceVisual(a) && AIRLINE_HOOK_STAKES_RE.test(blob)) score += 3;
           if (isBrightCabinInterior(a)) score += 3;
           const luma = Number(a?.lumaStdDev) || 0;
           const lap = Number(a?.laplacianVariance) || 0;
@@ -1299,9 +1349,14 @@ export function buildEditTimeline(project, options = {}) {
       // hangar-taxi / logo / vintage establishing for the full cut (s85-2).
       if (topicIsAirline) {
         let score = beatBoost + reusePenalty;
-        if (AIRLINE_STAKES_ESCAPE_RE.test(blob) || AIRLINE_HOOK_STAKES_RE.test(blob)) score += 6;
-        if (hasReadableFaceVisual(a) && AIRLINE_TOPICAL_VISUAL_RE.test(blob)) score += 4;
-        if (AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob)) score += 3;
+        if (
+          !isAirlineTrainingSlidePad(blob)
+          && (AIRLINE_STAKES_ESCAPE_RE.test(blob) || AIRLINE_HOOK_STAKES_RE.test(blob))
+        ) {
+          score += 6;
+        }
+        if (hasAirlineHookFaceVisual(a) && AIRLINE_TOPICAL_VISUAL_RE.test(blob)) score += 4;
+        if (AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob) && !isAirlineTrainingSlidePad(blob)) score += 3;
         if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait/i.test(blob)) {
           score += 2;
         }
@@ -1564,14 +1619,17 @@ export function buildEditTimeline(project, options = {}) {
           return false;
         }
         // Airline first ~8s: empty/dark cabin + retail shelf + faceless corporate
-        // + fabric/golf/animated pads + auto-mechanic + boarding-only stay banned
-        // even on relaxed — hook follow-through (web8 + stretch1 + s85-3).
+        // + fabric/golf/animated pads + auto-mechanic + boarding-only + training
+        // slides stay banned even on relaxed — hook follow-through
+        // (web8 + stretch1 + s85-3 + s85-4). Hangar/taxi establishing is banned
+        // whenever any face / oxygen-mask candidate exists in the pool.
         if (airlineHookFollowWindow) {
           const followBlob = assetBlob(candidate);
           if (isAirlineEmptyDarkCabin(followBlob)) return false;
           if (AIRLINE_GENERIC_RETAIL_SHELF_RE.test(followBlob)) return false;
           if (airlineVarietyPadJunkReason(followBlob)) return false;
           if (AIRLINE_AUTO_MECHANIC_PAD_RE.test(followBlob)) return false;
+          if (isAirlineTrainingSlidePad(followBlob)) return false;
           if (isAirlineBoardingOnlyWeakOpener(followBlob)) return false;
           if (
             AIRLINE_CORPORATE_NEWS_PAD_RE.test(followBlob)
@@ -1579,25 +1637,54 @@ export function buildEditTimeline(project, options = {}) {
           ) {
             return false;
           }
+          if (isAirlineHangarTaxiWeakOpener(followBlob)) {
+            const hasFaceOrOxygenAlt = uniqueAssetsByUrl([...ordered, ...borrowPool]).some((c) => {
+              if (urlKey(c) === key) return false;
+              if (isAirlineHangarTaxiWeakOpener(assetBlob(c))) return false;
+              if (isAirlineBoardingOnlyWeakOpener(assetBlob(c))) return false;
+              if (isAirlineTrainingSlidePad(assetBlob(c))) return false;
+              return hasAirlineHookFaceVisual(c)
+                || AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(assetBlob(c));
+            });
+            if (hasFaceOrOxygenAlt) return false;
+          }
         }
         if (!relaxed) {
           if (introLeadWindow && !isIntroLeadVisual(candidate, introLeadOptions)) return false;
           // Prefer face / oxygen / pressure / bright cabin while alternatives exist.
+          // When any face/oxygen-mask motion exists, never hold boarding/hangar.
           if (
             airlineHookFollowWindow
             && !introLeadWindow
-            && !hasReadableFaceVisual(candidate)
+            && !hasAirlineHookFaceVisual(candidate)
             && !AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(assetBlob(candidate))
             && !isBrightCabinInterior(candidate)
           ) {
             const hasFollowAlt = uniqueAssetsByUrl([...ordered, ...borrowPool]).some((c) => {
               if (urlKey(c) === key) return false;
               if (isAirlineEmptyDarkCabin(assetBlob(c))) return false;
-              return hasReadableFaceVisual(c)
+              if (isAirlineTrainingSlidePad(assetBlob(c))) return false;
+              return hasAirlineHookFaceVisual(c)
                 || AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(assetBlob(c))
                 || isBrightCabinInterior(c);
             });
             if (hasFollowAlt) return false;
+          }
+          // Intro 0–3s: if any face/oxygen-mask motion exists, reject boarding /
+          // hangar establishing even when they somehow clear lead-visual checks.
+          if (
+            introLeadWindow
+            && topicIsAirline
+            && (
+              isAirlineBoardingOnlyWeakOpener(assetBlob(candidate))
+              || isAirlineHangarTaxiWeakOpener(assetBlob(candidate))
+            )
+          ) {
+            const hasFaceMotion = uniqueAssetsByUrl([...ordered, ...borrowPool]).some((c) => {
+              if (urlKey(c) === key) return false;
+              return hasAirlineHookFaceVisual(c);
+            });
+            if (hasFaceMotion) return false;
           }
           if (key && recentTimelineUrls.includes(key)) return false;
           if (violatesConsecutiveCluster(candidate)) return false;
@@ -1700,27 +1787,34 @@ export function buildEditTimeline(project, options = {}) {
             }
           }
           if (topicIsAirline && airlineHookFollowWindow) {
-            // Tier A: readable face + topical aviation + stakes (oxygen/pressure).
+            // Tier A: readable face OR oxygen-mask face + topical aviation + stakes.
             for (let j = 0; j < rankedPool.length; j++) {
               const candidate = rankedPool[(ai + j) % rankedPool.length];
               if (!(
-                hasReadableFaceVisual(candidate)
+                hasAirlineHookFaceVisual(candidate)
                 && AIRLINE_TOPICAL_VISUAL_RE.test(assetBlob(candidate))
                 && AIRLINE_HOOK_STAKES_RE.test(assetBlob(candidate))
+                && !isAirlineTrainingSlidePad(assetBlob(candidate))
               )) continue;
               if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
             }
-            // Tier B: readable face + topical aviation.
+            // Tier B: readable face OR oxygen-mask face + topical aviation.
             for (let j = 0; j < rankedPool.length; j++) {
               const candidate = rankedPool[(ai + j) % rankedPool.length];
-              if (!(hasReadableFaceVisual(candidate) && AIRLINE_TOPICAL_VISUAL_RE.test(assetBlob(candidate)))) continue;
+              if (!(
+                hasAirlineHookFaceVisual(candidate)
+                && AIRLINE_TOPICAL_VISUAL_RE.test(assetBlob(candidate))
+                && !isAirlineTrainingSlidePad(assetBlob(candidate))
+              )) continue;
               if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
             }
-            // Tier C: oxygen / pressure / bright cabin evidence.
+            // Tier C: oxygen / pressure / bright cabin evidence (never training slides).
             for (let j = 0; j < rankedPool.length; j++) {
               const candidate = rankedPool[(ai + j) % rankedPool.length];
+              const cBlob = assetBlob(candidate);
+              if (isAirlineTrainingSlidePad(cBlob)) continue;
               if (
-                !AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(assetBlob(candidate))
+                !AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(cBlob)
                 && !isBrightCabinInterior(candidate)
               ) continue;
               if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;

@@ -624,11 +624,11 @@ export const AIRLINE_NEWS_PACKAGE_WRAPPER_RE =
  * Escape when oxygen / pressure / passenger-face evidence is also present.
  */
 export const AIRLINE_HANGAR_TAXI_ESTABLISHING_RE =
-  /\b(?:(?:empty|sterile|static)\s+hangar|hangar\s+timelapse|aircraft\s+hangar\s+timelapse|maintenance\s+hangar\s+(?:timelapse|establishing)|(?:plane|jet|aircraft|airplane)s?\s+taxi(?:ing|es|ed)?(?:\s+(?:on\s+)?(?:the\s+)?(?:tarmac|runway|apron))?(?:\s+(?:b-?roll|stock|establishing|loop))?|taxi(?:ing)?\s+(?:b-?roll|stock|establishing|loop)|hangar\s+(?:establishing|b-?roll\s+stock))\b/i;
+  /\b(?:(?:empty|sterile|static)\s+hangar|hangar\s+timelapse|aircraft\s+hangar\s+timelapse|maintenance\s+hangar\s+(?:timelapse|establishing)|(?:plane|jet|aircraft|airplane)s?\s+taxi(?:ing|es|ed)?(?:\s+(?:on\s+)?(?:the\s+)?(?:tarmac|runway|apron))?(?:\s+(?:b-?roll|stock|establishing|loop))?|taxi(?:ing)?\s+(?:b-?roll|stock|establishing|loop)|hangar\s+(?:establishing|b-?roll\s+stock)|hangar\s+ribbon\s+cutting|ribbon\s+cutting.{0,40}hangar|hangar.{0,40}ribbon\s+cutting)\b/i;
 
 /** Softer hangar/taxi pads demoted on the timeline (not always harvest-rejected). */
 export const AIRLINE_HANGAR_TAXI_DEMOTE_RE =
-  /\b(?:aircraft\s+hangar|maintenance\s+hangar|hangar\s+(?:interior|exterior|bay)|(?:plane|jet|aircraft|airplane)s?\s+taxi(?:ing|es|ed)?|taxi(?:ing)?\s+(?:tarmac|runway|apron)|tarmac\s+taxi)\b/i;
+  /\b(?:aircraft\s+hangar|maintenance\s+hangar|hangar\s+(?:interior|exterior|bay)|(?:plane|jet|aircraft|airplane)s?\s+taxi(?:ing|es|ed)?|taxi(?:ing)?\s+(?:tarmac|runway|apron)|tarmac\s+taxi|boeing\s+hangar|hangar\s+ribbon\s+cutting)\b/i;
 
 /**
  * Cabin interior-design / fabric-swatch marketing (airline-stretch1: repeated
@@ -693,6 +693,15 @@ export const AIRLINE_AUTOMOTIVE_TOPIC_RE =
 export const AIRLINE_BOARDING_ONLY_PAD_RE =
   /\b(?:(?:passengers?\s+)?board(?:ing|ed)(?:\s+(?:an?\s+)?(?:airplane|aircraft|plane|jet|flight))?|jet\s*bridges?|jetways?|boarding\s+(?:gate|queue|line|passengers?|airplane|aircraft|plane)|gate\s+boarding|airport\s+boarding|boarding\s+airplane|passenger\s+boarding)\b/i;
 
+/**
+ * Training slides / manuals / powerpoint cabin-safety cards / e-learning systems
+ * pads (airline-s85-4: CPAT "Aircraft Systems for Cabin Crew", physiology-of-flight
+ * educational reels, cabin-safety briefing cards). Not incident B-roll.
+ * Does NOT match real "oxygen equipment training film" motion footage.
+ */
+export const AIRLINE_TRAINING_SLIDE_PAD_RE =
+  /\b(?:training\s+slides?|training\s+manuals?|powerpoint(?:\s+(?:slide|deck|presentation|card))?|presentation\s+slides?|keynote\s+slides?|cabin\s+safety\s+(?:card|cards|briefing(?:\s+card)?|slide|manual)|safety\s+(?:briefing\s+)?(?:card|cards|slide|slides)|aircraft\s+systems?\s+for\s+cabin\s+crew|systems?\s+for\s+cabin\s+crew|cabin\s+crew\s+(?:training\s+)?(?:systems?|e-?learning|slides?|manuals?|powerpoint)|cpat\s+global|physiology\s+of\s+flight|(?:airline|aviation|cabin)\s+(?:e-?learning|training\s+(?:slide|manual|powerpoint|deck))|e-?learning\s+(?:cabin|airline|aviation|systems?)|cabin\s+pressuri[sz]ation\s+(?:diagram|chart|slide|manual|powerpoint)|(?:slide|powerpoint)\s+(?:deck|card)\s+(?:cabin|airline|aviation|safety))\b/i;
+
 /** Stakes that escape animated-course rejects (real cabin-pressure evidence). */
 export const AIRLINE_STAKES_ESCAPE_RE =
   /\b(?:oxygen\s*masks?|deployed\s+masks?|cabin\s+pressure|pressuri[sz]|decompress|worried\s+(?:passenger|face)|shocked\s+(?:passenger|face)|passenger\s+face)\b/i;
@@ -718,6 +727,42 @@ export function isAirlineBoardingOnlyWeakOpener(haystack) {
 }
 
 /**
+ * True when haystack is hangar/taxi establishing without face/oxygen/pressure
+ * stakes — weak early-window filler (airline-s85-4). Banned in ~0–8s when any
+ * face / oxygen-mask candidate exists; soft-fail mid-body / thin pools.
+ *
+ * @param {string} haystack
+ * @returns {boolean}
+ */
+export function isAirlineHangarTaxiWeakOpener(haystack) {
+  const h = String(haystack || '');
+  if (
+    !AIRLINE_HANGAR_TAXI_ESTABLISHING_RE.test(h)
+    && !AIRLINE_HANGAR_TAXI_DEMOTE_RE.test(h)
+  ) {
+    return false;
+  }
+  if (AIRLINE_STAKES_ESCAPE_RE.test(h)) return false;
+  if (
+    /\b(?:face|faces|portrait|close[-\s]?up|worried|shocked|oxygen\s*masks?|cabin\s+pressure|pressuri[sz]|decompress|passenger\s+face)\b/i.test(h)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * True when haystack is a training slide / manual / powerpoint cabin-safety
+ * card pad (airline-s85-4).
+ *
+ * @param {string} haystack
+ * @returns {boolean}
+ */
+export function isAirlineTrainingSlidePad(haystack) {
+  return AIRLINE_TRAINING_SLIDE_PAD_RE.test(String(haystack || ''));
+}
+
+/**
  * True when haystack is an empty/dark/muddy cabin without life/bright escape.
  * Shared by harvest reject + edit-timeline intro/early-window gates.
  *
@@ -733,7 +778,8 @@ export function isAirlineEmptyDarkCabin(haystack) {
 /**
  * Variety pads that hard-fail cabin-pressure harvest + early timeline windows
  * (airline-stretch1: fabric swatches / golf / animated course;
- * airline-s85-2: news-channel logos / biplane / vintage promo planes).
+ * airline-s85-2: news-channel logos / biplane / vintage promo planes;
+ * airline-s85-4: training slides / manuals / powerpoint cabin-safety cards).
  *
  * @param {string} haystack
  * @returns {string|null} reason or null
@@ -747,6 +793,9 @@ export function airlineVarietyPadJunkReason(haystack) {
   // News-package wrappers without stakes still read as TV pads.
   if (AIRLINE_NEWS_PACKAGE_WRAPPER_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
     return 'news-package wrapper pad for airline';
+  }
+  if (AIRLINE_TRAINING_SLIDE_PAD_RE.test(h)) {
+    return 'training-slide/manual/cabin-safety-card pad for airline';
   }
   if (AIRLINE_FABRIC_SWATCH_PAD_RE.test(h)) return 'fabric-swatch/interior-design pad for airline';
   if (AIRLINE_GOLF_PAD_RE.test(h)) return 'golf-course pad for airline';

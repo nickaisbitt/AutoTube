@@ -672,9 +672,50 @@ export const AIRLINE_BIPLANE_VINTAGE_PAD_RE =
 export const AIRLINE_FA_SAFETY_SHORTS_RE =
   /\b(?:flight\s+attendants?.{0,64}(?:safety\s+instructions?|shorts|tiktok|new\s+level)|(?:safety\s+instructions?).{0,48}(?:new\s+level|shorts|tiktok|flight\s+attendant)|takes\s+safety\s+instructions)\b/i;
 
+/**
+ * Off-topic car / auto mechanic / garage / under-vehicle repair pads that
+ * destroy cabin-pressure credibility (airline-s85-3: car mechanic under a
+ * vehicle mid-cut). Does NOT match aircraft hangar mechanics.
+ * Skip when the topic itself is clearly automotive.
+ */
+export const AIRLINE_AUTO_MECHANIC_PAD_RE =
+  /\b(?:(?:car|auto(?:motive)?|vehicle|truck)\s+mechanic|(?:auto|car)\s+mechanic|mechanic\s+(?:under|beneath|repairing|fixing)\s+(?:a\s+|the\s+)?(?:car|vehicle|truck|automobile)|(?:lying|working|repair(?:ing)?)\s+under\s+(?:a\s+|the\s+)?(?:car|vehicle|truck|automobile)|under\s+(?:a\s+|the\s+)?(?:car|vehicle|truck|automobile)(?:\s+(?:repair|mechanic|lift))?|(?:car|auto(?:motive)?|vehicle)\s+(?:repair(?:\s+(?:shop|garage|bay|pad))?|garage)|automotive\s+garage|(?:auto|car)\s+repair\s+(?:shop|garage|bay)|garage\s+(?:auto|car|mechanic|repair)|oil\s+change\s+(?:bay|shop|garage)|(?:car|vehicle)\s+engine\s+(?:bay|repair|block)|undercarriage\s+(?:repair|mechanic|inspection)|mechanic\s+(?:under|beneath)\s+(?:a\s+)?vehicle)\b/i;
+
+/** Topics that are genuinely about cars / auto repair (exempt auto-mechanic reject). */
+export const AIRLINE_AUTOMOTIVE_TOPIC_RE =
+  /\b(?:electric\s+cars?|car\s+batter(?:y|ies)|auto(?:motive)?\s+(?:repair|mechanic|garage|industry)|garage\s+fires?|vehicle\s+(?:repair|mechanic|batter)|car\s+(?:engine|mechanic|repair|fires?)|under[\s-]?(?:the\s+)?(?:car|vehicle)|oil\s+change|tire\s+shop)\b/i;
+
+/**
+ * Static boarding / jet-bridge establishing without face/oxygen/pressure stakes
+ * (airline-s85-3: boarding-only hook — weak, not a wow). Kept mid-video; demoted
+ * or banned in the first ~8s opener window.
+ */
+export const AIRLINE_BOARDING_ONLY_PAD_RE =
+  /\b(?:(?:passengers?\s+)?board(?:ing|ed)(?:\s+(?:an?\s+)?(?:airplane|aircraft|plane|jet|flight))?|jet\s*bridges?|jetways?|boarding\s+(?:gate|queue|line|passengers?|airplane|aircraft|plane)|gate\s+boarding|airport\s+boarding|boarding\s+airplane|passenger\s+boarding)\b/i;
+
 /** Stakes that escape animated-course rejects (real cabin-pressure evidence). */
 export const AIRLINE_STAKES_ESCAPE_RE =
   /\b(?:oxygen\s*masks?|deployed\s+masks?|cabin\s+pressure|pressuri[sz]|decompress|worried\s+(?:passenger|face)|shocked\s+(?:passenger|face)|passenger\s+face)\b/i;
+
+/**
+ * True when haystack is boarding/jet-bridge establishing without face/oxygen/
+ * pressure stakes — weak airline hook (airline-s85-3).
+ *
+ * @param {string} haystack
+ * @returns {boolean}
+ */
+export function isAirlineBoardingOnlyWeakOpener(haystack) {
+  const h = String(haystack || '');
+  if (!AIRLINE_BOARDING_ONLY_PAD_RE.test(h)) return false;
+  if (AIRLINE_STAKES_ESCAPE_RE.test(h)) return false;
+  // Readable face / pressure stakes escape the weak-opener demote.
+  if (
+    /\b(?:face|faces|portrait|close[-\s]?up|worried|shocked|oxygen\s*masks?|cabin\s+pressure|pressuri[sz]|decompress)\b/i.test(h)
+  ) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * True when haystack is an empty/dark/muddy cabin without life/bright escape.
@@ -788,6 +829,11 @@ export function airlineHarvestJunkReason(haystack, contextText = '') {
     && !/\b(?:oxygen\s*masks?|worried\s+(?:passenger|face)|shocked\s+(?:passenger|face)|passenger\s+face|cabin\s+pressure|pressuri[sz]|decompress)\b/i.test(h)
   ) {
     return 'sterile hangar/taxi establishing for airline';
+  }
+  // Car / auto mechanic / under-vehicle garage pads (airline-s85-3) — never on
+  // cabin-pressure stories unless the topic itself is automotive.
+  if (AIRLINE_AUTO_MECHANIC_PAD_RE.test(h) && !AIRLINE_AUTOMOTIVE_TOPIC_RE.test(ctx)) {
+    return 'auto/car-mechanic garage pad for airline';
   }
   // airline-stretch1/s85-2: fabric / golf / animated / vintage / biplane /
   // FA shorts / news-logo — hard-reject before timeline assembly.
@@ -2863,6 +2909,12 @@ const AIRLINE_HARD_REJECT_PATTERNS = [
   {
     reason: 'corporate-news-desk',
     pattern: AIRLINE_CORPORATE_NEWS_PAD_RE,
+  },
+  {
+    // airline-s85-3: car mechanic under a vehicle shattered credibility.
+    reason: 'auto-mechanic-garage',
+    pattern: AIRLINE_AUTO_MECHANIC_PAD_RE,
+    skipWhen: AIRLINE_AUTOMOTIVE_TOPIC_RE,
   },
 ];
 

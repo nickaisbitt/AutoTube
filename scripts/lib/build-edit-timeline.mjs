@@ -32,6 +32,9 @@ import {
   AIRLINE_HANGAR_TAXI_ESTABLISHING_RE,
   AIRLINE_NEWS_PACKAGE_WRAPPER_RE,
   AIRLINE_STAKES_ESCAPE_RE,
+  AIRLINE_AUTO_MECHANIC_PAD_RE,
+  AIRLINE_BOARDING_ONLY_PAD_RE,
+  isAirlineBoardingOnlyWeakOpener,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
@@ -110,6 +113,8 @@ const AIRLINE_LIMITED_CLUSTERS = new Set([
   'biplane-vintage',
   'news-logo',
   'hangar-taxi',
+  'boarding-only',
+  'auto-mechanic',
 ]);
 
 /** Subjects that must never carry a story, whatever the reuse pressure. */
@@ -152,6 +157,7 @@ function isSurveillanceVisual(asset) {
 /** Coarse visual cluster so cold body cuts don't loop the same subject. */
 export function visualSubjectCluster(asset) {
   const blob = assetBlob(asset);
+  if (AIRLINE_AUTO_MECHANIC_PAD_RE.test(blob)) return 'auto-mechanic';
   if (AIRLINE_NEWS_CHANNEL_LOGO_RE.test(blob)) return 'news-logo';
   if (AIRLINE_FABRIC_SWATCH_PAD_RE.test(blob)) return 'fabric-swatch';
   if (AIRLINE_GOLF_PAD_RE.test(blob)) return 'golf';
@@ -167,6 +173,11 @@ export function visualSubjectCluster(asset) {
     || AIRLINE_HANGAR_TAXI_DEMOTE_RE.test(blob)
   ) {
     return 'hangar-taxi';
+  }
+  if (isAirlineBoardingOnlyWeakOpener(blob) || (
+    AIRLINE_BOARDING_ONLY_PAD_RE.test(blob) && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
+  )) {
+    return 'boarding-only';
   }
   if (/\b(u\.?s\.?\s*mail|usps|postal|post\s*box|mailbox|mail\s*box|letterbox|envelopes?|mailroom|mail\s+truck)\b/.test(blob)) {
     return 'mail';
@@ -319,6 +330,8 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
     || AIRLINE_GENERIC_RETAIL_SHELF_RE.test(blob)
     || Boolean(airlineVarietyPadJunkReason(blob))
     || AIRLINE_NEWS_CHANNEL_LOGO_RE.test(blob)
+    || AIRLINE_AUTO_MECHANIC_PAD_RE.test(blob)
+    || isAirlineBoardingOnlyWeakOpener(blob)
     || (
       AIRLINE_CORPORATE_NEWS_PAD_RE.test(blob)
       && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
@@ -970,6 +983,15 @@ export function buildEditTimeline(project, options = {}) {
       if (topicIsAirline && airlineVarietyPadJunkReason(blob)) {
         return -18;
       }
+      // Car/auto mechanic under a vehicle — hard demote (airline-s85-3).
+      if (topicIsAirline && AIRLINE_AUTO_MECHANIC_PAD_RE.test(blob)) {
+        return -18;
+      }
+      // Static boarding-only without stakes — soft demote so oxygen/face wins
+      // the first ~8s hook (airline-s85-3); still usable mid-body if pool is thin.
+      if (topicIsAirline && isAirlineBoardingOnlyWeakOpener(blob)) {
+        reusePenalty -= 12;
+      }
       // Corporate / news-desk / retail shelf / sterile hangar-taxi — soft demote
       // so oxygen/face stakes win ties (airline-s85-2).
       if (
@@ -1542,13 +1564,15 @@ export function buildEditTimeline(project, options = {}) {
           return false;
         }
         // Airline first ~8s: empty/dark cabin + retail shelf + faceless corporate
-        // + fabric/golf/animated pads stay banned even on relaxed — hook
-        // follow-through (web8 + stretch1).
+        // + fabric/golf/animated pads + auto-mechanic + boarding-only stay banned
+        // even on relaxed — hook follow-through (web8 + stretch1 + s85-3).
         if (airlineHookFollowWindow) {
           const followBlob = assetBlob(candidate);
           if (isAirlineEmptyDarkCabin(followBlob)) return false;
           if (AIRLINE_GENERIC_RETAIL_SHELF_RE.test(followBlob)) return false;
           if (airlineVarietyPadJunkReason(followBlob)) return false;
+          if (AIRLINE_AUTO_MECHANIC_PAD_RE.test(followBlob)) return false;
+          if (isAirlineBoardingOnlyWeakOpener(followBlob)) return false;
           if (
             AIRLINE_CORPORATE_NEWS_PAD_RE.test(followBlob)
             && !/\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|passenger|pilot|flight)\b/i.test(followBlob)

@@ -31,6 +31,7 @@ import {
   healthcareArchiveTitleMismatchReason,
   housingOffTopicBrollReason,
   isGenericStockJunk,
+  isAirlineBoardingOnlyWeakOpener,
   isWebNativeMotionSource,
   keylessArchiveHumanPortraitScore,
   scoreAssetRelevance,
@@ -262,6 +263,65 @@ describe('keyless archive human portrait topical boost', () => {
         AIRLINE_TOPIC,
       ),
     ).toBe(false);
+  });
+
+  it('hard-rejects car/auto mechanic / under-vehicle garage pads (airline-s85-3)', () => {
+    expect(isGenericStockJunk('car mechanic under a vehicle repair bay', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('auto mechanic lying under the car engine bay', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('automotive garage oil change bay stock b-roll', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('mechanic under a vehicle lift repair shop', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('under the car repair garage mechanic', AIRLINE_TOPIC)).toBe(true);
+    // Aircraft hangar mechanic evidence still survives.
+    expect(
+      isGenericStockJunk(
+        'maintenance hangar mechanic tools aircraft fuselage inspection',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+    // Automotive topics keep car-mechanic B-roll.
+    expect(
+      isGenericStockJunk(
+        'car mechanic under a vehicle repair bay',
+        'Why electric car batteries are catching fire in garages',
+      ),
+    ).toBe(false);
+  });
+
+  it('flags boarding-only without face/oxygen/pressure as weak airline opener (airline-s85-3)', () => {
+    expect(isAirlineBoardingOnlyWeakOpener('passengers boarding airplane jet bridge gate')).toBe(true);
+    expect(isAirlineBoardingOnlyWeakOpener('airport boarding queue jet bridge stock')).toBe(true);
+    expect(isAirlineBoardingOnlyWeakOpener('boarding airplane passengers airport')).toBe(true);
+    // Stakes / face escape — not a weak opener.
+    expect(
+      isAirlineBoardingOnlyWeakOpener(
+        'passengers boarding airplane oxygen masks deployed cabin pressure drop',
+      ),
+    ).toBe(false);
+    expect(
+      isAirlineBoardingOnlyWeakOpener(
+        'worried passenger face close-up boarding gate jet bridge',
+      ),
+    ).toBe(false);
+    // Boarding alone is NOT harvest hard-junk (mid-body establishing OK).
+    expect(isGenericStockJunk('passengers boarding airplane jet bridge gate', AIRLINE_TOPIC)).toBe(false);
+  });
+
+  it('soft-pass hard-junk gate counts auto-mechanic pads (airline-s85-3)', () => {
+    const media = Array.from({ length: 6 }, (_, i) => ({
+      id: `v${i}`,
+      type: 'video',
+      url: `https://example.com/airline-s85-3-${i}.mp4`,
+      alt: i < 3
+        ? `car mechanic under a vehicle repair bay stock ${i}`
+        : `airplane cabin oxygen masks deployed passengers ${i}`,
+      query: 'airline cabin pressure',
+      source: 'Bing web video',
+    }));
+    const fail = airlineSoftPassMotionFailureReason(
+      { topic: AIRLINE_TOPIC, title: 'Hidden Failures', media },
+      {},
+    );
+    expect(fail).toMatch(/soft-pass-motion-airline-junk\(auto-mechanic-garage/);
   });
 
   it('keeps on-topic cabin pressurization / oxygen evidence', () => {

@@ -2306,6 +2306,117 @@ describe('buildEditTimeline: airline hook follow-through (web8 stretch)', () => 
     })).toBe('hangar-taxi');
   });
 
+  it('keeps oxygen/face stakes — never car mechanic or boarding-only openers (airline-s85-3)', () => {
+    const project = {
+      topic: AIRLINE_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 4,
+          narration: 'Why did the cabin keep failing?',
+          title: 'Intro',
+        },
+        {
+          id: 'body',
+          type: 'body',
+          duration: 20,
+          narration: 'They buried every pressure report while oxygen masks sat unused.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'stakes-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/worried-oxygen-face.mp4',
+          alt: 'worried passenger face close-up oxygen masks deployed cabin pressure drop people',
+          query: 'passenger face oxygen mask',
+          source: 'Bing web video',
+        },
+        {
+          id: 'boarding',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/boarding.mp4',
+          alt: 'passengers boarding airplane jet bridge gate queue airport',
+          query: 'boarding airplane',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'car-mechanic',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/car-mechanic.mp4',
+          alt: 'car mechanic under a vehicle repair bay garage stock',
+          query: 'mechanic',
+          source: 'Bing web video',
+        },
+        {
+          id: 'the-star',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/the-star-logo.mp4',
+          alt: 'the star logo news channel station bug branding card',
+          query: 'airline news',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'biplane',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/biplane.mp4',
+          alt: 'muddy biplane vintage propeller aircraft loop stock',
+          query: 'vintage airplane',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'oxygen',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/oxygen-masks.mp4',
+          alt: 'oxygen masks deployed airplane cabin pressure drop passengers',
+          query: 'oxygen mask cabin',
+          source: 'Bing web video',
+        },
+        {
+          id: 'bright',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/bright-cabin.mp4',
+          alt: 'bright daylight airplane cabin interior well-lit aisle passengers seated',
+          query: 'bright cabin daylight',
+          source: 'Bing web video',
+        },
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.0 });
+    const ids = timeline.map((e) => e.assetId);
+    expect(ids).not.toContain('car-mechanic');
+    expect(ids).not.toContain('the-star');
+    expect(ids).not.toContain('biplane');
+    expect(ids.some((id) => id === 'stakes-face' || id === 'oxygen' || id === 'bright')).toBe(true);
+    const introDur = 4;
+    const first8 = timeline.filter((e) => {
+      const global = e.segmentId === 'intro' ? e.startSec : introDur + e.startSec;
+      return global < 8;
+    });
+    expect(first8.map((e) => e.assetId)).not.toContain('boarding');
+    expect(first8[0].assetId).toBe('stakes-face');
+  });
+
+  it('clusters auto-mechanic / boarding-only for airline limited reuse (s85-3)', () => {
+    expect(visualSubjectCluster({
+      alt: 'car mechanic under a vehicle repair bay',
+      url: 'https://example.com/mechanic.mp4',
+    })).toBe('auto-mechanic');
+    expect(visualSubjectCluster({
+      alt: 'passengers boarding airplane jet bridge gate',
+      url: 'https://example.com/boarding.mp4',
+    })).toBe('boarding-only');
+  });
+
   it('keeps denser airline rich-pool holds after first 15s (airline-s85-2 pacing)', () => {
     const media = Array.from({ length: 16 }, (_, i) => ({
       id: `clip-${i}`,

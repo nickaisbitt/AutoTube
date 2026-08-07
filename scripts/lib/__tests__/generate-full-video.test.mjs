@@ -9,6 +9,9 @@ import {
   archiveTopicSubjectQueries,
   buildMotionPaddingQueue,
   decideStockVisionGate,
+  decideInjectRelevanceAction,
+  INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+  shouldRunHarvestRelevanceGate,
   extraArchiveClinicalAttemptsOnVimeoCircuitOpen,
   prioritizeArchiveClinicalFaceOrMriLeads,
   resolveArchiveClinicalBoostCount,
@@ -1784,6 +1787,145 @@ describe('shouldFailOpenWebVisionSkip', () => {
     expect(shouldFailOpenWebVisionSkip({ isWebClip: true, hasStrongEvidence: false })).toBe(false);
     expect(shouldFailOpenWebVisionSkip({ isWebClip: false, hasStrongEvidence: true })).toBe(false);
     expect(shouldFailOpenWebVisionSkip()).toBe(false);
+  });
+});
+
+describe('decideInjectRelevanceAction', () => {
+  const base = {
+    checked: 0,
+    budget: 48,
+    need: 8,
+    isIntro: false,
+    strongEvidence: false,
+    motionRelevancePassed: false,
+    relevanceRejected: 0,
+  };
+
+  it('runs the LLM gate within budget for unknown body clips', () => {
+    expect(decideInjectRelevanceAction(base)).toEqual({
+      action: 'check',
+      reason: 'within-budget',
+    });
+    expect(shouldRunHarvestRelevanceGate(base)).toBe(true);
+  });
+
+  it('skips LLM and admits body clips with strongEvidence', () => {
+    expect(
+      decideInjectRelevanceAction({ ...base, strongEvidence: true }),
+    ).toEqual({ action: 'admit', reason: 'strong-evidence' });
+    expect(shouldRunHarvestRelevanceGate({ ...base, strongEvidence: true })).toBe(false);
+  });
+
+  it('skips LLM and admits body clips with motionRelevancePassed', () => {
+    expect(
+      decideInjectRelevanceAction({ ...base, motionRelevancePassed: true }),
+    ).toEqual({ action: 'admit', reason: 'strong-evidence' });
+  });
+
+  it('still gates intro even with strongEvidence or motionRelevancePassed', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        isIntro: true,
+        strongEvidence: true,
+        motionRelevancePassed: true,
+      }),
+    ).toEqual({ action: 'check', reason: 'within-budget' });
+    expect(
+      shouldRunHarvestRelevanceGate({
+        ...base,
+        isIntro: true,
+        strongEvidence: true,
+        motionRelevancePassed: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('enters starveSoft admit on body after reject threshold while need remains', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+        need: 5,
+      }),
+    ).toEqual({ action: 'admit', reason: 'starve-soft' });
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD + 3,
+        need: 1,
+      }),
+    ).toEqual({ action: 'admit', reason: 'starve-soft' });
+  });
+
+  it('does not starveSoft-admit when need is already filled', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        need: 0,
+        relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+      }),
+    ).toEqual({ action: 'check', reason: 'within-budget' });
+  });
+
+  it('keeps judging intro under starveSoft (WEAK still blocked by caller)', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        isIntro: true,
+        need: 6,
+        relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+      }),
+    ).toEqual({ action: 'check', reason: 'within-budget' });
+  });
+
+  it('budget-skips without silently dropping the count path', () => {
+    expect(
+      decideInjectRelevanceAction({ ...base, checked: 48, budget: 48 }),
+    ).toEqual({ action: 'admit', reason: 'budget-exhausted' });
+    expect(shouldRunHarvestRelevanceGate({ ...base, checked: 48, budget: 48 })).toBe(false);
+  });
+
+  it('prefers strong-evidence admit over starveSoft and budget', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        strongEvidence: true,
+        checked: 99,
+        relevanceRejected: 99,
+        need: 9,
+      }),
+    ).toEqual({ action: 'admit', reason: 'strong-evidence' });
+  });
+
+  it('prefers starveSoft over budget-exhausted on body', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        checked: 48,
+        budget: 48,
+        need: 4,
+        relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+      }),
+    ).toEqual({ action: 'admit', reason: 'starve-soft' });
+  });
+
+  it('defaults starveSoft threshold to 12', () => {
+    expect(INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD).toBe(12);
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        relevanceRejected: 11,
+        need: 3,
+      }).action,
+    ).toBe('check');
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        relevanceRejected: 12,
+        need: 3,
+      }).reason,
+    ).toBe('starve-soft');
   });
 });
 

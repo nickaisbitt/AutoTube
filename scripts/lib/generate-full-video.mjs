@@ -736,6 +736,58 @@ export function shouldFailOpenWebVisionSkip({ isWebClip = false, hasStrongEviden
   return Boolean(isWebClip && hasStrongEvidence);
 }
 
+/** After this many Qwen REJECT/WEAK(intro) drops, body injects skip the LLM to avoid soft-pass starvation. */
+export const INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD = 12;
+
+/**
+ * Decide whether injectClip should call the Qwen harvest relevance gate.
+ * Gate stays ON; this only soft-admits under clear topic evidence or inject starvation.
+ *
+ * - Body + (strongEvidence | motionRelevancePassed) → admit without LLM.
+ * - Intro always prefers a real check (WEAK still blocked via shouldRejectRelevanceDecision).
+ * - need > 0 and relevanceRejected ≥ threshold → starve-soft admit on body only.
+ * - checked ≥ budget → admit with budget-exhausted (caller increments relevanceBudgetSkipped).
+ *
+ * @returns {{ action: 'check' | 'admit', reason: string }}
+ */
+export function decideInjectRelevanceAction({
+  checked = 0,
+  budget = 48,
+  need = 0,
+  isIntro = false,
+  strongEvidence = false,
+  motionRelevancePassed = false,
+  relevanceRejected = 0,
+  starveSoftThreshold = INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+} = {}) {
+  const hasTopicEvidence = Boolean(strongEvidence || motionRelevancePassed);
+  // Body with clear aviation/topic evidence already cleared keyword harvest — skip LLM.
+  // Intro still judged so WEAK/REJECT cannot land on the hook.
+  if (!isIntro && hasTopicEvidence) {
+    return { action: 'admit', reason: 'strong-evidence' };
+  }
+  const rejected = Number(relevanceRejected) || 0;
+  const threshold = Number(starveSoftThreshold);
+  const starveSoft =
+    need > 0
+    && Number.isFinite(threshold)
+    && rejected >= threshold;
+  // Soft-pass starvation: keep rejecting hard via LLM only while checking intros;
+  // remaining body slots soft-admit without spending more Qwen calls.
+  if (starveSoft && !isIntro) {
+    return { action: 'admit', reason: 'starve-soft' };
+  }
+  if (checked >= budget) {
+    return { action: 'admit', reason: 'budget-exhausted' };
+  }
+  return { action: 'check', reason: 'within-budget' };
+}
+
+/** True when decideInjectRelevanceAction chooses to call judgeHarvestRelevance. */
+export function shouldRunHarvestRelevanceGate(opts = {}) {
+  return decideInjectRelevanceAction(opts).action === 'check';
+}
+
 /** Keep proxy clips distinct by their decoded target, not the shared route path. */
 function motionUrlKey(url = '') {
   const raw = String(url || '');
@@ -4627,10 +4679,29 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // Cheap Qwen text relevance gate: keyword harvest lands near-topic but often
     // injects news logos / hangar pads / neighbor scenes. WEAK is OK for body;
     // intro and REJECT must not land. Fail-open when the model does not run.
+    // Soft-admit body under strong evidence or inject starvation so soft-pass
+    // does not die at ~7/16 while the gate stays ON for intros / unknowns.
     if (relevanceGateEnabled()) {
       const budget = relevanceGateBudget();
       const checked = report.relevanceChecked || 0;
-      if (checked < budget) {
+      const archiveClipForGate = /Archive/i.test(clip.source || '');
+      // Prior harvest evidence only — do not re-derive isCyberRelevantClip here or every
+      // airline body pool clip would skip Qwen and gut the gate.
+      const strongEvidence =
+        clip.motionRelevancePassed === true
+        || archiveClipForGate
+        || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip))
+        || (isHousingTopic(topicBlob) && hasHousingEvidence(clip));
+      const gate = decideInjectRelevanceAction({
+        checked,
+        budget,
+        need,
+        isIntro,
+        strongEvidence,
+        motionRelevancePassed: clip.motionRelevancePassed === true,
+        relevanceRejected: report.relevanceRejected || 0,
+      });
+      if (gate.action === 'check') {
         report.relevanceChecked = checked + 1;
         const apiKey = resolveOpenRouterKey();
         const verdict = await judgeHarvestRelevance({
@@ -4660,8 +4731,12 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
             report.relevanceWeakAdmitted = (report.relevanceWeakAdmitted || 0) + 1;
           }
         }
-      } else {
+      } else if (gate.reason === 'budget-exhausted') {
         report.relevanceBudgetSkipped = (report.relevanceBudgetSkipped || 0) + 1;
+      } else if (gate.reason === 'starve-soft') {
+        report.relevanceStarveSoftAdmitted = (report.relevanceStarveSoftAdmitted || 0) + 1;
+      } else if (gate.reason === 'strong-evidence') {
+        report.relevanceEvidenceSkipped = (report.relevanceEvidenceSkipped || 0) + 1;
       }
     }
     const n = (report.videoTopUp || []).length;

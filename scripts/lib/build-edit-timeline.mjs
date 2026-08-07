@@ -19,8 +19,12 @@ import {
   healthcareIntroClinicalEscape,
   isHealthcareIntroPadJunk,
   isAirlineEmptyDarkCabin,
+  airlineVarietyPadJunkReason,
   AIRLINE_CORPORATE_NEWS_PAD_RE,
   AIRLINE_GENERIC_RETAIL_SHELF_RE,
+  AIRLINE_FABRIC_SWATCH_PAD_RE,
+  AIRLINE_GOLF_PAD_RE,
+  AIRLINE_ANIMATED_COURSE_PAD_RE,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
@@ -29,9 +33,23 @@ import { stillQualityTimelinePenalty } from './sanitize-media-quality.mjs';
 /** First ~8s after open: face → oxygen/pressure/bright cabin, never empty/dark. */
 const AIRLINE_HOOK_FOLLOW_SEC = 8;
 
+/**
+ * High-stakes evidence for the first 3–8s (airline-stretch1): oxygen / pressure /
+ * worried-shocked passenger face — not bare FA uniform or educational cabin stock.
+ */
+const AIRLINE_HOOK_STAKES_RE =
+  /\b(oxygen\s*masks?|deployed\s+masks?|cabin\s+pressure|pressuri[sz]|decompress|worried|shocked|passenger\s+face|bright\s+(?:cabin|daylight)|daylight\s+cabin|well[-\s]?lit\s+cabin)\b/i;
+
 /** Evidence that earns early-window preference on cabin-pressure stories. */
 const AIRLINE_HOOK_FOLLOW_EVIDENCE_RE =
   /\b(oxygen\s*masks?|deployed\s+masks?|cabin\s+pressure|pressuri[sz]|decompress|worried|shocked|passenger\s+face|flight\s+attendant|cabin\s+crew|bright\s+(?:cabin|daylight)|daylight\s+cabin|well[-\s]?lit\s+cabin|cockpit|flight\s+deck)\b/i;
+
+/** Rich/medium airline pools: denser body holds than the generic 1.5s rich cap. */
+const MAX_BODY_HOLD_AIRLINE_DENSE_SEC = 1.15;
+
+/** Airline pattern-interrupt window (first minute), denser than the generic 15s gate. */
+const AIRLINE_PATTERN_INTERRUPT_SEC = 60;
+
 /**
  * @param {object} project
  * @param {{ cutIntervalSec?: number, reason?: string }} [options]
@@ -74,7 +92,15 @@ function tokens(text) {
     .filter((w) => w.length > 3);
 }
 
-const AIRLINE_LIMITED_CLUSTERS = new Set(['paperwork', 'mail', 'document', 'financial']);
+const AIRLINE_LIMITED_CLUSTERS = new Set([
+  'paperwork',
+  'mail',
+  'document',
+  'financial',
+  'fabric-swatch',
+  'golf',
+  'animated-course',
+]);
 
 /** Subjects that must never carry a story, whatever the reuse pressure. */
 const NEVER_USE_SUBJECT_RE = /\b(puppet|beetle|insect|bug macro|macro bug|spider macro|larva|caterpillar|cartoon|animation still|minecraft)\b/;
@@ -116,6 +142,9 @@ function isSurveillanceVisual(asset) {
 /** Coarse visual cluster so cold body cuts don't loop the same subject. */
 export function visualSubjectCluster(asset) {
   const blob = assetBlob(asset);
+  if (AIRLINE_FABRIC_SWATCH_PAD_RE.test(blob)) return 'fabric-swatch';
+  if (AIRLINE_GOLF_PAD_RE.test(blob)) return 'golf';
+  if (AIRLINE_ANIMATED_COURSE_PAD_RE.test(blob)) return 'animated-course';
   if (/\b(u\.?s\.?\s*mail|usps|postal|post\s*box|mailbox|mail\s*box|letterbox|envelopes?|mailroom|mail\s+truck)\b/.test(blob)) {
     return 'mail';
   }
@@ -265,6 +294,7 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
     /\b(mailbox|mail box|u\.?s\.?\s*mail|usps|postal|envelopes?|paperwork|documents?|financial|bank statement|invoice|receipt|tax form)\b/.test(blob)
     || isAirlineEmptyDarkCabin(blob)
     || AIRLINE_GENERIC_RETAIL_SHELF_RE.test(blob)
+    || Boolean(airlineVarietyPadJunkReason(blob))
     || (
       AIRLINE_CORPORATE_NEWS_PAD_RE.test(blob)
       && !/\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|passenger|pilot|flight)\b/i.test(blob)
@@ -514,11 +544,15 @@ export function introFaceTier(asset, { airline = false, housing = false, healthc
 function isAirlineIntroLeadVisual(asset) {
   if (isRejectedIntroLeadVisual(asset, { airline: true })) return false;
   const blob = assetBlob(asset);
-  const hasCabin = /\b(cabin|airplane interior|aircraft interior|plane interior|passenger seats?|aisle|overhead bins?|flight attendant|cabin crew)\b/.test(blob);
-  const hasCockpit = /\b(cockpit|flight deck)\b/.test(blob);
+  // Bare educational "cabin pressurization" titles are not enough for the hook —
+  // require face, oxygen/pressure stakes, cockpit, or bright cabin with life.
   const hasPassengerFace = /\b(passenger|pilot|attendant|crew|traveler|person|people|woman|man|family)\b/.test(blob)
     && /\b(face|faces|worried|shocked|reaction|portrait|close.?up|eyes)\b/.test(blob);
-  return hasCockpit || hasCabin || hasPassengerFace || isBrightCabinInterior(asset);
+  const hasCockpit = /\b(cockpit|flight deck)\b/.test(blob);
+  const hasStakes = AIRLINE_HOOK_STAKES_RE.test(blob);
+  const brightWithLife = isBrightCabinInterior(asset)
+    && /\b(passenger|passengers|seated|flight\s+attendant|cabin\s+crew|oxygen|worried|shocked|face)\b/i.test(blob);
+  return hasCockpit || hasPassengerFace || hasStakes || brightWithLife;
 }
 
 function isIntroLeadVisual(asset, { airline = false, cameraStory = false, housing = false, healthcare = false } = {}) {
@@ -683,7 +717,13 @@ export function buildEditTimeline(project, options = {}) {
   // 6; airline + housing + healthcare are stricter and lengthen cuts rather than
   // looping. healthcare-web53: only 12 assets → each clip appeared 6× (variety
   // 5/10). Cap at 3 to force hold extension before reuse, matching housing.
-  const HARD_MAX_REUSE_CEIL = topicIsAirline && coldEval && uniqueVideos.length >= 20
+  // airline-stretch1: short rich pools (≤75s, ≥12 videos) tighten to 2 so
+  // fabric/airport loops cannot dominate; longer airline edits keep ceil=3 so
+  // 1.5s rich holds still cover (airline-web 26×120s contract).
+  const HARD_MAX_REUSE_CEIL = topicIsAirline && (
+    (coldEval && uniqueVideos.length >= 20)
+    || (isShortVideo && uniqueVideos.length >= 12)
+  )
     ? 2
     : (topicIsAirline || topicIsHousing || topicIsHealthcare)
       ? 3
@@ -703,10 +743,11 @@ export function buildEditTimeline(project, options = {}) {
       hardMaxReuse = Math.min(4, hardMaxReuse);
     }
     if (clipsNeeded > uniqueVideos.length * effectiveMaxReuse) {
-      // Housing with enough URLs: lengthen holds instead of inflating reuse —
-      // repeating one crash/landscape URL tanks variety. Generic topics still
-      // raise effectiveMaxReuse toward hardMax so thin pools stay covered.
-      const honorMaxReuse = topicIsHousing
+      // Housing/airline with enough URLs: lengthen holds instead of inflating
+      // reuse — repeating one crash/landscape/airport URL tanks variety.
+      // Generic topics still raise effectiveMaxReuse toward hardMax so thin
+      // pools stay covered.
+      const honorMaxReuse = (topicIsHousing || topicIsAirline)
         && uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS;
       if (!honorMaxReuse) {
         effectiveMaxReuse = Math.min(
@@ -739,14 +780,19 @@ export function buildEditTimeline(project, options = {}) {
     // but never so tight that hardMaxReuse would be exceeded for coverage.
     if (isRichPool) {
       const richFloor = totalDur > 0 && maxSlots > 0 ? totalDur / maxSlots : 0;
-      if (richFloor > MAX_BODY_HOLD_RICH_POOL_SEC) {
+      // airline-stretch1: denser than 1.5s when hardMax still covers the duration.
+      const richCap = (
+        topicIsAirline
+        && richFloor <= MAX_BODY_HOLD_AIRLINE_DENSE_SEC
+      ) ? MAX_BODY_HOLD_AIRLINE_DENSE_SEC : MAX_BODY_HOLD_RICH_POOL_SEC;
+      if (richFloor > richCap) {
         // Need longer holds to stay under hardMax — prefer that over looping.
         effectiveCut = Math.min(
           MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC,
           Math.max(effectiveCut, richFloor),
         );
       } else {
-        effectiveCut = Math.min(effectiveCut, MAX_BODY_HOLD_RICH_POOL_SEC);
+        effectiveCut = Math.min(effectiveCut, richCap);
       }
     }
   } else {
@@ -876,6 +922,11 @@ export function buildEditTimeline(project, options = {}) {
       // Empty/dark cabin interiors kill hook follow-through (airline-web8).
       if (topicIsAirline && isAirlineEmptyDarkCabin(blob)) {
         return -16;
+      }
+      // Fabric / golf / animated-course / vintage promo / FA shorts — hard demote
+      // even if harvest somehow kept them (airline-stretch1 variety).
+      if (topicIsAirline && airlineVarietyPadJunkReason(blob)) {
+        return -18;
       }
       // Corporate / news-desk / retail shelf pads — soft demote on airline body.
       if (
@@ -1009,9 +1060,12 @@ export function buildEditTimeline(project, options = {}) {
         }
         // Airline first-cuts: prefer face / oxygen / pressure / bright cabin
         // evidence so the hook does not cut to empty/dark stock (web8).
+        // Extra stakes boost over bare FA/educational cabin (airline-stretch1).
         if (topicIsAirline && (isIntro || isBrightCabinInterior(a) || AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob))) {
           if (hasReadableFaceVisual(a) && AIRLINE_TOPICAL_VISUAL_RE.test(blob)) score += 5;
           if (AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob)) score += 4;
+          if (AIRLINE_HOOK_STAKES_RE.test(blob)) score += 5;
+          if (hasReadableFaceVisual(a) && AIRLINE_HOOK_STAKES_RE.test(blob)) score += 3;
           if (isBrightCabinInterior(a)) score += 3;
           const luma = Number(a?.lumaStdDev) || 0;
           const lap = Number(a?.laplacianVariance) || 0;
@@ -1267,9 +1321,11 @@ export function buildEditTimeline(project, options = {}) {
     // inside the first 15s. Non-housing rich pools (≥12 URLs) keep ≤1.5s cuts.
     // Rich housing stretch is ≈ max(1.5, 15/n) which stays ≤1.5 when n≥12, so
     // housing-web153 snappy pacing is preserved for rich pools.
+    // airline-stretch1: do NOT stretch airline early body — keep dense cuts.
     const earlyWindowStretch = (
       applyFirstWindowStrict
       && (!isRichPool || topicIsHousing)
+      && !topicIsAirline
       && !isIntro
       && !isOutro
       && uniqueUrlCount >= 4
@@ -1343,14 +1399,17 @@ export function buildEditTimeline(project, options = {}) {
       };
       // First 15s pattern interrupt: after two same non-human clusters, force a
       // subject change when a different-cluster alternative exists.
+      // airline-stretch1: denser interrupts across the first minute (every ~5–8s
+      // of same-subject pads) — trip after a single same non-human cluster.
       const continuesOpeningClusterPattern = (candidate) => {
-        if (globalStartSec >= FIRST_WINDOW_SEC) return false;
-        if (timelinePickClusterHistory.length < 2) return false;
+        const interruptSec = topicIsAirline ? AIRLINE_PATTERN_INTERRUPT_SEC : FIRST_WINDOW_SEC;
+        if (globalStartSec >= interruptSec) return false;
+        const needRepeats = topicIsAirline ? 1 : 2;
+        if (timelinePickClusterHistory.length < needRepeats) return false;
         const cluster = visualSubjectCluster(candidate);
         if (cluster === 'other' || isHumanCluster(cluster)) return false;
-        const back1 = timelinePickClusterHistory[timelinePickClusterHistory.length - 1];
-        const back2 = timelinePickClusterHistory[timelinePickClusterHistory.length - 2];
-        if (cluster !== back1 || cluster !== back2) return false;
+        const recent = timelinePickClusterHistory.slice(-needRepeats);
+        if (!recent.every((c) => c === cluster)) return false;
         return uniqueAssetsByUrl([...ordered, ...borrowPool]).some((c) => {
           const cCluster = visualSubjectCluster(c);
           if (cCluster === cluster || cCluster === 'other') return false;
@@ -1408,11 +1467,13 @@ export function buildEditTimeline(project, options = {}) {
           return false;
         }
         // Airline first ~8s: empty/dark cabin + retail shelf + faceless corporate
-        // pads stay banned even on relaxed — hook follow-through (web8).
+        // + fabric/golf/animated pads stay banned even on relaxed — hook
+        // follow-through (web8 + stretch1).
         if (airlineHookFollowWindow) {
           const followBlob = assetBlob(candidate);
           if (isAirlineEmptyDarkCabin(followBlob)) return false;
           if (AIRLINE_GENERIC_RETAIL_SHELF_RE.test(followBlob)) return false;
+          if (airlineVarietyPadJunkReason(followBlob)) return false;
           if (
             AIRLINE_CORPORATE_NEWS_PAD_RE.test(followBlob)
             && !/\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|passenger|pilot|flight)\b/i.test(followBlob)
@@ -1540,13 +1601,23 @@ export function buildEditTimeline(project, options = {}) {
             }
           }
           if (topicIsAirline && airlineHookFollowWindow) {
-            // Tier A: readable face + topical aviation.
+            // Tier A: readable face + topical aviation + stakes (oxygen/pressure).
+            for (let j = 0; j < rankedPool.length; j++) {
+              const candidate = rankedPool[(ai + j) % rankedPool.length];
+              if (!(
+                hasReadableFaceVisual(candidate)
+                && AIRLINE_TOPICAL_VISUAL_RE.test(assetBlob(candidate))
+                && AIRLINE_HOOK_STAKES_RE.test(assetBlob(candidate))
+              )) continue;
+              if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
+            }
+            // Tier B: readable face + topical aviation.
             for (let j = 0; j < rankedPool.length; j++) {
               const candidate = rankedPool[(ai + j) % rankedPool.length];
               if (!(hasReadableFaceVisual(candidate) && AIRLINE_TOPICAL_VISUAL_RE.test(assetBlob(candidate)))) continue;
               if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
             }
-            // Tier B: oxygen / pressure / bright cabin evidence.
+            // Tier C: oxygen / pressure / bright cabin evidence.
             for (let j = 0; j < rankedPool.length; j++) {
               const candidate = rankedPool[(ai + j) % rankedPool.length];
               if (

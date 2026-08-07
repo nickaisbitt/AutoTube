@@ -605,6 +605,43 @@ export const AIRLINE_CORPORATE_NEWS_PAD_RE =
   /\b(?:news\s+(?:desk|anchor|studio|package|segment)|anchor\s+desk|talking\s*heads?\s+(?:studio|news|desk|interview)|studio\s+interview\s+(?:desk|set)|corporate\s+(?:handshake|boardroom|office|skyline|b-?roll|stock)|business\s+(?:handshake|meeting|district)|glass\s+building\s+skyline|open[\s-]?plan\s+office|coworking(?:\s+space)?|executive\s+desk|press\s+conference(?:\s+podium)?|generic\s+corporate|stock\s+footage\s+loop)\b/i;
 
 /**
+ * Cabin interior-design / fabric-swatch marketing (airline-stretch1: repeated
+ * woman with fabric swatches). Not cabin-pressure evidence.
+ */
+export const AIRLINE_FABRIC_SWATCH_PAD_RE =
+  /\b(?:fabric\s*swatch(?:es)?|textile\s*swatch(?:es)?|colo(?:u)?r\s*swatch(?:es)?|material\s*(?:board|swatch(?:es)?)|upholstery\s*(?:sample|swatch|fabric)|fabric\s*(?:samples?|boards?|palette)|(?:woman|man|person|designer).{0,48}(?:fabric|textile|upholstery)\s*(?:swatch|sample|board)|(?:fabric|textile|upholstery)\s*(?:swatch|sample).{0,48}(?:woman|man|person|designer)|interior\s+design(?:ed)?\s+(?:cabin|aircraft|airplane|airline)|(?:cabin|aircraft|airplane).{0,40}interior\s+design|scandinavian\s+design.{0,48}(?:cabin|aircraft|sas)|(?:cabin|aircraft).{0,40}inspired\s+by\s+(?:scandinavian|nordic)\s+design|new\s+aircraft\s+interior\s+design)\b/i;
+
+/** Off-topic golf B-roll that survives keyword scrape noise on airline topics. */
+export const AIRLINE_GOLF_PAD_RE =
+  /\b(?:golf\s*(?:course|green|club|ball|tee|tournament)|playing\s+golf|golfers?|driving\s+range|putting\s+green|minigolf|mini[\s-]?golf)\b/i;
+
+/**
+ * Educational / cartoon aviation animation (airline-stretch1: animated
+ * "golf course" landscape from Sentinel-style radar films). Escape when
+ * oxygen / cabin-pressure / passenger stakes are also present.
+ */
+export const AIRLINE_ANIMATED_COURSE_PAD_RE =
+  /\b(?:(?:animated|animation|cartoon|illustrated)\s+(?:golf\s*)?(?:course|landscape|hills?|countryside|meadow|terrain|green)|(?:golf\s*)?course\s+animation|educational\s+animation|2d\s+animation\s+(?:landscape|aviation|radar|course)|flat\s+animation\s+(?:landscape|course)|animation\s+(?:radar|aviation|navigation)|sentinel\s+in\s+the\s+sky|cartoon\s+(?:landscape|aviation|radar|hills?))\b/i;
+
+/**
+ * Vintage transportation promo films that read as TV-documentary filler on
+ * modern cabin-pressure stories (airline-stretch1: 1930 American Airways).
+ */
+export const AIRLINE_VINTAGE_PROMO_FILM_RE =
+  /\b(?:(?:19[2-5]\d|silent).{0,48}(?:promo(?:tional)?\s+film|promotional\s+film)|(?:promo(?:tional)?\s+film|promotional\s+film).{0,48}(?:19[2-5]\d|silent|american\s+airways)|story\s+of\s+modern\s+airline\s+transportation|movement\s+of\s+man[,\s]+mail|airline\s+transportation\s+1930)\b/i;
+
+/**
+ * Viral flight-attendant safety-instruction shorts — generic documentary hook
+ * bait (airline-stretch1: shaky low-res uniform man), not oxygen/pressure stakes.
+ */
+export const AIRLINE_FA_SAFETY_SHORTS_RE =
+  /\b(?:flight\s+attendants?.{0,64}(?:safety\s+instructions?|shorts|tiktok|new\s+level)|(?:safety\s+instructions?).{0,48}(?:new\s+level|shorts|tiktok|flight\s+attendant)|takes\s+safety\s+instructions)\b/i;
+
+/** Stakes that escape animated-course rejects (real cabin-pressure evidence). */
+export const AIRLINE_STAKES_ESCAPE_RE =
+  /\b(?:oxygen\s*masks?|deployed\s+masks?|cabin\s+pressure|pressuri[sz]|decompress|worried\s+(?:passenger|face)|shocked\s+(?:passenger|face)|passenger\s+face)\b/i;
+
+/**
  * True when haystack is an empty/dark/muddy cabin without life/bright escape.
  * Shared by harvest reject + edit-timeline intro/early-window gates.
  *
@@ -615,6 +652,30 @@ export function isAirlineEmptyDarkCabin(haystack) {
   const h = String(haystack || '');
   if (!AIRLINE_EMPTY_DARK_CABIN_RE.test(h)) return false;
   return !AIRLINE_CABIN_LIFE_ESCAPE_RE.test(h);
+}
+
+/**
+ * Variety pads that hard-fail cabin-pressure harvest + early timeline windows
+ * (airline-stretch1: fabric swatches / golf / animated course).
+ *
+ * @param {string} haystack
+ * @returns {string|null} reason or null
+ */
+export function airlineVarietyPadJunkReason(haystack) {
+  const h = String(haystack || '');
+  if (!h.trim()) return null;
+  if (AIRLINE_FABRIC_SWATCH_PAD_RE.test(h)) return 'fabric-swatch/interior-design pad for airline';
+  if (AIRLINE_GOLF_PAD_RE.test(h)) return 'golf-course pad for airline';
+  if (AIRLINE_ANIMATED_COURSE_PAD_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
+    return 'animated-course/educational-animation pad for airline';
+  }
+  if (AIRLINE_VINTAGE_PROMO_FILM_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
+    return 'vintage promo-film pad for airline';
+  }
+  if (AIRLINE_FA_SAFETY_SHORTS_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
+    return 'flight-attendant safety-shorts pad for airline';
+  }
+  return null;
 }
 
 /**
@@ -669,6 +730,10 @@ export function airlineHarvestJunkReason(haystack, contextText = '') {
   ) {
     return 'corporate/news-desk pad for airline';
   }
+  // airline-stretch1: fabric swatches / golf / animated course / vintage promo /
+  // FA safety shorts — hard-reject before timeline assembly.
+  const varietyPad = airlineVarietyPadJunkReason(h);
+  if (varietyPad) return varietyPad;
   return null;
 }
 

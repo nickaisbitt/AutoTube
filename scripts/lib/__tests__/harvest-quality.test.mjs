@@ -148,6 +148,71 @@ describe('keyless archive human portrait topical boost', () => {
     ).toBe(true);
   });
 
+  it('hard-rejects fabric-swatch / golf / animated-course pads (airline-stretch1)', () => {
+    expect(
+      isGenericStockJunk(
+        'the new aircraft interior design in sas s new cabin is inspired by scandinavian design sas',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'woman with fabric swatches textile sample board aircraft cabin interior design',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(isGenericStockJunk('aerial golf course green driving range stock', AIRLINE_TOPIC)).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'sentinel in the sky animation radar aviation navigation modern radar for passenger aircraft',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'animated landscape hills countryside educational animation aviation',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+  });
+
+  it('hard-rejects vintage promo films and FA safety shorts without stakes (airline-stretch1)', () => {
+    expect(
+      isGenericStockJunk(
+        'the story of modern airline transportation 1930 american airways promo film airlines',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'flight attendant takes safety instructions to a new level shorts',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    // Oxygen / pressure stakes escape the FA-shorts reject.
+    expect(
+      isGenericStockJunk(
+        'flight attendant oxygen masks deployed cabin pressure drop worried passengers',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps on-topic cabin pressurization / oxygen evidence', () => {
+    expect(
+      isGenericStockJunk(
+        'physiology of flight ups and downs of cabin pressurization oxygen masks',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+    expect(
+      isGenericStockJunk(
+        'bright daylight airplane cabin passengers seated oxygen masks deployed',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
   it('keeps aviation archive evidence ahead of portrait-only archive clips on airline topics', () => {
     const aviationScore = scoreAssetRelevance(aviationArchive, segment, AIRLINE_TOPIC);
     const portraitScore = keylessArchiveHumanPortraitScore(portraitArchive, segment, AIRLINE_TOPIC);

@@ -2030,4 +2030,158 @@ describe('buildEditTimeline: airline hook follow-through (web8 stretch)', () => 
       type: 'video',
     }, { airline: true })).toBe(2);
   });
+
+  it('keeps oxygen/face stakes in first ~8s — never fabric, golf, or animated course', () => {
+    const project = {
+      topic: AIRLINE_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 4,
+          narration: 'Why did the cabin keep failing?',
+          title: 'Intro',
+        },
+        {
+          id: 'body',
+          type: 'body',
+          duration: 12,
+          narration: 'They buried every pressure report while oxygen masks sat unused.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'stakes-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/worried-oxygen-face.mp4',
+          alt: 'worried passenger face close-up oxygen masks deployed cabin pressure drop people',
+          query: 'passenger face oxygen mask',
+          source: 'Bing web video',
+        },
+        {
+          id: 'fabric',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/fabric-swatch.mp4',
+          alt: 'the new aircraft interior design in sas cabin inspired by scandinavian design fabric swatches',
+          query: 'aircraft cabin interior',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'golf',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/golf-course.mp4',
+          alt: 'aerial golf course green driving range landscape',
+          query: 'stock footage',
+          source: 'Bing web video',
+        },
+        {
+          id: 'animated',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/sentinel-animation.mp4',
+          alt: 'sentinel in the sky animation radar aviation navigation landscape hills',
+          query: 'aviation safety film',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'oxygen',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/oxygen-masks.mp4',
+          alt: 'oxygen masks deployed airplane cabin pressure drop passengers',
+          query: 'oxygen mask cabin',
+          source: 'Vimeo',
+        },
+        {
+          id: 'fa-shorts',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/fa-shorts.mp4',
+          alt: 'flight attendant takes safety instructions to a new level shorts',
+          query: 'flight attendant demonstration',
+          source: 'Archive.org live',
+        },
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const introDur = 4;
+    const first8 = timeline.filter((e) => {
+      const global = e.segmentId === 'intro' ? e.startSec : introDur + e.startSec;
+      return global < 8;
+    });
+    const ids = first8.map((e) => e.assetId);
+    expect(ids).not.toContain('fabric');
+    expect(ids).not.toContain('golf');
+    expect(ids).not.toContain('animated');
+    expect(ids).not.toContain('fa-shorts');
+    expect(ids.some((id) => id === 'stakes-face' || id === 'oxygen')).toBe(true);
+    expect(first8[0].assetId).toBe('stakes-face');
+  });
+
+  it('caps airline short rich-pool reuse at ≤2 and prefers denser holds when coverage allows', () => {
+    const media = Array.from({ length: 14 }, (_, i) => ({
+      id: `clip-${i}`,
+      segmentId: 'body',
+      type: 'video',
+      url: `https://example.com/airline-clip-${i}.mp4`,
+      alt: `airline cabin aircraft passenger clip ${i} oxygen pressure`,
+      query: 'airline cabin pressure',
+      source: 'Bing web video',
+    }));
+    media[0] = {
+      ...media[0],
+      id: 'hook-face',
+      segmentId: 'intro',
+      alt: 'worried passenger face close-up portrait airplane cabin people oxygen masks',
+      query: 'passenger face oxygen',
+    };
+    const project = {
+      topic: AIRLINE_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 3,
+          narration: 'Cabin pressure failed again.',
+          title: 'Intro',
+        },
+        {
+          id: 'body',
+          type: 'body',
+          duration: 24,
+          narration: 'Regional airlines hid cabin-pressure failures while oxygen masks sat unused in bright cabins.',
+          title: 'Body',
+        },
+      ],
+      media,
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const counts = reuseCounts(timeline);
+    const maxFromMap = Math.max(0, ...counts.values());
+    expect(maxFromMap).toBeLessThanOrEqual(2);
+    const bodyEntries = timeline.filter((e) => e.segmentId === 'body');
+    const holds = bodyEntries.map((e) => e.endSec - e.startSec);
+    const avgHold = holds.reduce((a, b) => a + b, 0) / Math.max(1, holds.length);
+    // Dense airline rich cap (1.15) when hardMax covers; never slower than 1.5.
+    expect(avgHold).toBeLessThanOrEqual(1.5);
+  });
+
+  it('clusters fabric / golf / animated pads for airline limited reuse', () => {
+    expect(visualSubjectCluster({
+      alt: 'woman fabric swatches textile sample aircraft interior design',
+      url: 'https://example.com/fabric.mp4',
+    })).toBe('fabric-swatch');
+    expect(visualSubjectCluster({
+      alt: 'golf course green aerial stock',
+      url: 'https://example.com/golf.mp4',
+    })).toBe('golf');
+    expect(visualSubjectCluster({
+      alt: 'sentinel in the sky animation radar aviation navigation',
+      url: 'https://example.com/anim.mp4',
+    })).toBe('animated-course');
+  });
 });

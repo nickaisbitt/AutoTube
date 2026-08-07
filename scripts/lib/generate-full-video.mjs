@@ -69,6 +69,12 @@ import {
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
 import {
+  judgeHarvestRelevance,
+  relevanceGateBudget,
+  relevanceGateEnabled,
+  shouldRejectRelevanceDecision,
+} from './harvest-relevance-gate.mjs';
+import {
   isAirlineTopic,
   isBankScamTopic,
   isHealthcareCyberTopic,
@@ -4608,6 +4614,46 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Proxy clips are re-encoded on demand at render; trust them like the harvest
       // keep-path does instead of forcing a full transcode just to answer a probe.
       report.injectProxyTrusted = (report.injectProxyTrusted || 0) + 1;
+    }
+    // Cheap Qwen text relevance gate: keyword harvest lands near-topic but often
+    // injects news logos / hangar pads / neighbor scenes. WEAK is OK for body;
+    // intro and REJECT must not land. Fail-open when the model does not run.
+    if (relevanceGateEnabled()) {
+      const budget = relevanceGateBudget();
+      const checked = report.relevanceChecked || 0;
+      if (checked < budget) {
+        report.relevanceChecked = checked + 1;
+        const apiKey = resolveOpenRouterKey();
+        const verdict = await judgeHarvestRelevance({
+          apiKey,
+          topic: topicBlob,
+          segmentTitle: seg.title || '',
+          segmentType: isIntro ? 'intro' : (seg.type || 'body'),
+          clipTitle: clip.title || '',
+          clipAlt: clip.alt || '',
+          query: clip.query || '',
+          source: clip.source || '',
+          thumbnailUrl: clip.thumbnailUrl || clip.image || '',
+        });
+        if (verdict.ran === false) {
+          report.relevanceUnverified = (report.relevanceUnverified || 0) + 1;
+        } else if (shouldRejectRelevanceDecision(verdict.decision, { isIntro })) {
+          report.relevanceRejected = (report.relevanceRejected || 0) + 1;
+          report.videoTopUpFailed = report.videoTopUpFailed || [];
+          report.videoTopUpFailed.push({
+            url: clip.url,
+            reason: `relevance-${String(verdict.decision || 'REJECT').toLowerCase()}:${verdict.reason || ''}`,
+          });
+          return false;
+        } else {
+          report.relevanceKept = (report.relevanceKept || 0) + 1;
+          if (verdict.decision === 'WEAK') {
+            report.relevanceWeakAdmitted = (report.relevanceWeakAdmitted || 0) + 1;
+          }
+        }
+      } else {
+        report.relevanceBudgetSkipped = (report.relevanceBudgetSkipped || 0) + 1;
+      }
     }
     const n = (report.videoTopUp || []).length;
     const airline = isAirlineTopic(topicBlob);

@@ -632,6 +632,34 @@ export const AIRLINE_NEWS_PACKAGE_WRAPPER_RE =
   /\b(?:ntdtv|ntd\s*tv|for\s+more\s+news\s+videos|visit\s+http[^\s]*ntd|news\s+videos?\s+visit|english\s+ntdtv)\b/i;
 
 /**
+ * English news chyron / lower-third / breaking-news graphic / station-logo bumper /
+ * title-card wrappers that burn LLM relevance budget before inject. Hard-junk when
+ * there is no cabin / cockpit / oxygen evidence on the same clip (mere "news" in a
+ * real cabin title must not trip this).
+ */
+export const NEWS_WRAPPER_PAD_RE =
+  /\b(?:(?:english\s+)?(?:news\s+)?chyrons?|lower[\s-]?thirds?|breaking\s+news(?:\s+(?:graphic|banner|overlay|cards?|package|title\s*cards?))?|(?:station|channel|network|tv)\s+logo(?:\s+(?:bumper|cards?|bug|pad))?|logo\s+bumpers?|news\s+(?:wrappers?|bumpers?|graphics?|banners?|overlays?|packages?|title\s*cards?)|title\s*cards?\s+(?:only|news|graphic|bumper|overlay|pad)|(?:news|channel|station)\s+(?:title\s*cards?|bumpers?))\b/i;
+
+/** Cabin / cockpit / oxygen stakes that keep a news-titled clip (not a wrapper pad). */
+export const NEWS_WRAPPER_CABIN_ESCAPE_RE =
+  /\b(?:cabin|cockpits?|flight\s+decks?|oxygen\s*masks?)\b/i;
+
+/**
+ * True when haystack is an English news chyron / lower-third / breaking-news /
+ * station-logo / title-card wrapper without cabin/cockpit/oxygen evidence.
+ *
+ * @param {string} haystack
+ * @returns {string|null} hard-junk reason or null
+ */
+export function newsWrapperPadReason(haystack) {
+  const h = String(haystack || '');
+  if (!h.trim()) return null;
+  if (!NEWS_WRAPPER_PAD_RE.test(h)) return null;
+  if (NEWS_WRAPPER_CABIN_ESCAPE_RE.test(h)) return null;
+  return 'news chyron/title-card wrapper pad';
+}
+
+/**
  * Sterile hangar / taxi establishing without cabin-pressure stakes
  * (airline-s85-2: static hangar + planes taxiing after the hook).
  * Harvest hard-rejects empty/timelapse/sterile pads; timeline demotes the rest.
@@ -843,6 +871,10 @@ export function airlineVarietyPadJunkReason(haystack) {
   if (AIRLINE_NEWS_CHANNEL_LOGO_RE.test(h)) {
     return 'news-channel logo/station-bug branding for airline';
   }
+  // English chyron / lower-third / breaking-news / title-card wrappers — kill
+  // before LLM gate unless cabin/cockpit/oxygen evidence is also present.
+  const newsWrapper = newsWrapperPadReason(h);
+  if (newsWrapper) return newsWrapper;
   // News-package wrappers without stakes still read as TV pads.
   if (AIRLINE_NEWS_PACKAGE_WRAPPER_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
     return 'news-package wrapper pad for airline';
@@ -3013,6 +3045,12 @@ const AIRLINE_HARD_REJECT_PATTERNS = [
     pattern: AIRLINE_CORPORATE_NEWS_PAD_RE,
   },
   {
+    // English chyron / lower-third / breaking-news / title-card wrappers —
+    // burn LLM budget; cabin/cockpit/oxygen escape applied in airlineHardRejectReason.
+    reason: 'news-chyron-wrapper',
+    pattern: NEWS_WRAPPER_PAD_RE,
+  },
+  {
     // airline-s85-3: car mechanic under a vehicle shattered credibility.
     reason: 'auto-mechanic-garage',
     pattern: AIRLINE_AUTO_MECHANIC_PAD_RE,
@@ -3059,6 +3097,8 @@ function airlineHardRejectReason(asset = {}, topicBlob = '') {
     if (reason === 'empty-dark-cabin' && !isAirlineEmptyDarkCabin(blob)) continue;
     // Corporate/news desk: aviation evidence on the same clip escapes.
     if (reason === 'corporate-news-desk' && AIRLINE_AVIATION_EVIDENCE_RE.test(blob)) continue;
+    // News chyron/title-card wrappers: cabin/cockpit/oxygen evidence escapes.
+    if (reason === 'news-chyron-wrapper' && NEWS_WRAPPER_CABIN_ESCAPE_RE.test(blob)) continue;
     return reason;
   }
   return null;

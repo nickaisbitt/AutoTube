@@ -36,6 +36,7 @@ import {
   isAirlineTrainingSlidePad,
   isAirlineFireExtinguisherFiller,
   airlineVarietyPadJunkReason,
+  newsWrapperPadReason,
   unreadableOverlayReason,
   genericStockJunkReason,
   isWebNativeMotionSource,
@@ -223,6 +224,37 @@ describe('keyless archive human portrait topical boost', () => {
     expect(
       isGenericStockJunk(
         'cabin depressurization oxygen masks deployed for more news videos visit ntdtv',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
+  it('hard-rejects English news chyron / lower-third / title-card wrappers without cabin evidence', () => {
+    // Chyron-only → junk (regex before LLM gate).
+    expect(newsWrapperPadReason('english news chyron lower-third graphic')).toMatch(
+      /news chyron|title-card wrapper/i,
+    );
+    expect(isGenericStockJunk('english news chyron lower-third graphic', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('breaking news graphic station logo bumper', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('CNN breaking news lower third title card', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('station logo bumper title card only', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('breaking news title card', AIRLINE_TOPIC)).toBe(true);
+    expect(
+      airlineVarietyPadJunkReason('news wrapper bumper lower-third graphic'),
+    ).toMatch(/news chyron|title-card wrapper/i);
+
+    // Cabin / oxygen / cockpit evidence escapes THIS reason (real incident footage
+    // that merely mentions news must not be hard-rejected via the wrapper matcher).
+    expect(newsWrapperPadReason('CNN passengers oxygen masks cabin')).toBeNull();
+    expect(
+      newsWrapperPadReason('breaking news passengers oxygen masks cabin cockpit'),
+    ).toBeNull();
+    expect(newsWrapperPadReason('news chyron cabin oxygen masks deployed')).toBeNull();
+    expect(isGenericStockJunk('CNN passengers oxygen masks cabin', AIRLINE_TOPIC)).toBe(false);
+    // Mere "news" in a cabin/oxygen title is not wrapper junk.
+    expect(
+      isGenericStockJunk(
+        'CNN news report passengers oxygen masks cabin pressure drop',
         AIRLINE_TOPIC,
       ),
     ).toBe(false);

@@ -1,6 +1,6 @@
 # AutoTube — Definition of Done (single source)
 
-Last updated: **2026-08-06T03:28Z** — tip `7d6affc`. **§B 3-topic pack CLOSED.** Airline-web8 raw **7.8**/YES; housing-web175 raw **7.2**/YES; healthcare-web215 raw **7.4**/YES. Floors unchanged. Web harvest only (pexels=0). §C Railway still **BLOCKED** without `AUTOTUBE_RAILWAY_TOKEN`.
+Last updated: **2026-08-07T01:32Z** — tip `66a67b3`. **§B CLOSED** (airline 7.8 / housing 7.2 / HC 7.4 upload YES). **§C CLOSED** — prod live on `66a67b3` via GHCR (`railway:completion-check` exit 0, smoke PASS). Floors unchanged.
 
 **housing-web152 root cause found + fixed (code + VM dep):** ddg=82 / archive=30 / clip-pool=108 / injected=18/18 (DM prefer after `d15a0ad`) but `render.log` showed every clip "fell back to alternate segment asset" between two hashes — watcher correctly flagged "same two clips on a loop" (SWNS woman + Toledo eviction still). Root: yt-dlp Dailymotion extractor requires curl_cffi impersonation; without it soft-probe/download 401. Also three `cdndirector…/x8fmvll.m3u8?sec=…` CDN tokens looked unique while being one video. Shipped: (1) pin `curl_cffi==0.13.0` in `build:railway`/`nixpacks` (0.16 is unsupported by yt-dlp); (2) DM soft-probe circuit at fetch/inject/keep (`openDailymotionFetchCircuit`, same shape as Vimeo) so a dead DM host falls back to Archive instead of trusting 18 doomed proxies; (3) `dailymotionVideoIdFromUrl` / `motionUrlKey` dedupe; (4) hard-reject Gwyneth/ski-crash celebrity pads. **≥7 floors unchanged.** No new score claimed until fresh watch. **Housing remains open.**
 
@@ -129,7 +129,7 @@ Watcher honesty is working: raw &lt;7 → exit 1 until quality lands. Floors hav
 
 Local proof (gitignored): `test-recordings/dod-proof/` + `SUMMARY.txt` (W2-PACK: **PACK_CLOSED** 2026-08-06). Status: `/tmp/dod-agents/W2-PACK.md`, `/tmp/dod-agents/BOTH-CLOSED.md`.
 
-**§B done** on fresh watches (not historical housing 7.0/NO). **Still open:** §C prod deploy currency (needs human `AUTOTUBE_RAILWAY_TOKEN`).
+**§B done** on fresh watches (not historical housing 7.0/NO). **§C done** — prod deploy currency matches tip `66a67b3`.
 
 ---
 
@@ -154,23 +154,38 @@ Do not invent passing scores. Do not claim ≥7 from tip commits alone — proof
 
 ---
 
-## §C — Railway / prod deploy currency
+## §C — CLOSED: Railway / prod deploy currency
 
-**Status: BLOCKED** (W2 re-scan 2026-08-02T20:19Z) — no personal/team Railway token on this VM.
+**Status: CLOSED** (2026-08-07T01:31Z) — tip `66a67b3`.
+
+| Check | Result |
+|-------|--------|
+| `env:debug-railway` | exit 0, source `AUTOTUBE_RAILWAY_TOKEN` |
+| GHCR image | `ghcr.io/nickaisbitt/autotube:66a67b37f7a5…` (workflow_dispatch on tip branch) |
+| Railway deploy | SUCCESS `160caeda` (registry pull) |
+| `railway:completion-check` | exit **0** — `live:true` `imageMatch:true` |
+| `railway:smoke` | exit **0** — health/index HTTP 200 |
+| Prod health | `gitCommit=66a67b37f7a5` matches local HEAD |
+
+Prior Railpack-from-GitHub attempt `81c1c7e2` FAILED after long BUILDING (vite succeeded; failure after apt/npm path). GHCR registry pull is the working closeout path.
+
+Token note: account API token lives in gitignored `.env.local` as `AUTOTUBE_RAILWAY_TOKEN` (do not commit; rotate if exposed in chat).
+
+---
+
+## §C history — was BLOCKED until 2026-08-07
+
+**Status was: BLOCKED** (W2 re-scan 2026-08-02T20:19Z) — no personal/team Railway token on this VM.
 Evidence: [`/tmp/dod-agents/W2-RAILWAY.md`](/tmp/dod-agents/W2-RAILWAY.md), prior [`A7-STATUS.md`](/tmp/dod-agents/A7-STATUS.md), [`ENV_DOD.md`](ENV_DOD.md).
 
-`RAILWAY_API_TOKEN` / `RAILWAY_TOKEN` are **present** but are the cursor-worker **runtime service** credential. `AUTOTUBE_RAILWAY_TOKEN` is **absent** (process env + `.env.local`). **Do not force deploy without auth.** Prod deploy currency stays **OPEN / BLOCKED** until:
+`RAILWAY_API_TOKEN` / `RAILWAY_TOKEN` are **present** but are the cursor-worker **runtime service** credential. `AUTOTUBE_RAILWAY_TOKEN` preferred for GraphQL.
 
 ```bash
 npm run env:debug-railway    # exit 0 with source AUTOTUBE_RAILWAY_TOKEN (exit 2 = worker-only credential)
 npm run railway:completion-check
 ```
 
-Expected when prod image/commit matches local HEAD: exit **0**.
-
-Prod app is still an **old container** until a fresh deploy from this branch lands. `npm run deploy:status` / `railway:smoke` for live state. Do not claim deploy parity from green CI or HTTP smoke alone.
-
-### Re-scan — 2026-08-02T20:19Z @ tip `ec994af`
+### Re-scan — 2026-08-02T20:19Z @ tip `ec994af` (historical)
 
 Local HEAD: `ec994afb308263f5a8271b3cb9ac4a58fef1d404`
 
@@ -202,32 +217,22 @@ Smoke passed.
 
 `railway:completion-check` / deploy **not attempted** — would Not Authorize without personal token (prior A7/W2: GraphQL Not Authorized on worker cred).
 
-#### Human unblock (exact)
+#### Human unblock (exact) — DONE 2026-08-07
 
-1. Create a Personal or Team API token at https://railway.app/account/tokens
-2. Add to AutoTube `.env.local` (gitignored): `AUTOTUBE_RAILWAY_TOKEN=<token>`
-   — or set the same name as a Cursor Environment secret on **railway-AutoTube** and start a new agent
-3. Re-run:
+1. Account API token set as `AUTOTUBE_RAILWAY_TOKEN` in `.env.local`
+2. `gh workflow run ghcr-image.yml --ref <tip-branch>`
+3. `RAILWAY_SKIP_BUILD=1 RAILWAY_IMAGE_USE_SHA=1 npm run deploy:railway:registry`
+4. `npm run railway:completion-check` + `npm run railway:smoke` → exit 0
 
-```bash
-npm run env:debug-railway          # must exit 0, source AUTOTUBE_RAILWAY_TOKEN
-npm run railway:completion-check
-# when GraphQL works but SHA still mismatches:
-gh workflow run ghcr-image.yml   # wait green
-npm run deploy:railway:registry:pull
-npm run railway:completion-check
-npm run railway:smoke
-```
-
-#### Summary
+#### Summary (historical pre-closeout)
 
 | Check | Result | Detail |
 |-------|--------|--------|
 | `env:debug-railway` | **WARN** (exit 2) | Worker `RAILWAY_API_TOKEN` SET; `AUTOTUBE_RAILWAY_TOKEN` unset |
-| `railway:completion-check` | **BLOCKED** (not re-run) | Needs personal token; prior runs Not Authorized |
+| `railway:completion-check` | **BLOCKED** | Needs personal token |
 | `railway:smoke` | **PASS** | Prod live HTTP 200 |
-| SHA match (prod vs local HEAD) | **MISMATCH** | prod `3e6f624` ≠ local `ec994af` |
-| Deploy currency | **BLOCKED / OPEN** | Needs personal `AUTOTUBE_RAILWAY_TOKEN`, then redeploy |
+| SHA match (prod vs local HEAD) | **MISMATCH** | prod `3e6f624` ≠ local tip |
+| Deploy currency | **was BLOCKED** | Closed 2026-08-07 on `66a67b3` |
 
 ---
 

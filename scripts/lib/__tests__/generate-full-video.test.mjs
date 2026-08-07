@@ -1801,6 +1801,12 @@ describe('formatMotionDropFunnel', () => {
       injectProbePassed: 3,
       injectProbeFailed: 1,
       injectProxyTrusted: 14,
+      relevanceChecked: 35,
+      relevanceKept: 7,
+      relevanceRejected: 28,
+      relevanceWeakAdmitted: 2,
+      relevanceUnverified: 0,
+      relevanceBudgetSkipped: 0,
       relevanceDroppedAfterTopUp: new Array(2),
       motionRelevanceDroppedAfterTopUp: [],
       videoTopUp: new Array(17),
@@ -1812,6 +1818,7 @@ describe('formatMotionDropFunnel', () => {
     expect(line).toContain('injected=17');
     expect(line).toContain('junk=22 relevance=8 vision=10 web-fail-open=4');
     expect(line).toContain('probe-pass=3 probe-fail=1 proxy-trusted=14');
+    expect(line).toContain('llm-checked=35 llm-kept=7 llm-rejected=28 llm-weak=2');
   });
 
   it('falls back to the clip pool size when the after-vision counter is absent', () => {

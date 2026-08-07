@@ -3647,6 +3647,14 @@ export function formatMotionDropFunnel(report = {}) {
     `probe-pass=${report.injectProbePassed || 0}`
     + ` probe-fail=${report.injectProbeFailed || 0}`
     + ` proxy-trusted=${report.injectProxyTrusted || 0}`;
+  // LLM inject gate (Qwen) — distinct from the earlier keyword motionDroppedRelevance.
+  const llm =
+    `llm-checked=${report.relevanceChecked || 0}`
+    + ` llm-kept=${report.relevanceKept || 0}`
+    + ` llm-rejected=${report.relevanceRejected || 0}`
+    + ` llm-weak=${report.relevanceWeakAdmitted || 0}`
+    + ` llm-unverified=${report.relevanceUnverified || 0}`
+    + ` llm-budget-skip=${report.relevanceBudgetSkipped || 0}`;
   return (
     `Motion drop funnel: fetched=${fetched}`
     + ` → after-junk=${afterJunk}`
@@ -3655,6 +3663,7 @@ export function formatMotionDropFunnel(report = {}) {
     + ` → injected=${injected}`
     + ` | drops(${drops})`
     + ` | inject(${inject})`
+    + ` | ${llm}`
   );
 }
 

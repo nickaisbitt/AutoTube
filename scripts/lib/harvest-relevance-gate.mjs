@@ -6,13 +6,18 @@ import { openRouterMessageText } from './openRouterMessageText.mjs';
 
 export const DEFAULT_RELEVANCE_MODEL = 'qwen/qwen3.7-flash';
 
-const SYSTEM_PROMPT = [
+/**
+ * System prompt for the harvest relevance judge.
+ * Exported for unit tests that assert policy wording.
+ */
+export const RELEVANCE_SYSTEM_PROMPT = [
   'You judge whether ONE stock/web video clip belongs in a serious news YouTube segment.',
   'Use the topic, segment beat, clip title/alt, and search query. Thumbnail is optional supporting evidence.',
   'Reply ONLY JSON: {"decision":"KEEP"|"WEAK"|"REJECT","reason":"short"}',
-  'KEEP = clearly depicts the segment beat / topic visuals (people, places, objects named by the beat).',
-  'WEAK = vaguely related keyword neighborhood but wrong subject, news wrapper/logo/title card, establishing hangar/crowd with no beat-specific action, neighbor topic, or generic filler.',
-  'REJECT = off-topic, wrong industry, meme/cartoon, chyron-only graphic, training slide, or clearly wrong scene.',
+  'KEEP = real footage matching the beat family (same visual stakes), even if a named brand/airline differs from the scripted scandal.',
+  'For aviation/cabin-pressure beats: KEEP cabin interior, oxygen masks, cockpit, pressurization, passengers in flight, or aircraft maintenance — wrong airline name is OK.',
+  'WEAK = vaguely airport/hangar establishing shot, historic WWII/1970s training film with no cabin-pressure stakes, or neighbor aviation topics without beat visuals.',
+  'REJECT = fiction/music video/movie trailer, chyron/logo/title-card only, clearly wrong industry (hospital, sports, postal), meme/cartoon, or training-slide graphic with no real scene.',
 ].join(' ');
 
 /**
@@ -144,7 +149,7 @@ export async function judgeHarvestRelevance(input = {}) {
         // Qwen flash otherwise dumps CoT into `reasoning` and leaves content null.
         reasoning: { effort: 'none' },
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: RELEVANCE_SYSTEM_PROMPT },
           { role: 'user', content: userContent },
         ],
         temperature: 0,

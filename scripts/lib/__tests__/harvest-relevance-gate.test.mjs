@@ -8,6 +8,7 @@ import {
   relevanceModelId,
   shouldRejectRelevanceDecision,
   DEFAULT_RELEVANCE_MODEL,
+  RELEVANCE_SYSTEM_PROMPT,
 } from '../harvest-relevance-gate.mjs';
 
 afterEach(() => {
@@ -40,7 +41,30 @@ describe('harvest-relevance-gate helpers', () => {
       decision: 'WEAK',
       reason: 'logo',
     });
+    expect(parseRelevanceDecision('{"decision":"REJECT","reason":"music video"}')).toEqual({
+      decision: 'REJECT',
+      reason: 'music video',
+    });
     expect(parseRelevanceDecision('not json').decision).toBeNull();
+  });
+
+  it('system prompt keeps same-beat aviation even when airline differs', () => {
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/wrong airline name is OK/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/oxygen masks/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/cabin/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/KEEP = real footage matching the beat family/i);
+  });
+
+  it('system prompt rejects fiction music trailers and chyron-only', () => {
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/fiction\/music video\/movie trailer/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/chyron\/logo\/title-card only/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/meme\/cartoon/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/REJECT =/i);
+  });
+
+  it('system prompt marks historic establishing as WEAK not REJECT', () => {
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/WEAK = vaguely airport\/hangar establishing/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/historic WWII\/1970s training film/i);
   });
 
   it('builds a compact user prompt', () => {
@@ -82,6 +106,8 @@ describe('judgeHarvestRelevance', () => {
       const body = JSON.parse(init.body);
       expect(body.reasoning).toEqual({ effort: 'none' });
       expect(body.model).toBe(DEFAULT_RELEVANCE_MODEL);
+      expect(body.messages[0].content).toBe(RELEVANCE_SYSTEM_PROMPT);
+      expect(body.messages[0].content).toMatch(/wrong airline name is OK/i);
       return {
         ok: true,
         json: async () => ({

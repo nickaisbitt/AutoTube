@@ -652,6 +652,9 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
 /**
  * Burn ≤3-word yellow impact cards every ~5s after the hook window.
  * Topic-matched beats (exportSettings.impactBeats) beat bank-scam defaults.
+ * Karaoke-OFF (airline/housing/healthcare): larger cards, longer hold, denser
+ * cadence — replaces weak white word-captions that get lost on dark B-roll
+ * (airline-web8 captionReadability 7).
  */
 export function overlayImpactBeats(videoPath, project, options = {}) {
   if (!existsSync(videoPath)) return { ok: false, error: 'video missing' };
@@ -664,6 +667,7 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   if (duration < 12) return { ok: false, error: 'too short' };
 
   const topic = String(project?.topic || project?.title || '');
+  const airlineTopic = isAirlineTopic(topic);
   const defaults = buildImpactBeatsForTopic(topic);
 
   const custom = Array.isArray(project?.exportSettings?.impactBeats)
@@ -671,16 +675,22 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
     : [];
   // Prefer project beats only when they match the topic family.
   const customOnTopic = impactBeatsMatchTopic(custom, topic);
+  const weakWordRe = /^(THE|A|AN|OF|TO|IN|ON|AT|IS|ARE|WAS|AND|OR|FOR|BY)$/;
   const beats = (customOnTopic ? custom : defaults)
-    .map((t) => String(t || '').trim().toUpperCase().split(/\s+/).slice(0, 3).join(' '))
-    .filter(Boolean);
+    .map((t) => String(t || '').trim().toUpperCase().split(/\s+/)
+      .filter((w) => w && !weakWordRe.test(w))
+      .slice(0, 3)
+      .join(' '))
+    .filter((t) => t && t.replace(/\s+/g, '').length >= 4);
   // Prefer unique cards across the timeline.
   const uniqueBeats = [...new Set(beats)];
+  if (!uniqueBeats.length) return { ok: false, error: 'no strong beats' };
 
   const hookEndSec = Number(options.hookEndSec ?? 3) || 3;
+  const defaultInterval = airlineTopic ? 3.5 : 4;
   const interval = Math.max(
-    3.5,
-    Number(project?.exportSettings?.impactBeatIntervalSec || options.intervalSec || 4) || 4,
+    airlineTopic ? 3.2 : 3.5,
+    Number(project?.exportSettings?.impactBeatIntervalSec || options.intervalSec || defaultInterval) || defaultInterval,
   );
   // Start right after hook window.
   const times = [];
@@ -701,14 +711,17 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
     };
   }
   const fontOpt = `fontfile='${escapeFontfile(fontFile)}':`;
-  const fontSize = Math.round(h * 0.095);
-  const border = Math.max(5, Math.round(fontSize * 0.09));
-  const yFracs = [0.36, 0.44, 0.52];
+  // Karaoke-OFF: larger yellow cards (airline stretch toward caption ≥9).
+  const fontFrac = airlineTopic ? 0.115 : 0.105;
+  const fontSize = Math.round(h * fontFrac);
+  const border = Math.max(6, Math.round(fontSize * 0.1));
+  const holdSec = airlineTopic ? 1.75 : 1.55;
+  const yFracs = [0.34, 0.42, 0.50];
   const filters = [];
   for (let i = 0; i < times.length; i += 1) {
     const text = escapeDrawtext(uniqueBeats[i % uniqueBeats.length]);
     const start = times[i];
-    const end = Math.min(duration - 0.05, start + 1.4);
+    const end = Math.min(duration - 0.05, start + holdSec);
     const y = `h*${yFracs[i % yFracs.length]}`;
     filters.push(
       `drawtext=${fontOpt}text='${text}':fontsize=${fontSize}:fontcolor=yellow:borderw=${border}:bordercolor=black:x=(w-text_w)/2:y=${y}:enable='between(t\\,${start}\\,${end})'`,
@@ -729,5 +742,5 @@ export function overlayImpactBeats(videoPath, project, options = {}) {
   } catch {
     /* ignore */
   }
-  return { ok: true, count: times.length, fontFile };
+  return { ok: true, count: times.length, fontFile, fontSize, holdSec };
 }

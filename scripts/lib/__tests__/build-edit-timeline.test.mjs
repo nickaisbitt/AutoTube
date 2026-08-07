@@ -1930,3 +1930,104 @@ describe('introFaceTier — healthcare-web70 Science Nation globe reject', () =>
     }, { healthcare: true })).toBe(-1);
   });
 });
+
+const AIRLINE_TOPIC = 'Why airline cabin-pressure failures keep happening and what they hid';
+
+describe('buildEditTimeline: airline hook follow-through (web8 stretch)', () => {
+  it('keeps face/oxygen/bright cabin in the first ~8s — never empty/dark cabin', () => {
+    const project = {
+      topic: AIRLINE_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 4,
+          narration: 'Why did the cabin keep failing?',
+          title: 'Intro',
+        },
+        {
+          id: 'body',
+          type: 'body',
+          duration: 10,
+          narration: 'They buried every pressure report while oxygen masks sat unused.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/passenger-face.mp4',
+          alt: 'worried passenger face close-up portrait airplane cabin people',
+          query: 'passenger face cabin',
+          source: 'Bing web video',
+        },
+        {
+          id: 'dark-empty',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/dark-empty-cabin.mp4',
+          alt: 'dark empty airplane cabin interior night vacant seats',
+          query: 'airplane cabin',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'oxygen',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/oxygen-masks.mp4',
+          alt: 'oxygen masks deployed airplane cabin pressure drop passengers',
+          query: 'oxygen mask cabin',
+          source: 'Vimeo',
+        },
+        {
+          id: 'bright',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/bright-cabin.mp4',
+          alt: 'bright daylight airplane cabin interior well-lit aisle passengers seated',
+          query: 'bright cabin daylight',
+          source: 'Dailymotion',
+        },
+        {
+          id: 'shelf',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/shelf.mp4',
+          alt: 'woman at the shelf stocking grocery aisle retail store',
+          query: 'stock footage',
+          source: 'Bing web video',
+        },
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    // startSec is segment-local — accumulate intro duration for global time.
+    const introDur = 4;
+    const first8 = timeline.filter((e) => {
+      const global = e.segmentId === 'intro' ? e.startSec : introDur + e.startSec;
+      return global < 8;
+    });
+    expect(first8.length).toBeGreaterThan(0);
+    const ids = first8.map((e) => e.assetId);
+    expect(ids).not.toContain('dark-empty');
+    expect(ids).not.toContain('shelf');
+    expect(ids.some((id) => id === 'face' || id === 'oxygen' || id === 'bright')).toBe(true);
+    expect(first8[0].assetId).toBe('face');
+  });
+
+  it('rejects empty/dark cabin and corporate news-desk as airline intro leads', () => {
+    expect(introFaceTier({
+      alt: 'dark empty airplane cabin interior night',
+      title: 'empty cabin',
+      url: 'https://example.com/dark.mp4',
+      type: 'video',
+    }, { airline: true })).toBe(0);
+    expect(introFaceTier({
+      alt: 'worried passenger face close-up portrait airplane cabin people',
+      title: 'passenger face',
+      url: 'https://example.com/face.mp4',
+      type: 'video',
+    }, { airline: true })).toBe(2);
+  });
+});

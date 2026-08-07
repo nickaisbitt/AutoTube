@@ -112,10 +112,18 @@ describe('keyless archive human portrait topical boost', () => {
   it('rejects empty/dark cabin interiors that kill airline hook follow-through (web8)', () => {
     expect(isGenericStockJunk('dark empty airplane cabin interior night', AIRLINE_TOPIC)).toBe(true);
     expect(isGenericStockJunk('empty cabin muddy lighting vacant seats', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('underexposed shadowy cabin aisle empty rows', AIRLINE_TOPIC)).toBe(true);
     // Bright passenger cabin must survive.
     expect(
       isGenericStockJunk(
         'bright daylight airplane cabin passengers seated flight attendant aisle',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+    // Dark cabin WITH oxygen/passengers escapes.
+    expect(
+      isGenericStockJunk(
+        'dark cabin oxygen mask deployed worried passengers seated',
         AIRLINE_TOPIC,
       ),
     ).toBe(false);
@@ -124,6 +132,20 @@ describe('keyless archive human portrait topical boost', () => {
   it('rejects generic retail shelf pads on cabin-pressure topics (web8)', () => {
     expect(isGenericStockJunk('woman at the shelf stocking grocery aisle', AIRLINE_TOPIC)).toBe(true);
     expect(isGenericStockJunk('supermarket shelf stock footage loop', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('retail store aisle product shelf stock b-roll', AIRLINE_TOPIC)).toBe(true);
+  });
+
+  it('rejects corporate / news-desk pads on cabin-pressure topics (web8 stretch)', () => {
+    expect(isGenericStockJunk('news desk anchor talking head studio interview', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('corporate handshake business meeting boardroom', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('generic corporate stock footage loop skyline', AIRLINE_TOPIC)).toBe(true);
+    // Even with cabin keywords, news-desk packaging still reads as polished TV.
+    expect(
+      isGenericStockJunk(
+        'news desk report airplane cabin pressure oxygen masks deployed',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
   });
 
   it('keeps aviation archive evidence ahead of portrait-only archive clips on airline topics', () => {

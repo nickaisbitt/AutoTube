@@ -18,11 +18,20 @@ import {
   isHealthcareIntroBeautyOrClinicJunk,
   healthcareIntroClinicalEscape,
   isHealthcareIntroPadJunk,
+  isAirlineEmptyDarkCabin,
+  AIRLINE_CORPORATE_NEWS_PAD_RE,
+  AIRLINE_GENERIC_RETAIL_SHELF_RE,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
 import { stillQualityTimelinePenalty } from './sanitize-media-quality.mjs';
 
+/** First ~8s after open: face → oxygen/pressure/bright cabin, never empty/dark. */
+const AIRLINE_HOOK_FOLLOW_SEC = 8;
+
+/** Evidence that earns early-window preference on cabin-pressure stories. */
+const AIRLINE_HOOK_FOLLOW_EVIDENCE_RE =
+  /\b(oxygen\s*masks?|deployed\s+masks?|cabin\s+pressure|pressuri[sz]|decompress|worried|shocked|passenger\s+face|flight\s+attendant|cabin\s+crew|bright\s+(?:cabin|daylight)|daylight\s+cabin|well[-\s]?lit\s+cabin|cockpit|flight\s+deck)\b/i;
 /**
  * @param {object} project
  * @param {{ cutIntervalSec?: number, reason?: string }} [options]
@@ -254,9 +263,11 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   if (isPassiveDeskIntroVisual(asset)) return true;
   return airline && (
     /\b(mailbox|mail box|u\.?s\.?\s*mail|usps|postal|envelopes?|paperwork|documents?|financial|bank statement|invoice|receipt|tax form)\b/.test(blob)
+    || isAirlineEmptyDarkCabin(blob)
+    || AIRLINE_GENERIC_RETAIL_SHELF_RE.test(blob)
     || (
-      /\b((?:empty|vacant|deserted)\s+(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:dark|dim|unlit|muddy)\s+(?:empty\s+)?(?:airplane\s+|aircraft\s+|plane\s+)?cabin|empty\s+(?:airplane|aircraft|plane)\s+interior)\b/i.test(blob)
-      && !/\b(passenger|passengers|seated|flight\s+attendant|cabin\s+crew|oxygen\s+mask|bright|daylight|well[-\s]?lit)\b/i.test(blob)
+      AIRLINE_CORPORATE_NEWS_PAD_RE.test(blob)
+      && !/\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|passenger|pilot|flight)\b/i.test(blob)
     )
     || AIRLINE_LIMITED_CLUSTERS.has(visualSubjectCluster(asset))
   );
@@ -863,12 +874,21 @@ export function buildEditTimeline(project, options = {}) {
         return -15;
       }
       // Empty/dark cabin interiors kill hook follow-through (airline-web8).
+      if (topicIsAirline && isAirlineEmptyDarkCabin(blob)) {
+        return -16;
+      }
+      // Corporate / news-desk / retail shelf pads — soft demote on airline body.
       if (
         topicIsAirline
-        && /\b((?:empty|vacant|deserted)\s+(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:dark|dim|unlit|muddy)\s+(?:empty\s+)?(?:airplane\s+|aircraft\s+|plane\s+)?cabin|empty\s+(?:airplane|aircraft|plane)\s+interior)\b/i.test(blob)
-        && !/\b(passenger|passengers|seated|flight\s+attendant|cabin\s+crew|oxygen\s+mask|bright|daylight|well[-\s]?lit)\b/i.test(blob)
+        && (
+          AIRLINE_GENERIC_RETAIL_SHELF_RE.test(blob)
+          || (
+            AIRLINE_CORPORATE_NEWS_PAD_RE.test(blob)
+            && !/\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|passenger|pilot|flight)\b/i.test(blob)
+          )
+        )
       ) {
-        return -16;
+        return -14;
       }
       if (/\b(black and white|b&w|monochrome|grayscale)\b/.test(blob)) return -6;
       // Intro must lead with faces / bright cabin — not distant runway silhouettes.
@@ -986,6 +1006,16 @@ export function buildEditTimeline(project, options = {}) {
         // Housing also boosts apartment-motion tier-1 via introFaceTier.
         if (isIntro && faceFirstIntroTopic && introFaceTier(a, faceTierOptions) > 0) {
           score += 4 + introFaceTier(a, faceTierOptions);
+        }
+        // Airline first-cuts: prefer face / oxygen / pressure / bright cabin
+        // evidence so the hook does not cut to empty/dark stock (web8).
+        if (topicIsAirline && (isIntro || isBrightCabinInterior(a) || AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob))) {
+          if (hasReadableFaceVisual(a) && AIRLINE_TOPICAL_VISUAL_RE.test(blob)) score += 5;
+          if (AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob)) score += 4;
+          if (isBrightCabinInterior(a)) score += 3;
+          const luma = Number(a?.lumaStdDev) || 0;
+          const lap = Number(a?.laplacianVariance) || 0;
+          if (luma >= 35 || lap >= 40) score += 2;
         }
         // Housing intro: shocked/worried face tied to eviction/apartment evidence → extra +4
         // so these strongly outrank split-screen/news-package/talking-head openers.
@@ -1272,6 +1302,9 @@ export function buildEditTimeline(project, options = {}) {
       const withinStrictReuseWindow = globalStartSec < STRICT_REUSE_WINDOW_SEC || isShortVideo;
       const activeBeat = beatAtSegmentTime(segBeats, t, duration, seg);
       const introLeadWindow = seg === script[0] && t < 3;
+      // Airline-web8: after a face opener, first ~8s must keep face/oxygen/pressure
+      // / bright-cabin evidence — never empty/dark cabin or retail/corporate pads.
+      const airlineHookFollowWindow = topicIsAirline && globalStartSec < AIRLINE_HOOK_FOLLOW_SEC;
       const introOutroReuse = isIntro || isOutro;
       const violatesConsecutiveCluster = (candidate) => {
         const cluster = visualSubjectCluster(candidate);
@@ -1374,8 +1407,38 @@ export function buildEditTimeline(project, options = {}) {
         ) {
           return false;
         }
+        // Airline first ~8s: empty/dark cabin + retail shelf + faceless corporate
+        // pads stay banned even on relaxed — hook follow-through (web8).
+        if (airlineHookFollowWindow) {
+          const followBlob = assetBlob(candidate);
+          if (isAirlineEmptyDarkCabin(followBlob)) return false;
+          if (AIRLINE_GENERIC_RETAIL_SHELF_RE.test(followBlob)) return false;
+          if (
+            AIRLINE_CORPORATE_NEWS_PAD_RE.test(followBlob)
+            && !/\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|passenger|pilot|flight)\b/i.test(followBlob)
+          ) {
+            return false;
+          }
+        }
         if (!relaxed) {
           if (introLeadWindow && !isIntroLeadVisual(candidate, introLeadOptions)) return false;
+          // Prefer face / oxygen / pressure / bright cabin while alternatives exist.
+          if (
+            airlineHookFollowWindow
+            && !introLeadWindow
+            && !hasReadableFaceVisual(candidate)
+            && !AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(assetBlob(candidate))
+            && !isBrightCabinInterior(candidate)
+          ) {
+            const hasFollowAlt = uniqueAssetsByUrl([...ordered, ...borrowPool]).some((c) => {
+              if (urlKey(c) === key) return false;
+              if (isAirlineEmptyDarkCabin(assetBlob(c))) return false;
+              return hasReadableFaceVisual(c)
+                || AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(assetBlob(c))
+                || isBrightCabinInterior(c);
+            });
+            if (hasFollowAlt) return false;
+          }
           if (key && recentTimelineUrls.includes(key)) return false;
           if (violatesConsecutiveCluster(candidate)) return false;
           if (continuesTwoClipPingPong(candidate)) return false;
@@ -1463,43 +1526,66 @@ export function buildEditTimeline(project, options = {}) {
         // tiers first. Healthcare face+topical is tier 3 — must beat faceless
         // surgical-robot tier 2 (web61/68: robot-led hooks capped ~6.6).
         // Reuse caps and adjacency rules still apply at every tier.
-        if (!relaxed && introLeadWindow && faceFirstIntroTopic) {
+        // Airline 3–8s: keep exhausting face/oxygen/bright evidence so the
+        // opener never falls into empty/dark cabin (web8 follow-through).
+        if (!relaxed && (introLeadWindow || airlineHookFollowWindow) && faceFirstIntroTopic) {
           // Housing: clips that satisfy checkEditTimelineIntroFace evidence
           // (tenant/evict/worried-family collocations) before bare face tags,
           // so timeline gate and picker stay aligned (web4 INTRO_FACE_FAIL).
-          if (topicIsHousing) {
+          if (topicIsHousing && introLeadWindow) {
             for (let j = 0; j < rankedPool.length; j++) {
               const candidate = rankedPool[(ai + j) % rankedPool.length];
               if (!passesHousingTimelineIntroEvidence(candidate)) continue;
               if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
             }
           }
-          for (const minTier of [3, 2, 1]) {
+          if (topicIsAirline && airlineHookFollowWindow) {
+            // Tier A: readable face + topical aviation.
             for (let j = 0; j < rankedPool.length; j++) {
               const candidate = rankedPool[(ai + j) % rankedPool.length];
-              if (introFaceTier(candidate, faceTierOptions) < minTier) continue;
+              if (!(hasReadableFaceVisual(candidate) && AIRLINE_TOPICAL_VISUAL_RE.test(assetBlob(candidate)))) continue;
               if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
+            }
+            // Tier B: oxygen / pressure / bright cabin evidence.
+            for (let j = 0; j < rankedPool.length; j++) {
+              const candidate = rankedPool[(ai + j) % rankedPool.length];
+              if (
+                !AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(assetBlob(candidate))
+                && !isBrightCabinInterior(candidate)
+              ) continue;
+              if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
+            }
+          }
+          if (introLeadWindow) {
+            for (const minTier of [3, 2, 1]) {
+              for (let j = 0; j < rankedPool.length; j++) {
+                const candidate = rankedPool[(ai + j) % rankedPool.length];
+                if (introFaceTier(candidate, faceTierOptions) < minTier) continue;
+                if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
+              }
             }
           }
           // No strict readable face found (Archive stills often lack role-word metadata).
           // Housing: prefer apartment/lived-in motion next, then human-cluster /
           // portrait-like assets — never landscape establishing for the opener.
-          if (topicIsHousing) {
+          if (topicIsHousing && introLeadWindow) {
             for (let j = 0; j < rankedPool.length; j++) {
               const candidate = rankedPool[(ai + j) % rankedPool.length];
               if (!isHousingApartmentMotion(candidate)) continue;
               if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
             }
           }
-          for (let j = 0; j < rankedPool.length; j++) {
-            const candidate = rankedPool[(ai + j) % rankedPool.length];
-            if (topicIsHousing && isLandscapeOnlyIntroVisual(candidate)) continue;
-            const cluster = visualSubjectCluster(candidate);
-            const blob = assetBlob(candidate);
-            const isPortraitLike = isHumanCluster(cluster)
-              || /\b(portrait|close.?up|person|people)\b/.test(blob);
-            if (!isPortraitLike) continue;
-            if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
+          if (introLeadWindow) {
+            for (let j = 0; j < rankedPool.length; j++) {
+              const candidate = rankedPool[(ai + j) % rankedPool.length];
+              if (topicIsHousing && isLandscapeOnlyIntroVisual(candidate)) continue;
+              const cluster = visualSubjectCluster(candidate);
+              const blob = assetBlob(candidate);
+              const isPortraitLike = isHumanCluster(cluster)
+                || /\b(portrait|close.?up|person|people)\b/.test(blob);
+              if (!isPortraitLike) continue;
+              if (canUseCandidate(candidate, { allowOverReuse, relaxed })) return candidate;
+            }
           }
         }
         for (let j = 0; j < rankedPool.length; j++) {

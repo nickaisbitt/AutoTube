@@ -170,6 +170,12 @@ export function impactBeatsMatchTopic(beats, topic) {
   if (isHousingTopic(t)) {
     return /lease|evict|rent|credit|blacklist|appeal|lock changed/.test(blob);
   }
+  if (isAirlineTopic(t)) {
+    return (
+      /pressure|mask|cabin|oxygen|faa|hid|cover|failed|buried|proof|failing/.test(blob)
+      && !/otp|wire|voice clone|lease|evict|hospital breach|charts stolen/.test(blob)
+    );
+  }
   if (isVeteransBenefitsTopic(t)) {
     return (
       /benefit|broker|ssn|va\b|dark web|credit|identity|file|freeze/.test(blob)

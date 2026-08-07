@@ -583,14 +583,39 @@ export const CORPORATE_SLIDE_DECK_JUNK_RE =
  * Escape when passengers / attendants / bright daylight evidence is present.
  */
 export const AIRLINE_EMPTY_DARK_CABIN_RE =
-  /\b((?:empty|vacant|deserted|uninhabited|abandoned)\s+(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:dark|dim(?:ly)?(?:\s+lit)?|unlit|muddy|night)\s+(?:empty\s+)?(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:airplane|aircraft|plane)\s+(?:cabin\s+)?(?:interior\s+)?(?:empty|dark|dim|unlit|muddy)|empty\s+(?:airplane|aircraft|plane)\s+interior)\b/i;
+  /\b((?:empty|vacant|deserted|uninhabited|abandoned)\s+(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:dark|dim(?:ly)?(?:\s+lit)?|unlit|muddy|night|shadowy|underexposed)\s+(?:empty\s+)?(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:airplane|aircraft|plane)\s+(?:cabin\s+)?(?:interior\s+)?(?:empty|dark|dim|unlit|muddy|vacant)|empty\s+(?:airplane|aircraft|plane)\s+interior|(?:empty|vacant|deserted)\s+(?:cabin\s+)?(?:seats?|aisle|rows?)|(?:dark|dim|muddy|unlit)\s+(?:cabin\s+)?(?:aisle|seats?|rows?|overhead))\b/i;
+
+/** Bright passenger / attendant / oxygen evidence that escapes empty/dark reject. */
+export const AIRLINE_CABIN_LIFE_ESCAPE_RE =
+  /\b(passenger|passengers|seated|flight\s+attendant|cabin\s+crew|oxygen\s+mask|bright|daylight|sunny|well[-\s]?lit|worried\s+face|shocked\s+face)\b/i;
 
 /**
  * Generic retail / grocery shelf pads that read as corporate stock on
  * cabin-pressure investigations (airline-web8 top-fix #3).
  */
 export const AIRLINE_GENERIC_RETAIL_SHELF_RE =
-  /\b(?:(?:woman|man|person|shopper|customer)\s+(?:at|by|near|browsing|stocking)\s+(?:the\s+)?(?:shelf|shelves|aisle)|(?:supermarket|grocery|retail|convenience\s+store)\s+(?:shelf|shelves|aisle|stock)|stocking\s+(?:shelves?|aisle)|woman\s+(?:at|by)\s+(?:the\s+)?shelf)\b/i;
+  /\b(?:(?:woman|man|person|shopper|customer|shopper)\s+(?:at|by|near|browsing|stocking|facing)\s+(?:the\s+)?(?:shelf|shelves|aisle|store\s+shelf)|(?:supermarket|grocery|retail|convenience\s+store|big[\s-]?box|department\s+store)\s+(?:shelf|shelves|aisle|stock|interior)|stocking\s+(?:shelves?|aisle)|(?:woman|man)\s+(?:at|by)\s+(?:the\s+)?shelf|product\s+shelf\s+(?:stock|b-?roll|footage)|retail\s+store\s+(?:interior|aisle|shelf))\b/i;
+
+/**
+ * News-desk / corporate-office / talking-head studio pads that make cabin-
+ * pressure stories feel like polished TV news (airline-web8 youtubeReadiness).
+ * Escape when cabin/oxygen/aircraft evidence is also present.
+ */
+export const AIRLINE_CORPORATE_NEWS_PAD_RE =
+  /\b(?:news\s+(?:desk|anchor|studio|package|segment)|anchor\s+desk|talking\s*heads?\s+(?:studio|news|desk|interview)|studio\s+interview\s+(?:desk|set)|corporate\s+(?:handshake|boardroom|office|skyline|b-?roll|stock)|business\s+(?:handshake|meeting|district)|glass\s+building\s+skyline|open[\s-]?plan\s+office|coworking(?:\s+space)?|executive\s+desk|press\s+conference(?:\s+podium)?|generic\s+corporate|stock\s+footage\s+loop)\b/i;
+
+/**
+ * True when haystack is an empty/dark/muddy cabin without life/bright escape.
+ * Shared by harvest reject + edit-timeline intro/early-window gates.
+ *
+ * @param {string} haystack
+ * @returns {boolean}
+ */
+export function isAirlineEmptyDarkCabin(haystack) {
+  const h = String(haystack || '');
+  if (!AIRLINE_EMPTY_DARK_CABIN_RE.test(h)) return false;
+  return !AIRLINE_CABIN_LIFE_ESCAPE_RE.test(h);
+}
 
 /**
  * Off-topic scrapes that survive keyword overlap on cabin-pressure topics
@@ -630,14 +655,19 @@ export function airlineHarvestJunkReason(haystack, contextText = '') {
     return 'corporate slide deck for airline';
   }
   // Bright passenger / attendant cabin escapes the empty/dark hard-reject.
-  if (
-    AIRLINE_EMPTY_DARK_CABIN_RE.test(h)
-    && !/\b(passenger|passengers|seated|flight\s+attendant|cabin\s+crew|oxygen\s+mask|bright|daylight|sunny|well[-\s]?lit)\b/i.test(h)
-  ) {
+  if (isAirlineEmptyDarkCabin(h)) {
     return 'empty/dark cabin interior for airline';
   }
   if (AIRLINE_GENERIC_RETAIL_SHELF_RE.test(h)) {
     return 'generic retail/shelf stock for airline';
+  }
+  // Corporate / news-desk pads survive keyword overlap ("pressure", "report")
+  // but read as polished TV — reject unless aviation evidence is also present.
+  if (
+    AIRLINE_CORPORATE_NEWS_PAD_RE.test(h)
+    && !AIRLINE_AVIATION_EVIDENCE_RE.test(h)
+  ) {
+    return 'corporate/news-desk pad for airline';
   }
   return null;
 }
@@ -2694,6 +2724,22 @@ const AIRLINE_HARD_REJECT_PATTERNS = [
     pattern: AIRLINE_POLITICS_PAD_RE,
     skipWhen: /\b(clinton|lynch|budget|congress|election)\b/i,
   },
+  {
+    reason: 'empty-dark-cabin',
+    pattern: AIRLINE_EMPTY_DARK_CABIN_RE,
+    // Soft-pass hard-junk counting: life/bright escape is applied in
+    // airlineHarvestJunkReason / isAirlineEmptyDarkCabin — pattern alone
+    // still marks the blob as hard-junk-shaped for ratio math when life
+    // tokens are absent (classifyAirlineHardJunk uses pattern.test only).
+  },
+  {
+    reason: 'retail-shelf',
+    pattern: AIRLINE_GENERIC_RETAIL_SHELF_RE,
+  },
+  {
+    reason: 'corporate-news-desk',
+    pattern: AIRLINE_CORPORATE_NEWS_PAD_RE,
+  },
 ];
 
 const AIRLINE_STRONG_CABIN_RE =
@@ -2730,7 +2776,12 @@ function airlineHardRejectReason(asset = {}, topicBlob = '') {
   for (const { reason, pattern, requires, skipWhen } of AIRLINE_HARD_REJECT_PATTERNS) {
     if (skipWhen && skipWhen.test(ctx)) continue;
     if (requires && !requires.test(blob)) continue;
-    if (pattern.test(blob)) return reason;
+    if (!pattern.test(blob)) continue;
+    // Empty/dark cabin: bright passenger / oxygen / attendant escapes.
+    if (reason === 'empty-dark-cabin' && !isAirlineEmptyDarkCabin(blob)) continue;
+    // Corporate/news desk: aviation evidence on the same clip escapes.
+    if (reason === 'corporate-news-desk' && AIRLINE_AVIATION_EVIDENCE_RE.test(blob)) continue;
+    return reason;
   }
   return null;
 }

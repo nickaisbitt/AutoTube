@@ -3,6 +3,7 @@
  * Used by loop patch + ffmpeg overlays — keep one source of truth.
  */
 import {
+  isAirlineTopic,
   isBankScamTopic,
   isHealthcareCyberTopic,
   isHealthcareTopic,
@@ -33,6 +34,25 @@ export function buildImpactBeatsForTopic(topic) {
       'TIMER STARTED',
       'APPEAL DENIED',
       'LOCK CHANGED',
+    ];
+  }
+
+  // Cabin-pressure / aviation investigations — punchy ≤3-word cards for
+  // karaoke-OFF mode (airline-web8 caption readability stretch).
+  if (isAirlineTopic(tl)) {
+    return [
+      'PRESSURE DROP',
+      'MASKS DEPLOYED',
+      'THEY HID IT',
+      'CABIN FAILED',
+      'REPORTS BURIED',
+      'OXYGEN GONE',
+      'WHO KNEW',
+      'COVER UP',
+      'PROOF IS OUT',
+      'FAA SILENT',
+      'STILL FAILING',
+      'ACT NOW',
     ];
   }
 

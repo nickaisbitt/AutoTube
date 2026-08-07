@@ -37,6 +37,17 @@ describe('ffmpeg overlay policy — less text spam', () => {
     expect(beats.join(' ')).not.toMatch(/WHY WIDGET|FOLLOW THE WIDGET|WIDGET HIDING/);
   });
 
+  it('airline cabin-pressure topics get punchy ≤3-word beats (karaoke-OFF path)', () => {
+    const beats = buildImpactBeatsForTopic(
+      'Why airline cabin-pressure failures keep happening and what they hid',
+    );
+    expect(beats[0]).toBe('PRESSURE DROP');
+    expect(beats).toContain('MASKS DEPLOYED');
+    expect(beats).toContain('THEY HID IT');
+    expect(beats.every((b) => b.split(/\s+/).length <= 3)).toBe(true);
+    expect(beats.join(' ')).not.toMatch(/EXPOSED|OTP|LEASE|EVICT/);
+  });
+
   it('repairs merged caption words before ASS text is burned', () => {
     expect(repairMergedCaptionText('CABINKEEP')).toBe('CABIN KEEP');
     expect(repairMergedCaptionText('cabinKeep APIResponse 2026Update')).toBe('cabin Keep API Response 2026 Update');

@@ -34,10 +34,13 @@ import {
   AIRLINE_STAKES_ESCAPE_RE,
   AIRLINE_AUTO_MECHANIC_PAD_RE,
   AIRLINE_BOARDING_ONLY_PAD_RE,
+  AIRLINE_AIRPORT_CROWD_PAD_RE,
   AIRLINE_TRAINING_SLIDE_PAD_RE,
+  AIRLINE_FIRE_EXTINGUISHER_FILLER_RE,
   isAirlineBoardingOnlyWeakOpener,
   isAirlineHangarTaxiWeakOpener,
   isAirlineTrainingSlidePad,
+  isAirlineFireExtinguisherFiller,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
@@ -117,8 +120,16 @@ const AIRLINE_LIMITED_CLUSTERS = new Set([
   'news-logo',
   'hangar-taxi',
   'boarding-only',
+  'airport-crowd',
   'auto-mechanic',
   'training-slide',
+  'fire-extinguisher',
+]);
+
+/** Clusters that must never exceed one URL use on airline timelines (s85-5). */
+const AIRLINE_MAX_REUSE_ONE_CLUSTERS = new Set([
+  'boarding-only',
+  'airport-crowd',
 ]);
 
 /** Subjects that must never carry a story, whatever the reuse pressure. */
@@ -181,6 +192,19 @@ export function visualSubjectCluster(asset) {
     || isAirlineHangarTaxiWeakOpener(blob)
   ) {
     return 'hangar-taxi';
+  }
+  if (isAirlineFireExtinguisherFiller(blob) || (
+    AIRLINE_FIRE_EXTINGUISHER_FILLER_RE.test(blob)
+    && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
+  )) {
+    return 'fire-extinguisher';
+  }
+  if (
+    AIRLINE_AIRPORT_CROWD_PAD_RE.test(blob)
+    && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
+    && !/\b(?:face|faces|portrait|close[-\s]?up|worried|shocked|oxygen\s*masks?)\b/i.test(blob)
+  ) {
+    return 'airport-crowd';
   }
   if (isAirlineBoardingOnlyWeakOpener(blob) || (
     AIRLINE_BOARDING_ONLY_PAD_RE.test(blob) && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
@@ -342,6 +366,11 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
     || isAirlineBoardingOnlyWeakOpener(blob)
     || isAirlineHangarTaxiWeakOpener(blob)
     || isAirlineTrainingSlidePad(blob)
+    || isAirlineFireExtinguisherFiller(blob)
+    || (
+      AIRLINE_AIRPORT_CROWD_PAD_RE.test(blob)
+      && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
+    )
     || (
       AIRLINE_CORPORATE_NEWS_PAD_RE.test(blob)
       && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
@@ -1031,10 +1060,23 @@ export function buildEditTimeline(project, options = {}) {
       if (topicIsAirline && AIRLINE_AUTO_MECHANIC_PAD_RE.test(blob)) {
         return -18;
       }
-      // Static boarding-only without stakes — soft demote so oxygen/face wins
-      // the first ~8s hook (airline-s85-3); still usable mid-body if pool is thin.
+      // Static boarding-only / airport-crowd without stakes — soft demote so
+      // oxygen/face wins the first ~8s hook (airline-s85-3/s85-5); still usable
+      // mid-body once (maxReuse=1) if the pool is thin.
       if (topicIsAirline && isAirlineBoardingOnlyWeakOpener(blob)) {
-        reusePenalty -= 12;
+        reusePenalty -= priorUses >= 1 ? 30 : 14;
+      }
+      if (
+        topicIsAirline
+        && AIRLINE_AIRPORT_CROWD_PAD_RE.test(blob)
+        && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
+      ) {
+        reusePenalty -= priorUses >= 1 ? 30 : 14;
+      }
+      // Muddy/dark fire-extinguisher filler — demote unless cabin emergency
+      // with face/oxygen (airline-s85-5 ACT NOW frame).
+      if (topicIsAirline && isAirlineFireExtinguisherFiller(blob)) {
+        reusePenalty -= 16;
       }
       // Hangar/taxi establishing without stakes — soft demote mid-body; hard-banned
       // in early window when face/oxygen alternatives exist (airline-s85-4).
@@ -1619,10 +1661,10 @@ export function buildEditTimeline(project, options = {}) {
           return false;
         }
         // Airline first ~8s: empty/dark cabin + retail shelf + faceless corporate
-        // + fabric/golf/animated pads + auto-mechanic + boarding-only + training
-        // slides stay banned even on relaxed — hook follow-through
-        // (web8 + stretch1 + s85-3 + s85-4). Hangar/taxi establishing is banned
-        // whenever any face / oxygen-mask candidate exists in the pool.
+        // + fabric/golf/animated pads + auto-mechanic + boarding-only / airport-
+        // crowd + training slides + muddy fire-extinguisher stay banned even on
+        // relaxed — hook follow-through (web8 + stretch1 + s85-3/4/5). Hangar/taxi
+        // establishing is banned whenever any face / oxygen-mask candidate exists.
         if (airlineHookFollowWindow) {
           const followBlob = assetBlob(candidate);
           if (isAirlineEmptyDarkCabin(followBlob)) return false;
@@ -1631,6 +1673,13 @@ export function buildEditTimeline(project, options = {}) {
           if (AIRLINE_AUTO_MECHANIC_PAD_RE.test(followBlob)) return false;
           if (isAirlineTrainingSlidePad(followBlob)) return false;
           if (isAirlineBoardingOnlyWeakOpener(followBlob)) return false;
+          if (
+            AIRLINE_AIRPORT_CROWD_PAD_RE.test(followBlob)
+            && !AIRLINE_STAKES_ESCAPE_RE.test(followBlob)
+          ) {
+            return false;
+          }
+          if (isAirlineFireExtinguisherFiller(followBlob)) return false;
           if (
             AIRLINE_CORPORATE_NEWS_PAD_RE.test(followBlob)
             && !/\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|passenger|pilot|flight)\b/i.test(followBlob)
@@ -1643,6 +1692,12 @@ export function buildEditTimeline(project, options = {}) {
               if (isAirlineHangarTaxiWeakOpener(assetBlob(c))) return false;
               if (isAirlineBoardingOnlyWeakOpener(assetBlob(c))) return false;
               if (isAirlineTrainingSlidePad(assetBlob(c))) return false;
+              if (
+                AIRLINE_AIRPORT_CROWD_PAD_RE.test(assetBlob(c))
+                && !AIRLINE_STAKES_ESCAPE_RE.test(assetBlob(c))
+              ) {
+                return false;
+              }
               return hasAirlineHookFaceVisual(c)
                 || AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(assetBlob(c));
             });
@@ -1671,13 +1726,19 @@ export function buildEditTimeline(project, options = {}) {
             if (hasFollowAlt) return false;
           }
           // Intro 0–3s: if any face/oxygen-mask motion exists, reject boarding /
-          // hangar establishing even when they somehow clear lead-visual checks.
+          // airport-crowd / hangar establishing even when they somehow clear
+          // lead-visual checks (airline-s85-4/s85-5).
           if (
             introLeadWindow
             && topicIsAirline
             && (
               isAirlineBoardingOnlyWeakOpener(assetBlob(candidate))
               || isAirlineHangarTaxiWeakOpener(assetBlob(candidate))
+              || (
+                AIRLINE_AIRPORT_CROWD_PAD_RE.test(assetBlob(candidate))
+                && !AIRLINE_STAKES_ESCAPE_RE.test(assetBlob(candidate))
+              )
+              || isAirlineFireExtinguisherFiller(assetBlob(candidate))
             )
           ) {
             const hasFaceMotion = uniqueAssetsByUrl([...ordered, ...borrowPool]).some((c) => {
@@ -1758,6 +1819,26 @@ export function buildEditTimeline(project, options = {}) {
           if (
             AIRLINE_LIMITED_CLUSTERS.has(airlineLimitedCluster)
             && airlineLimitedClusterUseTotal >= 1
+          ) {
+            return false;
+          }
+          // Crowd / boarding stock: hard maxReuse=1 even on relaxed / over-reuse
+          // paths so the same airplane-crowd loop cannot appear ≥3× (s85-5).
+          if (
+            AIRLINE_MAX_REUSE_ONE_CLUSTERS.has(airlineLimitedCluster)
+            && uses >= 1
+          ) {
+            return false;
+          }
+          if (
+            (
+              isAirlineBoardingOnlyWeakOpener(assetBlob(candidate))
+              || (
+                AIRLINE_AIRPORT_CROWD_PAD_RE.test(assetBlob(candidate))
+                && !AIRLINE_STAKES_ESCAPE_RE.test(assetBlob(candidate))
+              )
+            )
+            && uses >= 1
           ) {
             return false;
           }

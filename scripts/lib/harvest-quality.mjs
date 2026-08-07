@@ -460,7 +460,7 @@ export function militaryNavalJunkReason(haystack, contextText = '') {
 
 /** Burned-in tickers and non-Latin captions fight our own overlays and read as scraped news. */
 export const FOREIGN_NEWS_TICKER_RE =
-  /\b(?:japanese|chinese|korean|arabic|thai|hindi|russian|cyrillic|hebrew|vietnamese|turkish)\s+(?:news|tv|television|broadcast|subtitles?|captions?|characters?|text|ticker|headlines?)\b|\bnews\s+(?:ticker|crawl)\b|\bticker\s+tape\s+news\b|\bscrolling\s+(?:headline|headlines|news|text|ticker)\b|\bchyron\b|\bburn(?:ed|t)[-\s]?in\s+(?:subtitles?|captions?|text)\b|\bforeign[-\s]language\s+(?:news|subtitles?|captions?|text)\b|\bunreadable\s+(?:text|overlay|caption|subtitles?)\b|\b(?:nhk|cgtn)\b/i;
+  /\b(?:japanese|chinese|korean|arabic|thai|hindi|russian|cyrillic|hebrew|vietnamese|turkish)\s+(?:news|tv|television|broadcast|subtitles?|captions?|characters?|text|ticker|headlines?|chyron|title\s*cards?|overlay|on[\s-]?screen)\b|\b(?:chinese|japanese|korean|arabic|non[\s-]?latin)[\s-]*(?:only\s+)?(?:chyron|title\s*cards?|subtitles?|captions?|overlay|on[\s-]?screen\s+text)\b|\b(?:chyron|title\s*cards?|subtitles?|captions?).{0,32}(?:chinese|japanese|korean|arabic|non[\s-]?latin|cjk)\b|\bnews\s+(?:ticker|crawl)\b|\bticker\s+tape\s+news\b|\bscrolling\s+(?:headline|headlines|news|text|ticker)\b|\bchyron\b|\bburn(?:ed|t)[-\s]?in\s+(?:subtitles?|captions?|text)\b|\bforeign[-\s]language\s+(?:news|subtitles?|captions?|text|chyron|title\s*card)\b|\bunreadable\s+(?:text|overlay|caption|subtitles?|chyron)\b|\b(?:nhk|cgtn)\b|\b(?:instagram|tiktok|reels?).{0,64}(?:chinese|japanese|korean|arabic)\s+(?:text|subtitle|caption|chyron|overlay|characters?)\b/i;
 
 /** CJK / Cyrillic / Arabic / Thai glyphs in alt or title. */
 export const NON_LATIN_OVERLAY_SCRIPT_RE =
@@ -480,6 +480,20 @@ export function unreadableOverlayReason(haystack, contextText = '') {
   }
   if (FOREIGN_NEWS_TICKER_RE.test(h) && !FOREIGN_NEWS_TICKER_RE.test(ctx)) {
     return 'foreign/unreadable news ticker overlay';
+  }
+  // English airline topics: Chinese-/CJK-heavy title cards / chyrons as B-roll
+  // (airline-s85-5: Instagram frame with unreadable Chinese characters).
+  if (
+    isAirlineTopic(ctx)
+    && !NON_LATIN_OVERLAY_SCRIPT_RE.test(ctx)
+    && !/\b(?:chinese|japanese|korean|mandarin|cantonese|cjk)\b/i.test(ctx)
+  ) {
+    const cjkCount = (h.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
+    const latinCount = (h.match(/[A-Za-z]/g) || []).length;
+    const titleCardish = /\b(?:title\s*cards?|chyron|lower[\s-]?third|on[\s-]?screen\s+text|subtitle|caption|instagram|tiktok)\b/i.test(h);
+    if (cjkCount >= 4 && (cjkCount >= latinCount || titleCardish)) {
+      return 'Chinese/non-Latin chyron title card for English airline topic';
+    }
   }
   return null;
 }
@@ -694,6 +708,25 @@ export const AIRLINE_BOARDING_ONLY_PAD_RE =
   /\b(?:(?:passengers?\s+)?board(?:ing|ed)(?:\s+(?:an?\s+)?(?:airplane|aircraft|plane|jet|flight))?|jet\s*bridges?|jetways?|boarding\s+(?:gate|queue|line|passengers?|airplane|aircraft|plane)|gate\s+boarding|airport\s+boarding|boarding\s+airplane|passenger\s+boarding)\b/i;
 
 /**
+ * Generic airplane / airport / boarding crowd stock loops (airline-s85-5: same
+ * low-res airplane-crowd stair shot reused ≥3× kills visualVariety). Soft-kept
+ * once mid-body; hard maxReuse=1; banned in first ~8s when face/oxygen exists.
+ */
+export const AIRLINE_AIRPORT_CROWD_PAD_RE =
+  /\b(?:(?:airplane|aircraft|airport|boarding|plane|jet)\s+crowd(?:s)?|crowd(?:s)?\s+(?:at\s+(?:the\s+)?)?(?:airplane|aircraft|airport|boarding|gate|stairs?|jet\s*bridge|tarmac|plane)|(?:boarding|airport|airplane|aircraft)\s+(?:crowd|crowds)|(?:low[\s-]?res(?:olution)?|grainy|shaky)\s+(?:airplane|airport|boarding|plane)\s+crowd|passengers?\s+(?:crowd|crowding)(?:\s+(?:at|on|near))?\s+(?:the\s+)?(?:airplane|aircraft|airport|stairs?|gate|boarding)|crowd\s+of\s+passengers?(?:\s+(?:at|on|near))?\s+(?:the\s+)?(?:airplane|aircraft|airport|stairs?|gate)|(?:airplane|aircraft|boarding|airport)\s+(?:boarding\s+)?stairs?(?:\s+(?:crowd|passengers?|queue))?|passengers?\s+on\s+(?:the\s+)?(?:airplane|aircraft|boarding)\s+stairs?|emotionless\s+(?:crowd|boarding)|static\s+(?:airplane|airport|boarding)\s+crowd)\b/i;
+
+/**
+ * Muddy / dark fire-extinguisher wall filler (airline-s85-5: ACT NOW frame over
+ * underexposed extinguisher). Escape only for cabin-emergency + face/oxygen stakes.
+ */
+export const AIRLINE_FIRE_EXTINGUISHER_FILLER_RE =
+  /\b(?:fire[\s-]?extinguishers?|(?:red\s+)?extinguisher(?:\s+(?:on|mounted\s+on)\s+(?:the\s+)?(?:wall|cabin|panel|bulkhead))?|(?:muddy|dark|dim(?:ly)?(?:\s+lit)?|underexposed|shadowy)\s+(?:fire[\s-]?extinguisher|extinguisher(?:\s+wall)?)|(?:fire[\s-]?extinguisher|extinguisher).{0,48}(?:muddy|dark|dim|underexposed|wall\s+only|filler|b-?roll|stock))\b/i;
+
+/** Cabin-emergency + face/oxygen stakes that keep a fire-extinguisher clip. */
+export const AIRLINE_CABIN_EMERGENCY_FACE_ESCAPE_RE =
+  /\b(?:(?:cabin|in[\s-]?flight)\s+emergency|emergency\s+(?:cabin|evacuat\w*|landing)|oxygen\s*masks?|deployed\s+masks?|worried\s+(?:passenger|face)|shocked\s+(?:passenger|face)|passenger\s+face|cabin\s+fire\s+emergency)\b/i;
+
+/**
  * Training slides / manuals / powerpoint cabin-safety cards / e-learning systems
  * pads (airline-s85-4: CPAT "Aircraft Systems for Cabin Crew", physiology-of-flight
  * educational reels, cabin-safety briefing cards). Not incident B-roll.
@@ -707,20 +740,40 @@ export const AIRLINE_STAKES_ESCAPE_RE =
   /\b(?:oxygen\s*masks?|deployed\s+masks?|cabin\s+pressure|pressuri[sz]|decompress|worried\s+(?:passenger|face)|shocked\s+(?:passenger|face)|passenger\s+face)\b/i;
 
 /**
- * True when haystack is boarding/jet-bridge establishing without face/oxygen/
- * pressure stakes — weak airline hook (airline-s85-3).
+ * True when haystack is boarding/jet-bridge / airplane-crowd establishing without
+ * face/oxygen/pressure stakes — weak airline hook (airline-s85-3 / s85-5).
  *
  * @param {string} haystack
  * @returns {boolean}
  */
 export function isAirlineBoardingOnlyWeakOpener(haystack) {
   const h = String(haystack || '');
-  if (!AIRLINE_BOARDING_ONLY_PAD_RE.test(h)) return false;
+  const isCrowdOrBoarding =
+    AIRLINE_BOARDING_ONLY_PAD_RE.test(h) || AIRLINE_AIRPORT_CROWD_PAD_RE.test(h);
+  if (!isCrowdOrBoarding) return false;
   if (AIRLINE_STAKES_ESCAPE_RE.test(h)) return false;
   // Readable face / pressure stakes escape the weak-opener demote.
+  // Airport-crowd stills that only say "passengers" without face/oxygen stay weak.
   if (
     /\b(?:face|faces|portrait|close[-\s]?up|worried|shocked|oxygen\s*masks?|cabin\s+pressure|pressuri[sz]|decompress)\b/i.test(h)
   ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * True when haystack is muddy/dark fire-extinguisher filler without cabin-
+ * emergency face/oxygen stakes (airline-s85-5).
+ *
+ * @param {string} haystack
+ * @returns {boolean}
+ */
+export function isAirlineFireExtinguisherFiller(haystack) {
+  const h = String(haystack || '');
+  if (!AIRLINE_FIRE_EXTINGUISHER_FILLER_RE.test(h)) return false;
+  if (AIRLINE_CABIN_EMERGENCY_FACE_ESCAPE_RE.test(h)) return false;
+  if (AIRLINE_STAKES_ESCAPE_RE.test(h) && /\b(?:face|faces|portrait|close[-\s]?up|worried|shocked|passenger)\b/i.test(h)) {
     return false;
   }
   return true;

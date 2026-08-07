@@ -34,7 +34,10 @@ import {
   isAirlineBoardingOnlyWeakOpener,
   isAirlineHangarTaxiWeakOpener,
   isAirlineTrainingSlidePad,
+  isAirlineFireExtinguisherFiller,
   airlineVarietyPadJunkReason,
+  unreadableOverlayReason,
+  genericStockJunkReason,
   isWebNativeMotionSource,
   keylessArchiveHumanPortraitScore,
   scoreAssetRelevance,
@@ -307,6 +310,60 @@ describe('keyless archive human portrait topical boost', () => {
     ).toBe(false);
     // Boarding alone is NOT harvest hard-junk (mid-body establishing OK).
     expect(isGenericStockJunk('passengers boarding airplane jet bridge gate', AIRLINE_TOPIC)).toBe(false);
+  });
+
+  it('flags airplane/airport crowd stock as weak opener (airline-s85-5)', () => {
+    expect(isAirlineBoardingOnlyWeakOpener('low-res airplane crowd stock passengers stairs')).toBe(true);
+    expect(isAirlineBoardingOnlyWeakOpener('airport crowd at boarding gate stock')).toBe(true);
+    expect(isAirlineBoardingOnlyWeakOpener('crowd of passengers at airplane stairs')).toBe(true);
+    expect(isAirlineBoardingOnlyWeakOpener('static airplane crowd emotionless boarding')).toBe(true);
+    // Face/oxygen escape.
+    expect(
+      isAirlineBoardingOnlyWeakOpener(
+        'airplane crowd oxygen masks deployed cabin pressure worried faces',
+      ),
+    ).toBe(false);
+    // Not harvest hard-junk — mid-body once is OK.
+    expect(isGenericStockJunk('airplane crowd at boarding stairs stock', AIRLINE_TOPIC)).toBe(false);
+  });
+
+  it('flags muddy/dark fire-extinguisher filler unless cabin emergency face/oxygen (airline-s85-5)', () => {
+    expect(isAirlineFireExtinguisherFiller('muddy dark fire extinguisher on wall stock')).toBe(true);
+    expect(isAirlineFireExtinguisherFiller('fire extinguisher mounted on cabin wall filler')).toBe(true);
+    expect(isAirlineFireExtinguisherFiller('underexposed extinguisher wall only b-roll')).toBe(true);
+    // Cabin emergency + face/oxygen escapes.
+    expect(
+      isAirlineFireExtinguisherFiller(
+        'cabin emergency fire extinguisher oxygen masks deployed worried passenger face',
+      ),
+    ).toBe(false);
+    expect(
+      isAirlineFireExtinguisherFiller(
+        'in-flight emergency extinguisher cabin fire oxygen masks passengers',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects Chinese/non-Latin chyron title cards on English airline topics (airline-s85-5)', () => {
+    expect(
+      unreadableOverlayReason('chinese chyron title card airplane news', AIRLINE_TOPIC),
+    ).toMatch(/ticker|overlay|chyron|non-latin|chinese/i);
+    expect(
+      genericStockJunkReason('instagram chinese text overlay cabin video 客舱失压', AIRLINE_TOPIC),
+    ).toMatch(/non-latin|overlay|chyron|chinese/i);
+    expect(
+      genericStockJunkReason('飞机客舱失压新闻标题卡 title card chyron', AIRLINE_TOPIC),
+    ).toMatch(/non-latin|overlay|chyron|chinese/i);
+    expect(
+      genericStockJunkReason('airplane cabin aisle passengers daylight', AIRLINE_TOPIC),
+    ).toBeNull();
+    // Topic itself about Chinese broadcast keeps the footage.
+    expect(
+      unreadableOverlayReason(
+        'chinese news chyron',
+        'How a chinese news broadcast exposed the airline cabin-pressure cover-up',
+      ),
+    ).toBeNull();
   });
 
   it('hard-rejects training slides / manuals / cabin-safety cards (airline-s85-4)', () => {

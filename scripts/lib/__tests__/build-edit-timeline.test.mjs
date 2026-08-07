@@ -2549,6 +2549,148 @@ describe('buildEditTimeline: airline hook follow-through (web8 stretch)', () => 
     })).toBe('training-slide');
   });
 
+  it('clusters airport-crowd / fire-extinguisher for airline limited reuse (s85-5)', () => {
+    expect(visualSubjectCluster({
+      alt: 'low-res airplane crowd stock passengers on boarding stairs',
+      url: 'https://example.com/crowd.mp4',
+    })).toBe('airport-crowd');
+    expect(visualSubjectCluster({
+      alt: 'airport crowd at boarding gate stock',
+      url: 'https://example.com/airport-crowd.mp4',
+    })).toBe('airport-crowd');
+    expect(visualSubjectCluster({
+      alt: 'muddy dark fire extinguisher on wall stock filler',
+      url: 'https://example.com/extinguisher.mp4',
+    })).toBe('fire-extinguisher');
+  });
+
+  it('never reuses airplane-crowd / boarding stock more than once (airline-s85-5)', () => {
+    const project = {
+      topic: AIRLINE_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 4,
+          narration: 'Why did the cabin keep failing?',
+          title: 'Intro',
+        },
+        {
+          id: 'body',
+          type: 'body',
+          duration: 24,
+          narration: 'They buried every pressure report while oxygen masks sat unused across flights.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'oxygen-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/oxygen-passengers.mp4',
+          alt: 'oxygen masks deployed airplane cabin passengers wearing masks cabin pressure drop',
+          query: 'oxygen mask cabin',
+          source: 'Bing web video',
+        },
+        {
+          id: 'crowd-a',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/airplane-crowd.mp4',
+          alt: 'low-res airplane crowd stock passengers on boarding stairs airport',
+          query: 'airplane crowd boarding',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'crowd-b',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/airplane-crowd.mp4',
+          alt: 'low-res airplane crowd stock passengers on boarding stairs airport',
+          query: 'airplane crowd boarding',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'boarding',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/boarding-gate.mp4',
+          alt: 'passengers boarding airplane jet bridge gate queue airport',
+          query: 'boarding airplane',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'extinguisher',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/extinguisher.mp4',
+          alt: 'muddy dark fire extinguisher on wall stock filler underexposed',
+          query: 'fire extinguisher cabin',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'bright',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/bright-cabin.mp4',
+          alt: 'bright daylight airplane cabin interior well-lit aisle passengers seated',
+          query: 'bright cabin daylight',
+          source: 'Bing web video',
+        },
+        {
+          id: 'oxygen-2',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/oxygen-2.mp4',
+          alt: 'worried passenger face close-up oxygen masks deployed cabin pressure drop people',
+          query: 'passenger face oxygen',
+          source: 'Bing web video',
+        },
+        {
+          id: 'oxygen-3',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/oxygen-3.mp4',
+          alt: 'oxygen masks deployed southwest emergency landing cabin pressure passengers',
+          query: 'oxygen mask deploy',
+          source: 'Bing web video',
+        },
+        {
+          id: 'oxygen-4',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/oxygen-4.mp4',
+          alt: 'passengers wearing oxygen masks nosebleeds jet airways cabin pressure',
+          query: 'passenger oxygen mask',
+          source: 'Bing web video',
+        },
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.0, maxReusePerUrl: 1 });
+    const ids = timeline.map((e) => e.assetId);
+    const crowdUses = ids.filter((id) => id === 'crowd-a' || id === 'crowd-b').length;
+    expect(crowdUses).toBeLessThanOrEqual(1);
+    const boardingUses = ids.filter((id) => id === 'boarding').length;
+    expect(boardingUses).toBeLessThanOrEqual(1);
+    expect(ids).not.toContain('extinguisher');
+    const introDur = 4;
+    const first8 = timeline.filter((e) => {
+      const global = e.segmentId === 'intro' ? e.startSec : introDur + e.startSec;
+      return global < 8;
+    });
+    expect(first8.map((e) => e.assetId)).not.toContain('crowd-a');
+    expect(first8.map((e) => e.assetId)).not.toContain('crowd-b');
+    expect(first8.map((e) => e.assetId)).not.toContain('boarding');
+    expect(first8.map((e) => e.assetId)).not.toContain('extinguisher');
+    expect(
+      first8[0].assetId === 'oxygen-face'
+      || first8[0].assetId === 'oxygen-2'
+      || first8[0].assetId === 'oxygen-3'
+      || first8[0].assetId === 'oxygen-4',
+    ).toBe(true);
+  });
+
   it('keeps denser airline rich-pool holds after first 15s (airline-s85-2 pacing)', () => {
     const media = Array.from({ length: 16 }, (_, i) => ({
       id: `clip-${i}`,

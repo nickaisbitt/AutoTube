@@ -25,6 +25,13 @@ import {
   AIRLINE_FABRIC_SWATCH_PAD_RE,
   AIRLINE_GOLF_PAD_RE,
   AIRLINE_ANIMATED_COURSE_PAD_RE,
+  AIRLINE_NEWS_CHANNEL_LOGO_RE,
+  AIRLINE_BIPLANE_VINTAGE_PAD_RE,
+  AIRLINE_VINTAGE_PROMO_FILM_RE,
+  AIRLINE_HANGAR_TAXI_DEMOTE_RE,
+  AIRLINE_HANGAR_TAXI_ESTABLISHING_RE,
+  AIRLINE_NEWS_PACKAGE_WRAPPER_RE,
+  AIRLINE_STAKES_ESCAPE_RE,
 } from './harvest-quality.mjs';
 import { isAirlineTopic, isHealthcareTopic, isHousingTopic, isWorkplaceTopic } from './topic-family.mjs';
 import { isEvalColdMode } from './eval-flags.mjs';
@@ -45,10 +52,10 @@ const AIRLINE_HOOK_FOLLOW_EVIDENCE_RE =
   /\b(oxygen\s*masks?|deployed\s+masks?|cabin\s+pressure|pressuri[sz]|decompress|worried|shocked|passenger\s+face|flight\s+attendant|cabin\s+crew|bright\s+(?:cabin|daylight)|daylight\s+cabin|well[-\s]?lit\s+cabin|cockpit|flight\s+deck)\b/i;
 
 /** Rich/medium airline pools: denser body holds than the generic 1.5s rich cap. */
-const MAX_BODY_HOLD_AIRLINE_DENSE_SEC = 1.15;
+const MAX_BODY_HOLD_AIRLINE_DENSE_SEC = 1.0;
 
-/** Airline pattern-interrupt window (first minute), denser than the generic 15s gate. */
-const AIRLINE_PATTERN_INTERRUPT_SEC = 60;
+/** Airline pattern-interrupt window — denser across the full first 90s (s85-2). */
+const AIRLINE_PATTERN_INTERRUPT_SEC = 90;
 
 /**
  * @param {object} project
@@ -100,6 +107,9 @@ const AIRLINE_LIMITED_CLUSTERS = new Set([
   'fabric-swatch',
   'golf',
   'animated-course',
+  'biplane-vintage',
+  'news-logo',
+  'hangar-taxi',
 ]);
 
 /** Subjects that must never carry a story, whatever the reuse pressure. */
@@ -142,9 +152,22 @@ function isSurveillanceVisual(asset) {
 /** Coarse visual cluster so cold body cuts don't loop the same subject. */
 export function visualSubjectCluster(asset) {
   const blob = assetBlob(asset);
+  if (AIRLINE_NEWS_CHANNEL_LOGO_RE.test(blob)) return 'news-logo';
   if (AIRLINE_FABRIC_SWATCH_PAD_RE.test(blob)) return 'fabric-swatch';
   if (AIRLINE_GOLF_PAD_RE.test(blob)) return 'golf';
   if (AIRLINE_ANIMATED_COURSE_PAD_RE.test(blob)) return 'animated-course';
+  if (
+    AIRLINE_BIPLANE_VINTAGE_PAD_RE.test(blob)
+    || AIRLINE_VINTAGE_PROMO_FILM_RE.test(blob)
+  ) {
+    return 'biplane-vintage';
+  }
+  if (
+    AIRLINE_HANGAR_TAXI_ESTABLISHING_RE.test(blob)
+    || AIRLINE_HANGAR_TAXI_DEMOTE_RE.test(blob)
+  ) {
+    return 'hangar-taxi';
+  }
   if (/\b(u\.?s\.?\s*mail|usps|postal|post\s*box|mailbox|mail\s*box|letterbox|envelopes?|mailroom|mail\s+truck)\b/.test(blob)) {
     return 'mail';
   }
@@ -295,9 +318,24 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
     || isAirlineEmptyDarkCabin(blob)
     || AIRLINE_GENERIC_RETAIL_SHELF_RE.test(blob)
     || Boolean(airlineVarietyPadJunkReason(blob))
+    || AIRLINE_NEWS_CHANNEL_LOGO_RE.test(blob)
     || (
       AIRLINE_CORPORATE_NEWS_PAD_RE.test(blob)
-      && !/\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|passenger|pilot|flight)\b/i.test(blob)
+      && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
+    )
+    || (
+      (
+        AIRLINE_HANGAR_TAXI_ESTABLISHING_RE.test(blob)
+        || AIRLINE_HANGAR_TAXI_DEMOTE_RE.test(blob)
+      )
+      && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
+    )
+    || (
+      (
+        AIRLINE_BIPLANE_VINTAGE_PAD_RE.test(blob)
+        || AIRLINE_VINTAGE_PROMO_FILM_RE.test(blob)
+      )
+      && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
     )
     || AIRLINE_LIMITED_CLUSTERS.has(visualSubjectCluster(asset))
   );
@@ -776,11 +814,15 @@ export function buildEditTimeline(project, options = {}) {
     if (uniqueUrlCount >= ENOUGH_URLS_FOR_SNAPPY_CUTS && (!topicIsHousing || isRichPool)) {
       effectiveCut = Math.min(effectiveCut, MAX_BODY_HOLD_WHEN_ENOUGH_URLS_SEC);
     }
-    // Rich pool: tighter hold so a single download-clip source can't dominate —
-    // but never so tight that hardMaxReuse would be exceeded for coverage.
-    if (isRichPool) {
+    // Rich / medium airline pools: tighter hold so a single download-clip
+    // source can't dominate — but never so tight that hardMaxReuse would be
+    // exceeded for coverage. airline-s85-2: medium pools (≥6 URLs) also densify
+    // so pacing does not slow after the first 15s.
+    const airlineDensePool = topicIsAirline
+      && (isRichPool || uniqueUrlCount >= MEDIUM_POOL_URL_THRESHOLD);
+    if (isRichPool || airlineDensePool) {
       const richFloor = totalDur > 0 && maxSlots > 0 ? totalDur / maxSlots : 0;
-      // airline-stretch1: denser than 1.5s when hardMax still covers the duration.
+      // airline-stretch1/s85-2: denser than 1.5s when hardMax still covers.
       const richCap = (
         topicIsAirline
         && richFloor <= MAX_BODY_HOLD_AIRLINE_DENSE_SEC
@@ -923,23 +965,44 @@ export function buildEditTimeline(project, options = {}) {
       if (topicIsAirline && isAirlineEmptyDarkCabin(blob)) {
         return -16;
       }
-      // Fabric / golf / animated-course / vintage promo / FA shorts — hard demote
-      // even if harvest somehow kept them (airline-stretch1 variety).
+      // Fabric / golf / animated-course / vintage promo / biplane / FA shorts /
+      // news-channel logos — hard demote even if harvest somehow kept them.
       if (topicIsAirline && airlineVarietyPadJunkReason(blob)) {
         return -18;
       }
-      // Corporate / news-desk / retail shelf pads — soft demote on airline body.
+      // Corporate / news-desk / retail shelf / sterile hangar-taxi — soft demote
+      // so oxygen/face stakes win ties (airline-s85-2).
       if (
         topicIsAirline
         && (
           AIRLINE_GENERIC_RETAIL_SHELF_RE.test(blob)
+          || AIRLINE_NEWS_CHANNEL_LOGO_RE.test(blob)
           || (
             AIRLINE_CORPORATE_NEWS_PAD_RE.test(blob)
-            && !/\b(airline|aircraft|airplane|aviation|cabin|cockpit|oxygen|passenger|pilot|flight)\b/i.test(blob)
+            && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
+          )
+          || (
+            (
+              AIRLINE_HANGAR_TAXI_ESTABLISHING_RE.test(blob)
+              || AIRLINE_HANGAR_TAXI_DEMOTE_RE.test(blob)
+            )
+            && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
+          )
+          || (
+            (
+              AIRLINE_BIPLANE_VINTAGE_PAD_RE.test(blob)
+              || AIRLINE_VINTAGE_PROMO_FILM_RE.test(blob)
+            )
+            && !AIRLINE_STAKES_ESCAPE_RE.test(blob)
           )
         )
       ) {
         return -14;
+      }
+      // News-package wrappers (NTDTV etc.) with stakes: light demote so clean
+      // oxygen/face clips outrank presenter-logo news pads mid-video.
+      if (topicIsAirline && AIRLINE_NEWS_PACKAGE_WRAPPER_RE.test(blob)) {
+        reusePenalty -= AIRLINE_STAKES_ESCAPE_RE.test(blob) ? 5 : 12;
       }
       if (/\b(black and white|b&w|monochrome|grayscale)\b/.test(blob)) return -6;
       // Intro must lead with faces / bright cabin — not distant runway silhouettes.
@@ -1210,6 +1273,18 @@ export function buildEditTimeline(project, options = {}) {
         if (preferBright && /\b(daylight|sunny|bright|well.?lit|window light)\b/i.test(blob)) score += 1;
         return score + beatBoost + reusePenalty;
       }
+      // Airline body: prefer oxygen / cabin-pressure / face stakes over
+      // hangar-taxi / logo / vintage establishing for the full cut (s85-2).
+      if (topicIsAirline) {
+        let score = beatBoost + reusePenalty;
+        if (AIRLINE_STAKES_ESCAPE_RE.test(blob) || AIRLINE_HOOK_STAKES_RE.test(blob)) score += 6;
+        if (hasReadableFaceVisual(a) && AIRLINE_TOPICAL_VISUAL_RE.test(blob)) score += 4;
+        if (AIRLINE_HOOK_FOLLOW_EVIDENCE_RE.test(blob)) score += 3;
+        if (/face|person|people|couple|worried|shocked|reaction|family|close.?up|portrait/i.test(blob)) {
+          score += 2;
+        }
+        return score;
+      }
       if (/face|person|people|couple|worried|shocked|reaction|tenant|family|close.?up|portrait/i.test(blob)) return 3 + beatBoost + reusePenalty;
       return beatBoost + reusePenalty;
     };
@@ -1399,8 +1474,8 @@ export function buildEditTimeline(project, options = {}) {
       };
       // First 15s pattern interrupt: after two same non-human clusters, force a
       // subject change when a different-cluster alternative exists.
-      // airline-stretch1: denser interrupts across the first minute (every ~5–8s
-      // of same-subject pads) — trip after a single same non-human cluster.
+      // airline-stretch1/s85-2: denser interrupts across the first 90s (trip
+      // after a single same non-human cluster) so pacing does not slow after 15s.
       const continuesOpeningClusterPattern = (candidate) => {
         const interruptSec = topicIsAirline ? AIRLINE_PATTERN_INTERRUPT_SEC : FIRST_WINDOW_SEC;
         if (globalStartSec >= interruptSec) return false;

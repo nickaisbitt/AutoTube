@@ -198,6 +198,72 @@ describe('keyless archive human portrait topical boost', () => {
     ).toBe(false);
   });
 
+  it('hard-rejects The Star / news-channel logo / company-facts branding (airline-s85-2)', () => {
+    expect(isGenericStockJunk('the star logo news channel station bug', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('cut to The Star corporate branding mid video', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('news channel logo card station bug lower-third', AIRLINE_TOPIC)).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'Mesa Airlines: Company Facts and Work Culture - Cabin Crew HQ',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    // News-package wrapper without stakes.
+    expect(
+      isGenericStockJunk('for more news videos visit ntdtv studio desk anchor', AIRLINE_TOPIC),
+    ).toBe(true);
+    // Oxygen stakes escape news-package wrapper (real cabin-pressure evidence).
+    expect(
+      isGenericStockJunk(
+        'cabin depressurization oxygen masks deployed for more news videos visit ntdtv',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
+  it('hard-rejects biplane / vintage aircraft / 1960s promo pads (airline-s85-2)', () => {
+    expect(isGenericStockJunk('biplane vintage propeller aircraft loop stock', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('muddy biplane old propeller plane stock b-roll', AIRLINE_TOPIC)).toBe(true);
+    expect(
+      isGenericStockJunk(
+        '1960s world airways charter airline promotional film 53864',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(
+      isGenericStockJunk(
+        '1950s twa airlines plane new york trip via lockheed constellation airplane 89404',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(
+      isGenericStockJunk(
+        'airport in the jet age second edition 1962 educational film los angeles airport lax',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(true);
+    // Stakes escape vintage reject.
+    expect(
+      isGenericStockJunk(
+        '1950s vintage aircraft oxygen masks deployed cabin pressure drop worried passengers',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
+  it('hard-rejects sterile hangar timelapse / taxi establishing without stakes (airline-s85-2)', () => {
+    expect(isGenericStockJunk('aircraft hangar timelapse', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('empty hangar establishing b-roll', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('planes taxiing on the tarmac stock establishing', AIRLINE_TOPIC)).toBe(true);
+    // Real maintenance hangar / mechanic evidence survives.
+    expect(
+      isGenericStockJunk(
+        'maintenance hangar mechanic tools aircraft fuselage inspection',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
   it('keeps on-topic cabin pressurization / oxygen evidence', () => {
     expect(
       isGenericStockJunk(

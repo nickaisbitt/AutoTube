@@ -602,7 +602,33 @@ export const AIRLINE_GENERIC_RETAIL_SHELF_RE =
  * Escape when cabin/oxygen/aircraft evidence is also present.
  */
 export const AIRLINE_CORPORATE_NEWS_PAD_RE =
-  /\b(?:news\s+(?:desk|anchor|studio|package|segment)|anchor\s+desk|talking\s*heads?\s+(?:studio|news|desk|interview)|studio\s+interview\s+(?:desk|set)|corporate\s+(?:handshake|boardroom|office|skyline|b-?roll|stock)|business\s+(?:handshake|meeting|district)|glass\s+building\s+skyline|open[\s-]?plan\s+office|coworking(?:\s+space)?|executive\s+desk|press\s+conference(?:\s+podium)?|generic\s+corporate|stock\s+footage\s+loop)\b/i;
+  /\b(?:news\s+(?:desk|anchor|studio|package|segment|channel|report)|anchor\s+desk|talking\s*heads?\s+(?:studio|news|desk|interview)|studio\s+interview\s+(?:desk|set)|corporate\s+(?:handshake|boardroom|office|skyline|b-?roll|stock|presenter|branding)|static\s+presenter|news[\s-]?style\s+presenter|presenter[\s-]?logo|business\s+(?:handshake|meeting|district)|glass\s+building\s+skyline|open[\s-]?plan\s+office|coworking(?:\s+space)?|executive\s+desk|press\s+conference(?:\s+podium)?|generic\s+corporate|stock\s+footage\s+loop)\b/i;
+
+/**
+ * News-channel logo cards / station bugs / "The Star" branding pads
+ * (airline-s85-2: mid-video corporate logo retention killer). Pure branding
+ * hard-rejects even with aviation keyword stamp; news-package wrappers with
+ * oxygen/face stakes soft-demote on the timeline instead.
+ */
+export const AIRLINE_NEWS_CHANNEL_LOGO_RE =
+  /\b(?:the\s+star(?:\s+(?:logo|brand(?:ing)?|news|channel|network|tv|card|bug))?|star\s+(?:news|channel|network|tv)\s+(?:logo|bug|card|branding)|(?:news|channel|network|station|tv)\s+(?:logo\s*card|station\s*bug|channel\s*bug|bug\s*logo|logo\s*bug|branding\s*card|lower[\s-]?third\s+logo)|station\s*bug|channel\s*bug|logo\s*card|company\s+facts?\s+and\s+work\s+culture|work\s+culture[\s-]*(?:cabin\s+crew|airline)|(?:airline|mesa|skywest|united\s+express)\s+(?:company\s+facts?|work\s+culture|brand(?:ing)?\s+(?:card|pad|logo)|logo\s+(?:card|still|pad))|(?:corporate|airline)\s+logo\s+(?:card|still|pad|break)|logo\s+break)\b/i;
+
+/** News-package wrappers (NTDTV etc.) — demote unless pure logo (above). */
+export const AIRLINE_NEWS_PACKAGE_WRAPPER_RE =
+  /\b(?:ntdtv|ntd\s*tv|for\s+more\s+news\s+videos|visit\s+http[^\s]*ntd|news\s+videos?\s+visit|english\s+ntdtv)\b/i;
+
+/**
+ * Sterile hangar / taxi establishing without cabin-pressure stakes
+ * (airline-s85-2: static hangar + planes taxiing after the hook).
+ * Harvest hard-rejects empty/timelapse/sterile pads; timeline demotes the rest.
+ * Escape when oxygen / pressure / passenger-face evidence is also present.
+ */
+export const AIRLINE_HANGAR_TAXI_ESTABLISHING_RE =
+  /\b(?:(?:empty|sterile|static)\s+hangar|hangar\s+timelapse|aircraft\s+hangar\s+timelapse|maintenance\s+hangar\s+(?:timelapse|establishing)|(?:plane|jet|aircraft|airplane)s?\s+taxi(?:ing|es|ed)?(?:\s+(?:on\s+)?(?:the\s+)?(?:tarmac|runway|apron))?(?:\s+(?:b-?roll|stock|establishing|loop))?|taxi(?:ing)?\s+(?:b-?roll|stock|establishing|loop)|hangar\s+(?:establishing|b-?roll\s+stock))\b/i;
+
+/** Softer hangar/taxi pads demoted on the timeline (not always harvest-rejected). */
+export const AIRLINE_HANGAR_TAXI_DEMOTE_RE =
+  /\b(?:aircraft\s+hangar|maintenance\s+hangar|hangar\s+(?:interior|exterior|bay)|(?:plane|jet|aircraft|airplane)s?\s+taxi(?:ing|es|ed)?|taxi(?:ing)?\s+(?:tarmac|runway|apron)|tarmac\s+taxi)\b/i;
 
 /**
  * Cabin interior-design / fabric-swatch marketing (airline-stretch1: repeated
@@ -624,11 +650,20 @@ export const AIRLINE_ANIMATED_COURSE_PAD_RE =
   /\b(?:(?:animated|animation|cartoon|illustrated)\s+(?:golf\s*)?(?:course|landscape|hills?|countryside|meadow|terrain|green)|(?:golf\s*)?course\s+animation|educational\s+animation|2d\s+animation\s+(?:landscape|aviation|radar|course)|flat\s+animation\s+(?:landscape|course)|animation\s+(?:radar|aviation|navigation)|sentinel\s+in\s+the\s+sky|cartoon\s+(?:landscape|aviation|radar|hills?))\b/i;
 
 /**
- * Vintage transportation promo films that read as TV-documentary filler on
- * modern cabin-pressure stories (airline-stretch1: 1930 American Airways).
+ * Vintage transportation promo / educational films that read as TV-documentary
+ * filler on modern cabin-pressure stories (airline-stretch1: 1930 American
+ * Airways; airline-s85-2: 1950s TWA / 1960s World Airways / jet-age education).
  */
 export const AIRLINE_VINTAGE_PROMO_FILM_RE =
-  /\b(?:(?:19[2-5]\d|silent).{0,48}(?:promo(?:tional)?\s+film|promotional\s+film)|(?:promo(?:tional)?\s+film|promotional\s+film).{0,48}(?:19[2-5]\d|silent|american\s+airways)|story\s+of\s+modern\s+airline\s+transportation|movement\s+of\s+man[,\s]+mail|airline\s+transportation\s+1930)\b/i;
+  /\b(?:(?:19[2-6]\d|silent).{0,64}(?:promo(?:tional)?\s+film|promotional\s+film|educational\s+film|charter\s+airline)|(?:promo(?:tional)?\s+film|promotional\s+film|educational\s+film).{0,64}(?:19[2-6]\d|silent|american\s+airways|world\s+airways|twa)|story\s+of\s+modern\s+airline\s+transportation|movement\s+of\s+man[,\s]+mail|airline\s+transportation\s+1930|airport\s+in\s+the\s+jet\s+age|jet\s+age\s+(?:second\s+edition|educational)|(?:19[2-6]\d|1950s|1960s).{0,48}(?:twa|lockheed\s+constellation|constellation\s+airplane))\b/i;
+
+/**
+ * Muddy biplane / vintage propeller / promo-plane loops that dominate when not
+ * the story (airline-s85-2: overused old-plane B-roll). Escape when oxygen /
+ * cabin-pressure / passenger-face stakes are also present.
+ */
+export const AIRLINE_BIPLANE_VINTAGE_PAD_RE =
+  /\b(?:biplanes?|triplanes?|vintage\s+(?:aircraft|airplane|aeroplane|plane|prop(?:eller)?(?:\s+plane)?)|antique\s+(?:aircraft|airplane|plane)|old\s+(?:prop(?:eller)?\s+)?(?:plane|aircraft|biplane)|propeller\s+(?:plane|aircraft)\s+(?:loop|stock|pad|b-?roll)|muddy\s+(?:biplane|vintage\s+(?:plane|aircraft)|old\s+plane)|(?:lockheed\s+)?constellation\s+airplane|promo\s+plane\s+(?:loop|pad|stock)|vintage\s+promo\s+plane)\b/i;
 
 /**
  * Viral flight-attendant safety-instruction shorts — generic documentary hook
@@ -656,7 +691,8 @@ export function isAirlineEmptyDarkCabin(haystack) {
 
 /**
  * Variety pads that hard-fail cabin-pressure harvest + early timeline windows
- * (airline-stretch1: fabric swatches / golf / animated course).
+ * (airline-stretch1: fabric swatches / golf / animated course;
+ * airline-s85-2: news-channel logos / biplane / vintage promo planes).
  *
  * @param {string} haystack
  * @returns {string|null} reason or null
@@ -664,6 +700,13 @@ export function isAirlineEmptyDarkCabin(haystack) {
 export function airlineVarietyPadJunkReason(haystack) {
   const h = String(haystack || '');
   if (!h.trim()) return null;
+  if (AIRLINE_NEWS_CHANNEL_LOGO_RE.test(h)) {
+    return 'news-channel logo/station-bug branding for airline';
+  }
+  // News-package wrappers without stakes still read as TV pads.
+  if (AIRLINE_NEWS_PACKAGE_WRAPPER_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
+    return 'news-package wrapper pad for airline';
+  }
   if (AIRLINE_FABRIC_SWATCH_PAD_RE.test(h)) return 'fabric-swatch/interior-design pad for airline';
   if (AIRLINE_GOLF_PAD_RE.test(h)) return 'golf-course pad for airline';
   if (AIRLINE_ANIMATED_COURSE_PAD_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
@@ -671,6 +714,9 @@ export function airlineVarietyPadJunkReason(haystack) {
   }
   if (AIRLINE_VINTAGE_PROMO_FILM_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
     return 'vintage promo-film pad for airline';
+  }
+  if (AIRLINE_BIPLANE_VINTAGE_PAD_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
+    return 'biplane/vintage-aircraft pad for airline';
   }
   if (AIRLINE_FA_SAFETY_SHORTS_RE.test(h) && !AIRLINE_STAKES_ESCAPE_RE.test(h)) {
     return 'flight-attendant safety-shorts pad for airline';
@@ -722,6 +768,11 @@ export function airlineHarvestJunkReason(haystack, contextText = '') {
   if (AIRLINE_GENERIC_RETAIL_SHELF_RE.test(h)) {
     return 'generic retail/shelf stock for airline';
   }
+  // News-channel logo / "The Star" / station bugs — hard-reject even with
+  // aviation keyword stamp (airline-s85-2 mid-video retention killer).
+  if (AIRLINE_NEWS_CHANNEL_LOGO_RE.test(h)) {
+    return 'news-channel logo/station-bug branding for airline';
+  }
   // Corporate / news-desk pads survive keyword overlap ("pressure", "report")
   // but read as polished TV — reject unless aviation evidence is also present.
   if (
@@ -730,8 +781,16 @@ export function airlineHarvestJunkReason(haystack, contextText = '') {
   ) {
     return 'corporate/news-desk pad for airline';
   }
-  // airline-stretch1: fabric swatches / golf / animated course / vintage promo /
-  // FA safety shorts — hard-reject before timeline assembly.
+  // Sterile hangar / taxi establishing without stakes (airline-s85-2).
+  if (
+    AIRLINE_HANGAR_TAXI_ESTABLISHING_RE.test(h)
+    && !AIRLINE_STAKES_ESCAPE_RE.test(h)
+    && !/\b(?:oxygen\s*masks?|worried\s+(?:passenger|face)|shocked\s+(?:passenger|face)|passenger\s+face|cabin\s+pressure|pressuri[sz]|decompress)\b/i.test(h)
+  ) {
+    return 'sterile hangar/taxi establishing for airline';
+  }
+  // airline-stretch1/s85-2: fabric / golf / animated / vintage / biplane /
+  // FA shorts / news-logo — hard-reject before timeline assembly.
   const varietyPad = airlineVarietyPadJunkReason(h);
   if (varietyPad) return varietyPad;
   return null;

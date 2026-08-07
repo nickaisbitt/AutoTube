@@ -2166,7 +2166,7 @@ describe('buildEditTimeline: airline hook follow-through (web8 stretch)', () => 
     const bodyEntries = timeline.filter((e) => e.segmentId === 'body');
     const holds = bodyEntries.map((e) => e.endSec - e.startSec);
     const avgHold = holds.reduce((a, b) => a + b, 0) / Math.max(1, holds.length);
-    // Dense airline rich cap (1.15) when hardMax covers; never slower than 1.5.
+    // Dense airline rich cap (1.0) when hardMax covers; never slower than 1.5.
     expect(avgHold).toBeLessThanOrEqual(1.5);
   });
 
@@ -2183,5 +2183,172 @@ describe('buildEditTimeline: airline hook follow-through (web8 stretch)', () => 
       alt: 'sentinel in the sky animation radar aviation navigation',
       url: 'https://example.com/anim.mp4',
     })).toBe('animated-course');
+  });
+
+  it('keeps oxygen/face stakes — never The Star logo, biplane, or hangar pads (airline-s85-2)', () => {
+    const project = {
+      topic: AIRLINE_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 4,
+          narration: 'Why did the cabin keep failing?',
+          title: 'Intro',
+        },
+        {
+          id: 'body',
+          type: 'body',
+          duration: 20,
+          narration: 'They buried every pressure report while oxygen masks sat unused.',
+          title: 'Body',
+        },
+      ],
+      media: [
+        {
+          id: 'stakes-face',
+          segmentId: 'intro',
+          type: 'video',
+          url: 'https://example.com/worried-oxygen-face.mp4',
+          alt: 'worried passenger face close-up oxygen masks deployed cabin pressure drop people',
+          query: 'passenger face oxygen mask',
+          source: 'Bing web video',
+        },
+        {
+          id: 'the-star',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/the-star-logo.mp4',
+          alt: 'the star logo news channel station bug branding card',
+          query: 'airline news',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'mesa-brand',
+          segmentId: 'body',
+          type: 'image',
+          url: 'https://example.com/mesa-facts.jpg',
+          alt: 'Mesa Airlines: Company Facts and Work Culture - Cabin Crew HQ',
+          query: 'mesa airlines',
+          source: 'DuckDuckGo Images',
+        },
+        {
+          id: 'biplane',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/biplane.mp4',
+          alt: 'muddy biplane vintage propeller aircraft loop stock',
+          query: 'vintage airplane',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'hangar',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/hangar-timelapse.mp4',
+          alt: 'aircraft hangar timelapse',
+          query: 'aircraft hangar',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'vintage-promo',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/1960s-promo.mp4',
+          alt: '1960s world airways charter airline promotional film',
+          query: 'airline promo',
+          source: 'Archive.org live',
+        },
+        {
+          id: 'oxygen',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/oxygen-masks.mp4',
+          alt: 'oxygen masks deployed airplane cabin pressure drop passengers',
+          query: 'oxygen mask cabin',
+          source: 'Bing web video',
+        },
+        {
+          id: 'bright',
+          segmentId: 'body',
+          type: 'video',
+          url: 'https://example.com/bright-cabin.mp4',
+          alt: 'bright daylight airplane cabin interior well-lit aisle passengers seated',
+          query: 'bright cabin daylight',
+          source: 'Bing web video',
+        },
+      ],
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.0 });
+    const ids = timeline.map((e) => e.assetId);
+    expect(ids).not.toContain('the-star');
+    expect(ids).not.toContain('mesa-brand');
+    expect(ids).not.toContain('biplane');
+    expect(ids).not.toContain('hangar');
+    expect(ids).not.toContain('vintage-promo');
+    expect(ids.some((id) => id === 'stakes-face' || id === 'oxygen' || id === 'bright')).toBe(true);
+    const first8 = timeline.filter((e) => e.endSec <= 8 || e.startSec < 8);
+    expect(first8[0].assetId).toBe('stakes-face');
+  });
+
+  it('clusters news-logo / biplane / hangar-taxi for airline limited reuse (s85-2)', () => {
+    expect(visualSubjectCluster({
+      alt: 'the star logo news channel station bug',
+      url: 'https://example.com/star.mp4',
+    })).toBe('news-logo');
+    expect(visualSubjectCluster({
+      alt: 'muddy biplane vintage propeller aircraft loop',
+      url: 'https://example.com/biplane.mp4',
+    })).toBe('biplane-vintage');
+    expect(visualSubjectCluster({
+      alt: 'aircraft hangar timelapse',
+      url: 'https://example.com/hangar.mp4',
+    })).toBe('hangar-taxi');
+  });
+
+  it('keeps denser airline rich-pool holds after first 15s (airline-s85-2 pacing)', () => {
+    const media = Array.from({ length: 16 }, (_, i) => ({
+      id: `clip-${i}`,
+      segmentId: 'body',
+      type: 'video',
+      url: `https://example.com/airline-dense-${i}.mp4`,
+      alt: `airline cabin aircraft passenger clip ${i} oxygen pressure worried face`,
+      query: 'airline cabin pressure oxygen',
+      source: 'Bing web video',
+    }));
+    media[0] = {
+      ...media[0],
+      id: 'hook-face',
+      segmentId: 'intro',
+      alt: 'worried passenger face close-up portrait airplane cabin people oxygen masks',
+      query: 'passenger face oxygen',
+    };
+    const project = {
+      topic: AIRLINE_TOPIC,
+      script: [
+        {
+          id: 'intro',
+          type: 'intro',
+          duration: 3,
+          narration: 'Cabin pressure failed again.',
+          title: 'Intro',
+        },
+        {
+          id: 'body',
+          type: 'body',
+          duration: 40,
+          narration: 'Regional airlines hid cabin-pressure failures while oxygen masks sat unused in bright cabins across multiple flights.',
+          title: 'Body',
+        },
+      ],
+      media,
+    };
+    const timeline = buildEditTimeline(project, { cutIntervalSec: 1.25 });
+    const after15 = timeline.filter((e) => e.startSec >= 15);
+    expect(after15.length).toBeGreaterThan(0);
+    const holds = after15.map((e) => e.endSec - e.startSec);
+    const avgHold = holds.reduce((a, b) => a + b, 0) / holds.length;
+    // Dense airline cap (1.0) when coverage allows; never slower than 1.5 after 15s.
+    expect(avgHold).toBeLessThanOrEqual(1.5);
   });
 });

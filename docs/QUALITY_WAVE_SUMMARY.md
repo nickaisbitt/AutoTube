@@ -144,7 +144,7 @@ npm run loop:video -- --topic "The nursing home cameras that recorded abuse for 
 
 | # | Item | Notes |
 |---|------|-------|
-| 1 | **9.3 brutal stretch** | `npm run loop:video -- --until-score 9.3` — aspirational gate per `docs/REMAINING_WORK.md` |
+| 1 | **8.5 brutal stretch** | `npm run loop:video -- --until-score 8.5` — optional stretch per `docs/REMAINING_WORK.md` (was 9.3; too high for web-harvest) |
 | 2 | **Multi-topic ≥8 grind** | Bank, landlord, insurance, cyber, veterans — only nursing has documented 8.2 pass |
 | 3 | **Prod deploy** | GHCR image + `npm run deploy:railway:registry:pull`; prod may lag `master` |
 | 4 | **E2E full pipeline** | `npm run test:e2e:full` (~30 min) after deploy |

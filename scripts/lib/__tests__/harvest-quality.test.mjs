@@ -109,6 +109,23 @@ describe('keyless archive human portrait topical boost', () => {
     ).toBe(true);
   });
 
+  it('rejects empty/dark cabin interiors that kill airline hook follow-through (web8)', () => {
+    expect(isGenericStockJunk('dark empty airplane cabin interior night', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('empty cabin muddy lighting vacant seats', AIRLINE_TOPIC)).toBe(true);
+    // Bright passenger cabin must survive.
+    expect(
+      isGenericStockJunk(
+        'bright daylight airplane cabin passengers seated flight attendant aisle',
+        AIRLINE_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects generic retail shelf pads on cabin-pressure topics (web8)', () => {
+    expect(isGenericStockJunk('woman at the shelf stocking grocery aisle', AIRLINE_TOPIC)).toBe(true);
+    expect(isGenericStockJunk('supermarket shelf stock footage loop', AIRLINE_TOPIC)).toBe(true);
+  });
+
   it('keeps aviation archive evidence ahead of portrait-only archive clips on airline topics', () => {
     const aviationScore = scoreAssetRelevance(aviationArchive, segment, AIRLINE_TOPIC);
     const portraitScore = keylessArchiveHumanPortraitScore(portraitArchive, segment, AIRLINE_TOPIC);

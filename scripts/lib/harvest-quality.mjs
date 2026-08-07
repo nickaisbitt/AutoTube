@@ -578,6 +578,21 @@ export const CORPORATE_SLIDE_DECK_JUNK_RE =
   /\b(slideshare|slide\s*share|pitch\s*deck|powerpoint|keynote\s*slide|findability\s*sciences|corporate\s*slide|saas\s*slide)\b|slidesharecdn\.com/i;
 
 /**
+ * Empty / dark / muddy cabin interiors that kill hook follow-through
+ * (airline-web8: face opener → dark empty cabin → scroll risk).
+ * Escape when passengers / attendants / bright daylight evidence is present.
+ */
+export const AIRLINE_EMPTY_DARK_CABIN_RE =
+  /\b((?:empty|vacant|deserted|uninhabited|abandoned)\s+(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:dark|dim(?:ly)?(?:\s+lit)?|unlit|muddy|night)\s+(?:empty\s+)?(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:airplane|aircraft|plane)\s+(?:cabin\s+)?(?:interior\s+)?(?:empty|dark|dim|unlit|muddy)|empty\s+(?:airplane|aircraft|plane)\s+interior)\b/i;
+
+/**
+ * Generic retail / grocery shelf pads that read as corporate stock on
+ * cabin-pressure investigations (airline-web8 top-fix #3).
+ */
+export const AIRLINE_GENERIC_RETAIL_SHELF_RE =
+  /\b(?:(?:woman|man|person|shopper|customer)\s+(?:at|by|near|browsing|stocking)\s+(?:the\s+)?(?:shelf|shelves|aisle)|(?:supermarket|grocery|retail|convenience\s+store)\s+(?:shelf|shelves|aisle|stock)|stocking\s+(?:shelves?|aisle)|woman\s+(?:at|by)\s+(?:the\s+)?shelf)\b/i;
+
+/**
  * Off-topic scrapes that survive keyword overlap on cabin-pressure topics
  * ("pressure", "failures", "hidden").
  *
@@ -613,6 +628,16 @@ export function airlineHarvestJunkReason(haystack, contextText = '') {
   }
   if (CORPORATE_SLIDE_DECK_JUNK_RE.test(h)) {
     return 'corporate slide deck for airline';
+  }
+  // Bright passenger / attendant cabin escapes the empty/dark hard-reject.
+  if (
+    AIRLINE_EMPTY_DARK_CABIN_RE.test(h)
+    && !/\b(passenger|passengers|seated|flight\s+attendant|cabin\s+crew|oxygen\s+mask|bright|daylight|sunny|well[-\s]?lit)\b/i.test(h)
+  ) {
+    return 'empty/dark cabin interior for airline';
+  }
+  if (AIRLINE_GENERIC_RETAIL_SHELF_RE.test(h)) {
+    return 'generic retail/shelf stock for airline';
   }
   return null;
 }

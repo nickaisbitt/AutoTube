@@ -718,10 +718,12 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     && !hookOverlayViolation(fixState.hookOverlay, { topic, spokenHook: fallbackHookLine || '' })
     ? fixState.hookOverlay
     : undefined;
-  // Housing + healthcare: karaoke OFF by default — long STT burns over news
-  // chyrons / clinical footage tank captionReadability (housing-web15, healthcare-web2).
+  // Housing + healthcare + airline: karaoke OFF by default — long STT burns
+  // (small white/yellow word flashes) tank captionReadability on busy B-roll
+  // (housing-web15, healthcare-web2, airline-web8). Impact-beat yellow stays.
   const housingTopic = isHousingTopic(topic);
   const healthcareTopic = isHealthcareTopic(topic);
+  const airlineTopic = isAirlineTopic(topic);
   project.exportSettings = {
     ...(project.exportSettings || {}),
     quality: 'high',
@@ -729,7 +731,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
     musicPreset: 'neutral',
     resolution: '1080p',
     youtubeMode: true,
-    karaokeCaptions: (housingTopic || healthcareTopic) ? false : fixState.karaokeCaptions !== false,
+    karaokeCaptions: (housingTopic || healthcareTopic || airlineTopic) ? false : fixState.karaokeCaptions !== false,
     hookOverlay: project.exportSettings?.hookOverlay ?? fixStateOverlay,
     hookLine: fallbackHookLine,
   };

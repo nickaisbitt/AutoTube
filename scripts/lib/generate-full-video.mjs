@@ -5148,9 +5148,13 @@ export async function generateFullVideo(options) {
   applyEnvLocalToProcess();
 
   const fixState = { ...(options.fixState || {}) };
-  // Healthcare (like housing): force karaoke OFF at fixState level so render-env.json
-  // snapshot and AUTOTUBE_KARAOKE_CAPTIONS env var both agree with project.exportSettings.
-  if (isHealthcareTopic(topic) && fixState.karaokeCaptions !== false) {
+  // Housing / healthcare / airline: force karaoke OFF at fixState level so
+  // render-env.json and AUTOTUBE_KARAOKE_CAPTIONS agree with exportSettings
+  // (airline-web8: small STT word flashes tanked captionReadability).
+  if (
+    (isHealthcareTopic(topic) || isHousingTopic(topic) || isAirlineTopic(topic))
+    && fixState.karaokeCaptions !== false
+  ) {
     fixState.karaokeCaptions = false;
   }
   if (fixState.reHarvestMedia && !fixState.keepBestMedia) {

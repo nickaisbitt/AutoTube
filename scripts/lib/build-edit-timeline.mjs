@@ -254,6 +254,10 @@ function isRejectedIntroLeadVisual(asset, { airline = false, housing = false, he
   if (isPassiveDeskIntroVisual(asset)) return true;
   return airline && (
     /\b(mailbox|mail box|u\.?s\.?\s*mail|usps|postal|envelopes?|paperwork|documents?|financial|bank statement|invoice|receipt|tax form)\b/.test(blob)
+    || (
+      /\b((?:empty|vacant|deserted)\s+(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:dark|dim|unlit|muddy)\s+(?:empty\s+)?(?:airplane\s+|aircraft\s+|plane\s+)?cabin|empty\s+(?:airplane|aircraft|plane)\s+interior)\b/i.test(blob)
+      && !/\b(passenger|passengers|seated|flight\s+attendant|cabin\s+crew|oxygen\s+mask|bright|daylight|well[-\s]?lit)\b/i.test(blob)
+    )
     || AIRLINE_LIMITED_CLUSTERS.has(visualSubjectCluster(asset))
   );
 }
@@ -857,6 +861,14 @@ export function buildEditTimeline(project, options = {}) {
       // Dark window vignettes / B&W stock read as dead air under captions.
       if (/\b(airplane window|plane window|cabin window)\b/.test(blob) && /\b(night|dark|silhouette|black)\b/.test(blob)) {
         return -15;
+      }
+      // Empty/dark cabin interiors kill hook follow-through (airline-web8).
+      if (
+        topicIsAirline
+        && /\b((?:empty|vacant|deserted)\s+(?:airplane\s+|aircraft\s+|plane\s+)?cabin|(?:dark|dim|unlit|muddy)\s+(?:empty\s+)?(?:airplane\s+|aircraft\s+|plane\s+)?cabin|empty\s+(?:airplane|aircraft|plane)\s+interior)\b/i.test(blob)
+        && !/\b(passenger|passengers|seated|flight\s+attendant|cabin\s+crew|oxygen\s+mask|bright|daylight|well[-\s]?lit)\b/i.test(blob)
+      ) {
+        return -16;
       }
       if (/\b(black and white|b&w|monochrome|grayscale)\b/.test(blob)) return -6;
       // Intro must lead with faces / bright cabin — not distant runway silhouettes.

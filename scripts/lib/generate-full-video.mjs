@@ -732,14 +732,53 @@ export function keylessOmitsStockMotionPool(topicBlob = '', hasStockKeys = false
 }
 
 /**
- * Web clips carry provider-title evidence and already cleared the topical relevance
- * gate before vision. When the vision budget is spent we fail OPEN for them rather than
- * skipping into a near-empty inject — an aviation clip with strong title/query evidence
- * is safer to keep than to drop, and dropping web clips over budget is exactly what
- * starved segment media. Non-web (stock/archive) clips keep the strict skip.
+ * DoD product topics (airline / housing / healthcare) may soft-admit web clips on
+ * family evidence when the vision budget is spent. Random topics must not.
  */
-export function shouldFailOpenWebVisionSkip({ isWebClip = false, hasStrongEvidence = false } = {}) {
-  return Boolean(isWebClip && hasStrongEvidence);
+export function isDodVisionFailOpenTopic(topicBlob = '') {
+  return (
+    isAirlineTopic(topicBlob)
+    || isHousingTopic(topicBlob)
+    || isHealthcareTopic(topicBlob)
+  );
+}
+
+/**
+ * True when clip title/alt shares a meaningful subject token with the topic.
+ * Raises the bar for non-DoD vision fail-open: loose isCyberRelevantClip matches
+ * (bare `ai` inside "available"/"daily") must not soft-admit unverified web junk
+ * (beekeepers: visionWebFailOpen=77 flooded the motion pool).
+ */
+export function hasTitleAltSubjectMatch(clip = {}, topicBlob = '') {
+  const titleAlt = `${clip.title || ''} ${clip.alt || ''}`.trim();
+  if (!titleAlt || !String(topicBlob || '').trim()) return false;
+  const wanted = evidenceTokens(topicBlob);
+  if (!wanted.length) return false;
+  const sameSubject = (token, want) =>
+    token === want
+    || (Math.abs(token.length - want.length) <= 3 && (token.startsWith(want) || want.startsWith(token)));
+  return evidenceTokens(titleAlt).some((token) => wanted.some((want) => sameSubject(token, want)));
+}
+
+/**
+ * Web clips may fail OPEN when the vision budget is spent — but only with real evidence.
+ *
+ * - DoD (airline/housing/healthcare): keep soft-admit on strong family evidence so
+ *   aviation/clinical/housing harvest is not starved once the small vision budget ends.
+ * - Non-DoD: require a true title/alt subject match. Loose keyword "relevance"
+ *   (isCyberRelevantClip) is not enough — that path flooded beekeepers with Charlie Rose /
+ *   FEMA / news pads counted as visionWebFailOpen.
+ * Non-web (stock/archive) clips keep the strict skip.
+ */
+export function shouldFailOpenWebVisionSkip({
+  isWebClip = false,
+  hasStrongEvidence = false,
+  isDodTopic = false,
+  titleAltSubjectMatch = false,
+} = {}) {
+  if (!isWebClip) return false;
+  if (isDodTopic) return Boolean(hasStrongEvidence);
+  return Boolean(titleAltSubjectMatch);
 }
 
 /** After this many Qwen REJECT/WEAK(intro) drops, body injects skip the LLM to avoid soft-pass starvation. */
@@ -4310,12 +4349,15 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         budget: visionBudget,
       });
       if (gate.action === 'skip') {
-        // Fail open for web clips that already cleared the topical relevance gate on
-        // their own title/alt evidence — dropping them once the vision budget is spent
-        // is what starved inject to ~1. Stock/archive clips keep the strict skip.
+        // Fail open for web clips with real evidence when the vision budget is spent.
+        // DoD topics keep family strongMotionRelevance; non-DoD require title/alt
+        // subject match so loose cyber-keyword hits cannot flood the motion pool.
+        const titleAltSubjectMatch = hasTitleAltSubjectMatch(evidenceClip, topicBlob);
         const failOpen = shouldFailOpenWebVisionSkip({
           isWebClip,
           hasStrongEvidence: strongMotionRelevance,
+          isDodTopic: isDodVisionFailOpenTopic(topicBlob),
+          titleAltSubjectMatch,
         });
         if (failOpen) {
           report.visionStockBudgetSoftAdmitted = (report.visionStockBudgetSoftAdmitted || 0) + 1;
@@ -4328,7 +4370,24 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         }
       }
       if (gate.reason === 'budget-exhausted-soft') {
+        // AUTOTUBE_VISION_BUDGET_SOFT must not bypass the non-DoD title/alt bar.
+        const titleAltSubjectMatch = hasTitleAltSubjectMatch(evidenceClip, topicBlob);
+        const softAdmitWeb = shouldFailOpenWebVisionSkip({
+          isWebClip,
+          hasStrongEvidence: strongMotionRelevance,
+          isDodTopic: isDodVisionFailOpenTopic(topicBlob),
+          titleAltSubjectMatch,
+        });
+        if (isWebClip && !softAdmitWeb) {
+          report.visionStockBudgetSkipped = (report.visionStockBudgetSkipped || 0) + 1;
+          report.motionDroppedVision = (report.motionDroppedVision || 0) + 1;
+          report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+          continue;
+        }
         report.visionStockBudgetSoftAdmitted = (report.visionStockBudgetSoftAdmitted || 0) + 1;
+        if (isWebClip) {
+          report.visionWebFailOpen = (report.visionWebFailOpen || 0) + 1;
+        }
       }
       if (gate.action === 'check') {
         report.visionStockChecked = (report.visionStockChecked || 0) + 1;

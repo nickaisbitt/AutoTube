@@ -1892,6 +1892,7 @@ describe('decideInjectRelevanceAction', () => {
         ...base,
         strongEvidence: true,
         checked: 99,
+        relevanceKept: 2,
         relevanceRejected: 99,
         need: 9,
       }),
@@ -1905,6 +1906,7 @@ describe('decideInjectRelevanceAction', () => {
         checked: 48,
         budget: 48,
         need: 4,
+        relevanceKept: 3,
         relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
       }),
     ).toEqual({ action: 'admit', reason: 'starve-soft' });
@@ -1926,6 +1928,90 @@ describe('decideInjectRelevanceAction', () => {
         need: 3,
       }).reason,
     ).toBe('starve-soft');
+  });
+
+  it('locks out strong-evidence when LLM kept 0 and rejected > 0', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        checked: 15,
+        strongEvidence: true,
+        relevanceKept: 0,
+        relevanceRejected: 14,
+        need: 6,
+      }),
+    ).toEqual({ action: 'check', reason: 'zero-keep-lock' });
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        checked: 8,
+        motionRelevancePassed: true,
+        relevanceKept: 0,
+        relevanceRejected: 8,
+        need: 4,
+      }),
+    ).toEqual({ action: 'check', reason: 'zero-keep-lock' });
+  });
+
+  it('locks out starve-soft when LLM kept 0 and rejected > 0', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        checked: 14,
+        relevanceKept: 0,
+        relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+        need: 5,
+      }),
+    ).toEqual({ action: 'check', reason: 'zero-keep-lock' });
+  });
+
+  it('treats missing relevanceKept as zero once rejects exist', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        checked: 6,
+        strongEvidence: true,
+        relevanceRejected: 6,
+        need: 3,
+      }),
+    ).toEqual({ action: 'check', reason: 'zero-keep-lock' });
+  });
+
+  it('honors explicit zeroKeepLock even before rejects accumulate', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        strongEvidence: true,
+        zeroKeepLock: true,
+        need: 4,
+      }),
+    ).toEqual({ action: 'check', reason: 'zero-keep-lock' });
+  });
+
+  it('still strong-evidence admits when at least one clip was kept', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        checked: 15,
+        strongEvidence: true,
+        relevanceKept: 1,
+        relevanceRejected: 14,
+        need: 6,
+      }),
+    ).toEqual({ action: 'admit', reason: 'strong-evidence' });
+  });
+
+  it('does not lock before any LLM reject outcomes', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        checked: 0,
+        strongEvidence: true,
+        relevanceKept: 0,
+        relevanceRejected: 0,
+        need: 6,
+      }),
+    ).toEqual({ action: 'admit', reason: 'strong-evidence' });
   });
 });
 

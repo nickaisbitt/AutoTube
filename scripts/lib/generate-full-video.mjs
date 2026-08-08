@@ -753,6 +753,8 @@ export const INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD = 12;
  * - Intro always prefers a real check (WEAK still blocked via shouldRejectRelevanceDecision).
  * - need > 0 and relevanceRejected ≥ threshold → starve-soft admit on body only.
  * - checked ≥ budget → admit with budget-exhausted (caller increments relevanceBudgetSkipped).
+ * - zeroKeepLock / post-LLM 0 KEEP + REJECT > 0 → never soft-admit via strong-evidence
+ *   or starve-soft for the rest of that top-up (prefer thin soft-pass over Archive junk).
  *
  * @returns {{ action: 'check' | 'admit', reason: string }}
  */
@@ -764,15 +766,26 @@ export function decideInjectRelevanceAction({
   strongEvidence = false,
   motionRelevancePassed = false,
   relevanceRejected = 0,
+  relevanceKept,
+  zeroKeepLock = false,
   starveSoftThreshold = INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
 } = {}) {
+  const rejected = Number(relevanceRejected) || 0;
+  const keptNum = Number(relevanceKept);
+  // Missing or non-numeric kept counts as 0 once the run has LLM outcomes.
+  const keptIsZero = !Number.isFinite(keptNum) || keptNum <= 0;
+  const llmAlreadyChecked = (Number(checked) || 0) > 0;
+  const lock =
+    zeroKeepLock === true
+    || (llmAlreadyChecked && keptIsZero && rejected > 0);
+
   const hasTopicEvidence = Boolean(strongEvidence || motionRelevancePassed);
   // Body with clear aviation/topic evidence already cleared keyword harvest — skip LLM.
   // Intro still judged so WEAK/REJECT cannot land on the hook.
-  if (!isIntro && hasTopicEvidence) {
+  // After Qwen 0 KEEP / N REJECT, do not re-open Archive strong-evidence bypass.
+  if (!isIntro && hasTopicEvidence && !lock) {
     return { action: 'admit', reason: 'strong-evidence' };
   }
-  const rejected = Number(relevanceRejected) || 0;
   const threshold = Number(starveSoftThreshold);
   const starveSoft =
     need > 0
@@ -780,11 +793,15 @@ export function decideInjectRelevanceAction({
     && rejected >= threshold;
   // Soft-pass starvation: keep rejecting hard via LLM only while checking intros;
   // remaining body slots soft-admit without spending more Qwen calls.
-  if (starveSoft && !isIntro) {
+  // Locked runs leave need unmet instead of starve-soft injecting known rejects' cousins.
+  if (starveSoft && !isIntro && !lock) {
     return { action: 'admit', reason: 'starve-soft' };
   }
   if (checked >= budget) {
     return { action: 'admit', reason: 'budget-exhausted' };
+  }
+  if (lock && !isIntro && (hasTopicEvidence || starveSoft)) {
+    return { action: 'check', reason: 'zero-keep-lock' };
   }
   return { action: 'check', reason: 'within-budget' };
 }
@@ -4796,6 +4813,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         strongEvidence,
         motionRelevancePassed: clip.motionRelevancePassed === true,
         relevanceRejected: report.relevanceRejected || 0,
+        relevanceKept: report.relevanceKept || 0,
       });
       if (gate.action === 'check') {
         report.relevanceChecked = checked + 1;

@@ -86,7 +86,9 @@ describe('padding URL maxReuse=1 (generic topics)', () => {
     expect(paddingUrlReuseCap(AIRLINE_TOPIC)).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it('ensureTopicalVideoCoverage does not clone the same URL onto two segments when unused alternatives exist', () => {
+  it('ensureTopicalVideoCoverage does not clone Archive pads across segments on generic topics', () => {
+    // Generic maxReuse=1: URLs already on intro (reuseCount=1) must not be cloned
+    // onto varroa/outro — that was the Charlie Rose / corruption-pad failure.
     const topic = 'How beekeepers fight Varroa mites without killing the hive';
     const intro = { id: 'intro', title: 'Hive crisis', narration: 'Varroa mites threaten colonies' };
     const varroa = { id: 'varroa', title: 'Varroa mites', narration: 'mites drain bee brood' };
@@ -100,39 +102,70 @@ describe('padding URL maxReuse=1 (generic topics)', () => {
       title: 'Charlie Rose bees interview',
       query: 'beekeepers bees hive',
     };
-    const hive = {
+    const corruption = {
       type: 'video',
       segmentId: 'intro',
-      url: 'https://archive.org/download/HiveInspection/hive_inspection.mp4',
+      url: 'https://archive.org/download/VictoriansCorruption/corruption.mp4',
       source: 'Archive.org live',
-      alt: 'beekeeper inspecting hive frames for Varroa mites',
-      title: 'Hive inspection Varroa mites',
-      query: 'beekeeper hive Varroa mites',
+      alt: 'victorians corruption documentary',
+      title: 'victorians corruption',
+      query: 'beekeepers bees',
     };
     const project = {
       topic,
       title: 'Varroa mite crisis',
       script: [intro, varroa, outro],
-      media: [charlie, hive],
+      media: [charlie, corruption],
     };
     const coverage = ensureTopicalVideoCoverage(project);
-    const urlsBySeg = {};
-    for (const asset of project.media) {
-      if (asset.type !== 'video') continue;
-      urlsBySeg[asset.segmentId] = urlsBySeg[asset.segmentId] || [];
-      urlsBySeg[asset.segmentId].push(canonicalMediaKey(asset.url));
-    }
     const allVideoKeys = project.media
       .filter((a) => a.type === 'video')
       .map((a) => canonicalMediaKey(a.url));
-    const uniqueKeys = new Set(allVideoKeys);
-    expect(uniqueKeys.size).toBe(allVideoKeys.length);
-    expect(coverage.padded.length).toBeGreaterThanOrEqual(1);
-    const charlieKey = canonicalMediaKey(charlie.url);
-    const segsWithCharlie = Object.entries(urlsBySeg)
-      .filter(([, keys]) => keys.includes(charlieKey))
-      .map(([id]) => id);
-    expect(segsWithCharlie).toEqual(['intro']);
+    expect(new Set(allVideoKeys).size).toBe(allVideoKeys.length);
+    expect(coverage.padded).toEqual([]);
+    expect(project.media.filter((a) => a.segmentId === 'varroa')).toEqual([]);
+    expect(project.media.filter((a) => a.segmentId === 'outro')).toEqual([]);
+  });
+
+  it('ensureTopicalVideoCoverage prefers unused URLs when specialized topics allow reuse', () => {
+    const fear = { id: 'fear', title: 'The Fear Factor', narration: 'tenants panic over rent' };
+    const zillow = { id: 'zillow', title: 'Zillow crash', narration: 'home prices plunge' };
+    const usedTwice = {
+      type: 'video',
+      segmentId: 'zillow',
+      url: 'https://example.com/apartment-a.mp4',
+      source: 'Bing web video',
+      alt: 'apartment building for rent residential street',
+      title: 'apartment for rent',
+      query: 'apartment for rent housing',
+    };
+    // Same URL already cloned once elsewhere → reuseCount=2 after push below.
+    const usedTwiceClone = {
+      ...usedTwice,
+      id: 'clone-a',
+      segmentId: 'zillow',
+      url: 'https://example.com/apartment-a.mp4',
+    };
+    const unusedAlt = {
+      type: 'video',
+      segmentId: 'zillow',
+      url: 'https://example.com/eviction-notice.mp4',
+      source: 'Bing web video',
+      alt: 'tenant reads eviction notice apartment hallway',
+      title: 'eviction notice tenant',
+      query: 'eviction notice housing',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      title: 'Housing Crash',
+      script: [fear, zillow],
+      media: [usedTwice, usedTwiceClone, unusedAlt],
+    };
+    // Collapse intentional duplicate key count: mediaAssetKey counts both a clones.
+    const coverage = ensureTopicalVideoCoverage(project);
+    expect(coverage.padded.some((a) => a.segmentId === 'fear')).toBe(true);
+    const fearPad = coverage.padded.find((a) => a.segmentId === 'fear');
+    expect(canonicalMediaKey(fearPad.url)).toBe(canonicalMediaKey(unusedAlt.url));
   });
 
   it('mergeVolumePadding refuses to re-attach a URL already owned by another segment', () => {

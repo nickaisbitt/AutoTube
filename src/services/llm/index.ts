@@ -13,8 +13,16 @@ export {
 } from './defaultModels';
 
 // Script generation
-export { generateAIScript, generateHookVariants, DEFAULT_SCRIPT_MODEL, validateScriptSpecificity, buildSpecificityFixPrompt } from './scriptGenerator';
-export type { HookVariant } from './scriptGenerator';
+export {
+  generateAIScript,
+  generateHookVariants,
+  DEFAULT_SCRIPT_MODEL,
+  validateScriptSpecificity,
+  buildSpecificityFixPrompt,
+  scriptTopicFidelityIssues,
+  isHistoricalVictorianBeekeepingTopic,
+} from './scriptGenerator';
+export type { HookVariant, TopicFidelityIssue } from './scriptGenerator';
 
 // Script review
 export { reviewAndImproveScript, refineScriptMultiPass } from './scriptReviewer';

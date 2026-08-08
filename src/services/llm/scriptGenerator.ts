@@ -59,6 +59,13 @@ export async function generateAIScript(
 
 Your scripts sound like a confident, opinionated creator talking directly to camera — NOT like a news anchor or AI summary. Think Johnny Harris meets Wendover Productions meets a sharp podcast host.
 
+TOPIC FIDELITY (HARD — NEVER VIOLATE):
+- Preserve the ERA, GEOGRAPHY, and PROPER NOUNS implied by the user topic. Do NOT modernize, relocate, or swap lookalike names.
+- "Victorian" / "Victorian era" / "Victorian beekeepers" means 19th-century Britain (Queen Victoria's era) unless the topic explicitly names Australia, Melbourne, or the Australian state of Victoria.
+- Victorian era ≠ Victoria, Australia. Silent-hive fears in Victorian Britain ≠ modern Australian Varroa outbreaks, modern beekeeping influencers, or contemporary news figures (e.g. Simon Mildren) unless the topic says so.
+- If Wikipedia / web "CURRENT CONTEXT" contradicts the topic's era or place, IGNORE that context and stay faithful to the topic. Prefer historical framing over latest-news framing when the topic is clearly historical.
+- Named people, places, and institutions in the script must fit the topic's century and region. Do not import modern crises, brands, or celebrities that the topic never mentioned.
+
 VOICE RULES:
 - Write for SPOKEN delivery. Short sentences. Conversational rhythm. Mix punchy one-liners with longer explanatory beats.
 - Have a STRONG editorial opinion. Don't just summarize — tell the viewer what YOU think and why they should care.
@@ -322,6 +329,7 @@ Target Duration: ${config.targetDuration} minutes`;
   const userPrompt = `Write a ${config.targetDuration}-minute video script about: "${safeTopic}"
 ${topicDataBlock}${seoKeywordsBlock}${webContext}
 CRITICAL RULES:
+0. TOPIC FIDELITY: Stay in the era, geography, and proper-noun set implied by "${safeTopic}". Do NOT modernize or relocate (Victorian era ≠ Victoria Australia unless the topic says Australia/Melbourne). Discard web/wiki context that shifts century or place. Do not center modern Varroa-only AU crises or modern figures when the topic is historical Victorian beekeeping.
 1. HOOK-FIRST: The intro MUST open with a specific claim, statistic, or consequence derived from the TOPIC CONTEXT DATA above — NOT "Welcome to", "In this video", or any generic opener. If context data is available, pull a real number or fact from it and attribute it. If no context data is available, use dramatic framing around the topic name without fabricating statistics.
 2. Pick ONE central story/example and build the whole video around it. Don't list 5+ equal examples.
 3. The first two segments (intro + first section) MUST lead with a named person's story or real human example. Tell a MINI-STORY about one NAMED real person — reference them at least TWICE: once when introduced, and once later when the lesson connects back to them.
@@ -435,6 +443,15 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
       }
     } else if (specificityIssues.length > 0 && loopFastMode) {
       logger.info('OpenRouter', `Loop fast mode: skipping specificity retry (${specificityIssues.length} issue(s))`);
+    }
+
+    // Warn-only topic fidelity check (era/geography drift) — never blocks render
+    const fidelityIssues = scriptTopicFidelityIssues(safeTopic, segments);
+    if (fidelityIssues.length > 0) {
+      logger.warn(
+        'OpenRouter',
+        `Topic fidelity: ${fidelityIssues.length} issue(s) — ${fidelityIssues.map((i) => i.detail).join('; ')}`,
+      );
     }
 
     // Enforce duration cap — LLM sometimes ignores the 25s constraint
@@ -621,6 +638,83 @@ AUDIENCE-SPECIFIC ADAPTATION — CONSUMERS:
 - Connect larger threats to daily life: "when a hospital gets hacked, YOUR medical records end up for sale on the dark web."
 - Balance fear with agency: after every scary example, immediately show what they can do TODAY to protect themselves.
 - Avoid ALL jargon — no "vectors," "exploits," "zero-days," "lateral movement." Use plain English: "hackers get in through," "they spread to other devices," "a flaw nobody knew about."`;
+}
+
+
+// ---------------------------------------------------------------------------
+// Post-generation topic fidelity (era / geography / proper nouns)
+// ---------------------------------------------------------------------------
+
+export type TopicFidelityIssue = {
+  code: 'era_geography_drift' | 'modern_relocation' | 'anachronistic_entity';
+  detail: string;
+};
+
+function scriptTextFromInput(
+  script: string | Array<{ narration?: string; title?: string; visualNote?: string }>,
+): string {
+  if (typeof script === 'string') return script;
+  return script
+    .map((s) => [s.title, s.narration, s.visualNote].filter(Boolean).join(' '))
+    .join('\n');
+}
+
+/** True when the topic clearly means historical Victorian Britain (not AU Victoria). */
+export function isHistoricalVictorianBeekeepingTopic(topic: string): boolean {
+  const t = topic.toLowerCase();
+  const victorianEra =
+    /\bvictorian\b/.test(t)
+    && !/\b(?:australia|australian|melbourne|sydney|brisbane)\b/.test(t);
+  const beekeeping =
+    /\b(?:bee(?:keeper|keeping|s)?|hive|apiary|honey(?:comb)?|colony\s+collapse|silent\s+hive)\b/.test(t);
+  return victorianEra && beekeeping;
+}
+
+/**
+ * Lightweight post-check for script drift away from the user topic's era/place.
+ * Returns issues for logging / QA; does not throw or block render.
+ */
+export function scriptTopicFidelityIssues(
+  topic: string,
+  script: string | Array<{ narration?: string; title?: string; visualNote?: string }>,
+): TopicFidelityIssue[] {
+  const issues: TopicFidelityIssue[] = [];
+  const body = scriptTextFromInput(script);
+  if (!topic.trim() || body.trim().length < 20) return issues;
+
+  if (isHistoricalVictorianBeekeepingTopic(topic)) {
+    if (/\b(?:victoria(?:n)?\s+australia|australia(?:n)?\s+victoria|state\s+of\s+victoria|melbourne|sydney)\b/i.test(body)) {
+      issues.push({
+        code: 'modern_relocation',
+        detail: 'Script relocates Victorian-era beekeeping to Victoria Australia / modern AU geography',
+      });
+    }
+    if (/\bsimon\s+mildren\b/i.test(body)) {
+      issues.push({
+        code: 'anachronistic_entity',
+        detail: 'Script names modern figure Simon Mildren on a historical Victorian beekeeping topic',
+      });
+    }
+    // Modern Varroa-only framing without historical century anchors
+    const hasVarroa = /\bvarroa\b/i.test(body);
+    const hasHistoricalAnchor =
+      /\b(?:18\d{2}|19th\s+century|queen\s+victoria|britain|england|london|victorian\s+era)\b/i.test(body);
+    if (hasVarroa && !hasHistoricalAnchor) {
+      issues.push({
+        code: 'era_geography_drift',
+        detail: 'Script centers modern Varroa without historical Victorian-era anchors',
+      });
+    } else if (hasVarroa && /\b(?:australia|melbourne|202[0-9]|201[0-9])\b/i.test(body) && hasHistoricalAnchor) {
+      if (!issues.some((i) => i.code === 'modern_relocation')) {
+        issues.push({
+          code: 'era_geography_drift',
+          detail: 'Script mixes historical Victorian topic with modern Australian Varroa framing',
+        });
+      }
+    }
+  }
+
+  return issues;
 }
 
 // ---------------------------------------------------------------------------

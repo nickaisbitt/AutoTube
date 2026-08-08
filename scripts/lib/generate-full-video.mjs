@@ -65,6 +65,7 @@ import {
   medicalClickbaitReason,
   mergeVolumePadding,
   militaryNavalJunkReason,
+  canonicalMediaKey,
   unreadableOverlayReason,
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
@@ -823,14 +824,17 @@ export function withDistinctProxyIdentity(url = '', identity = 'clip') {
   );
 }
 
+/** Per-segment unique motion key — decode proxied targets so pad clones collapse. */
 function harvestVolumeUrlKey(url = '') {
-  return String(url || '').split('?')[0];
+  return canonicalMediaKey(url) || String(url || '').split('?')[0];
 }
 
 /**
  * Build a balanced assignment queue for motion padding. The least-populated
  * segments receive one clip each before any segment receives another, so a finite
  * pool improves the floor instead of being drained into the first few segments.
+ * Counts use {@link canonicalMediaKey} so the same Archive target with distinct
+ * proxy identities still counts as one URL (maxReuse=1 aware).
  */
 export function buildMotionPaddingQueue(project = {}, minPerSegment = 6, limit = Infinity) {
   const segments = Array.isArray(project.script) ? project.script : [];

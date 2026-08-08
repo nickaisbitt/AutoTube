@@ -1732,6 +1732,27 @@ describe('web-motion volume identity and distribution', () => {
     expect(volume.pass).toBe(true);
   });
 
+  it('counts identical Archive proxy targets as one URL per segment (pad maxReuse aware)', () => {
+    const target = encodeURIComponent('https://archive.org/download/Charlie_Rose/Charlie_Rose.mp4');
+    const script = [
+      { id: 's1', title: 'One' },
+      { id: 's2', title: 'Empty' },
+    ];
+    const media = [
+      {
+        segmentId: 's1',
+        url: withDistinctProxyIdentity(`/api/download-clip?url=${target}`, 's1-0'),
+      },
+      {
+        segmentId: 's1',
+        url: withDistinctProxyIdentity(`/api/download-clip?url=${target}`, 's1-clone'),
+      },
+    ];
+    const queue = buildMotionPaddingQueue({ script, media }, 2, 2);
+    expect(queue[0]).toBe('s2');
+    expect(queue).toContain('s2');
+  });
+
   it('balances a finite motion pool across the thinnest segments before filling to six', () => {
     const script = [
       { id: 's1', title: 'Three' },

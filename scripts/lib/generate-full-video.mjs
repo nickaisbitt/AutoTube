@@ -3858,7 +3858,7 @@ export function resolveMotionVolumeTargets({
   let perSegTarget = chaseHard ? 3 : 2;
   if (loopFastMode) {
     minVideos = Math.min(minVideos, segN * loopCap);
-    perSegTarget = Math.min(perSegTarget, loopCap);
+    perSegTarget = loopCap;
     if (!airline && !housing && !healthcare) {
       chaseHard = false;
     }
@@ -3866,7 +3866,7 @@ export function resolveMotionVolumeTargets({
   return {
     mode: 'keyless',
     minVideos,
-    stockNeed: chaseHard ? Math.max(0, keylessFloor - stockApiVideoCount) : 0,
+    stockNeed: chaseHard ? Math.max(0, minVideos - stockApiVideoCount) : 0,
     perSegTarget,
     introTarget: chaseHard ? 4 : 2,
     aggressive: false,

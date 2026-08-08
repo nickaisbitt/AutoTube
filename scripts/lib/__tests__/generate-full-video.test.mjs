@@ -1620,9 +1620,20 @@ describe('resolveMotionVolumeTargets', () => {
       loopFastMode: true,
       loopMinAssetsPerSegment: 4,
     });
-    expect(fast.minVideos).toBe(24);
+    expect(fast.minVideos).toBe(18);
     expect(fast.perSegTarget).toBe(4);
     expect(fast.stockNeed).toBe(0);
+    const cappedHousing = resolveMotionVolumeTargets({
+      ...base,
+      hasStockKeys: false,
+      topicBlob: HOUSING_TOPIC,
+      segmentCount: 10,
+      loopFastMode: true,
+      loopMinAssetsPerSegment: 3,
+    });
+    expect(cappedHousing.minVideos).toBe(30);
+    expect(cappedHousing.perSegTarget).toBe(3);
+    expect(cappedHousing.stockNeed).toBe(30);
     const airlineFast = resolveMotionVolumeTargets({
       ...base,
       hasStockKeys: false,
@@ -1631,7 +1642,7 @@ describe('resolveMotionVolumeTargets', () => {
       loopFastMode: true,
       loopMinAssetsPerSegment: 4,
     });
-    expect(airlineFast.minVideos).toBe(24);
+    expect(airlineFast.minVideos).toBe(18);
     expect(airlineFast.perSegTarget).toBe(4);
     expect(airlineFast.stockNeed).toBeGreaterThan(0);
   });
@@ -2032,6 +2043,7 @@ describe('web-motion volume identity and distribution', () => {
       segmentId: 's1',
       type: 'video',
       url: withDistinctProxyIdentity('/api/download-clip?url=https%3A%2F%2Fyoutu.be%2Fabc', 's1-0'),
+      title: 'beekeepers harvesting honey frames',
     };
     const untrusted = {
       id: 'untrusted',
@@ -2043,7 +2055,7 @@ describe('web-motion volume identity and distribution', () => {
     const result = restoreMotionRelevancePassed(kept, [trusted, untrusted], [
       { segmentId: 's1', url: trusted.url, motionRelevancePassed: true },
       { segmentId: 's1', url: untrusted.url, motionRelevancePassed: false },
-    ]);
+    ], 'Why beekeepers are disappearing', [{ id: 's1', title: 'Hive collapse' }]);
 
     expect(result.media.map((asset) => asset.id)).toEqual(['still', 'trusted']);
     expect(result.restored).toEqual([trusted]);

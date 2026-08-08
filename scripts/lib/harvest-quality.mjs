@@ -1325,6 +1325,25 @@ function topicRequiresSubjectOverlap(topicBlob = '') {
   return topicSubjectTokens(topicBlob).length > 0;
 }
 
+/**
+ * Keyless generic topics with filmable subject nouns (beekeepers, Varroa, …) —
+ * not DoD verticals. Used to chase more inject volume than the default cap of 6.
+ *
+ * @param {string} topicBlob
+ * @returns {boolean}
+ */
+export function isGenericKeylessSubjectTopic(topicBlob = '') {
+  if (
+    isAirlineTopic(topicBlob)
+    || isHousingTopic(topicBlob)
+    || isHealthcareTopic(topicBlob)
+    || isCrimeHeistTopic(topicBlob)
+  ) {
+    return false;
+  }
+  return topicSubjectTokens(topicBlob).length > 0;
+}
+
 /** Volume padding from top-up passes — must not be stripped by post-top-up relevance. */
 export function isVolumePaddingAsset(asset) {
   if (isUnsafeMediaUrl(asset?.url || '')) return false;
@@ -2061,7 +2080,16 @@ export function ensureTopicalVideoCoverage(project) {
         && !usedBySegment.has(key)
         && score >= VOLUME_PADDING_MIN_RELEVANCE
       ));
-    const candidate = pickPaddingCandidate(candidates, reuseCounts, maxReuse);
+    let candidate = pickPaddingCandidate(candidates, reuseCounts, maxReuse);
+    if (!candidate && candidates.length) {
+      const segmentAssets = media.filter((asset) => asset?.segmentId === segment.id);
+      const segmentVideos = segmentAssets.filter((asset) => isVideoAsset(asset));
+      // Video-starved segment: has harvested stills but zero motion — reuse best topical
+      // clip even past maxReuse. Empty segments stay empty (no Charlie Rose pad cloning).
+      if (segmentAssets.length > 0 && segmentVideos.length === 0) {
+        candidate = [...candidates].sort((a, b) => b.score - a.score)[0];
+      }
+    }
     if (!candidate) continue;
 
     const clone = {

@@ -36,6 +36,7 @@ import {
   healthcareOffTopicBrollReason,
   healthcareArchiveTitleMismatchReason,
   housingOffTopicBrollReason,
+  isGenericKeylessSubjectTopic,
   isGenericStockJunk,
   isAirlineBoardingOnlyWeakOpener,
   isAirlineHangarTaxiWeakOpener,
@@ -213,6 +214,38 @@ describe('padding URL maxReuse=1 (generic topics)', () => {
     });
     expect(merged).toHaveLength(1);
     expect(merged[0].segmentId).toBe('intro');
+  });
+
+  it('ensureTopicalVideoCoverage reuses best topical video when segment has zero videos', () => {
+    const topic = 'Why Victorian beekeepers feared the silent hive';
+    const intro = { id: 'intro', title: 'Silent hive', narration: 'Victorian beekeepers feared the silent hive' };
+    const outro = { id: 'outro', title: 'Aftermath', narration: 'beekeepers adapt to colony collapse' };
+    const beeVideo = {
+      type: 'video',
+      segmentId: 'intro',
+      url: 'https://archive.org/download/bee-heist/bee-heist.mp4',
+      source: 'Archive.org live',
+      alt: 'beekeeper inspects silent hive frames',
+      title: 'beekeeper hive inspection',
+      query: 'victorian beekeepers silent hive',
+    };
+    const outroStill = {
+      type: 'image',
+      segmentId: 'outro',
+      url: 'https://example.com/still.jpg',
+      source: 'Web harvest',
+      alt: 'victorian era illustration',
+      query: 'victorian',
+    };
+    const project = {
+      topic,
+      title: topic,
+      script: [intro, outro],
+      media: [beeVideo, outroStill],
+    };
+    const coverage = ensureTopicalVideoCoverage(project);
+    expect(coverage.padded.some((asset) => asset.segmentId === 'outro' && asset.type === 'video')).toBe(true);
+    expect(project.media.filter((asset) => asset.segmentId === 'outro' && asset.type === 'video')).toHaveLength(1);
   });
 });
 
@@ -668,6 +701,15 @@ describe('keyless archive human portrait topical boost', () => {
     const coverage = ensureTopicalVideoCoverage(project);
     expect(coverage.missingBefore).toEqual([]);
     expect(coverage.missing).toEqual([]);
+  });
+});
+
+describe('isGenericKeylessSubjectTopic', () => {
+  it('flags beekeepers as generic keyless subject and excludes airline verticals', () => {
+    expect(isGenericKeylessSubjectTopic('Why Victorian beekeepers feared the silent hive')).toBe(true);
+    expect(isGenericKeylessSubjectTopic(AIRLINE_TOPIC)).toBe(false);
+    expect(isGenericKeylessSubjectTopic(HOUSING_TOPIC)).toBe(false);
+    expect(isGenericKeylessSubjectTopic(HEALTHCARE_TOPIC)).toBe(false);
   });
 });
 

@@ -1556,7 +1556,7 @@ describe('resolveMotionVolumeTargets', () => {
     // Soft-pass needs 6 keyless airline clips; the top-up target stays well above it.
     expect(airline.minVideos).toBeGreaterThanOrEqual(18);
     expect(airline.perSegTarget).toBe(3);
-    const generic = resolveMotionVolumeTargets({ ...base, hasStockKeys: false, topicBlob: 'bank otp scam' });
+    const generic = resolveMotionVolumeTargets({ ...base, hasStockKeys: false, topicBlob: 'how and why' });
     expect(generic.minVideos).toBe(6);
     expect(generic.stockNeed).toBe(0);
   });
@@ -1569,6 +1569,19 @@ describe('resolveMotionVolumeTargets', () => {
       stockApiVideoCount: 5,
     });
     expect(targets.stockNeed).toBe(targets.minVideos - 5);
+  });
+
+  it('chases higher keyless volume for generic subject topics like beekeepers', () => {
+    const beekeepers = resolveMotionVolumeTargets({
+      ...base,
+      hasStockKeys: false,
+      topicBlob: 'Why Victorian beekeepers feared the silent hive',
+      segmentCount: 4,
+    });
+    expect(beekeepers.mode).toBe('keyless');
+    expect(beekeepers.minVideos).toBeGreaterThanOrEqual(12);
+    expect(beekeepers.perSegTarget).toBe(3);
+    expect(beekeepers.stockNeed).toBeGreaterThan(0);
   });
 });
 

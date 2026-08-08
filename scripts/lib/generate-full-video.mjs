@@ -69,6 +69,7 @@ import {
   canonicalMediaKey,
   unreadableOverlayReason,
   hasGenericSubjectEvidence,
+  isGenericKeylessSubjectTopic,
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
 import {
@@ -3827,8 +3828,10 @@ export function resolveMotionVolumeTargets({
       ? Math.max(18, segN * 4)
       : healthcare
         ? Math.max(16, segN * 3)
-        : Math.min(segN * 2, 6);
-  const chaseHard = airline || housing || healthcare;
+        : isGenericKeylessSubjectTopic(topicBlob)
+          ? Math.max(12, segN * 3)
+          : Math.min(segN * 2, 6);
+  const chaseHard = airline || housing || healthcare || isGenericKeylessSubjectTopic(topicBlob);
   return {
     mode: 'keyless',
     minVideos: keylessFloor,
@@ -5601,7 +5604,15 @@ export async function generateFullVideo(options) {
   const log = (msg) => {
     if (!options.quiet) console.log(msg);
   };
-  const loopMinAssets = Math.max(2, Math.min(8, fixState.minAssetsPerSegment || 6));
+  const loopMinAssets = Math.max(
+    2,
+    Math.min(
+      8,
+      (!resolveStockKeyMode().keyed && isGenericKeylessSubjectTopic(topic))
+        ? Math.min(fixState.minAssetsPerSegment || 4, 4)
+        : (fixState.minAssetsPerSegment || 6),
+    ),
+  );
 
   // Fast path: polish a frozen cut.
   if (keepBestEnabled() && fixState.keepBestMedia && fixState.frozenProjectPath) {

@@ -1524,7 +1524,9 @@ export function buildEditTimeline(project, options = {}) {
       && !isOutro
       && uniqueUrlCount >= 4
     ) ? Math.max(effectiveCut, FIRST_WINDOW_SEC / uniqueUrlCount) : interval;
-    const maxReuseThisSeg = isIntro || isOutro ? 1 : effectiveMaxReuse;
+    const maxReuseThisSeg = (isIntro || isOutro) && segUniqueUrlSet.size <= 1
+      ? Number.POSITIVE_INFINITY
+      : (isIntro || isOutro ? 1 : effectiveMaxReuse);
     const usableBodyVideos = (!isIntro && !isOutro && videos.length)
       ? uniqueAssetsByUrl(videos.filter((a) => scoreAsset(a) >= 0))
       : [];
@@ -2010,7 +2012,10 @@ export function buildEditTimeline(project, options = {}) {
         const coverage = uniqueAssetsByUrl([
           ...ordered,
           ...(isIntro || isOutro ? bookendCandidates(globalPool) : globalPool),
-        ]).filter((c) => c.id !== lastAssetId && !(urlKey(c) && urlKey(c) === lastUrl));
+        ]).filter((c) => {
+          if ((isIntro || isOutro) && segUniqueUrlSet.size <= 1) return true;
+          return c.id !== lastAssetId && !(urlKey(c) && urlKey(c) === lastUrl);
+        });
         const clean = coverage.filter((c) => !isNeverUseVisual(c));
         const base = clean.length ? clean : coverage;
         const intrinsic = (c) => scoreAsset(c, activeBeat, { ignoreReuse: true });

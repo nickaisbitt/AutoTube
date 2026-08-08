@@ -445,9 +445,46 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
       logger.info('OpenRouter', `Loop fast mode: skipping specificity retry (${specificityIssues.length} issue(s))`);
     }
 
-    // Warn-only topic fidelity check (era/geography drift) — never blocks render
+    // Topic fidelity retry — era/geography drift on historical topics (beekeepers autopsy:
+    // "Meet James Lacey" modern presenter on Victorian Britain topic).
     const fidelityIssues = scriptTopicFidelityIssues(safeTopic, segments);
-    if (fidelityIssues.length > 0) {
+    if (fidelityIssues.length > 0 && !signal?.aborted && !loopFastMode) {
+      logger.warn(
+        'OpenRouter',
+        `Topic fidelity: ${fidelityIssues.length} issue(s) — ${fidelityIssues.map((i) => i.detail).join('; ')}. Retrying.`,
+      );
+      const fixPrompt = buildTopicFidelityFixPrompt(segments, safeTopic, fidelityIssues);
+      try {
+        const retryResponse = await fetchWithTimeout(OPENROUTER_ENDPOINT, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://autotube.video',
+            'X-Title': 'AutoTube AI Generator',
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: finalSystemPrompt },
+              { role: 'user', content: fixPrompt },
+            ],
+            response_format: { type: 'json_object' },
+          }),
+        }, { timeoutMs: 90_000, maxRetries: 1, signal });
+        if (retryResponse.ok) {
+          const retryData = await retryResponse.json();
+          const retryContent = openRouterMessageText(retryData?.choices?.[0]?.message);
+          if (retryContent) {
+            const retrySegments = parseSegmentsFromContent(retryContent);
+            segments = injectTransitionIfMissing(retrySegments);
+            logger.success('OpenRouter', 'Topic fidelity retry produced improved segments');
+          }
+        }
+      } catch {
+        logger.warn('OpenRouter', 'Topic fidelity retry failed, keeping original segments');
+      }
+    } else if (fidelityIssues.length > 0) {
       logger.warn(
         'OpenRouter',
         `Topic fidelity: ${fidelityIssues.length} issue(s) — ${fidelityIssues.map((i) => i.detail).join('; ')}`,
@@ -646,7 +683,7 @@ AUDIENCE-SPECIFIC ADAPTATION — CONSUMERS:
 // ---------------------------------------------------------------------------
 
 export type TopicFidelityIssue = {
-  code: 'era_geography_drift' | 'modern_relocation' | 'anachronistic_entity';
+  code: 'era_geography_drift' | 'modern_relocation' | 'anachronistic_entity' | 'fabricated_presenter';
   detail: string;
 };
 
@@ -693,6 +730,12 @@ export function scriptTopicFidelityIssues(
       issues.push({
         code: 'anachronistic_entity',
         detail: 'Script names modern figure Simon Mildren on a historical Victorian beekeeping topic',
+      });
+    }
+    if (/\bmeet\s+[a-z][a-z'-]*\s+[a-z][a-z'-]+\b/i.test(body)) {
+      issues.push({
+        code: 'fabricated_presenter',
+        detail: 'Script uses modern documentary presenter framing ("Meet …") instead of historical Victorian beekeeping voice',
       });
     }
     // Modern Varroa-only framing without historical century anchors
@@ -789,4 +832,16 @@ export function buildSpecificityFixPrompt(
   }).join('\n');
 
   return `The following script about "${topic}" has specificity issues that must be fixed:\n\n${JSON.stringify(segments.map(s => ({ type: s.type, title: s.title, narration: s.narration, visualNote: s.visualNote, duration: s.duration })))}\n\nISSUES TO FIX:\n${issueDescriptions}\n\nCRITICAL FIX INSTRUCTIONS:\n- Add specific data and examples, make it less generic\n- Every segment MUST contain at least 2 specific statistics with numbers (dates, dollar amounts, percentages)\n- Every segment MUST mention at least 2 named entities (real companies, people, places)\n- The first segment MUST open with a hook — a specific attention-grabbing claim, not a generic welcome\n- Each segment should feel like a mini-story with setup, conflict, and payoff, not a Wikipedia summary\n\nReturn ONLY a valid JSON object in this shape: { "segments": [ ... ] }. No markdown, no preamble.`;
+}
+
+/**
+ * Builds a fix prompt when era/geography/topic fidelity checks fail.
+ */
+export function buildTopicFidelityFixPrompt(
+  segments: ScriptSegment[],
+  topic: string,
+  issues: TopicFidelityIssue[],
+): string {
+  const issueLines = issues.map((issue) => `- ${issue.detail}`).join('\n');
+  return `The following script about "${topic}" drifts away from the topic's era, geography, or subject. Rewrite it to stay faithful.\n\n${JSON.stringify(segments.map((s) => ({ type: s.type, title: s.title, narration: s.narration, visualNote: s.visualNote, duration: s.duration })))}\n\nFIDELITY ISSUES:\n${issueLines}\n\nCRITICAL FIX INSTRUCTIONS:\n- Stay in the century and region implied by the topic (Victorian beekeepers = 19th-century Britain, not Victoria Australia or modern news).\n- Do NOT open with "Meet [Name]" presenter framing — use historical narration, journals, or anonymous beekeepers.\n- Do NOT import modern figures, brands, or Varroa-only crises unless the topic explicitly names them.\n- Named people and places must fit the topic's era. Prefer real historical anchors (Queen Victoria, London, 1850s England) over fabricated modern characters.\n- Keep segment count, types, and approximate durations; fix narration and visualNote text only.\n\nReturn ONLY a valid JSON object: { "segments": [ ... ] }. No markdown, no preamble.`;
 }

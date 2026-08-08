@@ -124,6 +124,8 @@ describe('quality waves 2–5 helpers', () => {
         segmentId: i < 8 ? 'a' : 'b',
         url: `https://x/motion-${i}.mp4`,
         alt: i < 8 ? 'ambulance gps dispatch' : 'rural road paramedic',
+        motionRelevancePassed: true,
+        relevanceDecision: 'KEEP',
       })),
     };
     expect(
@@ -146,13 +148,22 @@ describe('quality waves 2–5 helpers', () => {
       delete process.env.VITE_PIXABAY_KEY;
       const project = {
         topic: 'How school districts lost student mental-health records to ransomware',
-        script: [{ id: 's1' }, { id: 's2' }, { id: 's3' }, { id: 's4' }],
+        script: [
+          { id: 's1', title: 'Breach', narration: 'school student records ransomware' },
+          { id: 's2', title: 'Parents', narration: 'worried parent student data breach' },
+          { id: 's3', title: 'District', narration: 'school district ransomware files' },
+          { id: 's4', title: 'Recovery', narration: 'student mental health records stolen' },
+        ],
         media: Array.from({ length: 12 }, (_, i) => ({
           type: 'video',
           segmentId: `s${(i % 4) + 1}`,
           url: `https://videos.pexels.com/topical-${i}.mp4`,
-          alt: i % 2 ? 'school hallway student records ransomware' : 'worried parent phone data breach',
+          alt: i % 2 === 0
+            ? 'school hallway student records ransomware'
+            : 'worried parent phone student data breach',
           source: 'Pexels Videos',
+          motionRelevancePassed: true,
+          relevanceDecision: 'KEEP',
         })),
       };
       const soft = evaluateHarvestVolumeWithSoftPass(
@@ -201,18 +212,18 @@ describe('quality waves 2–5 helpers', () => {
   it('volume evaluation pads an uncovered segment from the topical video pool', async () => {
     const { evaluateHarvestVolume } = await import('../../../scripts/lib/harvest-quality.mjs');
     const project = {
-      topic: 'How school districts lost student records to ransomware',
+      topic: 'How landlords use AI to evict tenants faster',
       script: [
-        { id: 's1', title: 'School breach', narration: 'student records ransomware breach' },
-        { id: 's2', title: 'Stolen records', narration: 'school student records were stolen' },
+        { id: 's1', title: 'Eviction notice', narration: 'tenant eviction notice paperwork landlord' },
+        { id: 's2', title: 'Court filing', narration: 'tenant faces eviction court filing apartment' },
       ],
       media: [
         {
           id: 'topical-video',
           type: 'video',
           segmentId: 's1',
-          url: 'https://videos.example.com/school-ransomware.mp4',
-          alt: 'school student records ransomware breach',
+          url: 'https://videos.example.com/eviction-paperwork.mp4',
+          alt: 'worried tenant eviction notice paperwork hands desk apartment',
           source: 'Pexels Videos',
         },
         { id: 's1-still', type: 'image', segmentId: 's1', url: 'https://images.example.com/s1.jpg' },
@@ -225,7 +236,7 @@ describe('quality waves 2–5 helpers', () => {
     expect(volume.pass).toBe(true);
     expect(volume.perSegment.s2.topicalVideoCount).toBe(1);
     expect(volume.topicalVideoPadding).toEqual([
-      expect.objectContaining({ segmentId: 's2', url: 'https://videos.example.com/school-ransomware.mp4' }),
+      expect.objectContaining({ segmentId: 's2', url: 'https://videos.example.com/eviction-paperwork.mp4' }),
     ]);
     expect(project.media.some((asset) => (
       asset.segmentId === 's2' && asset.topicalVideoPadding === true
@@ -238,7 +249,7 @@ describe('quality waves 2–5 helpers', () => {
       evaluateHarvestVolumeWithSoftPass,
     } = await import('../../../scripts/lib/harvest-quality.mjs');
     const project = {
-      topic: 'City services investigation',
+      topic: 'How rural ambulance GPS routes send crews to demolished houses',
       script: [
         { id: 's1', title: 'Emergency dispatch', narration: 'ambulance paramedic dispatch response' },
         { id: 's2', title: 'Flood zoning', narration: 'zoning flood maps erased neighborhoods' },

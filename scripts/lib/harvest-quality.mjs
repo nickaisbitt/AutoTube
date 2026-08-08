@@ -832,6 +832,27 @@ export function isAirlineBoardingOnlyWeakOpener(haystack) {
 }
 
 /**
+ * Generic airport-terminal / gate walking B-roll without cabin/oxygen/face stakes.
+ * Counts as aviation-adjacent but must not satisfy keyless strong-video majority
+ * (qualityWaves: airport-weak pads are not airplane cabin evidence).
+ */
+export const AIRLINE_TERMINAL_WALK_PAD_RE =
+  /\b(?:airport\s+terminal|terminal\s+passengers?|passengers?\s+walking(?:\s+(?:the\s+)?gate)?|walking\s+(?:the\s+)?gate|departure\s+(?:gate|lounge)|gate\s+area)\b/i;
+
+/**
+ * @param {string} haystack
+ * @returns {boolean}
+ */
+export function isAirlineTerminalWalkWeakPad(haystack) {
+  const h = String(haystack || '');
+  if (!AIRLINE_TERMINAL_WALK_PAD_RE.test(h)) return false;
+  if (AIRLINE_STAKES_ESCAPE_RE.test(h)) return false;
+  if (AIRLINE_STRONG_CABIN_RE.test(h) || AIRLINE_STRONG_OXYGEN_RE.test(h)) return false;
+  if (/\b(?:face|faces|portrait|close[-\s]?up|worried|shocked|oxygen\s*masks?)\b/i.test(h)) return false;
+  return true;
+}
+
+/**
  * True when haystack is muddy/dark fire-extinguisher filler without cabin-
  * emergency face/oxygen stakes (airline-s85-5).
  *
@@ -1442,6 +1463,20 @@ export function archivePathEvidenceText(url = '') {
 }
 
 /**
+ * Archive path titles only when provider alt/title are empty — avoids laundering
+ * harvest slugs like "airport-weak-0" into airline strong-video evidence.
+ *
+ * @param {object} asset
+ * @returns {string}
+ */
+function archiveEvidenceForAsset(asset = {}) {
+  const rawAlt = String(asset?.alt || '').trim();
+  const title = String(asset?.title || '').trim();
+  if (rawAlt || title) return '';
+  return archivePathEvidenceText(asset?.url || '');
+}
+
+/**
  * Whole-word (and light stem) match for topic subject tokens — bee ↔ beekeeper(s).
  *
  * @param {string} token
@@ -1480,7 +1515,7 @@ export function subjectTokenMatchesText(token, text) {
  */
 export function hasGenericSubjectEvidence(asset = {}, topicBlob = '') {
   if (!topicRequiresSubjectOverlap(topicBlob)) return false;
-  const blob = `${subjectTokenMetaBlob(asset)} ${archivePathEvidenceText(asset?.url || '')}`.trim();
+  const blob = `${subjectTokenMetaBlob(asset)} ${archiveEvidenceForAsset(asset)}`.trim();
   if (!blob) return false;
   const subjects = topicSubjectTokens(topicBlob);
   if (!subjects.length) return false;
@@ -1505,7 +1540,7 @@ export function visualEvidenceBlob(asset) {
   if (alt && query) {
     alt = alt.split(query).join(' ');
   }
-  const archiveMeta = archivePathEvidenceText(asset?.url || '');
+  const archiveMeta = archiveEvidenceForAsset(asset);
   return `${alt} ${asset?.title || ''} ${archiveMeta} ${asset?.sourceUrl || ''} ${asset?.url || ''} ${asset?.thumbnailUrl || ''}`
     .toLowerCase()
     .replace(/\s+/g, ' ')
@@ -1528,7 +1563,7 @@ export function subjectTokenMetaBlob(asset) {
   if (alt && query) {
     alt = alt.split(query).join(' ');
   }
-  const archiveMeta = archivePathEvidenceText(asset?.url || '');
+  const archiveMeta = archiveEvidenceForAsset(asset);
   return `${alt} ${asset?.title || ''} ${archiveMeta}`
     .toLowerCase()
     .replace(/\s+/g, ' ')
@@ -3650,6 +3685,7 @@ function isAirlineStrongVideo(asset = {}, topicBlob = '') {
   // harvest titles and queries actually use. Junk (military/medical/mail/etc.) was
   // already rejected above, so a surviving blob with this evidence is genuine
   // aviation motion — the fix that lets Bing/Google "download-clip" web clips count.
+  if (isAirlineTerminalWalkWeakPad(blob)) return false;
   if (AIRLINE_AVIATION_EVIDENCE_RE.test(blob)) return true;
   return false;
 }

@@ -57,6 +57,12 @@ describe('scriptTopicFidelityIssues', () => {
     expect(issues.some((i) => i.code === 'era_geography_drift')).toBe(true);
   });
 
+  it('flags modern presenter framing ("Meet …") on Victorian beekeeping topics', () => {
+    const drifted = 'Meet James Lacey, a beekeeper who fears the silent hive in his apiary.';
+    const issues = scriptTopicFidelityIssues(VICTORIAN_TOPIC, drifted);
+    expect(issues.some((i) => i.code === 'fabricated_presenter')).toBe(true);
+  });
+
   it('passes a faithful Victorian Britain script', () => {
     const faithful = `
       In 1850s England, Victorian beekeepers dreaded the silent hive.

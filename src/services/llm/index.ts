@@ -19,6 +19,7 @@ export {
   DEFAULT_SCRIPT_MODEL,
   validateScriptSpecificity,
   buildSpecificityFixPrompt,
+  buildTopicFidelityFixPrompt,
   scriptTopicFidelityIssues,
   isHistoricalVictorianBeekeepingTopic,
 } from './scriptGenerator';

@@ -3,6 +3,7 @@ import {
   airlineQueryVisionBypass,
   archiveEvidenceLookupBudget,
   archiveEvidenceVerdict,
+  archiveHasBeatEvidence,
   preferHealthcareArchiveClinicalQueries,
   archiveIdentifierFromUrl,
   archiveShortQueryVariants,
@@ -331,6 +332,95 @@ describe('providerEvidenceText', () => {
   it('drops markup and one-word metadata', () => {
     expect(providerEvidenceText('<p>Airliner &amp; hangar footage</p>')).toBe('airliner hangar footage');
     expect(providerEvidenceText('clip')).toBe('');
+  });
+});
+
+
+describe('archiveHasBeatEvidence', () => {
+  const BEE_TOPIC = 'Why beekeepers are vanishing and how hive collapse spreads';
+  const BEE_SEG = 'Hive inspection at dawn';
+
+  it('does not treat opaque Archive alt as strongEvidence (LLM must still run)', () => {
+    const charlieRose = {
+      source: 'Archive.org live',
+      url: 'https://archive.org/download/CharlieRose/clip.mp4',
+      title: 'Charlie Rose',
+      alt: 'charlie rose interview segment',
+      query: 'beekeepers hive honey',
+    };
+    const wmar = {
+      source: 'Archive.org',
+      title: 'WMAR 1959 newsreel Howard County',
+      alt: 'victorians corruption fema pad',
+      query: 'beekeepers hive',
+    };
+    expect(archiveHasBeatEvidence(charlieRose, BEE_TOPIC, BEE_SEG)).toBe(false);
+    expect(archiveHasBeatEvidence(wmar, BEE_TOPIC, BEE_SEG)).toBe(false);
+    // Gate input: opaque Archive must NOT skip LLM via strong-evidence admit.
+    expect(
+      decideInjectRelevanceAction({
+        checked: 0,
+        budget: 48,
+        need: 8,
+        isIntro: false,
+        strongEvidence: archiveHasBeatEvidence(charlieRose, BEE_TOPIC, BEE_SEG),
+        motionRelevancePassed: false,
+        relevanceRejected: 0,
+      }),
+    ).toEqual({ action: 'check', reason: 'within-budget' });
+    expect(
+      shouldRunHarvestRelevanceGate({
+        strongEvidence: archiveHasBeatEvidence(charlieRose, BEE_TOPIC, BEE_SEG),
+        isIntro: false,
+        checked: 0,
+        budget: 48,
+      }),
+    ).toBe(true);
+  });
+
+  it('counts bee/hive Archive alt as beat evidence and skips LLM on body', () => {
+    const hiveClip = {
+      source: 'Archive.org live',
+      url: 'https://archive.org/download/HiveFilm/clip.mp4',
+      title: 'Beekeepers inspect hive frames for brood',
+      alt: 'beekeeper hive honey frames close up',
+      query: 'beekeepers hive',
+    };
+    expect(archiveHasBeatEvidence(hiveClip, BEE_TOPIC, BEE_SEG)).toBe(true);
+    expect(
+      decideInjectRelevanceAction({
+        checked: 0,
+        budget: 48,
+        need: 8,
+        isIntro: false,
+        strongEvidence: archiveHasBeatEvidence(hiveClip, BEE_TOPIC, BEE_SEG),
+        motionRelevancePassed: false,
+        relevanceRejected: 0,
+      }),
+    ).toEqual({ action: 'admit', reason: 'strong-evidence' });
+    expect(
+      shouldRunHarvestRelevanceGate({
+        strongEvidence: archiveHasBeatEvidence(hiveClip, BEE_TOPIC, BEE_SEG),
+        isIntro: false,
+        checked: 0,
+        budget: 48,
+      }),
+    ).toBe(false);
+  });
+
+  it('returns false for non-Archive sources even with topical metadata', () => {
+    expect(
+      archiveHasBeatEvidence(
+        {
+          source: 'Bing Videos',
+          title: 'Beekeepers inspect hive frames',
+          alt: 'hive honey',
+          query: 'beekeepers',
+        },
+        BEE_TOPIC,
+        BEE_SEG,
+      ),
+    ).toBe(false);
   });
 });
 

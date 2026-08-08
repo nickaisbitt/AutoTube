@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   airlineSoftPassMotionFailureReason,
+  assetHasTopicSubjectOverlap,
   canonicalMediaKey,
   checkEditTimelineIntroFace,
   repairEditTimelineIntroFace,
   checkIntroFacePool,
   countAirlineStrongVideos,
   ensureTopicalVideoCoverage,
+  evaluateHarvestVolume,
   evaluateHarvestVolumeWithSoftPass,
+  extractKeywords,
   filterAssetsByRelevance,
   hasAirlineAviationEvidence,
   hasHealthcareEvidence,
@@ -43,6 +46,8 @@ import {
   keylessArchiveHumanPortraitScore,
   scoreAssetRelevance,
   thinInjectVarietyFailReason,
+  topicSubjectTokens,
+  topicalVideoScore,
   VOLUME_PADDING_MIN_RELEVANCE,
 } from '../harvest-quality.mjs';
 
@@ -502,6 +507,78 @@ describe('keyless archive human portrait topical boost', () => {
     const coverage = ensureTopicalVideoCoverage(project);
     expect(coverage.missingBefore).toEqual([]);
     expect(coverage.missing).toEqual([]);
+  });
+});
+
+describe('honest topicalVideoCount requires subject overlap', () => {
+  const BEEKEEPERS_TOPIC = 'Why Victorian beekeepers feared the silent hive';
+  const segment = {
+    id: 's1',
+    title: 'The Varroa Line in the Sand',
+    narration: 'Victorian beekeepers watched hives fall silent as mites spread.',
+  };
+  const topicKeywords = extractKeywords(BEEKEEPERS_TOPIC, 12);
+
+  it('extracts bee/hive subjects and drops victorian era + fear/silent framing', () => {
+    const tokens = topicSubjectTokens(BEEKEEPERS_TOPIC);
+    expect(tokens).toEqual(expect.arrayContaining(['beekeepers', 'hive', 'bee', 'honeycomb']));
+    expect(tokens).not.toContain('victorian');
+    expect(tokens).not.toContain('victorians');
+    expect(tokens).not.toContain('feared');
+    expect(tokens).not.toContain('silent');
+  });
+
+  it('does not count corruption-alt victorian clip as topical for beekeepers topic', () => {
+    const corruption = {
+      id: 'corruption-alt',
+      type: 'video',
+      segmentId: 's1',
+      alt: 'victorians are not worried about corruption',
+      title: 'victorians are not worried about corruption',
+      query: 'victorian',
+      url: 'https://archive.org/download/youtube-_LnvIZwJ0WA/_LnvIZwJ0WA.mp4',
+      source: 'Archive.org live',
+    };
+    expect(assetHasTopicSubjectOverlap(corruption, BEEKEEPERS_TOPIC)).toBe(false);
+    // Keyword relevance still lies via "victorian" + portrait "worried" — topical score must not.
+    expect(scoreAssetRelevance(corruption, segment, BEEKEEPERS_TOPIC, topicKeywords))
+      .toBeGreaterThanOrEqual(VOLUME_PADDING_MIN_RELEVANCE);
+    expect(keylessArchiveHumanPortraitScore(corruption, segment, BEEKEEPERS_TOPIC))
+      .toBeGreaterThanOrEqual(VOLUME_PADDING_MIN_RELEVANCE);
+    expect(topicalVideoScore(corruption, segment, BEEKEEPERS_TOPIC, topicKeywords)).toBe(0);
+
+    const volume = evaluateHarvestVolume({
+      topic: BEEKEEPERS_TOPIC,
+      title: BEEKEEPERS_TOPIC,
+      script: [segment],
+      media: [corruption],
+    }, 1);
+    expect(volume.perSegment.s1.topicalVideoCount).toBe(0);
+    expect(volume.pass).toBe(false);
+  });
+
+  it('counts honeycomb clip as topical video for beekeepers topic', () => {
+    const honeycomb = {
+      id: 'honeycomb-1',
+      type: 'video',
+      segmentId: 's1',
+      alt: 'close-up of honeycomb frames in a working hive',
+      title: 'honeycomb inspection',
+      query: 'honeycomb beekeeper',
+      url: 'https://example.com/videos/honeycomb-frames.mp4',
+      source: 'Web harvest',
+    };
+    expect(assetHasTopicSubjectOverlap(honeycomb, BEEKEEPERS_TOPIC)).toBe(true);
+    expect(topicalVideoScore(honeycomb, segment, BEEKEEPERS_TOPIC, topicKeywords))
+      .toBeGreaterThanOrEqual(VOLUME_PADDING_MIN_RELEVANCE);
+
+    const volume = evaluateHarvestVolume({
+      topic: BEEKEEPERS_TOPIC,
+      title: BEEKEEPERS_TOPIC,
+      script: [segment],
+      media: [honeycomb],
+    }, 1);
+    expect(volume.perSegment.s1.topicalVideoCount).toBe(1);
   });
 });
 

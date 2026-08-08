@@ -310,6 +310,212 @@ export async function assessHarvestStillQuality(asset, options = {}) {
   return assessed;
 }
 
+/**
+ * Stopwords for query-echo detection. Keep short: we only need to ignore glue
+ * words so "Why Victorian beekeepers feared the silent hive" compares cleanly.
+ */
+const QUERY_ECHO_STOPWORDS = new Set([
+  'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one',
+  'our', 'out', 'has', 'his', 'how', 'its', 'may', 'new', 'now', 'old', 'see', 'way', 'who',
+  'did', 'get', 'let', 'put', 'say', 'she', 'too', 'use', 'why', 'that', 'this', 'with', 'from',
+  'they', 'them', 'then', 'than', 'their', 'there', 'were', 'what', 'when', 'where', 'which',
+  'while', 'about', 'after', 'been', 'have', 'into', 'over', 'your', 'photo', 'photos', 'image',
+  'images', 'picture', 'pictures', 'news', 'stock', 'footage', 'video', 'videos', 'clip', 'clips',
+]);
+
+/** Anime / fan-art CDNs that keyword-drunk harvest pulls for single-token matches ("silent"). */
+export const ANIME_FICTION_HOST_RE =
+  /\b(?:zerochan\.net|danbooru\.donmai\.us|safebooru\.org|gelbooru\.com|anime-pictures\.net|pixiv\.net|i\.pximg\.net|myanimelist\.net|anidb\.net|anilist\.co|kitsu\.io|sankakucomplex\.com|chan\.sankakucomplex)\b/i;
+
+/**
+ * Meaningful tokens for echo overlap (length ≥ 3, stopwords stripped).
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function meaningfulEchoTokens(text = '') {
+  return [
+    ...new Set(
+      String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3 && !QUERY_ECHO_STOPWORDS.has(w)),
+    ),
+  ];
+}
+
+function tokensNearlyEqual(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 2) return false;
+  return a.startsWith(b) || b.startsWith(a);
+}
+
+/**
+ * Fraction of alt/title tokens that also appear in query/topic echo sources.
+ * 1.0 = alt is entirely composed of query/topic words (classic volume-pad laundering).
+ * @param {string} alt
+ * @param {string[]} echoSources
+ * @returns {number}
+ */
+export function queryEchoOverlapRatio(alt = '', echoSources = []) {
+  const altTokens = meaningfulEchoTokens(alt);
+  if (altTokens.length < 2) return altTokens.length === 0 ? 1 : 0;
+  const echoTokens = [
+    ...new Set((Array.isArray(echoSources) ? echoSources : [echoSources]).flatMap((s) => meaningfulEchoTokens(s))),
+  ];
+  if (!echoTokens.length) return 0;
+  const hits = altTokens.filter((token) => echoTokens.some((echo) => tokensNearlyEqual(token, echo)));
+  return hits.length / altTokens.length;
+}
+
+/**
+ * True when alt/title is mostly a copy of the search query or topic (no independent
+ * visual description). Volume top-up used to set alt = `${seg.title} ${topic}`, which
+ * made yacht-charter scrapes look on-topic for "Victorian beekeepers…".
+ *
+ * @param {string} alt
+ * @param {{ query?: string, topic?: string, topicBlob?: string, segmentTitle?: string, minRatio?: number }} [options]
+ * @returns {boolean}
+ */
+export function isQueryEchoAlt(alt = '', options = {}) {
+  const raw = String(alt || '').trim();
+  const altTokens = meaningfulEchoTokens(raw);
+  // Empty / placeholder alts prove nothing about the still.
+  if (!raw || altTokens.length < 2) return true;
+
+  const sources = [
+    options.query,
+    options.topic,
+    options.topicBlob,
+    options.segmentTitle,
+  ].filter((s) => String(s || '').trim());
+
+  if (!sources.length) return false;
+
+  const minRatio = Number.isFinite(options.minRatio) ? options.minRatio : 0.75;
+  const ratio = queryEchoOverlapRatio(raw, sources);
+  if (ratio >= minRatio && altTokens.length >= 3) return true;
+
+  // Near-exact copy of any single echo source (query pasted into alt).
+  const altKey = altTokens.join(' ');
+  for (const source of sources) {
+    const sourceTokens = meaningfulEchoTokens(source);
+    if (sourceTokens.length < 2) continue;
+    const sourceKey = sourceTokens.join(' ');
+    if (altKey === sourceKey) return true;
+    // Alt is a short prefix/suffix of the topic or vice versa.
+    if (
+      altTokens.length >= 3
+      && sourceTokens.length >= 3
+      && (altKey.includes(sourceKey) || sourceKey.includes(altKey))
+      && Math.min(altTokens.length, sourceTokens.length) / Math.max(altTokens.length, sourceTokens.length) >= 0.7
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Zerochan / danbooru / pixiv-style hosts.
+ * @param {object|string} assetOrUrl
+ * @returns {boolean}
+ */
+export function isAnimeFictionSource(assetOrUrl = {}) {
+  if (typeof assetOrUrl === 'string') {
+    return ANIME_FICTION_HOST_RE.test(assetOrUrl);
+  }
+  const blob = `${assetOrUrl?.url || ''} ${assetOrUrl?.source || ''} ${assetOrUrl?.sourceUrl || ''} ${assetOrUrl?.thumbnailUrl || ''}`;
+  return ANIME_FICTION_HOST_RE.test(blob);
+}
+
+/** Topics that legitimately want anime/fan-art stills. */
+export function topicAllowsAnimeFiction(topicBlob = '') {
+  return /\b(?:anime|manga|otaku|cosplay|waifu|seinen|shoujo|shonen|shounen|light\s+novel|visual\s+novel|cartoon\s+series|animated\s+series)\b/i.test(
+    String(topicBlob || ''),
+  );
+}
+
+/**
+ * Metadata-only still gate: query-echo alts and anime/fiction CDNs on non-anime topics.
+ * Call before (or after) buffer sharpness probes so volume pads fail closed without fetch.
+ *
+ * @param {object} asset
+ * @param {{ topic?: string, topicBlob?: string, query?: string, segmentTitle?: string, requireIndependentAlt?: boolean }} [options]
+ * @returns {{ action: 'keep'|'demote'|'reject', ok: boolean, reject: boolean, demote: boolean, reason: string, flags: string[] }}
+ */
+export function assessStillMetadataQuality(asset = {}, options = {}) {
+  const topicBlob = options.topicBlob || options.topic || '';
+  const query = options.query || asset.query || '';
+  const segmentTitle = options.segmentTitle || '';
+  const alt = `${asset.alt || ''} ${asset.title || ''}`.trim();
+  const requireIndependentAlt = options.requireIndependentAlt === true
+    || /volume top-up/i.test(String(asset.source || ''));
+
+  if (isAnimeFictionSource(asset) && !topicAllowsAnimeFiction(topicBlob)) {
+    return verdict('reject', 'anime/fiction still on non-anime topic', {
+      flags: ['anime-fiction-source'],
+    });
+  }
+
+  if (
+    requireIndependentAlt
+    && isQueryEchoAlt(alt, { query, topic: topicBlob, topicBlob, segmentTitle })
+  ) {
+    return verdict('reject', 'query-echo alt (no independent visual description)', {
+      flags: ['query-echo'],
+    });
+  }
+
+  // Non-volume stills with query-echo alts are demoted (scarcity fallback) rather
+  // than hard-rejected — deep-harvest can still carry a real URL with weak metadata.
+  if (isQueryEchoAlt(alt, { query, topic: topicBlob, topicBlob, segmentTitle })) {
+    return verdict('demote', 'query-echo alt (mostly topic/query copy)', {
+      flags: ['query-echo'],
+    });
+  }
+
+  return verdict('keep', 'still metadata OK', { flags: [] });
+}
+
+/**
+ * Merge buffer sharpness assessment with metadata gates (worst action wins).
+ * @param {object} bufferAssessment
+ * @param {object} metadataAssessment
+ */
+export function mergeStillQualityAssessments(bufferAssessment, metadataAssessment) {
+  if (!metadataAssessment || metadataAssessment.action === 'keep') {
+    return bufferAssessment;
+  }
+  if (!bufferAssessment || bufferAssessment.action === 'keep') {
+    return {
+      ...bufferAssessment,
+      ...metadataAssessment,
+      flags: [...new Set([...(bufferAssessment?.flags || []), ...(metadataAssessment.flags || [])])],
+      width: bufferAssessment?.width,
+      height: bufferAssessment?.height,
+      pixels: bufferAssessment?.pixels,
+      laplacianVariance: bufferAssessment?.laplacianVariance,
+      meanAbsLaplacian: bufferAssessment?.meanAbsLaplacian,
+      edgeDensity: bufferAssessment?.edgeDensity,
+      lumaStdDev: bufferAssessment?.lumaStdDev,
+    };
+  }
+  const rank = { keep: 0, demote: 1, reject: 2 };
+  const winner = rank[metadataAssessment.action] >= rank[bufferAssessment.action]
+    ? metadataAssessment
+    : bufferAssessment;
+  return {
+    ...bufferAssessment,
+    action: winner.action,
+    ok: winner.action !== 'reject',
+    reject: winner.action === 'reject',
+    demote: winner.action === 'demote',
+    reason: winner.reason,
+    flags: [...new Set([...(bufferAssessment.flags || []), ...(metadataAssessment.flags || [])])],
+  };
+}
+
 export function decorateStillWithQuality(asset, assessment) {
   const quality = {
     action: assessment.action,
@@ -337,6 +543,8 @@ export function stillQualityTimelinePenalty(asset = {}) {
     let penalty = -4;
     if (flags.has('low-resolution')) penalty -= 2;
     if (flags.has('soft-focus')) penalty -= 2;
+    if (flags.has('query-echo')) penalty -= 4;
+    if (flags.has('anime-fiction-source')) penalty -= 6;
     return penalty;
   }
   return 0;

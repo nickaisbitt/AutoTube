@@ -1627,6 +1627,24 @@ export function archiveEvidenceVerdict(clip = {}, { query = '', topicBlob = '' }
   }
   return { ok: true, reason: 'metadata-subject-match', evidence, matched };
 }
+/**
+ * Archive.org inject strongEvidence only when title/alt (via archiveEvidenceVerdict)
+ * actually match the topic/segment beat — never merely because source says Archive
+ * (beekeepers: Charlie Rose / WMAR pads skipped Qwen via blanket Archive ⇒ strongEvidence).
+ *
+ * @param {object} clip
+ * @param {string} topicBlob
+ * @param {string} [segmentTitle]
+ * @returns {boolean}
+ */
+export function archiveHasBeatEvidence(clip = {}, topicBlob = '', segmentTitle = '') {
+  if (!/Archive/i.test(String(clip?.source || ''))) return false;
+  const beatBlob = [topicBlob, segmentTitle].filter(Boolean).join(' ').trim();
+  return archiveEvidenceVerdict(clip, {
+    query: clip.query || '',
+    topicBlob: beatBlob,
+  }).ok === true;
+}
 
 /**
  * Pull real item metadata (title / description / subject) for one Archive.org item.
@@ -4797,12 +4815,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     if (relevanceGateEnabled()) {
       const budget = relevanceGateBudget();
       const checked = report.relevanceChecked || 0;
-      const archiveClipForGate = /Archive/i.test(clip.source || '');
       // Prior harvest evidence only — do not re-derive isCyberRelevantClip here or every
       // airline body pool clip would skip Qwen and gut the gate.
+      // Archive never gets a blanket pass: title/alt must match topic/segment beat
+      // (beekeepers autopsy: Charlie Rose / WMAR skipped Qwen via Archive ⇒ strongEvidence).
       const strongEvidence =
         clip.motionRelevancePassed === true
-        || archiveClipForGate
+        || archiveHasBeatEvidence(clip, topicBlob, seg.title || '')
         || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip))
         || (isHousingTopic(topicBlob) && hasHousingEvidence(clip));
       const gate = decideInjectRelevanceAction({

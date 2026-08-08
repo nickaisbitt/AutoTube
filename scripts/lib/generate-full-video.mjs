@@ -22,7 +22,13 @@ import { buildRenderEnvFromFixState, renderEnvJournalSnapshot } from './render-e
 import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
+  harvestHomonymBlockReason,
 } from './harvest-quality.mjs';
+import {
+  judgeHarvestRelevance,
+  relevanceGateEnabled,
+  shouldAdmitHarvestClip,
+} from './harvest-relevance-gate.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -257,35 +263,67 @@ function isJunkHarvestUrl(url) {
   );
 }
 
-async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode = false } = {}) {
+async function tryKeepVideoAsset(asset, devServer, sanitized, report, {
+  loopMode = false,
+  project = null,
+  segment = null,
+} = {}) {
+  const topicBlob = `${project?.topic || ''} ${project?.title || ''}`;
+  const seg = segment || (project?.script || []).find((s) => s.id === asset.segmentId) || project?.script?.[0];
+  const haystack = `${asset?.alt || ''} ${asset?.title || ''} ${asset?.url || ''} ${asset?.query || ''}`.toLowerCase();
+  const contextText = `${topicBlob} ${seg?.title || ''} ${seg?.narration || ''}`;
+  const homonym = harvestHomonymBlockReason(haystack, contextText);
+  if (homonym) {
+    report.dropped.push({ url: asset.url, reason: homonym });
+    report.relevanceRejected = (report.relevanceRejected || 0) + 1;
+    return false;
+  }
+
   const downloadUrl = resolveVideoDownloadUrl(asset, devServer);
   const proxied = isProxiedClipUrl(downloadUrl);
   const direct = isDirectVideoUrl(asset.url) && !proxied;
   const reasonPrefix = loopMode ? 'loop mode: ' : '';
 
-  if (proxied) {
-    sanitized.push({ ...asset, type: 'video', url: downloadUrl });
-    report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}proxy clip (no probe)` });
-    return true;
-  }
+  const clipOk = await canFetch(downloadUrl, { timeoutMs: 15000, minBytes: 2048, expectVideo: true });
+  if (!clipOk) return false;
 
-  if (direct) {
-    const clipOk = await canFetch(downloadUrl, { timeoutMs: 15000, minBytes: 2048, expectVideo: true });
-    if (clipOk) {
-      sanitized.push({ ...asset, type: 'video', url: downloadUrl });
-      report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}direct video URL` });
-      return true;
+  if (relevanceGateEnabled()) {
+    const apiKey = resolveOpenRouterKey();
+    const verdict = await judgeHarvestRelevance({
+      apiKey,
+      topic: topicBlob,
+      segmentTitle: seg?.title || '',
+      segmentType: seg?.type === 'intro' ? 'intro' : (seg?.type || 'body'),
+      clipTitle: asset.title || '',
+      clipAlt: asset.alt || '',
+      query: asset.query || '',
+      source: asset.source || '',
+      thumbnailUrl: asset.thumbnailUrl || asset.image || '',
+    });
+    report.relevanceChecked = (report.relevanceChecked || 0) + 1;
+    if (verdict.ran === false) {
+      report.relevanceUnverified = (report.relevanceUnverified || 0) + 1;
+      if (apiKey) {
+        report.dropped.push({ url: asset.url, reason: `relevance-unverified:${verdict.reason || 'qwen-failed'}` });
+        return false;
+      }
+    } else if (!shouldAdmitHarvestClip(verdict.decision)) {
+      report.relevanceRejected = (report.relevanceRejected || 0) + 1;
+      report.dropped.push({
+        url: asset.url,
+        reason: `relevance-${String(verdict.decision || 'REJECT').toLowerCase()}:${verdict.reason || ''}`,
+      });
+      return false;
+    } else {
+      report.relevanceKept = (report.relevanceKept || 0) + 1;
     }
   }
 
-  const clipOk = await canFetch(downloadUrl, { timeoutMs: 15000, minBytes: 2048, expectVideo: true });
-  if (clipOk) {
-    const keepUrl = downloadUrl.startsWith('http') ? downloadUrl : asset.url;
-    sanitized.push({ ...asset, type: 'video', url: keepUrl });
-    report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}clip probe OK` });
-    return true;
-  }
-  return false;
+  const keepUrl = downloadUrl.startsWith('http') ? downloadUrl : asset.url;
+  sanitized.push({ ...asset, type: 'video', url: keepUrl });
+  const probeLabel = proxied ? 'proxy clip probe OK' : direct ? 'direct video URL' : 'clip probe OK';
+  report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}${probeLabel}` });
+  return true;
 }
 
 async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}) {
@@ -309,6 +347,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
 
   const sanitized = [];
   const fallbackImage = project.topicContext?.thumbnailUrl || null;
+  const segmentsById = Object.fromEntries((project.script || []).map((s) => [s.id, s]));
 
   for (const asset of project.media) {
     if (isJunkHarvestUrl(asset.url) || isJunkHarvestUrl(asset.thumbnailUrl)) {
@@ -321,7 +360,11 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       continue;
     }
 
-    if (await tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode })) {
+    if (await tryKeepVideoAsset(asset, devServer, sanitized, report, {
+      loopMode,
+      project,
+      segment: segmentsById[asset.segmentId],
+    })) {
       continue;
     }
 

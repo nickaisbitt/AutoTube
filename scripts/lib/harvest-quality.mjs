@@ -22,6 +22,64 @@ const WEAK_TOPIC_WORDS = new Set([
   'social', 'media', 'online', 'watch', 'footage', 'clip', 'trending', 'update',
 ]);
 
+/**
+ * Keyword homonyms that score as on-topic but are wrong visuals.
+ * @param {string} haystack
+ * @param {string} contextText
+ * @returns {string|null}
+ */
+export function harvestHomonymBlockReason(haystack, contextText = '') {
+  const h = String(haystack || '').toLowerCase();
+  const ctx = String(contextText || '').toLowerCase();
+  const beeTopic = /\b(beekeeper|beekeepers|bee|bees|hive|hives|honeycomb|apiary|varroa)\b/i.test(ctx);
+
+  if (beeTopic) {
+    if (
+      /\bhoneycomb\b/i.test(h)
+      && /\b(aerospace|aeronautic|aircraft|airplane|composite|structural|engineering)\b/i.test(h)
+      && !/\b(bee|bees|hive|apiary|beekeeper|brood|pollinator)\b/i.test(h)
+    ) {
+      return 'homonym: aerospace honeycomb composite (not apiary)';
+    }
+    if (
+      /\bbeekeeper\b/i.test(h)
+      && /\b(20\d{2}|movie|film|trailer|cinema|action|jason|statham|\.ia\.mp4)\b/i.test(h)
+    ) {
+      return 'homonym: beekeeper fiction/movie (not documentary)';
+    }
+    if (/\bmurder\s+hornet\b/i.test(h) && !/\bvarroa\b/i.test(ctx)) {
+      return 'homonym: murder hornet sensational clip';
+    }
+    if (/\bbees?\s+influence\s+aviation\b|\bbuzz\s+the\s+tower\b/i.test(h)) {
+      return 'homonym: bees×aviation STEM (not beekeeping)';
+    }
+    if (/\bbee[\s-]?theft\s+detective\b|\bhive\s+heist\b/i.test(h) && /\b(detective|heist|crime)\b/i.test(h)) {
+      return 'homonym: bee crime story (not apiary documentary)';
+    }
+  }
+
+  const airlineTopic = /\b(airline|airlines|cabin|pressuriz|depressur|oxygen\s+mask|regional\s+jet|crj|embraer)\b/i.test(ctx);
+  if (airlineTopic) {
+    if (/\bhindenburg\b/i.test(h)) {
+      return 'homonym: Hindenburg disaster (wrong era/stakes)';
+    }
+    if (
+      /\b(707|stratoliner)\b/i.test(h)
+      && /\b(promotional|mock[\s-]?up|promo)\b/i.test(h)
+    ) {
+      return 'homonym: vintage cabin mock-up (not real incident)';
+    }
+    if (/\bhome\s+movie\b/i.test(h) && !/\b(cabin|cockpit|oxygen|pressur)\b/i.test(h)) {
+      return 'homonym: home-movie fair footage (no cabin stakes)';
+    }
+    if (/\b(screwdriver|tool|apex\s+bits|product\s+demo)\b/i.test(h)) {
+      return 'homonym: aircraft tool ad (not cabin safety)';
+    }
+  }
+
+  return null;
+}
+
 /** Topic-level tokens that strongly indicate off-topic harvest noise. */
 const OFF_TOPIC_BLOCKLIST = [
   { pattern: /\btrump\b/i, requires: /\btrump|president|white house|election|maga\b/i },
@@ -85,6 +143,7 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
 
   const contextText = `${topic} ${segText}`.toLowerCase();
   if (offTopicBlockReason(haystack, contextText)) return 0;
+  if (harvestHomonymBlockReason(haystack, contextText)) return 0;
 
   let topicHits = 0;
   let segHits = 0;
@@ -129,7 +188,8 @@ export function filterAssetsByRelevance(media, project, options = {}) {
     const seg = segments[asset.segmentId] || project.script?.[0];
     const haystack = `${asset?.alt || ''} ${asset?.url || ''} ${asset?.query || ''} ${asset?.sourceUrl || ''}`.toLowerCase();
     const contextText = `${topic} ${seg?.title || ''} ${seg?.narration || ''}`.toLowerCase();
-    const blockReason = offTopicBlockReason(haystack, contextText);
+    const blockReason = offTopicBlockReason(haystack, contextText)
+      || harvestHomonymBlockReason(haystack, contextText);
     if (blockReason) {
       dropped.push({
         url: asset.url,

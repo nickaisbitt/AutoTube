@@ -2605,13 +2605,132 @@ export function repairEditTimelineIntroFace(project) {
 }
 
 /**
+ * Meaningful tokens from provider metadata / topic text for subject overlap.
+ * Shared conceptually with Archive metadata-subject-match (S07 topical honesty):
+ * length≥4, stopwords dropped, used only to prove the media talks about the topic.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function softPassSubjectTokens(text) {
+  return [
+    ...new Set(
+      String(text || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 4 && !STOP_WORDS.has(w) && !WEAK_TOPIC_WORDS.has(w)),
+    ),
+  ];
+}
+
+/**
+ * Prefix-tolerant subject equality ("bee"/"bees", "beekeeper"/"beekeepers").
+ * @param {string} token
+ * @param {string} want
+ */
+function softPassSameSubjectToken(token, want) {
+  return (
+    token === want
+    || (Math.abs(token.length - want.length) <= 3
+      && (token.startsWith(want) || want.startsWith(token)))
+  );
+}
+
+/**
+ * Does provider metadata (title/alt/url — never the search query alone) overlap
+ * the topic subject? Query echo must not certify Charlie Rose as "beekeepers".
+ * Requires ≥2 token hits so a lone era word ("victorian") cannot launder
+ * off-topic interview pads.
+ *
+ * @param {object} asset
+ * @param {string} topicBlob
+ * @returns {boolean}
+ */
+export function mediaMetadataSubjectMatch(asset = {}, topicBlob = '') {
+  const wanted = softPassSubjectTokens(topicBlob);
+  if (!wanted.length) return true;
+  const evidence = visualEvidenceBlob(asset);
+  if (!evidence) return false;
+  const evidenceTokens = softPassSubjectTokens(evidence);
+  const matched = evidenceTokens.filter((token) =>
+    wanted.some((want) => softPassSameSubjectToken(token, want)),
+  );
+  // Deduplicate near-duplicates ("bee"/"bees") so one stem cannot count twice.
+  const uniqueStems = new Set(
+    matched.map((t) => (t.endsWith('s') && t.length > 4 ? t.slice(0, -1) : t)),
+  );
+  return uniqueStems.size >= 2;
+}
+
+/**
+ * Whether inject/media carried any explicit Qwen KEEP labels (on assets or report).
+ * When none exist, soft-pass falls back to metadata subject-match alone.
+ *
+ * @param {object[]} uniqueVideos
+ * @param {object} [mediaReport]
+ */
+export function softPassKeepFlagsPresent(uniqueVideos = [], mediaReport = {}) {
+  if (uniqueVideos.some((asset) => String(asset?.relevanceDecision || '').toUpperCase() === 'KEEP')) {
+    return true;
+  }
+  const kept = Number(mediaReport?.relevanceKept);
+  const weak = Number(mediaReport?.relevanceWeakAdmitted) || 0;
+  // relevanceKept includes WEAK admits — only treat pure KEEP residue as flags.
+  if (Number.isFinite(kept) && kept - weak > 0) return true;
+  return false;
+}
+
+/**
+ * Beat-relevant video for generic soft-pass volume:
+ * - explicit `relevanceDecision === 'KEEP'`, or
+ * - `motionRelevancePassed === true` AND metadata subject match, or
+ * - when inject stored no KEEP flags: metadata subject match alone (S07-style).
+ *
+ * @param {object} asset
+ * @param {string} topicBlob
+ * @param {{ keepFlagsPresent?: boolean }} [opts]
+ */
+export function isSoftPassRelevantVideo(asset = {}, topicBlob = '', opts = {}) {
+  if (String(asset?.relevanceDecision || '').toUpperCase() === 'KEEP') return true;
+  const subjectOk = mediaMetadataSubjectMatch(asset, topicBlob);
+  if (asset?.motionRelevancePassed === true && subjectOk) return true;
+  const keepFlagsPresent = opts.keepFlagsPresent === true;
+  if (!keepFlagsPresent && subjectOk) return true;
+  return false;
+}
+
+/**
+ * Count unique videos that are Qwen-KEEP / beat-relevant for generic soft-pass.
+ *
+ * @param {object[]} uniqueVideos
+ * @param {string} topicBlob
+ * @param {object} [mediaReport]
+ */
+export function countSoftPassRelevantVideos(uniqueVideos = [], topicBlob = '', mediaReport = {}) {
+  const keepFlagsPresent = softPassKeepFlagsPresent(uniqueVideos, mediaReport);
+  return uniqueVideos.filter((asset) =>
+    isSoftPassRelevantVideo(asset, topicBlob, { keepFlagsPresent }),
+  ).length;
+}
+
+/** Generic soft-pass floor: at least one relevant video per segment (min 2). */
+export function softPassMinRelevantVideos(segN = 1) {
+  return Math.max(Number(segN) || 1, 2);
+}
+
+/**
  * Soft-pass when curated cyber stills, raw web-harvest motion, or stock-API motion
  * filled a thin harvest. Requires motion-rich timelines (enough videos per segment),
  * not stills alone. Web-native motion (Bing/Google/DuckDuckGo video, Vimeo,
  * Dailymotion, Giphy, /api/download-clip, HybridScraper, DeepHarvest, Archive.org)
  * is first-class live motion, so a web-video-rich pool can pass with no Pexels/Pixabay.
  *
- * @param {{ volumePass?: boolean, cyberStockInjected?: number, pexelsFetched?: number, pixabayFetched?: number, archiveLiveFetched?: number, videoTopUp?: unknown[] }} mediaReport
+ * Generic topics additionally require a minimum of beat-relevant videos (Qwen KEEP
+ * or motionRelevancePassed + metadata subject match) so a 0-KEEP junk timeline
+ * cannot soft-pass on raw volume alone.
+ *
+ * @param {{ volumePass?: boolean, cyberStockInjected?: number, pexelsFetched?: number, pixabayFetched?: number, archiveLiveFetched?: number, videoTopUp?: unknown[], relevanceKept?: number, relevanceWeakAdmitted?: number, relevanceChecked?: number, relevanceRejected?: number }} mediaReport
  * @param {object} project
  * @returns {{ pass: boolean, reason?: string }}
  */
@@ -2841,8 +2960,18 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     };
   }
 
+  // Generic soft-pass must count Qwen-KEEP / beat-relevant videos, not raw volume
+  // (beekeepers: 0 KEEP + FEMA/Charlie Rose pads still cleared soft-pass on count alone).
+  const relevantVideoCount = countSoftPassRelevantVideos(uniqueVideos, topicBlob, mediaReport);
+  const minRelevantVideos = softPassMinRelevantVideos(segN);
+  const noRelevantSoftPass = () => ({
+    pass: false,
+    reason: `soft-pass-motion-no-relevant(${relevantVideoCount}/${minRelevantVideos} videos)`,
+  });
+
   // Soft-pass A: cyber stills + ≥1 video/seg
   if (cyber >= 6 && videosPerSeg >= 1) {
+    if (relevantVideoCount < minRelevantVideos) return noRelevantSoftPass();
     return { pass: true, reason: `soft-pass-cyber(${cyber})` };
   }
   // Soft-pass B: ≥2 videos/seg + live stock/top-up
@@ -2855,6 +2984,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
         reason: `soft-pass-motion-unique-video-floor(${uniqueTopicalVideos}/16 topical videos)`,
       };
     }
+    if (relevantVideoCount < minRelevantVideos) return noRelevantSoftPass();
     return { pass: true, reason: `soft-pass-motion(${videoCount}v/${segN}segs)` };
   }
   // Soft-pass B2: raw web harvest motion (no Pexels/Pixabay/top-up needed).
@@ -2864,6 +2994,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   // aggregate/cold floors below rather than hard-failing here.
   const webMotionRich = videosPerSeg >= motionMinPerSeg && webNativeMotionCount > 0;
   if (webMotionRich && uniqueTopicalVideos >= 16) {
+    if (relevantVideoCount < minRelevantVideos) return noRelevantSoftPass();
     return {
       pass: true,
       reason: `soft-pass-web-motion(${webNativeMotionCount}web/${videoCount}v/${segN}segs)`,
@@ -2875,6 +3006,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     && avgCount >= minPer * 0.75
     && media.length >= segN * Math.max(3, minPer - 2);
   if (aggregateOk) {
+    if (relevantVideoCount < minRelevantVideos) return noRelevantSoftPass();
     return { pass: true, reason: `soft-pass-aggregate(avg=${avgCount.toFixed(1)}, min=${minCount})` };
   }
   // Soft-pass C2 (cold): no empty segs + enough unique motion for dense cuts
@@ -2886,6 +3018,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     && videoCount >= Math.max(segN * 3, 9)
     && (stockFetched > 0 || topUp > 0)
   ) {
+    if (relevantVideoCount < minRelevantVideos) return noRelevantSoftPass();
     return { pass: true, reason: `soft-pass-cold-thin(avg=${avgCount.toFixed(1)}, min=${minCount}, v=${videoCount})` };
   }
   // Soft-pass D: crime/heist, no empty segs
@@ -2894,6 +3027,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     && minCount >= 2
     && media.length >= segN * (minPer - 1)
   ) {
+    if (relevantVideoCount < minRelevantVideos) return noRelevantSoftPass();
     return { pass: true, reason: `soft-pass-crime-heist(${media.length} assets/${segN} segs)` };
   }
   return { pass: false, reason: 'volume-hard-fail' };

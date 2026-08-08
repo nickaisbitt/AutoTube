@@ -1254,6 +1254,22 @@ describe('resolveInjectMotionRelevancePassed — no Archive blanket', () => {
       ),
     ).toBe(true);
   });
+
+  it('passes Archive bee-heist slug when alt/title empty (beekeepers yield)', () => {
+    const BEE_TOPIC = 'Why Victorian beekeepers feared the silent hive';
+    expect(
+      resolveInjectMotionRelevancePassed(
+        {
+          source: 'Archive.org live',
+          alt: '',
+          title: '',
+          url: 'https://archive.org/download/WatchABeeTheftDetectiveBustAHiveHeist/Watch%20A%20Bee-Theft%20Detective%20Bust%20A%20Hive%20Heist.mp4',
+        },
+        BEE_TOPIC,
+        'The Silent Hive',
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('keylessOmitsStockMotionPool — housing-web57/58 Mixkit leak', () => {

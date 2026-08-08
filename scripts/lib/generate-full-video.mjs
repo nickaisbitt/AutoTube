@@ -68,6 +68,7 @@ import {
   militaryNavalJunkReason,
   canonicalMediaKey,
   unreadableOverlayReason,
+  hasGenericSubjectEvidence,
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
 import {
@@ -970,17 +971,22 @@ function segmentMotionKey(asset = {}) {
 /**
  * Run-local post-top-up protection for an inject candidate.
  *
- * Pass only when harvest already marked motionRelevancePassed, or when
- * healthcare/housing beat-matching metadata is present. Archive source alone
- * must NOT auto-pass — otherwise junk Archive (Charlie Rose, WMAR pads, etc.)
- * survives post-top-up relevance as protected-motion.
+ * Pass when harvest already marked motionRelevancePassed, beat-matching domain
+ * evidence (healthcare/housing), or Archive/generic subject proof from metadata
+ * or decoded URL path (bee-heist hive slugs). Archive source alone must NOT
+ * auto-pass — otherwise junk Archive (Charlie Rose, WMAR pads) survives post-top-up.
+ *
+ * @param {object} clip
+ * @param {string} topicBlob
+ * @param {string} [segmentTitle]
  */
-export function resolveInjectMotionRelevancePassed(clip = {}, topicBlob = '') {
-  return (
-    clip.motionRelevancePassed === true
-    || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip))
-    || (isHousingTopic(topicBlob) && hasHousingEvidence(clip))
-  );
+export function resolveInjectMotionRelevancePassed(clip = {}, topicBlob = '', segmentTitle = '') {
+  if (clip.motionRelevancePassed === true) return true;
+  if (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip)) return true;
+  if (isHousingTopic(topicBlob) && hasHousingEvidence(clip)) return true;
+  if (archiveHasBeatEvidence(clip, topicBlob, segmentTitle)) return true;
+  if (hasGenericSubjectEvidence(clip, topicBlob)) return true;
+  return false;
 }
 
 /**
@@ -5009,19 +5015,27 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       { query: safeQuery, topicBlob },
     );
     const displayMeta = providerMeta || archiveMeta || '';
-    // Protect only harvest-proven or beat-matched injects. Archive source alone is
+    const enrichedClip = {
+      ...clip,
+      alt: clip.alt || displayMeta,
+      title: clip.title || displayMeta,
+    };
+    // Protect harvest-proven or beat-matched injects. Archive source alone is
     // not motion proof — blanket || archiveClip let junk survive post-top-up
     // (protected-motion=4, relevance removed 0). Healthcare/housing evidence still
     // survives when host-rank lost the liveClips flag (web4/web5; housing-web57/58).
-    const motionRelevancePassed = resolveInjectMotionRelevancePassed(clip, topicBlob);
+    const motionRelevancePassed = resolveInjectMotionRelevancePassed(
+      enrichedClip,
+      topicBlob,
+      seg.title || '',
+    );
     project.media.push({
       id: `stock-video-${seg.id}-${tag}-${n}`,
       segmentId: seg.id,
       type: 'video',
       url: injectedUrl,
       alt:
-        clip.alt
-        || displayMeta
+        enrichedClip.alt
         || (airline || /web video/i.test(clip.source || '')
           ? `${clip.source || 'Video'} clip`
           : seg.title),

@@ -97,7 +97,12 @@ import {
 } from './script-wait-policy.mjs';
 import {
   assessHarvestStillQuality,
+  assessStillMetadataQuality,
   decorateStillWithQuality,
+  isAnimeFictionSource,
+  isQueryEchoAlt,
+  mergeStillQualityAssessments,
+  topicAllowsAnimeFiction,
 } from './sanitize-media-quality.mjs';
 
 export function resolveOpenRouterKey() {
@@ -986,8 +991,24 @@ function stillQualityReportEntry(asset, assessment) {
   };
 }
 
-async function sanitizeStillQuality(asset, report, { devServer, cache } = {}) {
-  const assessment = await assessHarvestStillQuality(asset, { devServer, cache });
+async function sanitizeStillQuality(asset, report, { devServer, cache, topicBlob, segmentTitle } = {}) {
+  const topic = topicBlob || '';
+  const meta = assessStillMetadataQuality(asset, {
+    topicBlob: topic,
+    topic,
+    query: asset.query || '',
+    segmentTitle: segmentTitle || '',
+  });
+  // Fail closed on query-echo / anime CDNs before spending a fetch.
+  if (meta.action === 'reject') {
+    const entry = stillQualityReportEntry(asset, meta);
+    report.qualityStillRejected = report.qualityStillRejected || [];
+    report.qualityStillRejected.push(entry);
+    return null;
+  }
+
+  const bufferAssessment = await assessHarvestStillQuality(asset, { devServer, cache });
+  const assessment = mergeStillQualityAssessments(bufferAssessment, meta);
   const entry = stillQualityReportEntry(asset, assessment);
   if (assessment.action === 'reject') {
     report.qualityStillRejected = report.qualityStillRejected || [];
@@ -1004,6 +1025,8 @@ async function sanitizeStillQuality(asset, report, { devServer, cache } = {}) {
 
 async function sanitizeProjectStillQuality(project, report, { devServer, cache } = {}) {
   if (!project?.media?.length) return;
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`;
+  const segTitleById = new Map((project.script || []).map((seg) => [seg.id, seg.title || '']));
   const kept = [];
   for (const asset of project.media) {
     if (asset.type === 'video' || /\.(mp4|webm|mov)(?:[?#]|$)/i.test(asset.url || '')) {
@@ -1014,7 +1037,12 @@ async function sanitizeProjectStillQuality(project, report, { devServer, cache }
       kept.push(asset);
       continue;
     }
-    const qualityAsset = await sanitizeStillQuality(asset, report, { devServer, cache });
+    const qualityAsset = await sanitizeStillQuality(asset, report, {
+      devServer,
+      cache,
+      topicBlob,
+      segmentTitle: segTitleById.get(asset.segmentId) || '',
+    });
     if (!qualityAsset) {
       report.dropped = report.dropped || [];
       const reason = report.qualityStillRejected?.at(-1)?.reason || 'quality gate';
@@ -1051,6 +1079,7 @@ async function fetchImageSearchResults(devServer, endpoint, query) {
 async function topUpHarvestVolume(project, devServer, minPerSegment, report, options = {}) {
   const segments = project.script || [];
   const topic = project.topic || project.title || '';
+  const topicBlob = `${project.topic || ''} ${project.title || ''}`;
   const airline = isAirlineTopic(topic);
   const qualityCache = options.qualityCache || new Map();
   const usedGlobal = new Set(
@@ -1095,14 +1124,23 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
         : `${seg.title} ${topic} ${round > 0 ? 'news photo' : 'photo'}`;
       const results = await fetchImageSearchResults(devServer, searchEndpoints[round], q);
       const candidates = results
-        .map((r) => ({ url: r.url || r.thumbnailUrl, alt: r.alt || r.title || seg.title, source: r.source }))
+        .map((r) => ({
+          url: r.url || r.thumbnailUrl,
+          // Prefer provider metadata — never invent `${seg.title} ${topic}` as alt
+          // (that launders yacht-charter scrapes as query-echo "relevant" stills).
+          alt: String(r.alt || r.title || '').trim(),
+          source: r.source,
+        }))
         .filter(
           (r) =>
             r.url
             && isDirectImageCandidate(r.url)
             && !isJunkHarvestUrl(r.url)
             && !isUnsafeMediaUrl(r.url)
-            && !isJunkWebVolumeStillUrl(r.url),
+            && !isJunkWebVolumeStillUrl(r.url)
+            && !(isAnimeFictionSource(r.url) && !topicAllowsAnimeFiction(topicBlob))
+            && r.alt
+            && !isQueryEchoAlt(r.alt, { query: q, topic, topicBlob, segmentTitle: seg.title || '' }),
         );
 
       let added = false;
@@ -1114,13 +1152,18 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
           segmentId: seg.id,
           type: 'image',
           url: r.url,
-          alt: isHousingTopic(topic) ? q : `${seg.title} ${topic}`,
+          alt: r.alt,
           query: q,
           source: `${r.source || 'Search'} (volume top-up)`,
           duration: 5,
           isFallback: false,
         };
-        const qualityAsset = await sanitizeStillQuality(candidate, report, { devServer, cache: qualityCache });
+        const qualityAsset = await sanitizeStillQuality(candidate, report, {
+          devServer,
+          cache: qualityCache,
+          topicBlob,
+          segmentTitle: seg.title || '',
+        });
         if (!qualityAsset) continue;
 
         project.media.push(qualityAsset);
@@ -1148,18 +1191,36 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
         const key = img.url.split('?')[0];
         if (usedGlobal.has(key)) continue;
         if (isUnsafeMediaUrl(img.url) || isJunkWebVolumeStillUrl(img.url)) continue;
+        const stockAlt = String(img.alt || '').trim();
+        // Stock pool entries must carry a real visual alt — never fall back to topic echo.
+        if (
+          !stockAlt
+          || isQueryEchoAlt(stockAlt, {
+            query: `stock-pool ${seg.title}`,
+            topic,
+            topicBlob,
+            segmentTitle: seg.title || '',
+          })
+        ) {
+          continue;
+        }
         const candidate = {
           id: `stock-topup-${seg.id}-${uniqueCount}`,
           segmentId: seg.id,
           type: 'image',
           url: img.url,
-          alt: img.alt || `${seg.title} ${topic}`,
+          alt: stockAlt,
           query: `stock-pool ${seg.title}`,
           source: 'Stock pool (volume top-up)',
           duration: 5,
           isFallback: false,
         };
-        const qualityAsset = await sanitizeStillQuality(candidate, report, { devServer, cache: qualityCache });
+        const qualityAsset = await sanitizeStillQuality(candidate, report, {
+          devServer,
+          cache: qualityCache,
+          topicBlob,
+          segmentTitle: seg.title || '',
+        });
         if (!qualityAsset) continue;
 
         project.media.push(qualityAsset);
@@ -1172,7 +1233,6 @@ async function topUpHarvestVolume(project, devServer, minPerSegment, report, opt
     }
   }
 }
-
 function isSeriousNewsTopic(topicBlob = '') {
   return /bank|hack|stolen|identity|tornado|disaster|death|war|ransom|voice\s*clone|fraud|scam|warning|kill|phish|cyber|breach|heist|diamond|jewel|vault|airport|museum|robbery/i.test(
     topicBlob || '',
@@ -1234,6 +1294,7 @@ function stripJunkDemoVideos(project, report) {
 function stripJunkStillAssets(project, report) {
   if (!project?.media?.length) return;
   const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
+  const segTitleById = new Map((project.script || []).map((seg) => [seg.id, seg.title || '']));
   const kept = [];
   for (const asset of project.media) {
     if (asset.type === 'video' || /\.(mp4|webm|mov)(\?|$)/i.test(asset.url || '')) {
@@ -1241,8 +1302,17 @@ function stripJunkStillAssets(project, report) {
       continue;
     }
     const blob = `${asset.alt || ''} ${asset.title || ''} ${asset.url || ''} ${asset.query || ''} ${asset.source || ''}`;
+    const segmentTitle = segTitleById.get(asset.segmentId) || '';
+    const meta = assessStillMetadataQuality(asset, {
+      topicBlob,
+      topic: topicBlob,
+      query: asset.query || '',
+      segmentTitle,
+      requireIndependentAlt: /volume top-up/i.test(String(asset.source || '')),
+    });
     const junk =
-      isJunkStockClip(asset, topicBlob)
+      meta.action === 'reject'
+      || isJunkStockClip(asset, topicBlob)
       || isOffBrandVisual(blob, topicBlob)
       || isGenericStockJunk(blob, topicBlob)
       || (isAirlineTopic(topicBlob) && AIRLINE_OFF_TOPIC_RE.test(blob))
@@ -1254,7 +1324,14 @@ function stripJunkStillAssets(project, report) {
       || Boolean(healthcareOffTopicBrollReason(blob, topicBlob, asset));
     if (junk) {
       report.junkStillDropped = report.junkStillDropped || [];
-      report.junkStillDropped.push({ url: asset.url, reason: 'off-topic/web still junk' });
+      report.junkStillDropped.push({
+        url: asset.url,
+        reason: meta.action === 'reject' ? meta.reason : 'off-topic/web still junk',
+      });
+      continue;
+    }
+    if (meta.action === 'demote' && !asset.qualityDemoted) {
+      kept.push(decorateStillWithQuality(asset, meta));
       continue;
     }
     kept.push(asset);
@@ -5145,7 +5222,12 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
 
     let qualityAsset = urlOk.get(asset.url);
     if (qualityAsset === undefined) {
-      qualityAsset = await sanitizeStillQuality(asset, report, { devServer, cache: qualityCache });
+      qualityAsset = await sanitizeStillQuality(asset, report, {
+        devServer,
+        cache: qualityCache,
+        topicBlob: `${project.topic || ''} ${project.title || ''}`,
+        segmentTitle: (project.script || []).find((s) => s.id === asset.segmentId)?.title || '',
+      });
       urlOk.set(asset.url, qualityAsset || null);
     }
     if (qualityAsset) {

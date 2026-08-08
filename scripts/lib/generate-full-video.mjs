@@ -868,7 +868,9 @@ export function decideInjectRelevanceAction({
   if (checked >= budget) {
     return { action: 'admit', reason: 'budget-exhausted' };
   }
-  if (lock && !isIntro && (hasTopicEvidence || starveSoft)) {
+  // Surface the lock even when neither evidence-skip nor starve-soft would fire,
+  // so funnel logs / call sites can see zero-KEEP is engaged.
+  if (lock && !isIntro) {
     return { action: 'check', reason: 'zero-keep-lock' };
   }
   return { action: 'check', reason: 'within-budget' };

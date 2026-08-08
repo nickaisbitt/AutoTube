@@ -448,7 +448,7 @@ Return ONLY a valid JSON object in this exact shape: { "segments": [ ... ] }.`;
     // Topic fidelity retry — era/geography drift on historical topics (beekeepers autopsy:
     // "Meet James Lacey" modern presenter on Victorian Britain topic).
     const fidelityIssues = scriptTopicFidelityIssues(safeTopic, segments);
-    if (fidelityIssues.length > 0 && !signal?.aborted && !loopFastMode) {
+    if (fidelityIssues.length > 0 && !signal?.aborted) {
       logger.warn(
         'OpenRouter',
         `Topic fidelity: ${fidelityIssues.length} issue(s) — ${fidelityIssues.map((i) => i.detail).join('; ')}. Retrying.`,

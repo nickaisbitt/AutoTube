@@ -1949,6 +1949,9 @@ describe('formatMotionDropFunnel', () => {
       relevanceWeakAdmitted: 2,
       relevanceUnverified: 0,
       relevanceBudgetSkipped: 0,
+      relevanceEvidenceSkipped: 5,
+      relevanceStarveSoftAdmitted: 3,
+      relevanceZeroKeepLock: 1,
       relevanceDroppedAfterTopUp: new Array(2),
       motionRelevanceDroppedAfterTopUp: [],
       videoTopUp: new Array(17),
@@ -1961,12 +1964,18 @@ describe('formatMotionDropFunnel', () => {
     expect(line).toContain('junk=22 relevance=8 vision=10 web-fail-open=4');
     expect(line).toContain('probe-pass=3 probe-fail=1 proxy-trusted=14');
     expect(line).toContain('llm-checked=35 llm-kept=7 llm-rejected=28 llm-weak=2');
+    expect(line).toContain('llm-evidence-skip=5');
+    expect(line).toContain('llm-starve-soft=3');
+    expect(line).toContain('llm-zero-keep-lock=1');
   });
 
   it('falls back to the clip pool size when the after-vision counter is absent', () => {
     const line = formatMotionDropFunnel({ motionPoolSize: 41, videoTopUp: new Array(1) });
     expect(line).toContain('after-vision=41');
     expect(line).toContain('injected=1');
+    expect(line).toContain('llm-evidence-skip=0');
+    expect(line).toContain('llm-starve-soft=0');
+    expect(line).not.toContain('llm-zero-keep-lock');
   });
 });
 

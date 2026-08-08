@@ -3700,13 +3700,19 @@ export function formatMotionDropFunnel(report = {}) {
     + ` probe-fail=${report.injectProbeFailed || 0}`
     + ` proxy-trusted=${report.injectProxyTrusted || 0}`;
   // LLM inject gate (Qwen) — distinct from the earlier keyword motionDroppedRelevance.
-  const llm =
+  // evidence-skip / starve-soft scream bypasses that otherwise hide behind llm-kept=0.
+  let llm =
     `llm-checked=${report.relevanceChecked || 0}`
     + ` llm-kept=${report.relevanceKept || 0}`
     + ` llm-rejected=${report.relevanceRejected || 0}`
     + ` llm-weak=${report.relevanceWeakAdmitted || 0}`
     + ` llm-unverified=${report.relevanceUnverified || 0}`
-    + ` llm-budget-skip=${report.relevanceBudgetSkipped || 0}`;
+    + ` llm-budget-skip=${report.relevanceBudgetSkipped || 0}`
+    + ` llm-evidence-skip=${report.relevanceEvidenceSkipped || 0}`
+    + ` llm-starve-soft=${report.relevanceStarveSoftAdmitted || 0}`;
+  if (report.relevanceZeroKeepLock != null) {
+    llm += ` llm-zero-keep-lock=${report.relevanceZeroKeepLock}`;
+  }
   return (
     `Motion drop funnel: fetched=${fetched}`
     + ` → after-junk=${afterJunk}`

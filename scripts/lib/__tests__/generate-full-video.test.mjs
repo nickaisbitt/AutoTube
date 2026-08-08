@@ -38,6 +38,7 @@ import {
   unreliableWebProxyInjectReason,
   isYouTubeThumbnailStill,
   restoreMotionRelevancePassed,
+  resolveInjectMotionRelevancePassed,
   keylessOmitsStockMotionPool,
   motionCandidateHostRank,
   motionQueryPlan,
@@ -1124,7 +1125,7 @@ describe('non-YouTube motion planning and ranking', () => {
     ]);
   });
 
-  it('restores Archive injects marked motionRelevancePassed after relevance strips them', () => {
+  it('restores Archive injects only when harvest marked motionRelevancePassed', () => {
     const archive = {
       id: 'stock-video-s1-p0-0',
       segmentId: 's1',
@@ -1140,6 +1141,27 @@ describe('non-YouTube motion planning and ranking', () => {
     );
     expect(kept.media).toHaveLength(1);
     expect(kept.media[0].url).toBe(archive.url);
+  });
+
+  it('does not restore Archive injects that only passed because source is Archive', () => {
+    // beekeepers: || archiveClip set motionRelevancePassed at inject → protected-motion
+    // junk survived post-top-up. Source alone must not approve restore.
+    const archiveJunk = {
+      id: 'stock-video-s1-p0-0',
+      segmentId: 's1',
+      type: 'video',
+      url: 'https://archive.org/download/Charlie_Rose/charlie.mp4',
+      source: 'Archive.org live',
+      title: 'Charlie Rose',
+      motionRelevancePassed: false,
+    };
+    const kept = restoreMotionRelevancePassed(
+      [],
+      [archiveJunk],
+      [{ segmentId: 's1', url: archiveJunk.url, motionRelevancePassed: false }],
+    );
+    expect(kept.media).toHaveLength(0);
+    expect(kept.restored).toHaveLength(0);
   });
 
   it('restores housing Bing/DDG face clips marked motionRelevancePassed after relevance strips them', () => {
@@ -1173,6 +1195,61 @@ describe('non-YouTube motion planning and ranking', () => {
     );
     expect(kept.media).toHaveLength(1);
     expect(kept.media[0].url).toBe(webFace.url);
+  });
+});
+
+describe('resolveInjectMotionRelevancePassed — no Archive blanket', () => {
+  it('rejects Archive-only clips without harvest proof or beat metadata', () => {
+    expect(
+      resolveInjectMotionRelevancePassed(
+        {
+          source: 'Archive.org live',
+          title: 'Charlie Rose Interview',
+          url: 'https://archive.org/download/Charlie_Rose/x.mp4',
+        },
+        'The secret life of beekeepers',
+      ),
+    ).toBe(false);
+  });
+
+  it('passes when harvest already set motionRelevancePassed', () => {
+    expect(
+      resolveInjectMotionRelevancePassed(
+        {
+          source: 'Archive.org live',
+          title: 'apiary harvest frames',
+          motionRelevancePassed: true,
+        },
+        'The secret life of beekeepers',
+      ),
+    ).toBe(true);
+  });
+
+  it('passes housing Archive with beat-matching housing metadata', () => {
+    expect(
+      resolveInjectMotionRelevancePassed(
+        {
+          source: 'Archive.org live',
+          title: 'worried tenant apartment eviction packing boxes',
+          alt: 'tenant face close up foreclosure notice',
+        },
+        HOUSING_CRASH_TOPIC,
+      ),
+    ).toBe(true);
+  });
+
+  it('passes healthcare web evidence without Archive auto-pass', () => {
+    expect(
+      resolveInjectMotionRelevancePassed(
+        {
+          source: 'Bing web video',
+          title: 'MRI radiologist reviewing brain scan',
+          alt: 'doctor patient consultation hospital ward',
+          query: 'doctor face patient consultation close up',
+        },
+        HEALTHCARE_AI_TOPIC,
+      ),
+    ).toBe(true);
   });
 });
 

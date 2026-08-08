@@ -894,9 +894,27 @@ function segmentMotionKey(asset = {}) {
 }
 
 /**
+ * Run-local post-top-up protection for an inject candidate.
+ *
+ * Pass only when harvest already marked motionRelevancePassed, or when
+ * healthcare/housing beat-matching metadata is present. Archive source alone
+ * must NOT auto-pass — otherwise junk Archive (Charlie Rose, WMAR pads, etc.)
+ * survives post-top-up relevance as protected-motion.
+ */
+export function resolveInjectMotionRelevancePassed(clip = {}, topicBlob = '') {
+  return (
+    clip.motionRelevancePassed === true
+    || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip))
+    || (isHousingTopic(topicBlob) && hasHousingEvidence(clip))
+  );
+}
+
+/**
  * Restore only clips injected during this top-up that passed the web-motion
  * evidence gate. The report is run-local proof; persisted/project-provided flags
- * cannot create a relevance bypass.
+ * cannot create a relevance bypass. Archive source alone is never enough —
+ * videoTopUp.motionRelevancePassed must already be true from harvest evidence
+ * or beat-matching metadata (see resolveInjectMotionRelevancePassed).
  */
 export function restoreMotionRelevancePassed(media = [], candidates = [], videoTopUp = []) {
   const approved = new Set(
@@ -4874,7 +4892,6 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     }
     const n = (report.videoTopUp || []).length;
     const airline = isAirlineTopic(topicBlob);
-    const archiveClip = /Archive/i.test(clip.source || '');
     const safeQuery =
       clip.query
       || (airline
@@ -4887,16 +4904,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // clip on what it shows. Nothing aviation-flavoured is invented for empty alts —
     // a clip with no metadata must fail the relevance gate, not borrow a label.
     const providerMeta = providerEvidenceText(clip.title || '', { query: safeQuery, topicBlob });
-    // Archive items already cleared archiveEvidenceVerdict to enter the pool — treat
-    // that as run-local motion proof so post-top-up relevance cannot strip them while
-    // keeping YouTube talking-head harvest. Healthcare/housing web evidence must
-    // also survive even when host-rank lost the liveClips flag (web4/web5;
-    // housing-web57/58 Mixkit strip → thin).
-    const motionRelevancePassed =
-      clip.motionRelevancePassed === true
-      || archiveClip
-      || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip))
-      || (isHousingTopic(topicBlob) && hasHousingEvidence(clip));
+    // Protect only harvest-proven or beat-matched injects. Archive source alone is
+    // not motion proof — blanket || archiveClip let junk survive post-top-up
+    // (protected-motion=4, relevance removed 0). Healthcare/housing evidence still
+    // survives when host-rank lost the liveClips flag (web4/web5; housing-web57/58).
+    const motionRelevancePassed = resolveInjectMotionRelevancePassed(clip, topicBlob);
     project.media.push({
       id: `stock-video-${seg.id}-${tag}-${n}`,
       segmentId: seg.id,

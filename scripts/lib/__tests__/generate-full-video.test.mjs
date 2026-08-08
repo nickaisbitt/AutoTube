@@ -52,6 +52,8 @@ import {
   resolveStockKeyMode,
   resolveVisionUnverifiedMax,
   shouldFailOpenWebVisionSkip,
+  isDodVisionFailOpenTopic,
+  hasTitleAltSubjectMatch,
   spawnSyncFailureReason,
   stripJunkDemoVideos,
   stripJunkStillAssets,
@@ -1778,14 +1780,83 @@ describe('web-motion volume identity and distribution', () => {
   });
 });
 
+describe('isDodVisionFailOpenTopic', () => {
+  it('marks airline/housing/healthcare as DoD and rejects random topics', () => {
+    expect(isDodVisionFailOpenTopic(AIRLINE_TOPIC)).toBe(true);
+    expect(isDodVisionFailOpenTopic(HOUSING_TOPIC)).toBe(true);
+    expect(isDodVisionFailOpenTopic(HEALTHCARE_AI_TOPIC)).toBe(true);
+    expect(isDodVisionFailOpenTopic('Why beekeepers are disappearing')).toBe(false);
+  });
+});
+
+describe('hasTitleAltSubjectMatch', () => {
+  it('requires title/alt overlap with topic subject tokens', () => {
+    expect(
+      hasTitleAltSubjectMatch(
+        { title: 'Beekeepers harvesting honey frames', alt: '' },
+        'Why beekeepers are disappearing',
+      ),
+    ).toBe(true);
+    expect(
+      hasTitleAltSubjectMatch(
+        { title: 'Charlie Rose Interview available daily', alt: 'FEMA pad' },
+        'Why beekeepers are disappearing',
+      ),
+    ).toBe(false);
+  });
+});
+
 describe('shouldFailOpenWebVisionSkip', () => {
-  it('keeps a web clip that carries its own strong evidence when the vision budget is spent', () => {
-    expect(shouldFailOpenWebVisionSkip({ isWebClip: true, hasStrongEvidence: true })).toBe(true);
+  it('keeps DoD web clips with strong family evidence when the vision budget is spent', () => {
+    expect(
+      shouldFailOpenWebVisionSkip({
+        isWebClip: true,
+        hasStrongEvidence: true,
+        isDodTopic: true,
+        titleAltSubjectMatch: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('refuses non-DoD fail-open without title/alt subject match even if keyword evidence is strong', () => {
+    expect(
+      shouldFailOpenWebVisionSkip({
+        isWebClip: true,
+        hasStrongEvidence: true,
+        isDodTopic: false,
+        titleAltSubjectMatch: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('fail-opens non-DoD web clips only on true title/alt subject match', () => {
+    expect(
+      shouldFailOpenWebVisionSkip({
+        isWebClip: true,
+        hasStrongEvidence: false,
+        isDodTopic: false,
+        titleAltSubjectMatch: true,
+      }),
+    ).toBe(true);
   });
 
   it('drops web clips without evidence and never fails open on stock/archive clips', () => {
-    expect(shouldFailOpenWebVisionSkip({ isWebClip: true, hasStrongEvidence: false })).toBe(false);
-    expect(shouldFailOpenWebVisionSkip({ isWebClip: false, hasStrongEvidence: true })).toBe(false);
+    expect(
+      shouldFailOpenWebVisionSkip({
+        isWebClip: true,
+        hasStrongEvidence: false,
+        isDodTopic: true,
+        titleAltSubjectMatch: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFailOpenWebVisionSkip({
+        isWebClip: false,
+        hasStrongEvidence: true,
+        isDodTopic: true,
+        titleAltSubjectMatch: true,
+      }),
+    ).toBe(false);
     expect(shouldFailOpenWebVisionSkip()).toBe(false);
   });
 });

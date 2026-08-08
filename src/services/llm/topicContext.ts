@@ -49,6 +49,13 @@ export async function fetchWikiContext(topic: string): Promise<{ extract: string
   }
 }
 
+/** Historical topics should not be force-modernized with "news 2026" search suffixes. */
+export function isLikelyHistoricalTopic(topic: string): boolean {
+  return /\b(?:victorian|edwardian|medieval|ancient|colonial|renaissance|antique|era|century|18\d{2}|19\d{2}s?)\b/i.test(
+    topic,
+  );
+}
+
 /**
  * Fetch recent web context about a topic via the DDG search proxy.
  * Only works in dev mode (the /api/search proxy). In production it returns
@@ -56,8 +63,11 @@ export async function fetchWikiContext(topic: string): Promise<{ extract: string
  */
 export async function fetchTopicContext(topic: string): Promise<string> {
   try {
+    // Avoid "news 2026" for historical topics — that relocates Victorian-era
+    // queries into modern Victoria AU / Varroa headlines and poisons the script.
+    const query = isLikelyHistoricalTopic(topic) ? `${topic} history` : `${topic} news 2026`;
     const res = await fetchWithTimeout(
-      `/api/search?q=${encodeURIComponent(topic + ' news 2026')}`,
+      `/api/search?q=${encodeURIComponent(query)}`,
       {},
       { timeoutMs: 8_000, maxRetries: 1 },
     );

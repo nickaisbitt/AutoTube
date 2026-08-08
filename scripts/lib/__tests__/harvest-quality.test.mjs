@@ -46,6 +46,12 @@ import {
   newsWrapperPadReason,
   unreadableOverlayReason,
   genericStockJunkReason,
+  genericFetchSubjectGateReason,
+  hasAirlineStrongAviationEvidence,
+  isAirlineAirfieldEstablishingWeakPad,
+  isAirlineEstablishingOnlyWeak,
+  isUniversalOffTopicBroll,
+  universalOffTopicBrollReason,
   isWebNativeMotionSource,
   keylessArchiveHumanPortraitScore,
   archivePathEvidenceText,
@@ -743,9 +749,8 @@ describe('honest topicalVideoCount requires subject overlap', () => {
       source: 'Archive.org live',
     };
     expect(assetHasTopicSubjectOverlap(corruption, BEEKEEPERS_TOPIC)).toBe(false);
-    // Keyword relevance still lies via "victorian" + portrait "worried" — topical score must not.
-    expect(scoreAssetRelevance(corruption, segment, BEEKEEPERS_TOPIC, topicKeywords))
-      .toBeGreaterThanOrEqual(VOLUME_PADDING_MIN_RELEVANCE);
+    // Era/framing keyword overlap must not certify relevance without subject nouns.
+    expect(scoreAssetRelevance(corruption, segment, BEEKEEPERS_TOPIC, topicKeywords)).toBe(0);
     expect(keylessArchiveHumanPortraitScore(corruption, segment, BEEKEEPERS_TOPIC))
       .toBeGreaterThanOrEqual(VOLUME_PADDING_MIN_RELEVANCE);
     expect(topicalVideoScore(corruption, segment, BEEKEEPERS_TOPIC, topicKeywords)).toBe(0);
@@ -948,7 +953,7 @@ describe('web-native motion is first-class live motion', () => {
     const WEB_SOURCES = [
       { source: 'Vimeo', host: 'https://vimeo.com' },
       { source: 'Dailymotion', host: 'https://www.dailymotion.com/v' },
-      { source: 'giphy', host: 'https://media.giphy.com' },
+      { source: 'Archive.org live', host: 'https://archive.org/download' },
       { source: 'Deep Harvest (ocean.example.com)', host: 'https://cdn.example.com' },
     ];
     // 16 unique topical web videos, ≥2 per segment (distribution 4,3,3,3,3).
@@ -6179,5 +6184,58 @@ describe('healthcare-web214 botox/homeopathy/Jacono/Omron/molest/crane pads', ()
     }
     // Mount Sinai AI stills stay pool-eligible (not required to clear face gate).
     expect(isHealthcareIntroPadJunk('mount sinai ai radiology medical imaging')).toBe(false);
+  });
+});
+
+describe('universal off-topic junk gate (all topics)', () => {
+  const BEEKEEPERS_TOPIC = 'Why Victorian beekeepers feared the silent hive';
+
+  it('universalOffTopicBrollReason rejects FEMA on beekeepers topic', () => {
+    expect(universalOffTopicBrollReason('FEMA disaster relief outreach footage', BEEKEEPERS_TOPIC))
+      .toMatch(/universal off-topic/);
+    expect(isGenericStockJunk('FEMA disaster relief outreach footage', BEEKEEPERS_TOPIC)).toBe(true);
+    expect(healthcareOffTopicBrollReason('FEMA disaster relief outreach footage', BEEKEEPERS_TOPIC)).toBe('');
+  });
+
+  it('genericFetchSubjectGateReason rejects laptop clip on beekeepers', () => {
+    const laptopClip = {
+      type: 'video',
+      url: 'https://videos.pexels.com/video-files/laptop-desk.mp4',
+      alt: 'person typing on laptop at office desk',
+      title: 'office desk laptop stock b-roll',
+      query: 'victorian beekeepers silent hive',
+    };
+    expect(genericFetchSubjectGateReason(laptopClip, BEEKEEPERS_TOPIC))
+      .toMatch(/generic keyless fetch subject gate/);
+    expect(assetHasTopicSubjectOverlap(laptopClip, BEEKEEPERS_TOPIC)).toBe(false);
+  });
+});
+
+describe('airline establishing-only weak pads', () => {
+  const AIRLINE_TOPIC = 'Hidden cabin pressure failures on regional airlines';
+
+  it('isAirlineEstablishingOnlyWeak flags turf runway without stakes', () => {
+    const turfRunway = {
+      type: 'video',
+      url: 'https://videos.pexels.com/video-files/turf-runway.mp4',
+      alt: 'turf runway small airfield establishing b-roll',
+      title: 'general aviation turf strip runway',
+    };
+    expect(isAirlineEstablishingOnlyWeak(turfRunway)).toBe(true);
+    expect(isAirlineAirfieldEstablishingWeakPad(turfRunway.alt)).toBe(true);
+    expect(hasAirlineAviationEvidence(turfRunway)).toBe(true);
+    expect(hasAirlineStrongAviationEvidence(turfRunway)).toBe(false);
+    expect(countAirlineStrongVideos([turfRunway], AIRLINE_TOPIC)).toBe(0);
+  });
+
+  it('still counts cabin-pressure stakes as strong airline video', () => {
+    const oxygenClip = {
+      type: 'video',
+      url: 'https://videos.pexels.com/video-files/oxygen.mp4',
+      alt: 'passengers deploy oxygen masks during cabin pressure loss',
+      title: 'cabin pressure emergency oxygen masks',
+    };
+    expect(isAirlineEstablishingOnlyWeak(oxygenClip)).toBe(false);
+    expect(countAirlineStrongVideos([oxygenClip], AIRLINE_TOPIC)).toBe(1);
   });
 });

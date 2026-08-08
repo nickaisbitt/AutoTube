@@ -276,6 +276,88 @@ export function housingOffTopicBrollReason(haystack, contextText = '') {
  * conference, Tampa Bay phone-number radiology ads, and telehealth-startup
  * explainers — hard-reject those; keep Imperial MRI / Ulster–Shropshire OR.
  */
+
+/**
+ * Topic-agnostic disaster/conspiracy/meme/lecture/capitol junk shared across all
+ * harvest verticals. Healthcare-only pads remain in HEALTHCARE_OFF_TOPIC_BROLL_RE.
+ */
+export const UNIVERSAL_OFF_TOPIC_BROLL_RE =
+  /\b(?:aldous\s+huxley|huxley|george\s+orwell|orwell|brave\s+new\s+world|1984|dystopian?|conspiracy(?:\s*(?:theory|theories|bait|doc(?:umentary)?))?|deep\s+state|new\s+world\s+order|(?:truth|secrets?|agenda|elites?|government)\s+exposed|fema|hurricane(?:\s+\w+)?\s+(?:fema|assistance|psa|relief|recovery)|tornado(?:\s+(?:anniversary|coverage|warning|damage|recovery))?|storm\s+(?:recovery|restoration|warning|damage|psa)|community\s+recovery\s+after\s+disaster|disaster\s+(?:recovery|relief|psa|outreach|footage)|cockroach(?:es)?|roach(?:es)?|insects?|peas?\s+meme|green\s+peas?|classical\s+paintings?|oil\s+paintings?|renaissance\s+(?:art|painting|portrait)|baroque\s+painting|museum\s+painting|rembrandt|van\s+gogh|monet|literary\s+festival|book\s+festival|writers?\s+festival|brattleboro|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|powerpoint\s+lecture|online\s+lecture|mooc(?:\s+lecture)?|title\s+card|capitol(?:\s+building)?|state\s+capitol|protest(?:ers?|ing)?|rally\s+(?:crowd|footage)|political\s+rally)\b|\bexposed\s*[:\-]|\bmeme\b[^.]{0,40}\bpeas?\b/i;
+
+/** Generic stock-pool motion titles with no topical subject (Mixkit-style). */
+export const UNIVERSAL_GENERIC_MOTION_CLIP_RE =
+  /\b(?:business|lifestyle|urban|people|nature|character|office|corporate|city|street)\s+motion\s+clip\b/i;
+
+/** Laptop/desk B-roll with no other filmable subject. */
+export const UNIVERSAL_LAPTOP_ONLY_BROLL_RE =
+  /\b(?:office\s+desk\s+laptop|laptop\s+(?:on\s+)?(?:desk|table)|typing\s+on\s+(?:a\s+)?laptop|person\s+(?:on|using)\s+laptop|macbook\s+(?:on\s+)?desk|imac\s+(?:on\s+)?desk|people\s+working\s+(?:at|on)\s+(?:desks?|laptops?))\b/i;
+
+/**
+ * Runway/airfield/turf establishing tokens without cabin-pressure stakes.
+ * Used to demote GA/turf/runway-only pads from airline strong-video counts.
+ */
+export const AIRLINE_ESTABLISHING_ONLY_TOKENS_RE =
+  /\b(?:runway|airport|tarmac|taxiway|apron|hangar(?:\s+(?:milestone|ribbon\s+cutting))?|turf(?:\s+runway|\s+strip)?|grass\s+strip|general\s+aviation|ga\s+airfield|airfield)\b/i;
+
+/** GA/turf/runway-only establishing pads (parallel to terminal-walk weak pads). */
+export const AIRLINE_AIRFIELD_ESTABLISHING_PAD_RE =
+  /\b(?:general\s+aviation|ga\s+(?:airfield|airport)|grass\s+strip|turf(?:\s+runway|\s+strip)?|small\s+airfield|municipal\s+airport|regional\s+airport\s+runway|runway\s+(?:only|establishing|b-?roll|stock|loop)|turf\s+(?:strip|runway)|airfield\s+establishing)\b/i;
+
+/**
+ * Universal off-topic B-roll: Giphy hosts, disaster/conspiracy/meme junk, laptop-
+ * only pads, and generic "motion clip" stock titles. Applies to every topic.
+ *
+ * @param {string} haystack
+ * @param {string} [contextText]
+ * @param {object|null} [asset]
+ * @returns {string}
+ */
+export function universalOffTopicBrollReason(haystack, contextText = '', asset = null) {
+  void contextText;
+  void asset;
+  const h = String(haystack || '');
+  if (!h.trim()) return '';
+  if (/giphy\.com|media\d*\.giphy\.com/i.test(h)) {
+    return 'universal off-topic giphy/cartoon B-roll';
+  }
+  if (UNIVERSAL_OFF_TOPIC_BROLL_RE.test(h)) {
+    return 'universal off-topic disaster/conspiracy/meme B-roll';
+  }
+  if (UNIVERSAL_GENERIC_MOTION_CLIP_RE.test(h)) {
+    return 'universal off-topic generic motion-clip title';
+  }
+  if (UNIVERSAL_LAPTOP_ONLY_BROLL_RE.test(h)) {
+    return 'universal off-topic laptop-only B-roll';
+  }
+  return '';
+}
+
+/** @param {string} haystack @param {string} [topicBlob] @param {object|null} [asset] */
+export function isUniversalOffTopicBroll(haystack, topicBlob = '', asset = null) {
+  return Boolean(universalOffTopicBrollReason(haystack, topicBlob, asset));
+}
+
+/** @param {string} blob @param {string} [topicBlob] */
+export function isOffTopicUniversalJunk(blob, topicBlob = '') {
+  return Boolean(universalOffTopicBrollReason(blob, topicBlob));
+}
+
+/**
+ * Generic keyless topics: video assets must prove subject overlap from metadata.
+ *
+ * @param {object} asset
+ * @param {string} topicBlob
+ * @returns {string}
+ */
+export function genericFetchSubjectGateReason(asset = {}, topicBlob = '') {
+  if (!isGenericKeylessSubjectTopic(topicBlob)) return '';
+  if (!isVideoAsset(asset)) return '';
+  if (!assetHasTopicSubjectOverlap(asset, topicBlob)) {
+    return 'generic keyless fetch subject gate: no topic subject overlap';
+  }
+  return '';
+}
+
 export const HEALTHCARE_OFF_TOPIC_BROLL_RE =
   /\b(?:aldous\s+huxley|huxley|george\s+orwell|orwell|brave\s+new\s+world|1984|dystopian?|conspiracy(?:\s*(?:theory|theories|bait|doc(?:umentary)?))?|deep\s+state|new\s+world\s+order|(?:truth|secrets?|agenda|elites?|government)\s+exposed|healthcare\s+exposed|fema|hurricane(?:\s+\w+)?\s+(?:fema|assistance|psa|relief|recovery)|tornado(?:\s+(?:anniversary|coverage|warning|damage|recovery))?|storm\s+(?:recovery|restoration|warning|damage|psa)|community\s+recovery\s+after\s+disaster|disaster\s+(?:recovery|relief|psa|outreach|footage)|cockroach(?:es)?|roach(?:es)?|insects?|peas?\s+meme|green\s+peas?|classical\s+paintings?|oil\s+paintings?|renaissance\s+(?:art|painting|portrait)|baroque\s+painting|museum\s+painting|rembrandt|van\s+gogh|monet|literary\s+festival|book\s+festival|writers?\s+festival|brattleboro|(?:covid|c[\s-]?19|coronavirus)\s+(?:propaganda|psa|misinfo|hoax)|pandemic\s+propaganda|propaganda\s+war|sleepy\s+joe|antibody\s+dependent\s+enhancement|coursera|stanford\s+online|course\s+trailer|lecture\s+slides?|powerpoint\s+lecture|online\s+lecture|mooc(?:\s+lecture)?|title\s+card|capitol(?:\s+building)?|state\s+capitol|protest(?:ers?|ing)?|rally\s+(?:crowd|footage)|political\s+rally|maternity(?:\s+(?:ward|hospital|film|footage|clinic|care|1937|archival|vintage))?|childbirth|child\s*birth|washing\s+breasts?|kapparot|kapores|atonement\s+(?:ritual|ceremony)|ritual\s+(?:chicken|slaughter|atonement|kapparot)|news\s+talking\s*heads?|talking\s*heads?\s+(?:studio|news|interview)|news\s+(?:anchor|studio|desk|storage)|anchor\s+desk|studio\s+(?:interview|talking)|newsroom\s+anchor|christmas\s+tree|xmas\s+tree|green\s+screen|holiday\s+backdrop|chroma\s+key|def\s*con|biohacking\s+village|madness\s+and\s+medicine|sex\s+after\s+(?:prostate|surgery)|prostate\s+(?:cancer\s+)?(?:sex|breaking\s+news)|christmas\s+tree|green\s*screen\s+(?:christmas|holiday)|legos?|mgtow|hiroshima|atomic\s+(?:bomb|experiments?)|warzone|war\s*zone|holiday\s+health\s+tips|terrible\s+nurses|cnn\s*10|breast\s+implants?|plastic\s+surg(?:ery|eon)?|aesthetics?\s+(?:spa|medical)|mathew\s+epps|lowcountry\s+lowdown|cong\s+hoa|saigon|burn\s+ward|vietnam(?:ese)?\s+(?:war|hospital|archival|medical)|penfield\s+reading|ltc\s+lakin|obama.?s?\s+eligibility|challenging\s+obama|scooter\s+vs\s+car|collision\s+in\s+venice|medical\s+city\s+arlington|adventure\s+eight|paging\s+dr\.?\s+ross|scottsdale.?s?\s+cure\s+corridor|city\s+of\s+scottsdale|deadly\s+medicine\s+interactions|amazon\s+pharmacy|garland\s+isd|school\s+district|classroom\s+(?:demo|presentation)|students?\s+watching|children\s+(?:seated|audience)|kids?\s+(?:classroom|assembly)|robotic\s+surgery\s+demo\s+(?:at\s+)?(?:school|isd)|da\s*vinci\s+surgical\s+system\s+overview|neuralink(?:\s+robot|\s+live)?|school\s+nurse|wendy\s+cummings|whhi(?:\s+news)?|al\s+funduq|curfew\s+doctor|ukraine\s+pow|prisoners?\s+of\s+war|kissing\s+and\s+love|rhino\s+(?:ct|scan)|zoo\s+(?:ct|scan|x[\s-]?ray)|circumc(?:ision|ure)|board\s+of\s+commissioners|organ\s+harvesting|brain\s+death|world\s+laparoscopy\s+hospital|anniversary\s+celebration|medical\s+career|well\s+paying\s+medical|allied\s+health\s+radiologic|hospitals?\s+safe\s+from\s+covid|second\s+opinion\s+project|exhibition\s+hall|trade\s*show(?:\s+floor)?|\bhimss\b|conference\s+(?:booth|floor|expo\s+floor)|expo\s+(?:floor|booth|hall)|ces\s+(?:20\d{2}|conference|show)|health\s+(?:it\s+)?summit\s+(?:booth|floor|expo)|ai\s+(?:summit|conference)\s+(?:booth|floor|hall|product\s+demo)|medical\s+trade\s+show|healthcare\s+(?:expo|trade\s+show)|suit\s+(?:walk(?:ing)?|stroll(?:ing)?)|judy\s+mikovits|censored\s+scientists|david\s+samadi|\bsamadi\b|truth\s+about\s+canadian\s+healthcare|medical\s+liability|healthloop|bad\s+patient\s+diagnoses|overwhelmed\s+covid|covid\s*19\s+ward|talk\s+of\s+the\s+town|whhitv|ron\s+johnson|mrna\s+vaccine|vaccine\s+injury|ask\s+dr\s+drew|intestinal\s+injury|attempted\s+abortion|walk\s*in\s+center|mental\s+health\s+addictions|medical\s+monopoly|tour\s+glendale|new\s+hospital\s+st\s+joseph|swift\s+corridor|absolute\s+justice|white\s+coat\s+ceremony|medical\s+school\s+(?:graduation|convocation|white\s+coat)|nursing\s+(?:pinning\s+ceremony|graduation\s+ceremony|celebration\s+day)|hospital\s+(?:fundraiser|benefit\s+gala|benefit\s+concert|anniversary\s+gala)|digital\s+health\s+(?:summit\s+(?:floor|booth|expo)|conference\s+(?:floor|booth|expo))|health\s+(?:tech|information\s+technology)\s+conference\s+(?:floor|booth|expo|keynote)|ehr\s+(?:demo|product\s+demo|software\s+demo|keynote)|emr\s+(?:demo|product\s+demo|software\s+demo)|body\s+language\s+(?:healthcare|medical|clinical|edition|coaching|mistakes?)|healthcare\s+edition|nvidia\s+(?:ai\s+)?(?:for\s+)?(?:healthcare|life\s+sciences|health\s+systems?)|ai\s+patel|why\s+ai\s+[a-z]{3,}\s+why\s+ai|jada\s+pemble|meet\s+our\s+[a-z]+\s+[a-z]+\s+[a-z]+\s+medical\s+lab|helium\s+used\s+in\s+(?:the\s+)?medical\s+(?:field|imaging)|not\s+just\s+for\s+balloons\s+helium|milestone\s+celebration|maple\s+grove\s+(?:hospital|high\s+schooler)|medcram(?:\.com)?|(?:online\s+medical\s+learning|how)\s+(?:can\s+)?pa\s+schools?\s+(?:can\s+)?benefit|pa\s+schools?\s+(?:can\s+)?benefit(?:\s+from\s+medcram)?|nurses?\s+at\s+celebrity\s+eclipse|celebrity\s+eclipse\s+(?:medical|medical\s+facility)|celebrity\s+(?:cruise\s+)?(?:ship\s+)?(?:nurse|medical\s+facilit)|(?:maryland\s+)?women.?s?\s+heritage\s+center|honor\s+nurses?\s+(?:from\s+)?wwi|wwi\s+(?:heritage\s+center|nurses?)|emergency\s+1972|1972\s+(?:tv\s+series|television\s+series)\s+incomplete|1972\s+tv\s+series|bilibili\s+(?:chill|sakura|ai\s+debug)|sakura\s+(?:chill|ai\s+debug)|chill\s+sakura|ai\s+debug\s+pad|surgeon\s+simulator(?:\s+\d+)?(?:\s+multiplayer)?|electric\s+massage(?:\s+pillow|\s+cushion)?|massage\s+pillow|ai\s+geist|geist\s+lynx|lynx\s+reports?|kathmandu\s+medical\s+college|blurry\s+test\s*tubes?|test\s*tube\s+(?:close\s*up|b-?roll|stock)|petri\s+dish\s+(?:b-?roll|stock|close\s*up)|ent\s+examination\s+(?:video|lecture|tutorial)|jackthreads|jack\s*threads|real\s+fashion\s+for\s+guys|geekbeat(?:\.tv)?|unlock(?:ing)?\s+(?:your\s+)?(?:old\s+)?iphone|at\s*&?\s*t\s+will\s+unlock|\bmlk\b|martin\s+luther\s+king|why\s+america\s+may\s+go\s+to\s+hell|this\s+or\s+that|metro\s+edition|che\s+guevara|imperialism|palestine\s+deepdive|palestine\s+red\s+crescent|\bprcs\b|bald\s+truth|why\s+do\s+i\s+innovate|dr\.?\s+elias|elias.?s?\s+blind\s+spot|david\s*(?:&|and)\s*elias|hair\s+transplant|artas\s+hair|sri\s+ponni|\bbayer\b|corporate\s+(?:logo\s+)?(?:interview|presentation|stage|booth)|logo\s+stage|keynote\s+stage|fashion\s+for\s+guys|game\s+show|spinning\s+wheel|martial\s+law|senate\s+passes|congressional\s+hearing|david\s+daleiden|aborted\s+baby|transgender\s+critical|rainbow\s+or\s+die|high\s+schooler|accepted\s+to\s+medical\s+school|brookhaven|dies?\s+in\s+lebanon|denied\s+hospital\s+care|gaza\s+s?\s+wounded|gaza\s+(?:war\s+)?hospital|hospital\s+siege|war\s+hospital\s+siege|siege\s+(?:of\s+)?(?:a\s+|the\s+)?(?:gaza\s+)?hospital|thought\s+process\s+of\s+highly\s+successful|highly\s+successful\s+people|cuffless\s+(?:blood\s+)?pressure|blood\s+pressure\s+monitor\s+(?:product|ad|promo|commercial|review|wearable)|aaron\s+judge|bone\s+bruise|israeli\s+genocide|episode\s+\d+|split[\s-]?screen\s+(?:podcast|interview)|c4i|call\s+4\s+investigation|call\s+for\s+investigation|inner\s+voices|al\s+ahli\s+hospital|abu\s+sitta|moscow\s+times|sick\s+(?:russian\s+)?nurses?\s+in\s+storage|nurses?\s+storage\s+room\s+(?:outrage|spark)|bronxnet|open\s+tuesday\s+(?:ai|health|medical|breast|cancer|bronx|new\s+york)|public\s+access\s+tv|peg\s+(?:tv|channel|media|youtube)|community\s+media\s+(?:peg|bronx|channel)|rsna\s+20\d{2}|ai\s+interoperability\s+and\s+workflow|workflow\s+automation\s+at\s+rsna|mindray\s+n\s+series|user\s+training\s+part\s*\d|journal\s+of\s+diagnosis(?:\s+case\s+reports?)?|kaggle(?:\s+slide|\s+notebook|\s+competition)?|guerbet\s+aimed|\bnih\b\s+data\s+science\s+and\s+medicine|data\s+science\s+and\s+medicine\s+what.?s\s+possibly|corporate\s+(?:slide|powerpoint|deck)|powerpoint\s+(?:slide|deck|presentation)|slide\s+presentation\s+(?:healthcare|medical|ai)|imaging\s+wire|ramsoft\s+ceo|orbis\s+flying\s+eye(?:\s+hospital)?|fedex\s+helps\s+deliver\s+sight|ensemble[\s-]?x|ensembled?\s+deep\s+learning|whitney\s+hatch|heart\s+patient\s+(?:interview|testimonial)|chest\s+x[\s-]?ray\s+interpretation\s+explained|how\s+to\s+read\s+a\s+chest\s+x[\s-]?ray|overview\s+of\s+(?:the\s+)?da\s*vinci|onyx\s+rad\s+demonstration|mri\s+wide\s+bore\s+(?:video|southeastern)|manuscript\s+today|cassette|personal\s+injury\s+(?:clinic|center|doctor|attorney)|cabrini\s+foundation|veterinary\s+(?:imaging|radiology|(?:ct|mri|ultrasound)\s+modalities?)|after\s+effects?\s+(?:project|template)|\biamstemak\b|gcsc\s+surgical|what\s+to\s+expect\s+(?:when\s+)?having\s+(?:an?\s+)?(?:mri|ct\s+scan|mri\s+scan)|connect\s+patient\s+portal|patient\s+portal\s+(?:connect|login|app|software)|acr\s+accreditation|car\s+accident\s+(?:doctor|mri|clinic)|ghanashyam|ecg\s+reading\s+and\s+xray|radiology\s+dvds?|cosmetic\s+product\s+after\s+effects|remote\s+cardiac\s+monitoring\s+rhythm|myrhythmnow|cambridge\s+filmworks|at\s+medica\s+20\d{2}|medica\s+20\d{2}|versius\s+surgical\s+robotic\s+system|senhance\s+surgical\s+robotic\s+system(?:\s+full\s+length)?|full\s+length\s+benefits|smart\s+m(?:onitor|edical)\s+series\s+at\s+medica|science\s+nation|sciencenation|nsf\s+science\s+nation|national\s+science\s+foundation\s+science\s+nation|angry\s+boy\s+part|regen\s+seminar|ultrasound[\s-]?guided\s+injections?\s+(?:seminar|demo|demonstration|training)|why\s+is\s+awbus|\bawbus\b|better\s+choice\s+over\s+hand[\s-]?held|lab\s+interfaces|microwize|medisoft\s+clinical|shelford\s+surgical\s+training|start\s+programme|reveal\s+linq|insertable\s+cardiac\s+monitor|tmini\s+miniature|think\s+surgical|technical\s+overview\s+illustration|healthcare\s+professional\s+information\s+series|discussing\s+cancer\s+screening\s+with\s+patients|talking\s+to\s+family\s+loved\s+ones\s+about\s+lung|diversified\s+radiology\s+breast|patient\s+friendly\s+video\s+was\s+created\s+by\s+(?:acr|radiologist)|stitch\s+a\s+grape|mri\s+how\s+it\s+works\s+part|how\s+an\s+mri\s+mrt\s+scan\s+is\s+performed|philips\s+epiq|lcd\s+monitor\s+removal|omnibotics|corin.?s?\s+robotic\s+assisted|diagnostic\s+mammogram\s+este\s+video|qu[eé]\s+debe\s+saber\s+sobre\s+la\s+mamograf|clinic\s+promo|(?:mri|ct|ultrasound)\s+clinic\s+promo|promo\s+(?:personal\s+injury|clinic\s+mri)|walk[\s-]?in\s+(?:mri|imaging)\s+(?:promo|ad|clinic)|imaging\s+center\s+(?:promo|advertisement|commercial)|free\s+mri\s+(?:consult|consultation|promo)|ambulance\s+ramping|parliamentary\s+inquiry|nsw\s+inquiry|state\s+parliamentary\s+inquiry|patients?\s+dying\s+unnecessarily|cash\s+back\s+on\s+(?:doctor\s+)?consultation|\bzoylo\b|live\s*leak|\bliveleak\b|grapes\s+to\s+gowns|\bexo\s+echo\b|pocket\s+ultrasound|vibe\s+summit|tech\s+startups?\s+increasingly\s+offering|bayview\s+radiology|breast\s+ultrasounds?\s+in\s+tampa|most\s+common\s+use\s+cases?\s+for\s+ai|\bbotox\b|looking\s+frozen\s+after\s+botox|nano\s+homeopath|homeopath(?:y|ic)|dr\s+lubna\s+kamal|\bjacono\b|rhinoplast|width\s+of\s+her\s+nos|sexually\s+molests?|molests?\s+patients?\s+under\s+anesthesia|\bomron\b|\bbp742n\b|blood\s+pressure\s+monitor\s+pack|mri\s+unit\s+lifted|lifted\s+into\s+\w+\s+hospital\s+by\s+crane|denied\s+mri\s+referral|broke\s+skull\s+in\s+mri|fl\s+dept\s+of\s+health|paid\s+less\s+than\s+their\s+male\s+colleagues|female\s+doctors?\s+spent\s+more\s+time)\b|\bexposed\s*[:\-]|\bmeme\b[^.]{0,40}\bpeas?\b|srcpublishers\.com/i;
 
@@ -331,10 +413,9 @@ export function healthcareArchiveTitleMismatchReason(query = '', titleAlt = '', 
 export function healthcareOffTopicBrollReason(haystack, contextText = '', asset = null) {
   if (!isHealthcareTopic(contextText)) return '';
   const h = String(haystack || '');
-  // Giphy pads dominate keyless healthcare pools as cartoon/meme motion with
-  // empty titles (healthcare-web2: 9/17 assets) — hard-reject by host.
-  if (/giphy\.com|media\d*\.giphy\.com/i.test(h)) {
-    return 'healthcare off-topic giphy/cartoon B-roll';
+  const universal = universalOffTopicBrollReason(h, contextText, asset);
+  if (universal) {
+    return universal.replace(/^universal off-topic/, 'healthcare off-topic');
   }
   if (HEALTHCARE_OFF_TOPIC_BROLL_RE.test(h)) {
     return 'healthcare off-topic conspiracy/disaster/meme B-roll';
@@ -853,6 +934,46 @@ export function isAirlineTerminalWalkWeakPad(haystack) {
 }
 
 /**
+ * GA/turf/runway-only establishing without cabin/pressure/emergency stakes.
+ *
+ * @param {string} haystack
+ * @returns {boolean}
+ */
+export function isAirlineAirfieldEstablishingWeakPad(haystack) {
+  const h = String(haystack || '');
+  const airfieldPad = AIRLINE_AIRFIELD_ESTABLISHING_PAD_RE.test(h);
+  const runwayOnly =
+    /\b(?:runway|tarmac|taxiway|apron)\b/i.test(h)
+    && !/\b(?:cabin|cockpit|oxygen|passengers?|emergency|flight\s+attendant)\b/i.test(h);
+  if (!airfieldPad && !runwayOnly) return false;
+  if (AIRLINE_STAKES_ESCAPE_RE.test(h)) return false;
+  if (/\b(?:passengers?|emergency|cockpits?|flight\s+decks?|cabin\s+crew|flight\s+attendants?)\b/i.test(h)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * True when visual evidence is only runway/airfield/turf establishing without
+ * cabin/pressure/oxygen/emergency/passenger/cockpit stakes.
+ *
+ * @param {object} asset
+ * @returns {boolean}
+ */
+export function isAirlineEstablishingOnlyWeak(asset = {}) {
+  const visual = visualEvidenceBlob(asset);
+  const web = isWebNativeMotionSource(asset) ? webNativeEvidenceBlob(asset) : '';
+  const h = `${visual} ${web}`.replace(/\s+/g, ' ').trim();
+  if (!h) return false;
+  if (!AIRLINE_ESTABLISHING_ONLY_TOKENS_RE.test(h)) return false;
+  if (AIRLINE_STAKES_ESCAPE_RE.test(h)) return false;
+  if (/\b(?:passengers?|emergency|cockpits?|flight\s+decks?|cabin\s+crew|flight\s+attendants?)\b/i.test(h)) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * True when haystack is muddy/dark fire-extinguisher filler without cabin-
  * emergency face/oxygen stakes (airline-s85-5).
  *
@@ -1116,6 +1237,8 @@ export function genericStockJunkReason(haystack, contextText = '') {
   }
   const housingOffTopic = housingOffTopicBrollReason(h, ctx);
   if (housingOffTopic) return housingOffTopic;
+  const universalJunk = universalOffTopicBrollReason(h, ctx);
+  if (universalJunk) return universalJunk;
   const healthcareOffTopic = healthcareOffTopicBrollReason(h, ctx);
   if (healthcareOffTopic) return healthcareOffTopic;
   if (
@@ -1414,6 +1537,26 @@ export function hasAirlineAviationEvidence(asset = {}) {
   }
   return false;
 }
+
+/**
+ * Aviation evidence with cabin-pressure stakes — excludes establishing-only weak
+ * runway/turf/hangar pads that read as "aviation" to keyword gates.
+ *
+ * @param {object} asset
+ * @returns {boolean}
+ */
+export function hasAirlineStrongAviationEvidence(asset = {}) {
+  if (!hasAirlineAviationEvidence(asset)) return false;
+  const visual = visualEvidenceBlob(asset);
+  const blob = isWebNativeMotionSource(asset)
+    ? `${visual} ${webNativeEvidenceBlob(asset)}`.replace(/\s+/g, ' ').trim()
+    : visual;
+  if (!blob) return false;
+  if (isAirlineEstablishingOnlyWeak(asset)) return false;
+  if (isAirlineAirfieldEstablishingWeakPad(blob)) return false;
+  if (isAirlineTerminalWalkWeakPad(blob)) return false;
+  return true;
+}
 /**
  * Healthcare evidence contract — same stock-vs-web split as aviation.
  * @param {object} asset
@@ -1674,6 +1817,9 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   // Junk/off-brand gates still read the query: a fetch string that admits junk fails closed.
   if (offTopicBlockReason(`${visual} ${queryForScore}`.trim(), contextText)) return 0;
 
+  const subjectGate = genericFetchSubjectGateReason(asset, topic);
+  if (subjectGate) return 0;
+
   const countTopicHits = (keywords, text) =>
     keywords.reduce((n, kw) => (subjectTokenMatchesText(kw, text) || text.includes(kw) ? n + 1 : n), 0);
   const countSegHits = (keywords, text) =>
@@ -1739,6 +1885,16 @@ export function filterAssetsByRelevance(media, project, options = {}) {
         segmentId: asset.segmentId,
         score: 0,
         reason: blockReason,
+      });
+      continue;
+    }
+    const subjectGate = genericFetchSubjectGateReason(asset, topic);
+    if (subjectGate) {
+      dropped.push({
+        url: asset.url,
+        segmentId: asset.segmentId,
+        score: 0,
+        reason: subjectGate,
       });
       continue;
     }
@@ -3084,7 +3240,7 @@ function softPassSameSubjectToken(token, want) {
  * @returns {boolean}
  */
 export function mediaMetadataSubjectMatch(asset = {}, topicBlob = '') {
-  const wanted = softPassSubjectTokens(topicBlob);
+  const wanted = topicSubjectTokens(topicBlob);
   if (!wanted.length) return true;
   const evidence = visualEvidenceBlob(asset);
   if (!evidence) return false;
@@ -3699,12 +3855,22 @@ function isAirlineStrongVideo(asset = {}, topicBlob = '') {
   if (AIRLINE_STRONG_CABIN_RE.test(blob)) return true;
   if (AIRLINE_STRONG_COCKPIT_RE.test(blob)) return true;
   if (AIRLINE_STRONG_OXYGEN_RE.test(blob)) return true;
-  if (AIRLINE_STRONG_HANGAR_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
-  if (AIRLINE_STRONG_RUNWAY_RE.test(blob) && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)) return true;
+  if (AIRLINE_STAKES_ESCAPE_RE.test(blob)) return true;
+  if (isAirlineAirfieldEstablishingWeakPad(blob)) return false;
+  if (isAirlineEstablishingOnlyWeak(asset)) return false;
+  if (
+    AIRLINE_STRONG_HANGAR_RE.test(blob)
+    && AIRLINE_STRONG_AIRCRAFT_RE.test(blob)
+    && AIRLINE_STAKES_ESCAPE_RE.test(blob)
+  ) {
+    return true;
+  }
   if (
     /\b(airplane cabin|pilot cockpit|flight attendant airplane|passenger oxygen mask|oxygen mask deploy|maintenance hangar|mechanic tools aircraft|cabin pressure gauge|airport runway plane|aircraft maintenance|airplane|aircraft|cockpit|hangar|runway|tarmac|boarding)\b/i.test(
       blob,
     )
+    && !isAirlineAirfieldEstablishingWeakPad(blob)
+    && !isAirlineEstablishingOnlyWeak(asset)
   ) {
     return true;
   }
@@ -3714,7 +3880,7 @@ function isAirlineStrongVideo(asset = {}, topicBlob = '') {
   // already rejected above, so a surviving blob with this evidence is genuine
   // aviation motion — the fix that lets Bing/Google "download-clip" web clips count.
   if (isAirlineTerminalWalkWeakPad(blob)) return false;
-  if (AIRLINE_AVIATION_EVIDENCE_RE.test(blob)) return true;
+  if (hasAirlineStrongAviationEvidence(asset)) return true;
   return false;
 }
 

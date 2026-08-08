@@ -48,11 +48,14 @@ describe('harvest-relevance-gate helpers', () => {
     expect(parseRelevanceDecision('not json').decision).toBeNull();
   });
 
-  it('system prompt keeps same-beat aviation even when airline differs', () => {
+  it('system prompt keeps topical subject footage even when era/brand differs', () => {
     expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/wrong airline name is OK/i);
     expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/oxygen masks/i);
     expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/cabin/i);
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/KEEP = real footage matching the beat family/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/bees|hives|honeycomb|apiary/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/KEEP = real footage of the topic/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/era, brand, location/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/Do NOT REJECT solely because footage looks modern/i);
   });
 
   it('system prompt rejects fiction music trailers and chyron-only', () => {
@@ -60,11 +63,24 @@ describe('harvest-relevance-gate helpers', () => {
     expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/chyron\/logo\/title-card only/i);
     expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/meme\/cartoon/i);
     expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/REJECT =/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/wrong industry/i);
   });
 
-  it('system prompt marks historic establishing as WEAK not REJECT', () => {
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/WEAK = vaguely airport\/hangar establishing/i);
-    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/historic WWII\/1970s training film/i);
+  it('system prompt marks era mismatch and loose establishing as WEAK not REJECT', () => {
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/Era or brand mismatch alone is WEAK, never REJECT/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/WEAK = vaguely related establishing/i);
+    expect(RELEVANCE_SYSTEM_PROMPT).toMatch(/historic training film/i);
+  });
+
+  it('parse policy: KEEP/WEAK/REJECT remain the only valid decisions', () => {
+    expect(parseRelevanceDecision('{"decision":"KEEP","reason":"bees at hive"}').decision).toBe('KEEP');
+    expect(parseRelevanceDecision('{"decision":"WEAK","reason":"era mismatch establishing"}').decision).toBe('WEAK');
+    expect(parseRelevanceDecision('{"decision":"REJECT","reason":"music video"}').decision).toBe('REJECT');
+    expect(parseRelevanceDecision('{"decision":"NEAR_MISS","reason":"modern generic"}').decision).toBeNull();
+    // Body soft-admit path: WEAK must not hard-reject outside intro
+    expect(shouldRejectRelevanceDecision('WEAK', { isIntro: false })).toBe(false);
+    expect(shouldRejectRelevanceDecision('KEEP', { isIntro: false })).toBe(false);
+    expect(shouldRejectRelevanceDecision('REJECT', { isIntro: false })).toBe(true);
   });
 
   it('builds a compact user prompt', () => {

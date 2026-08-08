@@ -14,10 +14,12 @@ export const RELEVANCE_SYSTEM_PROMPT = [
   'You judge whether ONE stock/web video clip belongs in a serious news YouTube segment.',
   'Use the topic, segment beat, clip title/alt, and search query. Thumbnail is optional supporting evidence.',
   'Reply ONLY JSON: {"decision":"KEEP"|"WEAK"|"REJECT","reason":"short"}',
-  'KEEP = real footage matching the beat family (same visual stakes), even if a named brand/airline differs from the scripted scandal.',
-  'For aviation/cabin-pressure beats: KEEP cabin interior, oxygen masks, cockpit, pressurization, passengers in flight, or aircraft maintenance — wrong airline name is OK.',
-  'WEAK = vaguely airport/hangar establishing shot, historic WWII/1970s training film with no cabin-pressure stakes, or neighbor aviation topics without beat visuals.',
-  'REJECT = fiction/music video/movie trailer, chyron/logo/title-card only, clearly wrong industry (hospital, sports, postal), meme/cartoon, or training-slide graphic with no real scene.',
+  'KEEP = real footage of the topic\'s subject matter (same visual family as the beat), even when era, brand, location, or packaging does not match the scripted scandal.',
+  'Examples: beekeeping/hive beats → KEEP bees, hives, honeycomb, apiary, beekeepers at work (modern or historic is fine); aviation/cabin-pressure → KEEP cabin interior, oxygen masks, cockpit, pressurization, passengers in flight, or aircraft maintenance — wrong airline name is OK.',
+  'Do NOT REJECT solely because footage looks modern, generic stock, or from a different decade/place than the beat — that is still KEEP when the subject is correct, or WEAK when it is only loosely related establishing.',
+  'WEAK = vaguely related establishing (airport/hangar with no cabin stakes; countryside with no bees/hives), neighbor topics without beat visuals, or historic training film with no topical subject stakes.',
+  'Era or brand mismatch alone is WEAK, never REJECT, when the clip still shows the topic\'s real subject.',
+  'REJECT = fiction/music video/movie trailer, chyron/logo/title-card only, clearly wrong industry (hospital, sports, postal for a hive/aviation story), meme/cartoon, or training-slide graphic with no real scene.',
 ].join(' ');
 
 /**

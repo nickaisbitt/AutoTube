@@ -8,10 +8,13 @@ import {
   countAirlineStrongVideos,
   ensureTopicalVideoCoverage,
   evaluateHarvestVolumeWithSoftPass,
+  extractTopicSubjectTokens,
   filterAssetsByRelevance,
+  genericKeylessSubjectTokenFailureReason,
   hasAirlineAviationEvidence,
   hasHealthcareEvidence,
   hasHousingEvidence,
+  countSubjectTokenMatchingVideos,
   housingIntroFaceEvidenceMatches,
   healthcareIntroFaceEvidenceMatches,
   isHealthcareEstablishingOpener,
@@ -666,6 +669,155 @@ describe('web-native motion is first-class live motion', () => {
     const result = evaluateHarvestVolumeWithSoftPass(mediaReport, project);
     expect(result.pass).toBe(true);
     expect(result.reason).toMatch(/^soft-pass-web-motion\(/);
+  });
+});
+
+describe('keyless generic soft-pass subject-token meaning (beekeepers autopsy)', () => {
+  const BEE_TOPIC = 'Why Victorian beekeepers feared the silent hive';
+
+  beforeEach(() => {
+    vi.stubEnv('PEXELS_API_KEY', '');
+    vi.stubEnv('VITE_PEXELS_KEY', '');
+    vi.stubEnv('PIXABAY_API_KEY', '');
+    vi.stubEnv('VITE_PIXABAY_KEY', '');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const makeSegments = (n) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `seg${i}`,
+      title: `Segment ${i}`,
+      narration: 'Victorian beekeepers listened for a silent hive.',
+    }));
+
+  const junkAlts = [
+    'victorians are not worried about corruption',
+    'FEMA public outreach',
+    'charlie rose interviews lawrence lessig about his book remix',
+    'reel 2479 wmar tv television station baltimore',
+    'reiner fuellmich interviewed dr mike yeadon former vice president pfizer',
+    'howard county executive announces re opening plan for main street',
+    'news interview worried person talking head studio',
+    'stock pad city street pedestrians daylight',
+  ];
+
+  const beeAlts = [
+    'victorian beekeepers inspecting silent hive frames',
+    'beekeeper opens hive to check brood frames',
+    'honey bee swarm on a wooden hive box',
+    'apiary beekeepers smoke the silent hive',
+    'close up hive frames with worker bees',
+    'victorian beekeepers fear an empty silent hive',
+    'beekeeper listens at the hive entrance',
+    'beekeepers harvest honey from traditional hive',
+  ];
+
+  function buildPool(alts) {
+    const segments = makeSegments(4);
+    const media = [];
+    alts.forEach((alt, i) => {
+      const seg = segments[i % segments.length];
+      media.push({
+        type: 'video',
+        segmentId: seg.id,
+        url: `https://archive.org/download/bee_pool_${i}/clip_${i}.mp4`,
+        source: 'Archive.org live',
+        alt,
+        title: alt,
+        query: i % 2 === 0 ? 'victorian' : 'news interview worried person',
+      });
+      // Pad stills so soft-pass-aggregate / per-segment counts can clear on volume.
+      for (let s = 0; s < 5; s += 1) {
+        media.push({
+          type: 'image',
+          segmentId: seg.id,
+          url: `https://example.com/still-${i}-${s}.jpg`,
+          source: 'Stock image pool',
+          alt: `padding still ${s}`,
+        });
+      }
+    });
+    return { segments, media };
+  }
+
+  it('extracts bee/hive subject tokens and matches metadata (not query alone)', () => {
+    const tokens = extractTopicSubjectTokens(BEE_TOPIC);
+    expect(tokens).toEqual(expect.arrayContaining(['victorian', 'beekeepers', 'hive']));
+    expect(tokens).not.toContain('why');
+
+    const queryOnly = {
+      type: 'video',
+      url: 'https://archive.org/download/x/x.mp4',
+      alt: 'charlie rose interviews lawrence lessig',
+      title: 'charlie rose interviews lawrence lessig',
+      query: 'victorian beekeepers silent hive',
+    };
+    expect(countSubjectTokenMatchingVideos([queryOnly], BEE_TOPIC)).toBe(0);
+    expect(genericKeylessSubjectTokenFailureReason([queryOnly], BEE_TOPIC)).toMatch(
+      /soft-pass-motion-irrelevant/,
+    );
+  });
+
+  it('fails soft-pass when keyless pool is Charlie Rose / FEMA / corruption junk', () => {
+    const { segments, media } = buildPool(junkAlts);
+    const project = { topic: BEE_TOPIC, title: BEE_TOPIC, script: segments, media };
+    const perSegment = Object.fromEntries(
+      segments.map((seg) => [
+        seg.id,
+        {
+          title: seg.title,
+          count: media.filter((m) => m.segmentId === seg.id).length,
+          videoCount: 2,
+          topicalVideoCount: 1,
+        },
+      ]),
+    );
+    const result = evaluateHarvestVolumeWithSoftPass(
+      {
+        volumePass: false,
+        cyberStockInjected: 0,
+        pexelsFetched: 0,
+        pixabayFetched: 0,
+        archiveLiveFetched: 8,
+        videoTopUp: [],
+        harvestQuality: { minPerSegment: 6, perSegment },
+      },
+      project,
+    );
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/^soft-pass-motion-irrelevant\(/);
+  });
+
+  it('soft-passes keyless pool when video metadata matches bee/hive subject tokens', () => {
+    const { segments, media } = buildPool(beeAlts);
+    const project = { topic: BEE_TOPIC, title: BEE_TOPIC, script: segments, media };
+    const perSegment = Object.fromEntries(
+      segments.map((seg) => [
+        seg.id,
+        {
+          title: seg.title,
+          count: media.filter((m) => m.segmentId === seg.id).length,
+          videoCount: 2,
+          topicalVideoCount: 2,
+        },
+      ]),
+    );
+    const result = evaluateHarvestVolumeWithSoftPass(
+      {
+        volumePass: false,
+        cyberStockInjected: 0,
+        pexelsFetched: 0,
+        pixabayFetched: 0,
+        archiveLiveFetched: 8,
+        videoTopUp: [],
+        harvestQuality: { minPerSegment: 6, perSegment },
+      },
+      project,
+    );
+    expect(result.pass).toBe(true);
+    expect(result.reason).toMatch(/^soft-pass-(motion|aggregate|web-motion)/);
   });
 });
 

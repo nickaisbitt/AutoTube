@@ -1128,7 +1128,28 @@ describe('non-YouTube motion planning and ranking', () => {
     ]);
   });
 
-  it('restores Archive injects only when harvest marked motionRelevancePassed', () => {
+  it('restores injects with durable subject proof after relevance strips them', () => {
+    const archive = {
+      id: 'stock-video-s1-p0-0',
+      segmentId: 's1',
+      type: 'video',
+      url: 'https://archive.org/download/beekeepers/hive-harvest.mp4',
+      source: 'Archive.org live',
+      title: 'Victorian apiary beekeeper hive frames',
+      motionRelevancePassed: true,
+    };
+    const kept = restoreMotionRelevancePassed(
+      [],
+      [archive],
+      [{ segmentId: 's1', url: archive.url, motionRelevancePassed: true }],
+      'Why Victorian beekeepers feared the silent hive',
+      [{ id: 's1', title: 'Silent hives' }],
+    );
+    expect(kept.media).toHaveLength(1);
+    expect(kept.media[0].url).toBe(archive.url);
+  });
+
+  it('does not restore query-echo motion flags without durable subject proof', () => {
     const archive = {
       id: 'stock-video-s1-p0-0',
       segmentId: 's1',
@@ -1141,9 +1162,11 @@ describe('non-YouTube motion planning and ranking', () => {
       [],
       [archive],
       [{ segmentId: 's1', url: archive.url, motionRelevancePassed: true }],
+      'Why Victorian beekeepers feared the silent hive',
+      [{ id: 's1', title: 'Silent hives' }],
     );
-    expect(kept.media).toHaveLength(1);
-    expect(kept.media[0].url).toBe(archive.url);
+    expect(kept.media).toHaveLength(0);
+    expect(kept.restored).toHaveLength(0);
   });
 
   it('does not restore Archive injects that only passed because source is Archive', () => {
@@ -1162,6 +1185,8 @@ describe('non-YouTube motion planning and ranking', () => {
       [],
       [archiveJunk],
       [{ segmentId: 's1', url: archiveJunk.url, motionRelevancePassed: false }],
+      'The secret life of beekeepers',
+      [{ id: 's1', title: 'Colony collapse' }],
     );
     expect(kept.media).toHaveLength(0);
     expect(kept.restored).toHaveLength(0);
@@ -1195,6 +1220,8 @@ describe('non-YouTube motion planning and ranking', () => {
         { segmentId: 's1', url: webFace.url, motionRelevancePassed: true },
         { segmentId: 's1', url: mixkitPad.url, motionRelevancePassed: false },
       ],
+      HOUSING_TOPIC,
+      [{ id: 's1', title: 'Eviction notice' }],
     );
     expect(kept.media).toHaveLength(1);
     expect(kept.media[0].url).toBe(webFace.url);
@@ -1582,6 +1609,31 @@ describe('resolveMotionVolumeTargets', () => {
     expect(beekeepers.minVideos).toBeGreaterThanOrEqual(12);
     expect(beekeepers.perSegTarget).toBe(3);
     expect(beekeepers.stockNeed).toBeGreaterThan(0);
+  });
+
+  it('caps keyless volume in loop fast mode to segN * loopMinAssetsPerSegment', () => {
+    const fast = resolveMotionVolumeTargets({
+      ...base,
+      hasStockKeys: false,
+      topicBlob: 'Why Victorian beekeepers feared the silent hive',
+      segmentCount: 6,
+      loopFastMode: true,
+      loopMinAssetsPerSegment: 4,
+    });
+    expect(fast.minVideos).toBe(24);
+    expect(fast.perSegTarget).toBe(4);
+    expect(fast.stockNeed).toBe(0);
+    const airlineFast = resolveMotionVolumeTargets({
+      ...base,
+      hasStockKeys: false,
+      topicBlob: AIRLINE_TOPIC,
+      segmentCount: 6,
+      loopFastMode: true,
+      loopMinAssetsPerSegment: 4,
+    });
+    expect(airlineFast.minVideos).toBe(24);
+    expect(airlineFast.perSegTarget).toBe(4);
+    expect(airlineFast.stockNeed).toBeGreaterThan(0);
   });
 });
 
@@ -2107,10 +2159,11 @@ describe('decideInjectRelevanceAction', () => {
     expect(shouldRunHarvestRelevanceGate({ ...base, strongEvidence: true })).toBe(false);
   });
 
-  it('skips LLM and admits body clips with motionRelevancePassed', () => {
+  it('still gates body clips with motionRelevancePassed alone', () => {
     expect(
       decideInjectRelevanceAction({ ...base, motionRelevancePassed: true }),
-    ).toEqual({ action: 'admit', reason: 'strong-evidence' });
+    ).toEqual({ action: 'check', reason: 'within-budget' });
+    expect(shouldRunHarvestRelevanceGate({ ...base, motionRelevancePassed: true })).toBe(true);
   });
 
   it('still gates intro even with strongEvidence or motionRelevancePassed', () => {
@@ -2154,7 +2207,7 @@ describe('decideInjectRelevanceAction', () => {
     ).toEqual({ action: 'check', reason: 'within-budget' });
   });
 
-  it('enters starveSoft admit on airline body after reject threshold while need remains', () => {
+  it('keeps checking on DoD topics after reject threshold (no starve-soft admit)', () => {
     expect(
       decideInjectRelevanceAction({
         ...base,
@@ -2163,19 +2216,7 @@ describe('decideInjectRelevanceAction', () => {
         need: 5,
         starveSoftEnvValue: '',
       }),
-    ).toEqual({ action: 'admit', reason: 'starve-soft' });
-    expect(
-      decideInjectRelevanceAction({
-        ...base,
-        ...airline,
-        relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD + 3,
-        need: 1,
-        starveSoftEnvValue: '',
-      }),
-    ).toEqual({ action: 'admit', reason: 'starve-soft' });
-  });
-
-  it('allows starveSoft on housing and healthcare DoD families', () => {
+    ).toEqual({ action: 'check', reason: 'within-budget' });
     expect(
       decideInjectRelevanceAction({
         ...base,
@@ -2183,8 +2224,8 @@ describe('decideInjectRelevanceAction', () => {
         relevanceRejected: 12,
         need: 3,
         starveSoftEnvValue: '',
-      }).reason,
-    ).toBe('starve-soft');
+      }),
+    ).toEqual({ action: 'check', reason: 'within-budget' });
     expect(
       decideInjectRelevanceAction({
         ...base,
@@ -2192,11 +2233,11 @@ describe('decideInjectRelevanceAction', () => {
         relevanceRejected: 12,
         need: 3,
         starveSoftEnvValue: '',
-      }).reason,
-    ).toBe('starve-soft');
+      }),
+    ).toEqual({ action: 'check', reason: 'within-budget' });
   });
 
-  it('allows starveSoft on generic topics only when HARVEST_RELEVANCE_STARVE_SOFT=1', () => {
+  it('keeps checking on generic topics even when HARVEST_RELEVANCE_STARVE_SOFT=1', () => {
     expect(
       decideInjectRelevanceAction({
         ...base,
@@ -2204,7 +2245,7 @@ describe('decideInjectRelevanceAction', () => {
         need: 4,
         starveSoftEnvValue: '1',
       }),
-    ).toEqual({ action: 'admit', reason: 'starve-soft' });
+    ).toEqual({ action: 'check', reason: 'within-budget' });
     expect(
       harvestRelevanceStarveSoftAllowed({
         isAirline: false,
@@ -2248,11 +2289,11 @@ describe('decideInjectRelevanceAction', () => {
     ).toEqual({ action: 'check', reason: 'within-budget' });
   });
 
-  it('budget-skips without silently dropping the count path', () => {
+  it('budget-exhausted returns check so caller rejects instead of admitting', () => {
     expect(
       decideInjectRelevanceAction({ ...base, checked: 48, budget: 48 }),
-    ).toEqual({ action: 'admit', reason: 'budget-exhausted' });
-    expect(shouldRunHarvestRelevanceGate({ ...base, checked: 48, budget: 48 })).toBe(false);
+    ).toEqual({ action: 'check', reason: 'budget-exhausted' });
+    expect(shouldRunHarvestRelevanceGate({ ...base, checked: 48, budget: 48 })).toBe(true);
   });
 
   it('prefers strong-evidence admit over starveSoft and budget', () => {
@@ -2270,7 +2311,7 @@ describe('decideInjectRelevanceAction', () => {
     ).toEqual({ action: 'admit', reason: 'strong-evidence' });
   });
 
-  it('prefers starveSoft over budget-exhausted on airline body', () => {
+  it('budget-exhausted still checks when starve threshold would have fired', () => {
     expect(
       decideInjectRelevanceAction({
         ...base,
@@ -2282,10 +2323,10 @@ describe('decideInjectRelevanceAction', () => {
         relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
         starveSoftEnvValue: '',
       }),
-    ).toEqual({ action: 'admit', reason: 'starve-soft' });
+    ).toEqual({ action: 'check', reason: 'budget-exhausted' });
   });
 
-  it('defaults starveSoft threshold to 12 for DoD topics', () => {
+  it('defaults starveSoft threshold constant for legacy funnel logs', () => {
     expect(INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD).toBe(12);
     expect(
       decideInjectRelevanceAction({
@@ -2303,8 +2344,8 @@ describe('decideInjectRelevanceAction', () => {
         relevanceRejected: 12,
         need: 3,
         starveSoftEnvValue: '',
-      }).reason,
-    ).toBe('starve-soft');
+      }).action,
+    ).toBe('check');
   });
 
   it('locks out strong-evidence when LLM kept 0 and rejected > 0', () => {

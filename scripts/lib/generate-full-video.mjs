@@ -70,6 +70,9 @@ import {
   unreadableOverlayReason,
   hasGenericSubjectEvidence,
   isGenericKeylessSubjectTopic,
+  universalOffTopicBrollReason,
+  genericFetchSubjectGateReason,
+  visualEvidenceBlob,
 } from './harvest-quality.mjs';
 import { visionRejectOffBrandStock } from './stock-vision-gate.mjs';
 import {
@@ -806,15 +809,13 @@ export function harvestRelevanceStarveSoftAllowed({
 
 /**
  * Decide whether injectClip should call the Qwen harvest relevance gate.
- * Gate stays ON; this only soft-admits under clear topic evidence or inject starvation.
+ * Gate stays ON; only archive-beat / healthcare / housing evidence may skip LLM on body.
  *
- * - Body + (strongEvidence | motionRelevancePassed) → admit without LLM.
+ * - Body + strongEvidence (archive beat, healthcare, housing — NOT motionRelevancePassed) → admit.
  * - Intro always prefers a real check (WEAK still blocked via shouldRejectRelevanceDecision).
- * - need > 0 and relevanceRejected ≥ threshold → starve-soft admit on body only when
- *   the topic is a DoD family (airline/housing/healthcare) or HARVEST_RELEVANCE_STARVE_SOFT=1.
- * - checked ≥ budget → admit with budget-exhausted (caller increments relevanceBudgetSkipped).
- * - zeroKeepLock / post-LLM 0 KEEP + REJECT > 0 → never soft-admit via strong-evidence
- *   or starve-soft for the rest of that top-up (prefer thin soft-pass over Archive junk).
+ * - checked ≥ budget → check with budget-exhausted (caller rejects clip, no admit).
+ * - zeroKeepLock / post-LLM 0 KEEP + REJECT > 0 → never strong-evidence bypass.
+ * - Starve-soft admits are removed: reject storms leave need unmet instead of junk fill.
  *
  * @returns {{ action: 'check' | 'admit', reason: string }}
  */
@@ -834,6 +835,14 @@ export function decideInjectRelevanceAction({
   starveSoftEnvValue = process.env.HARVEST_RELEVANCE_STARVE_SOFT,
   starveSoftThreshold = INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
 } = {}) {
+  void motionRelevancePassed;
+  void need;
+  void relevanceRejected;
+  void isAirline;
+  void isHousing;
+  void isHealthcare;
+  void starveSoftEnvValue;
+  void starveSoftThreshold;
   const rejected = Number(relevanceRejected) || 0;
   const keptNum = Number(relevanceKept);
   // Missing or non-numeric kept counts as 0 once the run has LLM outcomes.
@@ -843,36 +852,15 @@ export function decideInjectRelevanceAction({
     zeroKeepLock === true
     || (llmAlreadyChecked && keptIsZero && rejected > 0);
 
-  const hasTopicEvidence = Boolean(strongEvidence || motionRelevancePassed);
-  // Body with clear aviation/topic evidence already cleared keyword harvest — skip LLM.
+  // Body with archive-beat / healthcare / housing evidence — skip LLM.
   // Intro still judged so WEAK/REJECT cannot land on the hook.
-  // After Qwen 0 KEEP / N REJECT, do not re-open Archive strong-evidence bypass.
-  if (!isIntro && hasTopicEvidence && !lock) {
+  // After Qwen 0 KEEP / N REJECT, do not re-open strong-evidence bypass.
+  if (!isIntro && strongEvidence && !lock) {
     return { action: 'admit', reason: 'strong-evidence' };
   }
-  const threshold = Number(starveSoftThreshold);
-  const starveSoftAllowed = harvestRelevanceStarveSoftAllowed({
-    isAirline,
-    isHousing,
-    isHealthcare,
-    envValue: starveSoftEnvValue,
-  });
-  const starveSoft =
-    starveSoftAllowed
-    && need > 0
-    && Number.isFinite(threshold)
-    && rejected >= threshold;
-  // Soft-pass starvation (DoD / explicit env only): body soft-admit after reject storms.
-  // Locked zero-KEEP runs leave need unmet instead of starve-soft / Archive fill.
-  // Generic topics stay on `check` so thin true-positive pools cannot fill with junk.
-  if (starveSoft && !isIntro && !lock) {
-    return { action: 'admit', reason: 'starve-soft' };
-  }
   if (checked >= budget) {
-    return { action: 'admit', reason: 'budget-exhausted' };
+    return { action: 'check', reason: 'budget-exhausted' };
   }
-  // Surface the lock even when neither evidence-skip nor starve-soft would fire,
-  // so funnel logs / call sites can see zero-KEEP is engaged.
   if (lock && !isIntro) {
     return { action: 'check', reason: 'zero-keep-lock' };
   }
@@ -983,6 +971,17 @@ function segmentMotionKey(asset = {}) {
  */
 export function resolveInjectMotionRelevancePassed(clip = {}, topicBlob = '', segmentTitle = '') {
   if (clip.motionRelevancePassed === true) return true;
+  return hasDurableMotionRelevanceProof(clip, topicBlob, segmentTitle);
+}
+
+/**
+ * Motion relevance proof that does not trust motionRelevancePassed or query echo alone.
+ *
+ * @param {object} clip
+ * @param {string} topicBlob
+ * @param {string} [segmentTitle]
+ */
+export function hasDurableMotionRelevanceProof(clip = {}, topicBlob = '', segmentTitle = '') {
   if (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip)) return true;
   if (isHousingTopic(topicBlob) && hasHousingEvidence(clip)) return true;
   if (archiveHasBeatEvidence(clip, topicBlob, segmentTitle)) return true;
@@ -997,10 +996,23 @@ export function resolveInjectMotionRelevancePassed(clip = {}, topicBlob = '', se
  * videoTopUp.motionRelevancePassed must already be true from harvest evidence
  * or beat-matching metadata (see resolveInjectMotionRelevancePassed).
  */
-export function restoreMotionRelevancePassed(media = [], candidates = [], videoTopUp = []) {
+export function restoreMotionRelevancePassed(
+  media = [],
+  candidates = [],
+  videoTopUp = [],
+  topicBlob = '',
+  segments = [],
+) {
+  const segTitleById = new Map((segments || []).map((seg) => [seg.id, seg.title || '']));
+  const candidateByKey = new Map((candidates || []).map((asset) => [segmentMotionKey(asset), asset]));
   const approved = new Set(
     videoTopUp
-      .filter((entry) => entry.motionRelevancePassed === true)
+      .filter((entry) => {
+        if (entry.motionRelevancePassed !== true) return false;
+        const asset = candidateByKey.get(segmentMotionKey(entry)) || entry;
+        const segTitle = segTitleById.get(entry.segmentId) || '';
+        return hasDurableMotionRelevanceProof(asset, topicBlob, segTitle);
+      })
       .map(segmentMotionKey),
   );
   const out = [...media];
@@ -2248,7 +2260,7 @@ function isCyberRelevantClip(clip = {}, topicBlob = '') {
   }
   const topical =
     /phone|smartphone|mobile|credit|card|bank|hack|laptop|computer|keyboard|microphone|security|lock|fingerprint|server|call|scam|fraud|money|cash|typing|payment|identity|password|ai|robot|code|data center|worried|shock|texting|ransom|leak|breach|records?/.test(
-      blob,
+      visualEvidenceBlob(clip),
     );
   // Office/business/architecture alone is not cyber-relevant.
   if (topical) return true;
@@ -2260,6 +2272,7 @@ function isJunkStockClip(clip = {}, topicBlob = '', options = {}) {
     options.preferBright === true || process.env.AUTOTUBE_PREFER_BRIGHT_BROLL === '1';
   const blob = `${clip.alt || ''} ${clip.title || ''} ${clip.source || ''} ${clip.sourceUrl || ''} ${clip.url || ''} ${clip.thumbnailUrl || ''} ${clip.query || ''}`.toLowerCase();
   const topicText = String(topicBlob || '').toLowerCase();
+  if (universalOffTopicBrollReason(blob, topicBlob, clip)) return true;
   if (isOffBrandVisual(blob, topicBlob)) return true;
   if (housingOffTopicBrollReason(blob, topicBlob)) return true;
   if (healthcareOffTopicBrollReason(blob, topicBlob, clip)) return true;
@@ -3796,26 +3809,35 @@ export function resolveMotionVolumeTargets({
   topicBlob = '',
   cutIntervalSec = 1.25,
   stockApiVideoCount = 0,
+  loopFastMode = false,
+  loopMinAssetsPerSegment = 4,
 } = {}) {
   const segN = Math.max(1, segmentCount);
+  const loopCap = Math.max(1, Number(loopMinAssetsPerSegment) || 4);
   const airline = isAirlineTopic(topicBlob);
   const housing = isHousingTopic(topicBlob);
   const healthcare = isHealthcareTopic(topicBlob);
+  const genericKeyless = isGenericKeylessSubjectTopic(topicBlob);
   if (hasStockKeys) {
     const aggressive = airline || housing || healthcare;
     const stockFloor = Math.max(aggressive ? 24 : 16, segN * (aggressive ? 5 : 4));
-    const minVideos = Math.min(
+    let minVideos = Math.min(
       aggressive ? 42 : 28,
       Math.max(
         stockFloor,
         Math.ceil((segmentDurationSec / (cutIntervalSec || 1.25)) * 0.75),
       ),
     );
+    let perSegTarget = aggressive ? 6 : 5;
+    if (loopFastMode) {
+      minVideos = Math.min(minVideos, segN * loopCap);
+      perSegTarget = Math.min(perSegTarget, loopCap);
+    }
     return {
       mode: 'keyed',
       minVideos,
       stockNeed: Math.max(0, stockFloor - stockApiVideoCount),
-      perSegTarget: aggressive ? 6 : 5,
+      perSegTarget,
       introTarget: aggressive ? 7 : 6,
       aggressive,
     };
@@ -3828,15 +3850,24 @@ export function resolveMotionVolumeTargets({
       ? Math.max(18, segN * 4)
       : healthcare
         ? Math.max(16, segN * 3)
-        : isGenericKeylessSubjectTopic(topicBlob)
+        : genericKeyless
           ? Math.max(12, segN * 3)
           : Math.min(segN * 2, 6);
-  const chaseHard = airline || housing || healthcare || isGenericKeylessSubjectTopic(topicBlob);
+  let chaseHard = airline || housing || healthcare || genericKeyless;
+  let minVideos = keylessFloor;
+  let perSegTarget = chaseHard ? 3 : 2;
+  if (loopFastMode) {
+    minVideos = Math.min(minVideos, segN * loopCap);
+    perSegTarget = Math.min(perSegTarget, loopCap);
+    if (!airline && !housing && !healthcare) {
+      chaseHard = false;
+    }
+  }
   return {
     mode: 'keyless',
-    minVideos: keylessFloor,
+    minVideos,
     stockNeed: chaseHard ? Math.max(0, keylessFloor - stockApiVideoCount) : 0,
-    perSegTarget: chaseHard ? 3 : 2,
+    perSegTarget,
     introTarget: chaseHard ? 4 : 2,
     aggressive: false,
   };
@@ -4006,6 +4037,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     topicBlob,
     cutIntervalSec: options.cutIntervalSec,
     stockApiVideoCount: existingStockVideos.length,
+    loopFastMode: options.loopFastMode === true,
+    loopMinAssetsPerSegment: options.loopMinAssetsPerSegment,
   });
 
   const liveClips = [];
@@ -4356,6 +4389,17 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         report.motionDroppedJunk = (report.motionDroppedJunk || 0) + 1;
         report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
         continue;
+      }
+      if (
+        !hasStockKeysEarly
+        && isGenericKeylessSubjectTopic(topicBlob)
+      ) {
+        const subjectGate = genericFetchSubjectGateReason(evidenceClip, topicBlob);
+        if (subjectGate) {
+          report.motionDroppedSubjectGate = (report.motionDroppedSubjectGate || 0) + 1;
+          report.junkStockSkipped = (report.junkStockSkipped || 0) + 1;
+          continue;
+        }
       }
       if (
         (
@@ -4858,6 +4902,13 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
     // / OR motion. Pure talking-head (0) and Archive explainers (1) stay for body.
     if (isIntro && isHealthcareTopic(topicBlob) && score < 2) return false;
     if (isIntro && score < 0) return false;
+    const subjectGate = genericFetchSubjectGateReason(clip, topicBlob);
+    if (subjectGate) {
+      report.videoTopUpFailed = report.videoTopUpFailed || [];
+      report.videoTopUpFailed.push({ url: clip.url, reason: subjectGate });
+      report.motionDroppedSubjectGate = (report.motionDroppedSubjectGate || 0) + 1;
+      return false;
+    }
     const unreliable = unreliableWebProxyInjectReason(clip, proxyGate);
     if (unreliable) {
       report.videoTopUpFailed = report.videoTopUpFailed || [];
@@ -4866,6 +4917,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       return false;
     }
     // Soft-probe the first TikTok; on failure open a circuit for the rest of the run.
+    let proxyHostSoftProbed = false;
     if (isTikTokMotionCandidate(clip) && isProxiedClipUrl(clip.url)) {
       const target = proxiedClipTarget(clip.url) || clip.sourceUrl || '';
       const alive = softProbeYtDlpUrl(target);
@@ -4893,6 +4945,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
         return false;
       }
+      proxyHostSoftProbed = true;
     }
     // Soft-probe Dailymotion the same way: housing-web152 injected 18/18 DM proxy
     // clips trusted with no probe; without curl_cffi impersonation every assemble
@@ -4908,6 +4961,7 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
         return false;
       }
+      proxyHostSoftProbed = true;
     }
     const probePlan = resolveInjectClipProbe(clip.url);
     if (probePlan.probe) {
@@ -4923,6 +4977,17 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         return false;
       }
       report.injectProbePassed = (report.injectProbePassed || 0) + 1;
+    } else if (proxyHostSoftProbed) {
+      report.injectProbePassed = (report.injectProbePassed || 0) + 1;
+    } else if (
+      (isVimeoMotionCandidate(clip) || isDailymotionMotionCandidate(clip))
+      && isProxiedClipUrl(clip.url)
+    ) {
+      // DM/Vimeo proxy clips must not count as trusted without a per-clip soft probe.
+      report.videoTopUpFailed = report.videoTopUpFailed || [];
+      report.videoTopUpFailed.push({ url: clip.url, reason: 'proxy-host-probe-required' });
+      report.injectProbeFailed = (report.injectProbeFailed || 0) + 1;
+      return false;
     } else {
       // Proxy clips are re-encoded on demand at render; trust them like the harvest
       // keep-path does instead of forcing a full transcode just to answer a probe.
@@ -4941,12 +5006,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       // Archive never gets a blanket pass: title/alt must match topic/segment beat
       // (beekeepers autopsy: Charlie Rose / WMAR skipped Qwen via Archive ⇒ strongEvidence).
       const strongEvidence =
-        clip.motionRelevancePassed === true
-        || archiveHasBeatEvidence(clip, topicBlob, seg.title || '')
+        archiveHasBeatEvidence(clip, topicBlob, seg.title || '')
         || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip))
         || (isHousingTopic(topicBlob) && hasHousingEvidence(clip));
-      // Starve-soft is DoD-shaped: only airline/housing/healthcare (or env opt-in)
-      // may soft-admit after Qwen reject storms — generic topics keep checking.
       const gate = decideInjectRelevanceAction({
         checked,
         budget,
@@ -4960,7 +5022,14 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         isHousing: isHousingTopic(topicBlob),
         isHealthcare: isHealthcareTopic(topicBlob),
       });
-      if (gate.action === 'check') {
+      if (gate.action === 'admit') {
+        report.relevanceEvidenceSkipped = (report.relevanceEvidenceSkipped || 0) + 1;
+      } else if (gate.reason === 'budget-exhausted') {
+        report.relevanceBudgetSkipped = (report.relevanceBudgetSkipped || 0) + 1;
+        report.videoTopUpFailed = report.videoTopUpFailed || [];
+        report.videoTopUpFailed.push({ url: clip.url, reason: 'relevance-budget-exhausted' });
+        return false;
+      } else {
         report.relevanceChecked = checked + 1;
         const apiKey = resolveOpenRouterKey();
         const verdict = await judgeHarvestRelevance({
@@ -4990,12 +5059,6 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
             report.relevanceWeakAdmitted = (report.relevanceWeakAdmitted || 0) + 1;
           }
         }
-      } else if (gate.reason === 'budget-exhausted') {
-        report.relevanceBudgetSkipped = (report.relevanceBudgetSkipped || 0) + 1;
-      } else if (gate.reason === 'starve-soft') {
-        report.relevanceStarveSoftAdmitted = (report.relevanceStarveSoftAdmitted || 0) + 1;
-      } else if (gate.reason === 'strong-evidence') {
-        report.relevanceEvidenceSkipped = (report.relevanceEvidenceSkipped || 0) + 1;
       }
     }
     const n = (report.videoTopUp || []).length;
@@ -5468,6 +5531,8 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       preferBright: options.preferBright === true,
       cutIntervalSec: options.cutIntervalSec,
       minAssetsPerSegment: minPerSegment,
+      loopFastMode: options.loopFastMode === true,
+      loopMinAssetsPerSegment: options.loopMinAssetsPerSegment ?? minPerSegment,
     });
     injectCyberStockStills(project, report, options.mediaOffset || 0);
     // Re-gate after top-up (can reintroduce junk).
@@ -5476,7 +5541,7 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     const beforeTopUpRelevance = [...(project.media || [])];
     const paddingBeforeFilter = beforeTopUpRelevance.filter(isVolumePaddingAsset);
     const afterTopUp = filterAssetsByRelevance(beforeTopUpRelevance, project, {
-      minScore: isEvalColdMode() ? 0.26 : 0.22,
+      minScore: isEvalColdMode() ? 0.26 : 0.25,
     });
     report.relevanceStrictDroppedAfterTopUp = afterTopUp.dropped;
     project.media = mergeVolumePadding(afterTopUp.media, paddingBeforeFilter, project);
@@ -5485,10 +5550,13 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     // The generic pass above can score it below threshold only because assignment
     // moved it to a segment with different essay keywords. Preserve that run-local
     // proof after the junk/unsafe gates have had their chance to remove the clip.
+    const topicBlob = `${project.topic || ''} ${project.title || ''}`.toLowerCase();
     const restoredMotion = restoreMotionRelevancePassed(
       project.media,
       beforeTopUpRelevance,
       report.videoTopUp || [],
+      topicBlob,
+      project.script || [],
     );
     project.media = restoredMotion.media;
 
@@ -6293,7 +6361,9 @@ export async function generateFullVideo(options) {
       }
       const mediaReport = await sanitizeRealHarvestMedia(gateProject, devServer, outDir, {
         loopMode: true,
-        minAssetsPerSegment: fixState.minAssetsPerSegment || 6,
+        loopFastMode: true,
+        loopMinAssetsPerSegment: loopMinAssets,
+        minAssetsPerSegment: fixState.minAssetsPerSegment || loopMinAssets,
         mediaOffset: fixState.mediaOffset || 0,
         faceSeek: fixState.faceSeekBroll === true || fixState.harvestVideoFirst !== false,
         preferBright: fixState.preferBrightBroll === true,

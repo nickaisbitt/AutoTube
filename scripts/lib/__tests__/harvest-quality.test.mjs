@@ -51,6 +51,10 @@ import {
   thinInjectVarietyFailReason,
   topicSubjectTokens,
   topicalVideoScore,
+  mediaMetadataSubjectMatch,
+  isSoftPassRelevantVideo,
+  countSoftPassRelevantVideos,
+  softPassMinRelevantVideos,
   VOLUME_PADDING_MIN_RELEVANCE,
 } from '../harvest-quality.mjs';
 
@@ -821,7 +825,8 @@ describe('keyless generic soft-pass subject-token meaning (beekeepers autopsy)',
 
   it('extracts bee/hive subject tokens and matches metadata (not query alone)', () => {
     const tokens = extractTopicSubjectTokens(BEE_TOPIC);
-    expect(tokens).toEqual(expect.arrayContaining(['victorian', 'beekeepers', 'hive']));
+    expect(tokens).toEqual(expect.arrayContaining(['beekeepers', 'bee', 'hive']));
+    expect(tokens).not.toContain('victorian');
     expect(tokens).not.toContain('why');
 
     const queryOnly = {
@@ -864,7 +869,8 @@ describe('keyless generic soft-pass subject-token meaning (beekeepers autopsy)',
       project,
     );
     expect(result.pass).toBe(false);
-    expect(result.reason).toMatch(/^soft-pass-motion-irrelevant\(/);
+    // Subject honesty may hard-fail topical-empty before soft-pass meaning runs.
+    expect(result.reason).toMatch(/soft-pass-motion-irrelevant|volume-topical-video-empty|soft-pass-motion-no-relevant/);
   });
 
   it('soft-passes keyless pool when video metadata matches bee/hive subject tokens', () => {
@@ -895,6 +901,216 @@ describe('keyless generic soft-pass subject-token meaning (beekeepers autopsy)',
     );
     expect(result.pass).toBe(true);
     expect(result.reason).toMatch(/^soft-pass-(motion|aggregate|web-motion)/);
+  });
+});
+
+describe('generic soft-pass requires beat-relevant videos (swarm-12)', () => {
+  const BEE_TOPIC = 'Why Victorian beekeepers feared the silent hive';
+
+  const makeBeeSegments = (n) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `bee${i}`,
+      title: `Bee beat ${i}`,
+      narration: 'Victorian beekeepers listened for a silent hive after Varroa.',
+    }));
+
+  const junkArchive = ({ segmentId, title, idx }) => ({
+    type: 'video',
+    segmentId,
+    url: `https://archive.org/download/junk-${idx}/junk-${idx}.mp4`,
+    source: 'Archive.org live',
+    title,
+    alt: title,
+    query: 'news interview worried person',
+    motionRelevancePassed: true,
+  });
+
+  it('mediaMetadataSubjectMatch accepts beekeeping titles and rejects Charlie Rose pads', () => {
+    expect(
+      mediaMetadataSubjectMatch(
+        { title: 'victorian beekeepers inspect silent hive frames', alt: 'beekeepers' },
+        BEE_TOPIC,
+      ),
+    ).toBe(true);
+    expect(
+      mediaMetadataSubjectMatch(
+        {
+          title: 'charlie rose interviews lawrence lessig about remix',
+          alt: 'charlie rose interviews lawrence lessig about remix',
+        },
+        BEE_TOPIC,
+      ),
+    ).toBe(false);
+    expect(
+      mediaMetadataSubjectMatch(
+        {
+          title: 'victorians are not worried about corruption',
+          alt: 'victorians are not worried about corruption',
+        },
+        BEE_TOPIC,
+      ),
+    ).toBe(false);
+  });
+
+  it('isSoftPassRelevantVideo honors KEEP, MRP+subject, and subject-only when no KEEP flags', () => {
+    expect(
+      isSoftPassRelevantVideo(
+        { relevanceDecision: 'KEEP', title: 'unrelated news desk', alt: 'news desk' },
+        BEE_TOPIC,
+        { keepFlagsPresent: true },
+      ),
+    ).toBe(true);
+    expect(
+      isSoftPassRelevantVideo(
+        {
+          motionRelevancePassed: true,
+          title: 'beekeeper opens silent hive boxes',
+          alt: 'beekeeper opens silent hive boxes',
+        },
+        BEE_TOPIC,
+        { keepFlagsPresent: true },
+      ),
+    ).toBe(true);
+    // MRP without subject match must not count when KEEP flags exist.
+    expect(
+      isSoftPassRelevantVideo(
+        {
+          motionRelevancePassed: true,
+          title: 'charlie rose interviews lawrence lessig',
+          alt: 'charlie rose interviews lawrence lessig',
+        },
+        BEE_TOPIC,
+        { keepFlagsPresent: true },
+      ),
+    ).toBe(false);
+    // No KEEP flags stored → subject match alone counts (inject never wrote decisions).
+    expect(
+      isSoftPassRelevantVideo(
+        {
+          motionRelevancePassed: false,
+          title: 'beekeeper smoke and frames victorian apiary',
+          alt: 'beekeeper smoke and frames victorian apiary',
+        },
+        BEE_TOPIC,
+        { keepFlagsPresent: false },
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects 0-KEEP junk Archive volume that previously soft-passed (beekeepers)', () => {
+    const segments = makeBeeSegments(4);
+    const junkTitles = [
+      'charlie rose interviews lawrence lessig about his book remix',
+      'reel 2479 wmar tv television station baltimore 1959 journalism',
+      'reiner fuellmich interviewed dr mike yeadon former pfizer',
+      'victorians are not worried about corruption',
+      'howard county council meeting public comment',
+      'FEMA public outreach community meeting',
+      'from youtube news desk interview pad',
+      'baltimore raw news footage originally shot by staff',
+    ];
+    const media = junkTitles.map((title, idx) =>
+      junkArchive({ segmentId: segments[idx % segments.length].id, title, idx }),
+    );
+    const project = { topic: BEE_TOPIC, title: BEE_TOPIC, script: segments, media };
+    const mediaReport = {
+      volumePass: false,
+      cyberStockInjected: 0,
+      pexelsFetched: 0,
+      pixabayFetched: 0,
+      archiveLiveFetched: 8,
+      videoTopUp: media.map((m) => ({ segmentId: m.segmentId, url: m.url, motionRelevancePassed: true })),
+      relevanceChecked: 15,
+      relevanceKept: 0,
+      relevanceRejected: 14,
+      relevanceEvidenceSkipped: 5,
+    };
+    expect(countSoftPassRelevantVideos(media, BEE_TOPIC, mediaReport)).toBe(0);
+    expect(softPassMinRelevantVideos(segments.length)).toBe(4);
+    const result = evaluateHarvestVolumeWithSoftPass(mediaReport, project);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/soft-pass-motion-no-relevant|volume-topical-video-empty|soft-pass-motion-irrelevant/);
+  });
+
+  it('soft-passes when enough MRP+subject videos clear the relevant floor', () => {
+    const segments = makeBeeSegments(4);
+    const media = [];
+    let idx = 0;
+    for (const seg of segments) {
+      for (let k = 0; k < 2; k += 1) {
+        media.push({
+          type: 'video',
+          segmentId: seg.id,
+          url: `https://archive.org/download/bee-ok-${idx}/bee-ok-${idx}.mp4`,
+          source: 'Archive.org live',
+          title: 'victorian beekeepers inspect silent hive frames after colony collapse',
+          alt: 'victorian beekeepers inspect silent hive frames after colony collapse',
+          query: 'victorian beekeepers silent hive',
+          motionRelevancePassed: true,
+        });
+        idx += 1;
+      }
+    }
+    const project = { topic: BEE_TOPIC, title: BEE_TOPIC, script: segments, media };
+    const mediaReport = {
+      volumePass: false,
+      archiveLiveFetched: 8,
+      videoTopUp: media.map((m) => ({ segmentId: m.segmentId, url: m.url })),
+      relevanceChecked: 0,
+      relevanceKept: 0,
+    };
+    const result = evaluateHarvestVolumeWithSoftPass(mediaReport, project);
+    expect(result.pass).toBe(true);
+    expect(result.reason).toMatch(/^soft-pass-web-motion\(|^soft-pass-motion\(/);
+  });
+
+  it('counts explicit relevanceDecision KEEP even without subject match', () => {
+    const offTopicKeep = {
+      type: 'video',
+      segmentId: 'bee0',
+      url: 'https://vimeo.com/keep-offtopic.mp4',
+      source: 'Vimeo',
+      title: 'studio interview desk lighting',
+      alt: 'studio interview desk lighting',
+      query: 'hive',
+      relevanceDecision: 'KEEP',
+      motionRelevancePassed: false,
+    };
+    // Helper path: KEEP alone is enough even when metadata is off-subject.
+    expect(countSoftPassRelevantVideos([offTopicKeep], BEE_TOPIC, { relevanceKept: 1 })).toBe(1);
+    expect(
+      isSoftPassRelevantVideo(offTopicKeep, BEE_TOPIC, { keepFlagsPresent: true }),
+    ).toBe(true);
+
+    // Soft-pass path still needs topical coverage; KEEP on subject-matching web
+    // motion clears the relevant floor without relying on MRP.
+    const segments = makeBeeSegments(4);
+    const media = [];
+    for (let i = 0; i < 8; i += 1) {
+      media.push({
+        type: 'video',
+        segmentId: segments[i % 4].id,
+        url: `https://vimeo.com/keep-${i}.mp4`,
+        source: 'Vimeo',
+        title: 'victorian beekeepers silent hive inspection',
+        alt: 'victorian beekeepers silent hive inspection',
+        query: 'victorian beekeepers',
+        relevanceDecision: 'KEEP',
+        motionRelevancePassed: false,
+      });
+    }
+    expect(countSoftPassRelevantVideos(media, BEE_TOPIC, { relevanceKept: 8 })).toBe(8);
+    const project = { topic: BEE_TOPIC, title: BEE_TOPIC, script: segments, media };
+    const result = evaluateHarvestVolumeWithSoftPass(
+      {
+        volumePass: false,
+        archiveLiveFetched: 0,
+        videoTopUp: media.map((m) => ({ segmentId: m.segmentId, url: m.url })),
+        relevanceKept: 8,
+      },
+      project,
+    );
+    expect(result.pass).toBe(true);
   });
 });
 

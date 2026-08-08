@@ -60,6 +60,13 @@ const TOPIC_SUBJECT_RELATED_GROUPS = [
 ];
 
 /**
+ * Keyless generic soft-pass: at least this many videos must carry topic subject
+ * tokens in metadata (not just videoCount). Beekeepers autopsy cleared on volume
+ * with Charlie Rose / FEMA pads and zero hive/bee evidence.
+ */
+const GENERIC_KEYLESS_SOFT_PASS_MIN_SUBJECT_VIDEOS = 4;
+
+/**
  * Shared essay words on cabin-pressure topics that also match games, physics
  * homework, wildfire "failures", and tech clickbait. Never count these alone.
  */
@@ -1236,6 +1243,16 @@ export function topicSubjectTokens(topicBlob = '') {
 }
 
 /**
+ * Soft-pass meaning helper — same subject tokens as topicalVideoCount honesty.
+ *
+ * @param {string} [topicBlob]
+ * @returns {string[]}
+ */
+export function extractTopicSubjectTokens(topicBlob = '') {
+  return topicSubjectTokens(topicBlob);
+}
+
+/**
  * @param {string} token
  * @returns {string}
  */
@@ -1414,6 +1431,87 @@ export function visualEvidenceBlob(asset) {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Alt/title metadata for subject-token soft-pass checks. Excludes fetch query
+ * echo and URLs (archive.org contains the substring "hive").
+ *
+ * @param {object} asset
+ * @returns {string}
+ */
+export function subjectTokenMetaBlob(asset) {
+  const rawAlt = String(asset?.alt || '').trim();
+  const query = assetSearchQueryText(asset);
+  let alt = PROVIDER_ALT_ONLY_RE.test(rawAlt)
+    ? ''
+    : rawAlt.replace(PROVIDER_ALT_PREFIX_RE, '').toLowerCase();
+  if (alt && query) {
+    alt = alt.split(query).join(' ');
+  }
+  return `${alt} ${asset?.title || ''}`
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * True when asset alt/title carries at least one topic subject token as a whole word.
+ *
+ * @param {object} asset
+ * @param {string[]} [subjectTokens]
+ */
+export function videoMatchesTopicSubjectTokens(asset, subjectTokens = []) {
+  if (!Array.isArray(subjectTokens) || subjectTokens.length === 0) return false;
+  const meta = subjectTokenMetaBlob(asset);
+  if (!meta) return false;
+  return subjectTokens.some((tok) => {
+    if (!tok || tok.length < 3) return false;
+    const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`, 'i').test(meta);
+  });
+}
+
+/**
+ * Count unique videos whose metadata matches topic subject tokens.
+ *
+ * @param {object[]} [uniqueVideos]
+ * @param {string} [topicBlob]
+ */
+export function countSubjectTokenMatchingVideos(uniqueVideos = [], topicBlob = '') {
+  const tokens = extractTopicSubjectTokens(topicBlob);
+  if (!tokens.length) return 0;
+  return uniqueVideos.filter((asset) => videoMatchesTopicSubjectTokens(asset, tokens)).length;
+}
+
+/**
+ * Keyless generic soft-pass must not clear on volume alone (beekeepers autopsy:
+ * Charlie Rose / FEMA / corruption interview pads soft-passed while hive tokens
+ * never appeared). Require a minimum of subject-token-matching videos.
+ *
+ * @param {object[]} [uniqueVideos]
+ * @param {string} [topicBlob]
+ * @returns {string|null}
+ */
+export function genericKeylessSubjectTokenFailureReason(uniqueVideos = [], topicBlob = '') {
+  const tokens = extractTopicSubjectTokens(topicBlob);
+  if (!tokens.length) return null;
+  const matched = countSubjectTokenMatchingVideos(uniqueVideos, topicBlob);
+  const videoCount = uniqueVideos.length;
+  if (videoCount <= 0) return null;
+  // Require a majority (or ≥4) subject-token matches, but never more than the
+  // pool size — thin crime/heist soft-passes with 3 on-topic clips must still clear.
+  const needed = Math.min(
+    videoCount,
+    Math.max(
+      GENERIC_KEYLESS_SOFT_PASS_MIN_SUBJECT_VIDEOS,
+      Math.ceil(videoCount / 2),
+    ),
+  );
+  if (matched < needed) {
+    return `soft-pass-motion-irrelevant(${matched}/${needed} subject-token videos)`;
+  }
+  return null;
 }
 
 /**
@@ -2984,9 +3082,19 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     };
   }
 
+  // Keyless generic: volume alone must not soft-pass Charlie Rose / FEMA pads —
+  // require subject-token matches in video metadata before any soft-pass clears.
+  const finishGenericSoftPass = (reason) => {
+    if (!hasStockKeys) {
+      const subjectFail = genericKeylessSubjectTokenFailureReason(uniqueVideos, topicBlob);
+      if (subjectFail) return { pass: false, reason: subjectFail };
+    }
+    return { pass: true, reason };
+  };
+
   // Soft-pass A: cyber stills + ≥1 video/seg
   if (cyber >= 6 && videosPerSeg >= 1) {
-    return { pass: true, reason: `soft-pass-cyber(${cyber})` };
+    return finishGenericSoftPass(`soft-pass-cyber(${cyber})`);
   }
   // Soft-pass B: ≥2 videos/seg + live stock/top-up
   const motionMinPerSeg = 2;
@@ -2998,7 +3106,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
         reason: `soft-pass-motion-unique-video-floor(${uniqueTopicalVideos}/16 topical videos)`,
       };
     }
-    return { pass: true, reason: `soft-pass-motion(${videoCount}v/${segN}segs)` };
+    return finishGenericSoftPass(`soft-pass-motion(${videoCount}v/${segN}segs)`);
   }
   // Soft-pass B2: raw web harvest motion (no Pexels/Pixabay/top-up needed).
   // Web-native video is the primary supply, so a web-video-rich pool passes on its
@@ -3007,10 +3115,9 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
   // aggregate/cold floors below rather than hard-failing here.
   const webMotionRich = videosPerSeg >= motionMinPerSeg && webNativeMotionCount > 0;
   if (webMotionRich && uniqueTopicalVideos >= 16) {
-    return {
-      pass: true,
-      reason: `soft-pass-web-motion(${webNativeMotionCount}web/${videoCount}v/${segN}segs)`,
-    };
+    return finishGenericSoftPass(
+      `soft-pass-web-motion(${webNativeMotionCount}web/${videoCount}v/${segN}segs)`,
+    );
   }
   // Soft-pass C: uneven but adequate
   const aggregateOk =
@@ -3018,7 +3125,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     && avgCount >= minPer * 0.75
     && media.length >= segN * Math.max(3, minPer - 2);
   if (aggregateOk) {
-    return { pass: true, reason: `soft-pass-aggregate(avg=${avgCount.toFixed(1)}, min=${minCount})` };
+    return finishGenericSoftPass(`soft-pass-aggregate(avg=${avgCount.toFixed(1)}, min=${minCount})`);
   }
   // Soft-pass C2 (cold): no empty segs + enough unique motion for dense cuts
   if (
@@ -3029,7 +3136,9 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     && videoCount >= Math.max(segN * 3, 9)
     && (stockFetched > 0 || topUp > 0)
   ) {
-    return { pass: true, reason: `soft-pass-cold-thin(avg=${avgCount.toFixed(1)}, min=${minCount}, v=${videoCount})` };
+    return finishGenericSoftPass(
+      `soft-pass-cold-thin(avg=${avgCount.toFixed(1)}, min=${minCount}, v=${videoCount})`,
+    );
   }
   // Soft-pass D: crime/heist, no empty segs
   if (
@@ -3037,7 +3146,7 @@ export function evaluateHarvestVolumeWithSoftPass(mediaReport, project) {
     && minCount >= 2
     && media.length >= segN * (minPer - 1)
   ) {
-    return { pass: true, reason: `soft-pass-crime-heist(${media.length} assets/${segN} segs)` };
+    return finishGenericSoftPass(`soft-pass-crime-heist(${media.length} assets/${segN} segs)`);
   }
   return { pass: false, reason: 'volume-hard-fail' };
 }

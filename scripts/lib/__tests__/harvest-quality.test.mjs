@@ -834,6 +834,25 @@ describe('generic soft-pass requires beat-relevant videos (swarm-12)', () => {
   });
 
   it('counts explicit relevanceDecision KEEP even without subject match', () => {
+    const offTopicKeep = {
+      type: 'video',
+      segmentId: 'bee0',
+      url: 'https://vimeo.com/keep-offtopic.mp4',
+      source: 'Vimeo',
+      title: 'studio interview desk lighting',
+      alt: 'studio interview desk lighting',
+      query: 'hive',
+      relevanceDecision: 'KEEP',
+      motionRelevancePassed: false,
+    };
+    // Helper path: KEEP alone is enough even when metadata is off-subject.
+    expect(countSoftPassRelevantVideos([offTopicKeep], BEE_TOPIC, { relevanceKept: 1 })).toBe(1);
+    expect(
+      isSoftPassRelevantVideo(offTopicKeep, BEE_TOPIC, { keepFlagsPresent: true }),
+    ).toBe(true);
+
+    // Soft-pass path still needs topical coverage; KEEP on subject-matching web
+    // motion clears the relevant floor without relying on MRP.
     const segments = makeBeeSegments(4);
     const media = [];
     for (let i = 0; i < 8; i += 1) {
@@ -842,9 +861,9 @@ describe('generic soft-pass requires beat-relevant videos (swarm-12)', () => {
         segmentId: segments[i % 4].id,
         url: `https://vimeo.com/keep-${i}.mp4`,
         source: 'Vimeo',
-        title: 'studio interview desk lighting',
-        alt: 'studio interview desk lighting',
-        query: 'hive',
+        title: 'victorian beekeepers silent hive inspection',
+        alt: 'victorian beekeepers silent hive inspection',
+        query: 'victorian beekeepers',
         relevanceDecision: 'KEEP',
         motionRelevancePassed: false,
       });

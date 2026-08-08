@@ -785,12 +785,29 @@ export function shouldFailOpenWebVisionSkip({
 export const INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD = 12;
 
 /**
+ * Starve-soft soft-admit is DoD-only by default (airline / housing / healthcare).
+ * Generic topics must keep checking after Qwen rejects so junk cannot fill thin pools
+ * (beekeepers: Charlie Rose / FEMA / news pads after 14 REJECT). Opt in for all topics
+ * with HARVEST_RELEVANCE_STARVE_SOFT=1.
+ */
+export function harvestRelevanceStarveSoftAllowed({
+  isAirline = false,
+  isHousing = false,
+  isHealthcare = false,
+  envValue = process.env.HARVEST_RELEVANCE_STARVE_SOFT,
+} = {}) {
+  if (String(envValue ?? '') === '1') return true;
+  return Boolean(isAirline || isHousing || isHealthcare);
+}
+
+/**
  * Decide whether injectClip should call the Qwen harvest relevance gate.
  * Gate stays ON; this only soft-admits under clear topic evidence or inject starvation.
  *
  * - Body + (strongEvidence | motionRelevancePassed) → admit without LLM.
  * - Intro always prefers a real check (WEAK still blocked via shouldRejectRelevanceDecision).
- * - need > 0 and relevanceRejected ≥ threshold → starve-soft admit on body only.
+ * - need > 0 and relevanceRejected ≥ threshold → starve-soft admit on body only when
+ *   the topic is a DoD family (airline/housing/healthcare) or HARVEST_RELEVANCE_STARVE_SOFT=1.
  * - checked ≥ budget → admit with budget-exhausted (caller increments relevanceBudgetSkipped).
  * - zeroKeepLock / post-LLM 0 KEEP + REJECT > 0 → never soft-admit via strong-evidence
  *   or starve-soft for the rest of that top-up (prefer thin soft-pass over Archive junk).
@@ -807,6 +824,10 @@ export function decideInjectRelevanceAction({
   relevanceRejected = 0,
   relevanceKept,
   zeroKeepLock = false,
+  isAirline = false,
+  isHousing = false,
+  isHealthcare = false,
+  starveSoftEnvValue = process.env.HARVEST_RELEVANCE_STARVE_SOFT,
   starveSoftThreshold = INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
 } = {}) {
   const rejected = Number(relevanceRejected) || 0;
@@ -826,13 +847,20 @@ export function decideInjectRelevanceAction({
     return { action: 'admit', reason: 'strong-evidence' };
   }
   const threshold = Number(starveSoftThreshold);
+  const starveSoftAllowed = harvestRelevanceStarveSoftAllowed({
+    isAirline,
+    isHousing,
+    isHealthcare,
+    envValue: starveSoftEnvValue,
+  });
   const starveSoft =
-    need > 0
+    starveSoftAllowed
+    && need > 0
     && Number.isFinite(threshold)
     && rejected >= threshold;
-  // Soft-pass starvation: keep rejecting hard via LLM only while checking intros;
-  // remaining body slots soft-admit without spending more Qwen calls.
-  // Locked runs leave need unmet instead of starve-soft injecting known rejects' cousins.
+  // Soft-pass starvation (DoD / explicit env only): body soft-admit after reject storms.
+  // Locked zero-KEEP runs leave need unmet instead of starve-soft / Archive fill.
+  // Generic topics stay on `check` so thin true-positive pools cannot fill with junk.
   if (starveSoft && !isIntro && !lock) {
     return { action: 'admit', reason: 'starve-soft' };
   }
@@ -4901,6 +4929,8 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         || archiveHasBeatEvidence(clip, topicBlob, seg.title || '')
         || (isHealthcareTopic(topicBlob) && hasHealthcareEvidence(clip))
         || (isHousingTopic(topicBlob) && hasHousingEvidence(clip));
+      // Starve-soft is DoD-shaped: only airline/housing/healthcare (or env opt-in)
+      // may soft-admit after Qwen reject storms — generic topics keep checking.
       const gate = decideInjectRelevanceAction({
         checked,
         budget,
@@ -4910,6 +4940,9 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
         motionRelevancePassed: clip.motionRelevancePassed === true,
         relevanceRejected: report.relevanceRejected || 0,
         relevanceKept: report.relevanceKept || 0,
+        isAirline: isAirlineTopic(topicBlob),
+        isHousing: isHousingTopic(topicBlob),
+        isHealthcare: isHealthcareTopic(topicBlob),
       });
       if (gate.action === 'check') {
         report.relevanceChecked = checked + 1;

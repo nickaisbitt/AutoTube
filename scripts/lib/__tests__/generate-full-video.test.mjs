@@ -11,6 +11,7 @@ import {
   buildMotionPaddingQueue,
   decideStockVisionGate,
   decideInjectRelevanceAction,
+  harvestRelevanceStarveSoftAllowed,
   INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
   shouldRunHarvestRelevanceGate,
   extraArchiveClinicalAttemptsOnVimeoCircuitOpen,
@@ -2038,6 +2039,8 @@ describe('decideInjectRelevanceAction', () => {
     motionRelevancePassed: false,
     relevanceRejected: 0,
   };
+  /** DoD airline topic flags — starve-soft allowed without env override. */
+  const airline = { isAirline: true, isHousing: false, isHealthcare: false };
 
   it('runs the LLM gate within budget for unknown body clips', () => {
     expect(decideInjectRelevanceAction(base)).toEqual({
@@ -2079,29 +2082,105 @@ describe('decideInjectRelevanceAction', () => {
     ).toBe(true);
   });
 
-  it('enters starveSoft admit on body after reject threshold while need remains', () => {
+  it('keeps checking on generic topics after reject threshold (no starve-soft)', () => {
     expect(
       decideInjectRelevanceAction({
         ...base,
         relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
         need: 5,
+        starveSoftEnvValue: '',
+      }),
+    ).toEqual({ action: 'check', reason: 'within-budget' });
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        relevanceRejected: 12,
+        need: 8,
+        isAirline: false,
+        isHousing: false,
+        isHealthcare: false,
+        starveSoftEnvValue: '0',
+      }),
+    ).toEqual({ action: 'check', reason: 'within-budget' });
+  });
+
+  it('enters starveSoft admit on airline body after reject threshold while need remains', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        ...airline,
+        relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+        need: 5,
+        starveSoftEnvValue: '',
       }),
     ).toEqual({ action: 'admit', reason: 'starve-soft' });
     expect(
       decideInjectRelevanceAction({
         ...base,
+        ...airline,
         relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD + 3,
         need: 1,
+        starveSoftEnvValue: '',
       }),
     ).toEqual({ action: 'admit', reason: 'starve-soft' });
+  });
+
+  it('allows starveSoft on housing and healthcare DoD families', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        isHousing: true,
+        relevanceRejected: 12,
+        need: 3,
+        starveSoftEnvValue: '',
+      }).reason,
+    ).toBe('starve-soft');
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        isHealthcare: true,
+        relevanceRejected: 12,
+        need: 3,
+        starveSoftEnvValue: '',
+      }).reason,
+    ).toBe('starve-soft');
+  });
+
+  it('allows starveSoft on generic topics only when HARVEST_RELEVANCE_STARVE_SOFT=1', () => {
+    expect(
+      decideInjectRelevanceAction({
+        ...base,
+        relevanceRejected: 12,
+        need: 4,
+        starveSoftEnvValue: '1',
+      }),
+    ).toEqual({ action: 'admit', reason: 'starve-soft' });
+    expect(
+      harvestRelevanceStarveSoftAllowed({
+        isAirline: false,
+        isHousing: false,
+        isHealthcare: false,
+        envValue: '1',
+      }),
+    ).toBe(true);
+    expect(
+      harvestRelevanceStarveSoftAllowed({
+        isAirline: false,
+        isHousing: false,
+        isHealthcare: false,
+        envValue: '',
+      }),
+    ).toBe(false);
   });
 
   it('does not starveSoft-admit when need is already filled', () => {
     expect(
       decideInjectRelevanceAction({
         ...base,
+        ...airline,
         need: 0,
         relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+        starveSoftEnvValue: '',
       }),
     ).toEqual({ action: 'check', reason: 'within-budget' });
   });
@@ -2110,9 +2189,11 @@ describe('decideInjectRelevanceAction', () => {
     expect(
       decideInjectRelevanceAction({
         ...base,
+        ...airline,
         isIntro: true,
         need: 6,
         relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+        starveSoftEnvValue: '',
       }),
     ).toEqual({ action: 'check', reason: 'within-budget' });
   });
@@ -2128,42 +2209,50 @@ describe('decideInjectRelevanceAction', () => {
     expect(
       decideInjectRelevanceAction({
         ...base,
+        ...airline,
         strongEvidence: true,
         checked: 99,
         relevanceKept: 2,
         relevanceRejected: 99,
         need: 9,
+        starveSoftEnvValue: '',
       }),
     ).toEqual({ action: 'admit', reason: 'strong-evidence' });
   });
 
-  it('prefers starveSoft over budget-exhausted on body', () => {
+  it('prefers starveSoft over budget-exhausted on airline body', () => {
     expect(
       decideInjectRelevanceAction({
         ...base,
+        ...airline,
         checked: 48,
         budget: 48,
         need: 4,
         relevanceKept: 3,
         relevanceRejected: INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD,
+        starveSoftEnvValue: '',
       }),
     ).toEqual({ action: 'admit', reason: 'starve-soft' });
   });
 
-  it('defaults starveSoft threshold to 12', () => {
+  it('defaults starveSoft threshold to 12 for DoD topics', () => {
     expect(INJECT_RELEVANCE_STARVE_SOFT_THRESHOLD).toBe(12);
     expect(
       decideInjectRelevanceAction({
         ...base,
+        ...airline,
         relevanceRejected: 11,
         need: 3,
+        starveSoftEnvValue: '',
       }).action,
     ).toBe('check');
     expect(
       decideInjectRelevanceAction({
         ...base,
+        ...airline,
         relevanceRejected: 12,
         need: 3,
+        starveSoftEnvValue: '',
       }).reason,
     ).toBe('starve-soft');
   });

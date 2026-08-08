@@ -1265,9 +1265,7 @@ function escapeRegExp(token) {
  * @param {string} token
  */
 function visualHasSubjectToken(visual, token) {
-  if (!token) return false;
-  // Word-boundary only — never substring ("comb" must not hit "corruption").
-  return new RegExp(`\\b${escapeRegExp(token)}s?\\b`, 'i').test(visual);
+  return subjectTokenMatchesText(token, visual);
 }
 
 /**
@@ -1410,6 +1408,86 @@ export function assetSearchQueryText(asset) {
 }
 
 /**
+ * Human-readable title extracted from an Archive.org download/details URL when
+ * provider title/alt are empty. Decodes %20, splits camelCase, and uses path
+ * segments so "Watch%20A%20Bee-...Hive%20Heist" counts as evidence.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function archivePathEvidenceText(url = '') {
+  const raw = String(url || '').trim();
+  if (!/archive\.org/i.test(raw)) return '';
+  const path = raw.replace(/^.*archive\.org\/(?:download|details|embed|services\/img)\//i, '');
+  if (!path) return '';
+  const parts = [];
+  for (const segment of path.split('/').filter(Boolean)) {
+    let decoded = segment;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      decoded = segment;
+    }
+    const cleaned = decoded
+      .replace(/\.[a-z0-9]{2,5}$/i, '')
+      .replace(/[[\](){}]/g, ' ')
+      .replace(/[_-]+/g, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/%20/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (cleaned.length >= 3) parts.push(cleaned);
+  }
+  return [...new Set(parts)].join(' ').trim();
+}
+
+/**
+ * Whole-word (and light stem) match for topic subject tokens — bee ↔ beekeeper(s).
+ *
+ * @param {string} token
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function subjectTokenMatchesText(token, text) {
+  if (!token || !text) return false;
+  const t = String(token).toLowerCase();
+  const h = String(text).toLowerCase();
+  if (new RegExp(`\\b${escapeRegExp(t)}s?\\b`, 'i').test(h)) return true;
+  // bee / hive families (beekeepers autopsy: URL slug had hive but not "beekeepers")
+  if (t === 'bee' || t === 'bees' || /^bee(?:keeper|keepers|keeping)?$/.test(t)) {
+    return /\bbee(?:s|keeper|keepers|keeping|hive|hives|honeycomb|apiary|apiaries)?\b/i.test(h);
+  }
+  if (t === 'hive' || t === 'hives' || t === 'beehive' || t === 'beehives') {
+    return /\b(?:hive|hives|beehive|beehives)\b/i.test(h);
+  }
+  if (t.length >= 5) {
+    const stem = t
+      .replace(/(keepers|keeper|keeping)$/i, '')
+      .replace(/ies$/i, 'y')
+      .replace(/es$/i, '')
+      .replace(/s$/i, '');
+    if (stem.length >= 3 && stem !== t && subjectTokenMatchesText(stem, h)) return true;
+  }
+  return false;
+}
+
+/**
+ * Generic (non-DoD) topics: true when decoded metadata shows filmable subject nouns.
+ *
+ * @param {object} asset
+ * @param {string} topicBlob
+ * @returns {boolean}
+ */
+export function hasGenericSubjectEvidence(asset = {}, topicBlob = '') {
+  if (!topicRequiresSubjectOverlap(topicBlob)) return false;
+  const blob = `${subjectTokenMetaBlob(asset)} ${archivePathEvidenceText(asset?.url || '')}`.trim();
+  if (!blob) return false;
+  const subjects = topicSubjectTokens(topicBlob);
+  if (!subjects.length) return false;
+  return subjects.some((token) => subjectTokenMatchesText(token, blob));
+}
+
+/**
  * What the media itself claims to show. The query used to fetch an asset is
  * excluded on purpose: providers echo the search string back into `alt`, which
  * lets a football clip certify itself as "worried passenger face". Query text
@@ -1427,7 +1505,8 @@ export function visualEvidenceBlob(asset) {
   if (alt && query) {
     alt = alt.split(query).join(' ');
   }
-  return `${alt} ${asset?.title || ''} ${asset?.sourceUrl || ''} ${asset?.url || ''} ${asset?.thumbnailUrl || ''}`
+  const archiveMeta = archivePathEvidenceText(asset?.url || '');
+  return `${alt} ${asset?.title || ''} ${archiveMeta} ${asset?.sourceUrl || ''} ${asset?.url || ''} ${asset?.thumbnailUrl || ''}`
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
@@ -1449,7 +1528,8 @@ export function subjectTokenMetaBlob(asset) {
   if (alt && query) {
     alt = alt.split(query).join(' ');
   }
-  return `${alt} ${asset?.title || ''}`
+  const archiveMeta = archivePathEvidenceText(asset?.url || '');
+  return `${alt} ${asset?.title || ''} ${archiveMeta}`
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
@@ -1465,11 +1545,7 @@ export function videoMatchesTopicSubjectTokens(asset, subjectTokens = []) {
   if (!Array.isArray(subjectTokens) || subjectTokens.length === 0) return false;
   const meta = subjectTokenMetaBlob(asset);
   if (!meta) return false;
-  return subjectTokens.some((tok) => {
-    if (!tok || tok.length < 3) return false;
-    const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`\\b${escaped}\\b`, 'i').test(meta);
-  });
+  return subjectTokens.some((tok) => subjectTokenMatchesText(tok, meta));
 }
 
 /**
@@ -1544,23 +1620,23 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
   // Junk/off-brand gates still read the query: a fetch string that admits junk fails closed.
   if (offTopicBlockReason(`${visual} ${queryForScore}`.trim(), contextText)) return 0;
 
-  const countHits = (keywords, text) => keywords.reduce((n, kw) => (text.includes(kw) ? n + 1 : n), 0);
-  const visualTopicHits = countHits(strongTopicKws, visual);
-  const visualSegHits = countHits(segKeywords, visual);
+  const countTopicHits = (keywords, text) =>
+    keywords.reduce((n, kw) => (subjectTokenMatchesText(kw, text) || text.includes(kw) ? n + 1 : n), 0);
+  const countSegHits = (keywords, text) =>
+    keywords.reduce((n, kw) => (text.includes(kw) ? n + 1 : n), 0);
+  const visualTopicHits = countTopicHits(strongTopicKws, visual);
+  const visualSegHits = countSegHits(segKeywords, visual);
   const combined = queryForScore ? `${visual} ${queryForScore}` : visual;
-  const topicHits = countHits(strongTopicKws, combined);
-  const segHits = countHits(segKeywords, combined);
+  const topicHits = countTopicHits(strongTopicKws, combined);
+  const segHits = countSegHits(segKeywords, combined);
 
   // The query never establishes relevance on its own — the media must show something topical.
   if (visualTopicHits + visualSegHits === 0) {
     if (isCrimeHeistTopic(topic) && CRIME_HEIST_EVIDENCE_RE.test(visual)) return 0.35;
     if (isAirlineTopic(topic) && AIRLINE_AVIATION_EVIDENCE_RE.test(visual)) return 0.4;
-    // "healthcare"/"AI" topic tokens rarely appear in hospital/doctor titles —
-    // clinical evidence floors keep honest medical motion through the filter.
     if (isHealthcareTopic(topic) && hasHealthcareEvidence(asset)) return 0.4;
-    // Abstract housing beats ("Fear Factor") share no keywords with Zillow /
-    // eviction / apartment titles — evidence floors keep lived-in housing motion.
     if (isHousingTopic(topic) && hasHousingEvidence(asset)) return 0.4;
+    if (hasGenericSubjectEvidence(asset, topic)) return 0.4;
     return 0;
   }
   if (segHits === 0 && topicHits < 2) {
@@ -1568,6 +1644,7 @@ export function scoreAssetRelevance(asset, segment, topic, topicKeywords = []) {
     if (isAirlineTopic(topic) && AIRLINE_AVIATION_EVIDENCE_RE.test(visual)) return 0.35;
     if (isHealthcareTopic(topic) && hasHealthcareEvidence(asset)) return 0.35;
     if (isHousingTopic(topic) && hasHousingEvidence(asset)) return 0.35;
+    if (hasGenericSubjectEvidence(asset, topic)) return 0.35;
     return 0;
   }
 

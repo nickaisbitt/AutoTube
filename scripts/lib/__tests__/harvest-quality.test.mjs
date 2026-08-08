@@ -47,6 +47,10 @@ import {
   genericStockJunkReason,
   isWebNativeMotionSource,
   keylessArchiveHumanPortraitScore,
+  archivePathEvidenceText,
+  subjectTokenMatchesText,
+  hasGenericSubjectEvidence,
+  videoMatchesTopicSubjectTokens,
   scoreAssetRelevance,
   thinInjectVarietyFailReason,
   topicSubjectTokens,
@@ -736,6 +740,42 @@ describe('honest topicalVideoCount requires subject overlap', () => {
       media: [honeycomb],
     }, 1);
     expect(volume.perSegment.s1.topicalVideoCount).toBe(1);
+  });
+
+  it('decodes Archive URL path segments into evidence text when alt/title are empty', () => {
+    const url =
+      'https://archive.org/download/Watch%20A%20Bee-Theft%20Detective%20Hive%20Heist/Watch%20A%20Bee-Theft%20Detective%20Hive%20Heist.mp4';
+    const decoded = archivePathEvidenceText(url);
+    expect(decoded).toMatch(/bee/i);
+    expect(decoded).toMatch(/hive/i);
+    expect(decoded).toMatch(/heist/i);
+  });
+
+  it('stem-matches beekeepers topic tokens against bee/hive archive slugs', () => {
+    const archiveUrl =
+      'https://archive.org/download/Bee-Theft-Detective-Hive-Heist/Bee-Theft-Detective-Hive-Heist.mp4';
+    const blob = archivePathEvidenceText(archiveUrl);
+    const tokens = topicSubjectTokens(BEEKEEPERS_TOPIC);
+    expect(subjectTokenMatchesText('beekeepers', blob)).toBe(true);
+    expect(subjectTokenMatchesText('hive', blob)).toBe(true);
+    expect(videoMatchesTopicSubjectTokens({ url: archiveUrl, alt: '', title: '' }, tokens)).toBe(true);
+  });
+
+  it('scores Archive bee-heist clip with empty metadata via generic subject floor', () => {
+    const beeHeist = {
+      id: 'bee-heist-archive',
+      type: 'video',
+      segmentId: 's1',
+      alt: '',
+      title: '',
+      query: 'victorian beekeepers hive',
+      url: 'https://archive.org/download/Watch%20A%20Bee-Theft%20Detective%20Hive%20Heist/Watch%20A%20Bee-Theft%20Detective%20Hive%20Heist.mp4',
+      source: 'Archive.org live',
+    };
+    expect(hasGenericSubjectEvidence(beeHeist, BEEKEEPERS_TOPIC)).toBe(true);
+    expect(scoreAssetRelevance(beeHeist, segment, BEEKEEPERS_TOPIC, topicKeywords)).toBeGreaterThan(0);
+    expect(topicalVideoScore(beeHeist, segment, BEEKEEPERS_TOPIC, topicKeywords))
+      .toBeGreaterThanOrEqual(VOLUME_PADDING_MIN_RELEVANCE);
   });
 });
 

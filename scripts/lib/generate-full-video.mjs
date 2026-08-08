@@ -40,6 +40,7 @@ import {
 } from './keep-best.mjs';
 import {
   airlineSoftPassMotionFailureReason,
+  archivePathEvidenceText,
   checkEditTimelineIntroFace,
   repairEditTimelineIntroFace,
   checkIntroFacePool,
@@ -4998,10 +4999,16 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
           ? 'worried tenant apartment face close up'
           : `stock-video ${seg.title}`);
     const injectedUrl = withDistinctProxyIdentity(clip.url, `${seg.id}-${n}`);
+    const archiveMeta = /Archive/i.test(clip.source || '')
+      ? archivePathEvidenceText(clip.url || clip.sourceUrl || '')
+      : '';
     // Provider metadata travels with the asset so downstream evidence gates judge the
-    // clip on what it shows. Nothing aviation-flavoured is invented for empty alts —
-    // a clip with no metadata must fail the relevance gate, not borrow a label.
-    const providerMeta = providerEvidenceText(clip.title || '', { query: safeQuery, topicBlob });
+    // clip on what it shows. Archive URLs carry human titles in the path when alt is empty.
+    const providerMeta = providerEvidenceText(
+      clip.title || clip.alt || archiveMeta || '',
+      { query: safeQuery, topicBlob },
+    );
+    const displayMeta = providerMeta || archiveMeta || '';
     // Protect only harvest-proven or beat-matched injects. Archive source alone is
     // not motion proof — blanket || archiveClip let junk survive post-top-up
     // (protected-motion=4, relevance removed 0). Healthcare/housing evidence still
@@ -5014,11 +5021,11 @@ async function topUpVideoBroll(project, report, mediaOffset = 0, devServer = '',
       url: injectedUrl,
       alt:
         clip.alt
-        || providerMeta
+        || displayMeta
         || (airline || /web video/i.test(clip.source || '')
           ? `${clip.source || 'Video'} clip`
           : seg.title),
-      ...(providerMeta ? { title: providerMeta } : {}),
+      ...(displayMeta ? { title: displayMeta } : {}),
       query: safeQuery,
       source: clip.source || 'Stock video pool',
       duration: 8,

@@ -1655,7 +1655,55 @@ export function filterAssetsByRelevance(media, project, options = {}) {
 export const VOLUME_PADDING_MIN_RELEVANCE = 0.2;
 
 /**
+ * Project-wide max times a padded motion URL may appear. Generic topics hard-cap
+ * at 1 so junk Archive (Charlie Rose, corruption pads) cannot be stamped onto
+ * every thin segment via topical volume top-up / mergeVolumePadding.
+ */
+export const PADDING_MAX_URL_REUSE = 1;
+
+/**
+ * Reuse ceiling for padded motion clones. Specialized verticals may fall back to
+ * a reused URL only when no unused alternative exists; generic topics never
+ * exceed {@link PADDING_MAX_URL_REUSE}.
+ * @param {string} [topicBlob]
+ * @returns {number}
+ */
+export function paddingUrlReuseCap(topicBlob = '') {
+  if (
+    isAirlineTopic(topicBlob)
+    || isHousingTopic(topicBlob)
+    || isHealthcareTopic(topicBlob)
+    || isCrimeHeistTopic(topicBlob)
+  ) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return PADDING_MAX_URL_REUSE;
+}
+
+/**
+ * Prefer never-used URLs for padding. Only fall back to a reused URL when the
+ * topic's reuse cap allows it and no unused alternative exists.
+ *
+ * @param {{ key: string, score?: number }[]} candidates
+ * @param {Map<string, number>} reuseCounts
+ * @param {number} [maxReuse]
+ * @returns {{ key: string, score?: number } | null}
+ */
+export function pickPaddingCandidate(candidates, reuseCounts, maxReuse = PADDING_MAX_URL_REUSE) {
+  if (!Array.isArray(candidates) || !candidates.length) return null;
+  const sorted = [...candidates].sort((a, b) => (
+    (reuseCounts.get(a.key) || 0) - (reuseCounts.get(b.key) || 0)
+    || (b.score || 0) - (a.score || 0)
+  ));
+  const unused = sorted.filter((c) => (reuseCounts.get(c.key) || 0) === 0);
+  if (unused.length) return unused[0];
+  const cap = Number.isFinite(maxReuse) ? maxReuse : Number.POSITIVE_INFINITY;
+  return sorted.find((c) => (reuseCounts.get(c.key) || 0) < cap) || null;
+}
+
+/**
  * Re-attach volume-padding assets dropped by relevance so per-segment counts hold.
+ * Project-wide maxReuse=1: never re-attach a URL already owned by any segment.
  * @param {object[]} media
  * @param {object[]} padding
  */
@@ -1678,11 +1726,16 @@ export function mergeVolumePadding(media, padding, project = null) {
     });
   }
   const out = [...media];
+  const projectKeys = new Set(
+    out.map((m) => canonicalMediaKey(m.url || '')).filter(Boolean),
+  );
   for (const asset of pad) {
     const key = canonicalMediaKey(asset.url || '');
     if (!key) continue;
-    if (out.some((m) => m.segmentId === asset.segmentId && canonicalMediaKey(m.url || '') === key)) continue;
+    // maxReuse=1 project-wide — same Archive pad must not land on two segments.
+    if (projectKeys.has(key)) continue;
     out.push(asset);
+    projectKeys.add(key);
   }
   return out;
 }
@@ -1850,6 +1903,11 @@ export function topicalVideoScore(asset, segment, topicBlob, topicKeywords) {
  * unique-video floors still dedupe by URL, so this cannot inflate motion-rich
  * or airline strong-visual counts.
  *
+ * Prefer unused URLs. Generic topics enforce maxReuse=1 so the same junk
+ * Archive clip cannot be cloned onto outro + body (beekeepers Charlie Rose /
+ * corruption pads). Specialized verticals may reuse only when no unused
+ * alternative exists.
+ *
  * @param {object} project
  * @returns {{ padded: object[], missingBefore: string[], missing: string[] }}
  */
@@ -1863,6 +1921,7 @@ export function ensureTopicalVideoCoverage(project) {
   const media = project.media;
   const topicBlob = `${project.topic || ''} ${project.title || ''}`;
   const topicKeywords = extractKeywords(topicBlob, 12);
+  const maxReuse = paddingUrlReuseCap(topicBlob);
   const topicalForSegment = (segment) => media.filter((asset) => (
     asset?.segmentId === segment.id
     && topicalVideoScore(asset, segment, topicBlob, topicKeywords) >= VOLUME_PADDING_MIN_RELEVANCE
@@ -1889,12 +1948,8 @@ export function ensureTopicalVideoCoverage(project) {
         key
         && !usedBySegment.has(key)
         && score >= VOLUME_PADDING_MIN_RELEVANCE
-      ))
-      .sort((a, b) => (
-        (reuseCounts.get(a.key) || 0) - (reuseCounts.get(b.key) || 0)
-        || b.score - a.score
       ));
-    const candidate = candidates[0];
+    const candidate = pickPaddingCandidate(candidates, reuseCounts, maxReuse);
     if (!candidate) continue;
 
     const clone = {

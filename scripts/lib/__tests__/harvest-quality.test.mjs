@@ -56,11 +56,161 @@ import {
   countSoftPassRelevantVideos,
   softPassMinRelevantVideos,
   VOLUME_PADDING_MIN_RELEVANCE,
+  PADDING_MAX_URL_REUSE,
+  paddingUrlReuseCap,
+  pickPaddingCandidate,
+  mergeVolumePadding,
 } from '../harvest-quality.mjs';
 
 const AIRLINE_TOPIC = 'Hidden cabin pressure failures at regional airlines';
 const HEALTHCARE_TOPIC = 'Why AI will change healthcare';
 const HOUSING_TOPIC = 'The housing crash they said would never happen';
+
+describe('padding URL maxReuse=1 (generic topics)', () => {
+  it('pickPaddingCandidate prefers unused URLs when alternatives exist', () => {
+    const reuseCounts = new Map([
+      ['https://archive.org/download/charlie/charlie.mp4', 1],
+      ['https://archive.org/download/bees/bees.mp4', 0],
+    ]);
+    const candidates = [
+      { key: 'https://archive.org/download/charlie/charlie.mp4', score: 0.9 },
+      { key: 'https://archive.org/download/bees/bees.mp4', score: 0.4 },
+    ];
+    const picked = pickPaddingCandidate(candidates, reuseCounts, PADDING_MAX_URL_REUSE);
+    expect(picked?.key).toBe('https://archive.org/download/bees/bees.mp4');
+  });
+
+  it('pickPaddingCandidate refuses reuse on generic maxReuse=1 when only used URLs remain', () => {
+    const reuseCounts = new Map([
+      ['https://archive.org/download/charlie/charlie.mp4', 1],
+      ['https://archive.org/download/corruption/corruption.mp4', 1],
+    ]);
+    const candidates = [
+      { key: 'https://archive.org/download/charlie/charlie.mp4', score: 0.8 },
+      { key: 'https://archive.org/download/corruption/corruption.mp4', score: 0.7 },
+    ];
+    expect(pickPaddingCandidate(candidates, reuseCounts, PADDING_MAX_URL_REUSE)).toBeNull();
+  });
+
+  it('paddingUrlReuseCap is 1 for generic topics and unbounded for specialized', () => {
+    expect(paddingUrlReuseCap('Beekeepers fighting Varroa mites')).toBe(PADDING_MAX_URL_REUSE);
+    expect(paddingUrlReuseCap(HOUSING_TOPIC)).toBe(Number.POSITIVE_INFINITY);
+    expect(paddingUrlReuseCap(AIRLINE_TOPIC)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('ensureTopicalVideoCoverage does not clone Archive pads across segments on generic topics', () => {
+    // Generic maxReuse=1: URLs already on intro (reuseCount=1) must not be cloned
+    // onto varroa/outro — that was the Charlie Rose / corruption-pad failure.
+    const topic = 'How beekeepers fight Varroa mites without killing the hive';
+    const intro = { id: 'intro', title: 'Hive crisis', narration: 'Varroa mites threaten colonies' };
+    const varroa = { id: 'varroa', title: 'Varroa mites', narration: 'mites drain bee brood' };
+    const outro = { id: 'outro', title: 'Save the hive', narration: 'beekeepers adapt treatments' };
+    const charlie = {
+      type: 'video',
+      segmentId: 'intro',
+      url: 'https://archive.org/download/Charlie_Rose_Bees/Charlie_Rose_Bees.mp4',
+      source: 'Archive.org live',
+      alt: 'Charlie Rose interview about bees and pollination',
+      title: 'Charlie Rose bees interview',
+      query: 'beekeepers bees hive',
+    };
+    const corruption = {
+      type: 'video',
+      segmentId: 'intro',
+      url: 'https://archive.org/download/VictoriansCorruption/corruption.mp4',
+      source: 'Archive.org live',
+      alt: 'victorians corruption documentary',
+      title: 'victorians corruption',
+      query: 'beekeepers bees',
+    };
+    const project = {
+      topic,
+      title: 'Varroa mite crisis',
+      script: [intro, varroa, outro],
+      media: [charlie, corruption],
+    };
+    const coverage = ensureTopicalVideoCoverage(project);
+    const allVideoKeys = project.media
+      .filter((a) => a.type === 'video')
+      .map((a) => canonicalMediaKey(a.url));
+    expect(new Set(allVideoKeys).size).toBe(allVideoKeys.length);
+    expect(coverage.padded).toEqual([]);
+    expect(project.media.filter((a) => a.segmentId === 'varroa')).toEqual([]);
+    expect(project.media.filter((a) => a.segmentId === 'outro')).toEqual([]);
+  });
+
+  it('ensureTopicalVideoCoverage prefers unused URLs when specialized topics allow reuse', () => {
+    const fear = { id: 'fear', title: 'The Fear Factor', narration: 'tenants panic over rent' };
+    const zillow = { id: 'zillow', title: 'Zillow crash', narration: 'home prices plunge' };
+    const usedTwice = {
+      type: 'video',
+      segmentId: 'zillow',
+      url: 'https://example.com/apartment-a.mp4',
+      source: 'Bing web video',
+      alt: 'apartment building for rent residential street',
+      title: 'apartment for rent',
+      query: 'apartment for rent housing',
+    };
+    // Same URL already cloned once elsewhere → reuseCount=2 after push below.
+    const usedTwiceClone = {
+      ...usedTwice,
+      id: 'clone-a',
+      segmentId: 'zillow',
+      url: 'https://example.com/apartment-a.mp4',
+    };
+    const unusedAlt = {
+      type: 'video',
+      segmentId: 'zillow',
+      url: 'https://example.com/eviction-notice.mp4',
+      source: 'Bing web video',
+      alt: 'tenant reads eviction notice apartment hallway',
+      title: 'eviction notice tenant',
+      query: 'eviction notice housing',
+    };
+    const project = {
+      topic: HOUSING_TOPIC,
+      title: 'Housing Crash',
+      script: [fear, zillow],
+      media: [usedTwice, usedTwiceClone, unusedAlt],
+    };
+    // Collapse intentional duplicate key count: mediaAssetKey counts both a clones.
+    const coverage = ensureTopicalVideoCoverage(project);
+    expect(coverage.padded.some((a) => a.segmentId === 'fear')).toBe(true);
+    const fearPad = coverage.padded.find((a) => a.segmentId === 'fear');
+    expect(canonicalMediaKey(fearPad.url)).toBe(canonicalMediaKey(unusedAlt.url));
+  });
+
+  it('mergeVolumePadding refuses to re-attach a URL already owned by another segment', () => {
+    const topic = 'How beekeepers fight Varroa mites without killing the hive';
+    const media = [{
+      id: 'keep',
+      segmentId: 'intro',
+      type: 'video',
+      url: 'https://archive.org/download/Charlie_Rose_Bees/Charlie_Rose_Bees.mp4',
+      alt: 'beekeeper hive Varroa mites inspection',
+      query: 'beekeeper Varroa',
+      source: 'Archive.org live',
+    }];
+    const padding = [{
+      id: 'pad-outro',
+      segmentId: 'outro',
+      type: 'video',
+      url: 'https://archive.org/download/Charlie_Rose_Bees/Charlie_Rose_Bees.mp4',
+      alt: 'beekeeper hive Varroa mites inspection',
+      query: 'beekeeper Varroa',
+      source: 'Stock pool (volume top-up)',
+    }];
+    const merged = mergeVolumePadding(media, padding, {
+      topic,
+      script: [
+        { id: 'intro', title: 'Hive crisis', narration: 'Varroa mites' },
+        { id: 'outro', title: 'Save the hive', narration: 'beekeepers adapt' },
+      ],
+    });
+    expect(merged).toHaveLength(1);
+    expect(merged[0].segmentId).toBe('intro');
+  });
+});
 
 describe('keyless archive human portrait topical boost', () => {
   const segment = {

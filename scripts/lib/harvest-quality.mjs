@@ -26,6 +26,40 @@ const WEAK_TOPIC_WORDS = new Set([
 ]);
 
 /**
+ * Era / period adjectives. Matching "victorian" alone must not certify a clip as
+ * topical for "Victorian beekeepers…" — subjects are bee/hive/etc.
+ */
+const TOPIC_ERA_MODIFIER_WORDS = new Set([
+  'victorian', 'victorians', 'edwardian', 'edwardians', 'medieval', 'ancient',
+  'colonial', 'renaissance', 'prehistoric', 'antique', 'vintage', 'historic',
+  'historical', 'century', 'modern', 'contemporary', 'georgian', 'tudor',
+  'roman', 'greek', 'egyptian', 'byzantine',
+]);
+
+/** Mood / framing words that are not filmable subject nouns. */
+const TOPIC_SUBJECT_WEAK_WORDS = new Set([
+  'fear', 'feared', 'fears', 'afraid', 'silent', 'silence', 'silenced',
+  'hidden', 'hiding', 'secret', 'secrets', 'shocking', 'truth', 'story',
+  'why', 'how', 'what', 'when', 'means', 'really', 'never', 'always',
+  'people', 'things', 'thing', 'world', 'life', 'years', 'year',
+  'real', 'true', 'dark', 'deadly', 'strange', 'weird', 'crazy',
+]);
+
+/**
+ * When a topic names one member of a subject family, related visual vocabulary
+ * (honeycomb for beekeepers) counts as honest subject overlap.
+ */
+const TOPIC_SUBJECT_RELATED_GROUPS = [
+  [
+    'bee', 'bees', 'beekeeper', 'beekeepers', 'beekeeping',
+    'hive', 'hives', 'beehive', 'beehives',
+    'honeycomb', 'honeycombs', 'honey', 'apiary', 'apiaries',
+    'swarm', 'swarms', 'nectar', 'pollen',
+    'colony', 'colonies', 'apiculture', 'apiarist', 'apiarists',
+  ],
+];
+
+/**
  * Shared essay words on cabin-pressure topics that also match games, physics
  * homework, wildfire "failures", and tech clickbait. Never count these alone.
  */
@@ -1157,6 +1191,104 @@ export function extractKeywords(text, max = 14) {
   return out;
 }
 
+/**
+ * Concrete subject tokens from a topic (bee/hive…), dropping era modifiers
+ * ("victorian") and framing words ("feared", "silent"). Related-family terms
+ * (honeycomb) are expanded when a seed member is present.
+ *
+ * @param {string} topicBlob
+ * @returns {string[]}
+ */
+export function topicSubjectTokens(topicBlob = '') {
+  const raw = extractKeywords(topicBlob, 16);
+  const seeds = [];
+  for (const kw of raw) {
+    if (TOPIC_ERA_MODIFIER_WORDS.has(kw)) continue;
+    if (TOPIC_SUBJECT_WEAK_WORDS.has(kw)) continue;
+    if (WEAK_TOPIC_WORDS.has(kw)) continue;
+    if (STOP_WORDS.has(kw)) continue;
+    if (kw.length < 4) continue;
+    seeds.push(kw);
+    // beekeepers → bee; beekeeping → bee; hives → hive
+    if (/keepers?$/i.test(kw)) {
+      const head = kw.replace(/keepers?$/i, '');
+      if (head.length >= 3) seeds.push(head);
+      const singular = kw.replace(/s$/i, '');
+      if (singular.length >= 4) seeds.push(singular);
+    } else if (/keeping$/i.test(kw)) {
+      const head = kw.replace(/keeping$/i, '');
+      if (head.length >= 3) seeds.push(head);
+    } else if (/ies$/i.test(kw) && kw.length >= 5) {
+      seeds.push(`${kw.slice(0, -3)}y`);
+    } else if (/ses$/i.test(kw) && kw.length >= 5) {
+      seeds.push(kw.slice(0, -2));
+    } else if (/s$/i.test(kw) && kw.length >= 5 && !/ss$/i.test(kw)) {
+      seeds.push(kw.slice(0, -1));
+    }
+  }
+  const out = new Set(seeds);
+  for (const group of TOPIC_SUBJECT_RELATED_GROUPS) {
+    if (group.some((member) => out.has(member))) {
+      for (const member of group) out.add(member);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * @param {string} token
+ * @returns {string}
+ */
+function escapeRegExp(token) {
+  return String(token || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * @param {string} visual
+ * @param {string} token
+ */
+function visualHasSubjectToken(visual, token) {
+  if (!token) return false;
+  // Word-boundary only — never substring ("comb" must not hit "corruption").
+  return new RegExp(`\\b${escapeRegExp(token)}s?\\b`, 'i').test(visual);
+}
+
+/**
+ * True when visual evidence (alt/title/url — not query echo alone) overlaps a
+ * concrete topic subject. Era-only hits like "victorian" on a corruption clip
+ * are not subject overlap for a beekeepers topic.
+ *
+ * @param {object} asset
+ * @param {string} topicBlob
+ * @returns {boolean}
+ */
+export function assetHasTopicSubjectOverlap(asset = {}, topicBlob = '') {
+  const subjects = topicSubjectTokens(topicBlob);
+  if (!subjects.length) return true;
+  const visual = visualEvidenceBlob(asset);
+  if (!visual) return false;
+  return subjects.some((token) => visualHasSubjectToken(visual, token));
+}
+
+/**
+ * Domain topics already prove subject via aviation/housing/clinical evidence
+ * floors and face-first portrait padding. Generic topics (beekeepers, …) need
+ * honest subject overlap so era/framing substring hits cannot pad volume.
+ *
+ * @param {string} topicBlob
+ */
+function topicRequiresSubjectOverlap(topicBlob = '') {
+  if (
+    isAirlineTopic(topicBlob)
+    || isHousingTopic(topicBlob)
+    || isHealthcareTopic(topicBlob)
+    || isCrimeHeistTopic(topicBlob)
+  ) {
+    return false;
+  }
+  return topicSubjectTokens(topicBlob).length > 0;
+}
+
 /** Volume padding from top-up passes — must not be stripped by post-top-up relevance. */
 export function isVolumePaddingAsset(asset) {
   if (isUnsafeMediaUrl(asset?.url || '')) return false;
@@ -1590,17 +1722,28 @@ export function webNativeEvidenceBlob(asset = {}) {
  * matches, airline medical/carrier/ticker junk, and unsafe URLs cannot pad a
  * segment.
  *
+ * Generic topics additionally require subject overlap (bee/hive/…): a mere
+ * "victorian" substring or portrait-query "worried" cannot certify topical
+ * video for harvest-quality counts.
+ *
  * @param {object} asset
  * @param {object} segment
  * @param {string} topicBlob
  * @param {string[]} topicKeywords
  */
-function topicalVideoScore(asset, segment, topicBlob, topicKeywords) {
+export function topicalVideoScore(asset, segment, topicBlob, topicKeywords) {
   if (!isVideoAsset(asset)) return 0;
   if (isUnsafeMediaUrl(asset?.url || '') || isJunkWebVolumeStillUrl(asset?.url || '')) return 0;
   const base = scoreAssetRelevance(asset, segment, topicBlob, topicKeywords);
   const portraitFloor = keylessArchiveHumanPortraitScore(asset, segment, topicBlob);
-  return Math.max(base, portraitFloor);
+  let score = Math.max(base, portraitFloor);
+  if (topicRequiresSubjectOverlap(topicBlob)) {
+    if (!assetHasTopicSubjectOverlap(asset, topicBlob)) return 0;
+    // Subject-proven visuals clear the topical volume floor even when essay
+    // keyword scoring misses plurals/stems (beekeeper vs beekeepers).
+    if (score < VOLUME_PADDING_MIN_RELEVANCE) score = VOLUME_PADDING_MIN_RELEVANCE;
+  }
+  return score;
 }
 
 /**

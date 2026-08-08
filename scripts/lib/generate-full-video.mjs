@@ -74,6 +74,7 @@ import {
   relevanceGateEnabled,
   shouldRejectRelevanceDecision,
 } from './harvest-relevance-gate.mjs';
+import { rewriteHarvestQueryPlan } from './harvest-query-rewrite.mjs';
 import {
   isAirlineTopic,
   isBankScamTopic,
@@ -3264,6 +3265,18 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
       queries.push(q);
     }
   }
+  // Drop weak generic pads ("news interview worried person", lone "victorian") and
+  // prefer topic subject nouns (bee/hive/…) so cold-eval topics don't harvest neighbor junk.
+  const rewriteOpts = {
+    topicBlob,
+    segmentTitle: String(options.segmentTitle || '').trim(),
+  };
+  const rewrittenQueries = rewriteHarvestQueryPlan(queries, rewriteOpts);
+  queries.length = 0;
+  for (const q of rewrittenQueries) queries.push(q);
+  const rewrittenWebQueries = rewriteHarvestQueryPlan(webQueries, rewriteOpts);
+  const rewrittenWebHostQueries = rewriteHarvestQueryPlan(webHostQueries, rewriteOpts);
+
   // site: host searches must not displace Archive.org subjects — strip them from
   // the archive lane (they are web-only face/OR/lived-in yield).
   const archiveSourceQueries = (healthcare || housing)
@@ -3273,8 +3286,8 @@ export function motionQueryPlan(topicBlob, cyberTopic, options = {}) {
     mode: keyed ? 'keyed' : 'keyless',
     keyed,
     queries,
-    webQueries,
-    webHostQueries,
+    webQueries: rewrittenWebQueries,
+    webHostQueries: rewrittenWebHostQueries,
     // Archive.org has its own direct-MP4 search lane; host-scoped web searches must
     // never displace these subjects from that lane.
     archiveQueries: healthcare

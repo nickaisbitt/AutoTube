@@ -92,7 +92,7 @@ export function buildShortHookOverlay(topic, hookLine, options = {}) {
 }
 
 const DATE_OPENER_RE =
-  /^(On\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|On\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|In\s+\d{4}|As\s+of\s+\w+\s+\d{4})/i;
+  /^(On\s+(?:\w+\s+)?\d{1,2},?\s+\d{4}|On\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)|In\s+\d{4}|As\s+of\s+\w+\s+\d{4}|Here'?s\s+(?:the\s+)?(?:human|a)\s+(?:part|story))/i;
 
 /** Replace weak date/year openers with the shock hook line. */
 export function rewriteIntroOpener(project, hookLine) {
@@ -100,7 +100,11 @@ export function rewriteIntroOpener(project, hookLine) {
   const intro = project.script[0];
   const narration = intro.narration || '';
   const rest = narration.replace(/^[^.!?]+[.!?]\s*/, '');
-  if (DATE_OPENER_RE.test(narration.trim()) || /^in \d{4}/i.test(narration.trim())) {
+  const weakOpener =
+    DATE_OPENER_RE.test(narration.trim())
+    || /^in \d{4}/i.test(narration.trim())
+    || /\bin 20\d{2}\b/i.test(narration.slice(0, 120));
+  if (weakOpener) {
     intro.narration = `${hookLine.trim()} ${rest}`.trim();
   }
   return project;

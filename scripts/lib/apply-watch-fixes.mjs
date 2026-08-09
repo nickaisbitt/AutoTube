@@ -118,8 +118,9 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
     applied.push(`1. Hook FAIL → overlay: "${s.hookOverlay}"`);
   }
 
-  if ((pacing <= 8 || longestHold >= 4) && !sceneFail) {
+  if ((pacing <= 5 || longestHold >= 4) && !sceneFail) {
     s.useFastPacing = true;
+    s.patternInterrupts = true;
     if ((s.cutIntervalSec ?? 1.25) > CUT_FLOOR) {
       const prev = s.cutIntervalSec ?? 1.25;
       s.cutIntervalSec = Math.max(CUT_FLOOR, prev - 0.15);

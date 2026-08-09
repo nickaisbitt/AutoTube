@@ -35,7 +35,6 @@ function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
   if (loopMode) return { w: 1280, h: 720 };
-  if (draft && loopMode) return { w: 1280, h: 720 };
   return draft ? { w: 960, h: 540 } : { w: 1920, h: 1080 };
 }
 
@@ -216,6 +215,18 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
     const abs = resolve(asset.localPath);
     if (existsSync(abs) && readFileSync(abs).length > 500) {
       return abs;
+    }
+  }
+  const sharedCache = process.env.AUTOTUBE_MEDIA_CACHE_DIR;
+  if (sharedCache && existsSync(sharedCache)) {
+    const rawUrl = asset.url || '';
+    const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(rawUrl);
+    for (const fetchUrl of [rawUrl, asset.thumbnailUrl || ''].filter(Boolean)) {
+      if (!fetchUrl.startsWith('http')) continue;
+      const cached = cachePathForUrl(fetchUrl, sharedCache, isVideo);
+      if (existsSync(cached) && readFileSync(cached).length > 500) {
+        return cached;
+      }
     }
   }
   const rawUrl = asset.url || '';

@@ -14,6 +14,7 @@ export function buildRenderEnvFromFixState(fixState = {}, base = {}) {
   };
 
   if (base.projectPath) env.AUTOTUBE_PROJECT_PATH = base.projectPath;
+  if (base.mediaCacheDir) env.AUTOTUBE_MEDIA_CACHE_DIR = base.mediaCacheDir;
   if (fixState.cutIntervalSec) env.AUTOTUBE_CUT_INTERVAL_SEC = String(fixState.cutIntervalSec);
   if (fixState.showKineticText) env.AUTOTUBE_KINETIC_TEXT = '1';
   if (fixState.patternInterrupts) env.AUTOTUBE_PATTERN_INTERRUPTS = '1';

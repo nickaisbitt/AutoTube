@@ -131,6 +131,13 @@ function giphyStillUrl(asset = {}) {
   return asset.thumbnailUrl || '';
 }
 
+function vimeoStillUrl(asset = {}) {
+  const src = `${asset.sourceUrl || ''} ${asset.url || ''}`;
+  const match = src.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+  if (!match) return '';
+  return `https://vumbnail.com/${match[1]}.jpg`;
+}
+
 function isImageLikeUrl(url = '') {
   return /\.(?:jpg|jpeg|png|webp|gif)(?:[?#].*)?$/i.test(url)
     || /(?:th\.bing\.com|tse\d*\.mm\.bing\.net|i\.vimeocdn\.com|images\.|img\.|cdn\.)/i.test(url);
@@ -265,9 +272,13 @@ async function tryKeepVideoAsset(asset, devServer, sanitized, report, { loopMode
   const reasonPrefix = loopMode ? 'loop mode: ' : '';
 
   if (proxied) {
-    sanitized.push({ ...asset, type: 'video', url: downloadUrl });
-    report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}proxy clip (no probe)` });
-    return true;
+    const clipOk = await canFetch(downloadUrl, { timeoutMs: 20000, minBytes: 2048, expectVideo: true });
+    if (clipOk) {
+      sanitized.push({ ...asset, type: 'video', url: downloadUrl });
+      report.keptVideo.push({ url: asset.url, reason: `${reasonPrefix}proxy clip probe OK` });
+      return true;
+    }
+    return false;
   }
 
   if (direct) {
@@ -326,7 +337,11 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       continue;
     }
 
-    const thumbnailUrl = asset.thumbnailUrl || (isImageLikeUrl(asset.url) ? asset.url : '') || giphyStillUrl(asset);
+    const thumbnailUrl =
+      asset.thumbnailUrl
+      || (isImageLikeUrl(asset.url) ? asset.url : '')
+      || vimeoStillUrl(asset)
+      || giphyStillUrl(asset);
     if (thumbnailUrl && !isJunkHarvestUrl(thumbnailUrl) && await canFetch(thumbnailUrl, { timeoutMs: 8000 })) {
       sanitized.push({
         ...asset,
@@ -441,7 +456,11 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     const asset = project.media[i];
     const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
     if (!isVideo || asset.localPath) continue;
-    const thumb = asset.thumbnailUrl;
+    const thumb =
+      asset.thumbnailUrl
+      || vimeoStillUrl(asset)
+      || (isImageLikeUrl(asset.url) ? asset.url : '')
+      || giphyStillUrl(asset);
     if (!thumb || isJunkHarvestUrl(thumb)) continue;
     const stillPath = await cacheAssetToDir(
       { type: 'image', url: thumb, thumbnailUrl: thumb },
@@ -459,6 +478,17 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
       report.videoToStill = report.videoToStill || [];
       report.videoToStill.push({ from: asset.url, to: thumb });
     }
+  }
+
+  const uncached = project.media.filter((a) => !a.localPath);
+  if (uncached.length) {
+    report.droppedUncached = uncached.map((a) => ({
+      id: a.id,
+      url: (a.url || '').slice(0, 100),
+      type: a.type,
+    }));
+    project.media = project.media.filter((a) => a.localPath);
+    report.afterDropUncached = project.media.length;
   }
 
   const volume = evaluateHarvestVolume(project, minPerSegment);
@@ -860,6 +890,7 @@ export async function generateFullVideo(options) {
           fixState,
         };
       }
+      patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
     }
     const timelineReport = validateEditTimeline(project, { cutIntervalSec: fixState.cutIntervalSec ?? 1.25 });
     if (timelineReport.rebuilt) {
@@ -886,7 +917,11 @@ export async function generateFullVideo(options) {
     const mp4Out = join(outDir, 'final-video.mp4');
     log(`🎥 Render → ${mp4Out}`);
 
-    const renderEnv = buildRenderEnvFromFixState(fixState, { devServer, projectPath });
+    const renderEnv = buildRenderEnvFromFixState(fixState, {
+      devServer,
+      projectPath,
+      mediaCacheDir: join(outDir, 'media-cache'),
+    });
     const renderSnapshot = renderEnvJournalSnapshot(fixState);
     writeFileSync(join(outDir, 'render-env.json'), JSON.stringify(renderSnapshot, null, 2));
 

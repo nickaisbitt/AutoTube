@@ -34,6 +34,7 @@ function trimAudioToDuration(inputPath, outputPath, targetSec) {
 function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  if (loopMode) return { w: 1280, h: 720 };
   if (draft && loopMode) return { w: 1280, h: 720 };
   return draft ? { w: 960, h: 540 } : { w: 1920, h: 1080 };
 }

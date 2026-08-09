@@ -2,7 +2,7 @@
  * Dev-server HTTP helpers — attach AUTOTUBE_API_KEY when the Vite middleware requires it.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 
 export function resolveDevApiKey() {
@@ -30,17 +30,29 @@ export async function devFetch(url, options = {}) {
   });
 }
 
-function cachePathForUrl(url, cacheDir, isVideo) {
+function cachePathForUrl(url, cacheDir, isVideo, extHint = null) {
   const hash = createHash('sha1').update(url).digest('hex').slice(0, 16);
-  let ext = '.jpg';
-  try {
-    ext = extname(new URL(url, 'http://local').pathname) || ext;
-  } catch {
-    /* ignore */
+  let ext = extHint || '.jpg';
+  if (!extHint) {
+    try {
+      ext = extname(new URL(url, 'http://local').pathname) || ext;
+    } catch {
+      /* ignore */
+    }
   }
   if (isVideo) ext = '.mp4';
   if (!/^\.(jpe?g|png|webp|gif|mp4|webm|mov)$/i.test(ext)) ext = isVideo ? '.mp4' : '.jpg';
   return join(cacheDir, `${hash}${ext}`);
+}
+
+/** @returns {string|null} normalized ext including dot */
+function imageExtFromBuffer(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8) return '.jpg';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return '.png';
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return '.gif';
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46) return '.webp';
+  return null;
 }
 
 async function fetchBytes(url, { expectVideo = false, timeoutMs = 60_000 } = {}) {
@@ -54,7 +66,12 @@ async function fetchBytes(url, { expectVideo = false, timeoutMs = 60_000 } = {})
     if (sig !== 'ftyp' && !buf.slice(0, 4).toString('hex').includes('1a45')) return null;
   }
   if (!expectVideo && /text\/html/i.test(contentType)) return null;
-  return buf;
+  if (!expectVideo) {
+    const ext = imageExtFromBuffer(buf);
+    if (!ext) return null;
+    return { buf, ext };
+  }
+  return { buf, ext: '.mp4' };
 }
 
 /**
@@ -100,15 +117,22 @@ export async function cacheAssetToDir(asset, devServer, cacheDir) {
     if (!fetchUrl.startsWith('http')) continue;
     const cached = cachePathForUrl(fetchUrl, cacheDir, isVideo);
     if (existsSync(cached) && readFileSync(cached).length > 500) {
-      return cached;
+      const buf = readFileSync(cached);
+      if (isVideo || imageExtFromBuffer(buf)) return cached;
+      try {
+        unlinkSync(cached);
+      } catch {
+        /* ignore */
+      }
     }
     try {
-      const buf = await fetchBytes(fetchUrl, {
+      const fetched = await fetchBytes(fetchUrl, {
         expectVideo: isVideo,
         timeoutMs: isVideo || fetchUrl.includes('/api/download-clip') ? 120_000 : 45_000,
       });
-      if (!buf) continue;
-      writeFileSync(cached, buf);
+      if (!fetched) continue;
+      const cached = cachePathForUrl(fetchUrl, cacheDir, isVideo, fetched.ext);
+      writeFileSync(cached, fetched.buf);
       return cached;
     } catch {
       /* try next */

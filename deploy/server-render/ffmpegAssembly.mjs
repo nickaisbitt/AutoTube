@@ -182,13 +182,6 @@ function cachePathForUrl(url, cacheDir, isVideo) {
   return join(cacheDir, `${hash}${ext}`);
 }
 
-function apiFetchHeaders() {
-  const headers = { 'user-agent': 'Mozilla/5.0 AutoTube/1.0' };
-  const key = (process.env.AUTOTUBE_API_KEY || process.env.VITE_AUTOTUBE_API_KEY || '').trim();
-  if (key) headers['X-API-Key'] = key;
-  return headers;
-}
-
 async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
   const timeoutMs = expectVideo || fetchUrl.includes('/api/download-clip') ? 120_000 : 45_000;
   const res = await fetch(fetchUrl, {

@@ -197,6 +197,14 @@ async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
     if (sig !== 'ftyp' && !buf.slice(0, 4).toString('hex').includes('1a45')) return null;
   }
   if (!expectVideo && /text\/html/i.test(contentType)) return null;
+  if (!expectVideo) {
+    const ok =
+      (buf[0] === 0xff && buf[1] === 0xd8)
+      || (buf[0] === 0x89 && buf[1] === 0x50)
+      || (buf[0] === 0x47 && buf[1] === 0x49)
+      || (buf[0] === 0x52 && buf[1] === 0x49);
+    if (!ok) return null;
+  }
   writeFileSync(cached, buf);
   return cached;
 }

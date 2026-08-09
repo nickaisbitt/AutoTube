@@ -323,6 +323,7 @@ async function main() {
         runDir,
       });
       if (cfg.delaySec > 0) await sleep(cfg.delaySec * 1000);
+      sessionCount -= 1;
       continue;
     }
 

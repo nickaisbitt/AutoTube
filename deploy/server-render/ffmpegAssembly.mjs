@@ -224,8 +224,9 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
   }
 
   const candidates = [];
-  if (rawUrl.startsWith('/api/')) {
-    candidates.push(`${devServer}${rawUrl}`);
+  if (rawUrl.startsWith('/api/') || rawUrl.includes('/api/download-clip') || rawUrl.includes('/api/proxy-image')) {
+    const apiUrl = rawUrl.startsWith('http') ? rawUrl : `${devServer}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
+    candidates.push(apiUrl);
   } else if (rawUrl.startsWith('http')) {
     if (isVideo) {
       candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);
@@ -550,8 +551,9 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   }
 
   if (audioForMux && existsSync(audioForMux)) {
+    const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
     muxVideoWithAudio(mergedVideo, audioForMux, outputPath, muxDurationSec, {
-      backgroundMusic: project.exportSettings?.backgroundMusic !== false,
+      backgroundMusic: !loopMode && project.exportSettings?.backgroundMusic !== false,
       musicPreset: project.exportSettings?.musicPreset,
     });
   } else {

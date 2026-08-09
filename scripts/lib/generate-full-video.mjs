@@ -23,7 +23,7 @@ import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
 } from './harvest-quality.mjs';
-import { devFetch, cacheProjectMedia } from './dev-server-client.mjs';
+import { devFetch, cacheProjectMedia, cacheAssetToDir } from './dev-server-client.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -436,6 +436,30 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
   const cacheDir = join(outDir, 'media-cache');
   const cacheReport = await cacheProjectMedia(project, devServer, cacheDir);
   report.mediaCache = cacheReport;
+
+  for (let i = 0; i < project.media.length; i++) {
+    const asset = project.media[i];
+    const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
+    if (!isVideo || asset.localPath) continue;
+    const thumb = asset.thumbnailUrl;
+    if (!thumb || isJunkHarvestUrl(thumb)) continue;
+    const stillPath = await cacheAssetToDir(
+      { type: 'image', url: thumb, thumbnailUrl: thumb },
+      devServer,
+      cacheDir,
+    );
+    if (stillPath) {
+      project.media[i] = {
+        ...asset,
+        type: 'image',
+        url: thumb,
+        thumbnailUrl: thumb,
+        localPath: stillPath,
+      };
+      report.videoToStill = report.videoToStill || [];
+      report.videoToStill.push({ from: asset.url, to: thumb });
+    }
+  }
 
   const volume = evaluateHarvestVolume(project, minPerSegment);
   report.harvestQuality = volume;

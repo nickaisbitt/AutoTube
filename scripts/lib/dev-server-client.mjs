@@ -79,8 +79,9 @@ export async function cacheAssetToDir(asset, devServer, cacheDir) {
   }
 
   const candidates = [];
-  if (rawUrl.startsWith('/api/')) {
-    candidates.push(`${devServer}${rawUrl}`);
+  if (rawUrl.startsWith('/api/') || rawUrl.includes('/api/download-clip') || rawUrl.includes('/api/proxy-image')) {
+    const apiUrl = rawUrl.startsWith('http') ? rawUrl : `${devServer}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
+    candidates.push(apiUrl);
   } else if (rawUrl.startsWith('http')) {
     if (isVideo) {
       candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);

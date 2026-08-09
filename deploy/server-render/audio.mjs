@@ -297,6 +297,10 @@ export function applyDynamicDucking(bgMusicPath, narrationTimings, outputFile, t
  */
 export async function concatenateAudio(audioFiles, outputFile, options = {}) {
   const { crossfadeDuration = 0.5 } = options;
+  const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
+  const outIsWav = outputFile.toLowerCase().endsWith('.wav');
+  const outCodec = outIsWav ? 'pcm_s16le' : 'aac';
+  const outBitrate = outIsWav ? undefined : '320k';
 
   if (audioFiles.length === 0) {
     console.warn('  ⚠ No audio files to concatenate');
@@ -305,16 +309,55 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
 
   if (audioFiles.length === 1) {
     // Single file: just convert format
-    return convertAudioFormat(audioFiles[0].file, outputFile);
+    return convertAudioFormat(audioFiles[0].file, outputFile, {
+      codec: outCodec,
+      bitrate: outIsWav ? 192 : 320,
+    });
   }
 
   console.log(`  🔗 Concatenating ${audioFiles.length} audio segments with ${crossfadeDuration}s crossfades...`);
 
+  // Loop mode: simple concat — acrossfade chains are fragile with many short edge-tts clips
+  if (loopMode) {
+    const normalizedFiles = [];
+    for (let i = 0; i < audioFiles.length; i++) {
+      const normalizedPath = join(tmpdir(), `autotube-norm-${Date.now()}-${i}.${outIsWav ? 'wav' : 'aac'}`);
+      const ok = convertAudioFormat(audioFiles[i].file, normalizedPath, {
+        codec: outCodec,
+        bitrate: outIsWav ? 192 : 320,
+      });
+      if (!ok) {
+        normalizedFiles.forEach((f) => { try { unlinkSync(f); } catch {} });
+        return false;
+      }
+      normalizedFiles.push(normalizedPath);
+    }
+    const listFile = join(tmpdir(), `autotube-audio-list-${Date.now()}.txt`);
+    writeFileSync(listFile, normalizedFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'));
+    const concatArgs = [
+      '-y', '-f', 'concat', '-safe', '0', '-i', listFile,
+      '-c:a', outCodec,
+    ];
+    if (!outIsWav) concatArgs.push('-b:a', outBitrate, '-ar', '48000', '-ac', '2');
+    concatArgs.push(outputFile);
+    const simple = spawnSync('ffmpeg', concatArgs, { encoding: 'utf8', timeout: 120_000 });
+    try { unlinkSync(listFile); } catch {}
+    normalizedFiles.forEach((f) => { try { unlinkSync(f); } catch {} });
+    if (simple.status === 0) {
+      console.log('  ✓ Audio concatenated (loop simple concat)');
+      return true;
+    }
+    console.warn('  ⚠ Loop simple concat failed — falling back to crossfade path');
+  }
+
   // First, normalize all input files to consistent format
   const normalizedFiles = [];
   for (let i = 0; i < audioFiles.length; i++) {
-    const normalizedPath = join(tmpdir(), `autotube-norm-${Date.now()}-${i}.aac`);
-    const ok = convertAudioFormat(audioFiles[i].file, normalizedPath);
+    const normalizedPath = join(tmpdir(), `autotube-norm-${Date.now()}-${i}.${outIsWav ? 'wav' : 'aac'}`);
+    const ok = convertAudioFormat(audioFiles[i].file, normalizedPath, {
+      codec: outCodec,
+      bitrate: outIsWav ? 192 : 320,
+    });
     if (!ok) {
       console.warn(`  ⚠ Failed to normalize segment ${i}`);
       // Clean up already normalized files
@@ -367,10 +410,12 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
     ...normalizedFiles.flatMap((_, i) => ['-i', normalizedFiles[i]]),
     '-filter_complex', filterComplex,
     '-map', '[out]',
-    '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
   ];
-  // native aac encoder only supports fltp sample format
-  // do not pass -sample_fmt s16 for aac
+  if (outIsWav) {
+    args.push('-c:a', 'pcm_s16le');
+  } else {
+    args.push('-c:a', 'aac', '-b:a', outBitrate, '-ar', '48000', '-ac', '2');
+  }
   args.push(outputFile);
 
   const result = spawnSync('ffmpeg', args, { encoding: 'utf8', timeout: 120000 });
@@ -382,7 +427,8 @@ export async function concatenateAudio(audioFiles, outputFile, options = {}) {
     const fallbackResult = spawnSync('ffmpeg', [
       '-y', '-f', 'concat', '-safe', '0',
       '-i', listFile,
-      '-c:a', 'aac', '-b:a', '320k', '-ar', '48000', '-ac', '2',
+      '-c:a', outCodec,
+      ...(outIsWav ? [] : ['-b:a', outBitrate, '-ar', '48000', '-ac', '2']),
       '-af', 'aresample=48000:async=1:min_hard_comp=0.100000:first_pts=0',
       outputFile,
     ], { encoding: 'utf8', timeout: 60000 });

@@ -182,11 +182,18 @@ function cachePathForUrl(url, cacheDir, isVideo) {
   return join(cacheDir, `${hash}${ext}`);
 }
 
+function apiFetchHeaders() {
+  const headers = { 'user-agent': 'Mozilla/5.0 AutoTube/1.0' };
+  const key = (process.env.AUTOTUBE_API_KEY || process.env.VITE_AUTOTUBE_API_KEY || '').trim();
+  if (key) headers['X-API-Key'] = key;
+  return headers;
+}
+
 async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
   const timeoutMs = expectVideo || fetchUrl.includes('/api/download-clip') ? 120_000 : 45_000;
   const res = await fetch(fetchUrl, {
     signal: AbortSignal.timeout(timeoutMs),
-    headers: { 'user-agent': 'Mozilla/5.0 AutoTube/1.0' },
+    headers: apiFetchHeaders(),
   });
   if (!res.ok) return null;
   const buf = Buffer.from(await res.arrayBuffer());
@@ -203,6 +210,12 @@ async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
 
 async function ensureLocalAsset(asset, devServer, cacheDir) {
   mkdirSync(cacheDir, { recursive: true });
+  if (asset.localPath) {
+    const abs = resolve(asset.localPath);
+    if (existsSync(abs) && readFileSync(abs).length > 500) {
+      return abs;
+    }
+  }
   const rawUrl = asset.url || '';
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(rawUrl);
   if (rawUrl && !rawUrl.startsWith('http') && !rawUrl.startsWith('/api/')) {

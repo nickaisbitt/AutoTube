@@ -23,6 +23,7 @@ import {
   filterAssetsByRelevance,
   evaluateHarvestVolume,
 } from './harvest-quality.mjs';
+import { devFetch, cacheProjectMedia } from './dev-server-client.mjs';
 
 export function resolveOpenRouterKey() {
   return (
@@ -179,7 +180,7 @@ function isDirectImageCandidate(url = '') {
 
 async function fetchImageSearchResults(devServer, endpoint, query) {
   try {
-    const res = await fetch(`${devServer}${endpoint}?q=${encodeURIComponent(query)}`);
+    const res = await devFetch(`${devServer}${endpoint}?q=${encodeURIComponent(query)}`);
     if (!res.ok) return [];
     const data = await res.json();
     return data.results || [];
@@ -431,6 +432,10 @@ async function sanitizeRealHarvestMedia(project, devServer, outDir, options = {}
     await topUpHarvestVolume(project, devServer, minPerSegment, report);
     report.afterTopUp = project.media.length;
   }
+
+  const cacheDir = join(outDir, 'media-cache');
+  const cacheReport = await cacheProjectMedia(project, devServer, cacheDir);
+  report.mediaCache = cacheReport;
 
   const volume = evaluateHarvestVolume(project, minPerSegment);
   report.harvestQuality = volume;
@@ -813,6 +818,9 @@ export async function generateFullVideo(options) {
       }
       if (mediaReport.phashDropped?.length) {
         log(`   🔍 pHash dedup: removed ${mediaReport.phashDropped.length} visually similar assets`);
+      }
+      if (mediaReport.mediaCache) {
+        log(`   💾 Media cache: ${mediaReport.mediaCache.cached} local, ${mediaReport.mediaCache.failed} failed`);
       }
       if (mediaReport.volumePass === false) {
         const failing = mediaReport.harvestQuality?.failing || [];

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-const MIN_DURATION_SEC = 55;
+const MIN_DURATION_SEC = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true' ? 48 : 55;
 const MIN_BYTES = 5 * 1024 * 1024;
 
 /**

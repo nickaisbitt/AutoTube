@@ -34,7 +34,7 @@ function trimAudioToDuration(inputPath, outputPath, targetSec) {
 function outputDimensions() {
   const draft = process.env.AUTOTUBE_RENDER_QUALITY === 'draft';
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
-  if (draft && loopMode) return { w: 1280, h: 720 };
+  if (loopMode) return { w: 1280, h: 720 };
   return draft ? { w: 960, h: 540 } : { w: 1920, h: 1080 };
 }
 
@@ -186,7 +186,7 @@ async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
   const timeoutMs = expectVideo || fetchUrl.includes('/api/download-clip') ? 120_000 : 45_000;
   const res = await fetch(fetchUrl, {
     signal: AbortSignal.timeout(timeoutMs),
-    headers: { 'user-agent': 'Mozilla/5.0 AutoTube/1.0' },
+    headers: apiFetchHeaders(),
   });
   if (!res.ok) return null;
   const buf = Buffer.from(await res.arrayBuffer());
@@ -197,12 +197,38 @@ async function fetchToCache(fetchUrl, cached, { expectVideo = false } = {}) {
     if (sig !== 'ftyp' && !buf.slice(0, 4).toString('hex').includes('1a45')) return null;
   }
   if (!expectVideo && /text\/html/i.test(contentType)) return null;
+  if (!expectVideo) {
+    const ok =
+      (buf[0] === 0xff && buf[1] === 0xd8)
+      || (buf[0] === 0x89 && buf[1] === 0x50)
+      || (buf[0] === 0x47 && buf[1] === 0x49)
+      || (buf[0] === 0x52 && buf[1] === 0x49);
+    if (!ok) return null;
+  }
   writeFileSync(cached, buf);
   return cached;
 }
 
 async function ensureLocalAsset(asset, devServer, cacheDir) {
   mkdirSync(cacheDir, { recursive: true });
+  if (asset.localPath) {
+    const abs = resolve(asset.localPath);
+    if (existsSync(abs) && readFileSync(abs).length > 500) {
+      return abs;
+    }
+  }
+  const sharedCache = process.env.AUTOTUBE_MEDIA_CACHE_DIR;
+  if (sharedCache && existsSync(sharedCache)) {
+    const rawUrl = asset.url || '';
+    const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(rawUrl);
+    for (const fetchUrl of [rawUrl, asset.thumbnailUrl || ''].filter(Boolean)) {
+      if (!fetchUrl.startsWith('http')) continue;
+      const cached = cachePathForUrl(fetchUrl, sharedCache, isVideo);
+      if (existsSync(cached) && readFileSync(cached).length > 500) {
+        return cached;
+      }
+    }
+  }
   const rawUrl = asset.url || '';
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(rawUrl);
   if (rawUrl && !rawUrl.startsWith('http') && !rawUrl.startsWith('/api/')) {
@@ -211,8 +237,9 @@ async function ensureLocalAsset(asset, devServer, cacheDir) {
   }
 
   const candidates = [];
-  if (rawUrl.startsWith('/api/')) {
-    candidates.push(`${devServer}${rawUrl}`);
+  if (rawUrl.startsWith('/api/') || rawUrl.includes('/api/download-clip') || rawUrl.includes('/api/proxy-image')) {
+    const apiUrl = rawUrl.startsWith('http') ? rawUrl : `${devServer}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
+    candidates.push(apiUrl);
   } else if (rawUrl.startsWith('http')) {
     if (isVideo) {
       candidates.push(`${devServer}/api/download-clip?url=${encodeURIComponent(rawUrl)}`);
@@ -537,8 +564,9 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
   }
 
   if (audioForMux && existsSync(audioForMux)) {
+    const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
     muxVideoWithAudio(mergedVideo, audioForMux, outputPath, muxDurationSec, {
-      backgroundMusic: project.exportSettings?.backgroundMusic !== false,
+      backgroundMusic: !loopMode && project.exportSettings?.backgroundMusic !== false,
       musicPreset: project.exportSettings?.musicPreset,
     });
   } else {

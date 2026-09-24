@@ -22,8 +22,14 @@ A 66-second, 1920×1080 film written entirely in code: no footage, no image or v
 
 ## Watch
 
-- `out/tide-ink-web.mp4` (a lighter copy kept in the repo; re-run the renderer for the full-quality master)
-- Or open `index.html` and press **Play with sound**. It needs a GPU; the JavaScript physics runs in real time on a modern laptop.
+Open one of these in any normal video player (QuickTime, VLC, Chrome, the GitHub file view):
+
+- `out/tide-ink-preview.mp4` — 720p, about 6 MB. This is the one GitHub will play in the browser.
+- `out/tide-ink-web.mp4` — 1080p. Download it; GitHub will not preview files this large.
+
+Both are H.264 High profile at level 4.1 or below, with AAC audio and the index at the front of the file, so they start immediately.
+
+Or open `index.html` and press **Play with sound**. That version is drawn live and needs a GPU.
 
 ## Render
 

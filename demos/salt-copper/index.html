@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Salt &amp; Copper — a code film</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #041016;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      overflow: hidden;
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+      color: #e8e4dc;
+    }
+    #stage {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 40%, #0a2430 0%, #041016 70%, #02080c 100%);
+    }
+    canvas {
+      width: min(92vmin, 900px);
+      height: min(92vmin, 900px);
+      background: #061820;
+      box-shadow: 0 0 0 1px rgba(232, 228, 220, 0.08), 0 24px 80px rgba(0, 0, 0, 0.55);
+      image-rendering: auto;
+    }
+    #hud {
+      position: fixed;
+      left: 1.25rem;
+      bottom: 1.25rem;
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      z-index: 2;
+      opacity: 0.85;
+      font-size: 0.8rem;
+      letter-spacing: 0.04em;
+    }
+    button {
+      appearance: none;
+      border: 1px solid rgba(232, 228, 220, 0.28);
+      background: rgba(6, 24, 32, 0.7);
+      color: #e8e4dc;
+      padding: 0.45rem 0.85rem;
+      border-radius: 999px;
+      cursor: pointer;
+      font: inherit;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+    }
+    button:hover { border-color: #e8a04a; color: #e8a04a; }
+    #titlecard {
+      position: fixed;
+      top: 1.2rem;
+      left: 1.25rem;
+      z-index: 2;
+      opacity: 0.7;
+      font-size: 0.78rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+    #titlecard span {
+      display: block;
+      opacity: 0.55;
+      letter-spacing: 0.08em;
+      text-transform: none;
+      margin-top: 0.2rem;
+      font-style: italic;
+    }
+    body.render #hud,
+    body.render #titlecard { display: none; }
+    body.render, body.render #stage { background: #000; }
+    body.render canvas {
+      width: 720px;
+      height: 720px;
+      box-shadow: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="titlecard">Salt &amp; Copper<span>a code film · no assets</span></div>
+  <div id="stage"><canvas id="c" width="720" height="720" aria-label="Salt and Copper animation"></canvas></div>
+  <div id="hud">
+    <button id="play" type="button">Play</button>
+    <span id="clock">0:00</span>
+  </div>
+  <script>
+(() => {
+  const W = 720;
+  const H = 720;
+  const FPS = 30;
+  const DURATION = 42; // seconds
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const clockEl = document.getElementById('clock');
+  const playBtn = document.getElementById('play');
+
+  const C = {
+    abyss: '#061820',
+    deep: '#0a2c36',
+    teal: '#1a4a52',
+    foam: '#e8e4dc',
+    salt: '#d5cfc3',
+    copper: '#b87333',
+    brightCopper: '#d9924a',
+    verdigris: '#6f8f7e',
+    filament: '#e8a04a',
+    ink: '#02080c',
+  };
+
+  // Deterministic RNG
+  function mulberry32(a) {
+    return function () {
+      let t = (a += 0x6d2b79f5);
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const rand = mulberry32(0x5a17c0de);
+
+  // Precompute particles & cable points
+  const silt = Array.from({ length: 90 }, () => ({
+    x: rand() * W,
+    y: rand() * H,
+    r: 0.6 + rand() * 2.2,
+    drift: 8 + rand() * 22,
+    phase: rand() * Math.PI * 2,
+    alpha: 0.08 + rand() * 0.22,
+  }));
+
+  const cable = (() => {
+    const pts = [];
+    const n = 48;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const x = -40 + t * (W + 80);
+      const y =
+        H * 0.58 +
+        Math.sin(t * Math.PI * 2.15) * 42 +
+        Math.sin(t * Math.PI * 5.1) * 14 +
+        (t - 0.5) * 28;
+      pts.push({ x, y, t });
+    }
+    return pts;
+  })();
+
+  // Morse for "HELLO" then a heartbeat pulse train
+  // . = 1 unit, - = 3, gap letter = 3, word = 7
+  const MORSE = {
+    H: '....', E: '.', L: '.-..', O: '---',
+  };
+  function buildMorseTimeline(word, start, unit) {
+    const events = [];
+    let t = start;
+    for (let wi = 0; wi < word.length; wi++) {
+      const code = MORSE[word[wi]] || '';
+      for (let ci = 0; ci < code.length; ci++) {
+        const mark = code[ci] === '-' ? unit * 3 : unit;
+        events.push({ t0: t, t1: t + mark, kind: 'mark' });
+        t += mark + unit;
+      }
+      t += unit * 2; // already added 1 unit after last mark
+    }
+    return events;
+  }
+  const morseEvents = buildMorseTimeline('HELLO', 14.2, 0.18);
+
+  // Constellation nodes that appear late
+  const nodes = Array.from({ length: 18 }, (_, i) => {
+    const a = (i / 18) * Math.PI * 2 + 0.4;
+    const r = 70 + (i % 5) * 28 + rand() * 20;
+    return {
+      x: W * 0.5 + Math.cos(a) * r,
+      y: H * 0.38 + Math.sin(a) * r * 0.72,
+      delay: 28 + (i % 7) * 0.35 + rand() * 0.4,
+      r: 2 + rand() * 2.5,
+    };
+  });
+
+  const links = [];
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const dx = nodes[i].x - nodes[j].x;
+      const dy = nodes[i].y - nodes[j].y;
+      const d = Math.hypot(dx, dy);
+      if (d < 120) links.push([i, j, d]);
+    }
+  }
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function easeInOut(t) {
+    t = clamp(t, 0, 1);
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+  function easeOut(t) {
+    t = clamp(t, 0, 1);
+    return 1 - Math.pow(1 - t, 3);
+  }
+  function smoothstep(a, b, x) {
+    const t = clamp((x - a) / (b - a), 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  function rgba(hex, a) {
+    const { r, g, b } = hexToRgb(hex);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  function pointOnCable(u) {
+    const f = clamp(u, 0, 1) * (cable.length - 1);
+    const i = Math.floor(f);
+    const t = f - i;
+    const a = cable[i];
+    const b = cable[Math.min(i + 1, cable.length - 1)];
+    return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t) };
+  }
+
+  function drawBackground(t) {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#071a22');
+    g.addColorStop(0.45, C.abyss);
+    g.addColorStop(1, '#030c10');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // Soft caustic bands
+    for (let i = 0; i < 5; i++) {
+      const y = H * 0.15 + i * 70 + Math.sin(t * 0.4 + i) * 12;
+      const band = ctx.createLinearGradient(0, y - 40, 0, y + 40);
+      band.addColorStop(0, 'rgba(26,74,82,0)');
+      band.addColorStop(0.5, `rgba(111,143,126,${0.035 + i * 0.008})`);
+      band.addColorStop(1, 'rgba(26,74,82,0)');
+      ctx.fillStyle = band;
+      ctx.fillRect(0, y - 40, W, 80);
+    }
+
+    // Silt
+    for (const p of silt) {
+      const x = (p.x + Math.sin(t * 0.35 + p.phase) * 18 + t * 3) % W;
+      const y = (p.y + Math.cos(t * 0.22 + p.phase) * 10 + t * (p.drift * 0.15)) % H;
+      ctx.beginPath();
+      ctx.fillStyle = rgba(C.salt, p.alpha * (0.55 + 0.45 * Math.sin(t + p.phase)));
+      ctx.arc(x < 0 ? x + W : x, y < 0 ? y + H : y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawSeafloor(t) {
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += 8) {
+      const y =
+        H * 0.78 +
+        Math.sin(x * 0.018 + 1.2) * 18 +
+        Math.sin(x * 0.041) * 8 +
+        Math.sin(t * 0.2 + x * 0.01) * 2;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, H * 0.72, 0, H);
+    g.addColorStop(0, '#0d2a30');
+    g.addColorStop(1, '#051014');
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // Sparse kelp silhouettes
+    for (let i = 0; i < 7; i++) {
+      const x = 40 + i * 100 + Math.sin(i * 2.1) * 20;
+      const sway = Math.sin(t * 0.9 + i) * 10;
+      ctx.strokeStyle = rgba(C.verdigris, 0.22);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, H);
+      ctx.bezierCurveTo(x + sway, H - 60, x - sway * 1.4, H - 120, x + sway * 0.5, H - 170 - (i % 3) * 20);
+      ctx.stroke();
+    }
+  }
+
+  function drawCable(t) {
+    const reveal = easeOut(smoothstep(3.2, 9.5, t));
+    if (reveal <= 0.001) return;
+
+    const end = Math.max(2, Math.floor(reveal * (cable.length - 1)));
+    // Shadow / trench
+    ctx.beginPath();
+    ctx.moveTo(cable[0].x, cable[0].y + 6);
+    for (let i = 1; i <= end; i++) ctx.lineTo(cable[i].x, cable[i].y + 6);
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 10;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // Verdigris sheath
+    ctx.beginPath();
+    ctx.moveTo(cable[0].x, cable[0].y);
+    for (let i = 1; i <= end; i++) ctx.lineTo(cable[i].x, cable[i].y);
+    ctx.strokeStyle = rgba(C.verdigris, 0.55);
+    ctx.lineWidth = 7;
+    ctx.stroke();
+
+    // Copper core
+    const copperGrad = ctx.createLinearGradient(0, 0, W, H);
+    copperGrad.addColorStop(0, C.copper);
+    copperGrad.addColorStop(0.5, C.brightCopper);
+    copperGrad.addColorStop(1, C.copper);
+    ctx.beginPath();
+    ctx.moveTo(cable[0].x, cable[0].y);
+    for (let i = 1; i <= end; i++) ctx.lineTo(cable[i].x, cable[i].y);
+    ctx.strokeStyle = copperGrad;
+    ctx.lineWidth = 3.2;
+    ctx.stroke();
+
+    // Segment rivets
+    for (let i = 0; i <= end; i += 4) {
+      const p = cable[i];
+      ctx.beginPath();
+      ctx.fillStyle = rgba(C.salt, 0.35 * reveal);
+      ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function morseActive(t) {
+    for (const e of morseEvents) {
+      if (t >= e.t0 && t <= e.t1) return true;
+    }
+    // Continuous heartbeat after message
+    if (t > 22 && t < 34) {
+      const cycle = ((t - 22) % 1.6);
+      return cycle < 0.12 || (cycle > 0.22 && cycle < 0.34);
+    }
+    return false;
+  }
+
+  function drawSignals(t) {
+    const cableOn = smoothstep(8.5, 10.5, t);
+    if (cableOn <= 0) return;
+
+    const pulseOn = morseActive(t);
+    const baseGlow = pulseOn ? 1 : 0.25 + 0.15 * Math.sin(t * 3);
+
+    // Traveling beads
+    const count = 5;
+    for (let i = 0; i < count; i++) {
+      const speed = 0.11 + i * 0.017;
+      const u = ((t - 10.2) * speed + i / count) % 1;
+      if (t < 10.2) continue;
+      const p = pointOnCable(u);
+      const a = cableOn * (0.35 + 0.65 * baseGlow) * (1 - Math.abs(u - 0.5) * 0.3);
+      const r = 3.5 + (pulseOn ? 2.5 : 0);
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 5);
+      g.addColorStop(0, rgba(C.filament, 0.9 * a));
+      g.addColorStop(0.35, rgba(C.brightCopper, 0.45 * a));
+      g.addColorStop(1, rgba(C.filament, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = rgba(C.foam, 0.85 * a);
+      ctx.arc(p.x, p.y, r * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Whole-cable flash on marks
+    if (pulseOn && t > 14) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.beginPath();
+      ctx.moveTo(cable[0].x, cable[0].y);
+      for (let i = 1; i < cable.length; i++) ctx.lineTo(cable[i].x, cable[i].y);
+      ctx.strokeStyle = rgba(C.filament, 0.18);
+      ctx.lineWidth = 10;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawBuoy(t) {
+    const appear = easeOut(smoothstep(18, 22, t));
+    if (appear <= 0) return;
+    const x = W * 0.72;
+    const y = H * 0.28 + Math.sin(t * 1.1) * 4;
+    const beam = appear * (0.35 + (morseActive(t) ? 0.55 : 0.15));
+
+    // Beam cone
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-0.35 + Math.sin(t * 0.4) * 0.05);
+    const cone = ctx.createRadialGradient(0, 0, 0, 0, 0, 260);
+    cone.addColorStop(0, rgba(C.filament, 0.28 * beam));
+    cone.addColorStop(0.45, rgba(C.filament, 0.06 * beam));
+    cone.addColorStop(1, rgba(C.filament, 0));
+    ctx.fillStyle = cone;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(240, -90);
+    ctx.lineTo(240, 90);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Buoy body
+    ctx.fillStyle = rgba(C.foam, 0.9 * appear);
+    ctx.beginPath();
+    ctx.ellipse(x, y + 10, 10, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = rgba(C.copper, appear);
+    ctx.fillRect(x - 3, y - 18, 6, 22);
+    ctx.beginPath();
+    ctx.fillStyle = rgba(C.filament, appear);
+    ctx.arc(x, y - 20, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawConstellation(t) {
+    const fade = smoothstep(27.5, 31, t) * (1 - smoothstep(36.5, 40.5, t));
+    if (fade <= 0.001) return;
+
+    for (const [i, j] of links) {
+      const a = nodes[i];
+      const b = nodes[j];
+      const ready = Math.min(
+        smoothstep(a.delay, a.delay + 0.8, t),
+        smoothstep(b.delay, b.delay + 0.8, t)
+      );
+      if (ready <= 0) continue;
+      ctx.strokeStyle = rgba(C.salt, 0.18 * fade * ready);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+
+    for (const n of nodes) {
+      const a = smoothstep(n.delay, n.delay + 0.9, t) * fade;
+      if (a <= 0) continue;
+      const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 6);
+      g.addColorStop(0, rgba(C.foam, 0.85 * a));
+      g.addColorStop(0.4, rgba(C.filament, 0.25 * a));
+      g.addColorStop(1, rgba(C.filament, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r * 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = rgba(C.foam, a);
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawTitles(t) {
+    // Opening card
+    const open = 1 - smoothstep(0.4, 2.6, t);
+    if (open > 0.01) {
+      ctx.fillStyle = rgba(C.ink, open * 0.55);
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = rgba(C.foam, open);
+      ctx.font = '500 28px "Iowan Old Style", Palatino, Georgia, serif';
+      ctx.fillText('Salt & Copper', W / 2, H / 2 - 8);
+      ctx.font = 'italic 14px "Iowan Old Style", Palatino, Georgia, serif';
+      ctx.fillStyle = rgba(C.salt, open * 0.75);
+      ctx.fillText('an undersea cable remembers a message', W / 2, H / 2 + 22);
+    }
+
+    // Closing card
+    const close = smoothstep(38.2, 40.2, t);
+    if (close > 0.01) {
+      ctx.fillStyle = rgba(C.ink, close * 0.72);
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = rgba(C.foam, close);
+      ctx.font = '500 22px "Iowan Old Style", Palatino, Georgia, serif';
+      ctx.fillText('end of transmission', W / 2, H / 2 - 4);
+      ctx.font = 'italic 13px "Iowan Old Style", Palatino, Georgia, serif';
+      ctx.fillStyle = rgba(C.brightCopper, close * 0.85);
+      ctx.fillText('made of code · no stock · no models', W / 2, H / 2 + 24);
+    }
+  }
+
+  function drawVignette() {
+    const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.72);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(2,8,12,0.55)');
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawGrain(t) {
+    // Lightweight film grain via sparse noise dots (deterministic-ish per frame bucket)
+    const frame = Math.floor(t * FPS);
+    const gRand = mulberry32(0x9e3779b9 ^ frame);
+    ctx.save();
+    ctx.globalAlpha = 0.045;
+    for (let i = 0; i < 220; i++) {
+      const x = gRand() * W;
+      const y = gRand() * H;
+      ctx.fillStyle = gRand() > 0.5 ? '#fff' : '#000';
+      ctx.fillRect(x, y, 1.2, 1.2);
+    }
+    ctx.restore();
+  }
+
+  function drawFrame(t) {
+    const time = clamp(t, 0, DURATION);
+    drawBackground(time);
+    drawSeafloor(time);
+    drawCable(time);
+    drawSignals(time);
+    drawBuoy(time);
+    drawConstellation(time);
+    drawVignette();
+    drawGrain(time);
+    drawTitles(time);
+  }
+
+  // --- Playback / render API ---
+  let playing = false;
+  let startPerf = 0;
+  let offset = 0;
+  let raf = 0;
+  let audioCtx = null;
+  let masterGain = null;
+  let audioStarted = false;
+
+  function formatTime(t) {
+    const s = Math.floor(t);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  function ensureAudio() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.18;
+    masterGain.connect(audioCtx.destination);
+
+    // Low ocean bed drone
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 48;
+    const og = audioCtx.createGain();
+    og.gain.value = 0.45;
+    osc.connect(og);
+    og.connect(masterGain);
+    osc.start();
+
+    // Soft high shimmer
+    const osc2 = audioCtx.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.value = 186;
+    const og2 = audioCtx.createGain();
+    og2.gain.value = 0.04;
+    osc2.connect(og2);
+    og2.connect(masterGain);
+    osc2.start();
+
+    // Schedule Morse beeps
+    for (const e of morseEvents) {
+      const o = audioCtx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = 620;
+      const g = audioCtx.createGain();
+      g.gain.value = 0;
+      o.connect(g);
+      g.connect(masterGain);
+      const t0 = audioCtx.currentTime + e.t0;
+      const t1 = audioCtx.currentTime + e.t1;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.55, t0 + 0.01);
+      g.gain.setValueAtTime(0.55, Math.max(t0 + 0.01, t1 - 0.02));
+      g.gain.linearRampToValueAtTime(0, t1);
+      o.start(t0);
+      o.stop(t1 + 0.02);
+    }
+    audioStarted = true;
+  }
+
+  function tick(now) {
+    if (!playing) return;
+    const t = offset + (now - startPerf) / 1000;
+    if (t >= DURATION) {
+      playing = false;
+      offset = DURATION;
+      drawFrame(DURATION);
+      clockEl.textContent = formatTime(DURATION);
+      playBtn.textContent = 'Replay';
+      return;
+    }
+    drawFrame(t);
+    clockEl.textContent = formatTime(t);
+    raf = requestAnimationFrame(tick);
+  }
+
+  function play() {
+    if (playing) return;
+    if (offset >= DURATION) offset = 0;
+    ensureAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    playing = true;
+    startPerf = performance.now();
+    playBtn.textContent = 'Pause';
+    raf = requestAnimationFrame(tick);
+  }
+
+  function pause() {
+    if (!playing) return;
+    offset += (performance.now() - startPerf) / 1000;
+    playing = false;
+    cancelAnimationFrame(raf);
+    playBtn.textContent = 'Play';
+  }
+
+  playBtn.addEventListener('click', () => {
+    if (playing) pause();
+    else play();
+  });
+
+  // Public API for headless render
+  window.__FILM__ = {
+    duration: DURATION,
+    fps: FPS,
+    width: W,
+    height: H,
+    seek(t) {
+      pause();
+      offset = clamp(t, 0, DURATION);
+      drawFrame(offset);
+      clockEl.textContent = formatTime(offset);
+    },
+    drawFrame,
+    canvas,
+  };
+
+  const params = new URLSearchParams(location.search);
+  if (params.has('render')) {
+    document.body.classList.add('render');
+    const t = parseFloat(params.get('t') || '0');
+    drawFrame(t);
+  } else {
+    drawFrame(0);
+  }
+})();
+  </script>
+</body>
+</html>

@@ -1,0 +1,1327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tide Ink — a film written in code</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  #out { width: min(100vw, 177.78vh); aspect-ratio: 16 / 9; display: block; }
+  #ui {
+    position: fixed; left: 18px; bottom: 16px; display: flex; gap: 12px; align-items: center;
+    font: 13px/1 "EB Garamond", Georgia, serif; color: #e8e2d4; letter-spacing: .06em;
+  }
+  #ui button {
+    font: inherit; text-transform: uppercase; letter-spacing: .14em; font-size: 11px;
+    color: #e8e2d4; background: rgba(8, 16, 24, .6); border: 1px solid rgba(232, 226, 212, .3);
+    border-radius: 999px; padding: 9px 16px; cursor: pointer;
+  }
+  #ui button:hover { border-color: #f0b36b; color: #f0b36b; }
+  body.render #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="out" width="1920" height="1080"></canvas></div>
+<div id="ui"><button id="play" type="button">Play with sound</button><span id="clock">0:00</span></div>
+<script>
+(() => {
+'use strict';
+
+const W = 1920, H = 1080, FPS = 30, DUR = 66, SUB = 2, DT = 1 / (FPS * SUB);
+const P = 32000, A = 5000, N = P + A;
+const SW = 1600, SH = 900;
+const SERIF = '"EB Garamond", "Cormorant Garamond", Garamond, Georgia, serif';
+
+// ---------------------------------------------------------------- utilities
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function gauss(r) { return Math.sqrt(-2 * Math.log(r() + 1e-9)) * Math.cos(6.283185 * r()); }
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+function smoothstep(a, b, x) { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+function smoother(t) { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); }
+const lerp = (a, b, t) => a + (b - a) * t;
+function hex(h) { const n = parseInt(h.slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; }
+
+// Perlin noise + curl field
+const perm = new Uint8Array(512);
+{
+  const r = mulberry32(1337); const p = Array.from({ length: 256 }, (_, i) => i);
+  for (let i = 255; i > 0; i--) { const j = Math.floor(r() * (i + 1)); const t = p[i]; p[i] = p[j]; p[j] = t; }
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+}
+const GX = [1, -1, 1, -1, 1, -1, 0, 0], GY = [1, 1, -1, -1, 0, 0, 1, -1];
+function perlin(x, y) {
+  let X = Math.floor(x), Y = Math.floor(y); x -= X; y -= Y; X &= 255; Y &= 255;
+  const u = x * x * x * (x * (x * 6 - 15) + 10), v = y * y * y * (y * (y * 6 - 15) + 10);
+  const aa = perm[X + perm[Y]] & 7, ab = perm[X + perm[Y + 1]] & 7;
+  const ba = perm[X + 1 + perm[Y]] & 7, bb = perm[X + 1 + perm[Y + 1]] & 7;
+  const n00 = GX[aa] * x + GY[aa] * y, n10 = GX[ba] * (x - 1) + GY[ba] * y;
+  const n01 = GX[ab] * x + GY[ab] * (y - 1), n11 = GX[bb] * (x - 1) + GY[bb] * (y - 1);
+  const a = n00 + u * (n10 - n00), b = n01 + u * (n11 - n01);
+  return a + v * (b - a);
+}
+function field(x, y, t) {
+  return perlin(x * 1.1 + t * 0.13, y * 1.1 - t * 0.09) + 0.5 * perlin(x * 2.7 - t * 0.21 + 13.1, y * 2.7 + t * 0.17 + 7.7);
+}
+let CX = 0, CY = 0;
+function curl(x, y, t) {
+  const e = 0.02;
+  CX = (field(x, y + e, t) - field(x, y - e, t)) / (2 * e);
+  CY = -(field(x + e, y, t) - field(x - e, y, t)) / (2 * e);
+}
+
+// ---------------------------------------------------------------- shape drawing (1600x900 canvas space)
+function linGrad(ctx, x0, y0, x1, y1, stops) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  for (const [o, c] of stops) g.addColorStop(o, c);
+  return g;
+}
+
+function whaleBodyPath(ctx) {
+  ctx.beginPath();
+  ctx.moveTo(1310, 440);
+  ctx.bezierCurveTo(1290, 395, 1230, 372, 1150, 368);
+  ctx.bezierCurveTo(1040, 362, 930, 358, 820, 372);
+  ctx.bezierCurveTo(760, 378, 720, 382, 690, 388);
+  ctx.lineTo(668, 358);
+  ctx.lineTo(640, 396);
+  ctx.bezierCurveTo(560, 410, 490, 425, 440, 436);
+  ctx.bezierCurveTo(410, 420, 370, 380, 312, 350);
+  ctx.bezierCurveTo(330, 395, 345, 425, 372, 447);
+  ctx.bezierCurveTo(345, 468, 330, 500, 312, 546);
+  ctx.bezierCurveTo(372, 512, 410, 474, 440, 458);
+  ctx.bezierCurveTo(540, 470, 650, 500, 780, 520);
+  ctx.bezierCurveTo(930, 540, 1080, 536, 1180, 505);
+  ctx.bezierCurveTo(1250, 485, 1295, 465, 1310, 440);
+  ctx.closePath();
+}
+function whaleFinPath(ctx) {
+  ctx.beginPath();
+  ctx.moveTo(1050, 494);
+  ctx.bezierCurveTo(1005, 560, 940, 632, 856, 692);
+  ctx.bezierCurveTo(846, 700, 838, 690, 846, 680);
+  ctx.bezierCurveTo(900, 640, 975, 590, 1110, 512);
+  ctx.closePath();
+}
+function drawWhaleBody(ctx, cx, cy, s, stops) {
+  ctx.save();
+  ctx.translate(cx, cy); ctx.scale(s, s); ctx.translate(-800, -450);
+  whaleBodyPath(ctx);
+  ctx.fillStyle = linGrad(ctx, 0, 358, 0, 545, stops);
+  ctx.fill();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 3.4;
+  for (let k = 0; k < 7; k++) {
+    ctx.beginPath();
+    ctx.moveTo(1268 - k * 10, 468 + k * 5);
+    ctx.quadraticCurveTo(1100, 510 + k * 4, 905 + k * 8, 518 + k * 1.6);
+    ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(1212, 431, 7.5, 0, Math.PI * 2); ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(1306, 445); ctx.quadraticCurveTo(1250, 453, 1172, 452); ctx.stroke();
+  ctx.restore();
+}
+function drawWhaleFin(ctx, cx, cy, s, stops) {
+  ctx.save();
+  ctx.translate(cx, cy); ctx.scale(s, s); ctx.translate(-800, -450);
+  whaleFinPath(ctx);
+  ctx.fillStyle = linGrad(ctx, 1060, 500, 870, 680, stops);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawTitle(ctx, stops) {
+  ctx.save();
+  ctx.font = `600 250px ${SERIF}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '34px';
+  ctx.fillStyle = linGrad(ctx, 360, 0, 1240, 0, stops);
+  ctx.fillText('TIDE INK', 812, 430);
+  ctx.restore();
+}
+function drawTitleRule(ctx) {
+  ctx.save();
+  ctx.fillStyle = linGrad(ctx, 600, 0, 1000, 0, [[0, 'rgba(240,179,107,0)'], [0.5, 'rgba(240,179,107,1)'], [1, 'rgba(240,179,107,0)']]);
+  ctx.fillRect(560, 566, 480, 5);
+  ctx.restore();
+}
+
+// Lighthouse scene
+function drawMoon(ctx) {
+  const g = ctx.createRadialGradient(330, 170, 0, 330, 170, 58);
+  g.addColorStop(0, '#fbf5e4'); g.addColorStop(0.85, '#e9dfc4'); g.addColorStop(1, 'rgba(233,223,196,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(330, 170, 58, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  for (const [x, y, r] of [[312, 158, 10], [345, 185, 7], [338, 150, 5]]) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+}
+function cliffPath(ctx) {
+  ctx.beginPath();
+  ctx.moveTo(920, 900); ctx.lineTo(945, 800); ctx.lineTo(985, 735); ctx.lineTo(1020, 690);
+  ctx.lineTo(1070, 655); ctx.lineTo(1130, 630); ctx.lineTo(1255, 622); ctx.lineTo(1350, 632);
+  ctx.lineTo(1450, 650); ctx.lineTo(1540, 662); ctx.lineTo(1600, 668); ctx.lineTo(1600, 900);
+  ctx.closePath();
+}
+function drawCliff(ctx) {
+  cliffPath(ctx);
+  ctx.fillStyle = linGrad(ctx, 0, 620, 0, 900, [[0, '#7c8796'], [0.35, '#4a5563'], [1, '#1c232d']]);
+  ctx.fill();
+  ctx.save(); cliffPath(ctx); ctx.clip();
+  ctx.strokeStyle = 'rgba(170,182,196,0.9)'; ctx.lineWidth = 3;
+  const r = mulberry32(77);
+  for (let i = 0; i < 22; i++) {
+    const x = 960 + r() * 640, y = 650 + r() * 240;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 30 + r() * 60, y + 10 + r() * 30); ctx.lineTo(x + 50 + r() * 70, y + 50 + r() * 40); ctx.stroke();
+  }
+  ctx.restore();
+}
+function towerPath(ctx) {
+  ctx.beginPath(); ctx.moveTo(1150, 624); ctx.lineTo(1250, 624); ctx.lineTo(1231, 346); ctx.lineTo(1169, 346); ctx.closePath();
+}
+function drawTower(ctx) {
+  ctx.save(); towerPath(ctx); ctx.clip();
+  for (let i = 0; i < 6; i++) {
+    ctx.fillStyle = i % 2 ? '#d4483f' : '#f1ebdf';
+    ctx.fillRect(1140, 346 + i * 47, 120, 47);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(1212, 340, 50, 290);
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = '#000';
+  ctx.fillRect(1188, 580, 24, 44);
+  for (const y of [420, 510]) ctx.fillRect(1194, y, 12, 20);
+  ctx.restore();
+}
+function drawGallery(ctx) {
+  ctx.fillStyle = '#9aa1ac'; ctx.fillRect(1146, 330, 108, 16);
+  ctx.strokeStyle = '#9aa1ac'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(1150, 330); ctx.lineTo(1150, 312); ctx.lineTo(1250, 312); ctx.lineTo(1250, 330); ctx.stroke();
+  for (let x = 1162; x < 1250; x += 14) { ctx.beginPath(); ctx.moveTo(x, 312); ctx.lineTo(x, 330); ctx.stroke(); }
+}
+function drawLamp(ctx) {
+  const g = ctx.createRadialGradient(1200, 296, 0, 1200, 296, 60);
+  g.addColorStop(0, '#fffbe8'); g.addColorStop(0.5, '#ffd27a'); g.addColorStop(1, '#f0a14a');
+  ctx.fillStyle = g; ctx.fillRect(1172, 272, 56, 42);
+  ctx.globalCompositeOperation = 'destination-out'; ctx.fillStyle = '#000';
+  for (const x of [1186, 1200, 1214]) ctx.fillRect(x - 1, 272, 2, 42);
+}
+function drawRoof(ctx) {
+  ctx.fillStyle = '#c0453b';
+  ctx.beginPath(); ctx.moveTo(1162, 274); ctx.quadraticCurveTo(1200, 222, 1238, 274); ctx.closePath(); ctx.fill();
+  ctx.fillRect(1197, 214, 6, 16);
+  ctx.beginPath(); ctx.arc(1200, 212, 5, 0, Math.PI * 2); ctx.fill();
+}
+function drawBeam(ctx) {
+  const g = ctx.createLinearGradient(1200, 296, 300, 300);
+  g.addColorStop(0, 'rgba(255,224,150,1)'); g.addColorStop(0.35, 'rgba(255,214,140,0.45)'); g.addColorStop(1, 'rgba(255,214,140,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.moveTo(1200, 290); ctx.lineTo(260, 150); ctx.lineTo(260, 420); ctx.lineTo(1200, 302); ctx.closePath(); ctx.fill();
+}
+function drawNightSea(ctx) {
+  ctx.fillStyle = linGrad(ctx, 0, 700, 0, 900, [[0, 'rgba(58,110,160,0.55)'], [1, 'rgba(18,40,66,0.25)']]);
+  ctx.fillRect(0, 702, 1010, 198);
+  ctx.strokeStyle = '#a9d2ec'; ctx.lineCap = 'round';
+  const r = mulberry32(31);
+  for (let row = 0; row < 16; row++) {
+    const y = 708 + row * 12 + row * row * 0.4;
+    ctx.lineWidth = 2.6 - row * 0.1;
+    for (let k = 0; k < 9; k++) {
+      const x = r() * 1000, len = 30 + r() * 90;
+      ctx.globalAlpha = 0.9 - row * 0.04;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + len / 2, y - 4, x + len, y); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1; ctx.strokeStyle = '#f7efd8';
+  for (let row = 0; row < 14; row++) {
+    const y = 710 + row * 13, w = 70 - row * 3.5;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(330 - w / 2 + (row % 2) * 8, y); ctx.lineTo(330 + w / 2, y); ctx.stroke();
+  }
+}
+
+// Storm scene
+function drawClouds(ctx) {
+  const r = mulberry32(501);
+  for (let i = 0; i < 38; i++) {
+    const x = r() * 1700 - 50, y = 30 + r() * 170, rad = 60 + r() * 110;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+    g.addColorStop(0, 'rgba(120,136,160,0.55)'); g.addColorStop(1, 'rgba(120,136,160,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill();
+  }
+}
+function hullPath(ctx) {
+  ctx.beginPath();
+  ctx.moveTo(470, 518); ctx.lineTo(565, 518); ctx.lineTo(585, 552); ctx.lineTo(1060, 552);
+  ctx.lineTo(1128, 530); ctx.lineTo(1048, 640); ctx.quadraticCurveTo(820, 662, 628, 648);
+  ctx.lineTo(520, 600); ctx.closePath();
+}
+function drawHull(ctx) {
+  hullPath(ctx);
+  ctx.fillStyle = linGrad(ctx, 0, 518, 0, 655, [[0, '#c98a4b'], [0.5, '#9a6232'], [1, '#5a3618']]);
+  ctx.fill();
+  ctx.strokeStyle = '#f2c46a'; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(530, 575); ctx.lineTo(1085, 575); ctx.stroke();
+  ctx.save(); hullPath(ctx); ctx.clip();
+  ctx.globalCompositeOperation = 'destination-out'; ctx.fillStyle = '#000';
+  for (let x = 640; x < 1020; x += 46) ctx.fillRect(x, 588, 16, 12);
+  ctx.restore();
+  ctx.fillStyle = '#ffd98a';
+  for (const x of [490, 515, 540]) ctx.fillRect(x, 528, 10, 10);
+}
+function drawRigging(ctx) {
+  ctx.strokeStyle = '#d9c29a'; ctx.lineCap = 'round';
+  ctx.lineWidth = 7;
+  for (const [x, top] of [[640, 262], [820, 196], [990, 282]]) { ctx.beginPath(); ctx.moveTo(x, 556); ctx.lineTo(x, top); ctx.stroke(); }
+  ctx.beginPath(); ctx.moveTo(1100, 540); ctx.lineTo(1262, 470); ctx.stroke();
+  ctx.lineWidth = 2;
+  for (const [a, b] of [[[640, 262], [470, 518]], [[820, 196], [585, 552]], [[820, 196], [1060, 552]], [[990, 282], [1262, 470]], [[640, 262], [820, 196]], [[820, 196], [990, 282]]]) {
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  }
+  ctx.fillStyle = '#ff6a5a';
+  ctx.beginPath(); ctx.moveTo(820, 196); ctx.quadraticCurveTo(850, 188, 876, 200); ctx.lineTo(820, 214); ctx.closePath(); ctx.fill();
+}
+function sailPath(ctx, x, yt, yb, w) {
+  ctx.beginPath();
+  ctx.moveTo(x - w / 2, yt); ctx.lineTo(x + w / 2, yt);
+  ctx.quadraticCurveTo(x + w / 2 + 30, (yt + yb) / 2, x + w / 2 + 6, yb);
+  ctx.lineTo(x - w / 2 + 6, yb);
+  ctx.quadraticCurveTo(x - w / 2 + 34, (yt + yb) / 2, x - w / 2, yt);
+  ctx.closePath();
+}
+function drawSails(ctx) {
+  const sails = [[640, 282, 360, 118], [640, 370, 492, 150], [820, 218, 330, 170], [820, 342, 478, 206], [990, 300, 382, 128], [990, 392, 500, 160]];
+  for (const [x, yt, yb, w] of sails) {
+    sailPath(ctx, x, yt, yb, w);
+    ctx.fillStyle = linGrad(ctx, x - w / 2, 0, x + w / 2 + 30, 0, [[0, '#fbf3e0'], [0.6, '#eadbbd'], [1, '#c9b692']]);
+    ctx.fill();
+    ctx.fillStyle = '#b8a582'; ctx.fillRect(x - w / 2 - 6, yt - 3, w + 12, 5);
+  }
+  ctx.fillStyle = linGrad(ctx, 1000, 0, 1260, 0, [[0, '#f6ecd6'], [1, '#d7c6a2']]);
+  ctx.beginPath(); ctx.moveTo(1004, 300); ctx.quadraticCurveTo(1150, 400, 1250, 474); ctx.lineTo(1030, 500); ctx.closePath(); ctx.fill();
+}
+function stormWaveY(x) { return 652 + 38 * Math.sin(x * 0.011 + 0.6) + 16 * Math.sin(x * 0.029 + 2.1) + 8 * Math.sin(x * 0.07); }
+function drawStormSea(ctx) {
+  ctx.beginPath(); ctx.moveTo(0, 900);
+  for (let x = 0; x <= 1600; x += 8) ctx.lineTo(x, stormWaveY(x));
+  ctx.lineTo(1600, 900); ctx.closePath();
+  ctx.fillStyle = linGrad(ctx, 0, 600, 0, 900, [[0, 'rgba(84,138,168,0.75)'], [0.4, 'rgba(38,78,102,0.45)'], [1, 'rgba(14,34,48,0.2)']]);
+  ctx.fill();
+  ctx.strokeStyle = '#e6f3f8'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (let x = 0; x <= 1600; x += 8) { const y = stormWaveY(x); x ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+  const r = mulberry32(909);
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 60; i++) {
+    const x = r() * 1600, y = stormWaveY(x) + 20 + r() * 200, len = 20 + r() * 70;
+    ctx.globalAlpha = 0.85 - (y - 650) / 400;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x + len / 2, y - 7, x + len, y + 2); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Dawn scene
+function drawSun(ctx) {
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, 1600, 612); ctx.clip();
+  const g = ctx.createRadialGradient(1120, 612, 0, 1120, 612, 132);
+  g.addColorStop(0, '#fff1c9'); g.addColorStop(0.6, '#ffc27d'); g.addColorStop(0.97, '#f2894f'); g.addColorStop(1, 'rgba(242,137,79,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(1120, 612, 132, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+function drawDawnWater(ctx) {
+  ctx.fillStyle = linGrad(ctx, 0, 612, 0, 900, [[0, 'rgba(230,140,96,0.28)'], [1, 'rgba(70,44,84,0.08)']]);
+  ctx.fillRect(0, 614, 1600, 286);
+  const r = mulberry32(4242);
+  ctx.lineCap = 'round';
+  for (let y = 620; y < 896; y += 8) {
+    const depth = (y - 612) / 290;
+    const w = 190 * (1 - depth * 0.6);
+    ctx.strokeStyle = '#ffe2b0'; ctx.lineWidth = 3.2 - depth * 1.5; ctx.globalAlpha = 1 - depth * 0.5;
+    for (let k = 0; k < 3; k++) {
+      const x0 = 1120 - w / 2 + r() * w * 0.6, len = 20 + r() * w * 0.5;
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + len, y); ctx.stroke();
+    }
+    ctx.strokeStyle = '#f0a77a'; ctx.globalAlpha = 0.7 - depth * 0.5; ctx.lineWidth = 2;
+    for (let k = 0; k < 4; k++) {
+      const x0 = r() * 1600, len = 30 + r() * 90;
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + len, y); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function drawPaperBoat(ctx, flip) {
+  ctx.save();
+  if (flip) { ctx.translate(0, 1224); ctx.scale(1, -1); }
+  ctx.fillStyle = '#fbf6ec';
+  ctx.beginPath(); ctx.moveTo(800, 372); ctx.lineTo(690, 560); ctx.lineTo(800, 560); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#d9cdb9';
+  ctx.beginPath(); ctx.moveTo(800, 372); ctx.lineTo(800, 560); ctx.lineTo(910, 560); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#f3ebdc';
+  ctx.beginPath(); ctx.moveTo(590, 548); ctx.lineTo(1010, 548); ctx.lineTo(936, 612); ctx.lineTo(664, 612); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#cfc2ad';
+  ctx.beginPath(); ctx.moveTo(664, 596); ctx.lineTo(936, 596); ctx.lineTo(936, 612); ctx.lineTo(664, 612); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  if (flip) {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    for (let y = 616; y < 860; y += 9) ctx.fillRect(560, y, 480, 4);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = linGrad(ctx, 0, 612, 0, 860, [[0, 'rgba(222,170,140,0.75)'], [1, 'rgba(160,110,110,0)']]);
+    ctx.fillRect(500, 612, 600, 260);
+  }
+}
+
+// Sky whale horizon
+function drawHorizonGlow(ctx) {
+  ctx.fillStyle = linGrad(ctx, 0, 740, 0, 812, [[0, 'rgba(143,176,230,0)'], [0.85, 'rgba(160,190,240,0.55)'], [1, 'rgba(190,210,250,1)']]);
+  ctx.fillRect(0, 740, 1600, 72);
+  ctx.fillStyle = 'rgba(120,150,210,0.35)';
+  const r = mulberry32(12);
+  for (let i = 0; i < 90; i++) ctx.fillRect(r() * 1600, 818 + r() * 70, 20 + r() * 60, 2);
+}
+
+// ---------------------------------------------------------------- motions (world coords, write TX/TY)
+let TX = 0, TY = 0;
+const W2 = (px) => (px - 800) / 450;
+const H2 = (py) => -(py - 450) / 450;
+
+function rot(bx, by, pxw, pyw, a) {
+  const c = Math.cos(a), s = Math.sin(a), dx = bx - pxw, dy = by - pyw;
+  TX = pxw + c * dx - s * dy; TY = pyw + s * dx + c * dy;
+}
+function makeWhaleMotion(cxw, cyw, s, speedX, isFin) {
+  const pivX = cxw + s * W2(1030) - s * W2(800) + 0, pivY = cyw + s * (H2(505) - H2(450));
+  return (bx, by, lt) => {
+    if (isFin) rot(bx, by, pivX, pivY, 0.22 * Math.sin(lt * 1.6) - 0.05); else { TX = bx; TY = by; }
+    const lx = ((isFin ? pivX : TX) - cxw) / s;
+    const w = smoothstep(0.55, -1.25, lx);
+    const wave = Math.sin(lt * 2.1 - lx * 2.4);
+    TY += s * (0.085 * w * w * wave + 0.014 * Math.sin(lt * 0.9) + 0.03 * Math.sin(lt * 0.45) * lx * 0.4);
+    TX += speedX * lt + s * 0.01 * Math.sin(lt * 0.9 + 1);
+  };
+}
+const breathe = (bx, by, lt) => { TX = bx * (1 + 0.012 * Math.sin(lt * 0.8)); TY = by + 0.005 * Math.sin(lt * 2 + bx * 3); };
+const dustMotion = (bx, by, lt) => { TX = bx + 0.05 * Math.sin(lt * 0.3 + by * 3); TY = by + 0.03 * Math.cos(lt * 0.25 + bx * 2); };
+const lampW = [W2(1200), H2(296)];
+const beamMotion = (bx, by, lt) => rot(bx, by, lampW[0], lampW[1], 0.3 * Math.sin(lt * 0.62) - 0.04);
+const nightSeaMotion = (bx, by, lt) => { TX = bx + 0.012 * Math.sin(by * 22 + lt * 0.9); TY = by + 0.01 * Math.sin(bx * 4 + lt * 1.4) + 0.005 * Math.sin(bx * 9 - lt * 2.1); };
+const stormSeaMotion = (bx, by, lt) => {
+  const amp = 0.55 + 0.45 * smoothstep(-1, -0.4, by);
+  TY = by + amp * (0.05 * Math.sin(bx * 2.4 + lt * 1.7) + 0.02 * Math.sin(bx * 6.1 - lt * 2.6));
+  TX = bx + 0.02 * Math.sin(lt * 1.1 + by * 8);
+};
+const shipPiv = [0, H2(600)];
+function shipMotion(flutter) {
+  return (bx, by, lt) => {
+    const a = 0.085 * Math.sin(lt * 1.25) + 0.03 * Math.sin(lt * 2.3);
+    rot(bx, by, shipPiv[0], shipPiv[1], a);
+    TY += 0.034 * Math.sin(lt * 1.7 + 0.3);
+    if (flutter) TX += 0.006 * Math.sin(lt * 9 + by * 30);
+  };
+}
+const cloudMotion = (bx, by, lt) => { TX = bx - 0.018 * lt + 0.02 * Math.sin(lt * 0.5 + by * 5); TY = by + 0.012 * Math.sin(lt * 0.7 + bx * 2); };
+const boatPiv = [0, H2(600)];
+const boatMotion = (bx, by, lt) => { rot(bx, by, boatPiv[0], boatPiv[1], 0.035 * Math.sin(lt * 1.1)); TY += 0.012 * Math.sin(lt * 1.3); };
+const reflMotion = (bx, by, lt) => { rot(bx, by, boatPiv[0], H2(612), -0.035 * Math.sin(lt * 1.1)); TY -= 0.012 * Math.sin(lt * 1.3); TX += 0.012 * Math.sin(by * 60 + lt * 3); };
+const waterMotion = (bx, by, lt) => { TX = bx + 0.014 * Math.sin(by * 40 + lt * 1.3); TY = by; };
+const sunMotion = (bx, by, lt) => { TX = bx; TY = by + 0.004 * lt; };
+const horizonMotion = (bx, by, lt) => { TX = bx + 0.01 * Math.sin(by * 50 + lt * 1.5); TY = by; };
+const nebulaMotion = (bx, by, lt) => {
+  const a = lt * 0.16 + 0.1 * Math.sin(lt * 0.5), c = Math.cos(a), s = Math.sin(a);
+  TX = c * bx - s * by * 1.6; TY = (s * bx + c * by * 1.6) / 1.6;
+};
+
+// ---------------------------------------------------------------- generators (canvas px, write GP)
+const GP = { x: 0, y: 0, r: 1, g: 1, b: 1 };
+function setCol(c, k = 1) { GP.r = c[0] * k; GP.g = c[1] * k; GP.b = c[2] * k; }
+const C_WARM = hex('#ffe3b8'), C_TEAL = hex('#5fd0e0'), C_DEEP = hex('#2b6fa8'), C_AMBER = hex('#f0b36b');
+function nebulaGen(r) {
+  if (r() < 0.28) {
+    GP.x = 800 + gauss(r) * 230; GP.y = 450 + gauss(r) * 130;
+    setCol(r() < 0.5 ? C_DEEP : C_TEAL, 0.55);
+    return;
+  }
+  const arm = r() < 0.5 ? 0 : Math.PI;
+  const rad = 8 + Math.pow(r(), 0.8) * 360;
+  const ang = arm + Math.log(rad / 8) * 1.75 + gauss(r) * 0.18;
+  const sp = gauss(r) * (6 + rad * 0.07);
+  GP.x = 800 + Math.cos(ang) * rad + sp; GP.y = 450 + (Math.sin(ang) * rad + sp) * 0.62;
+  const k = rad / 360;
+  const c = k < 0.18 ? C_WARM : k < 0.55 ? C_TEAL : C_DEEP;
+  setCol(r() < 0.07 ? C_AMBER : c, 1 - k * 0.35);
+}
+function dustGen(sx, sy, cols, gain) {
+  return (r) => { GP.x = 800 + gauss(r) * sx; GP.y = 450 + gauss(r) * sy; setCol(cols[(r() * cols.length) | 0], gain * (0.5 + r() * 0.5)); };
+}
+const planktonGen = dustGen(620, 300, [hex('#8fd3e6'), hex('#4f9fc8'), hex('#cfeaf2')], 0.32);
+const titleDustGen = dustGen(430, 190, [C_TEAL, C_AMBER, C_DEEP], 0.3);
+const skyDustGen = dustGen(700, 260, [hex('#dfe9ff'), hex('#9fb8f0')], 0.28);
+
+// ---------------------------------------------------------------- scenes
+const WHALE_STOPS = [[0, '#2f7fb0'], [0.45, '#3f9cc8'], [0.62, '#a6dcec'], [1, '#e4f6fa']];
+const FIN_STOPS = [[0, '#3f98c4'], [1, '#c6ecf5']];
+const SKY_WHALE_STOPS = [[0, '#b9d4ff'], [0.55, '#dde8ff'], [1, '#ffffff']];
+const SKY_FIN_STOPS = [[0, '#c7dbff'], [1, '#ffffff']];
+const TITLE_STOPS = [[0, '#7fd8ea'], [0.5, '#e9f3f0'], [1, '#f2b36b']];
+const END_STOPS = [[0, '#f2b36b'], [0.5, '#fff1d9'], [1, '#7fd8ea']];
+
+const whaleCx = 760, whaleCy = 470, skyCx = 800, skyCy = 318, skyS = 0.6;
+
+const SCENES = [
+  {
+    name: 'bloom', t0: 0, k: 2.6, turb: 0.75, burst: 0, damp: 2.4, delay: 'bloom', ambient: 'drift',
+    bg: ['#03080e', '#041420', '#02070c'], mid: 0.5, rays: 0.25, decay: 0.86, intensity: 0.55,
+    layers: [{ gen: nebulaGen, motion: nebulaMotion }],
+  },
+  {
+    name: 'title', t0: 6.5, k: 16, turb: 0.07, burst: 2.2, damp: 5, delay: 'sweep', ambient: 'drift',
+    bg: ['#030b14', '#06192a', '#020810'], mid: 0.45, rays: 0.3, decay: 0.8, intensity: 0.62,
+    layers: [
+      { draw: (c) => drawTitle(c, TITLE_STOPS), motion: breathe },
+      { draw: drawTitleRule, density: 3, motion: breathe },
+      { gen: titleDustGen, share: 0.26, motion: dustMotion },
+    ],
+  },
+  {
+    name: 'whale', t0: 11, k: 15, turb: 0.07, burst: 2.4, damp: 4.6, delay: 'random', ambient: 'bubbles',
+    bg: ['#06304a', '#04192b', '#020a12'], mid: 0.55, rays: 0.75, decay: 0.8, intensity: 0.55,
+    layers: [
+      { draw: (c) => drawWhaleBody(c, whaleCx, whaleCy, 1, WHALE_STOPS), motion: makeWhaleMotion(W2(whaleCx), H2(whaleCy), 1, 0.026, false) },
+      { draw: (c) => drawWhaleFin(c, whaleCx, whaleCy, 1, FIN_STOPS), motion: makeWhaleMotion(W2(whaleCx), H2(whaleCy), 1, 0.026, true) },
+      { gen: planktonGen, share: 0.12, motion: dustMotion },
+    ],
+  },
+  {
+    name: 'lighthouse', t0: 22, k: 16, turb: 0.06, burst: 2.6, damp: 5, delay: 'sweep', ambient: 'stars',
+    bg: ['#060d22', '#0d1c34', '#050a14'], mid: 0.3, rays: 0, decay: 0.8, intensity: 0.6,
+    layers: [
+      { draw: drawMoon, density: 1.6 },
+      { draw: drawCliff, density: 0.32 },
+      { draw: drawTower, density: 1.3 },
+      { draw: drawGallery, density: 1.2 },
+      { draw: drawLamp, density: 3.2, flicker: true },
+      { draw: drawRoof, density: 1.3 },
+      { draw: drawBeam, share: 0.13, motion: beamMotion, pulse: true },
+      { draw: drawNightSea, density: 0.55, motion: nightSeaMotion },
+    ],
+  },
+  {
+    name: 'storm', t0: 33.5, k: 14, turb: 0.1, burst: 3.0, damp: 4.4, delay: 'random', ambient: 'rain',
+    bg: ['#0c131c', '#18222d', '#070b10'], mid: 0.45, rays: 0, decay: 0.83, intensity: 0.55,
+    layers: [
+      { draw: drawClouds, share: 0.12, motion: cloudMotion },
+      { draw: drawHull, density: 1.1, motion: shipMotion(false) },
+      { draw: drawRigging, density: 1.4, motion: shipMotion(false) },
+      { draw: drawSails, density: 1.0, motion: shipMotion(true) },
+      { draw: drawStormSea, density: 0.5, motion: stormSeaMotion },
+    ],
+  },
+  {
+    name: 'dawn', t0: 43, k: 15, turb: 0.05, burst: 2.2, damp: 5, delay: 'sweep', ambient: 'motes',
+    bg: ['#15183c', '#5e3450', '#1a1128'], mid: 0.43, rays: 0, decay: 0.8, intensity: 0.46,
+    layers: [
+      { draw: drawSun, density: 0.9, motion: sunMotion },
+      { draw: drawDawnWater, density: 0.55, motion: waterMotion },
+      { draw: (c) => drawPaperBoat(c, false), density: 1.4, motion: boatMotion },
+      { draw: (c) => drawPaperBoat(c, true), density: 0.5, motion: reflMotion },
+    ],
+  },
+  {
+    name: 'skywhale', t0: 51.5, k: 13, turb: 0.07, burst: 2.4, damp: 4.4, delay: 'radial', ambient: 'stars',
+    bg: ['#050a22', '#141c48', '#2a2350'], mid: 0.25, rays: 0, decay: 0.84, intensity: 0.5,
+    layers: [
+      { draw: (c) => drawWhaleBody(c, skyCx, skyCy, skyS, SKY_WHALE_STOPS), motion: makeWhaleMotion(W2(skyCx), H2(skyCy), skyS, 0.02, false), twinkle: true },
+      { draw: (c) => drawWhaleFin(c, skyCx, skyCy, skyS, SKY_FIN_STOPS), motion: makeWhaleMotion(W2(skyCx), H2(skyCy), skyS, 0.02, true), twinkle: true },
+      { draw: drawHorizonGlow, share: 0.07, motion: horizonMotion },
+      { gen: skyDustGen, share: 0.1, motion: dustMotion, twinkle: true },
+    ],
+  },
+  {
+    name: 'end', t0: 59.5, k: 15, turb: 0.06, burst: 2.2, damp: 5, delay: 'sweep', ambient: 'drift',
+    bg: ['#03080e', '#07131e', '#02060a'], mid: 0.5, rays: 0.2, decay: 0.82, intensity: 0.62,
+    layers: [
+      { draw: (c) => drawTitle(c, END_STOPS), motion: breathe },
+      { draw: drawTitleRule, density: 3, motion: breathe },
+      { gen: titleDustGen, share: 0.26, motion: dustMotion },
+    ],
+  },
+];
+
+const SUBTITLES = [
+  [1.8, 5.9, 'Every drop of the sea remembers something.'],
+  [13.0, 18.6, 'Some memories are vast.'],
+  [24.8, 30.2, 'Some keep watch through the night.'],
+  [35.2, 40.6, 'Some are storms we barely survive.'],
+  [45.0, 50.2, 'Some are small enough to hold.'],
+  [53.4, 58.6, 'And some swim on, long after we are gone.'],
+];
+
+const STRIKES = [[36.3, -1.05], [38.95, 1.0], [41.15, -0.35]];
+function flashAt(t) {
+  let f = 0;
+  for (const [s] of STRIKES) {
+    const d = t - s;
+    if (d >= 0 && d < 1.4) f += Math.exp(-d * 7) + (d > 0.14 ? 0.7 * Math.exp(-(d - 0.14) * 9) : 0);
+  }
+  return Math.min(f, 1.3);
+}
+
+// Camera keyframes: t, x, y, zoom, rotation
+const CAM = [
+  [0, 0, 0, 1.55, 0], [6.5, 0, 0, 1.0, 0], [11, 0, 0, 1.06, 0], [21.6, 0.2, 0.02, 1.24, 0],
+  [22.6, 0.1, 0.03, 1.0, 0], [33.2, 0.22, 0.06, 1.1, 0], [34.2, 0, 0, 1.14, 0], [42.8, 0, 0.02, 1.02, 0],
+  [43.8, 0, -0.06, 1.2, 0], [51.2, 0.05, -0.02, 1.04, 0], [52.2, 0, 0.1, 1.02, 0], [59.2, 0, 0.14, 0.96, 0],
+  [60.2, 0, 0, 1.0, 0], [66, 0, 0, 1.07, 0],
+];
+const CAMV = { x: 0, y: 0, z: 1, r: 0 };
+function camAt(t) {
+  let i = 0; while (i < CAM.length - 2 && t > CAM[i + 1][0]) i++;
+  const a = CAM[i], b = CAM[i + 1];
+  const u = smoother((t - a[0]) / (b[0] - a[0]));
+  CAMV.x = lerp(a[1], b[1], u); CAMV.y = lerp(a[2], b[2], u); CAMV.z = lerp(a[3], b[3], u); CAMV.r = lerp(a[4], b[4], u);
+  const storm = smoothstep(33.5, 35, t) * (1 - smoothstep(42.5, 44, t));
+  const fl = flashAt(t);
+  CAMV.x += storm * (0.006 * Math.sin(t * 1.9) + 0.004 * Math.sin(t * 3.7)) + fl * 0.004 * Math.sin(t * 60);
+  CAMV.y += storm * 0.006 * Math.sin(t * 1.3 + 1) + fl * 0.003 * Math.cos(t * 55);
+  CAMV.r += storm * 0.018 * Math.sin(t * 0.9);
+  return CAMV;
+}
+
+// ---------------------------------------------------------------- build scenes (sample shapes)
+const scv = document.createElement('canvas'); scv.width = SW; scv.height = SH;
+const sctx = scv.getContext('2d', { willReadFrequently: true });
+
+function buildScene(S, seed) {
+  const r = mulberry32(seed);
+  const L = S.layers;
+  const info = L.map((layer) => {
+    if (layer.gen) return { layer, weight: 0 };
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.globalAlpha = 1;
+    sctx.clearRect(0, 0, SW, SH);
+    sctx.save(); layer.draw(sctx); sctx.restore();
+    const data = sctx.getImageData(0, 0, SW, SH).data;
+    let count = 0, sum = 0;
+    for (let p = 3; p < data.length; p += 4) if (data[p] > 8) { count++; sum += data[p]; }
+    const cand = new Int32Array(count);
+    for (let i = 0, p = 3, k = 0; p < data.length; p += 4, i++) if (data[p] > 8) cand[k++] = i;
+    return { layer, data, cand, weight: (sum / 255) * (layer.density || 1) };
+  });
+  let fixed = 0, wsum = 0;
+  for (const it of info) { if (it.layer.share) fixed += it.layer.share; else wsum += it.weight; }
+  let remaining = P;
+  const counts = info.map((it, idx) => {
+    let n = it.layer.share ? Math.round(it.layer.share * P) : Math.round(((1 - fixed) * P * it.weight) / (wsum || 1));
+    if (idx === info.length - 1) n = remaining; else n = Math.min(n, remaining);
+    remaining -= n; return n;
+  });
+
+  const bx = new Float32Array(P), by = new Float32Array(P), cr = new Float32Array(P), cg = new Float32Array(P), cb = new Float32Array(P);
+  const layerOf = new Uint8Array(P);
+  let o = 0;
+  info.forEach((it, li) => {
+    const n = counts[li];
+    for (let k = 0; k < n; k++, o++) {
+      if (it.layer.gen) {
+        it.layer.gen(r);
+        bx[o] = W2(GP.x); by[o] = H2(GP.y); cr[o] = GP.r; cg[o] = GP.g; cb[o] = GP.b;
+      } else {
+        let idx = 0, guard = 0;
+        do { idx = it.cand[(r() * it.cand.length) | 0]; guard++; } while (r() * 255 > it.data[idx * 4 + 3] && guard < 40);
+        const x = (idx % SW) + r(), y = ((idx / SW) | 0) + r();
+        bx[o] = W2(x); by[o] = H2(y);
+        const g = it.layer.gain || 1;
+        cr[o] = (it.data[idx * 4] / 255) * g; cg[o] = (it.data[idx * 4 + 1] / 255) * g; cb[o] = (it.data[idx * 4 + 2] / 255) * g;
+      }
+      layerOf[o] = li;
+    }
+  });
+  // shuffle so every particle gets a random destination (ink-like re-forming)
+  for (let i = P - 1; i > 0; i--) {
+    const j = (r() * (i + 1)) | 0;
+    let t = bx[i]; bx[i] = bx[j]; bx[j] = t; t = by[i]; by[i] = by[j]; by[j] = t;
+    t = cr[i]; cr[i] = cr[j]; cr[j] = t; t = cg[i]; cg[i] = cg[j]; cg[j] = t; t = cb[i]; cb[i] = cb[j]; cb[j] = t;
+    const l = layerOf[i]; layerOf[i] = layerOf[j]; layerOf[j] = l;
+  }
+  const delay = new Float32Array(P);
+  for (let i = 0; i < P; i++) {
+    switch (S.delay) {
+      case 'bloom': delay[i] = Math.pow(r(), 1.6) * 3.2; break;
+      case 'sweep': delay[i] = 0.05 + ((bx[i] + 1.8) / 3.6) * 0.95 + r() * 0.2; break;
+      case 'radial': delay[i] = Math.hypot(bx[i], by[i] - 0.25) * 0.7 + r() * 0.35; break;
+      default: delay[i] = r() * 1.1;
+    }
+  }
+  const motions = L.map((l) => l.motion || null);
+  const flags = L.map((l) => (l.twinkle ? 1 : 0) | (l.flicker ? 2 : 0) | (l.pulse ? 4 : 0));
+  Object.assign(S, { bx, by, cr, cg, cb, layerOf, delay, motions, flags,
+    bgc: S.bg.map(hex), kEff: S.k });
+}
+
+// ---------------------------------------------------------------- simulation state
+const px = new Float32Array(P), py = new Float32Array(P), vx = new Float32Array(P), vy = new Float32Array(P);
+const colR = new Float32Array(P), colG = new Float32Array(P), colB = new Float32Array(P), colA = new Float32Array(P);
+const stiff = new Float32Array(P), phase = new Float32Array(P);
+const qx = new Float32Array(A), qy = new Float32Array(A), qvx = new Float32Array(A), qvy = new Float32Array(A);
+const qhx = new Float32Array(A), qhy = new Float32Array(A), qph = new Float32Array(A);
+const qR = new Float32Array(A), qG = new Float32Array(A), qB = new Float32Array(A), qA = new Float32Array(A);
+const sizes = new Float32Array(N);
+let simT = 0;
+
+function resetSim() {
+  const r = mulberry32(99);
+  for (let i = 0; i < P; i++) {
+    const a = r() * 6.2832, d = Math.pow(r(), 2) * 0.02;
+    px[i] = Math.cos(a) * d; py[i] = Math.sin(a) * d * 0.7;
+    vx[i] = 0; vy[i] = 0;
+    colR[i] = 1; colG[i] = 0.9; colB[i] = 0.74; colA[i] = 0.5;
+    stiff[i] = 0.6 + r() * 0.8; phase[i] = r();
+    sizes[i] = 1.25 + Math.pow(r(), 2.2) * 2.1;
+  }
+  for (let j = 0; j < A; j++) {
+    qx[j] = (r() * 2 - 1) * 2.1; qy[j] = (r() * 2 - 1) * 1.3; qvx[j] = 0; qvy[j] = 0;
+    qhx[j] = (r() * 2 - 1) * 2.05; qhy[j] = -0.12 + Math.pow(r(), 0.8) * 1.3;
+    qph[j] = r();
+    qR[j] = 0.5; qG[j] = 0.75; qB[j] = 0.85; qA[j] = 0;
+    sizes[P + j] = 0.9 + Math.pow(r(), 3) * 2.2;
+  }
+  simT = 0;
+}
+
+function sceneIndex(t) { let i = SCENES.length - 1; while (i > 0 && t < SCENES[i].t0) i--; return i; }
+
+const AMB = {
+  drift: { c: hex('#7ec4d4'), a: 0.22 },
+  bubbles: { c: hex('#cdeef7'), a: 0.34 },
+  stars: { c: hex('#eef3ff'), a: 0.5 },
+  rain: { c: hex('#a9bdd1'), a: 0.0 },
+  motes: { c: hex('#ffd6a0'), a: 0.3 },
+};
+
+function step() {
+  const t = simT + DT;
+  const si = sceneIndex(t);
+  const S = SCENES[si], Sp = si > 0 ? SCENES[si - 1] : null;
+  const damp = 1;
+  for (let i = 0; i < P; i++) {
+    const since = t - S.t0 - S.delay[i];
+    let sc = null, lt = 0, ramp = 1, burst = 0;
+    if (since >= 0) { sc = S; lt = t - S.t0; ramp = smoothstep(0, 1.35, since); burst = S.burst * Math.exp(-since * 1.5); }
+    else if (Sp) { sc = Sp; lt = t - Sp.t0; ramp = smoothstep(0, 1.35, t - Sp.t0 - Sp.delay[i]); }
+    let k, turb, dmp, tr, tg, tb, ta;
+    if (sc) {
+      const li = sc.layerOf[i], m = sc.motions[li];
+      if (m) m(sc.bx[i], sc.by[i], lt); else { TX = sc.bx[i]; TY = sc.by[i]; }
+      k = sc.k * stiff[i] * (0.06 + 0.94 * ramp);
+      turb = sc.turb + burst; dmp = sc.damp;
+      let f = 1;
+      const fl = sc.flags[li];
+      if (fl & 1) f = 0.55 + 0.45 * Math.sin(lt * 2.6 + phase[i] * 40);
+      if (fl & 2) f = 0.9 + 0.1 * Math.sin(lt * 17 + phase[i] * 9);
+      if (fl & 4) f = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(lt * 1.24));
+      tr = sc.cr[i] * f; tg = sc.cg[i] * f; tb = sc.cb[i] * f; ta = sc.intensity;
+    } else {
+      TX = 0; TY = 0; k = 7; turb = 0.05; dmp = 4; tr = 1; tg = 0.9; tb = 0.74; ta = 0.5;
+    }
+    const x = px[i], y = py[i];
+    curl(x, y, t);
+    const ax = k * (TX - x) + turb * CX, ay = k * (TY - y) + turb * CY;
+    const d = 1 - dmp * DT * damp;
+    vx[i] = (vx[i] + ax * DT) * d; vy[i] = (vy[i] + ay * DT) * d;
+    px[i] = x + vx[i] * DT; py[i] = y + vy[i] * DT;
+    const cr = DT * 2.4;
+    colR[i] += (tr - colR[i]) * cr; colG[i] += (tg - colG[i]) * cr; colB[i] += (tb - colB[i]) * cr; colA[i] += (ta - colA[i]) * cr;
+  }
+
+  const mode = S.ambient, am = AMB[mode];
+  for (let j = 0; j < A; j++) {
+    let tvx = 0, tvy = 0, rate = 2.5;
+    const x = qx[j], y = qy[j], ph = qph[j];
+    if (mode === 'stars') { tvx = (qhx[j] - x) * 1.6; tvy = (qhy[j] - y) * 1.6; rate = 3; }
+    else if (mode === 'bubbles') { tvx = 0.04 * Math.sin(t * 2 + ph * 40); tvy = 0.06 + ph * 0.12; }
+    else if (mode === 'rain') { tvx = -0.55; tvy = -2.3 - ph * 0.6; rate = 6; }
+    else if (mode === 'motes') { curl(x, y, t * 0.5); tvx = 0.03 + CX * 0.05; tvy = 0.015 + CY * 0.05; }
+    else { curl(x, y, t * 0.6); tvx = CX * 0.06; tvy = CY * 0.06 + 0.01; }
+    qvx[j] += (tvx - qvx[j]) * Math.min(1, DT * rate);
+    qvy[j] += (tvy - qvy[j]) * Math.min(1, DT * rate);
+    let nx = x + qvx[j] * DT, ny = y + qvy[j] * DT;
+    if (mode !== 'stars') {
+      if (nx < -2.25) nx += 4.5; else if (nx > 2.25) nx -= 4.5;
+      if (ny < -1.35) ny += 2.7; else if (ny > 1.35) ny -= 2.7;
+    }
+    qx[j] = nx; qy[j] = ny;
+    let a = am.a;
+    if (mode === 'stars') a *= (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * (1.5 + ph * 3) + ph * 60))) * (qhy[j] > -0.1 ? 1 : 0);
+    const cr = DT * 1.5;
+    qR[j] += (am.c[0] - qR[j]) * cr; qG[j] += (am.c[1] - qG[j]) * cr; qB[j] += (am.c[2] - qB[j]) * cr; qA[j] += (a - qA[j]) * cr;
+  }
+  simT = t;
+}
+
+function envAt(t) {
+  const si = sceneIndex(t), S = SCENES[si], Sp = si > 0 ? SCENES[si - 1] : S;
+  const b = smoothstep(S.t0 - 0.3, S.t0 + 2.2, t);
+  const mix3 = (k) => [0, 1, 2].map((c) => lerp(Sp.bgc[k][c], S.bgc[k][c], b));
+  return {
+    top: mix3(0), mid: mix3(1), bot: mix3(2),
+    midPos: lerp(Sp.mid, S.mid, b), rays: lerp(Sp.rays, S.rays, b), decay: lerp(Sp.decay, S.decay, b),
+  };
+}
+
+// ---------------------------------------------------------------- WebGL
+const glc = document.createElement('canvas'); glc.width = W; glc.height = H;
+const gl = glc.getContext('webgl2', { antialias: false, alpha: false, preserveDrawingBuffer: true, premultipliedAlpha: false });
+if (!gl) throw new Error('WebGL2 required');
+
+function compile(vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+
+const FS_VS = `#version 300 es
+out vec2 vUv;
+void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); vUv = p; gl_Position = vec4(p * 2. - 1., 0., 1.); }`;
+
+const partProg = compile(`#version 300 es
+in vec2 aPos; in vec4 aCol; in float aSize;
+uniform vec2 uCam; uniform float uZoom, uRot, uAspect, uPx;
+out vec4 vCol;
+void main(){
+  vec2 p = aPos - uCam; float c = cos(uRot), s = sin(uRot);
+  p = vec2(c * p.x - s * p.y, s * p.x + c * p.y) * uZoom;
+  gl_Position = vec4(p.x / uAspect, p.y, 0., 1.);
+  gl_PointSize = aSize * uPx * uZoom;
+  vCol = aCol;
+}`, `#version 300 es
+precision highp float;
+in vec4 vCol; out vec4 o;
+void main(){
+  vec2 d = gl_PointCoord * 2. - 1.; float r2 = dot(d, d);
+  if (r2 > 1.) discard;
+  o = vec4(vCol.rgb * vCol.a * exp(-r2 * 3.2), 1.);
+}`);
+
+const decayProg = compile(FS_VS, `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o; uniform sampler2D uPrev; uniform float uDecay;
+void main(){ o = vec4(max(texture(uPrev, vUv).rgb * uDecay - 1.2 / 255., 0.), 1.); }`);
+
+const downProg = compile(FS_VS, `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o; uniform sampler2D uSrc; uniform vec2 uTexel;
+void main(){
+  vec3 c = texture(uSrc, vUv).rgb * 0.2;
+  c += (texture(uSrc, vUv + uTexel * vec2(1., 1.)).rgb + texture(uSrc, vUv + uTexel * vec2(-1., 1.)).rgb
+      + texture(uSrc, vUv + uTexel * vec2(1., -1.)).rgb + texture(uSrc, vUv + uTexel * vec2(-1., -1.)).rgb) * 0.125;
+  c += (texture(uSrc, vUv + uTexel * vec2(2., 0.)).rgb + texture(uSrc, vUv - uTexel * vec2(2., 0.)).rgb
+      + texture(uSrc, vUv + uTexel * vec2(0., 2.)).rgb + texture(uSrc, vUv - uTexel * vec2(0., 2.)).rgb) * 0.075;
+  o = vec4(c, 1.);
+}`);
+
+const compProg = compile(FS_VS, `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uTrail, uB2, uB3, uB4, uB5, uB6;
+uniform vec2 uT4, uT5, uT6;
+vec3 tent(sampler2D s, vec2 uv, vec2 t){
+  return (texture(s, uv + t * vec2(.5, .5)).rgb + texture(s, uv + t * vec2(-.5, .5)).rgb + texture(s, uv + t * vec2(.5, -.5)).rgb + texture(s, uv + t * vec2(-.5, -.5)).rgb) * .25;
+}
+uniform vec3 uTop, uMid, uBot; uniform float uMidPos, uRays, uFlash, uFade, uTime, uExposure; uniform vec2 uRes;
+float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+void main(){
+  vec2 uv = vUv;
+  float y = uv.y;
+  vec3 bg = y > uMidPos ? mix(uMid, uTop, smoothstep(0., 1., (y - uMidPos) / (1. - uMidPos))) : mix(uBot, uMid, smoothstep(0., 1., y / uMidPos));
+  vec2 d = uv - vec2(0.62, 1.25); float ang = atan(d.x, d.y);
+  float rays = (0.5 + 0.5 * sin(ang * 23. + uTime * 0.35)) * (0.5 + 0.5 * sin(ang * 37. - uTime * 0.22)) * (0.5 + 0.5 * sin(ang * 11. + uTime * 0.1));
+  bg += vec3(0.22, 0.5, 0.6) * rays * uRays * 0.16 * smoothstep(0.1, 1.0, y);
+  vec2 cd = (uv - 0.5) * 0.0022;
+  vec3 tr = vec3(texture(uTrail, uv + cd).r, texture(uTrail, uv).g, texture(uTrail, uv - cd).b);
+  vec3 bl = texture(uB2, uv).rgb * 0.35 + texture(uB3, uv).rgb * 0.55 + tent(uB4, uv, uT4) * 0.75 + tent(uB5, uv, uT5) * 0.85 + tent(uB6, uv, uT6) * 0.7;
+  vec3 lit = tr + bl * 0.9;
+  vec3 col = bg + (1. - exp(-lit * uExposure));
+  col += uFlash * vec3(0.72, 0.78, 0.95) * (0.55 + 0.45 * y);
+  vec2 q = uv - 0.5; q.x *= uRes.x / uRes.y;
+  col *= 1. - dot(q, q) * 0.5;
+  col += (hash(uv * uRes + fract(uTime * 7.13) * 91.) - 0.5) * 0.03;
+  o = vec4(col * uFade, 1.);
+}`);
+
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+const posBuf = gl.createBuffer(), colBuf = gl.createBuffer(), sizeBuf = gl.createBuffer();
+const posData = new Float32Array(N * 2), colData = new Float32Array(N * 4);
+function attrib(buf, name, size, data, usage) {
+  const loc = gl.getAttribLocation(partProg.p, name);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, data, usage);
+  gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+}
+attrib(posBuf, 'aPos', 2, posData, gl.DYNAMIC_DRAW);
+attrib(colBuf, 'aCol', 4, colData, gl.DYNAMIC_DRAW);
+const emptyVao = gl.createVertexArray();
+
+function makeTarget(w, h) {
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  return { t, f, w, h };
+}
+const trails = [makeTarget(W, H), makeTarget(W, H)];
+const tex = trails.map((x) => x.t), fbo = trails.map((x) => x.f);
+const bloomLv = [];
+for (let k = 1; k <= 6; k++) bloomLv[k] = makeTarget(Math.max(1, W >> k), Math.max(1, H >> k));
+let rd = 0;
+
+// ---------------------------------------------------------------- output compositor
+const out = document.getElementById('out');
+const octx = out.getContext('2d');
+
+function worldToScreen(x, y, cam) {
+  const dx = x - cam.x, dy = y - cam.y, c = Math.cos(cam.r), s = Math.sin(cam.r);
+  const rx = (c * dx - s * dy) * cam.z, ry = (s * dx + c * dy) * cam.z;
+  return [W / 2 + rx * (H / 2), H / 2 - ry * (H / 2)];
+}
+
+function boltPath(seed, x0) {
+  const r = mulberry32(seed); const pts = [[x0, 1.12]]; let x = x0, y = 1.12;
+  while (y > -0.38) { y -= 0.05 + r() * 0.07; x += (r() - 0.5) * 0.13; pts.push([x, y]); }
+  const branch = []; const bi = 3 + ((r() * 4) | 0); let bx = pts[bi][0], by = pts[bi][1];
+  branch.push([bx, by]);
+  for (let k = 0; k < 6; k++) { by -= 0.05 + r() * 0.05; bx += 0.03 + r() * 0.06; branch.push([bx, by]); }
+  return [pts, branch];
+}
+const BOLTS = STRIKES.map(([, x], i) => boltPath(700 + i, x));
+
+function fadeAt(t) { return smoothstep(0, 1.6, t) * (1 - smoothstep(DUR - 1.8, DUR - 0.05, t)); }
+
+function drawOverlay(t, cam) {
+  const fade = fadeAt(t);
+  if (SCENES[sceneIndex(t)].ambient === 'rain') {
+    const rainA = smoothstep(33.5, 35, t) * (1 - smoothstep(42.2, 43.5, t)) * fade;
+    octx.save();
+    octx.strokeStyle = `rgba(185,205,225,${0.22 * rainA})`; octx.lineWidth = 1.2; octx.lineCap = 'round';
+    octx.beginPath();
+    for (let j = 0; j < A; j += 2) {
+      const [sx, sy] = worldToScreen(qx[j], qy[j], cam);
+      const len = 26 + qph[j] * 30;
+      octx.moveTo(sx, sy); octx.lineTo(sx + len * 0.23, sy - len);
+    }
+    octx.stroke(); octx.restore();
+  }
+  STRIKES.forEach(([s], i) => {
+    const d = t - s;
+    if (d < 0 || d > 0.5) return;
+    const a = (Math.exp(-d * 10) + (d > 0.14 ? 0.8 * Math.exp(-(d - 0.14) * 12) : 0)) * fade;
+    octx.save();
+    octx.shadowColor = `rgba(170,195,255,${Math.min(1, a)})`; octx.shadowBlur = 28;
+    octx.strokeStyle = `rgba(238,244,255,${Math.min(1, a)})`; octx.lineJoin = 'round';
+    BOLTS[i].forEach((path, pi) => {
+      octx.lineWidth = pi ? 1.6 : 3.2;
+      octx.beginPath();
+      path.forEach(([x, y], k) => { const [sx, sy] = worldToScreen(x, y, cam); k ? octx.lineTo(sx, sy) : octx.moveTo(sx, sy); });
+      octx.stroke();
+    });
+    octx.restore();
+  });
+
+  for (const [a, b, text] of SUBTITLES) {
+    if (t < a - 0.1 || t > b + 0.1) continue;
+    const al = smoothstep(a, a + 0.9, t) * (1 - smoothstep(b - 0.9, b, t)) * fade;
+    const rise = (1 - smoothstep(a, a + 1.4, t)) * 10;
+    octx.save();
+    octx.font = `italic 46px ${SERIF}`; octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    if ('letterSpacing' in octx) octx.letterSpacing = '1.5px';
+    octx.shadowColor = `rgba(0,0,0,${0.75 * al})`; octx.shadowBlur = 18;
+    octx.fillStyle = `rgba(242,236,222,${al})`;
+    octx.fillText(text, W / 2, H - 118 + rise);
+    octx.restore();
+  }
+  const endA = smoothstep(61.4, 62.8, t) * fade;
+  if (endA > 0) {
+    octx.save();
+    octx.font = `italic 34px ${SERIF}`; octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    if ('letterSpacing' in octx) octx.letterSpacing = '6px';
+    octx.shadowColor = 'rgba(0,0,0,0.7)'; octx.shadowBlur = 14;
+    octx.fillStyle = `rgba(240,200,150,${endA})`;
+    octx.fillText('a film written entirely in code', W / 2, 752);
+    octx.restore();
+  }
+}
+
+function render(t) {
+  const env = envAt(t), cam = camAt(t);
+  for (let i = 0; i < P; i++) {
+    posData[i * 2] = px[i]; posData[i * 2 + 1] = py[i];
+    const o = i * 4; colData[o] = colR[i]; colData[o + 1] = colG[i]; colData[o + 2] = colB[i]; colData[o + 3] = colA[i];
+  }
+  for (let j = 0; j < A; j++) {
+    const i = P + j;
+    posData[i * 2] = qx[j]; posData[i * 2 + 1] = qy[j];
+    const o = i * 4; colData[o] = qR[j]; colData[o + 1] = qG[j]; colData[o + 2] = qB[j]; colData[o + 3] = qA[j];
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, posData);
+  gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, colData);
+  const wr = 1 - rd;
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo[wr]);
+  gl.viewport(0, 0, W, H);
+  gl.disable(gl.BLEND);
+  gl.useProgram(decayProg.p);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex[rd]);
+  gl.uniform1i(decayProg.u.uPrev, 0); gl.uniform1f(decayProg.u.uDecay, env.decay);
+  gl.bindVertexArray(emptyVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(partProg.p);
+  gl.uniform2f(partProg.u.uCam, cam.x, cam.y); gl.uniform1f(partProg.u.uZoom, cam.z); gl.uniform1f(partProg.u.uRot, cam.r);
+  gl.uniform1f(partProg.u.uAspect, W / H); gl.uniform1f(partProg.u.uPx, H / 1080);
+  gl.bindVertexArray(vao); gl.drawArrays(gl.POINTS, 0, N);
+  gl.disable(gl.BLEND);
+
+  gl.useProgram(downProg.p);
+  gl.uniform1i(downProg.u.uSrc, 0);
+  gl.bindVertexArray(emptyVao);
+  for (let k = 1; k <= 6; k++) {
+    const src = k === 1 ? { t: tex[wr], w: W, h: H } : bloomLv[k - 1], dst = bloomLv[k];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.f); gl.viewport(0, 0, dst.w, dst.h);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src.t);
+    gl.uniform2f(downProg.u.uTexel, 1 / src.w, 1 / src.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(compProg.p);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex[wr]);
+  gl.uniform1i(compProg.u.uTrail, 0);
+  [2, 3, 4, 5, 6].forEach((k, n) => {
+    gl.activeTexture(gl.TEXTURE1 + n); gl.bindTexture(gl.TEXTURE_2D, bloomLv[k].t);
+    gl.uniform1i(compProg.u[`uB${k}`], 1 + n);
+  });
+  gl.uniform2f(compProg.u.uT4, 1 / bloomLv[4].w, 1 / bloomLv[4].h);
+  gl.uniform2f(compProg.u.uT5, 1 / bloomLv[5].w, 1 / bloomLv[5].h);
+  gl.uniform2f(compProg.u.uT6, 1 / bloomLv[6].w, 1 / bloomLv[6].h);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.uniform3fv(compProg.u.uTop, env.top); gl.uniform3fv(compProg.u.uMid, env.mid); gl.uniform3fv(compProg.u.uBot, env.bot);
+  gl.uniform1f(compProg.u.uMidPos, env.midPos); gl.uniform1f(compProg.u.uRays, env.rays);
+  gl.uniform1f(compProg.u.uFlash, flashAt(t) * 0.32); gl.uniform1f(compProg.u.uFade, fadeAt(t));
+  gl.uniform1f(compProg.u.uTime, t); gl.uniform1f(compProg.u.uExposure, 1.35); gl.uniform2f(compProg.u.uRes, W, H);
+  gl.bindVertexArray(emptyVao); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  rd = wr;
+
+  octx.globalCompositeOperation = 'source-over';
+  octx.drawImage(glc, 0, 0);
+  drawOverlay(t, cam);
+}
+
+// ---------------------------------------------------------------- score (Web Audio; same code live + offline)
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const CH = {
+  Dm: [50, 53, 57, 62], Bb: [46, 50, 53, 58], F: [48, 53, 57, 60], C: [48, 52, 55, 60],
+  Gm: [50, 55, 58, 62], A: [49, 52, 57, 61], D: [50, 54, 57, 62, 66],
+};
+const BASS = { Dm: 38, Bb: 34, F: 41, C: 36, Gm: 43, A: 45, D: 38 };
+const PROG = [
+  [0, 6.5, 'Dm'], [6.5, 11, 'Dm'], [11, 16.5, 'Dm'], [16.5, 22, 'Bb'], [22, 27.7, 'F'], [27.7, 33.5, 'C'],
+  [33.5, 38.2, 'Gm'], [38.2, 43, 'A'], [43, 47.2, 'Bb'], [47.2, 51.5, 'F'], [51.5, 55.5, 'Dm'], [55.5, 59.5, 'Bb'], [59.5, 66, 'D'],
+];
+
+function buildScore(ctx, T0) {
+  const r = mulberry32(0xa11ce);
+  const sr = ctx.sampleRate;
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -18; comp.knee.value = 14; comp.ratio.value = 3; comp.attack.value = 0.01; comp.release.value = 0.35;
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0, T0); master.gain.linearRampToValueAtTime(0.85, T0 + 1.6);
+  master.gain.setValueAtTime(0.85, T0 + DUR - 2.4); master.gain.linearRampToValueAtTime(0, T0 + DUR - 0.05);
+  master.connect(comp); comp.connect(ctx.destination);
+
+  const ir = ctx.createBuffer(2, Math.floor(sr * 5), sr);
+  for (let c = 0; c < 2; c++) {
+    const d = ir.getChannelData(c); let lp = 0;
+    for (let i = 0; i < d.length; i++) {
+      const tt = i / sr, a = 0.55 - 0.45 * Math.min(1, tt / 3.5);
+      lp += ((r() * 2 - 1) - lp) * a;
+      d[i] = lp * Math.exp(-tt * 1.25) * (tt < 0.012 ? tt / 0.012 : 1);
+    }
+  }
+  const verb = ctx.createConvolver(); verb.buffer = ir;
+  const wet = ctx.createGain(); wet.gain.value = 0.55; verb.connect(wet); wet.connect(master);
+
+  const noise = ctx.createBuffer(2, sr * 4, sr);
+  for (let c = 0; c < 2; c++) { const d = noise.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] = r() * 2 - 1; }
+
+  function bus(dry, wt, pan = 0) {
+    const g = ctx.createGain(), p = ctx.createStereoPanner(); p.pan.value = pan; g.connect(p);
+    const dg = ctx.createGain(); dg.gain.value = dry; p.connect(dg); dg.connect(master);
+    const wg = ctx.createGain(); wg.gain.value = wt; p.connect(wg); wg.connect(verb);
+    return g;
+  }
+  function noiseSrc(t0, t1) { const s = ctx.createBufferSource(); s.buffer = noise; s.loop = true; s.start(T0 + t0, r() * 3); s.stop(T0 + t1); return s; }
+  const at = (t) => T0 + Math.max(0, t);
+
+  function pad(notes, t0, t1, level) {
+    notes.forEach((m, ni) => {
+      const b = bus(0.45, 0.85, (ni / Math.max(1, notes.length - 1)) * 1.2 - 0.6);
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 0.5;
+      f.frequency.setValueAtTime(420, at(t0)); f.frequency.linearRampToValueAtTime(1500, at(t0 + (t1 - t0) * 0.6)); f.frequency.linearRampToValueAtTime(650, at(t1 + 2.8));
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, at(t0)); g.gain.linearRampToValueAtTime(level, at(t0 + 2.2)); g.gain.setValueAtTime(level, at(t1)); g.gain.linearRampToValueAtTime(0, at(t1 + 2.8));
+      f.connect(g); g.connect(b);
+      for (const det of [-9, 8]) {
+        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = det;
+        o.connect(f); o.start(at(t0)); o.stop(at(t1 + 3));
+      }
+    });
+  }
+  function bass(m, t0, t1, level) {
+    const b = bus(0.9, 0.15);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, at(t0)); g.gain.linearRampToValueAtTime(level, at(t0 + 1.4)); g.gain.setValueAtTime(level, at(t1)); g.gain.linearRampToValueAtTime(0, at(t1 + 2));
+    g.connect(b);
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = mtof(m); o.connect(g); o.start(at(t0)); o.stop(at(t1 + 2.2));
+    const o2 = ctx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = mtof(m + 12);
+    const g2 = ctx.createGain(); g2.gain.value = 0.18; o2.connect(g2); g2.connect(g); o2.start(at(t0)); o2.stop(at(t1 + 2.2));
+  }
+  function pluck(t, m, vel, pan) {
+    const b = bus(0.55, 0.95, pan);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(3200, at(t)); f.frequency.exponentialRampToValueAtTime(500, at(t + 1.6));
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(vel, at(t + 0.006)); g.gain.exponentialRampToValueAtTime(0.0001, at(t + 2.4));
+    f.connect(g); g.connect(b);
+    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = mtof(m); o.connect(f);
+    const o2 = ctx.createOscillator(); o2.type = 'sine'; o2.frequency.value = mtof(m + 12) * 1.002;
+    const g2 = ctx.createGain(); g2.gain.value = 0.35; o2.connect(g2); g2.connect(f);
+    o.start(at(t)); o.stop(at(t + 2.5)); o2.start(at(t)); o2.stop(at(t + 2.5));
+  }
+  function bell(t, m, vel, pan = 0) {
+    const b = bus(0.35, 1.0, pan);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(vel, at(t + 0.004)); g.gain.exponentialRampToValueAtTime(0.0001, at(t + 5.5));
+    g.connect(b);
+    const f = mtof(m);
+    const car = ctx.createOscillator(); car.type = 'sine'; car.frequency.value = f;
+    const mod = ctx.createOscillator(); mod.type = 'sine'; mod.frequency.value = f * 2.76;
+    const mg = ctx.createGain(); mg.gain.setValueAtTime(f * 1.6, at(t)); mg.gain.exponentialRampToValueAtTime(f * 0.02, at(t + 3));
+    mod.connect(mg); mg.connect(car.frequency); car.connect(g);
+    car.start(at(t)); mod.start(at(t)); car.stop(at(t + 5.6)); mod.stop(at(t + 5.6));
+  }
+  function whaleCall(t, pts, level, pan) {
+    const b = bus(0.25, 1.3, pan);
+    const end = pts[pts.length - 1][0];
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(level, at(t + 0.7));
+    g.gain.setValueAtTime(level, at(t + end - 0.9)); g.gain.linearRampToValueAtTime(0, at(t + end));
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1400; f.Q.value = 2;
+    f.connect(g); g.connect(b);
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(pts[0][1], at(t));
+    for (const [dt, hz] of pts.slice(1)) o.frequency.linearRampToValueAtTime(hz, at(t + dt));
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 4.6; const lg = ctx.createGain(); lg.gain.value = 5;
+    lfo.connect(lg); lg.connect(o.frequency);
+    const o2 = ctx.createOscillator(); o2.type = 'triangle';
+    o2.frequency.setValueAtTime(pts[0][1] * 1.5, at(t));
+    for (const [dt, hz] of pts.slice(1)) o2.frequency.linearRampToValueAtTime(hz * 1.5, at(t + dt));
+    const g2 = ctx.createGain(); g2.gain.value = 0.18; o2.connect(g2); g2.connect(f);
+    o.connect(f);
+    for (const n of [o, o2, lfo]) { n.start(at(t)); n.stop(at(t + end + 0.1)); }
+  }
+  function whoosh(t, dur, level, p0, p1) {
+    const s = noiseSrc(t, t + dur + 0.1);
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.1;
+    f.frequency.setValueAtTime(260, at(t)); f.frequency.exponentialRampToValueAtTime(2600, at(t + dur * 0.6)); f.frequency.exponentialRampToValueAtTime(500, at(t + dur));
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(level, at(t + dur * 0.6)); g.gain.linearRampToValueAtTime(0, at(t + dur));
+    const p = ctx.createStereoPanner(); p.pan.setValueAtTime(p0, at(t)); p.pan.linearRampToValueAtTime(p1, at(t + dur));
+    const wg = ctx.createGain(); wg.gain.value = 0.5;
+    s.connect(f); f.connect(g); g.connect(p); p.connect(master); p.connect(wg); wg.connect(verb);
+  }
+  function impact(t, level) {
+    const b = bus(0.9, 0.45);
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(95, at(t)); o.frequency.exponentialRampToValueAtTime(36, at(t + 0.9));
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(level, at(t + 0.01)); g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.8));
+    o.connect(g); g.connect(b); o.start(at(t)); o.stop(at(t + 1.9));
+    const s = noiseSrc(t, t + 0.6);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+    const ng = ctx.createGain(); ng.gain.setValueAtTime(level * 0.35, at(t)); ng.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.5));
+    s.connect(f); f.connect(ng); ng.connect(b);
+  }
+  function thunder(t) {
+    const b = bus(0.9, 0.55, (r() - 0.5) * 0.8);
+    const s = noiseSrc(t, t + 5);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(1100, at(t)); f.frequency.exponentialRampToValueAtTime(140, at(t + 3));
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(0.55, at(t + 0.05)); g.gain.exponentialRampToValueAtTime(0.0001, at(t + 4.5));
+    s.connect(f); f.connect(g); g.connect(b);
+    const s2 = noiseSrc(t + 0.2, t + 5);
+    const f2 = ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 110;
+    const g2 = ctx.createGain(); g2.gain.setValueAtTime(0, at(t + 0.2)); g2.gain.linearRampToValueAtTime(0.7, at(t + 0.5)); g2.gain.exponentialRampToValueAtTime(0.0001, at(t + 4.8));
+    s2.connect(f2); f2.connect(g2); g2.connect(b);
+  }
+  function wash(t0, t1, level, type, freq, q, swell) {
+    const s = noiseSrc(t0, t1 + 0.2);
+    const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, at(t0)); g.gain.linearRampToValueAtTime(level, at(t0 + 1.5));
+    for (let t = t0 + 1.5; t < t1 - 1.5; t += swell) {
+      g.gain.linearRampToValueAtTime(level * (0.45 + r() * 0.3), at(t + swell * 0.5));
+      g.gain.linearRampToValueAtTime(level, at(t + swell));
+      if (type === 'bandpass') f.frequency.linearRampToValueAtTime(freq * (0.6 + r() * 0.9), at(t + swell));
+    }
+    g.gain.linearRampToValueAtTime(0, at(t1));
+    const wg = ctx.createGain(); wg.gain.value = 0.3;
+    s.connect(f); f.connect(g); g.connect(master); g.connect(wg); wg.connect(verb);
+  }
+
+  // harmony
+  for (const [a, b, name] of PROG) {
+    const lvl = name === 'D' ? 0.03 : 0.024;
+    pad(CH[name], a, b, lvl);
+    if (a >= 3) bass(BASS[name], a, b, name === 'D' ? 0.16 : 0.13);
+  }
+  pad([74, 78, 81], 59.5, 66, 0.012);
+
+  // bloom sparkles
+  const PENTA = [74, 77, 79, 81, 84, 86, 89, 91, 93];
+  for (let t = 0.6; t < 6.3; t += 0.12 + r() * 0.28) pluck(t, PENTA[(r() * PENTA.length) | 0], 0.018 + (t / 6.3) * 0.03, (r() - 0.5) * 1.4);
+
+  // transitions + formation hits
+  for (const [t, lv, p0, p1] of [[5.4, 0.16, -0.7, 0.7], [9.9, 0.2, 0.7, -0.6], [20.9, 0.22, -0.6, 0.7], [32.4, 0.24, 0.6, -0.7], [42, 0.2, -0.7, 0.6], [50.4, 0.2, 0.6, -0.6], [58.4, 0.2, -0.6, 0.6]]) whoosh(t, 1.6, lv, p0, p1);
+  for (const [t, lv] of [[7.7, 0.42], [12.4, 0.5], [23.6, 0.42], [35.0, 0.55], [44.6, 0.32], [53.1, 0.4], [61.0, 0.55]]) impact(t, lv);
+  bell(7.7, 74, 0.09, -0.2); bell(7.95, 81, 0.07, 0.3); bell(61.0, 74, 0.1, -0.2); bell(61.2, 78, 0.08, 0.1); bell(61.45, 81, 0.08, 0.3); bell(61.8, 86, 0.06, 0);
+
+  // whale arps + song
+  const arp = (t0, t1, rate, name, vel, oct, pat) => {
+    let k = 0;
+    for (let t = t0; t < t1; t += rate, k++) pluck(t, CH[name][pat[k % pat.length] % CH[name].length] + oct, vel * (k % 4 === 0 ? 1.25 : 1), (k % 2 ? 0.35 : -0.35));
+  };
+  arp(12.4, 16.5, 0.5, 'Dm', 0.05, 12, [0, 1, 2, 3, 2, 1]);
+  arp(16.5, 21.6, 0.5, 'Bb', 0.05, 12, [0, 1, 2, 3, 2, 1]);
+  whaleCall(13.8, [[0, 190], [1.2, 260], [2.2, 230], [3.3, 150]], 0.075, -0.3);
+  whaleCall(17.6, [[0, 300], [0.9, 420], [1.8, 360], [2.8, 280], [3.6, 200]], 0.06, 0.35);
+
+  // lighthouse: ocean, bell on each beam sweep, sparse plucks
+  wash(22, 34, 0.07, 'lowpass', 520, 0.5, 5.2);
+  for (let t = 24.2; t < 33; t += 5.07) { bell(t, 69, 0.07, 0.4); bell(t + 0.02, 81, 0.035, 0.4); }
+  arp(24, 27.7, 0.9, 'F', 0.035, 12, [0, 2, 1, 3]);
+  arp(27.7, 33, 0.9, 'C', 0.035, 12, [0, 2, 1, 3]);
+
+  // storm: wind, rain, pulses, thunder
+  wash(33.5, 43.5, 0.16, 'bandpass', 700, 0.8, 1.3);
+  wash(33.8, 43.2, 0.05, 'highpass', 4200, 0.5, 2.1);
+  for (let t = 34.2, k = 0; t < 42.7; t += 0.25, k++) {
+    const root = t < 38.2 ? BASS.Gm : BASS.A;
+    const b = bus(0.9, 0.1);
+    const g = ctx.createGain(); const v = k % 4 === 0 ? 0.16 : 0.09;
+    g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(v, at(t + 0.01)); g.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.22));
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(root);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 380;
+    o.connect(f); f.connect(g); g.connect(b); o.start(at(t)); o.stop(at(t + 0.24));
+  }
+  for (const [s] of STRIKES) thunder(s + 0.18);
+
+  // dawn: warm arps, gentle sea
+  wash(43, 52, 0.05, 'lowpass', 600, 0.5, 4.6);
+  arp(44.6, 47.2, 0.42, 'Bb', 0.045, 12, [0, 1, 2, 3]);
+  arp(47.2, 51.2, 0.42, 'F', 0.045, 12, [0, 1, 2, 3]);
+
+  // sky whale: call returns, higher & farther
+  arp(53, 55.5, 0.6, 'Dm', 0.04, 24, [0, 2, 1, 3]);
+  arp(55.5, 59.2, 0.6, 'Bb', 0.04, 24, [0, 2, 1, 3]);
+  whaleCall(53.4, [[0, 230], [1.3, 330], [2.4, 300], [3.6, 190]], 0.06, 0.2);
+  whaleCall(57.0, [[0, 380], [1.0, 520], [2.2, 440], [3.2, 300]], 0.045, -0.35);
+}
+
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, sr = buf.sampleRate, n = buf.length;
+  const ab = new ArrayBuffer(44 + n * ch * 2), dv = new DataView(ab);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true); dv.setUint32(24, sr, true);
+  dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true); dv.setUint16(34, 16, true); ws(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
+  let peak = 0; for (const d of chans) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
+  const g = peak > 0.95 ? 0.95 / peak : 1;
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++, o += 2) dv.setInt16(o, clamp(chans[c][i] * g, -1, 1) * 32767, true);
+  const bytes = new Uint8Array(ab); let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+// ---------------------------------------------------------------- boot + API
+SCENES.forEach((S, i) => buildScene(S, 1000 + i * 97));
+resetSim();
+render(0);
+
+let frameIdx = 0;
+function advanceToTime(t) { while (simT < t - 1e-9) step(); }
+
+window.FILM = {
+  ready: true, duration: DUR, fps: FPS, width: W, height: H, out,
+  reset() { resetSim(); frameIdx = 0; for (const f of fbo) { gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.clear(gl.COLOR_BUFFER_BIT); } },
+  advanceTo(frame) { advanceToTime(frame / FPS); frameIdx = frame; },
+  warmTo(frame, warm = 24) {
+    advanceToTime(Math.max(0, frame - warm) / FPS);
+    for (let f = Math.max(0, frame - warm); f <= frame; f++) { advanceToTime(f / FPS); render(f / FPS); }
+    frameIdx = frame + 1;
+  },
+  still(type = 'image/png') { render(simT); return out.toDataURL(type); },
+  nextFrame(q = 0.95) { advanceToTime(frameIdx / FPS); render(frameIdx / FPS); frameIdx++; return out.toDataURL('image/jpeg', q); },
+  async renderAudio() {
+    const sr = 48000; const oc = new OfflineAudioContext(2, sr * DUR, sr);
+    buildScore(oc, 0);
+    return encodeWav(await oc.startRendering());
+  },
+};
+
+// ---------------------------------------------------------------- live playback
+const params = new URLSearchParams(location.search);
+if (params.has('render')) { document.body.classList.add('render'); return; }
+
+const btn = document.getElementById('play'), clock = document.getElementById('clock');
+let actx = null, T0 = 0, playing = false;
+function loop() {
+  if (!playing) return;
+  const t = actx.currentTime - T0;
+  if (t >= DUR) { playing = false; btn.textContent = 'Replay'; return; }
+  let guard = 0; while (simT < t && guard++ < 6) step();
+  if (simT < t - 0.25) simT = t;
+  render(simT);
+  clock.textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  requestAnimationFrame(loop);
+}
+btn.addEventListener('click', async () => {
+  if (actx) { await actx.close(); }
+  actx = new AudioContext();
+  window.FILM.reset();
+  T0 = actx.currentTime + 0.15;
+  buildScore(actx, T0);
+  playing = true; btn.textContent = 'Restart';
+  requestAnimationFrame(loop);
+});
+})();
+</script>
+</body>
+</html>

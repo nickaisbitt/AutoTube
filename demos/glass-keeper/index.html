@@ -82,7 +82,7 @@ const STORY = {
     { id: 's3', t0: 17.5, t1: 22.5, beat: 17.5, camera: { x: 0.05, y: -0.02, zoom: 1.18, rot: 0 }, subject: 'watch', action: 'dissolve to tower', caption: 'Some keep time.' },
     { id: 's4', t0: 22.5, t1: 30, beat: 22.5, camera: { x: 0.14, y: 0.0, zoom: 1.32, rot: 0 }, subject: 'lighthouse', action: 'beam sweep', caption: '' },
     { id: 's5', t0: 30, t1: 35, beat: 30, camera: { x: 0, y: -0.02, zoom: 1.12, rot: 0 }, subject: 'tower', action: 'tiles become gulls', caption: 'Some keep watch.' },
-    { id: 's6', t0: 35, t1: 42.5, beat: 35, camera: { x: 0, y: -0.02, zoom: 1.22, rot: 0 }, subject: 'gull-flock', action: 'fly across', caption: '' },
+    { id: 's6', t0: 35, t1: 42.5, beat: 35, camera: { x: 0, y: -0.02, zoom: 1.35, rot: 0 }, subject: 'gull-flock', action: 'fly across', caption: '' },
     { id: 's7', t0: 42.5, t1: 47.5, beat: 42.5, camera: { x: 0, y: -0.04, zoom: 1.18, rot: 0 }, subject: 'flock', action: 'spiral dissolve', caption: 'And some leave.' },
     { id: 's8', t0: 47.5, t1: 52, beat: 47.5, camera: { x: 0, y: 0, zoom: 1.0, rot: 0 }, subject: 'title', action: 'end card', caption: '' },
   ],
@@ -229,30 +229,28 @@ const tower = buildMaskTargets((x, y) => {
   return cliff || shaft || gallery || lamp || roof;
 });
 
-// Gull flock — 5 large side-profile birds with clear gaps (not mountain chevrons)
+// Gull flock — 5 small, widely spaced side-profile birds (gaps must stay black)
 function birdSilhouette(x, y, cx, cy, sc, facing) {
   const dx = ((x - cx) / sc) * facing;
   const dy = (y - cy) / sc;
-  // plump body oval
-  const body = (dx * dx) / (0.42 * 0.42) + ((dy - 0.02) * (dy - 0.02)) / (0.22 * 0.22) < 1;
-  // head / beak
-  const head = Math.hypot(dx - 0.38, dy + 0.02) < 0.16;
-  // raised wing (thick crescent above body)
+  const body = (dx * dx) / (0.38 * 0.38) + ((dy - 0.04) * (dy - 0.04)) / (0.2 * 0.2) < 1;
+  const head = Math.hypot(dx - 0.42, dy + 0.0) < 0.14;
+  // compact raised wing — keep short so birds don't fuse
   const wing =
-    dx > -0.55 && dx < 0.35 && dy < 0.05 && dy > -0.55
-    && Math.abs(dy + 0.22 - 0.22 * Math.sin((dx + 0.55) * 1.6)) < 0.16;
-  // short tail
-  const tail = dx < -0.32 && dx > -0.62 && Math.abs(dy - 0.06) < 0.12;
+    dx > -0.25 && dx < 0.28 && dy < -0.02 && dy > -0.48
+    && Math.abs(dy + 0.28 - 0.1 * Math.sin((dx + 0.2) * 2.2)) < 0.13;
+  const tail = dx < -0.28 && dx > -0.52 && Math.abs(dy - 0.05) < 0.1;
   return body || head || wing || tail;
 }
 
 const flock = buildMaskTargets((x, y) => {
+  // diagonal flight path with large gaps between birds
   const birds = [
-    [0.28, 0.38, 0.22, 1],
-    [0.48, 0.30, 0.24, 1],
-    [0.68, 0.36, 0.22, 1],
-    [0.38, 0.55, 0.20, 1],
-    [0.60, 0.52, 0.21, 1],
+    [0.20, 0.42, 0.13, 1],
+    [0.38, 0.30, 0.14, 1],
+    [0.56, 0.40, 0.13, 1],
+    [0.72, 0.28, 0.14, 1],
+    [0.48, 0.56, 0.12, 1],
   ];
   for (const [bx, by, scN, facing] of birds) {
     if (birdSilhouette(x, y, W * bx, H * by, W * scN, facing)) return true;
@@ -319,10 +317,10 @@ function tilePos(i, t) {
   x += Math.cos(ang) * turb * 22 * (0.5 + order[i]);
   y += Math.sin(ang * 1.3) * turb * 18 * (0.5 + order[i]);
 
-  // flock travel drift
-  const fly = smoothstep(34, 36, t) * (1 - smoothstep(42, 44, t));
-  x += fly * (t - 34) * 22;
-  y += fly * Math.sin(t * 1.2 + phase[i] * 4) * 8;
+  // flock travel drift — keep modest so birds stay readable
+  const fly = smoothstep(34.5, 36.5, t) * (1 - smoothstep(42, 44, t));
+  x += fly * (t - 34.5) * 14;
+  y += fly * Math.sin(t * 1.1 + phase[i] * 4) * 5;
 
   // spiral spin — hold readable helix through t≈46, expand after
   const spin = smoothstep(42.5, 45, t);

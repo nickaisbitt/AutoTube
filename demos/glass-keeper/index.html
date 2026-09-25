@@ -28,7 +28,7 @@
 'use strict';
 
 const W = 1920, H = 1080, FPS = 30, DUR = 52, SEED = 0x61a55;
-const COLS = 96, ROWS = 54;           // 5184 tiles — readable flocks, headless-friendly
+const COLS = 112, ROWS = 63;          // 7056 tiles — finer silhouettes, still seekPure-friendly
 const N = COLS * ROWS;
 const TW = W / COLS, TH = H / ROWS;
 
@@ -68,26 +68,26 @@ const STORY = {
     foam: '#e8e4dc', verdigris: '#6f8f7e', lamp: '#f0c87a',
   },
   sections: [
-    { id: 'wall', t0: 0, t1: 5, mood: 'still', harmony: 'Dm' },
-    { id: 'watch', t0: 5, t1: 17.5, mood: 'assemble', harmony: 'Bb' },
+    { id: 'wall', t0: 0, t1: 3.75, mood: 'still', harmony: 'Dm' },
+    { id: 'watch', t0: 3.75, t1: 17.5, mood: 'assemble', harmony: 'Bb' },
     { id: 'tower', t0: 17.5, t1: 30, mood: 'vigil', harmony: 'F' },
     { id: 'flock', t0: 30, t1: 42.5, mood: 'lift', harmony: 'C' },
     { id: 'spiral', t0: 42.5, t1: 52, mood: 'release', harmony: 'D' },
   ],
   shots: [
-    // 2 bars — tight gold-vein material close-up (not wallpaper)
-    { id: 's0', t0: 0, t1: 5, beat: 0, camera: { x: 0.22, y: -0.14, zoom: 2.85, rot: 0.04 }, subject: 'mosaic-wall', action: 'gold vein detail', caption: '' },
-    { id: 's1', t0: 5, t1: 12.5, beat: 5, camera: { x: 0, y: 0.02, zoom: 1.22, rot: 0 }, subject: 'tiles', action: 'lift into watch', caption: 'They were never cemented.' },
-    { id: 's2', t0: 12.5, t1: 17.5, beat: 12.5, camera: { x: 0, y: 0, zoom: 1.48, rot: 0 }, subject: 'pocket-watch', action: 'assemble + tick', caption: '' },
-    { id: 's3', t0: 17.5, t1: 22.5, beat: 17.5, camera: { x: 0.05, y: -0.02, zoom: 1.22, rot: 0 }, subject: 'watch', action: 'dissolve to tower', caption: 'Some keep time.' },
-    { id: 's4', t0: 22.5, t1: 30, beat: 22.5, camera: { x: 0.14, y: 0.0, zoom: 1.38, rot: 0 }, subject: 'lighthouse', action: 'beam sweep', caption: '' },
-    { id: 's5', t0: 30, t1: 35, beat: 30, camera: { x: 0, y: -0.02, zoom: 1.12, rot: 0 }, subject: 'tower', action: 'tiles become gulls', caption: 'Some keep watch.' },
-    { id: 's6', t0: 35, t1: 42.5, beat: 35, camera: { x: 0, y: -0.02, zoom: 1.35, rot: 0 }, subject: 'gull-flock', action: 'fly across', caption: '' },
-    { id: 's7', t0: 42.5, t1: 47.5, beat: 42.5, camera: { x: 0, y: -0.04, zoom: 1.18, rot: 0 }, subject: 'flock', action: 'spiral dissolve', caption: 'And some leave.' },
+    // gold-vein material close-up — short opening, then lift
+    { id: 's0', t0: 0, t1: 3.75, beat: 0, camera: { x: -0.02, y: 0.08, zoom: 3.2, rot: 0.03 }, subject: 'mosaic-wall', action: 'gold vein detail', caption: '' },
+    { id: 's1', t0: 3.75, t1: 12.5, beat: 3.75, camera: { x: 0, y: 0.02, zoom: 1.32, rot: 0 }, subject: 'tiles', action: 'lift into watch', caption: 'They were never cemented.' },
+    { id: 's2', t0: 12.5, t1: 17.5, beat: 12.5, camera: { x: 0, y: 0, zoom: 1.55, rot: 0 }, subject: 'pocket-watch', action: 'assemble + tick', caption: '' },
+    { id: 's3', t0: 17.5, t1: 22.5, beat: 17.5, camera: { x: 0.05, y: -0.02, zoom: 1.28, rot: 0 }, subject: 'watch', action: 'dissolve to tower', caption: 'Some keep time.' },
+    { id: 's4', t0: 22.5, t1: 30, beat: 22.5, camera: { x: 0.16, y: 0.02, zoom: 1.45, rot: 0 }, subject: 'lighthouse', action: 'beam sweep', caption: '' },
+    { id: 's5', t0: 30, t1: 35, beat: 30, camera: { x: 0, y: -0.04, zoom: 1.22, rot: 0 }, subject: 'tower', action: 'tiles become gulls', caption: 'Some keep watch.' },
+    { id: 's6', t0: 35, t1: 42.5, beat: 35, camera: { x: 0, y: -0.04, zoom: 1.45, rot: 0 }, subject: 'gull-flock', action: 'fly across', caption: '' },
+    { id: 's7', t0: 42.5, t1: 47.5, beat: 42.5, camera: { x: 0, y: -0.02, zoom: 1.28, rot: 0 }, subject: 'flock', action: 'spiral dissolve', caption: 'And some leave.' },
     { id: 's8', t0: 47.5, t1: 52, beat: 47.5, camera: { x: 0, y: 0, zoom: 1.0, rot: 0 }, subject: 'title', action: 'end card', caption: '' },
   ],
   events: [
-    { t: 5, kind: 'whoosh', id: 'lift' },
+    { t: 3.75, kind: 'whoosh', id: 'lift' },
     { t: 12.5, kind: 'impact', id: 'watch-lock' },
     { t: 12.5 + 0.625, kind: 'bell', id: 'tick-a' },
     { t: 12.5 + 1.25, kind: 'bell', id: 'tick-b' },
@@ -117,10 +117,15 @@ for (let i = 0; i < N; i++) {
   const col = i % COLS, row = (i / COLS) | 0;
   homeX[i] = (col + 0.5) * TW;
   homeY[i] = (row + 0.5) * TH;
-  // gold leaf veins — large scale so a zoomed shot reads as material, not wallpaper
+  // Sinuous gold rivulet through cool glass — readable ribbon form at material close-up
   const nx = col / COLS, ny = row / ROWS;
-  const vein = Math.abs(Math.sin((nx * 3.2 + ny * 1.7) * Math.PI)) * Math.abs(Math.cos((nx * 1.3 - ny * 2.6) * Math.PI));
-  tint[i] = clamp(vein * 1.55 - 0.4 + (rnd() - 0.5) * 0.12, 0, 1);
+  const meander = 0.045 * Math.sin(nx * 12.5) + 0.022 * Math.sin(nx * 27 + 1.2);
+  const dVein = ny - 0.32 - 0.55 * nx - meander;
+  const width = 12.5 + 3.5 * Math.sin(nx * 9 + 0.4); // pulsing width = mineral, not stripe
+  const main = Math.exp(-Math.pow(dVein * width, 2));
+  const core = Math.exp(-Math.pow(dVein * (width * 2.1), 2));
+  const flake = Math.exp(-Math.pow((ny - 0.48 - 0.2 * nx - 0.03 * Math.sin(nx * 40)) * 28, 2)) * 0.35;
+  tint[i] = clamp(main * 1.2 + core * 0.75 + flake + (rnd() - 0.5) * 0.03, 0, 1);
   phase[i] = rnd();
   order[i] = rnd();
 }
@@ -158,14 +163,16 @@ function buildMaskTargets(predicate) {
   const idx = Array.from({ length: N }, (_, i) => i);
   for (let i = N - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; const t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
   const used = new Uint8Array(N);
-  // Pack ≥97% of tiles INTO the subject (resample/jitter if mask is sparse)
+  // Pack ≥97% of tiles INTO the subject (tight jitter so sparse strokes stay strokes)
   const take = Math.floor(N * 0.97);
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  const sparse = pts.length < N * 0.55;
   for (let p = 0; p < take; p++) {
     const i = idx[p];
     const src = pts[p % pts.length];
-    const jx = (p >= pts.length) ? (rnd() - 0.5) * TW * 0.18 : 0;
-    const jy = (p >= pts.length) ? (rnd() - 0.5) * TH * 0.18 : 0;
+    const jAmp = sparse ? 0.08 : 0.16;
+    const jx = (p >= pts.length) ? (rnd() - 0.5) * TW * jAmp : 0;
+    const jy = (p >= pts.length) ? (rnd() - 0.5) * TH * jAmp : 0;
     const px = src[0] + jx, py = src[1] + jy;
     txs[i] = px; tys[i] = py;
     used[i] = 1;
@@ -173,13 +180,17 @@ function buildMaskTargets(predicate) {
     if (py < minY) minY = py; if (py > maxY) maxY = py;
   }
   const bw = Math.max(40, maxX - minX), bh = Math.max(40, maxY - minY);
-  // leftovers (≤3%): sparse dust INSIDE / near subject AABB only — never edge frame
+  // leftovers (≤3%): cling to subject — prefer near existing pts (keeps flock gaps black)
   for (let i = 0; i < N; i++) if (!used[i]) {
-    if (rnd() < 0.7) {
+    if (sparse && pts.length) {
+      const src = pts[(rnd() * pts.length) | 0];
+      txs[i] = src[0] + (rnd() - 0.5) * TW * 0.9;
+      tys[i] = src[1] + (rnd() - 0.5) * TH * 0.9;
+    } else if (rnd() < 0.75) {
       txs[i] = minX + rnd() * bw;
       tys[i] = minY + rnd() * bh;
     } else {
-      const near = 0.12;
+      const near = 0.08;
       txs[i] = minX - bw * near + rnd() * bw * (1 + 2 * near);
       tys[i] = minY - bh * near + rnd() * bh * (1 + 2 * near);
     }
@@ -229,28 +240,38 @@ const tower = buildMaskTargets((x, y) => {
   return cliff || shaft || gallery || lamp || roof;
 });
 
-// Gull flock — 5 small, widely spaced side-profile birds (gaps must stay black)
+// Gull flock — 4 large side-profile birds; stroke silhouettes so gaps stay black
+function distSeg(px, py, ax, ay, bx, by) {
+  const vx = bx - ax, vy = by - ay;
+  const den = vx * vx + vy * vy || 1;
+  const t = clamp(((px - ax) * vx + (py - ay) * vy) / den, 0, 1);
+  return Math.hypot(px - ax - t * vx, py - ay - t * vy);
+}
+
 function birdSilhouette(x, y, cx, cy, sc, facing) {
+  // Local: +x = beak. Filled fuselage + clear raised wing (must read as bird at thumb size).
   const dx = ((x - cx) / sc) * facing;
   const dy = (y - cy) / sc;
-  const body = (dx * dx) / (0.38 * 0.38) + ((dy - 0.04) * (dy - 0.04)) / (0.2 * 0.2) < 1;
-  const head = Math.hypot(dx - 0.42, dy + 0.0) < 0.14;
-  // compact raised wing — keep short so birds don't fuse
+  const body =
+    dx > -0.42 && dx < 0.48
+    && Math.abs(dy - 0.02) < 0.14 * (1 - Math.pow(clamp((Math.abs(dx) - 0.08) / 0.45, 0, 1), 1.4));
+  const head = Math.hypot(dx - 0.52, dy + 0.0) < 0.15;
+  const beak = dx > 0.58 && dx < 0.88 && Math.abs(dy + 0.02) < 0.055;
+  // Raised wing as a filled crescent (not hairline stroke)
   const wing =
-    dx > -0.25 && dx < 0.28 && dy < -0.02 && dy > -0.48
-    && Math.abs(dy + 0.28 - 0.1 * Math.sin((dx + 0.2) * 2.2)) < 0.13;
-  const tail = dx < -0.28 && dx > -0.52 && Math.abs(dy - 0.05) < 0.1;
-  return body || head || wing || tail;
+    dx > -0.28 && dx < 0.48 && dy < -0.02 && dy > -0.72
+    && Math.abs(dy + 0.38 - 0.12 * Math.sin((dx + 0.15) * 2.4)) < 0.16;
+  const tail = dx < -0.32 && dx > -0.72 && Math.abs(dy - 0.04) < 0.12;
+  return body || head || beak || wing || tail;
 }
 
 const flock = buildMaskTargets((x, y) => {
-  // diagonal flight path with large gaps between birds
+  // 4 larger birds with clear black gaps
   const birds = [
-    [0.20, 0.42, 0.13, 1],
-    [0.38, 0.30, 0.14, 1],
-    [0.56, 0.40, 0.13, 1],
-    [0.72, 0.28, 0.14, 1],
-    [0.48, 0.56, 0.12, 1],
+    [0.20, 0.42, 0.18, 1],
+    [0.44, 0.28, 0.19, 1],
+    [0.70, 0.40, 0.18, 1],
+    [0.52, 0.60, 0.17, 1],
   ];
   for (const [bx, by, scN, facing] of birds) {
     if (birdSilhouette(x, y, W * bx, H * by, W * scN, facing)) return true;
@@ -258,16 +279,16 @@ const flock = buildMaskTargets((x, y) => {
   return false;
 });
 
-// Spiral — fewer revolutions, thicker radial arm so helix reads before expand
+// Spiral — Archimedean helix: ~2.6 turns, moderate arm thickness, clear gaps
 const spiral = (() => {
   const txs = new Float32Array(N), tys = new Float32Array(N);
   for (let i = 0; i < N; i++) {
-    const u = (i + phase[i]) / N;
-    const a = u * TAU * 3.2 + phase[i] * 0.9;
-    const r = 55 + u * Math.min(W, H) * 0.40;
-    const thick = (phase[i] - 0.5) * 36;
+    const u = (i + phase[i] * 0.35) / N;
+    const a = u * TAU * 2.6 + phase[i] * 0.35;
+    const r = 70 + u * Math.min(W, H) * 0.42;
+    const thick = (phase[i] - 0.5) * 20; // thinner than before → helix arms, not egg
     txs[i] = W / 2 + Math.cos(a) * (r + thick);
-    tys[i] = H / 2 + Math.sin(a) * (r + thick) * 0.68;
+    tys[i] = H / 2 + Math.sin(a) * (r + thick) * 0.78;
   }
   return { x: txs, y: tys };
 })();
@@ -276,12 +297,12 @@ const wall = { x: homeX, y: homeY };
 
 function formationWeights(t) {
   // wall → watch (early lock) → tower → flock → spiral (bar-aligned)
-  // wall must hit ~0 by t=9 so it cannot sprinkle a full-frame dust grid
-  const wWall = 1 - smoothstep(4.5, 8.5, t);
-  const wWatch = smoothstep(5.5, 11.5, t) * (1 - smoothstep(16.5, 20.5, t));
+  // wall falls fast; watch ring readable by t≈8–9; spiral locked through t≈46
+  const wWall = 1 - smoothstep(3.2, 6.2, t);
+  const wWatch = smoothstep(4.2, 9.0, t) * (1 - smoothstep(16.5, 20.5, t));
   const wTower = smoothstep(17.5, 22.5, t) * (1 - smoothstep(28.5, 32.5, t));
-  const wFlock = smoothstep(30.0, 35.0, t) * (1 - smoothstep(41.0, 43.5, t));
-  const wSpiral = smoothstep(42.0, 44.5, t) * (1 - smoothstep(47.8, 49.2, t));
+  const wFlock = smoothstep(30.0, 34.2, t) * (1 - smoothstep(41.0, 43.5, t));
+  const wSpiral = smoothstep(42.0, 43.8, t) * (1 - smoothstep(47.5, 49.0, t));
   const sum = wWall + wWatch + wTower + wFlock + wSpiral + 1e-6;
   return [wWall / sum, wWatch / sum, wTower / sum, wFlock / sum, wSpiral / sum];
 }
@@ -306,38 +327,38 @@ function tilePos(i, t) {
   x += (phase[i] - 0.5) * TW * 0.25;
   y += (order[i] - 0.5) * TH * 0.22;
 
-  // transition turbulence — settle before locked watch frame (t≈12.5)
-  const lift = smoothstep(4.8, 7.2, t) * (1 - smoothstep(9.0, 11.5, t))
+  // transition turbulence — settle early so watch ring reads by t≈8–10
+  const lift = smoothstep(3.8, 5.8, t) * (1 - smoothstep(7.5, 9.8, t))
     + smoothstep(17.5, 20, t) * (1 - smoothstep(22, 24, t))
-    + smoothstep(29.5, 32, t) * (1 - smoothstep(34, 36, t))
-    + smoothstep(41.5, 44, t) * (1 - smoothstep(45.5, 47, t));
-  const stagger = smoother(clamp((t - 5.2 - order[i] * 2.0) / 1.1, 0, 1));
+    + smoothstep(29.5, 32, t) * (1 - smoothstep(33.5, 35.5, t))
+    + smoothstep(41.5, 43.5, t) * (1 - smoothstep(44.5, 46.0, t));
+  const stagger = smoother(clamp((t - 4.0 - order[i] * 1.6) / 1.0, 0, 1));
   const turb = lift * (0.28 + 0.55 * stagger);
   const ang = phase[i] * TAU + t * (0.7 + phase[i]);
   x += Math.cos(ang) * turb * 22 * (0.5 + order[i]);
   y += Math.sin(ang * 1.3) * turb * 18 * (0.5 + order[i]);
 
-  // flock travel drift — keep modest so birds stay readable
-  const fly = smoothstep(34.5, 36.5, t) * (1 - smoothstep(42, 44, t));
-  x += fly * (t - 34.5) * 14;
-  y += fly * Math.sin(t * 1.1 + phase[i] * 4) * 5;
+  // flock travel drift — keep modest so birds stay readable at lock
+  const fly = smoothstep(35.0, 37.0, t) * (1 - smoothstep(42, 44, t));
+  x += fly * (t - 35.0) * 12;
+  y += fly * Math.sin(t * 1.1 + phase[i] * 4) * 4;
 
   // spiral spin — hold readable helix through t≈46, expand after
-  const spin = smoothstep(42.5, 45, t);
+  const spin = smoothstep(42.5, 44.5, t);
   if (spin > 0) {
     const cx = W / 2, cy = H / 2;
     const dx = x - cx, dy = y - cy;
-    const a2 = spin * (t - 42) * 0.4;
+    const a2 = spin * (t - 42) * 0.32;
     const ca = Math.cos(a2), sa = Math.sin(a2);
     x = cx + ca * dx - sa * dy;
     y = cy + sa * dx + ca * dy;
-    const out = smoothstep(47.2, 51.0, t);
+    const out = smoothstep(47.6, 51.0, t);
     x = lerp(x, cx + dx * 2.4, out);
     y = lerp(y, cy + dy * 2.4, out);
   }
 
   // end card: clear tiles into abyss before title
-  const clear = smoothstep(47.6, 49.0, t);
+  const clear = smoothstep(47.8, 49.2, t);
   if (clear > 0) {
     const cx = W / 2, cy = H / 2;
     x = lerp(x, cx + (x - cx) * 3.2, clear);
@@ -387,7 +408,7 @@ const C_VER = hexRgb(STORY.palette.verdigris);
 function drawFrame(t) {
   t = clamp(t, 0, DUR);
   const cam = camAt(t);
-  const clearTiles = smoothstep(47.6, 49.0, t);
+  const clearTiles = smoothstep(47.8, 49.2, t);
 
   // background
   const g = ctx.createLinearGradient(0, 0, 0, H);
@@ -413,7 +434,7 @@ function drawFrame(t) {
   const tileAlpha = 1 - clearTiles;
 
   const gap = 1.15;
-  const [, wWatch] = formationWeights(t);
+  const [wWall, wWatch] = formationWeights(t);
   for (let i = 0; i < N; i++) {
     const [x, y] = tilePos(i, t);
     if (tileAlpha < 0.02) continue;
@@ -429,6 +450,20 @@ function drawFrame(t) {
     let r = (C_GLASS[0] * (1 - k) + C_GOLD[0] * k) * shimmer * key;
     let gg = (C_GLASS[1] * (1 - k) + C_GOLD[1] * k) * shimmer * key;
     let b = (C_GLASS[2] * (1 - k) + C_GOLD[2] * k) * shimmer * key;
+    // Wall close-up: hot gold ribbon vs cooler glass so the vein edge reads at thumbnail
+    if (wWall > 0.55) {
+      if (k > 0.4) {
+        const push = (k - 0.4) * wWall * 1.55;
+        r = Math.min(255, r + 58 * push);
+        gg = Math.min(255, gg + 26 * push);
+        b = Math.min(255, b * (1 - 0.35 * push));
+      } else {
+        const cool = (0.4 - k) * wWall * 0.55;
+        r *= 1 - 0.28 * cool;
+        gg *= 1 - 0.18 * cool;
+        b *= 1 - 0.05 * cool;
+      }
+    }
 
     // beam lights tiles inside wedge (leftward cone from lantern)
     if (beamA > 0.01) {
@@ -461,17 +496,19 @@ function drawFrame(t) {
     ctx.fillRect(x - tw / 2, y - th / 2, tw, th);
 
     // light-relative specular — gold hotter/tighter, glass soft Fresnel rim
+    // Wall close-up: quiet uniform bevel so gold vein form wins over grid rhythm
+    const wallQuiet = 1 - 0.62 * wWall;
     const specPow = isGlass ? 3.2 : 10;
     const spec = Math.pow(ndot, specPow);
     const fresnel = isGlass ? Math.pow(1 - ndot, 1.5) * 0.28 : 0;
-    const specA = (0.12 + 0.72 * k) * spec + fresnel;
+    const specA = ((0.12 + 0.72 * k) * spec + fresnel) * wallQuiet;
     if (specA > 0.015) {
       ctx.globalAlpha = tileAlpha * clamp(specA, 0, 0.9);
       ctx.fillStyle = k > 0.5 ? 'rgb(255,242,200)' : 'rgb(235,245,255)';
       ctx.fillRect(x - tw / 2 + 1, y - th / 2 + 1, tw * (0.32 + 0.22 * k), th * (0.2 + 0.12 * k));
       // cheap upper-left bevel when facing light
-      if (ndot > 0.5) {
-        ctx.globalAlpha = tileAlpha * (0.14 + 0.22 * k) * ndot;
+      if (ndot > 0.5 && wWall < 0.85) {
+        ctx.globalAlpha = tileAlpha * (0.14 + 0.22 * k) * ndot * wallQuiet;
         ctx.fillRect(x - tw / 2, y - th / 2, tw * 0.14, th);
         ctx.fillRect(x - tw / 2, y - th / 2, tw, th * 0.12);
       }
@@ -536,7 +573,7 @@ function drawFrame(t) {
     ctx.fillText('tiles that were never cemented', W / 2, H / 2 + 36);
   }
   // end card after tiles clear
-  const end = smoothstep(48.4, 49.4, t);
+  const end = smoothstep(48.8, 49.6, t);
   if (end > 0.01) {
     ctx.fillStyle = `rgba(7,9,14,${0.72 * end})`;
     ctx.fillRect(0, 0, W, H);

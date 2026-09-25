@@ -85,15 +85,15 @@ const STORY = {
   ],
   // camera x/y = world look-at; zoom = screen scale. Continuous path — no hard cuts.
   shots: [
-    { id: 's0', t0: 0, t1: 6.4, beat: 0, camera: { x: 180, y: 90, zoom: 1.05, rot: 0 }, subject: 'open-sea', action: 'push into ink swirl', caption: '' },
+    { id: 's0', t0: 0, t1: 6.4, beat: 0, camera: { x: 200, y: 80, zoom: 1.18, rot: 0 }, subject: 'open-sea', action: 'push into ink swirl', caption: '' },
     { id: 's1', t0: 6.4, t1: 9.6, beat: 6.4, camera: { x: 420, y: -10, zoom: 1.35, rot: 0 }, subject: 'title', action: 'assemble title', caption: '' },
-    { id: 's2', t0: 9.6, t1: 16.0, beat: 9.6, camera: { x: 1100, y: 110, zoom: 1.12, rot: -0.02 }, subject: 'whale', action: 'orbit whale swim', caption: 'Ink remembers the deep.' },
-    { id: 's3', t0: 16.0, t1: 22.4, beat: 16.0, camera: { x: 2100, y: 30, zoom: 0.92, rot: 0.01 }, subject: 'whale-coast', action: 'pan push to coast', caption: '' },
-    { id: 's4', t0: 22.4, t1: 28.8, beat: 22.4, camera: { x: 2850, y: -30, zoom: 1.22, rot: 0 }, subject: 'lighthouse', action: 'orbit beam sweep', caption: 'Some keep watch.' },
-    { id: 's5', t0: 28.8, t1: 35.2, beat: 28.8, camera: { x: 3900, y: 70, zoom: 0.88, rot: 0.03 }, subject: 'storm-ship', action: 'pull into storm', caption: '' },
-    { id: 's6', t0: 35.2, t1: 41.6, beat: 35.2, camera: { x: 4450, y: 95, zoom: 1.12, rot: -0.04 }, subject: 'ship', action: 'orbit ship pitch', caption: '' },
-    { id: 's7', t0: 41.6, t1: 48.0, beat: 41.6, camera: { x: 5450, y: 105, zoom: 1.02, rot: 0 }, subject: 'paper-boat', action: 'pull back dawn', caption: 'And some float home.' },
-    { id: 's8', t0: 48.0, t1: 54.4, beat: 48.0, camera: { x: 6050, y: -380, zoom: 0.82, rot: 0 }, subject: 'constellation', action: 'lift to sky whale', caption: '' },
+    { id: 's2', t0: 9.6, t1: 16.0, beat: 9.6, camera: { x: 1080, y: 100, zoom: 1.52, rot: -0.02 }, subject: 'whale', action: 'orbit whale swim', caption: 'Ink remembers the deep.' },
+    { id: 's3', t0: 16.0, t1: 22.4, beat: 16.0, camera: { x: 2100, y: 30, zoom: 1.05, rot: 0.01 }, subject: 'whale-coast', action: 'pan push to coast', caption: '' },
+    { id: 's4', t0: 22.4, t1: 28.8, beat: 22.4, camera: { x: 2850, y: -40, zoom: 1.38, rot: 0 }, subject: 'lighthouse', action: 'orbit beam sweep', caption: 'Some keep watch.' },
+    { id: 's5', t0: 28.8, t1: 35.2, beat: 28.8, camera: { x: 3900, y: 70, zoom: 0.95, rot: 0.03 }, subject: 'storm-ship', action: 'pull into storm', caption: '' },
+    { id: 's6', t0: 35.2, t1: 41.6, beat: 35.2, camera: { x: 4450, y: 80, zoom: 1.28, rot: -0.04 }, subject: 'ship', action: 'orbit ship pitch', caption: '' },
+    { id: 's7', t0: 41.6, t1: 48.0, beat: 41.6, camera: { x: 5450, y: 95, zoom: 1.12, rot: 0 }, subject: 'paper-boat', action: 'pull back dawn', caption: 'And some float home.' },
+    { id: 's8', t0: 48.0, t1: 54.4, beat: 48.0, camera: { x: 6050, y: -400, zoom: 1.08, rot: 0 }, subject: 'constellation', action: 'lift to sky whale', caption: '' },
     { id: 's9', t0: 54.4, t1: 64.0, beat: 54.4, camera: { x: 6200, y: -180, zoom: 1.0, rot: 0 }, subject: 'end-card', action: 'settle end card', caption: '' },
   ],
   events: [
@@ -133,9 +133,16 @@ const size = new Float32Array(N);
 const tint = new Float32Array(N);
 
 for (let i = 0; i < N; i++) {
-  // concentrate open-sea ink near the water column, not a starfield
-  px0[i] = (rnd() - 0.5) * 9000;
-  py0[i] = 40 + (rnd() - 0.15) * 900 + (rnd() > 0.7 ? (rnd() - 0.5) * 600 : 0);
+  // concentrate early ink near the open-sea swirl, not a blank starfield
+  if (rnd() < 0.72) {
+    const ang = rnd() * TAU;
+    const rad = 40 + rnd() * 520;
+    px0[i] = 200 + Math.cos(ang) * rad * (0.7 + rnd() * 0.6);
+    py0[i] = 90 + Math.sin(ang) * rad * 0.75;
+  } else {
+    px0[i] = (rnd() - 0.5) * 9000;
+    py0[i] = 40 + (rnd() - 0.15) * 900 + (rnd() > 0.7 ? (rnd() - 0.5) * 600 : 0);
+  }
   phase[i] = rnd();
   order[i] = rnd();
   size[i] = 1.6 + rnd() * 3.2;
@@ -172,7 +179,7 @@ function sampleMask(predicate, cx, cy, halfW, halfH, seedOff) {
     const j = (r() * (i + 1)) | 0;
     const tmp = pts[i]; pts[i] = pts[j]; pts[j] = tmp;
   }
-  const take = Math.min(pts.length, Math.floor(N * 0.96));
+  const take = Math.min(pts.length, Math.floor(N * 0.985));
   const idx = Array.from({ length: N }, (_, i) => i);
   for (let i = N - 1; i > 0; i--) {
     const j = (r() * (i + 1)) | 0;
@@ -186,66 +193,80 @@ function sampleMask(predicate, cx, cy, halfW, halfH, seedOff) {
     used[i] = 1;
     core[i] = 1;
   }
-  // leftovers: distant ocean dust — never a circular halo around the subject
+  // leftovers: far off-frame ocean dust — never a circular halo around the subject
   for (let i = 0; i < N; i++) if (!used[i]) {
     const edge = r();
     if (edge < 0.5) {
-      txs[i] = cx + (r() - 0.5) * halfW * 6;
-      tys[i] = cy + halfH * (1.6 + r() * 2.2);
+      txs[i] = cx + (r() - 0.5) * halfW * 9;
+      tys[i] = cy + halfH * (2.8 + r() * 3.5);
     } else {
-      txs[i] = cx + (r() < 0.5 ? -1 : 1) * halfW * (2.2 + r() * 3);
-      tys[i] = cy + (r() - 0.3) * halfH * 2.5;
+      txs[i] = cx + (r() < 0.5 ? -1 : 1) * halfW * (3.5 + r() * 4);
+      tys[i] = cy + (r() - 0.3) * halfH * 3.5;
     }
   }
   return { x: txs, y: tys, core };
 }
 
-// Whale silhouette — thick body, clear fluke, pectoral, eye cutout
+// Open-sea ink swirl — readable form by ~3s (thumbnail not blank ocean)
+const SWIRL_CX = 200, SWIRL_CY = 90;
+const swirl = sampleMask((lx, ly) => {
+  const r = Math.hypot(lx, ly);
+  const ang = Math.atan2(ly, lx);
+  const arm = Math.abs(((ang / TAU) * 3 - r * 2.4 + 10) % 1 - 0.5) < 0.1 && r > 0.1 && r < 0.92;
+  const arm2 = Math.abs(((ang / TAU) * 3 - r * 2.4 + 10.5) % 1 - 0.5) < 0.07 && r > 0.18 && r < 0.85;
+  const core = r < 0.28;
+  const ring = r > 0.48 && r < 0.68 && Math.abs(Math.sin(ang * 3)) > 0.35;
+  return arm || arm2 || core || ring;
+}, SWIRL_CX, SWIRL_CY, 480, 360, 707);
+
+// Whale silhouette — thick body, bold fluke, pectoral, eye cutout (thumbnail-readable)
 const WHALE_CX = 1000, WHALE_CY = 120;
 const whale = sampleMask((lx, ly) => {
-  const body = Math.hypot(lx * 0.95, ly * 2.15) < 0.78 && lx > -0.5 && lx < 0.78;
-  const head = Math.hypot((lx - 0.58) / 0.42, ly / 0.48) < 1 && lx > 0.2;
-  const jaw = lx > 0.35 && lx < 0.92 && ly > -0.05 && ly < 0.28 && ly < 0.05 + (0.92 - lx) * 0.35;
-  const flukeTop = lx < -0.42 && lx > -0.98 && ly < -0.05 && ly > -0.62 && ly > -0.15 + (lx + 0.42) * 0.9;
-  const flukeBot = lx < -0.42 && lx > -0.98 && ly > 0.05 && ly < 0.62 && ly < 0.15 - (lx + 0.42) * 0.9;
-  const peduncle = lx > -0.55 && lx < -0.25 && Math.abs(ly) < 0.22;
-  const fin = lx > 0.0 && lx < 0.38 && ly > 0.18 && ly < 0.62
-    && Math.abs(ly - 0.22 - (lx - 0.0) * 1.05) < 0.2;
-  const eye = Math.hypot(lx - 0.66, ly + 0.06) < 0.055;
+  const body = Math.hypot(lx * 0.88, ly * 1.85) < 0.88 && lx > -0.55 && lx < 0.82;
+  const head = Math.hypot((lx - 0.55) / 0.48, ly / 0.55) < 1 && lx > 0.15;
+  const jaw = lx > 0.3 && lx < 0.95 && ly > -0.08 && ly < 0.35 && ly < 0.08 + (0.95 - lx) * 0.4;
+  const flukeTop = lx < -0.35 && lx > -1.02 && ly < 0.06 && ly > -0.78
+    && ly > -0.28 + (lx + 0.35) * 1.15 && ly < 0.1 + (lx + 0.35) * 0.22;
+  const flukeBot = lx < -0.35 && lx > -1.02 && ly > -0.06 && ly < 0.78
+    && ly < 0.28 - (lx + 0.35) * 1.15 && ly > -0.1 - (lx + 0.35) * 0.22;
+  const peduncle = lx > -0.6 && lx < -0.18 && Math.abs(ly) < 0.32;
+  const fin = lx > -0.02 && lx < 0.42 && ly > 0.14 && ly < 0.72
+    && Math.abs(ly - 0.2 - (lx + 0.02) * 1.1) < 0.26;
+  const eye = Math.hypot(lx - 0.68, ly + 0.08) < 0.06;
   return (body || head || jaw || flukeTop || flukeBot || peduncle || fin) && !eye;
-}, WHALE_CX, WHALE_CY, 560, 240, 101);
+}, WHALE_CX, WHALE_CY, 520, 260, 101);
 
-// Lighthouse + cliff + moon — thicker shaft, clear stripes via density
+// Lighthouse + cliff + moon — bold shaft/lamp, dense cliff
 const LH_CX = 2850, LH_CY = -20;
 const lighthouse = sampleMask((lx, ly) => {
   const cliff = inPoly(lx, ly, [
-    [-0.35, 0.98], [-0.18, 0.55], [-0.05, 0.42], [0.12, 0.32],
-    [0.28, 0.28], [0.55, 0.34], [0.78, 0.42], [0.95, 0.55], [1.1, 0.98],
-  ]) || (ly > 0.55 && lx > -0.4 && lx < 1.05 && Math.sin(lx * 18) * 0.04 + 0.62 < ly);
-  const taper = lerp(1.2, 0.72, clamp((-0.55 - ly) / -0.92, 0, 1));
-  const shaft = ly > -0.58 && ly < 0.32 && Math.abs(lx - 0.28) < 0.12 * taper;
-  const stripeCut = shaft && ((Math.floor((ly + 0.58) * 7) % 2) === 0) && Math.abs(lx - 0.28) > 0.05 * taper;
-  const gallery = Math.abs(ly + 0.5) < 0.055 && Math.abs(lx - 0.28) < 0.18;
-  const lamp = Math.hypot(lx - 0.28, ly + 0.64) < 0.11;
-  const roof = ly < -0.64 && ly > -0.94 && Math.abs(lx - 0.28) < 0.17 * clamp((-0.64 - ly) / 0.3 + 0.2, 0.2, 1.2);
-  const moon = Math.hypot(lx + 0.72, ly + 0.58) < 0.2;
-  const moonCut = Math.hypot(lx + 0.78, ly + 0.52) < 0.045 || Math.hypot(lx + 0.64, ly + 0.64) < 0.035;
+    [-0.42, 0.98], [-0.22, 0.52], [-0.08, 0.38], [0.1, 0.28],
+    [0.28, 0.24], [0.55, 0.3], [0.82, 0.4], [1.0, 0.55], [1.15, 0.98],
+  ]) || (ly > 0.5 && lx > -0.45 && lx < 1.1 && Math.sin(lx * 16) * 0.05 + 0.58 < ly);
+  const taper = lerp(1.45, 0.85, clamp((-0.55 - ly) / -0.92, 0, 1));
+  const shaft = ly > -0.58 && ly < 0.38 && Math.abs(lx - 0.28) < 0.2 * taper;
+  const stripeCut = shaft && ((Math.floor((ly + 0.58) * 5) % 2) === 0) && Math.abs(lx - 0.28) > 0.09 * taper;
+  const gallery = Math.abs(ly + 0.5) < 0.085 && Math.abs(lx - 0.28) < 0.28;
+  const lamp = Math.hypot(lx - 0.28, ly + 0.68) < 0.18;
+  const roof = ly < -0.62 && ly > -1.0 && Math.abs(lx - 0.28) < 0.26 * clamp((-0.62 - ly) / 0.32 + 0.3, 0.3, 1.35);
+  const moon = Math.hypot(lx + 0.72, ly + 0.58) < 0.22;
+  const moonCut = Math.hypot(lx + 0.78, ly + 0.52) < 0.05 || Math.hypot(lx + 0.64, ly + 0.64) < 0.04;
   return cliff || (shaft && !stripeCut) || gallery || lamp || roof || (moon && !moonCut);
-}, LH_CX, LH_CY, 520, 420, 202);
+}, LH_CX, LH_CY, 480, 400, 202);
 
-// Ship — thicker hull, tall mast, triangular sail
+// Ship — thick hull + sail outline, minimal scatter
 const SHIP_CX = 4450, SHIP_CY = 100;
 const ship = sampleMask((lx, ly) => {
-  const hull = ly > 0.18 && ly < 0.58 && Math.abs(lx) < 0.78 - (ly - 0.18) * 0.4;
-  const bow = lx > 0.4 && lx < 0.98 && ly > 0.0 && ly < 0.48 && ly > -0.05 + (lx - 0.4) * 0.5;
-  const cabin = Math.abs(lx + 0.15) < 0.18 && ly > -0.05 && ly < 0.22;
-  const mast = Math.abs(lx - 0.05) < 0.045 && ly > -0.82 && ly < 0.22;
-  const sail = lx > 0.02 && lx < 0.55 && ly > -0.78 && ly < 0.02
-    && (lx - 0.02) < 0.55 * (1 - (ly + 0.78) / 0.8) * 0.9 + 0.08;
-  const boom = Math.abs(ly + 0.02) < 0.035 && lx > -0.02 && lx < 0.52;
-  const flag = lx > -0.02 && lx < 0.12 && ly > -0.92 && ly < -0.78;
+  const hull = ly > 0.12 && ly < 0.62 && Math.abs(lx) < 0.85 - (ly - 0.12) * 0.35;
+  const bow = lx > 0.35 && lx < 1.0 && ly > -0.05 && ly < 0.52 && ly > -0.08 + (lx - 0.35) * 0.48;
+  const cabin = Math.abs(lx + 0.15) < 0.22 && ly > -0.08 && ly < 0.26;
+  const mast = Math.abs(lx - 0.05) < 0.06 && ly > -0.85 && ly < 0.26;
+  const sail = lx > -0.02 && lx < 0.62 && ly > -0.82 && ly < 0.06
+    && (lx + 0.02) < 0.62 * (1 - (ly + 0.82) / 0.88) * 0.95 + 0.12;
+  const boom = Math.abs(ly + 0.02) < 0.045 && lx > -0.05 && lx < 0.58;
+  const flag = lx > -0.05 && lx < 0.16 && ly > -0.95 && ly < -0.78;
   return hull || bow || cabin || mast || sail || boom || flag;
-}, SHIP_CX, SHIP_CY, 440, 320, 303);
+}, SHIP_CX, SHIP_CY, 400, 300, 303);
 
 // Paper boat — crisp origami silhouette
 const BOAT_CX = 5450, BOAT_CY = 130;
@@ -288,56 +309,62 @@ const title = sampleMask((lx, ly) => {
   return false;
 }, TITLE_CX, TITLE_CY, 780, 220, 505);
 
-// Constellation whale — outline + star nodes (no filled blob)
+// Constellation whale — sparse body dust + bold connected stars (reads as sky whale, not blob)
 const CONST_CX = 6050, CONST_CY = -400;
 const constellation = sampleMask((lx, ly) => {
-  // thick outline of whale body
-  const er = Math.hypot(lx * 1.05, ly * 2.1);
-  const inBody = er < 0.62 && lx > -0.48 && lx < 0.78;
-  const outBody = er < 0.78 && lx > -0.55 && lx < 0.88;
-  const outline = outBody && !inBody;
-  const flukeTop = lx < -0.4 && lx > -0.95 && ly < -0.08 && ly > -0.55
-    && Math.abs(ly + 0.12 - (lx + 0.4) * 0.7) < 0.12;
-  const flukeBot = lx < -0.4 && lx > -0.95 && ly > 0.08 && ly < 0.55
-    && Math.abs(ly - 0.12 + (lx + 0.4) * 0.7) < 0.12;
+  const er = Math.hypot(lx * 0.92, ly * 1.9);
+  // sparse dithered fill so outline+stars dominate at thumbnail size
+  const bodyDust = er < 0.58 && lx > -0.5 && lx < 0.8
+    && ((Math.floor(lx * 28) + Math.floor(ly * 28) * 3) % 4 === 0);
+  const bodyRim = er < 0.76 && er > 0.52 && lx > -0.58 && lx < 0.9;
+  const head = Math.hypot((lx - 0.58) / 0.4, ly / 0.44) < 1 && lx > 0.28
+    && ((Math.floor(lx * 22) + Math.floor(ly * 22)) % 3 !== 0);
+  const flukeTop = lx < -0.32 && lx > -1.0 && ly < -0.02 && ly > -0.7
+    && ly > -0.2 + (lx + 0.32) * 1.05 && ly < 0.04 + (lx + 0.32) * 0.22;
+  const flukeBot = lx < -0.32 && lx > -1.0 && ly > 0.02 && ly < 0.7
+    && ly < 0.2 - (lx + 0.32) * 1.05 && ly > -0.04 - (lx + 0.32) * 0.22;
+  const peduncle = lx > -0.52 && lx < -0.2 && Math.abs(ly) < 0.22;
   const stars = [
-    [0.62, -0.02], [0.35, -0.18], [0.1, 0.08], [-0.15, -0.12],
-    [-0.38, 0.05], [-0.55, -0.28], [-0.58, 0.28], [0.45, 0.2], [0.2, 0.22],
+    [0.78, -0.04], [0.52, -0.26], [0.28, 0.02], [0.02, -0.18],
+    [-0.24, 0.0], [-0.5, -0.36], [-0.52, 0.36], [0.42, 0.26], [0.14, 0.32],
+    [0.62, 0.14], [-0.12, 0.2], [0.68, -0.18],
   ];
   let onStar = false;
   for (const [sx, sy] of stars) {
-    if (Math.hypot(lx - sx, ly - sy) < 0.085) { onStar = true; break; }
+    if (Math.hypot(lx - sx, ly - sy) < 0.13) { onStar = true; break; }
   }
-  // connecting rays between stars
   const rays = [
-    [0.62, -0.02, 0.35, -0.18], [0.35, -0.18, 0.1, 0.08], [0.1, 0.08, -0.15, -0.12],
-    [-0.15, -0.12, -0.38, 0.05], [-0.38, 0.05, -0.55, -0.28], [-0.38, 0.05, -0.58, 0.28],
-    [0.1, 0.08, 0.45, 0.2], [0.45, 0.2, 0.2, 0.22],
+    [0.78, -0.04, 0.52, -0.26], [0.52, -0.26, 0.28, 0.02], [0.28, 0.02, 0.02, -0.18],
+    [0.02, -0.18, -0.24, 0.0], [-0.24, 0.0, -0.5, -0.36], [-0.24, 0.0, -0.52, 0.36],
+    [0.28, 0.02, 0.42, 0.26], [0.42, 0.26, 0.14, 0.32], [0.52, -0.26, 0.62, 0.14],
+    [0.02, -0.18, -0.12, 0.2], [0.78, -0.04, 0.68, -0.18],
   ];
   let onRay = false;
   for (const [x0, y0, x1, y1] of rays) {
     const dx = x1 - x0, dy = y1 - y0;
     const len2 = dx * dx + dy * dy || 1;
-    const t = clamp(((lx - x0) * dx + (ly - y0) * dy) / len2, 0, 1);
-    const px = x0 + dx * t, py = y0 + dy * t;
-    if (Math.hypot(lx - px, ly - py) < 0.035) { onRay = true; break; }
+    const tt = clamp(((lx - x0) * dx + (ly - y0) * dy) / len2, 0, 1);
+    const px = x0 + dx * tt, py = y0 + dy * tt;
+    if (Math.hypot(lx - px, ly - py) < 0.062) { onRay = true; break; }
   }
-  return outline || flukeTop || flukeBot || onStar || onRay;
-}, CONST_CX, CONST_CY, 580, 260, 606);
+  return bodyDust || bodyRim || head || flukeTop || flukeBot || peduncle || onStar || onRay;
+}, CONST_CX, CONST_CY, 540, 270, 606);
 
 const oceanScatter = { x: px0, y: py0 };
 
 function formationWeights(t) {
-  const wOpen = 1 - smoothstep(5.5, 8.5, t);
-  const wTitle = smoothstep(6.0, 7.6, t) * (1 - smoothstep(9.4, 11.5, t));
-  const wWhale = smoothstep(9.4, 12.5, t) * (1 - smoothstep(19.5, 23.5, t));
-  const wLight = smoothstep(21.5, 24.5, t) * (1 - smoothstep(27.8, 30.5, t));
-  const wShip = smoothstep(29.5, 33.5, t) * (1 - smoothstep(40.0, 43.5, t));
-  const wBoat = smoothstep(41.0, 44.5, t) * (1 - smoothstep(47.0, 50.0, t));
-  const wConst = smoothstep(47.5, 51.5, t) * (1 - smoothstep(58.5, 62.5, t));
-  const sum = wOpen + wTitle + wWhale + wLight + wShip + wBoat + wConst + 1e-6;
+  // Hard locks during beat windows — short crossfades, less mushy blends
+  const wOpen = 1 - smoothstep(0.4, 2.2, t);
+  const wSwirl = smoothstep(0.3, 2.0, t) * (1 - smoothstep(5.8, 7.4, t));
+  const wTitle = smoothstep(6.0, 7.0, t) * (1 - smoothstep(9.2, 10.4, t));
+  const wWhale = smoothstep(9.2, 10.5, t) * (1 - smoothstep(20.0, 22.2, t));
+  const wLight = smoothstep(21.8, 23.0, t) * (1 - smoothstep(27.8, 29.2, t));
+  const wShip = smoothstep(31.0, 33.0, t) * (1 - smoothstep(40.0, 42.2, t));
+  const wBoat = smoothstep(41.2, 43.2, t) * (1 - smoothstep(47.0, 49.2, t));
+  const wConst = smoothstep(47.8, 49.6, t) * (1 - smoothstep(58.0, 61.2, t));
+  const sum = wOpen + wSwirl + wTitle + wWhale + wLight + wShip + wBoat + wConst + 1e-6;
   return {
-    open: wOpen / sum, title: wTitle / sum, whale: wWhale / sum,
+    open: wOpen / sum, swirl: wSwirl / sum, title: wTitle / sum, whale: wWhale / sum,
     light: wLight / sum, ship: wShip / sum, boat: wBoat / sum, cons: wConst / sum,
   };
 }
@@ -355,6 +382,7 @@ function eventStrength(t, kind, window = 0.9) {
 function particleWorld(i, t) {
   const w = formationWeights(t);
   let x = w.open * oceanScatter.x[i]
+    + w.swirl * swirl.x[i]
     + w.title * title.x[i]
     + w.whale * whale.x[i]
     + w.light * lighthouse.x[i]
@@ -362,6 +390,7 @@ function particleWorld(i, t) {
     + w.boat * boat.x[i]
     + w.cons * constellation.x[i];
   let y = w.open * oceanScatter.y[i]
+    + w.swirl * swirl.y[i]
     + w.title * title.y[i]
     + w.whale * whale.y[i]
     + w.light * lighthouse.y[i]
@@ -397,9 +426,11 @@ function particleWorld(i, t) {
   x += Math.cos(ang) * turb * 38 * (0.4 + order[i]);
   y += Math.sin(ang * 1.25) * turb * 28 * (0.4 + order[i]);
 
-  // gentle curl drift always (subtle — don't blur silhouette)
-  x += Math.sin(t * 0.35 + phase[i] * 6) * 3.5;
-  y += Math.cos(t * 0.28 + phase[i] * 5) * 2.5;
+  // gentle curl only when unlocked — hard lock keeps silhouettes crisp
+  const lock = w.swirl + w.title + w.whale + w.light + w.ship + w.boat + w.cons;
+  const drift = 1 - clamp(lock * 1.15, 0, 0.92);
+  x += Math.sin(t * 0.35 + phase[i] * 6) * 3.5 * drift;
+  y += Math.cos(t * 0.28 + phase[i] * 5) * 2.5 * drift;
 
   return [x, y];
 }
@@ -420,18 +451,34 @@ function camAt(t) {
   if (follow > 0) {
     const whaleX = WHALE_CX + (t - 9.6) * 28;
     const whaleY = WHALE_CY + Math.sin((t - 9.6) * 0.9) * 8;
-    x = lerp(x, whaleX + 80, follow * 0.85);
-    y = lerp(y, whaleY + 20, follow * 0.5);
+    x = lerp(x, whaleX + 40, follow * 0.92);
+    y = lerp(y, whaleY + 10, follow * 0.65);
   }
-  // hold lighthouse in frame during vigil
-  const vigil = smoothstep(22.0, 23.5, t) * (1 - smoothstep(27.5, 29.5, t));
+  // hold lighthouse in frame during vigil (override early pan to storm)
+  const vigil = smoothstep(22.0, 23.2, t) * (1 - smoothstep(27.8, 29.5, t));
   if (vigil > 0) {
-    x = lerp(x, LH_CX + 120, vigil * 0.7);
-    y = lerp(y, LH_CY + 40, vigil * 0.5);
+    x = lerp(x, LH_CX + 30, vigil * 0.95);
+    y = lerp(y, LH_CY - 10, vigil * 0.75);
   }
+  // hold ship centered through its beat (override pull toward dawn boat)
+  const shipHold = smoothstep(34.5, 36.0, t) * (1 - smoothstep(40.0, 42.5, t));
+  if (shipHold > 0) {
+    x = lerp(x, SHIP_CX + 20, shipHold * 0.92);
+    y = lerp(y, SHIP_CY - 10, shipHold * 0.7);
+  }
+  // hold constellation whale centered
+  const skyHold = smoothstep(48.0, 49.5, t) * (1 - smoothstep(53.5, 56.0, t));
+  if (skyHold > 0) {
+    x = lerp(x, CONST_CX, skyHold * 0.9);
+    y = lerp(y, CONST_CY, skyHold * 0.85);
+  }
+  let zoom = lerp(ca.zoom, cb.zoom, u) * (1 + 0.01 * Math.sin(t * 0.55) - punch);
+  if (follow > 0.5) zoom = Math.max(zoom, 1.38);
+  if (vigil > 0.5) zoom = Math.max(zoom, 1.32);
+  if (shipHold > 0.5) zoom = Math.max(zoom, 1.22);
+  if (skyHold > 0.5) zoom = Math.max(zoom, 1.05);
   return {
-    x, y,
-    zoom: lerp(ca.zoom, cb.zoom, u) * (1 + 0.01 * Math.sin(t * 0.55) - punch),
+    x, y, zoom,
     rot: lerp(ca.rot || 0, cb.rot || 0, u),
   };
 }
@@ -454,6 +501,18 @@ function captionAt(t) {
     }
   }
   return null;
+}
+
+/** Lift captions when the featured subject sits in the lower third. */
+function subjectLowExtent(t) {
+  const w = formationWeights(t);
+  if (w.whale > 0.35) return true;
+  if (w.ship > 0.35) return true;
+  if (w.boat > 0.35) return true;
+  if (w.swirl > 0.4) return true;
+  if (w.light > 0.35) return true; // cliff base occupies lower third
+  if (w.cons > 0.35) return false; // sky whale is high
+  return false;
 }
 
 function hexRgb(h) {
@@ -623,14 +682,16 @@ function drawParticles(t, cam) {
     const [sx, sy] = worldToScreen(wx, wy, cam);
     if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) continue;
 
-    const isCore = (w.title > 0.35 && title.core[i])
-      || (w.whale > 0.35 && whale.core[i])
-      || (w.light > 0.35 && lighthouse.core[i])
-      || (w.ship > 0.35 && ship.core[i])
-      || (w.boat > 0.35 && boat.core[i])
-      || (w.cons > 0.35 && constellation.core[i]);
-    if (!isCore && w.open < 0.55 && (w.title + w.whale + w.light + w.ship + w.boat + w.cons) > 0.45) {
-      continue; // no leftover halo / reflection bands
+    const isCore = (w.swirl > 0.3 && swirl.core[i])
+      || (w.title > 0.3 && title.core[i])
+      || (w.whale > 0.3 && whale.core[i])
+      || (w.light > 0.3 && lighthouse.core[i])
+      || (w.ship > 0.3 && ship.core[i])
+      || (w.boat > 0.3 && boat.core[i])
+      || (w.cons > 0.3 && constellation.core[i]);
+    const formLock = w.swirl + w.title + w.whale + w.light + w.ship + w.boat + w.cons;
+    if (!isCore && formLock > 0.35) {
+      continue; // no leftover halo / scatter near locked subjects
     }
 
     const k = tint[i];
@@ -643,10 +704,17 @@ function drawParticles(t, cam) {
       r = lerp(C_INK[0], C_DAWN[0], k * 0.55 + dawn * 0.2);
       g = lerp(C_INK[1], C_DAWN[1], k * 0.45);
       b = lerp(C_INK[2], C_DAWN[2], k * 0.35);
-    } else if (night > 0.3) {
-      r = lerp(C_INK[0], C_MOON[0], k * 0.55);
-      g = lerp(C_INK[1], C_MOON[1], k * 0.55);
-      b = lerp(C_INK[2], C_MOON[2], k * 0.55);
+    } else if (night > 0.3 || w.cons > 0.35) {
+      // constellation stars punch brighter than body dust
+      const starPunch = w.cons > 0.35 && isCore && (k > 0.55 || order[i] > 0.7) ? 0.85 : 0.45;
+      r = lerp(C_INK[0], C_MOON[0], k * 0.4 + starPunch);
+      g = lerp(C_INK[1], C_MOON[1], k * 0.4 + starPunch);
+      b = lerp(C_INK[2], C_MOON[2], k * 0.4 + starPunch);
+      if (w.cons > 0.35 && k > 0.72) {
+        r = lerp(r, C_AMBER[0], 0.35);
+        g = lerp(g, C_AMBER[1], 0.35);
+        b = lerp(b, C_AMBER[2], 0.35);
+      }
     } else {
       r = lerp(C_INK[0], C_FOAM[0], k * 0.45);
       g = lerp(C_INK[1], C_FOAM[1], k * 0.45);
@@ -658,11 +726,50 @@ function drawParticles(t, cam) {
       }
     }
     const shimmer = 0.9 + 0.1 * Math.sin(t * 2.2 + phase[i] * 30);
-    const glow = (isCore ? 1.15 : 0.75) + punch * 0.35 + bell * 0.15;
-    const s = size[i] * (isCore ? 1.15 : 0.7) * (0.9 + cam.zoom * 0.15) * (1 + punch * 0.2);
+    const coreBoost = (w.whale > 0.4 || w.light > 0.4 || w.ship > 0.4 || w.cons > 0.4 || w.swirl > 0.4) ? 1.35 : 1.2;
+    const glow = (isCore ? 1.22 : 0.7) + punch * 0.35 + bell * 0.15;
+    const s = size[i] * (isCore ? coreBoost : 0.55) * (0.9 + cam.zoom * 0.15) * (1 + punch * 0.2);
     ctx.fillStyle = `rgb(${(r * shimmer * glow) | 0},${(g * shimmer * glow) | 0},${(b * shimmer * glow) | 0})`;
     ctx.fillRect(sx - s / 2, sy - s / 2, s, s);
   }
+}
+
+function drawConstellationStars(t, cam) {
+  const a = smoothstep(48.5, 50.5, t) * (1 - smoothstep(56.5, 60.5, t));
+  if (a < 0.02) return;
+  const stars = [
+    [0.78, -0.04], [0.52, -0.26], [0.28, 0.02], [0.02, -0.18],
+    [-0.24, 0.0], [-0.5, -0.36], [-0.52, 0.36], [0.42, 0.26], [0.14, 0.32],
+    [0.62, 0.14], [-0.12, 0.2], [0.68, -0.18],
+  ];
+  const rays = [
+    [0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [4, 6], [2, 7], [7, 8], [1, 9], [3, 10], [0, 11],
+  ];
+  const hw = 540, hh = 270;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const [i0, i1] of rays) {
+    const [lx0, ly0] = stars[i0], [lx1, ly1] = stars[i1];
+    const [x0, y0] = worldToScreen(CONST_CX + lx0 * hw, CONST_CY + ly0 * hh, cam);
+    const [x1, y1] = worldToScreen(CONST_CX + lx1 * hw, CONST_CY + ly1 * hh, cam);
+    ctx.strokeStyle = `rgba(240,234,216,${0.55 * a})`;
+    ctx.lineWidth = 2.2 * cam.zoom;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  }
+  for (let i = 0; i < stars.length; i++) {
+    const [lx, ly] = stars[i];
+    const [sx, sy] = worldToScreen(CONST_CX + lx * hw, CONST_CY + ly * hh, cam);
+    const r = (i % 3 === 0 ? 7.5 : 5.2) * cam.zoom;
+    const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 2.4);
+    g.addColorStop(0, `rgba(255,248,230,${0.95 * a})`);
+    g.addColorStop(0.35, `rgba(232,200,140,${0.55 * a})`);
+    g.addColorStop(1, 'rgba(232,200,140,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(sx, sy, r * 2.4, 0, TAU); ctx.fill();
+    ctx.fillStyle = `rgba(255,252,240,${0.98 * a})`;
+    ctx.beginPath(); ctx.arc(sx, sy, r * 0.55, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawBeam(t, cam) {
@@ -726,18 +833,21 @@ function drawFrame(t) {
   drawTitleUnderpaint(t, cam);
   drawBeam(t, cam);
   drawParticles(t, cam);
+  drawConstellationStars(t, cam);
   ctx.restore();
 
-  // vignette
-  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.18, W / 2, H / 2, H * 0.82);
+  // vignette (softer so silhouettes don't crush)
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.28, W / 2, H / 2, H * 0.92);
   v.addColorStop(0, 'rgba(0,0,0,0)');
-  v.addColorStop(1, 'rgba(0,0,0,0.5)');
+  v.addColorStop(0.65, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,0.26)');
   ctx.fillStyle = v;
   ctx.fillRect(0, 0, W, H);
 
-  // captions
+  // captions — lift when subject occupies lower third
   const cap = captionAt(t);
   if (cap) {
+    const capY = subjectLowExtent(t) ? H * 0.1 : H - 96;
     ctx.save();
     ctx.font = `italic 40px ${SERIF}`;
     ctx.textAlign = 'center';
@@ -745,7 +855,7 @@ function drawFrame(t) {
     ctx.fillStyle = `rgba(232,226,212,${cap.a})`;
     ctx.shadowColor = `rgba(0,0,0,${0.65 * cap.a})`;
     ctx.shadowBlur = 14;
-    ctx.fillText(cap.text, W / 2, H - 96);
+    ctx.fillText(cap.text, W / 2, capY);
     ctx.restore();
   }
 

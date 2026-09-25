@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Glass Keeper — a code film</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07090e; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas { width: min(100vw, 177.78vh); aspect-ratio: 16/9; display: block; background: #07090e; }
+  #ui {
+    position: fixed; left: 16px; bottom: 14px; display: flex; gap: 10px; align-items: center;
+    font: 12px/1 ui-sans-serif, system-ui, sans-serif; color: #e8e4dc; letter-spacing: .08em;
+  }
+  #ui button {
+    font: inherit; text-transform: uppercase; letter-spacing: .14em; font-size: 11px;
+    color: #e8e4dc; background: rgba(8,12,18,.65); border: 1px solid rgba(232,228,220,.28);
+    border-radius: 999px; padding: 8px 14px; cursor: pointer;
+  }
+  body.render #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="1920" height="1080"></canvas></div>
+<div id="ui"><button id="play" type="button">Play</button><span id="clock">0:00</span></div>
+<script>
+(() => {
+'use strict';
+
+const W = 1920, H = 1080, FPS = 30, DUR = 52, SEED = 0x61a55;
+const COLS = 96, ROWS = 54;           // 5184 tiles — readable flocks, headless-friendly
+const N = COLS * ROWS;
+const TW = W / COLS, TH = H / ROWS;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoother = (t) => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+const smoothstep = (a, b, x) => smoother((x - a) / (b - a));
+const TAU = Math.PI * 2;
+
+// --- storyboard (picture + sound both read this) ---
+const bpm = 96;
+const beat = (n) => (n * 60) / bpm; // bar beat index → seconds (4/4: beat n)
+const STORY = {
+  id: 'glass-keeper',
+  title: 'Glass Keeper',
+  logline: 'Glass and gold-leaf tiles that were never cemented — they remember a watch, a tower, a flock, then leave.',
+  technique: 'glass-tile-flock',
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  seed: SEED,
+  tempo: { bpm, beatsPerBar: 4 },
+  palette: {
+    abyss: '#07090e', deep: '#121826', glass: '#9eb8c8', gold: '#d4a85a',
+    foam: '#e8e4dc', verdigris: '#6f8f7e', lamp: '#f0c87a',
+  },
+  sections: [
+    { id: 'wall', t0: 0, t1: 7.5, mood: 'still', harmony: 'Dm' },
+    { id: 'watch', t0: 7.5, t1: 17.5, mood: 'assemble', harmony: 'Bb' },
+    { id: 'tower', t0: 17.5, t1: 30, mood: 'vigil', harmony: 'F' },
+    { id: 'flock', t0: 30, t1: 42.5, mood: 'lift', harmony: 'C' },
+    { id: 'spiral', t0: 42.5, t1: 52, mood: 'release', harmony: 'D' },
+  ],
+  shots: [
+    { id: 's0', t0: 0, t1: 7.5, beat: 0, camera: { x: 0, y: 0, zoom: 1.08, rot: 0 }, subject: 'mosaic-wall', action: 'idle shimmer', caption: '' },
+    { id: 's1', t0: 7.5, t1: 12.5, beat: 7.5, camera: { x: 0, y: 0.02, zoom: 1.0, rot: 0 }, subject: 'tiles', action: 'lift off wall', caption: 'They were never cemented.' },
+    { id: 's2', t0: 12.5, t1: 17.5, beat: 12.5, camera: { x: 0, y: 0, zoom: 1.12, rot: 0 }, subject: 'pocket-watch', action: 'assemble + tick', caption: '' },
+    { id: 's3', t0: 17.5, t1: 22.5, beat: 17.5, camera: { x: 0.05, y: -0.02, zoom: 1.0, rot: 0 }, subject: 'watch', action: 'dissolve to tower', caption: 'Some keep time.' },
+    { id: 's4', t0: 22.5, t1: 30, beat: 22.5, camera: { x: 0.08, y: 0.04, zoom: 1.15, rot: 0 }, subject: 'lighthouse', action: 'beam sweep', caption: '' },
+    { id: 's5', t0: 30, t1: 35, beat: 30, camera: { x: 0, y: -0.04, zoom: 1.0, rot: 0 }, subject: 'tower', action: 'tiles become gulls', caption: 'Some keep watch.' },
+    { id: 's6', t0: 35, t1: 42.5, beat: 35, camera: { x: -0.04, y: -0.06, zoom: 0.95, rot: 0 }, subject: 'gull-flock', action: 'fly across', caption: '' },
+    { id: 's7', t0: 42.5, t1: 47.5, beat: 42.5, camera: { x: 0, y: 0, zoom: 1.05, rot: 0 }, subject: 'flock', action: 'spiral dissolve', caption: 'And some leave.' },
+    { id: 's8', t0: 47.5, t1: 52, beat: 47.5, camera: { x: 0, y: 0, zoom: 1.0, rot: 0 }, subject: 'title', action: 'end card', caption: '' },
+  ],
+  events: [
+    { t: 7.5, kind: 'whoosh', id: 'lift' },
+    { t: 12.5, kind: 'impact', id: 'watch-lock' },
+    { t: 12.5 + 0.625, kind: 'bell', id: 'tick-a' },
+    { t: 12.5 + 1.25, kind: 'bell', id: 'tick-b' },
+    { t: 12.5 + 1.875, kind: 'bell', id: 'tick-c' },
+    { t: 17.5, kind: 'whoosh', id: 'to-tower' },
+    { t: 22.5, kind: 'impact', id: 'tower-lock' },
+    { t: 22.5 + 2.5, kind: 'bell', id: 'beam-1' },
+    { t: 22.5 + 5.0, kind: 'bell', id: 'beam-2' },
+    { t: 22.5 + 7.5, kind: 'bell', id: 'beam-3' },
+    { t: 30, kind: 'whoosh', id: 'to-flock' },
+    { t: 35, kind: 'impact', id: 'flock-lock' },
+    { t: 42.5, kind: 'whoosh', id: 'spiral' },
+    { t: 47.5, kind: 'impact', id: 'end' },
+  ],
+  acceptance: { maxDeadAirSec: 1.5, beatToleranceSec: 0.04, thumbnailReadable: true, zeroExternalAssets: true },
+};
+
+// --- tile geometry ---
+const rnd = mulberry32(SEED);
+const homeX = new Float32Array(N);
+const homeY = new Float32Array(N);
+const tint = new Float32Array(N); // 0 glass → 1 gold
+const phase = new Float32Array(N);
+const order = new Float32Array(N); // stagger 0..1
+
+for (let i = 0; i < N; i++) {
+  const col = i % COLS, row = (i / COLS) | 0;
+  homeX[i] = (col + 0.5) * TW;
+  homeY[i] = (row + 0.5) * TH;
+  // gold leaf veins
+  const nx = col / COLS, ny = row / ROWS;
+  const vein = Math.abs(Math.sin((nx * 7.3 + ny * 3.1) * Math.PI)) * Math.abs(Math.cos((nx * 2.1 - ny * 5.7) * Math.PI));
+  tint[i] = clamp(vein * 1.4 - 0.35 + (rnd() - 0.5) * 0.15, 0, 1);
+  phase[i] = rnd();
+  order[i] = rnd();
+}
+
+// Formation samplers: return target (x,y) for tile i, or null if tile is "background scatter"
+function inPoly(x, y, poly) {
+  // ray cast
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    const intersect = ((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function buildMaskTargets(predicate, scatterAmp = 0) {
+  const txs = new Float32Array(N);
+  const tys = new Float32Array(N);
+  const pts = [];
+  // denser supersampled mask so silhouettes stay solid
+  const sx = COLS * 2, sy = ROWS * 2;
+  for (let row = 0; row < sy; row++) {
+    for (let col = 0; col < sx; col++) {
+      const x = ((col + 0.5) / sx) * W, y = ((row + 0.5) / sy) * H;
+      if (predicate(x, y, col, row)) pts.push([x, y]);
+    }
+  }
+  // shuffle points, assign first N occupied preferentially
+  for (let i = pts.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; const t = pts[i]; pts[i] = pts[j]; pts[j] = t; }
+  const idx = Array.from({ length: N }, (_, i) => i);
+  for (let i = N - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; const t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
+  const used = new Uint8Array(N);
+  const take = Math.min(pts.length, Math.floor(N * 0.92));
+  for (let p = 0; p < take; p++) {
+    const i = idx[p];
+    txs[i] = pts[p][0]; tys[i] = pts[p][1];
+    used[i] = 1;
+  }
+  // leftovers: sparse dust at frame edges (must not form a second silhouette)
+  for (let i = 0; i < N; i++) if (!used[i]) {
+    const edge = rnd();
+    if (edge < 0.25) { txs[i] = rnd() * W; tys[i] = rnd() * H * 0.08; }
+    else if (edge < 0.5) { txs[i] = rnd() * W; tys[i] = H * (0.92 + rnd() * 0.08); }
+    else if (edge < 0.75) { txs[i] = rnd() * W * 0.06; tys[i] = rnd() * H; }
+    else { txs[i] = W * (0.94 + rnd() * 0.06); tys[i] = rnd() * H; }
+  }
+  return { x: txs, y: tys };
+}
+
+// Watch silhouette (ellipse + crown + hands as dense band)
+const watch = buildMaskTargets((x, y) => {
+  const cx = W * 0.5, cy = H * 0.48;
+  const dx = (x - cx) / (W * 0.18), dy = (y - cy) / (H * 0.30);
+  const r = Math.hypot(dx, dy);
+  const ring = r > 0.78 && r < 1.05;
+  const crown = Math.abs(x - cx) < W * 0.055 && y < cy - H * 0.28 && y > cy - H * 0.38;
+  const stem = Math.abs(x - cx) < W * 0.018 && y < cy - H * 0.22 && y > cy - H * 0.30;
+  const hub = r < 0.12;
+  const ang = Math.atan2(dy, dx);
+  const hourAng = -Math.PI / 2;
+  const minAng = 0.55;
+  const hour = Math.abs(((ang - hourAng + Math.PI * 3) % TAU) - Math.PI) < 0.11 && r < 0.55 && r > 0.08;
+  const minute = Math.abs(((ang - minAng + Math.PI * 3) % TAU) - Math.PI) < 0.08 && r < 0.88 && r > 0.08;
+  // tick marks
+  const tick = r > 0.88 && r < 0.98 && (Math.abs(Math.sin(ang * 6)) > 0.92);
+  return ring || crown || stem || hub || hour || minute || tick;
+}, 0.12);
+
+// Lighthouse on cliff
+const tower = buildMaskTargets((x, y) => {
+  const cliff = inPoly(x, y, [
+    [W * 0.38, H * 0.95], [W * 0.46, H * 0.70], [W * 0.55, H * 0.64], [W * 0.80, H * 0.62],
+    [W * 0.95, H * 0.70], [W * 1.02, H * 0.95],
+  ]);
+  const taper = 1 - ((H * 0.66 - y) / (H * 0.40)) * 0.25;
+  const shaft = y > H * 0.26 && y < H * 0.66 && Math.abs(x - W * 0.62) < W * 0.045 * taper;
+  const gallery = Math.abs(y - H * 0.30) < H * 0.015 && Math.abs(x - W * 0.62) < W * 0.07;
+  const lamp = Math.hypot(x - W * 0.62, y - H * 0.24) < H * 0.04;
+  const roof = y < H * 0.24 && y > H * 0.15 && Math.abs(x - W * 0.62) < W * 0.07 * ((H * 0.24 - y) / (H * 0.09));
+  const beam = x < W * 0.58 && x > W * 0.08 && Math.abs(y - (H * 0.25 + (W * 0.62 - x) * 0.04)) < H * 0.035;
+  const moon = Math.hypot(x - W * 0.20, y - H * 0.20) < H * 0.055;
+  return cliff || shaft || gallery || lamp || roof || beam || moon;
+}, 0.1);
+
+// Gull flock — several V formations
+const flock = buildMaskTargets((x, y) => {
+  // classic ›‹ chevron gulls — thick strokes so they read at thumbnail size
+  const birds = [
+    [0.26, 0.36, 0.14], [0.40, 0.30, 0.15], [0.54, 0.34, 0.13],
+    [0.66, 0.26, 0.14], [0.78, 0.38, 0.12], [0.34, 0.48, 0.13],
+    [0.48, 0.44, 0.12], [0.60, 0.52, 0.13], [0.20, 0.42, 0.11],
+    [0.72, 0.48, 0.11], [0.44, 0.58, 0.10],
+  ];
+  for (const [bx, by, scN] of birds) {
+    const cx = W * bx, cy = H * by, sc = W * scN;
+    const dx = (x - cx) / sc, dy = (y - cy) / sc;
+    // two arms of a V: y ≈ |x|  (pointing up)
+    const onArm = Math.abs(dy - Math.abs(dx) + 0.15) < 0.11 && Math.abs(dx) < 1.0 && dy < 0.35;
+    const tip = Math.hypot(dx, dy + 0.05) < 0.12;
+    if (onArm || tip) return true;
+  }
+  return false;
+}, 0.15);
+
+// Spiral targets
+const spiral = (() => {
+  const txs = new Float32Array(N), tys = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const u = (i + phase[i]) / N;
+    const a = u * TAU * 7.5 + phase[i] * TAU;
+    const r = 40 + u * Math.min(W, H) * 0.48;
+    txs[i] = W / 2 + Math.cos(a) * r;
+    tys[i] = H / 2 + Math.sin(a) * r * 0.62;
+  }
+  return { x: txs, y: tys };
+})();
+
+const wall = { x: homeX, y: homeY };
+
+function formationWeights(t) {
+  // wall → watch → tower → flock → spiral (bar-aligned)
+  const wWall = 1 - smoothstep(7.0, 13.0, t);
+  const wWatch = smoothstep(7.5, 13.5, t) * (1 - smoothstep(16.5, 20.5, t));
+  const wTower = smoothstep(17.5, 22.5, t) * (1 - smoothstep(28.5, 32.5, t));
+  const wFlock = smoothstep(30.0, 35.0, t) * (1 - smoothstep(40.5, 44.5, t));
+  const wSpiral = smoothstep(42.5, 47.5, t);
+  const sum = wWall + wWatch + wTower + wFlock + wSpiral + 1e-6;
+  return [wWall / sum, wWatch / sum, wTower / sum, wFlock / sum, wSpiral / sum];
+}
+
+function tilePos(i, t) {
+  const [a, b, c, d, e] = formationWeights(t);
+  let x = a * wall.x[i] + b * watch.x[i] + c * tower.x[i] + d * flock.x[i] + e * spiral.x[i];
+  let y = a * wall.y[i] + b * watch.y[i] + c * tower.y[i] + d * flock.y[i] + e * spiral.y[i];
+
+  // transition turbulence + stagger
+  const lift = smoothstep(7.2, 10.0, t) * (1 - smoothstep(12, 14, t))
+    + smoothstep(17.5, 20, t) * (1 - smoothstep(22, 24, t))
+    + smoothstep(29.5, 32, t) * (1 - smoothstep(34, 36, t))
+    + smoothstep(41.5, 44, t);
+  const stagger = smoother(clamp((t - 8 - order[i] * 2.2) / 1.2, 0, 1));
+  const turb = lift * (0.35 + 0.65 * stagger);
+  const ang = phase[i] * TAU + t * (0.7 + phase[i]);
+  x += Math.cos(ang) * turb * 28 * (0.5 + order[i]);
+  y += Math.sin(ang * 1.3) * turb * 22 * (0.5 + order[i]);
+
+  // flock travel drift
+  const fly = smoothstep(34, 36, t) * (1 - smoothstep(42, 44, t));
+  x += fly * (t - 34) * 22;
+  y += fly * Math.sin(t * 1.2 + phase[i] * 4) * 8;
+
+  // spiral spin
+  const spin = smoothstep(43, 48, t);
+  if (spin > 0) {
+    const cx = W / 2, cy = H / 2;
+    const dx = x - cx, dy = y - cy;
+    const a2 = spin * (t - 42) * 0.55;
+    const ca = Math.cos(a2), sa = Math.sin(a2);
+    x = cx + ca * dx - sa * dy;
+    y = cy + sa * dx + ca * dy;
+    const out = smoothstep(46, 51.5, t);
+    x = lerp(x, cx + dx * 2.2, out);
+    y = lerp(y, cy + dy * 2.2, out);
+  }
+  return [x, y];
+}
+
+function camAt(t) {
+  const shots = STORY.shots;
+  let i = 0;
+  while (i < shots.length - 1 && t >= shots[i + 1].t0) i++;
+  const a = shots[i], b = shots[Math.min(i + 1, shots.length - 1)];
+  const u = a.t1 === a.t0 ? 1 : smoother(clamp((t - a.t0) / Math.max(0.001, (b.t0 - a.t0)), 0, 1));
+  // hold camera of current shot mostly; ease toward next at boundary
+  const hold = smoother(clamp((t - a.t0) / Math.max(0.2, a.t1 - a.t0), 0, 1));
+  const ca = a.camera, cb = (t > a.t1 - 0.8 ? b.camera : a.camera);
+  const k = t > a.t1 - 0.8 ? smoother(clamp((t - (a.t1 - 0.8)) / 0.8, 0, 1)) : 0;
+  return {
+    x: lerp(ca.x, cb.x, k),
+    y: lerp(ca.y, cb.y, k),
+    zoom: lerp(ca.zoom, cb.zoom, k),
+    rot: lerp(ca.rot || 0, cb.rot || 0, k),
+    breathe: 1 + 0.008 * Math.sin(t * 0.7),
+  };
+}
+
+function captionAt(t) {
+  for (const s of STORY.shots) {
+    if (!s.caption) continue;
+    if (t >= s.t0 + 0.35 && t <= s.t1 - 0.4) {
+      const a = smoothstep(s.t0 + 0.35, s.t0 + 1.1, t) * (1 - smoothstep(s.t1 - 1.2, s.t1 - 0.4, t));
+      return { text: s.caption, a };
+    }
+  }
+  return null;
+}
+
+function hexRgb(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const C_GLASS = hexRgb(STORY.palette.glass);
+const C_GOLD = hexRgb(STORY.palette.gold);
+const C_VER = hexRgb(STORY.palette.verdigris);
+
+function drawFrame(t) {
+  t = clamp(t, 0, DUR);
+  const cam = camAt(t);
+
+  // background
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#0b1018');
+  g.addColorStop(0.55, '#07090e');
+  g.addColorStop(1, '#05070b');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // soft vignette plane
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate(cam.rot);
+  ctx.scale(cam.zoom * cam.breathe, cam.zoom * cam.breathe);
+  ctx.translate(-W / 2 - cam.x * W, -H / 2 - cam.y * H);
+
+  // draw tiles back-to-front roughly by y
+  // For speed: single pass, small tiles
+  const gap = 1.15;
+  for (let i = 0; i < N; i++) {
+    const [x, y] = tilePos(i, t);
+    const tw = TW - gap, th = TH - gap;
+    const k = tint[i];
+    const shimmer = 0.92 + 0.08 * Math.sin(t * 2.1 + phase[i] * 40);
+    const r = (C_GLASS[0] * (1 - k) + C_GOLD[0] * k) * shimmer;
+    const gg = (C_GLASS[1] * (1 - k) + C_GOLD[1] * k) * shimmer;
+    const b = (C_GLASS[2] * (1 - k) + C_GOLD[2] * k) * shimmer;
+    // verdigris edges on some
+    const edge = phase[i] > 0.82;
+    ctx.fillStyle = edge
+      ? `rgb(${(r * 0.55 + C_VER[0] * 0.45) | 0},${(gg * 0.55 + C_VER[1] * 0.45) | 0},${(b * 0.55 + C_VER[2] * 0.45) | 0})`
+      : `rgb(${r | 0},${gg | 0},${b | 0})`;
+    ctx.fillRect(x - tw / 2, y - th / 2, tw, th);
+    // specular
+    ctx.fillStyle = `rgba(255,250,235,${0.1 + 0.12 * k})`;
+    ctx.fillRect(x - tw / 2 + 1, y - th / 2 + 1, tw * 0.35, th * 0.22);
+  }
+
+  // lighthouse beam highlight overlay when in tower section
+  const beamA = smoothstep(22, 24, t) * (1 - smoothstep(30, 32, t));
+  if (beamA > 0.01) {
+    const ang = -0.25 + Math.sin(t * 0.9) * 0.35;
+    ctx.save();
+    ctx.translate(W * 0.62, H * 0.26);
+    ctx.rotate(ang);
+    const bg = ctx.createLinearGradient(0, 0, -W * 0.55, 0);
+    bg.addColorStop(0, `rgba(240,200,120,${0.22 * beamA})`);
+    bg.addColorStop(1, 'rgba(240,200,120,0)');
+    ctx.fillStyle = bg;
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(-W * 0.55, -H * 0.12);
+    ctx.lineTo(-W * 0.55, H * 0.12);
+    ctx.lineTo(0, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.restore();
+
+  // vignette
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.2, W / 2, H / 2, H * 0.78);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+
+  // captions
+  const cap = captionAt(t);
+  if (cap) {
+    ctx.save();
+    ctx.font = 'italic 42px Georgia, "Times New Roman", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(232,228,220,${cap.a})`;
+    ctx.shadowColor = `rgba(0,0,0,${0.7 * cap.a})`;
+    ctx.shadowBlur = 16;
+    ctx.fillText(cap.text, W / 2, H - 100);
+    ctx.restore();
+  }
+
+  // title cards
+  const open = 1 - smoothstep(0.3, 2.4, t);
+  if (open > 0.01) {
+    ctx.fillStyle = `rgba(7,9,14,${0.35 * open})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(232,228,220,${open})`;
+    ctx.font = '600 64px Georgia, serif';
+    ctx.fillText('Glass Keeper', W / 2, H / 2 - 10);
+    ctx.font = 'italic 22px Georgia, serif';
+    ctx.fillStyle = `rgba(212,168,90,${open * 0.9})`;
+    ctx.fillText('tiles that were never cemented', W / 2, H / 2 + 36);
+  }
+  const end = smoothstep(47.7, 49.0, t);
+  if (end > 0.01) {
+    ctx.fillStyle = `rgba(7,9,14,${0.55 * end})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(232,228,220,${end})`;
+    ctx.font = '600 52px Georgia, serif';
+    ctx.fillText('Glass Keeper', W / 2, H / 2 - 8);
+    ctx.font = 'italic 20px Georgia, serif';
+    ctx.fillStyle = `rgba(212,168,90,${end})`;
+    ctx.fillText('a film written entirely in code', W / 2, H / 2 + 34);
+  }
+
+  // grain
+  const gr = mulberry32((SEED ^ (Math.floor(t * FPS) * 2654435761)) >>> 0);
+  ctx.globalAlpha = 0.035;
+  for (let k = 0; k < 180; k++) {
+    ctx.fillStyle = gr() > 0.5 ? '#fff' : '#000';
+    ctx.fillRect(gr() * W, gr() * H, 1.5, 1.5);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// --- audio ---
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const CHORDS = { Dm: [50, 53, 57], Bb: [46, 50, 53], F: [48, 53, 57], C: [48, 52, 55], D: [50, 54, 57, 61] };
+
+function buildScore(ac, T0) {
+  const master = ac.createGain();
+  master.gain.setValueAtTime(0, T0);
+  master.gain.linearRampToValueAtTime(0.8, T0 + 1.2);
+  master.gain.setValueAtTime(0.8, T0 + DUR - 2);
+  master.gain.linearRampToValueAtTime(0, T0 + DUR);
+  master.connect(ac.destination);
+  const at = (t) => T0 + Math.max(0, t);
+
+  function pad(name, t0, t1, level) {
+    for (const m of CHORDS[name]) {
+      const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = (m % 3) * 4 - 4;
+      const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, at(t0));
+      g.gain.linearRampToValueAtTime(level, at(t0 + 1.5));
+      g.gain.setValueAtTime(level, at(t1));
+      g.gain.linearRampToValueAtTime(0, at(t1 + 2));
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(at(t0)); o.stop(at(t1 + 2.2));
+    }
+  }
+  for (const s of STORY.sections) pad(s.harmony, s.t0, s.t1, s.id === 'spiral' ? 0.03 : 0.022);
+
+  function whoosh(t) {
+    const len = ac.sampleRate * 1.4;
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * 0.45));
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.setValueAtTime(400, at(t)); f.frequency.exponentialRampToValueAtTime(2200, at(t + 0.7));
+    const g = ac.createGain(); g.gain.value = 0.2;
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+  }
+  function impact(t) {
+    const o = ac.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(110, at(t)); o.frequency.exponentialRampToValueAtTime(40, at(t + 0.6));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(0.35, at(t + 0.01)); g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.2));
+    o.connect(g); g.connect(master); o.start(at(t)); o.stop(at(t + 1.3));
+  }
+  function bell(t) {
+    const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = 740;
+    const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = 1480;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(0.12, at(t + 0.01)); g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.8));
+    const g2 = ac.createGain(); g2.gain.value = 0.25;
+    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+    o.start(at(t)); o2.start(at(t)); o.stop(at(t + 2)); o2.stop(at(t + 2));
+  }
+  for (const e of STORY.events) {
+    if (e.kind === 'whoosh') whoosh(e.t);
+    else if (e.kind === 'impact') impact(e.t);
+    else if (e.kind === 'bell') bell(e.t);
+  }
+}
+
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, sr = buf.sampleRate, n = buf.length;
+  const ab = new ArrayBuffer(44 + n * ch * 2), dv = new DataView(ab);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+  dv.setUint16(34, 16, true); ws(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++, o += 2) {
+    const s = Math.max(-1, Math.min(1, chans[c][i]));
+    dv.setInt16(o, s * 32767, true);
+  }
+  const bytes = new Uint8Array(ab);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+// --- API ---
+drawFrame(0);
+window.FILM = {
+  ready: true,
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  storyboard: STORY,
+  canvas,
+  out: canvas,
+  seek(t) { drawFrame(t); },
+  reset() { drawFrame(0); },
+  async renderAudio() {
+    const sr = 48000;
+    const oc = new OfflineAudioContext(2, sr * DUR, sr);
+    buildScore(oc, 0);
+    return encodeWav(await oc.startRendering());
+  },
+};
+
+const params = new URLSearchParams(location.search);
+if (params.has('render')) {
+  document.body.classList.add('render');
+} else {
+  const btn = document.getElementById('play');
+  const clock = document.getElementById('clock');
+  let ac = null, T0 = 0, playing = false;
+  function loop() {
+    if (!playing) return;
+    const t = ac.currentTime - T0;
+    if (t >= DUR) { playing = false; btn.textContent = 'Replay'; drawFrame(DUR); return; }
+    drawFrame(t);
+    clock.textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    requestAnimationFrame(loop);
+  }
+  btn.addEventListener('click', async () => {
+    if (ac) await ac.close();
+    ac = new AudioContext();
+    T0 = ac.currentTime + 0.12;
+    buildScore(ac, T0);
+    playing = true; btn.textContent = 'Restart';
+    requestAnimationFrame(loop);
+  });
+}
+})();
+</script>
+</body>
+</html>

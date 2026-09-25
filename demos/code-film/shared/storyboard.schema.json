@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autotube.local/schemas/code-film-storyboard.json",
+  "title": "CodeFilmStoryboard",
+  "type": "object",
+  "required": ["id", "title", "duration", "fps", "width", "height", "tempo", "sections", "shots", "events"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "title": { "type": "string" },
+    "logline": { "type": "string" },
+    "technique": {
+      "type": "string",
+      "description": "Signature craft that must be readable at thumbnail size",
+      "examples": ["glass-tile-flock", "sand-ink", "hand-drawn-hatch", "particle-ink"]
+    },
+    "duration": { "type": "number", "minimum": 5 },
+    "fps": { "type": "integer", "enum": [24, 30, 60] },
+    "width": { "type": "integer" },
+    "height": { "type": "integer" },
+    "seed": { "type": "integer" },
+    "tempo": {
+      "type": "object",
+      "required": ["bpm"],
+      "properties": {
+        "bpm": { "type": "number", "minimum": 40, "maximum": 180 },
+        "beatsPerBar": { "type": "integer", "default": 4 }
+      }
+    },
+    "palette": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "t0", "t1", "mood"],
+        "properties": {
+          "id": { "type": "string" },
+          "t0": { "type": "number" },
+          "t1": { "type": "number" },
+          "mood": { "type": "string" },
+          "harmony": { "type": "string" }
+        }
+      }
+    },
+    "shots": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["id", "t0", "t1", "beat", "camera", "subject", "action"],
+        "properties": {
+          "id": { "type": "string" },
+          "t0": { "type": "number" },
+          "t1": { "type": "number" },
+          "beat": { "type": "number", "description": "Nearest downbeat time; cuts must land within ±0.04s" },
+          "camera": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "zoom": { "type": "number" },
+              "rot": { "type": "number" },
+              "ease": { "type": "string" }
+            }
+          },
+          "subject": { "type": "string" },
+          "action": { "type": "string" },
+          "caption": { "type": "string" }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["t", "kind", "id"],
+        "properties": {
+          "t": { "type": "number" },
+          "kind": {
+            "type": "string",
+            "enum": ["sfx", "visual", "cut", "caption", "impact", "whoosh", "bell", "thunder", "pluck"]
+          },
+          "id": { "type": "string" },
+          "params": { "type": "object" }
+        }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "properties": {
+        "maxDeadAirSec": { "type": "number", "default": 1.5 },
+        "beatToleranceSec": { "type": "number", "default": 0.04 },
+        "thumbnailReadable": { "type": "boolean", "default": true },
+        "zeroExternalAssets": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}

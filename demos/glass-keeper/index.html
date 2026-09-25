@@ -68,26 +68,26 @@ const STORY = {
     foam: '#e8e4dc', verdigris: '#6f8f7e', lamp: '#f0c87a',
   },
   sections: [
-    { id: 'wall', t0: 0, t1: 2.5, mood: 'still', harmony: 'Dm' },
-    { id: 'watch', t0: 2.5, t1: 17.5, mood: 'assemble', harmony: 'Bb' },
+    { id: 'wall', t0: 0, t1: 5, mood: 'still', harmony: 'Dm' },
+    { id: 'watch', t0: 5, t1: 17.5, mood: 'assemble', harmony: 'Bb' },
     { id: 'tower', t0: 17.5, t1: 30, mood: 'vigil', harmony: 'F' },
     { id: 'flock', t0: 30, t1: 42.5, mood: 'lift', harmony: 'C' },
     { id: 'spiral', t0: 42.5, t1: 52, mood: 'release', harmony: 'D' },
   ],
   shots: [
-    // s0: one bar — gold-vein close-up (not wallpaper)
-    { id: 's0', t0: 0, t1: 2.5, beat: 0, camera: { x: 0.14, y: -0.06, zoom: 1.48, rot: 0.02 }, subject: 'mosaic-wall', action: 'gold vein detail', caption: '' },
-    { id: 's1', t0: 2.5, t1: 12.5, beat: 2.5, camera: { x: 0, y: 0.02, zoom: 1.18, rot: 0 }, subject: 'tiles', action: 'lift into watch', caption: 'They were never cemented.' },
-    { id: 's2', t0: 12.5, t1: 17.5, beat: 12.5, camera: { x: 0, y: 0, zoom: 1.4, rot: 0 }, subject: 'pocket-watch', action: 'assemble + tick', caption: '' },
-    { id: 's3', t0: 17.5, t1: 22.5, beat: 17.5, camera: { x: 0.05, y: -0.02, zoom: 1.15, rot: 0 }, subject: 'watch', action: 'dissolve to tower', caption: 'Some keep time.' },
-    { id: 's4', t0: 22.5, t1: 30, beat: 22.5, camera: { x: 0.12, y: 0.02, zoom: 1.3, rot: 0 }, subject: 'lighthouse', action: 'beam sweep', caption: '' },
-    { id: 's5', t0: 30, t1: 35, beat: 30, camera: { x: 0, y: -0.04, zoom: 1.1, rot: 0 }, subject: 'tower', action: 'tiles become gulls', caption: 'Some keep watch.' },
-    { id: 's6', t0: 35, t1: 42.5, beat: 35, camera: { x: -0.02, y: -0.04, zoom: 1.2, rot: 0 }, subject: 'gull-flock', action: 'fly across', caption: '' },
-    { id: 's7', t0: 42.5, t1: 47.5, beat: 42.5, camera: { x: 0, y: 0, zoom: 1.12, rot: 0 }, subject: 'flock', action: 'spiral dissolve', caption: 'And some leave.' },
+    // 2 bars — tight gold-vein material close-up (not wallpaper)
+    { id: 's0', t0: 0, t1: 5, beat: 0, camera: { x: 0.17, y: -0.11, zoom: 2.15, rot: 0.03 }, subject: 'mosaic-wall', action: 'gold vein detail', caption: '' },
+    { id: 's1', t0: 5, t1: 12.5, beat: 5, camera: { x: 0, y: 0.02, zoom: 1.22, rot: 0 }, subject: 'tiles', action: 'lift into watch', caption: 'They were never cemented.' },
+    { id: 's2', t0: 12.5, t1: 17.5, beat: 12.5, camera: { x: 0, y: 0, zoom: 1.42, rot: 0 }, subject: 'pocket-watch', action: 'assemble + tick', caption: '' },
+    { id: 's3', t0: 17.5, t1: 22.5, beat: 17.5, camera: { x: 0.05, y: -0.02, zoom: 1.18, rot: 0 }, subject: 'watch', action: 'dissolve to tower', caption: 'Some keep time.' },
+    { id: 's4', t0: 22.5, t1: 30, beat: 22.5, camera: { x: 0.14, y: 0.0, zoom: 1.32, rot: 0 }, subject: 'lighthouse', action: 'beam sweep', caption: '' },
+    { id: 's5', t0: 30, t1: 35, beat: 30, camera: { x: 0, y: -0.02, zoom: 1.12, rot: 0 }, subject: 'tower', action: 'tiles become gulls', caption: 'Some keep watch.' },
+    { id: 's6', t0: 35, t1: 42.5, beat: 35, camera: { x: 0, y: -0.02, zoom: 1.22, rot: 0 }, subject: 'gull-flock', action: 'fly across', caption: '' },
+    { id: 's7', t0: 42.5, t1: 47.5, beat: 42.5, camera: { x: 0, y: -0.04, zoom: 1.18, rot: 0 }, subject: 'flock', action: 'spiral dissolve', caption: 'And some leave.' },
     { id: 's8', t0: 47.5, t1: 52, beat: 47.5, camera: { x: 0, y: 0, zoom: 1.0, rot: 0 }, subject: 'title', action: 'end card', caption: '' },
   ],
   events: [
-    { t: 2.5, kind: 'whoosh', id: 'lift' },
+    { t: 5, kind: 'whoosh', id: 'lift' },
     { t: 12.5, kind: 'impact', id: 'watch-lock' },
     { t: 12.5 + 0.625, kind: 'bell', id: 'tick-a' },
     { t: 12.5 + 1.25, kind: 'bell', id: 'tick-b' },
@@ -149,30 +149,37 @@ function buildMaskTargets(predicate) {
       if (predicate(x, y, col, row)) pts.push([x, y]);
     }
   }
-  // shuffle points, assign first N occupied preferentially
+  if (pts.length === 0) {
+    for (let i = 0; i < N; i++) { txs[i] = W / 2; tys[i] = H / 2; }
+    return { x: txs, y: tys, aabb: { minX: W * 0.4, maxX: W * 0.6, minY: H * 0.4, maxY: H * 0.6 } };
+  }
+  // shuffle points
   for (let i = pts.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; const t = pts[i]; pts[i] = pts[j]; pts[j] = t; }
   const idx = Array.from({ length: N }, (_, i) => i);
   for (let i = N - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; const t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
   const used = new Uint8Array(N);
-  const take = Math.min(pts.length, Math.floor(N * 0.97));
+  // Pack ≥97% of tiles INTO the subject (resample/jitter if mask is sparse)
+  const take = Math.floor(N * 0.97);
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (let p = 0; p < take; p++) {
     const i = idx[p];
-    const px = pts[p][0], py = pts[p][1];
+    const src = pts[p % pts.length];
+    const jx = (p >= pts.length) ? (rnd() - 0.5) * TW * 0.55 : 0;
+    const jy = (p >= pts.length) ? (rnd() - 0.5) * TH * 0.55 : 0;
+    const px = src[0] + jx, py = src[1] + jy;
     txs[i] = px; tys[i] = py;
     used[i] = 1;
     if (px < minX) minX = px; if (px > maxX) maxX = px;
     if (py < minY) minY = py; if (py > maxY) maxY = py;
   }
-  if (!Number.isFinite(minX)) { minX = W * 0.35; maxX = W * 0.65; minY = H * 0.3; maxY = H * 0.7; }
   const bw = Math.max(40, maxX - minX), bh = Math.max(40, maxY - minY);
-  // leftovers: sparse dust INSIDE subject AABB or near it — never edge picture-frame
+  // leftovers (≤3%): sparse dust INSIDE / near subject AABB only — never edge frame
   for (let i = 0; i < N; i++) if (!used[i]) {
-    if (rnd() < 0.55) {
+    if (rnd() < 0.7) {
       txs[i] = minX + rnd() * bw;
       tys[i] = minY + rnd() * bh;
     } else {
-      const near = 0.15;
+      const near = 0.12;
       txs[i] = minX - bw * near + rnd() * bw * (1 + 2 * near);
       tys[i] = minY - bh * near + rnd() * bh * (1 + 2 * near);
     }
@@ -187,8 +194,8 @@ function watchRegion(x, y) {
   const ang = Math.atan2(dy, dx);
   const hourAng = -Math.PI / 2;
   const minAng = 0.55;
-  const hour = Math.abs(((ang - hourAng + Math.PI * 3) % TAU) - Math.PI) < 0.18 && r < 0.58 && r > 0.07;
-  const minute = Math.abs(((ang - minAng + Math.PI * 3) % TAU) - Math.PI) < 0.14 && r < 0.90 && r > 0.07;
+  const hour = Math.abs(((ang - hourAng + Math.PI * 3) % TAU) - Math.PI) < 0.22 && r < 0.58 && r > 0.07;
+  const minute = Math.abs(((ang - minAng + Math.PI * 3) % TAU) - Math.PI) < 0.17 && r < 0.90 && r > 0.07;
   const crown = Math.abs(x - cx) < W * 0.06 && y < cy - H * 0.27 && y > cy - H * 0.39;
   const stem = Math.abs(x - cx) < W * 0.02 && y < cy - H * 0.21 && y > cy - H * 0.30;
   const hub = r < 0.14;
@@ -222,17 +229,20 @@ const tower = buildMaskTargets((x, y) => {
   return cliff || shaft || gallery || lamp || roof;
 });
 
-// Gull flock — 5 larger birds with body ovals (not mountain chevrons)
+// Gull flock — 5 large, separated birds with body ovals (not a mountain range)
 const flock = buildMaskTargets((x, y) => {
   const birds = [
-    [0.38, 0.40, 0.20], [0.52, 0.34, 0.22], [0.64, 0.42, 0.19],
-    [0.46, 0.52, 0.18], [0.58, 0.48, 0.20],
+    [0.30, 0.36, 0.26], [0.50, 0.30, 0.28], [0.70, 0.38, 0.26],
+    [0.40, 0.54, 0.24], [0.62, 0.50, 0.25],
   ];
   for (const [bx, by, scN] of birds) {
     const cx = W * bx, cy = H * by, sc = W * scN;
     const dx = (x - cx) / sc, dy = (y - cy) / sc;
-    const onArm = Math.abs(dy - Math.abs(dx) + 0.12) < 0.16 && Math.abs(dx) < 1.05 && dy < 0.4;
-    const body = Math.hypot(dx, dy + 0.02) < 0.22;
+    // clear V arms with gap under the V so birds don't fuse into a slab
+    const onArm = Math.abs(dy - Math.abs(dx) * 0.92 + 0.1) < 0.15
+      && Math.abs(dx) > 0.08 && Math.abs(dx) < 1.05 && dy < 0.38 && dy > -0.15;
+    // body oval at the tip (reads as a bird, not a chevron)
+    const body = (dx * dx) / (0.2 * 0.2) + ((dy + 0.02) * (dy + 0.02)) / (0.14 * 0.14) < 1;
     if (onArm || body) return true;
   }
   return false;
@@ -256,8 +266,8 @@ const wall = { x: homeX, y: homeY };
 
 function formationWeights(t) {
   // wall → watch (early lock) → tower → flock → spiral (bar-aligned)
-  const wWall = 1 - smoothstep(2.0, 8.5, t);
-  const wWatch = smoothstep(3.5, 11.0, t) * (1 - smoothstep(16.5, 20.5, t));
+  const wWall = 1 - smoothstep(4.5, 10.5, t);
+  const wWatch = smoothstep(5.5, 12.0, t) * (1 - smoothstep(16.5, 20.5, t));
   const wTower = smoothstep(17.5, 22.5, t) * (1 - smoothstep(28.5, 32.5, t));
   const wFlock = smoothstep(30.0, 35.0, t) * (1 - smoothstep(41.0, 43.5, t));
   const wSpiral = smoothstep(42.0, 44.5, t) * (1 - smoothstep(47.8, 49.2, t));
@@ -265,22 +275,15 @@ function formationWeights(t) {
   return [wWall / sum, wWatch / sum, wTower / sum, wFlock / sum, wSpiral / sum];
 }
 
-function subjectCentroid(t) {
+function subjectLowExtent(t) {
   const [, b, c, d, e] = formationWeights(t);
-  if (e > 0.35) return { x: W / 2, y: H / 2 };
-  if (d > 0.35 && flock.aabb) {
-    const a = flock.aabb;
-    return { x: (a.minX + a.maxX) / 2, y: (a.minY + a.maxY) / 2 };
-  }
-  if (c > 0.35 && tower.aabb) {
-    const a = tower.aabb;
-    return { x: (a.minX + a.maxX) / 2, y: (a.minY + a.maxY) / 2 };
-  }
-  if (b > 0.35 && watch.aabb) {
-    const a = watch.aabb;
-    return { x: (a.minX + a.maxX) / 2, y: (a.minY + a.maxY) / 2 };
-  }
-  return { x: W / 2, y: H / 2 };
+  if (e > 0.25) return true; // spiral arms reach lower third
+  let aabb = null;
+  if (d > 0.35) aabb = flock.aabb;
+  else if (c > 0.35) aabb = tower.aabb;
+  else if (b > 0.35) aabb = watch.aabb;
+  if (!aabb) return false;
+  return aabb.maxY > H * 0.62;
 }
 
 function tilePos(i, t) {
@@ -288,17 +291,16 @@ function tilePos(i, t) {
   let x = a * wall.x[i] + b * watch.x[i] + c * tower.x[i] + d * flock.x[i] + e * spiral.x[i];
   let y = a * wall.y[i] + b * watch.y[i] + c * tower.y[i] + d * flock.y[i] + e * spiral.y[i];
 
-  // micro-offset breaks grid lock when formed
-  const form = clamp(1 - a, 0, 1);
-  x += (phase[i] - 0.5) * TW * 0.25 * form;
-  y += (order[i] - 0.5) * TH * 0.22 * form;
+  // micro-offset breaks grid lock
+  x += (phase[i] - 0.5) * TW * 0.25;
+  y += (order[i] - 0.5) * TH * 0.22;
 
-  // transition turbulence + stagger (lift starts with shortened wall)
-  const lift = smoothstep(2.2, 6.5, t) * (1 - smoothstep(10.5, 13, t))
+  // transition turbulence + stagger (lift after vein close-up)
+  const lift = smoothstep(4.8, 8.5, t) * (1 - smoothstep(11, 13.5, t))
     + smoothstep(17.5, 20, t) * (1 - smoothstep(22, 24, t))
     + smoothstep(29.5, 32, t) * (1 - smoothstep(34, 36, t))
     + smoothstep(41.5, 44, t) * (1 - smoothstep(45.5, 47, t));
-  const stagger = smoother(clamp((t - 3 - order[i] * 2.2) / 1.2, 0, 1));
+  const stagger = smoother(clamp((t - 5.2 - order[i] * 2.2) / 1.2, 0, 1));
   const turb = lift * (0.35 + 0.65 * stagger);
   const ang = phase[i] * TAU + t * (0.7 + phase[i]);
   x += Math.cos(ang) * turb * 28 * (0.5 + order[i]);
@@ -417,18 +419,21 @@ function drawFrame(t) {
     let gg = (C_GLASS[1] * (1 - k) + C_GOLD[1] * k) * shimmer * key;
     let b = (C_GLASS[2] * (1 - k) + C_GOLD[2] * k) * shimmer * key;
 
-    // beam lights tiles inside wedge
+    // beam lights tiles inside wedge (leftward cone from lantern)
     if (beamA > 0.01) {
       const dx = x - bx0, dy = y - by0;
-      const localAng = Math.atan2(dy, dx) - beamAng;
       const dist = Math.hypot(dx, dy);
-      const inWedge = Math.abs(localAng - Math.PI) < 0.28 && dist < W * 0.58 && dist > 8;
+      let ang = Math.atan2(dy, dx) - beamAng;
+      while (ang > Math.PI) ang -= TAU;
+      while (ang < -Math.PI) ang += TAU;
+      // beam aims roughly π (left) in local space after rotation
+      const inWedge = Math.abs(ang) > Math.PI * 0.72 && dist < W * 0.58 && dist > 6;
       if (inWedge) {
         const fall = 1 - dist / (W * 0.58);
-        const boost = 1 + 0.55 * beamA * fall;
-        r = Math.min(255, r * boost + 40 * beamA * fall);
-        gg = Math.min(255, gg * boost + 28 * beamA * fall);
-        b = Math.min(255, b * boost + 8 * beamA * fall);
+        const boost = 1 + 0.7 * beamA * fall;
+        r = Math.min(255, r * boost + 55 * beamA * fall);
+        gg = Math.min(255, gg * boost + 38 * beamA * fall);
+        b = Math.min(255, b * boost + 10 * beamA * fall);
       }
     }
 
@@ -445,19 +450,19 @@ function drawFrame(t) {
     ctx.fillRect(x - tw / 2, y - th / 2, tw, th);
 
     // light-relative specular — gold hotter/tighter, glass soft Fresnel rim
-    const specPow = isGlass ? 3.5 : 12;
+    const specPow = isGlass ? 3.2 : 10;
     const spec = Math.pow(ndot, specPow);
-    const fresnel = isGlass ? Math.pow(1 - ndot, 1.6) * 0.22 : 0;
-    const specA = (0.08 + 0.55 * k) * spec + fresnel;
-    if (specA > 0.02) {
-      ctx.globalAlpha = tileAlpha * clamp(specA, 0, 0.85);
-      ctx.fillStyle = k > 0.5 ? 'rgb(255,236,190)' : 'rgb(235,245,255)';
-      ctx.fillRect(x - tw / 2 + 1, y - th / 2 + 1, tw * (0.28 + 0.2 * k), th * (0.18 + 0.1 * k));
+    const fresnel = isGlass ? Math.pow(1 - ndot, 1.5) * 0.28 : 0;
+    const specA = (0.12 + 0.72 * k) * spec + fresnel;
+    if (specA > 0.015) {
+      ctx.globalAlpha = tileAlpha * clamp(specA, 0, 0.9);
+      ctx.fillStyle = k > 0.5 ? 'rgb(255,242,200)' : 'rgb(235,245,255)';
+      ctx.fillRect(x - tw / 2 + 1, y - th / 2 + 1, tw * (0.32 + 0.22 * k), th * (0.2 + 0.12 * k));
       // cheap upper-left bevel when facing light
-      if (ndot > 0.55) {
-        ctx.globalAlpha = tileAlpha * (0.12 + 0.18 * k) * ndot;
-        ctx.fillRect(x - tw / 2, y - th / 2, tw * 0.12, th);
-        ctx.fillRect(x - tw / 2, y - th / 2, tw, th * 0.1);
+      if (ndot > 0.5) {
+        ctx.globalAlpha = tileAlpha * (0.14 + 0.22 * k) * ndot;
+        ctx.fillRect(x - tw / 2, y - th / 2, tw * 0.14, th);
+        ctx.fillRect(x - tw / 2, y - th / 2, tw, th * 0.12);
       }
     }
     ctx.globalAlpha = 1;
@@ -494,8 +499,7 @@ function drawFrame(t) {
   // captions — lift when subject occupies lower third
   const cap = captionAt(t);
   if (cap) {
-    const cen = subjectCentroid(t);
-    const capY = cen.y > H * 0.55 ? H * 0.14 : H - 100;
+    const capY = subjectLowExtent(t) ? H * 0.13 : H - 100;
     ctx.save();
     ctx.font = 'italic 42px Georgia, "Times New Roman", serif';
     ctx.textAlign = 'center';

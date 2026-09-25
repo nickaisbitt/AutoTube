@@ -25,13 +25,13 @@
     {
       "id": "wall",
       "t0": 0,
-      "t1": 5,
+      "t1": 3.75,
       "mood": "still",
       "harmony": "Dm"
     },
     {
       "id": "watch",
-      "t0": 5,
+      "t0": 3.75,
       "t1": 17.5,
       "mood": "assemble",
       "harmony": "Bb"
@@ -62,13 +62,13 @@
     {
       "id": "s0",
       "t0": 0,
-      "t1": 5,
+      "t1": 3.75,
       "beat": 0,
       "camera": {
-        "x": 0.22,
-        "y": -0.14,
-        "zoom": 2.85,
-        "rot": 0.04
+        "x": -0.02,
+        "y": 0.08,
+        "zoom": 3.2,
+        "rot": 0.03
       },
       "subject": "mosaic-wall",
       "action": "gold vein detail",
@@ -76,13 +76,13 @@
     },
     {
       "id": "s1",
-      "t0": 5,
+      "t0": 3.75,
       "t1": 12.5,
-      "beat": 5,
+      "beat": 3.75,
       "camera": {
         "x": 0,
         "y": 0.02,
-        "zoom": 1.22,
+        "zoom": 1.32,
         "rot": 0
       },
       "subject": "tiles",
@@ -97,7 +97,7 @@
       "camera": {
         "x": 0,
         "y": 0,
-        "zoom": 1.48,
+        "zoom": 1.55,
         "rot": 0
       },
       "subject": "pocket-watch",
@@ -112,7 +112,7 @@
       "camera": {
         "x": 0.05,
         "y": -0.02,
-        "zoom": 1.22,
+        "zoom": 1.28,
         "rot": 0
       },
       "subject": "watch",
@@ -125,9 +125,9 @@
       "t1": 30,
       "beat": 22.5,
       "camera": {
-        "x": 0.14,
-        "y": 0,
-        "zoom": 1.38,
+        "x": 0.16,
+        "y": 0.02,
+        "zoom": 1.45,
         "rot": 0
       },
       "subject": "lighthouse",
@@ -141,8 +141,8 @@
       "beat": 30,
       "camera": {
         "x": 0,
-        "y": -0.02,
-        "zoom": 1.12,
+        "y": -0.04,
+        "zoom": 1.22,
         "rot": 0
       },
       "subject": "tower",
@@ -156,8 +156,8 @@
       "beat": 35,
       "camera": {
         "x": 0,
-        "y": -0.02,
-        "zoom": 1.35,
+        "y": -0.04,
+        "zoom": 1.45,
         "rot": 0
       },
       "subject": "gull-flock",
@@ -171,8 +171,8 @@
       "beat": 42.5,
       "camera": {
         "x": 0,
-        "y": -0.04,
-        "zoom": 1.18,
+        "y": -0.02,
+        "zoom": 1.28,
         "rot": 0
       },
       "subject": "flock",
@@ -197,7 +197,7 @@
   ],
   "events": [
     {
-      "t": 5,
+      "t": 3.75,
       "kind": "whoosh",
       "id": "lift"
     },

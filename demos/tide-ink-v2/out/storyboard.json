@@ -81,9 +81,9 @@
       "t1": 6.4,
       "beat": 0,
       "camera": {
-        "x": 180,
-        "y": 90,
-        "zoom": 1.05,
+        "x": 200,
+        "y": 80,
+        "zoom": 1.18,
         "rot": 0
       },
       "subject": "open-sea",
@@ -111,9 +111,9 @@
       "t1": 16,
       "beat": 9.6,
       "camera": {
-        "x": 1100,
-        "y": 110,
-        "zoom": 1.12,
+        "x": 1080,
+        "y": 100,
+        "zoom": 1.52,
         "rot": -0.02
       },
       "subject": "whale",
@@ -128,7 +128,7 @@
       "camera": {
         "x": 2100,
         "y": 30,
-        "zoom": 0.92,
+        "zoom": 1.05,
         "rot": 0.01
       },
       "subject": "whale-coast",
@@ -142,8 +142,8 @@
       "beat": 22.4,
       "camera": {
         "x": 2850,
-        "y": -30,
-        "zoom": 1.22,
+        "y": -40,
+        "zoom": 1.38,
         "rot": 0
       },
       "subject": "lighthouse",
@@ -158,7 +158,7 @@
       "camera": {
         "x": 3900,
         "y": 70,
-        "zoom": 0.88,
+        "zoom": 0.95,
         "rot": 0.03
       },
       "subject": "storm-ship",
@@ -172,8 +172,8 @@
       "beat": 35.2,
       "camera": {
         "x": 4450,
-        "y": 95,
-        "zoom": 1.12,
+        "y": 80,
+        "zoom": 1.28,
         "rot": -0.04
       },
       "subject": "ship",
@@ -187,8 +187,8 @@
       "beat": 41.6,
       "camera": {
         "x": 5450,
-        "y": 105,
-        "zoom": 1.02,
+        "y": 95,
+        "zoom": 1.12,
         "rot": 0
       },
       "subject": "paper-boat",
@@ -202,8 +202,8 @@
       "beat": 48,
       "camera": {
         "x": 6050,
-        "y": -380,
-        "zoom": 0.82,
+        "y": -400,
+        "zoom": 1.08,
         "rot": 0
       },
       "subject": "constellation",

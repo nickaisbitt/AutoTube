@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tide Ink v2 — continuous particle-ink film</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #061018; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas { width: min(100vw, 177.78vh); aspect-ratio: 16/9; display: block; background: #061018; }
+  #ui {
+    position: fixed; left: 16px; bottom: 14px; display: flex; gap: 10px; align-items: center;
+    font: 12px/1 Georgia, "Times New Roman", serif; color: #e8e2d4; letter-spacing: .08em;
+  }
+  #ui button {
+    font: inherit; text-transform: uppercase; letter-spacing: .14em; font-size: 11px;
+    color: #e8e2d4; background: rgba(6,16,24,.65); border: 1px solid rgba(232,226,212,.28);
+    border-radius: 999px; padding: 8px 14px; cursor: pointer;
+  }
+  #ui button:hover { border-color: #e8a45a; color: #e8a45a; }
+  body.render #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="1920" height="1080"></canvas></div>
+<div id="ui"><button id="play" type="button">Play with sound</button><span id="clock">0:00</span></div>
+<script>
+(() => {
+'use strict';
+
+const W = 1920, H = 1080, FPS = 30, DUR = 64, SEED = 0x71de;
+const N = 7200;
+const TAU = Math.PI * 2;
+const SERIF = 'Georgia, "Times New Roman", serif';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoother = (t) => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+const smoothstep = (a, b, x) => smoother((x - a) / (b - a));
+
+// --- storyboard (picture + sound both read this) ---
+const bpm = 75;
+const beatSec = 60 / bpm; // 0.8s
+const STORY = {
+  id: 'tide-ink-v2',
+  title: 'Tide Ink',
+  logline: 'One continuous ocean: particle ink remembers a whale, a lighthouse, a ship, a paper boat.',
+  technique: 'particle-ink',
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  seed: SEED,
+  tempo: { bpm, beatsPerBar: 4 },
+  palette: {
+    abyss: '#061018',
+    deep: '#0c2436',
+    sea: '#1a4a5e',
+    foam: '#d8e6ea',
+    ink: '#9ec4d4',
+    amber: '#e8a45a',
+    moon: '#f0ead8',
+    storm: '#142230',
+    dawn: '#c4784a',
+  },
+  sections: [
+    { id: 'open', t0: 0, t1: 9.6, mood: 'gather', harmony: 'Dm' },
+    { id: 'whale', t0: 9.6, t1: 22.4, mood: 'glide', harmony: 'Bb' },
+    { id: 'lighthouse', t0: 22.4, t1: 28.8, mood: 'vigil', harmony: 'F' },
+    { id: 'storm', t0: 28.8, t1: 41.6, mood: 'tempest', harmony: 'Gm' },
+    { id: 'dawn', t0: 41.6, t1: 48.0, mood: 'calm', harmony: 'Bb' },
+    { id: 'sky', t0: 48.0, t1: 54.4, mood: 'lift', harmony: 'Dm' },
+    { id: 'end', t0: 54.4, t1: 64.0, mood: 'release', harmony: 'D' },
+  ],
+  // camera x/y = world look-at; zoom = screen scale. Continuous path — no hard cuts.
+  shots: [
+    { id: 's0', t0: 0, t1: 6.4, beat: 0, camera: { x: 180, y: 90, zoom: 1.05, rot: 0 }, subject: 'open-sea', action: 'push into ink swirl', caption: '' },
+    { id: 's1', t0: 6.4, t1: 9.6, beat: 6.4, camera: { x: 420, y: -10, zoom: 1.35, rot: 0 }, subject: 'title', action: 'assemble title', caption: '' },
+    { id: 's2', t0: 9.6, t1: 16.0, beat: 9.6, camera: { x: 1100, y: 110, zoom: 1.12, rot: -0.02 }, subject: 'whale', action: 'orbit whale swim', caption: 'Ink remembers the deep.' },
+    { id: 's3', t0: 16.0, t1: 22.4, beat: 16.0, camera: { x: 2100, y: 30, zoom: 0.92, rot: 0.01 }, subject: 'whale-coast', action: 'pan push to coast', caption: '' },
+    { id: 's4', t0: 22.4, t1: 28.8, beat: 22.4, camera: { x: 2850, y: -30, zoom: 1.22, rot: 0 }, subject: 'lighthouse', action: 'orbit beam sweep', caption: 'Some keep watch.' },
+    { id: 's5', t0: 28.8, t1: 35.2, beat: 28.8, camera: { x: 3900, y: 70, zoom: 0.88, rot: 0.03 }, subject: 'storm-ship', action: 'pull into storm', caption: '' },
+    { id: 's6', t0: 35.2, t1: 41.6, beat: 35.2, camera: { x: 4450, y: 95, zoom: 1.12, rot: -0.04 }, subject: 'ship', action: 'orbit ship pitch', caption: '' },
+    { id: 's7', t0: 41.6, t1: 48.0, beat: 41.6, camera: { x: 5450, y: 105, zoom: 1.02, rot: 0 }, subject: 'paper-boat', action: 'pull back dawn', caption: 'And some float home.' },
+    { id: 's8', t0: 48.0, t1: 54.4, beat: 48.0, camera: { x: 6050, y: -380, zoom: 0.82, rot: 0 }, subject: 'constellation', action: 'lift to sky whale', caption: '' },
+    { id: 's9', t0: 54.4, t1: 64.0, beat: 54.4, camera: { x: 6200, y: -180, zoom: 1.0, rot: 0 }, subject: 'end-card', action: 'settle end card', caption: '' },
+  ],
+  events: [
+    { t: 6.4, kind: 'whoosh', id: 'to-title' },
+    { t: 9.6, kind: 'impact', id: 'title-lock' },
+    { t: 9.6, kind: 'whoosh', id: 'to-whale' },
+    { t: 12.0, kind: 'pluck', id: 'whale-call-a' },
+    { t: 14.4, kind: 'pluck', id: 'whale-call-b' },
+    { t: 16.0, kind: 'whoosh', id: 'to-coast' },
+    { t: 22.4, kind: 'impact', id: 'tower-lock' },
+    { t: 24.0, kind: 'bell', id: 'beam-1' },
+    { t: 25.6, kind: 'bell', id: 'beam-2' },
+    { t: 27.2, kind: 'bell', id: 'beam-3' },
+    { t: 28.8, kind: 'whoosh', id: 'to-storm' },
+    { t: 32.0, kind: 'thunder', id: 'flash-1' },
+    { t: 35.2, kind: 'impact', id: 'ship-lock' },
+    { t: 36.8, kind: 'thunder', id: 'flash-2' },
+    { t: 39.2, kind: 'thunder', id: 'flash-3' },
+    { t: 41.6, kind: 'whoosh', id: 'to-dawn' },
+    { t: 44.0, kind: 'bell', id: 'dawn-bell' },
+    { t: 48.0, kind: 'whoosh', id: 'to-sky' },
+    { t: 50.4, kind: 'pluck', id: 'sky-call' },
+    { t: 54.4, kind: 'impact', id: 'end-lock' },
+    { t: 56.0, kind: 'bell', id: 'end-bell-a' },
+    { t: 56.8, kind: 'bell', id: 'end-bell-b' },
+  ],
+  acceptance: { maxDeadAirSec: 1.5, beatToleranceSec: 0.04, thumbnailReadable: true, zeroExternalAssets: true },
+};
+
+// --- particle state (deterministic) ---
+const rnd = mulberry32(SEED);
+const px0 = new Float32Array(N);
+const py0 = new Float32Array(N);
+const phase = new Float32Array(N);
+const order = new Float32Array(N);
+const size = new Float32Array(N);
+const tint = new Float32Array(N);
+
+for (let i = 0; i < N; i++) {
+  // concentrate open-sea ink near the water column, not a starfield
+  px0[i] = (rnd() - 0.5) * 9000;
+  py0[i] = 40 + (rnd() - 0.15) * 900 + (rnd() > 0.7 ? (rnd() - 0.5) * 600 : 0);
+  phase[i] = rnd();
+  order[i] = rnd();
+  size[i] = 1.6 + rnd() * 3.2;
+  tint[i] = rnd();
+}
+
+function inPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    const intersect = ((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** Sample a world-space mask into N targets; leftovers go far away (no halo). */
+function sampleMask(predicate, cx, cy, halfW, halfH, seedOff) {
+  const r = mulberry32(SEED ^ seedOff);
+  const txs = new Float32Array(N), tys = new Float32Array(N);
+  const core = new Uint8Array(N);
+  const pts = [];
+  const sx = 280, sy = 160;
+  for (let row = 0; row < sy; row++) {
+    for (let col = 0; col < sx; col++) {
+      const lx = ((col + 0.5) / sx) * 2 - 1;
+      const ly = ((row + 0.5) / sy) * 2 - 1;
+      const wx = cx + lx * halfW;
+      const wy = cy + ly * halfH;
+      if (predicate(lx, ly, wx, wy)) pts.push([wx, wy]);
+    }
+  }
+  for (let i = pts.length - 1; i > 0; i--) {
+    const j = (r() * (i + 1)) | 0;
+    const tmp = pts[i]; pts[i] = pts[j]; pts[j] = tmp;
+  }
+  const take = Math.min(pts.length, Math.floor(N * 0.96));
+  const idx = Array.from({ length: N }, (_, i) => i);
+  for (let i = N - 1; i > 0; i--) {
+    const j = (r() * (i + 1)) | 0;
+    const tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
+  }
+  const used = new Uint8Array(N);
+  for (let p = 0; p < take; p++) {
+    const i = idx[p];
+    txs[i] = pts[p][0];
+    tys[i] = pts[p][1];
+    used[i] = 1;
+    core[i] = 1;
+  }
+  // leftovers: distant ocean dust — never a circular halo around the subject
+  for (let i = 0; i < N; i++) if (!used[i]) {
+    const edge = r();
+    if (edge < 0.5) {
+      txs[i] = cx + (r() - 0.5) * halfW * 6;
+      tys[i] = cy + halfH * (1.6 + r() * 2.2);
+    } else {
+      txs[i] = cx + (r() < 0.5 ? -1 : 1) * halfW * (2.2 + r() * 3);
+      tys[i] = cy + (r() - 0.3) * halfH * 2.5;
+    }
+  }
+  return { x: txs, y: tys, core };
+}
+
+// Whale silhouette — thick body, clear fluke, pectoral, eye cutout
+const WHALE_CX = 1000, WHALE_CY = 120;
+const whale = sampleMask((lx, ly) => {
+  const body = Math.hypot(lx * 0.95, ly * 2.15) < 0.78 && lx > -0.5 && lx < 0.78;
+  const head = Math.hypot((lx - 0.58) / 0.42, ly / 0.48) < 1 && lx > 0.2;
+  const jaw = lx > 0.35 && lx < 0.92 && ly > -0.05 && ly < 0.28 && ly < 0.05 + (0.92 - lx) * 0.35;
+  const flukeTop = lx < -0.42 && lx > -0.98 && ly < -0.05 && ly > -0.62 && ly > -0.15 + (lx + 0.42) * 0.9;
+  const flukeBot = lx < -0.42 && lx > -0.98 && ly > 0.05 && ly < 0.62 && ly < 0.15 - (lx + 0.42) * 0.9;
+  const peduncle = lx > -0.55 && lx < -0.25 && Math.abs(ly) < 0.22;
+  const fin = lx > 0.0 && lx < 0.38 && ly > 0.18 && ly < 0.62
+    && Math.abs(ly - 0.22 - (lx - 0.0) * 1.05) < 0.2;
+  const eye = Math.hypot(lx - 0.66, ly + 0.06) < 0.055;
+  return (body || head || jaw || flukeTop || flukeBot || peduncle || fin) && !eye;
+}, WHALE_CX, WHALE_CY, 560, 240, 101);
+
+// Lighthouse + cliff + moon — thicker shaft, clear stripes via density
+const LH_CX = 2850, LH_CY = -20;
+const lighthouse = sampleMask((lx, ly) => {
+  const cliff = inPoly(lx, ly, [
+    [-0.35, 0.98], [-0.18, 0.55], [-0.05, 0.42], [0.12, 0.32],
+    [0.28, 0.28], [0.55, 0.34], [0.78, 0.42], [0.95, 0.55], [1.1, 0.98],
+  ]) || (ly > 0.55 && lx > -0.4 && lx < 1.05 && Math.sin(lx * 18) * 0.04 + 0.62 < ly);
+  const taper = lerp(1.2, 0.72, clamp((-0.55 - ly) / -0.92, 0, 1));
+  const shaft = ly > -0.58 && ly < 0.32 && Math.abs(lx - 0.28) < 0.12 * taper;
+  const stripeCut = shaft && ((Math.floor((ly + 0.58) * 7) % 2) === 0) && Math.abs(lx - 0.28) > 0.05 * taper;
+  const gallery = Math.abs(ly + 0.5) < 0.055 && Math.abs(lx - 0.28) < 0.18;
+  const lamp = Math.hypot(lx - 0.28, ly + 0.64) < 0.11;
+  const roof = ly < -0.64 && ly > -0.94 && Math.abs(lx - 0.28) < 0.17 * clamp((-0.64 - ly) / 0.3 + 0.2, 0.2, 1.2);
+  const moon = Math.hypot(lx + 0.72, ly + 0.58) < 0.2;
+  const moonCut = Math.hypot(lx + 0.78, ly + 0.52) < 0.045 || Math.hypot(lx + 0.64, ly + 0.64) < 0.035;
+  return cliff || (shaft && !stripeCut) || gallery || lamp || roof || (moon && !moonCut);
+}, LH_CX, LH_CY, 520, 420, 202);
+
+// Ship — thicker hull, tall mast, triangular sail
+const SHIP_CX = 4450, SHIP_CY = 100;
+const ship = sampleMask((lx, ly) => {
+  const hull = ly > 0.18 && ly < 0.58 && Math.abs(lx) < 0.78 - (ly - 0.18) * 0.4;
+  const bow = lx > 0.4 && lx < 0.98 && ly > 0.0 && ly < 0.48 && ly > -0.05 + (lx - 0.4) * 0.5;
+  const cabin = Math.abs(lx + 0.15) < 0.18 && ly > -0.05 && ly < 0.22;
+  const mast = Math.abs(lx - 0.05) < 0.045 && ly > -0.82 && ly < 0.22;
+  const sail = lx > 0.02 && lx < 0.55 && ly > -0.78 && ly < 0.02
+    && (lx - 0.02) < 0.55 * (1 - (ly + 0.78) / 0.8) * 0.9 + 0.08;
+  const boom = Math.abs(ly + 0.02) < 0.035 && lx > -0.02 && lx < 0.52;
+  const flag = lx > -0.02 && lx < 0.12 && ly > -0.92 && ly < -0.78;
+  return hull || bow || cabin || mast || sail || boom || flag;
+}, SHIP_CX, SHIP_CY, 440, 320, 303);
+
+// Paper boat — crisp origami silhouette
+const BOAT_CX = 5450, BOAT_CY = 130;
+const boat = sampleMask((lx, ly) => {
+  const base = ly > 0.2 && ly < 0.58 && Math.abs(lx) < 0.78 - (ly - 0.2) * 0.55;
+  const left = lx <= 0 && lx > -0.9 && ly > -0.4 && ly < 0.35
+    && Math.abs(ly - (-0.05 - lx * 0.6)) < 0.16;
+  const right = lx >= 0 && lx < 0.9 && ly > -0.4 && ly < 0.35
+    && Math.abs(ly - (-0.05 + lx * 0.6)) < 0.16;
+  const peak = Math.abs(lx) < 0.1 && ly > -0.62 && ly < 0.12;
+  return base || left || right || peak;
+}, BOAT_CX, BOAT_CY, 300, 190, 404);
+
+// Title — geometric block letters (reliable thumbnail, no font dependency)
+const TITLE_CX = 420, TITLE_CY = -20;
+const title = sampleMask((lx, ly) => {
+  // letter boxes in local -1..1 with clear gaps
+  const bars = [
+    // T
+    [-0.92, -0.42, 0.20, 0.14], [-0.85, -0.42, 0.07, 0.78],
+    // I
+    [-0.64, -0.42, 0.07, 0.78],
+    // D
+    [-0.48, -0.42, 0.07, 0.78], [-0.48, -0.42, 0.20, 0.14], [-0.48, 0.22, 0.20, 0.14],
+    [-0.34, -0.28, 0.10, 0.50],
+    // E
+    [-0.16, -0.42, 0.07, 0.78], [-0.16, -0.42, 0.20, 0.14], [-0.16, -0.08, 0.16, 0.12], [-0.16, 0.22, 0.20, 0.14],
+    // gap then I
+    [0.18, -0.42, 0.07, 0.78],
+    // N
+    [0.34, -0.42, 0.07, 0.78], [0.52, -0.42, 0.07, 0.78], [0.34, -0.28, 0.22, 0.18],
+    // K
+    [0.68, -0.42, 0.07, 0.78], [0.74, -0.28, 0.18, 0.14], [0.74, 0.0, 0.18, 0.14], [0.82, 0.14, 0.14, 0.22],
+  ];
+  for (const [x, y, w, h] of bars) {
+    if (lx >= x && lx <= x + w && ly >= y && ly <= y + h) return true;
+  }
+  // underline
+  if (ly > 0.48 && ly < 0.58 && lx > -0.88 && lx < 0.92) return true;
+  return false;
+}, TITLE_CX, TITLE_CY, 780, 220, 505);
+
+// Constellation whale — outline + star nodes (no filled blob)
+const CONST_CX = 6050, CONST_CY = -400;
+const constellation = sampleMask((lx, ly) => {
+  // thick outline of whale body
+  const er = Math.hypot(lx * 1.05, ly * 2.1);
+  const inBody = er < 0.62 && lx > -0.48 && lx < 0.78;
+  const outBody = er < 0.78 && lx > -0.55 && lx < 0.88;
+  const outline = outBody && !inBody;
+  const flukeTop = lx < -0.4 && lx > -0.95 && ly < -0.08 && ly > -0.55
+    && Math.abs(ly + 0.12 - (lx + 0.4) * 0.7) < 0.12;
+  const flukeBot = lx < -0.4 && lx > -0.95 && ly > 0.08 && ly < 0.55
+    && Math.abs(ly - 0.12 + (lx + 0.4) * 0.7) < 0.12;
+  const stars = [
+    [0.62, -0.02], [0.35, -0.18], [0.1, 0.08], [-0.15, -0.12],
+    [-0.38, 0.05], [-0.55, -0.28], [-0.58, 0.28], [0.45, 0.2], [0.2, 0.22],
+  ];
+  let onStar = false;
+  for (const [sx, sy] of stars) {
+    if (Math.hypot(lx - sx, ly - sy) < 0.085) { onStar = true; break; }
+  }
+  // connecting rays between stars
+  const rays = [
+    [0.62, -0.02, 0.35, -0.18], [0.35, -0.18, 0.1, 0.08], [0.1, 0.08, -0.15, -0.12],
+    [-0.15, -0.12, -0.38, 0.05], [-0.38, 0.05, -0.55, -0.28], [-0.38, 0.05, -0.58, 0.28],
+    [0.1, 0.08, 0.45, 0.2], [0.45, 0.2, 0.2, 0.22],
+  ];
+  let onRay = false;
+  for (const [x0, y0, x1, y1] of rays) {
+    const dx = x1 - x0, dy = y1 - y0;
+    const len2 = dx * dx + dy * dy || 1;
+    const t = clamp(((lx - x0) * dx + (ly - y0) * dy) / len2, 0, 1);
+    const px = x0 + dx * t, py = y0 + dy * t;
+    if (Math.hypot(lx - px, ly - py) < 0.035) { onRay = true; break; }
+  }
+  return outline || flukeTop || flukeBot || onStar || onRay;
+}, CONST_CX, CONST_CY, 580, 260, 606);
+
+const oceanScatter = { x: px0, y: py0 };
+
+function formationWeights(t) {
+  const wOpen = 1 - smoothstep(5.5, 8.5, t);
+  const wTitle = smoothstep(6.0, 7.6, t) * (1 - smoothstep(9.4, 11.5, t));
+  const wWhale = smoothstep(9.4, 12.5, t) * (1 - smoothstep(19.5, 23.5, t));
+  const wLight = smoothstep(21.5, 24.5, t) * (1 - smoothstep(27.8, 30.5, t));
+  const wShip = smoothstep(29.5, 33.5, t) * (1 - smoothstep(40.0, 43.5, t));
+  const wBoat = smoothstep(41.0, 44.5, t) * (1 - smoothstep(47.0, 50.0, t));
+  const wConst = smoothstep(47.5, 51.5, t) * (1 - smoothstep(58.5, 62.5, t));
+  const sum = wOpen + wTitle + wWhale + wLight + wShip + wBoat + wConst + 1e-6;
+  return {
+    open: wOpen / sum, title: wTitle / sum, whale: wWhale / sum,
+    light: wLight / sum, ship: wShip / sum, boat: wBoat / sum, cons: wConst / sum,
+  };
+}
+
+function eventStrength(t, kind, window = 0.9) {
+  let s = 0;
+  for (const e of STORY.events) {
+    if (e.kind !== kind) continue;
+    const d = Math.abs(t - e.t);
+    if (d < window) s = Math.max(s, 1 - d / window);
+  }
+  return s;
+}
+
+function particleWorld(i, t) {
+  const w = formationWeights(t);
+  let x = w.open * oceanScatter.x[i]
+    + w.title * title.x[i]
+    + w.whale * whale.x[i]
+    + w.light * lighthouse.x[i]
+    + w.ship * ship.x[i]
+    + w.boat * boat.x[i]
+    + w.cons * constellation.x[i];
+  let y = w.open * oceanScatter.y[i]
+    + w.title * title.y[i]
+    + w.whale * whale.y[i]
+    + w.light * lighthouse.y[i]
+    + w.ship * ship.y[i]
+    + w.boat * boat.y[i]
+    + w.cons * constellation.y[i];
+
+  // whale travels slowly while featured
+  const swim = smoothstep(9.6, 12, t) * (1 - smoothstep(20, 23, t));
+  if (swim > 0) {
+    x += swim * (t - 9.6) * 28;
+    y += swim * Math.sin((t - 9.6) * 0.9 + phase[i]) * 12;
+  }
+
+  // ship pitch
+  const pitch = smoothstep(30, 34, t) * (1 - smoothstep(40, 43, t));
+  if (pitch > 0) {
+    const ang = Math.sin(t * 1.7) * 0.12 * pitch;
+    const dx = x - SHIP_CX, dy = y - SHIP_CY;
+    x = SHIP_CX + dx * Math.cos(ang) - dy * Math.sin(ang);
+    y = SHIP_CY + dx * Math.sin(ang) + dy * Math.cos(ang) + Math.sin(t * 2.1) * 18 * pitch;
+  }
+
+  // paper boat bob
+  const bob = smoothstep(42, 45, t) * (1 - smoothstep(47, 50, t));
+  if (bob > 0) y += Math.sin(t * 1.4 + phase[i] * 2) * 10 * bob;
+
+  // whoosh turbulence from shared events — settle hard when formation locks
+  const whoosh = eventStrength(t, 'whoosh', 1.1) + eventStrength(t, 'impact', 0.45) * 0.5;
+  const stagger = smoother(clamp((whoosh * 1.4 - order[i] * 0.5), 0, 1));
+  const turb = whoosh * (0.25 + 0.45 * stagger);
+  const ang = phase[i] * TAU + t * (0.8 + phase[i] * 0.4);
+  x += Math.cos(ang) * turb * 38 * (0.4 + order[i]);
+  y += Math.sin(ang * 1.25) * turb * 28 * (0.4 + order[i]);
+
+  // gentle curl drift always (subtle — don't blur silhouette)
+  x += Math.sin(t * 0.35 + phase[i] * 6) * 3.5;
+  y += Math.cos(t * 0.28 + phase[i] * 5) * 2.5;
+
+  return [x, y];
+}
+
+function camAt(t) {
+  const shots = STORY.shots;
+  let i = 0;
+  while (i < shots.length - 1 && t >= shots[i + 1].t0) i++;
+  const a = shots[i];
+  const b = shots[Math.min(i + 1, shots.length - 1)];
+  const u = smoother(clamp((t - a.t0) / Math.max(0.001, b.t0 - a.t0 || a.t1 - a.t0), 0, 1));
+  const ca = a.camera, cb = b.camera;
+  const punch = eventStrength(t, 'impact', 0.4) * 0.04;
+  let x = lerp(ca.x, cb.x, u);
+  let y = lerp(ca.y, cb.y, u);
+  // keep whale framed while it swims (continuous world, not a crop)
+  const follow = smoothstep(9.6, 11.0, t) * (1 - smoothstep(18.5, 22.0, t));
+  if (follow > 0) {
+    const whaleX = WHALE_CX + (t - 9.6) * 28;
+    const whaleY = WHALE_CY + Math.sin((t - 9.6) * 0.9) * 8;
+    x = lerp(x, whaleX + 80, follow * 0.85);
+    y = lerp(y, whaleY + 20, follow * 0.5);
+  }
+  // hold lighthouse in frame during vigil
+  const vigil = smoothstep(22.0, 23.5, t) * (1 - smoothstep(27.5, 29.5, t));
+  if (vigil > 0) {
+    x = lerp(x, LH_CX + 120, vigil * 0.7);
+    y = lerp(y, LH_CY + 40, vigil * 0.5);
+  }
+  return {
+    x, y,
+    zoom: lerp(ca.zoom, cb.zoom, u) * (1 + 0.01 * Math.sin(t * 0.55) - punch),
+    rot: lerp(ca.rot || 0, cb.rot || 0, u),
+  };
+}
+
+function worldToScreen(wx, wy, cam) {
+  const z = cam.zoom;
+  const dx = wx - cam.x, dy = wy - cam.y;
+  const ca = Math.cos(cam.rot), sa = Math.sin(cam.rot);
+  const rx = ca * dx - sa * dy;
+  const ry = sa * dx + ca * dy;
+  return [W / 2 + rx * z, H / 2 + ry * z];
+}
+
+function captionAt(t) {
+  for (const s of STORY.shots) {
+    if (!s.caption) continue;
+    if (t >= s.t0 + 0.4 && t <= s.t1 - 0.5) {
+      const a = smoothstep(s.t0 + 0.4, s.t0 + 1.2, t) * (1 - smoothstep(s.t1 - 1.3, s.t1 - 0.5, t));
+      return { text: s.caption, a };
+    }
+  }
+  return null;
+}
+
+function hexRgb(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, (n & 255)];
+}
+const C_INK = hexRgb(STORY.palette.ink);
+const C_FOAM = hexRgb(STORY.palette.foam);
+const C_AMBER = hexRgb(STORY.palette.amber);
+const C_MOON = hexRgb(STORY.palette.moon);
+const C_DAWN = hexRgb(STORY.palette.dawn);
+
+function skyColors(t) {
+  // journey day-cycle: dawn → day → dusk → storm → dawn → night
+  if (t < 9.6) return ['#0a1824', '#123048', '#1a4058'];
+  if (t < 22.4) return ['#0c2034', '#163850', '#1e4860'];
+  if (t < 28.8) return ['#081420', '#0e2438', '#142840'];
+  if (t < 41.6) return ['#060e18', '#0a1828', '#102030'];
+  if (t < 48) return ['#1a2030', '#3a3040', '#6a4850'];
+  if (t < 54.4) return ['#060e1c', '#0a1428', '#101c34'];
+  return ['#061018', '#0a1824', '#0e2030'];
+}
+
+function drawOceanWorld(t, cam) {
+  const skies = skyColors(t);
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, skies[0]);
+  g.addColorStop(0.42, skies[1]);
+  g.addColorStop(0.58, skies[2]);
+  g.addColorStop(1, '#061820');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // horizon band in world → screen
+  const [hx0, hy] = worldToScreen(cam.x - 2000, 40, cam);
+  const [, hy2] = worldToScreen(cam.x, 40, cam);
+  const horizonY = clamp((hy + hy2) / 2, H * 0.28, H * 0.72);
+
+  // sun / moon
+  const storm = smoothstep(28.5, 32, t) * (1 - smoothstep(40.5, 43, t));
+  const dawn = smoothstep(41, 44, t) * (1 - smoothstep(47, 50, t));
+  const night = smoothstep(47.5, 51, t);
+  if (dawn > 0.05) {
+    const sx = W * 0.72, sy = horizonY - 40;
+    const sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, 120);
+    sg.addColorStop(0, `rgba(232,140,70,${0.55 * dawn})`);
+    sg.addColorStop(0.4, `rgba(200,90,50,${0.25 * dawn})`);
+    sg.addColorStop(1, 'rgba(200,90,50,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath(); ctx.arc(sx, sy, 120, 0, TAU); ctx.fill();
+  }
+  if (night > 0.05 || (t > 20 && t < 30)) {
+    const ma = night > 0.05 ? night : smoothstep(20, 23, t) * (1 - smoothstep(28, 30, t));
+    const [mx, my] = worldToScreen(LH_CX - 380, LH_CY - 220, cam);
+    const mg = ctx.createRadialGradient(mx, my, 0, mx, my, 50);
+    mg.addColorStop(0, `rgba(240,234,216,${0.9 * ma})`);
+    mg.addColorStop(0.7, `rgba(220,210,180,${0.5 * ma})`);
+    mg.addColorStop(1, 'rgba(220,210,180,0)');
+    ctx.fillStyle = mg;
+    ctx.beginPath(); ctx.arc(mx, my, 50, 0, TAU); ctx.fill();
+  }
+
+  // sea body below horizon
+  const seaG = ctx.createLinearGradient(0, horizonY, 0, H);
+  const seaTop = storm > 0.3 ? '#0e2030' : dawn > 0.3 ? '#2a4050' : '#123848';
+  const seaBot = storm > 0.3 ? '#081018' : '#061820';
+  seaG.addColorStop(0, seaTop);
+  seaG.addColorStop(1, seaBot);
+  ctx.fillStyle = seaG;
+  ctx.fillRect(0, horizonY, W, H - horizonY);
+
+  // wave ribbons with camera parallax + crest foam
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, horizonY - 8, W, H - horizonY + 8);
+  ctx.clip();
+  for (let band = 0; band < 7; band++) {
+    const y0 = horizonY + 18 + band * 48;
+    const amp = (10 + band * 5) * (1 + storm * 1.4);
+    const speed = 0.55 + band * 0.12;
+    const crest = [];
+    ctx.beginPath();
+    ctx.moveTo(-20, H + 20);
+    ctx.lineTo(-20, y0);
+    for (let x = 0; x <= W + 20; x += 16) {
+      const wx = cam.x + (x - W / 2) / cam.zoom;
+      const y = y0 + Math.sin(wx * 0.012 + t * speed + band) * amp
+        + Math.sin(wx * 0.03 - t * 0.7 + band * 2) * amp * 0.35;
+      ctx.lineTo(x, y);
+      crest.push([x, y]);
+    }
+    ctx.lineTo(W + 20, H + 20);
+    ctx.closePath();
+    const a = 0.1 + band * 0.03;
+    ctx.fillStyle = storm > 0.2
+      ? `rgba(50,85,105,${a + storm * 0.1})`
+      : `rgba(80,150,170,${a})`;
+    ctx.fill();
+    // crest highlight line
+    ctx.beginPath();
+    for (let i = 0; i < crest.length; i++) {
+      const [x, y] = crest[i];
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = `rgba(200,230,235,${0.1 + dawn * 0.12 + (1 - band / 7) * 0.08})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // soft horizon haze (not a hard razor line)
+  const haze = ctx.createLinearGradient(0, horizonY - 28, 0, horizonY + 28);
+  haze.addColorStop(0, 'rgba(180,210,220,0)');
+  haze.addColorStop(0.5, `rgba(200,230,235,${0.1 + dawn * 0.12})`);
+  haze.addColorStop(1, 'rgba(180,210,220,0)');
+  ctx.fillStyle = haze;
+  ctx.fillRect(0, horizonY - 28, W, 56);
+
+  // rain in storm — varied length/angle
+  if (storm > 0.08) {
+    const gr = mulberry32((SEED ^ (Math.floor(t * 20) * 9973)) >>> 0);
+    for (let k = 0; k < 160; k++) {
+      const x = gr() * W;
+      const y = gr() * H;
+      const len = 12 + gr() * 16;
+      const dx = 2 + gr() * 5;
+      ctx.strokeStyle = `rgba(180,200,220,${(0.12 + gr() * 0.18) * storm})`;
+      ctx.lineWidth = 1 + gr();
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - dx, y + len);
+      ctx.stroke();
+    }
+  }
+
+  // lightning from thunder events
+  const flash = eventStrength(t, 'thunder', 0.55);
+  if (flash > 0.05) {
+    ctx.fillStyle = `rgba(200,220,255,${0.18 * flash})`;
+    ctx.fillRect(0, 0, W, H);
+    const lx = W * (0.35 + 0.3 * Math.sin(Math.floor(t * 10)));
+    ctx.strokeStyle = `rgba(230,240,255,${0.85 * flash})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(lx, 0);
+    ctx.lineTo(lx + 40, H * 0.22);
+    ctx.lineTo(lx - 20, H * 0.28);
+    ctx.lineTo(lx + 55, horizonY);
+    ctx.stroke();
+  }
+
+  return horizonY;
+}
+
+function drawParticles(t, cam) {
+  const punch = eventStrength(t, 'impact', 0.5);
+  const bell = eventStrength(t, 'bell', 0.8);
+  const dawn = smoothstep(41, 45, t) * (1 - smoothstep(47, 51, t));
+  const storm = smoothstep(29, 33, t) * (1 - smoothstep(40, 43, t));
+  const night = smoothstep(48, 52, t);
+  const w = formationWeights(t);
+
+  for (let i = 0; i < N; i++) {
+    const [wx, wy] = particleWorld(i, t);
+    const [sx, sy] = worldToScreen(wx, wy, cam);
+    if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) continue;
+
+    const isCore = (w.title > 0.35 && title.core[i])
+      || (w.whale > 0.35 && whale.core[i])
+      || (w.light > 0.35 && lighthouse.core[i])
+      || (w.ship > 0.35 && ship.core[i])
+      || (w.boat > 0.35 && boat.core[i])
+      || (w.cons > 0.35 && constellation.core[i]);
+    if (!isCore && w.open < 0.55 && (w.title + w.whale + w.light + w.ship + w.boat + w.cons) > 0.45) {
+      continue; // no leftover halo / reflection bands
+    }
+
+    const k = tint[i];
+    let r, g, b;
+    if (storm > 0.4) {
+      r = lerp(C_INK[0], 180, k * 0.35);
+      g = lerp(C_INK[1], 200, k * 0.35);
+      b = lerp(C_INK[2], 220, k * 0.35);
+    } else if (dawn > 0.3) {
+      r = lerp(C_INK[0], C_DAWN[0], k * 0.55 + dawn * 0.2);
+      g = lerp(C_INK[1], C_DAWN[1], k * 0.45);
+      b = lerp(C_INK[2], C_DAWN[2], k * 0.35);
+    } else if (night > 0.3) {
+      r = lerp(C_INK[0], C_MOON[0], k * 0.55);
+      g = lerp(C_INK[1], C_MOON[1], k * 0.55);
+      b = lerp(C_INK[2], C_MOON[2], k * 0.55);
+    } else {
+      r = lerp(C_INK[0], C_FOAM[0], k * 0.45);
+      g = lerp(C_INK[1], C_FOAM[1], k * 0.45);
+      b = lerp(C_INK[2], C_FOAM[2], k * 0.45);
+      if (k > 0.78) {
+        r = lerp(r, C_AMBER[0], 0.55);
+        g = lerp(g, C_AMBER[1], 0.55);
+        b = lerp(b, C_AMBER[2], 0.55);
+      }
+    }
+    const shimmer = 0.9 + 0.1 * Math.sin(t * 2.2 + phase[i] * 30);
+    const glow = (isCore ? 1.15 : 0.75) + punch * 0.35 + bell * 0.15;
+    const s = size[i] * (isCore ? 1.15 : 0.7) * (0.9 + cam.zoom * 0.15) * (1 + punch * 0.2);
+    ctx.fillStyle = `rgb(${(r * shimmer * glow) | 0},${(g * shimmer * glow) | 0},${(b * shimmer * glow) | 0})`;
+    ctx.fillRect(sx - s / 2, sy - s / 2, s, s);
+  }
+}
+
+function drawBeam(t, cam) {
+  const a = smoothstep(22.2, 24.0, t) * (1 - smoothstep(28.2, 30.0, t));
+  if (a < 0.02) return;
+  const bell = eventStrength(t, 'bell', 0.7);
+  const ang = 0.2 + Math.sin(t * 0.85) * 0.45;
+  const [lx, ly] = worldToScreen(LH_CX + 30, LH_CY - 220, cam);
+  ctx.save();
+  ctx.translate(lx, ly);
+  ctx.rotate(ang);
+  const len = 720 * cam.zoom;
+  const bg = ctx.createLinearGradient(0, 0, -len, 0);
+  bg.addColorStop(0, `rgba(240,200,120,${(0.22 + bell * 0.3) * a})`);
+  bg.addColorStop(0.45, `rgba(240,200,120,${0.08 * a})`);
+  bg.addColorStop(1, 'rgba(240,200,120,0)');
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.moveTo(0, -6);
+  ctx.lineTo(-len, -H * 0.06);
+  ctx.lineTo(-len, H * 0.06);
+  ctx.lineTo(0, 6);
+  ctx.closePath();
+  ctx.fill();
+  // dust motes in the beam
+  const gr = mulberry32((SEED ^ 0xbea11 ^ Math.floor(t * 8)) >>> 0);
+  ctx.fillStyle = `rgba(255,230,180,${0.35 * a})`;
+  for (let k = 0; k < 48; k++) {
+    const d = gr() * len;
+    const yy = (gr() - 0.5) * (8 + d * 0.08);
+    ctx.fillRect(-d, yy, 2.2, 2.2);
+  }
+  ctx.restore();
+}
+
+function drawTitleUnderpaint(t, cam) {
+  const a = smoothstep(6.2, 7.4, t) * (1 - smoothstep(9.4, 11.2, t));
+  if (a < 0.02) return;
+  const [sx, sy] = worldToScreen(TITLE_CX, TITLE_CY, cam);
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.scale(cam.zoom, cam.zoom);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `700 120px ${SERIF}`;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '20px';
+  ctx.fillStyle = `rgba(220,235,240,${0.55 * a})`;
+  ctx.fillText('TIDE INK', 0, -10);
+  ctx.fillStyle = `rgba(232,164,90,${0.7 * a})`;
+  ctx.fillRect(-320, 68, 640, 6);
+  ctx.restore();
+}
+
+function drawFrame(t) {
+  t = clamp(t, 0, DUR);
+  const cam = camAt(t);
+
+  drawOceanWorld(t, cam);
+
+  ctx.save();
+  drawTitleUnderpaint(t, cam);
+  drawBeam(t, cam);
+  drawParticles(t, cam);
+  ctx.restore();
+
+  // vignette
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.18, W / 2, H / 2, H * 0.82);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+
+  // captions
+  const cap = captionAt(t);
+  if (cap) {
+    ctx.save();
+    ctx.font = `italic 40px ${SERIF}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(232,226,212,${cap.a})`;
+    ctx.shadowColor = `rgba(0,0,0,${0.65 * cap.a})`;
+    ctx.shadowBlur = 14;
+    ctx.fillText(cap.text, W / 2, H - 96);
+    ctx.restore();
+  }
+
+  // end card
+  const end = smoothstep(54.2, 56.5, t);
+  if (end > 0.01) {
+    ctx.fillStyle = `rgba(6,16,24,${0.45 * end})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(232,226,212,${end})`;
+    ctx.font = `600 72px ${SERIF}`;
+    ctx.fillText('Tide Ink', W / 2, H / 2 - 12);
+    ctx.font = `italic 24px ${SERIF}`;
+    ctx.fillStyle = `rgba(232,164,90,${end * 0.95})`;
+    ctx.fillText('a continuous world, written in code', W / 2, H / 2 + 40);
+  }
+
+  // grain
+  const gr = mulberry32((SEED ^ (Math.floor(t * FPS) * 2654435761)) >>> 0);
+  ctx.globalAlpha = 0.03;
+  for (let k = 0; k < 160; k++) {
+    ctx.fillStyle = gr() > 0.5 ? '#fff' : '#000';
+    ctx.fillRect(gr() * W, gr() * H, 1.6, 1.6);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// --- audio from shared events + section harmony ---
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const CHORDS = {
+  Dm: [50, 53, 57, 60],
+  Bb: [46, 50, 53, 57],
+  F: [48, 53, 57, 60],
+  Gm: [43, 46, 50, 55],
+  D: [50, 54, 57, 61],
+};
+
+function buildScore(ac, T0) {
+  const master = ac.createGain();
+  master.gain.setValueAtTime(0, T0);
+  master.gain.linearRampToValueAtTime(0.85, T0 + 1.4);
+  master.gain.setValueAtTime(0.85, T0 + DUR - 2.5);
+  master.gain.linearRampToValueAtTime(0, T0 + DUR);
+  master.connect(ac.destination);
+  const at = (t) => T0 + Math.max(0, t);
+  const r = mulberry32(SEED ^ 0xaad10);
+
+  function noiseBuf(sec) {
+    const len = Math.max(1, (ac.sampleRate * sec) | 0);
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  function pad(name, t0, t1, level) {
+    for (const m of CHORDS[name] || CHORDS.Dm) {
+      const o = ac.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = mtof(m);
+      o.detune.value = (m % 5) * 3 - 6;
+      const f = ac.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = name === 'Gm' ? 700 : 980;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, at(t0));
+      g.gain.linearRampToValueAtTime(level, at(t0 + 1.6));
+      g.gain.setValueAtTime(level, at(t1));
+      g.gain.linearRampToValueAtTime(0, at(t1 + 2.2));
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(at(t0)); o.stop(at(t1 + 2.4));
+    }
+  }
+  for (const s of STORY.sections) {
+    const lvl = s.id === 'storm' ? 0.028 : s.id === 'end' ? 0.034 : 0.022;
+    pad(s.harmony, s.t0, s.t1, lvl);
+  }
+
+  function whoosh(t) {
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf(1.5);
+    const f = ac.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 1.1;
+    f.frequency.setValueAtTime(320, at(t));
+    f.frequency.exponentialRampToValueAtTime(2400, at(t + 0.7));
+    f.frequency.exponentialRampToValueAtTime(500, at(t + 1.3));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.22, at(t + 0.55));
+    g.gain.linearRampToValueAtTime(0, at(t + 1.35));
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+  }
+  function impact(t) {
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(100, at(t));
+    o.frequency.exponentialRampToValueAtTime(38, at(t + 0.7));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.38, at(t + 0.012));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.4));
+    o.connect(g); g.connect(master);
+    o.start(at(t)); o.stop(at(t + 1.5));
+  }
+  function bell(t) {
+    const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = 698;
+    const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = 698 * 2.76;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.11, at(t + 0.008));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 3.2));
+    const mg = ac.createGain(); mg.gain.value = 0.22;
+    o2.connect(mg); mg.connect(o.frequency);
+    o.connect(g); g.connect(master);
+    o.start(at(t)); o2.start(at(t));
+    o.stop(at(t + 3.3)); o2.stop(at(t + 3.3));
+  }
+  function thunder(t) {
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf(4.5);
+    const f = ac.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(900, at(t));
+    f.frequency.exponentialRampToValueAtTime(120, at(t + 2.8));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.5, at(t + 0.04));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 4));
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+  }
+  function pluck(t) {
+    const o = ac.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(220 + r() * 80, at(t));
+    o.frequency.linearRampToValueAtTime(160 + r() * 40, at(t + 2.2));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.08, at(t + 0.15));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 2.8));
+    const f = ac.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 1200;
+    o.connect(f); f.connect(g); g.connect(master);
+    o.start(at(t)); o.stop(at(t + 3));
+  }
+  function wash(t0, t1, level, freq) {
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf(t1 - t0 + 0.5);
+    const f = ac.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = freq;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t0));
+    g.gain.linearRampToValueAtTime(level, at(t0 + 1.2));
+    g.gain.setValueAtTime(level, at(t1 - 1));
+    g.gain.linearRampToValueAtTime(0, at(t1));
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t0));
+  }
+
+  wash(0, 22, 0.04, 480);
+  wash(28.5, 42, 0.12, 650);
+  wash(41.5, 52, 0.045, 520);
+
+  for (const e of STORY.events) {
+    if (e.kind === 'whoosh') whoosh(e.t);
+    else if (e.kind === 'impact') impact(e.t);
+    else if (e.kind === 'bell') bell(e.t);
+    else if (e.kind === 'thunder') thunder(e.t);
+    else if (e.kind === 'pluck') pluck(e.t);
+  }
+}
+
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, sr = buf.sampleRate, n = buf.length;
+  const ab = new ArrayBuffer(44 + n * ch * 2), dv = new DataView(ab);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+  dv.setUint16(34, 16, true); ws(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
+  let peak = 0;
+  for (const d of chans) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
+  const gain = peak > 0.95 ? 0.95 / peak : 1;
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++, o += 2) {
+    const s = Math.max(-1, Math.min(1, chans[c][i] * gain));
+    dv.setInt16(o, s * 32767, true);
+  }
+  const bytes = new Uint8Array(ab);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+// --- API ---
+drawFrame(0);
+window.FILM = {
+  ready: true,
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  storyboard: STORY,
+  canvas,
+  out: canvas,
+  seek(t) { drawFrame(t); },
+  reset() { drawFrame(0); },
+  async renderAudio() {
+    const sr = 48000;
+    const oc = new OfflineAudioContext(2, Math.ceil(sr * DUR), sr);
+    buildScore(oc, 0);
+    return encodeWav(await oc.startRendering());
+  },
+};
+
+const params = new URLSearchParams(location.search);
+if (params.has('render')) {
+  document.body.classList.add('render');
+} else {
+  const btn = document.getElementById('play');
+  const clock = document.getElementById('clock');
+  let ac = null, T0 = 0, playing = false;
+  function loop() {
+    if (!playing) return;
+    const t = ac.currentTime - T0;
+    if (t >= DUR) { playing = false; btn.textContent = 'Replay'; drawFrame(DUR); return; }
+    drawFrame(t);
+    clock.textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    requestAnimationFrame(loop);
+  }
+  btn.addEventListener('click', async () => {
+    if (ac) await ac.close();
+    ac = new AudioContext();
+    T0 = ac.currentTime + 0.12;
+    buildScore(ac, T0);
+    playing = true; btn.textContent = 'Restart';
+    requestAnimationFrame(loop);
+  });
+}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+out/score.wav
+out/review/cs-*.png
+out/review/cs-list.txt
+out/review/preview-*.png
+out/master.mp4
+out/tide-ink-v2.mp4
+*.raw
+.DS_Store

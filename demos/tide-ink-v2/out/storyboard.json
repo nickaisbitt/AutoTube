@@ -1,0 +1,347 @@
+{
+  "id": "tide-ink-v2",
+  "title": "Tide Ink",
+  "logline": "One continuous ocean: particle ink remembers a whale, a lighthouse, a ship, a paper boat.",
+  "technique": "particle-ink",
+  "duration": 64,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "seed": 29150,
+  "tempo": {
+    "bpm": 75,
+    "beatsPerBar": 4
+  },
+  "palette": {
+    "abyss": "#061018",
+    "deep": "#0c2436",
+    "sea": "#1a4a5e",
+    "foam": "#d8e6ea",
+    "ink": "#9ec4d4",
+    "amber": "#e8a45a",
+    "moon": "#f0ead8",
+    "storm": "#142230",
+    "dawn": "#c4784a"
+  },
+  "sections": [
+    {
+      "id": "open",
+      "t0": 0,
+      "t1": 9.6,
+      "mood": "gather",
+      "harmony": "Dm"
+    },
+    {
+      "id": "whale",
+      "t0": 9.6,
+      "t1": 22.4,
+      "mood": "glide",
+      "harmony": "Bb"
+    },
+    {
+      "id": "lighthouse",
+      "t0": 22.4,
+      "t1": 28.8,
+      "mood": "vigil",
+      "harmony": "F"
+    },
+    {
+      "id": "storm",
+      "t0": 28.8,
+      "t1": 41.6,
+      "mood": "tempest",
+      "harmony": "Gm"
+    },
+    {
+      "id": "dawn",
+      "t0": 41.6,
+      "t1": 48,
+      "mood": "calm",
+      "harmony": "Bb"
+    },
+    {
+      "id": "sky",
+      "t0": 48,
+      "t1": 54.4,
+      "mood": "lift",
+      "harmony": "Dm"
+    },
+    {
+      "id": "end",
+      "t0": 54.4,
+      "t1": 64,
+      "mood": "release",
+      "harmony": "D"
+    }
+  ],
+  "shots": [
+    {
+      "id": "s0",
+      "t0": 0,
+      "t1": 6.4,
+      "beat": 0,
+      "camera": {
+        "x": 180,
+        "y": 90,
+        "zoom": 1.05,
+        "rot": 0
+      },
+      "subject": "open-sea",
+      "action": "push into ink swirl",
+      "caption": ""
+    },
+    {
+      "id": "s1",
+      "t0": 6.4,
+      "t1": 9.6,
+      "beat": 6.4,
+      "camera": {
+        "x": 420,
+        "y": -10,
+        "zoom": 1.35,
+        "rot": 0
+      },
+      "subject": "title",
+      "action": "assemble title",
+      "caption": ""
+    },
+    {
+      "id": "s2",
+      "t0": 9.6,
+      "t1": 16,
+      "beat": 9.6,
+      "camera": {
+        "x": 1100,
+        "y": 110,
+        "zoom": 1.12,
+        "rot": -0.02
+      },
+      "subject": "whale",
+      "action": "orbit whale swim",
+      "caption": "Ink remembers the deep."
+    },
+    {
+      "id": "s3",
+      "t0": 16,
+      "t1": 22.4,
+      "beat": 16,
+      "camera": {
+        "x": 2100,
+        "y": 30,
+        "zoom": 0.92,
+        "rot": 0.01
+      },
+      "subject": "whale-coast",
+      "action": "pan push to coast",
+      "caption": ""
+    },
+    {
+      "id": "s4",
+      "t0": 22.4,
+      "t1": 28.8,
+      "beat": 22.4,
+      "camera": {
+        "x": 2850,
+        "y": -30,
+        "zoom": 1.22,
+        "rot": 0
+      },
+      "subject": "lighthouse",
+      "action": "orbit beam sweep",
+      "caption": "Some keep watch."
+    },
+    {
+      "id": "s5",
+      "t0": 28.8,
+      "t1": 35.2,
+      "beat": 28.8,
+      "camera": {
+        "x": 3900,
+        "y": 70,
+        "zoom": 0.88,
+        "rot": 0.03
+      },
+      "subject": "storm-ship",
+      "action": "pull into storm",
+      "caption": ""
+    },
+    {
+      "id": "s6",
+      "t0": 35.2,
+      "t1": 41.6,
+      "beat": 35.2,
+      "camera": {
+        "x": 4450,
+        "y": 95,
+        "zoom": 1.12,
+        "rot": -0.04
+      },
+      "subject": "ship",
+      "action": "orbit ship pitch",
+      "caption": ""
+    },
+    {
+      "id": "s7",
+      "t0": 41.6,
+      "t1": 48,
+      "beat": 41.6,
+      "camera": {
+        "x": 5450,
+        "y": 105,
+        "zoom": 1.02,
+        "rot": 0
+      },
+      "subject": "paper-boat",
+      "action": "pull back dawn",
+      "caption": "And some float home."
+    },
+    {
+      "id": "s8",
+      "t0": 48,
+      "t1": 54.4,
+      "beat": 48,
+      "camera": {
+        "x": 6050,
+        "y": -380,
+        "zoom": 0.82,
+        "rot": 0
+      },
+      "subject": "constellation",
+      "action": "lift to sky whale",
+      "caption": ""
+    },
+    {
+      "id": "s9",
+      "t0": 54.4,
+      "t1": 64,
+      "beat": 54.4,
+      "camera": {
+        "x": 6200,
+        "y": -180,
+        "zoom": 1,
+        "rot": 0
+      },
+      "subject": "end-card",
+      "action": "settle end card",
+      "caption": ""
+    }
+  ],
+  "events": [
+    {
+      "t": 6.4,
+      "kind": "whoosh",
+      "id": "to-title"
+    },
+    {
+      "t": 9.6,
+      "kind": "impact",
+      "id": "title-lock"
+    },
+    {
+      "t": 9.6,
+      "kind": "whoosh",
+      "id": "to-whale"
+    },
+    {
+      "t": 12,
+      "kind": "pluck",
+      "id": "whale-call-a"
+    },
+    {
+      "t": 14.4,
+      "kind": "pluck",
+      "id": "whale-call-b"
+    },
+    {
+      "t": 16,
+      "kind": "whoosh",
+      "id": "to-coast"
+    },
+    {
+      "t": 22.4,
+      "kind": "impact",
+      "id": "tower-lock"
+    },
+    {
+      "t": 24,
+      "kind": "bell",
+      "id": "beam-1"
+    },
+    {
+      "t": 25.6,
+      "kind": "bell",
+      "id": "beam-2"
+    },
+    {
+      "t": 27.2,
+      "kind": "bell",
+      "id": "beam-3"
+    },
+    {
+      "t": 28.8,
+      "kind": "whoosh",
+      "id": "to-storm"
+    },
+    {
+      "t": 32,
+      "kind": "thunder",
+      "id": "flash-1"
+    },
+    {
+      "t": 35.2,
+      "kind": "impact",
+      "id": "ship-lock"
+    },
+    {
+      "t": 36.8,
+      "kind": "thunder",
+      "id": "flash-2"
+    },
+    {
+      "t": 39.2,
+      "kind": "thunder",
+      "id": "flash-3"
+    },
+    {
+      "t": 41.6,
+      "kind": "whoosh",
+      "id": "to-dawn"
+    },
+    {
+      "t": 44,
+      "kind": "bell",
+      "id": "dawn-bell"
+    },
+    {
+      "t": 48,
+      "kind": "whoosh",
+      "id": "to-sky"
+    },
+    {
+      "t": 50.4,
+      "kind": "pluck",
+      "id": "sky-call"
+    },
+    {
+      "t": 54.4,
+      "kind": "impact",
+      "id": "end-lock"
+    },
+    {
+      "t": 56,
+      "kind": "bell",
+      "id": "end-bell-a"
+    },
+    {
+      "t": 56.8,
+      "kind": "bell",
+      "id": "end-bell-b"
+    }
+  ],
+  "acceptance": {
+    "maxDeadAirSec": 1.5,
+    "beatToleranceSec": 0.04,
+    "thumbnailReadable": true,
+    "zeroExternalAssets": true
+  }
+}

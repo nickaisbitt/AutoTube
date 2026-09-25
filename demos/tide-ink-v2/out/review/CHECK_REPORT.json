@@ -1,0 +1,43 @@
+{
+  "id": "tide-ink-v2",
+  "title": "Tide Ink",
+  "checkedAt": "2026-09-25T17:49:15.032Z",
+  "pass": true,
+  "failures": [],
+  "warnings": [],
+  "stats": {
+    "zeroAssets": true,
+    "beatMisses": 0,
+    "sample": {
+      "center": [
+        32,
+        53,
+        74
+      ],
+      "corners": [
+        [
+          4,
+          10,
+          16
+        ],
+        [
+          4,
+          10,
+          16
+        ],
+        [
+          32,
+          61,
+          69
+        ],
+        [
+          32,
+          61,
+          70
+        ]
+      ],
+      "w": 1920,
+      "h": 1080
+    }
+  }
+}

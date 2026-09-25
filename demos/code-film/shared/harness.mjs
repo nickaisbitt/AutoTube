@@ -26,14 +26,12 @@
  *   --warm N             warm frames for stateful sims on --preview/--contact (ignored when seekPure)
  */
 import { chromium } from 'playwright';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { once } from 'node:events';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -87,9 +85,9 @@ function run(cmd, args) {
 }
 
 function defaultWorkers(seekPure) {
+  // Parallel Chromium at 1080p repeatedly OOM/crashes here. Opt in with --workers N.
   if (!seekPure) return 1;
-  // 2 workers usually peak for canvas encode; more often fights memory bandwidth.
-  return Math.min(4, Math.max(2, Math.floor(os.cpus().length / 8) || 2));
+  return 1;
 }
 
 async function launchBrowser(swiftshader) {
@@ -345,39 +343,34 @@ async function checkFilm(page, meta, dirs) {
   return report;
 }
 
-/**
- * Ordered frame writer: workers may finish out of order; we pipe in frame index order.
- */
-function createOrderedJpegPipe(stdin) {
-  const pending = new Map();
-  let next = 0;
-  let drainWait = null;
+/** Min JPEG size that counts as a real captured frame (reject empty/corrupt stubs). */
+const MIN_FRAME_BYTES = 800;
 
-  async function write(buf) {
-    if (!stdin.write(buf)) {
-      if (!drainWait) drainWait = once(stdin, 'drain').then(() => { drainWait = null; });
-      await drainWait;
-    }
-  }
-
-  return {
-    async push(frameIndex, buf) {
-      pending.set(frameIndex, buf);
-      while (pending.has(next)) {
-        const b = pending.get(next);
-        pending.delete(next);
-        await write(b);
-        next += 1;
-      }
-    },
-    get backlog() { return pending.size; },
-    get written() { return next; },
-  };
+function framePath(framesDir, i) {
+  return path.join(framesDir, `f-${String(i).padStart(6, '0')}.jpg`);
 }
 
-async function captureFrameOnPage(page, frameIndex, { jpegQuality, stateful }) {
+async function frameExists(framesDir, i) {
+  try {
+    const s = await stat(framePath(framesDir, i));
+    return s.size >= MIN_FRAME_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+async function countExistingFrames(framesDir, total) {
+  if (!existsSync(framesDir)) return 0;
+  let n = 0;
+  for (let i = 0; i < total; i++) {
+    if (await frameExists(framesDir, i)) n += 1;
+    else break; // contiguous from 0 required for resume
+  }
+  return n;
+}
+
+async function captureFrameToDisk(page, frameIndex, file, { jpegQuality, stateful }) {
   if (stateful) {
-    // nextFrame / advance path — must stay sequential on one page
     const dataUrl = await page.evaluate((frame) => {
       const F = window.FILM;
       if (typeof F.nextFrame === 'function') return F.nextFrame(0.92);
@@ -386,51 +379,141 @@ async function captureFrameOnPage(page, frameIndex, { jpegQuality, stateful }) {
       const c = F.out || F.canvas || document.querySelector('canvas');
       return c.toDataURL('image/jpeg', 0.92);
     }, frameIndex);
-    return Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+    await writeFile(file, Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64'));
+    return;
   }
   await page.evaluate((frame) => {
-    const F = window.FILM;
-    F.seek(frame / F.fps);
+    window.FILM.seek(frame / window.FILM.fps);
   }, frameIndex);
-  return canvasJpegBuffer(page, jpegQuality);
+  const buf = await canvasJpegBuffer(page, jpegQuality);
+  await writeFile(file, buf);
 }
 
+/**
+ * Capture frames to disk, restarting Chromium every `restartEvery` frames so
+ * long 1080p toDataURL loops do not OOM/crash mid-film. Resumes from the first
+ * missing contiguous frame. Encodes only after all frames exist and verify.
+ */
 async function renderMp4(browser, page, meta, dirs, abs, opts) {
   await mkdir(dirs.out, { recursive: true });
   await mkdir(dirs.artifact, { recursive: true });
 
-  let wavPath = null;
+  let wavPath = path.join(dirs.out, 'score.wav');
   if (meta.hasAudio) {
-    console.log('Rendering score…');
-    const b64 = await page.evaluate(() => window.FILM.renderAudio());
-    wavPath = path.join(dirs.out, 'score.wav');
-    await writeFile(wavPath, Buffer.from(b64, 'base64'));
+    if (!existsSync(wavPath) || (await stat(wavPath)).size < 1000) {
+      console.log('Rendering score…');
+      const b64 = await page.evaluate(() => window.FILM.renderAudio());
+      await writeFile(wavPath, Buffer.from(b64, 'base64'));
+    } else {
+      console.log(`Reusing score ${wavPath}`);
+    }
+  } else {
+    wavPath = null;
   }
 
   const previewPath = path.join(dirs.out, `${meta.id}-preview.mp4`);
   const webPath = path.join(dirs.out, `${meta.id}-web.mp4`);
+  const framesDir = path.join(dirs.out, 'frames');
+  await mkdir(framesDir, { recursive: true });
+
   const total = Math.round(meta.duration * meta.fps);
   const stateful = !meta.seekPure || meta.hasNextFrame;
-  const workers = stateful ? 1 : (opts.workers ?? defaultWorkers(true));
   const jpegQuality = opts.jpegQuality ?? 80;
+  const restartEvery = opts.restartEvery ?? 240;
+  const expectedDur = meta.duration;
 
   console.log(
-    `Rendering ${total} frames @ ${meta.fps}fps…` +
-    ` workers=${workers} jpeg=${jpegQuality}` +
-    ` seekPure=${!!meta.seekPure} swiftshader=${!!opts.swiftshader}`,
+    `Rendering ${total} frames @ ${meta.fps}fps → disk` +
+    ` jpeg=${jpegQuality} restartEvery=${restartEvery}` +
+    ` seekPure=${!!meta.seekPure} stateful=${stateful}`,
   );
 
-  await page.evaluate(() => { if (window.FILM.reset) window.FILM.reset(); });
+  let startAt = stateful ? 0 : await countExistingFrames(framesDir, total);
+  if (startAt > 0) console.log(`Resuming from frame ${startAt}/${total}`);
+  if (stateful && startAt === 0) {
+    // Clear any partial frames — stateful capture cannot skip.
+    await rm(framesDir, { recursive: true, force: true });
+    await mkdir(framesDir, { recursive: true });
+  }
 
-  // Pipe MJPEG into ffmpeg → CRF web encode. Pipe JPEG is intermediate; final quality is CRF.
+  let browserRef = browser;
+  let pageRef = page;
+  const started = Date.now();
+  let capturedThisRun = 0;
+
+  async function relaunch() {
+    console.log('  restarting browser…');
+    await browserRef.close().catch(() => {});
+    browserRef = await launchBrowser(!!opts.swiftshader);
+    pageRef = await openFilmPage(browserRef, abs, { width: meta.width, height: meta.height });
+    await pageRef.setViewportSize({ width: meta.width, height: meta.height });
+    await pageRef.evaluate(() => { if (window.FILM.reset) window.FILM.reset(); });
+  }
+
+  await pageRef.evaluate(() => { if (window.FILM.reset) window.FILM.reset(); });
+
+  for (let i = startAt; i < total; i++) {
+    const file = framePath(framesDir, i);
+    let ok = false;
+    let lastErr;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        await captureFrameToDisk(pageRef, i, file, { jpegQuality, stateful });
+        const s = await stat(file);
+        if (s.size < MIN_FRAME_BYTES) throw new Error(`tiny frame ${s.size}b`);
+        ok = true;
+        break;
+      } catch (err) {
+        lastErr = err;
+        const msg = String(err?.message || err);
+        console.warn(`frame ${i} attempt ${attempt + 1}: ${msg.slice(0, 140)}`);
+        await relaunch();
+        // For stateful films after crash, must restart from 0 (no resume).
+        if (stateful) {
+          await rm(framesDir, { recursive: true, force: true });
+          await mkdir(framesDir, { recursive: true });
+          i = -1; // loop will ++ to 0
+          ok = true; // break attempt loop; outer continues from 0
+          capturedThisRun = 0;
+          break;
+        }
+      }
+    }
+    if (!ok) throw lastErr || new Error(`failed frame ${i}`);
+    if (i < 0) continue;
+
+    capturedThisRun += 1;
+    if ((i + 1) % 60 === 0 || i === total - 1) {
+      const el = (Date.now() - started) / 1000;
+      const done = i + 1 - startAt;
+      const per = el / Math.max(done, 1);
+      console.log(
+        `frame ${i + 1}/${total}  ${el.toFixed(0)}s  ${(per * 1000).toFixed(0)}ms/f` +
+        `  ~${(per * (total - i - 1)).toFixed(0)}s left`,
+      );
+    }
+
+    // Periodic browser restart before Chromium OOM (skip on last frame).
+    if (!stateful && capturedThisRun > 0 && capturedThisRun % restartEvery === 0 && i < total - 1) {
+      await relaunch();
+    }
+  }
+
+  // Verify contiguous frame set before encode.
+  const have = await countExistingFrames(framesDir, total);
+  if (have < total) {
+    throw new Error(`incomplete frames: ${have}/${total} — refusing to encode`);
+  }
+  console.log(`All ${total} frames on disk. Encoding…`);
+
   const ffArgs = [
     '-y', '-loglevel', 'error',
-    '-f', 'image2pipe', '-framerate', String(meta.fps), '-c:v', 'mjpeg', '-i', '-',
+    '-framerate', String(meta.fps),
+    '-i', path.join(framesDir, 'f-%06d.jpg'),
   ];
   if (wavPath) ffArgs.push('-i', wavPath);
   ffArgs.push(
     '-c:v', 'libx264', '-profile:v', 'high', '-level:v', '4.1',
-    // medium is much faster than slow at similar CRF quality for these shorts
     '-preset', 'medium', '-crf', '20',
     '-maxrate', '6M', '-bufsize', '12M',
     '-pix_fmt', 'yuv420p',
@@ -440,69 +523,34 @@ async function renderMp4(browser, page, meta, dirs, abs, opts) {
   else ffArgs.push('-an');
   ffArgs.push('-movflags', '+faststart', webPath);
 
-  const ff = spawn('ffmpeg', ffArgs, { stdio: ['pipe', 'inherit', 'inherit'] });
-  const done = once(ff, 'close');
-  const pipe = createOrderedJpegPipe(ff.stdin);
-  const started = Date.now();
-  const maxBacklog = Math.max(workers * 4, 8);
+  await run('ffmpeg', ffArgs);
 
-  if (workers === 1) {
-    for (let i = 0; i < total; i++) {
-      const buf = await captureFrameOnPage(page, i, { jpegQuality, stateful });
-      await pipe.push(i, buf);
-      if (i % 60 === 0 || i === total - 1) {
-        const el = (Date.now() - started) / 1000;
-        const per = el / (i + 1);
-        console.log(`frame ${i + 1}/${total}  ${el.toFixed(0)}s  ${(per * 1000).toFixed(0)}ms/f  ~${(per * (total - i - 1)).toFixed(0)}s left`);
-      }
-    }
-  } else {
-    // Extra pages for parallel pure seeks (page[0] is the already-open film page).
-    const pages = [page];
-    for (let w = 1; w < workers; w++) {
-      const p = await openFilmPage(browser, abs, { width: meta.width, height: meta.height });
-      await p.setViewportSize({ width: meta.width, height: meta.height });
-      await p.evaluate(() => { if (window.FILM.reset) window.FILM.reset(); });
-      pages.push(p);
-    }
-
-    let nextFrame = 0;
-    let finished = 0;
-    const capOpts = { jpegQuality, stateful: false };
-
-    async function worker(p) {
-      while (true) {
-        while (pipe.backlog >= maxBacklog) {
-          await new Promise((r) => setTimeout(r, 5));
-        }
-        const i = nextFrame++;
-        if (i >= total) return;
-        const buf = await captureFrameOnPage(p, i, capOpts);
-        await pipe.push(i, buf);
-        finished += 1;
-        if (finished % 60 === 0 || finished === total) {
-          const el = (Date.now() - started) / 1000;
-          const per = el / finished;
-          console.log(`frame ${finished}/${total}  ${el.toFixed(0)}s  ${(per * 1000).toFixed(0)}ms/f  ~${(per * (total - finished)).toFixed(0)}s left`);
-        }
-      }
-    }
-
-    try {
-      await Promise.all(pages.map((p) => worker(p)));
-    } finally {
-      for (let w = 1; w < pages.length; w++) {
-        await pages[w].close().catch(() => {});
-      }
-    }
+  // Hard duration gate — never claim success on a truncated encode.
+  const probe = await new Promise((resolve, reject) => {
+    const p = spawn('ffprobe', [
+      '-v', 'error', '-select_streams', 'v:0',
+      '-show_entries', 'stream=nb_frames,duration,width,height,level',
+      '-show_entries', 'format=duration',
+      '-of', 'json', webPath,
+    ], { stdio: ['ignore', 'pipe', 'inherit'] });
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('error', reject);
+    p.on('close', (code) => (code === 0 ? resolve(JSON.parse(out)) : reject(new Error(`ffprobe ${code}`))));
+  });
+  const dur = Number(probe.format?.duration || probe.streams?.[0]?.duration || 0);
+  const nb = Number(probe.streams?.[0]?.nb_frames || 0);
+  const level = Number(probe.streams?.[0]?.level || 0);
+  if (Math.abs(dur - expectedDur) > 0.35) {
+    throw new Error(`duration mismatch: got ${dur}s expected ~${expectedDur}s (frames=${nb})`);
   }
-
-  ff.stdin.end();
-  const [code] = await done;
-  if (code !== 0) throw new Error(`ffmpeg exited ${code}`);
-
-  const elapsed = (Date.now() - started) / 1000;
-  console.log(`capture+encode ${elapsed.toFixed(1)}s  avg ${(elapsed / total * 1000).toFixed(0)}ms/frame`);
+  if (nb > 0 && Math.abs(nb - total) > 2) {
+    throw new Error(`frame count mismatch: got ${nb} expected ${total}`);
+  }
+  if (level > 41) {
+    throw new Error(`H.264 level ${level} > 4.1 — not widely playable`);
+  }
+  console.log(`ffprobe OK: ${dur.toFixed(3)}s  frames=${nb || total}  level=${level}`);
 
   const previewArgs = [
     '-y', '-v', 'error', '-i', webPath,
@@ -517,8 +565,17 @@ async function renderMp4(browser, page, meta, dirs, abs, opts) {
 
   await run('cp', [webPath, path.join(dirs.artifact, path.basename(webPath))]);
   await run('cp', [previewPath, path.join(dirs.artifact, path.basename(previewPath))]);
-  console.log(`render → ${webPath}\n       → ${previewPath}`);
-  return { webPath, previewPath, elapsed, total };
+
+  const elapsed = (Date.now() - started) / 1000;
+  console.log(`render → ${webPath}\n       → ${previewPath}  (${elapsed.toFixed(0)}s)`);
+
+  // Keep frames by default for resume/debug; opt-in cleanup.
+  if (opts.cleanFrames) {
+    await rm(framesDir, { recursive: true, force: true });
+  }
+
+  // Hand ownership of browser back — we may have replaced it.
+  return { webPath, previewPath, elapsed, total, browser: browserRef };
 }
 
 async function main() {
@@ -530,7 +587,7 @@ async function main() {
   }
   try { require('playwright'); } catch { console.error('playwright required'); process.exit(1); }
 
-  const { browser, page, meta, abs } = await launchFilm(args.film, { swiftshader: args.swiftshader });
+  let { browser, page, meta, abs } = await launchFilm(args.film, { swiftshader: args.swiftshader });
   const dirs = filmDirs(abs, meta);
   await mkdir(dirs.out, { recursive: true });
   await mkdir(dirs.review, { recursive: true });
@@ -556,18 +613,21 @@ async function main() {
       if (!report.pass && !args.render && !args.contact && !args.preview) process.exitCode = 2;
     }
     if (args.render) {
-      await renderMp4(browser, page, meta, dirs, abs, {
+      const result = await renderMp4(browser, page, meta, dirs, abs, {
         workers: args.workers,
         jpegQuality: args.jpegQuality,
         swiftshader: args.swiftshader,
+        restartEvery: 200,
       });
+      // renderMp4 may have replaced the browser after mid-run restarts
+      if (result?.browser) browser = result.browser;
     }
     if (!args.preview && !args.contact && !args.check && !args.render) {
       console.log('Meta:', { ...meta, storyboard: meta.storyboard ? '[…]' : null });
       console.log('Pass --preview / --contact / --check / --render / --all');
     }
   } finally {
-    await browser.close();
+    await browser.close().catch(() => {});
   }
 }
 

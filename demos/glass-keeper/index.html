@@ -78,9 +78,9 @@ const STORY = {
     // 2 bars — tight gold-vein material close-up (not wallpaper)
     { id: 's0', t0: 0, t1: 5, beat: 0, camera: { x: 0.22, y: -0.14, zoom: 2.85, rot: 0.04 }, subject: 'mosaic-wall', action: 'gold vein detail', caption: '' },
     { id: 's1', t0: 5, t1: 12.5, beat: 5, camera: { x: 0, y: 0.02, zoom: 1.22, rot: 0 }, subject: 'tiles', action: 'lift into watch', caption: 'They were never cemented.' },
-    { id: 's2', t0: 12.5, t1: 17.5, beat: 12.5, camera: { x: 0, y: 0, zoom: 1.42, rot: 0 }, subject: 'pocket-watch', action: 'assemble + tick', caption: '' },
-    { id: 's3', t0: 17.5, t1: 22.5, beat: 17.5, camera: { x: 0.05, y: -0.02, zoom: 1.18, rot: 0 }, subject: 'watch', action: 'dissolve to tower', caption: 'Some keep time.' },
-    { id: 's4', t0: 22.5, t1: 30, beat: 22.5, camera: { x: 0.14, y: 0.0, zoom: 1.32, rot: 0 }, subject: 'lighthouse', action: 'beam sweep', caption: '' },
+    { id: 's2', t0: 12.5, t1: 17.5, beat: 12.5, camera: { x: 0, y: 0, zoom: 1.48, rot: 0 }, subject: 'pocket-watch', action: 'assemble + tick', caption: '' },
+    { id: 's3', t0: 17.5, t1: 22.5, beat: 17.5, camera: { x: 0.05, y: -0.02, zoom: 1.22, rot: 0 }, subject: 'watch', action: 'dissolve to tower', caption: 'Some keep time.' },
+    { id: 's4', t0: 22.5, t1: 30, beat: 22.5, camera: { x: 0.14, y: 0.0, zoom: 1.38, rot: 0 }, subject: 'lighthouse', action: 'beam sweep', caption: '' },
     { id: 's5', t0: 30, t1: 35, beat: 30, camera: { x: 0, y: -0.02, zoom: 1.12, rot: 0 }, subject: 'tower', action: 'tiles become gulls', caption: 'Some keep watch.' },
     { id: 's6', t0: 35, t1: 42.5, beat: 35, camera: { x: 0, y: -0.02, zoom: 1.35, rot: 0 }, subject: 'gull-flock', action: 'fly across', caption: '' },
     { id: 's7', t0: 42.5, t1: 47.5, beat: 42.5, camera: { x: 0, y: -0.04, zoom: 1.18, rot: 0 }, subject: 'flock', action: 'spiral dissolve', caption: 'And some leave.' },
@@ -194,8 +194,8 @@ function watchRegion(x, y) {
   const ang = Math.atan2(dy, dx);
   const hourAng = -Math.PI / 2;
   const minAng = 0.55;
-  const hour = Math.abs(((ang - hourAng + Math.PI * 3) % TAU) - Math.PI) < 0.22 && r < 0.58 && r > 0.07;
-  const minute = Math.abs(((ang - minAng + Math.PI * 3) % TAU) - Math.PI) < 0.17 && r < 0.90 && r > 0.07;
+  const hour = Math.abs(((ang - hourAng + Math.PI * 3) % TAU) - Math.PI) < 0.28 && r < 0.58 && r > 0.07;
+  const minute = Math.abs(((ang - minAng + Math.PI * 3) % TAU) - Math.PI) < 0.22 && r < 0.90 && r > 0.07;
   const crown = Math.abs(x - cx) < W * 0.06 && y < cy - H * 0.27 && y > cy - H * 0.39;
   const stem = Math.abs(x - cx) < W * 0.02 && y < cy - H * 0.21 && y > cy - H * 0.30;
   const hub = r < 0.14;

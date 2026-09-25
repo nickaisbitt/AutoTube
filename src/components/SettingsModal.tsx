@@ -293,6 +293,23 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </div>
             </div>
 
+            {/* Experimental: code film (CLI-only — does not change stock pipeline) */}
+            <div className="space-y-2 border-2 border-dashed border-surface-600 bg-surface-950 p-3" data-testid="code-film-experimental-note">
+              <label className="text-xs font-mono font-semibold uppercase tracking-wider text-surface-500">
+                Experimental — Code Film
+                <span className="ml-2 text-[10px] text-surface-400 normal-case font-mono font-normal border border-surface-600 px-1.5 py-0.5">
+                  CLI only
+                </span>
+              </label>
+              <p className="text-[10px] font-mono text-surface-500 leading-relaxed">
+                Optional path: draw every frame in JS (no stock B-roll). Does not affect the essay pipeline above.
+                Scaffold and render with{' '}
+                <code className="text-surface-300">npm run code-film -- init &lt;id&gt;</code>
+                {' '}— see{' '}
+                <code className="text-surface-300">docs/CODE_FILM_MODE.md</code>.
+              </p>
+            </div>
+
             {/* Narration (TTS) — Fallback Chain Status */}
             <div className="space-y-3 border-2 border-surface-700 bg-surface-950 p-3">
               <label className="text-xs font-mono font-semibold uppercase tracking-wider text-surface-500 flex items-center gap-2">

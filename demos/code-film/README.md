@@ -6,8 +6,14 @@ Shared tools for Opus-style films: every frame from code, storyboard-as-data, co
 
 ```bash
 npx playwright install chromium   # once
+npm run code-film -- init my-film
+npm run code-film -- preview my-film -- 2,8,16
+npm run code-film:check -- my-film
+# or call the harness directly:
 node demos/code-film/shared/harness.mjs demos/<film>/index.html --all
 ```
+
+Product mode (Track C AutoTube): `docs/CODE_FILM_MODE.md`.
 
 ## Tracks
 

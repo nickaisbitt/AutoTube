@@ -26,16 +26,31 @@ Stateful sims (trails, physics that only step forward): keep `nextFrame` / `warm
 
 ```bash
 node demos/code-film/shared/harness.mjs demos/<film>/index.html --render \
-  --workers 2 \
-  --jpeg-quality 80
+  --jpeg-quality 75
 ```
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--workers N` | auto (2–4 if `seekPure`, else 1) | Parallel Playwright pages; ordered pipe to ffmpeg |
-| `--jpeg-quality` | 80 | Intermediate MJPEG quality (final look is still CRF 20) |
+| `--workers N` | **1** (parallel pages OOM at 1080p here) | Kept for API compat; render path is serial |
+| `--jpeg-quality` | 80 | Intermediate JPEG quality (final look is still CRF 20) |
 | `--swiftshader` | off | Software WebGL; **slow** canvas readback |
 | `--warm N` | 0 | Only for stateful preview/contact |
+
+### Durable encode path (current)
+
+Long 1080p `toDataURL` loops crash Chromium mid-film (~1k frames). The harness now:
+
+1. Writes `out/frames/f-NNNNNN.jpg` to disk
+2. Restarts the browser every **200** frames
+3. Resumes from the first missing contiguous frame after a crash
+4. Encodes only after `count == total`, then **ffprobe-gates** duration (±0.35s), frame count, and H.264 level ≤4.1
+
+Measured full renders on this host (~40–50ms/frame capture):
+
+| Film | Frames | Capture | Verified duration |
+|------|--------|---------|-------------------|
+| Tide Ink v2 | 1920 | ~96s | **64.000s** level 4.1 |
+| Glass Keeper | 1560 | ~71s | **52.000s** level 4.1 |
 
 ## Smoke timing (1280×720, 2s @ 30fps = 60 frames)
 

@@ -1,0 +1,276 @@
+{
+  "id": "glass-keeper",
+  "title": "Glass Keeper",
+  "logline": "Glass and gold-leaf tiles that were never cemented — they remember a watch, a tower, a flock, then leave.",
+  "technique": "glass-tile-flock",
+  "duration": 52,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "seed": 399957,
+  "tempo": {
+    "bpm": 96,
+    "beatsPerBar": 4
+  },
+  "palette": {
+    "abyss": "#07090e",
+    "deep": "#121826",
+    "glass": "#9eb8c8",
+    "gold": "#d4a85a",
+    "foam": "#e8e4dc",
+    "verdigris": "#6f8f7e",
+    "lamp": "#f0c87a"
+  },
+  "sections": [
+    {
+      "id": "wall",
+      "t0": 0,
+      "t1": 5,
+      "mood": "still",
+      "harmony": "Dm"
+    },
+    {
+      "id": "watch",
+      "t0": 5,
+      "t1": 17.5,
+      "mood": "assemble",
+      "harmony": "Bb"
+    },
+    {
+      "id": "tower",
+      "t0": 17.5,
+      "t1": 30,
+      "mood": "vigil",
+      "harmony": "F"
+    },
+    {
+      "id": "flock",
+      "t0": 30,
+      "t1": 42.5,
+      "mood": "lift",
+      "harmony": "C"
+    },
+    {
+      "id": "spiral",
+      "t0": 42.5,
+      "t1": 52,
+      "mood": "release",
+      "harmony": "D"
+    }
+  ],
+  "shots": [
+    {
+      "id": "s0",
+      "t0": 0,
+      "t1": 5,
+      "beat": 0,
+      "camera": {
+        "x": 0.22,
+        "y": -0.14,
+        "zoom": 2.85,
+        "rot": 0.04
+      },
+      "subject": "mosaic-wall",
+      "action": "gold vein detail",
+      "caption": ""
+    },
+    {
+      "id": "s1",
+      "t0": 5,
+      "t1": 12.5,
+      "beat": 5,
+      "camera": {
+        "x": 0,
+        "y": 0.02,
+        "zoom": 1.22,
+        "rot": 0
+      },
+      "subject": "tiles",
+      "action": "lift into watch",
+      "caption": "They were never cemented."
+    },
+    {
+      "id": "s2",
+      "t0": 12.5,
+      "t1": 17.5,
+      "beat": 12.5,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1.48,
+        "rot": 0
+      },
+      "subject": "pocket-watch",
+      "action": "assemble + tick",
+      "caption": ""
+    },
+    {
+      "id": "s3",
+      "t0": 17.5,
+      "t1": 22.5,
+      "beat": 17.5,
+      "camera": {
+        "x": 0.05,
+        "y": -0.02,
+        "zoom": 1.22,
+        "rot": 0
+      },
+      "subject": "watch",
+      "action": "dissolve to tower",
+      "caption": "Some keep time."
+    },
+    {
+      "id": "s4",
+      "t0": 22.5,
+      "t1": 30,
+      "beat": 22.5,
+      "camera": {
+        "x": 0.14,
+        "y": 0,
+        "zoom": 1.38,
+        "rot": 0
+      },
+      "subject": "lighthouse",
+      "action": "beam sweep",
+      "caption": ""
+    },
+    {
+      "id": "s5",
+      "t0": 30,
+      "t1": 35,
+      "beat": 30,
+      "camera": {
+        "x": 0,
+        "y": -0.02,
+        "zoom": 1.12,
+        "rot": 0
+      },
+      "subject": "tower",
+      "action": "tiles become gulls",
+      "caption": "Some keep watch."
+    },
+    {
+      "id": "s6",
+      "t0": 35,
+      "t1": 42.5,
+      "beat": 35,
+      "camera": {
+        "x": 0,
+        "y": -0.02,
+        "zoom": 1.35,
+        "rot": 0
+      },
+      "subject": "gull-flock",
+      "action": "fly across",
+      "caption": ""
+    },
+    {
+      "id": "s7",
+      "t0": 42.5,
+      "t1": 47.5,
+      "beat": 42.5,
+      "camera": {
+        "x": 0,
+        "y": -0.04,
+        "zoom": 1.18,
+        "rot": 0
+      },
+      "subject": "flock",
+      "action": "spiral dissolve",
+      "caption": "And some leave."
+    },
+    {
+      "id": "s8",
+      "t0": 47.5,
+      "t1": 52,
+      "beat": 47.5,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1,
+        "rot": 0
+      },
+      "subject": "title",
+      "action": "end card",
+      "caption": ""
+    }
+  ],
+  "events": [
+    {
+      "t": 5,
+      "kind": "whoosh",
+      "id": "lift"
+    },
+    {
+      "t": 12.5,
+      "kind": "impact",
+      "id": "watch-lock"
+    },
+    {
+      "t": 13.125,
+      "kind": "bell",
+      "id": "tick-a"
+    },
+    {
+      "t": 13.75,
+      "kind": "bell",
+      "id": "tick-b"
+    },
+    {
+      "t": 14.375,
+      "kind": "bell",
+      "id": "tick-c"
+    },
+    {
+      "t": 17.5,
+      "kind": "whoosh",
+      "id": "to-tower"
+    },
+    {
+      "t": 22.5,
+      "kind": "impact",
+      "id": "tower-lock"
+    },
+    {
+      "t": 25,
+      "kind": "bell",
+      "id": "beam-1"
+    },
+    {
+      "t": 27.5,
+      "kind": "bell",
+      "id": "beam-2"
+    },
+    {
+      "t": 30,
+      "kind": "bell",
+      "id": "beam-3"
+    },
+    {
+      "t": 30,
+      "kind": "whoosh",
+      "id": "to-flock"
+    },
+    {
+      "t": 35,
+      "kind": "impact",
+      "id": "flock-lock"
+    },
+    {
+      "t": 42.5,
+      "kind": "whoosh",
+      "id": "spiral"
+    },
+    {
+      "t": 47.5,
+      "kind": "impact",
+      "id": "end"
+    }
+  ],
+  "acceptance": {
+    "maxDeadAirSec": 1.5,
+    "beatToleranceSec": 0.04,
+    "thumbnailReadable": true,
+    "zeroExternalAssets": true
+  }
+}

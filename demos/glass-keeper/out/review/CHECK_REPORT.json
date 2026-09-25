@@ -1,0 +1,64 @@
+{
+  "id": "glass-keeper",
+  "title": "Glass Keeper",
+  "checkedAt": "2026-09-25T17:51:12.185Z",
+  "pass": true,
+  "failures": [],
+  "warnings": [
+    {
+      "code": "possible-dead-air",
+      "shot": "s0",
+      "duration": 5
+    },
+    {
+      "code": "possible-dead-air",
+      "shot": "s1",
+      "duration": 7.5
+    },
+    {
+      "code": "possible-dead-air",
+      "shot": "s5",
+      "duration": 5
+    },
+    {
+      "code": "possible-dead-air",
+      "shot": "s8",
+      "duration": 4.5
+    }
+  ],
+  "stats": {
+    "zeroAssets": true,
+    "beatMisses": 0,
+    "sample": {
+      "center": [
+        38,
+        43,
+        48
+      ],
+      "corners": [
+        [
+          7,
+          10,
+          15
+        ],
+        [
+          7,
+          10,
+          16
+        ],
+        [
+          3,
+          5,
+          7
+        ],
+        [
+          78,
+          90,
+          95
+        ]
+      ],
+      "w": 1920,
+      "h": 1080
+    }
+  }
+}

@@ -6,3 +6,4 @@ out/master.mp4
 out/tide-ink-v2.mp4
 *.raw
 .DS_Store
+out/frames/

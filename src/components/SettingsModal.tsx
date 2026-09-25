@@ -303,9 +303,12 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </label>
               <p className="text-[10px] font-mono text-surface-500 leading-relaxed">
                 Optional path: draw every frame in JS (no stock B-roll). Does not affect the essay pipeline above.
-                Scaffold and render with{' '}
+                Examples: <code className="text-surface-300">tide-ink-v2</code>,{' '}
+                <code className="text-surface-300">glass-keeper</code>. Scaffold with{' '}
                 <code className="text-surface-300">npm run code-film -- init &lt;id&gt;</code>
-                {' '}— see{' '}
+                {' · '}
+                <code className="text-surface-300">npm run code-film -- list</code>
+                {' — see '}
                 <code className="text-surface-300">docs/CODE_FILM_MODE.md</code>.
               </p>
             </div>

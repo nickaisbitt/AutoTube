@@ -40,6 +40,7 @@ Today this loop is **CLI + agent skill**, not an in-app generate button.
 ## CLI (shipped)
 
 ```bash
+npm run code-film -- list
 npm run code-film -- init my-film
 npm run code-film -- preview my-film -- 2,8,16
 npm run code-film -- contact my-film
@@ -48,6 +49,17 @@ npm run code-film -- render my-film
 ```
 
 Requires Playwright Chromium + ffmpeg (same as harness). See `.cursor/skills/code-film/SKILL.md` and `demos/code-film/shared/`.
+
+## Shipped example films
+
+| Id | Technique | Notes |
+|----|-----------|-------|
+| `tide-ink-v2` | particle-ink continuous world | ~64s; camera travels one ocean |
+| `glass-keeper` | glass-tile flock | ~52s; watch → tower → gulls → spiral |
+| `tide-ink` | particle-ink v1 | Credible prototype; prefer v2 |
+| `salt-copper` | mood/texture | Early sketch |
+
+Harness encode path writes JPEGs to `out/frames/`, restarts Chromium every ~200 frames, and ffprobe-gates duration / frame count / H.264 level ≤4.1 before success.
 
 ## Acceptance bar
 

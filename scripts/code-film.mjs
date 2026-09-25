@@ -9,7 +9,7 @@
  * demos/code-film/shared/harness.mjs without modifying the harness.
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,20 +28,23 @@ const RESERVED = new Set([
   'salt-copper',
 ]);
 
-const COMMANDS = new Set(['init', 'preview', 'contact', 'check', 'render', 'all', 'help']);
+const COMMANDS = new Set(['init', 'list', 'preview', 'contact', 'check', 'render', 'all', 'help']);
 
 function usage(exitCode = 0) {
   const text = `Usage:
   node scripts/code-film.mjs init <id>
+  node scripts/code-film.mjs list
   node scripts/code-film.mjs preview <id> [-- t1,t2,...]
   node scripts/code-film.mjs contact|check|render|all <id>
 
 Examples:
   npm run code-film -- init hatch-demo
+  npm run code-film -- list
   npm run code-film -- preview hatch-demo -- 2,8,16
   npm run code-film:check -- hatch-demo
   npm run code-film -- render hatch-demo
 
+Shipped demos: tide-ink-v2, glass-keeper, tide-ink, salt-copper
 Docs: docs/CODE_FILM_MODE.md
 Harness: demos/code-film/shared/harness.mjs
 `;
@@ -219,6 +222,7 @@ function stubHtml(id) {
 
   window.FILM = {
     ready: true,
+    seekPure: true,
     duration: DURATION,
     fps: FPS,
     width: W,
@@ -235,6 +239,34 @@ function stubHtml(id) {
 </body>
 </html>
 `;
+}
+
+function cmdList() {
+  const entries = readdirSync(DEMOS)
+    .filter((name) => {
+      if (name === 'code-film') return false;
+      try {
+        return statSync(path.join(DEMOS, name)).isDirectory()
+          && existsSync(path.join(DEMOS, name, 'index.html'));
+      } catch {
+        return false;
+      }
+    })
+    .sort();
+  if (!entries.length) {
+    console.log('No films under demos/. Scaffold with: npm run code-film -- init <id>');
+    return;
+  }
+  console.log('Code films:');
+  for (const id of entries) {
+    const out = path.join(DEMOS, id, 'out');
+    const web = existsSync(path.join(out, `${id}-web.mp4`))
+      || [...(existsSync(out) ? readdirSync(out) : [])].some((f) => f.endsWith('-web.mp4'));
+    const preview = existsSync(out)
+      && readdirSync(out).some((f) => f.endsWith('-preview.mp4'));
+    const flags = [web ? 'web' : null, preview ? 'preview' : null].filter(Boolean).join('+') || 'source';
+    console.log(`  ${id.padEnd(16)} ${flags}`);
+  }
 }
 
 async function cmdInit(id) {
@@ -312,6 +344,10 @@ async function main() {
 
   if (cmd === 'init') {
     await cmdInit(argv[1]);
+    return;
+  }
+  if (cmd === 'list') {
+    cmdList();
     return;
   }
 

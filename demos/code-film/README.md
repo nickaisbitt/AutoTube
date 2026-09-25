@@ -6,14 +6,25 @@ Shared tools for Opus-style films: every frame from code, storyboard-as-data, co
 
 ```bash
 npx playwright install chromium   # once
-npm run code-film -- init my-film
-npm run code-film -- preview my-film -- 2,8,16
-npm run code-film:check -- my-film
-# or call the harness directly:
 node demos/code-film/shared/harness.mjs demos/<film>/index.html --all
 ```
 
-Product mode (Track C AutoTube): `docs/CODE_FILM_MODE.md`.
+Smoke (2s gradient, for harness timing):
+
+```bash
+node demos/code-film/shared/harness.mjs demos/code-film/fixtures/smoke.html --render
+```
+
+## Render performance
+
+Prefer **pure `seek(t)`** films so the harness can use multiple Playwright pages and skip warm frames. Do **not** pass `--swiftshader` unless WebGL fails without it — software GL makes 1080p JPEG capture ~10× slower.
+
+See [`shared/perf-notes.md`](./shared/perf-notes.md) for worker/JPEG knobs and film-side patterns.
+
+```bash
+# typical fast path
+node demos/code-film/shared/harness.mjs demos/<film>/index.html --render --workers 2 --jpeg-quality 80
+```
 
 ## Tracks
 

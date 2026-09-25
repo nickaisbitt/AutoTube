@@ -22,6 +22,9 @@ Compared to viral Opus 5.5 demos (glass-tile flock, sand films, pixel wizard, st
 demos/code-film/shared/
   storyboard.schema.json   # contract for FILM.storyboard
   harness.mjs              # --preview / --contact / --check / --render / --all
+  perf-notes.md            # render speed: workers, JPEG, SwiftShader, seekPure
+demos/code-film/fixtures/
+  smoke.html               # 2s gradient for harness timing
 demos/<film-id>/
   index.html               # self-contained film exposing window.FILM
   out/                     # storyboard.json, review/, *-web.mp4, *-preview.mp4
@@ -39,14 +42,23 @@ window.FILM = {
   storyboard,          // matches storyboard.schema.json
   canvas / out,        // drawing surface
   seek(t),             // preferred: pure draw at time t
+  seekPure: true,      // optional hint — enables parallel --render workers
   reset?.(),
-  warmTo?.(frame, n),  // stateful sims only
-  nextFrame?.(q),      // stateful render loop
+  warmTo?.(frame, n),  // stateful sims only (forces workers=1)
+  nextFrame?.(q),      // stateful render loop (forces workers=1)
   renderAudio?.(),     // base64 WAV, same timeline as picture
 };
 ```
 
 Open with `?render=1` to hide UI chrome.
+
+### Perf (harness)
+
+- Default Chromium launch **does not** use SwiftShader — software GL made 1080p canvas→JPEG ~10× slower. Pass `--swiftshader` only if WebGL fails on host GL.
+- Pure `seek(t)` (+ no `nextFrame`) → auto `--workers` 2–4 with ordered MJPEG pipe; `--jpeg-quality` defaults to 80 (final look is still CRF 20).
+- Stateful films: single worker; use `--warm` only on `--preview`/`--contact`.
+- Smoke timing: `node demos/code-film/shared/harness.mjs demos/code-film/fixtures/smoke.html --render`
+- Details: `demos/code-film/shared/perf-notes.md`
 
 ## Workflow (always)
 
@@ -64,7 +76,7 @@ Cuts must equal `beat` within 0.04s.
 
 ### 2. Implement the technique
 
-Prefer **frame-pure** `seek(t)` / `draw(t)`. If state is required (trails), expose `reset` + `warmTo`/`nextFrame` and document it.
+Prefer **frame-pure** `seek(t)` / `draw(t)` and set `seekPure: true` — required for parallel renders and to hit ≤1s/frame at 1080p. Use `getContext('2d', { alpha: false, willReadFrequently: true })` when reading back every frame. If state is required (trails), expose `reset` + `warmTo`/`nextFrame` and document it (accepts slower sequential capture).
 
 Avoid: purple-on-white defaults, cream+terracotta clichés, flat single-color backgrounds, soft unreadable silhouettes, dead air >1.5s.
 

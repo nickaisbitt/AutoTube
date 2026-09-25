@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>code-film smoke fixture</title>
+  <style>
+    html, body { margin: 0; background: #111; overflow: hidden; }
+    canvas { display: block; }
+    body:not(.render) #hud {
+      position: fixed; left: 12px; bottom: 12px; color: #eee;
+      font: 14px ui-monospace, monospace; opacity: 0.7;
+    }
+    body.render #hud { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="c" width="1280" height="720"></canvas>
+  <div id="hud">smoke fixture — gradient seek(t)</div>
+  <script>
+(() => {
+  const W = 1280, H = 720, FPS = 30, DUR = 2;
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+
+  function drawFrame(t) {
+    const u = Math.max(0, Math.min(1, t / DUR));
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, `hsl(${(u * 140 + 18).toFixed(1)} 62% 42%)`);
+    g.addColorStop(1, `hsl(${(u * 140 + 200).toFixed(1)} 55% 22%)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    // Moving bar so frames are distinct under contact/check
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillRect((u * (W - 80)) | 0, (H / 2 - 8) | 0, 80, 16);
+    ctx.font = '600 28px ui-sans-serif, system-ui, sans-serif';
+    ctx.fillText(`t=${t.toFixed(2)}s`, 36, 48);
+  }
+
+  drawFrame(0);
+  window.FILM = {
+    ready: true,
+    duration: DUR,
+    fps: FPS,
+    width: W,
+    height: H,
+    seekPure: true,
+    storyboard: {
+      id: 'smoke',
+      title: 'Smoke Fixture',
+      technique: 'gradient-seek',
+      duration: DUR,
+      fps: FPS,
+      width: W,
+      height: H,
+      tempo: { bpm: 120, beatsPerBar: 4 },
+      sections: [{ id: 'a', t0: 0, t1: DUR, mood: 'test', harmony: ['C'] }],
+      shots: [{ id: 's1', t0: 0, t1: DUR, beat: 0, camera: 'static', subject: 'bar', action: 'slide' }],
+      events: [{ t: 1, type: 'hit', label: 'mid' }],
+      acceptance: { beatToleranceSec: 0.04, maxDeadAirSec: 1.5 },
+    },
+    canvas,
+    out: canvas,
+    seek(t) { drawFrame(t); },
+    reset() { drawFrame(0); },
+  };
+
+  if (new URLSearchParams(location.search).has('render')) {
+    document.body.classList.add('render');
+  }
+})();
+  </script>
+</body>
+</html>

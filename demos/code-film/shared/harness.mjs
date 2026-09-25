@@ -370,6 +370,7 @@ async function countExistingFrames(framesDir, total) {
 }
 
 async function captureFrameToDisk(page, frameIndex, file, { jpegQuality, stateful }) {
+  await mkdir(path.dirname(file), { recursive: true });
   if (stateful) {
     const dataUrl = await page.evaluate((frame) => {
       const F = window.FILM;

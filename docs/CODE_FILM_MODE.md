@@ -56,6 +56,11 @@ Requires Playwright Chromium + ffmpeg (same as harness). See `.cursor/skills/cod
 |----|-----------|-------|
 | `tide-ink-v2` | particle-ink continuous world | ~64s; camera travels one ocean |
 | `glass-keeper` | glass-tile flock | ~52s; watch → tower → gulls → spiral |
+| `mosaic-flock` | glass/gold tile flock (Riley-bar) | fish → birds → constellation → spiral |
+| `sand-america` | sand-animation icons | grains settle into history silhouettes |
+| `orange-cosmos` | metamorphosis short | orange face-square → cosmos (~32s) |
+| `pixel-wizard` | fixed-palette pixel film | low-res buffer, nearest-neighbor scale |
+| `tile-hatch` | dense mosaic → fish | star glints hatch into a school |
 | `tide-ink` | particle-ink v1 | Credible prototype; prefer v2 |
 | `salt-copper` | mood/texture | Early sketch |
 

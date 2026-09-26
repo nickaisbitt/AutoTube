@@ -26,6 +26,11 @@ const RESERVED = new Set([
   'tide-ink',
   'tide-ink-v2',
   'salt-copper',
+  'mosaic-flock',
+  'sand-america',
+  'orange-cosmos',
+  'pixel-wizard',
+  'tile-hatch',
 ]);
 
 const COMMANDS = new Set(['init', 'list', 'preview', 'contact', 'check', 'render', 'all', 'help']);
@@ -44,7 +49,8 @@ Examples:
   npm run code-film:check -- hatch-demo
   npm run code-film -- render hatch-demo
 
-Shipped demos: tide-ink-v2, glass-keeper, tide-ink, salt-copper
+Shipped demos: tide-ink-v2, glass-keeper, mosaic-flock, sand-america,
+  orange-cosmos, pixel-wizard, tile-hatch, tide-ink, salt-copper
 Docs: docs/CODE_FILM_MODE.md
 Harness: demos/code-film/shared/harness.mjs
 `;

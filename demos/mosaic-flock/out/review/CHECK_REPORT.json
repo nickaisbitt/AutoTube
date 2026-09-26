@@ -1,0 +1,55 @@
+{
+  "id": "mosaic-flock",
+  "title": "Mosaic Flock",
+  "checkedAt": "2026-09-26T01:01:23.852Z",
+  "pass": true,
+  "failures": [],
+  "warnings": [
+    {
+      "code": "possible-dead-air",
+      "shot": "s0",
+      "duration": 5
+    },
+    {
+      "code": "possible-dead-air",
+      "shot": "s9",
+      "duration": 3.5
+    }
+  ],
+  "stats": {
+    "zeroAssets": true,
+    "beatMisses": 0,
+    "sample": {
+      "center": [
+        128,
+        132,
+        124
+      ],
+      "corners": [
+        [
+          18,
+          28,
+          41
+        ],
+        [
+          19,
+          29,
+          42
+        ],
+        [
+          6,
+          7,
+          12
+        ],
+        [
+          6,
+          7,
+          12
+        ]
+      ],
+      "w": 1920,
+      "h": 1080
+    },
+    "seekPure": true
+  }
+}

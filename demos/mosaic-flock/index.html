@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mosaic Flock — a code film</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07090e; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas { width: min(100vw, 177.78vh); aspect-ratio: 16/9; display: block; background: #07090e; }
+  #ui {
+    position: fixed; left: 16px; bottom: 14px; display: flex; gap: 10px; align-items: center;
+    font: 12px/1 ui-sans-serif, system-ui, sans-serif; color: #e8e4dc; letter-spacing: .08em;
+  }
+  #ui button {
+    font: inherit; text-transform: uppercase; letter-spacing: .14em; font-size: 11px;
+    color: #e8e4dc; background: rgba(8,12,18,.65); border: 1px solid rgba(232,228,220,.28);
+    border-radius: 999px; padding: 8px 14px; cursor: pointer;
+  }
+  body.render #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="1920" height="1080"></canvas></div>
+<div id="ui"><button id="play" type="button">Play</button><span id="clock">0:00</span></div>
+<script>
+(() => {
+'use strict';
+
+const W = 1920, H = 1080, FPS = 30, DUR = 66, SEED = 0x6f5a1c;
+const COLS = 128, ROWS = 72;          // 9216 tiles — dense flock, seekPure-friendly
+const N = COLS * ROWS;
+const TW = W / COLS, TH = H / ROWS;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoother = (t) => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+const smoothstep = (a, b, x) => smoother((x - a) / (b - a));
+const TAU = Math.PI * 2;
+
+// --- storyboard (picture + sound both read this) ---
+const bpm = 96;
+const STORY = {
+  id: 'mosaic-flock',
+  title: 'Mosaic Flock',
+  logline: 'A glass-and-gold mosaic that never stayed a wall — tiles lift, swim as fish, rise as cranes, then pin themselves into night.',
+  technique: 'glass-tile-flock',
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  seed: SEED,
+  tempo: { bpm, beatsPerBar: 4 },
+  palette: {
+    abyss: '#07090e', deep: '#121826', glass: '#9eb8c8', gold: '#d4a85a',
+    foam: '#e8e4dc', dusk: '#3a4a62', dawn: '#c8a078', night: '#0a0e18',
+  },
+  sections: [
+    { id: 'wall', t0: 0, t1: 5, mood: 'still', harmony: 'Dm' },
+    { id: 'fish', t0: 5, t1: 26.25, mood: 'swim', harmony: 'Bb' },
+    { id: 'birds', t0: 26.25, t1: 42.5, mood: 'lift', harmony: 'F' },
+    { id: 'night', t0: 42.5, t1: 56.25, mood: 'constellate', harmony: 'C' },
+    { id: 'release', t0: 56.25, t1: 66, mood: 'disperse', harmony: 'D' },
+  ],
+  shots: [
+    { id: 's0', t0: 0, t1: 5, beat: 0, camera: { x: -0.04, y: 0.1, zoom: 3.35, rot: 0.025 }, subject: 'mosaic-wall', action: 'gold vein detail hold', caption: '' },
+    { id: 's1', t0: 5, t1: 11.25, beat: 5, camera: { x: 0, y: 0.02, zoom: 1.28, rot: 0 }, subject: 'tiles', action: 'assemble into fish', caption: 'The wall remembers the sea.' },
+    { id: 's2', t0: 11.25, t1: 18.75, beat: 11.25, camera: { x: 0.02, y: -0.02, zoom: 1.42, rot: 0 }, subject: 'fish-flock', action: 'assemble + swim', caption: '' },
+    { id: 's3', t0: 18.75, t1: 26.25, beat: 18.75, camera: { x: -0.04, y: 0, zoom: 1.35, rot: 0 }, subject: 'fish-flock', action: 'swim across', caption: 'Tiles learned to swim.' },
+    { id: 's4', t0: 26.25, t1: 33.75, beat: 26.25, camera: { x: 0, y: -0.04, zoom: 1.22, rot: 0 }, subject: 'fish', action: 'dissolve to cranes', caption: '' },
+    { id: 's5', t0: 33.75, t1: 42.5, beat: 33.75, camera: { x: 0.02, y: -0.06, zoom: 1.38, rot: 0 }, subject: 'crane-flock', action: 'fly flock across', caption: 'Then they learned to fly.' },
+    { id: 's6', t0: 42.5, t1: 50, beat: 42.5, camera: { x: 0, y: -0.02, zoom: 1.18, rot: 0 }, subject: 'sky', action: 'dissolve day to night', caption: '' },
+    { id: 's7', t0: 50, t1: 56.25, beat: 50, camera: { x: 0, y: 0, zoom: 1.48, rot: 0 }, subject: 'constellation', action: 'stars lock figure', caption: 'Night kept the pattern.' },
+    { id: 's8', t0: 56.25, t1: 62.5, beat: 56.25, camera: { x: 0, y: 0, zoom: 1.22, rot: 0 }, subject: 'constellation', action: 'spiral dissolve', caption: '' },
+    { id: 's9', t0: 62.5, t1: 66, beat: 62.5, camera: { x: 0, y: 0, zoom: 1.0, rot: 0 }, subject: 'title', action: 'end card hold', caption: '' },
+  ],
+  events: [
+    { t: 5, kind: 'whoosh', id: 'lift' },
+    { t: 11.25, kind: 'impact', id: 'fish-lock' },
+    { t: 11.25 + 1.25, kind: 'pluck', id: 'fin-a' },
+    { t: 11.25 + 2.5, kind: 'pluck', id: 'fin-b' },
+    { t: 11.25 + 3.75, kind: 'pluck', id: 'fin-c' },
+    { t: 18.75, kind: 'whoosh', id: 'swim-push' },
+    { t: 26.25, kind: 'whoosh', id: 'to-birds' },
+    { t: 33.75, kind: 'impact', id: 'crane-lock' },
+    { t: 33.75 + 2.5, kind: 'bell', id: 'wing-1' },
+    { t: 33.75 + 5.0, kind: 'bell', id: 'wing-2' },
+    { t: 42.5, kind: 'whoosh', id: 'dusk' },
+    { t: 50, kind: 'impact', id: 'constellation-lock' },
+    { t: 50 + 1.875, kind: 'bell', id: 'star-a' },
+    { t: 50 + 3.75, kind: 'bell', id: 'star-b' },
+    { t: 56.25, kind: 'whoosh', id: 'spiral' },
+    { t: 62.5, kind: 'impact', id: 'end' },
+  ],
+  acceptance: { maxDeadAirSec: 1.5, beatToleranceSec: 0.04, thumbnailReadable: true, zeroExternalAssets: true },
+};
+
+// --- tile geometry ---
+const rnd = mulberry32(SEED);
+const homeX = new Float32Array(N);
+const homeY = new Float32Array(N);
+const tint = new Float32Array(N); // 0 glass → 1 gold
+const phase = new Float32Array(N);
+const order = new Float32Array(N);
+
+for (let i = 0; i < N; i++) {
+  const col = i % COLS, row = (i / COLS) | 0;
+  homeX[i] = (col + 0.5) * TW;
+  homeY[i] = (row + 0.5) * TH;
+  const nx = col / COLS, ny = row / ROWS;
+  // Sinuous gold-leaf rivulet — mineral vein, not a stripe
+  const meander = 0.05 * Math.sin(nx * 11.2) + 0.025 * Math.sin(nx * 29 + 0.9);
+  const dVein = ny - 0.30 - 0.52 * nx - meander;
+  const width = 11.5 + 3.2 * Math.sin(nx * 8.5 + 0.5);
+  const main = Math.exp(-Math.pow(dVein * width, 2));
+  const core = Math.exp(-Math.pow(dVein * (width * 2.2), 2));
+  const flake = Math.exp(-Math.pow((ny - 0.52 - 0.18 * nx - 0.028 * Math.sin(nx * 38)) * 26, 2)) * 0.38;
+  tint[i] = clamp(main * 1.25 + core * 0.7 + flake + (rnd() - 0.5) * 0.03, 0, 1);
+  phase[i] = rnd();
+  order[i] = rnd();
+}
+
+function buildMaskTargets(predicate) {
+  const txs = new Float32Array(N);
+  const tys = new Float32Array(N);
+  const pts = [];
+  const sx = COLS * 2, sy = ROWS * 2;
+  for (let row = 0; row < sy; row++) {
+    for (let col = 0; col < sx; col++) {
+      const x = ((col + 0.5) / sx) * W, y = ((row + 0.5) / sy) * H;
+      if (predicate(x, y, col, row)) pts.push([x, y]);
+    }
+  }
+  if (pts.length === 0) {
+    for (let i = 0; i < N; i++) { txs[i] = W / 2; tys[i] = H / 2; }
+    return { x: txs, y: tys, aabb: { minX: W * 0.4, maxX: W * 0.6, minY: H * 0.4, maxY: H * 0.6 } };
+  }
+  for (let i = pts.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; const t = pts[i]; pts[i] = pts[j]; pts[j] = t; }
+  const idx = Array.from({ length: N }, (_, i) => i);
+  for (let i = N - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; const t = idx[i]; idx[i] = idx[j]; idx[j] = t; }
+  const used = new Uint8Array(N);
+  const take = Math.floor(N * 0.97);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  const sparse = pts.length < N * 0.55;
+  for (let p = 0; p < take; p++) {
+    const i = idx[p];
+    const src = pts[p % pts.length];
+    const jAmp = sparse ? 0.07 : 0.14;
+    const jx = (p >= pts.length) ? (rnd() - 0.5) * TW * jAmp : 0;
+    const jy = (p >= pts.length) ? (rnd() - 0.5) * TH * jAmp : 0;
+    const px = src[0] + jx, py = src[1] + jy;
+    txs[i] = px; tys[i] = py;
+    used[i] = 1;
+    if (px < minX) minX = px; if (px > maxX) maxX = px;
+    if (py < minY) minY = py; if (py > maxY) maxY = py;
+  }
+  const bw = Math.max(40, maxX - minX), bh = Math.max(40, maxY - minY);
+  for (let i = 0; i < N; i++) if (!used[i]) {
+    if (sparse && pts.length) {
+      const src = pts[(rnd() * pts.length) | 0];
+      txs[i] = src[0] + (rnd() - 0.5) * TW * 0.85;
+      tys[i] = src[1] + (rnd() - 0.5) * TH * 0.85;
+    } else if (rnd() < 0.78) {
+      txs[i] = minX + rnd() * bw;
+      tys[i] = minY + rnd() * bh;
+    } else {
+      const near = 0.07;
+      txs[i] = minX - bw * near + rnd() * bw * (1 + 2 * near);
+      tys[i] = minY - bh * near + rnd() * bh * (1 + 2 * near);
+    }
+  }
+  return { x: txs, y: tys, aabb: { minX, maxX, minY, maxY } };
+}
+
+function distSeg(px, py, ax, ay, bx, by) {
+  const vx = bx - ax, vy = by - ay;
+  const den = vx * vx + vy * vy || 1;
+  const t = clamp(((px - ax) * vx + (py - ay) * vy) / den, 0, 1);
+  return Math.hypot(px - ax - t * vx, py - ay - t * vy);
+}
+
+// Side-profile fish — filled body + clear fins (thumbnail-readable)
+function fishSilhouette(x, y, cx, cy, sc, facing) {
+  const dx = ((x - cx) / sc) * facing;
+  const dy = (y - cy) / sc;
+  // fuselage taper
+  const body =
+    dx > -0.55 && dx < 0.62
+    && Math.abs(dy) < 0.22 * (1 - Math.pow(clamp((Math.abs(dx) - 0.05) / 0.55, 0, 1), 1.35));
+  const head = Math.hypot(dx - 0.68, dy) < 0.18;
+  const eye = Math.hypot(dx - 0.72, dy + 0.04) < 0.035; // punched as gold later via tint
+  const snout = dx > 0.78 && dx < 1.05 && Math.abs(dy) < 0.07 * (1 - (dx - 0.78) / 0.3);
+  // caudal fork
+  const tail =
+    dx < -0.48 && dx > -0.95
+    && Math.abs(dy) < 0.08 + 0.32 * clamp((-dx - 0.48) / 0.45, 0, 1)
+    && Math.abs(dy) > 0.02 * clamp((-dx - 0.55) / 0.3, 0, 1);
+  // dorsal fin peak
+  const dorsal =
+    dx > -0.15 && dx < 0.35 && dy < -0.12 && dy > -0.55
+    && Math.abs(dx - 0.05) < 0.22 * (1 + (dy + 0.12) / 0.4);
+  const ventral =
+    dx > -0.05 && dx < 0.28 && dy > 0.12 && dy < 0.38
+    && Math.abs(dx - 0.1) < 0.14 * (1 - (dy - 0.12) / 0.28);
+  return body || head || snout || tail || dorsal || ventral || eye;
+}
+
+const fish = buildMaskTargets((x, y) => {
+  // 3 large fish with black gaps between — reads as school, not blob
+  const school = [
+    [0.26, 0.44, 0.24, 1],
+    [0.54, 0.30, 0.26, 1],
+    [0.74, 0.60, 0.22, 1],
+  ];
+  for (const [bx, by, scN, facing] of school) {
+    if (fishSilhouette(x, y, W * bx, H * by, W * scN, facing)) return true;
+  }
+  return false;
+});
+
+// Crane / dove — long neck, raised wing, trailing legs
+function craneSilhouette(x, y, cx, cy, sc, facing) {
+  const dx = ((x - cx) / sc) * facing;
+  const dy = (y - cy) / sc;
+  const body =
+    dx > -0.35 && dx < 0.38
+    && Math.abs(dy - 0.05) < 0.13 * (1 - Math.pow(clamp((Math.abs(dx) - 0.05) / 0.4, 0, 1), 1.3));
+  // long S-neck + head
+  const neck =
+    dx > 0.28 && dx < 0.72
+    && Math.abs(dy + 0.22 - 0.35 * Math.sin((dx - 0.28) * 2.2)) < 0.09;
+  const head = Math.hypot(dx - 0.78, dy + 0.38) < 0.11;
+  const beak = dx > 0.85 && dx < 1.12 && Math.abs(dy + 0.40) < 0.045;
+  // raised wing crescent
+  const wing =
+    dx > -0.25 && dx < 0.42 && dy < 0.0 && dy > -0.78
+    && Math.abs(dy + 0.42 - 0.1 * Math.sin((dx + 0.1) * 2.6)) < 0.15;
+  const tail = dx < -0.28 && dx > -0.62 && Math.abs(dy - 0.06) < 0.11;
+  // trailing legs
+  const leg1 = distSeg(dx, dy, -0.05, 0.16, -0.12, 0.72) < 0.045;
+  const leg2 = distSeg(dx, dy, 0.08, 0.16, 0.18, 0.70) < 0.045;
+  return body || neck || head || beak || wing || tail || leg1 || leg2;
+}
+
+const birds = buildMaskTargets((x, y) => {
+  const flock = [
+    [0.20, 0.40, 0.20, 1],
+    [0.44, 0.24, 0.22, 1],
+    [0.70, 0.34, 0.20, 1],
+    [0.52, 0.58, 0.18, 1],
+  ];
+  for (const [bx, by, scN, facing] of flock) {
+    if (craneSilhouette(x, y, W * bx, H * by, W * scN, facing)) return true;
+  }
+  return false;
+});
+
+// Constellation — bright nodes + thin connecting arms (crane figure in stars)
+function constellationMask(x, y) {
+  // star nodes (normalized) forming a rising crane
+  const nodes = [
+    [0.22, 0.62], // rear foot
+    [0.30, 0.48], // hip
+    [0.42, 0.42], // body
+    [0.52, 0.30], // wing tip
+    [0.48, 0.48], // shoulder
+    [0.58, 0.36], // neck bend
+    [0.68, 0.24], // head
+    [0.78, 0.22], // beak
+    [0.36, 0.55], // front foot
+    [0.44, 0.58], // belly
+  ];
+  const edges = [
+    [0, 1], [1, 2], [2, 3], [2, 4], [4, 5], [5, 6], [6, 7], [1, 8], [2, 9], [8, 9],
+  ];
+  const stroke = H * 0.012;
+  for (const [ax, ay] of nodes) {
+    if (Math.hypot(x - W * ax, y - H * ay) < H * 0.028) return true;
+  }
+  for (const [ia, ib] of edges) {
+    const a = nodes[ia], b = nodes[ib];
+    if (distSeg(x, y, W * a[0], H * a[1], W * b[0], H * b[1]) < stroke) return true;
+  }
+  return false;
+}
+
+const stars = buildMaskTargets((x, y) => constellationMask(x, y));
+
+// Spiral — Archimedean helix for disperse
+const spiral = (() => {
+  const txs = new Float32Array(N), tys = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const u = (i + phase[i] * 0.35) / N;
+    const a = u * TAU * 2.7 + phase[i] * 0.4;
+    const r = 65 + u * Math.min(W, H) * 0.44;
+    const thick = (phase[i] - 0.5) * 18;
+    txs[i] = W / 2 + Math.cos(a) * (r + thick);
+    tys[i] = H / 2 + Math.sin(a) * (r + thick) * 0.76;
+  }
+  return { x: txs, y: tys };
+})();
+
+const wall = { x: homeX, y: homeY };
+
+// Gold bias for fish eyes / bird beaks when locked
+const fishTint = new Float32Array(N);
+for (let i = 0; i < N; i++) {
+  const fx = fish.x[i], fy = fish.y[i];
+  // approximate eye zones of the three fish
+  let gold = -1;
+  const eyes = [
+    [0.28 + 0.20 * 0.72 / 1, 0.42], // rough — use local check
+  ];
+  // Prefer gold near snout/head regions of each fish center
+  const heads = [
+    [W * 0.28 + W * 0.20 * 0.72, H * 0.42],
+    [W * 0.55 + W * 0.22 * 0.72, H * 0.30],
+    [W * 0.72 + W * 0.18 * 0.72, H * 0.58],
+  ];
+  for (const [hx, hy] of heads) {
+    if (Math.hypot(fx - hx, fy - hy) < W * 0.035) { gold = 0.95; break; }
+  }
+  // dorsal tips slightly gold
+  if (gold < 0) {
+    const dorsals = [
+      [W * 0.28, H * 0.42 - W * 0.20 * 0.4],
+      [W * 0.55, H * 0.30 - W * 0.22 * 0.4],
+      [W * 0.72, H * 0.58 - W * 0.18 * 0.4],
+    ];
+    for (const [dx, dy] of dorsals) {
+      if (Math.hypot(fx - dx, fy - dy) < W * 0.04) { gold = 0.75; break; }
+    }
+  }
+  fishTint[i] = gold;
+}
+
+const birdTint = new Float32Array(N);
+for (let i = 0; i < N; i++) {
+  const bx = birds.x[i], by = birds.y[i];
+  const beaks = [
+    [W * 0.22 + W * 0.17 * 0.95, H * 0.38 - W * 0.17 * 0.38],
+    [W * 0.46 + W * 0.19 * 0.95, H * 0.26 - W * 0.19 * 0.38],
+    [W * 0.70 + W * 0.17 * 0.95, H * 0.36 - W * 0.17 * 0.38],
+    [W * 0.54 + W * 0.16 * 0.95, H * 0.58 - W * 0.16 * 0.38],
+  ];
+  let g = -1;
+  for (const [hx, hy] of beaks) {
+    if (Math.hypot(bx - hx, by - hy) < W * 0.03) { g = 0.92; break; }
+  }
+  birdTint[i] = g;
+}
+
+function formationWeights(t) {
+  // wall → fish → birds → constellation → spiral
+  // Lock beats: fish ~8, birds ~28, stars ~52; spiral clears before title @62
+  const wWall = 1 - smoothstep(3.8, 6.5, t);
+  const wFish = smoothstep(4.6, 7.6, t) * (1 - smoothstep(23.2, 26.4, t));
+  const wBirds = smoothstep(24.0, 27.6, t) * (1 - smoothstep(40.0, 44.5, t));
+  const wStars = smoothstep(42.0, 47.5, t) * (1 - smoothstep(54.5, 57.2, t));
+  const wSpiral = smoothstep(55.2, 57.8, t) * (1 - smoothstep(59.8, 61.4, t));
+  const sum = wWall + wFish + wBirds + wStars + wSpiral + 1e-6;
+  return [wWall / sum, wFish / sum, wBirds / sum, wStars / sum, wSpiral / sum];
+}
+
+function subjectLowExtent(t) {
+  const [, b, c, d, e] = formationWeights(t);
+  if (e > 0.25) return true;
+  if (d > 0.4) return false; // constellation centered
+  let aabb = null;
+  if (c > 0.35) aabb = birds.aabb;
+  else if (b > 0.35) aabb = fish.aabb;
+  if (!aabb) return false;
+  return aabb.maxY > H * 0.7;
+}
+
+function tilePos(i, t) {
+  const [a, b, c, d, e] = formationWeights(t);
+  let x = a * wall.x[i] + b * fish.x[i] + c * birds.x[i] + d * stars.x[i] + e * spiral.x[i];
+  let y = a * wall.y[i] + b * fish.y[i] + c * birds.y[i] + d * stars.y[i] + e * spiral.y[i];
+
+  x += (phase[i] - 0.5) * TW * 0.22;
+  y += (order[i] - 0.5) * TH * 0.2;
+
+  // transition turbulence — settle BEFORE locked preview beats (8, 28, 52)
+  const lift = smoothstep(4.5, 6.0, t) * (1 - smoothstep(7.0, 8.4, t))
+    + smoothstep(23.5, 25.5, t) * (1 - smoothstep(26.8, 28.2, t))
+    + smoothstep(41.5, 44.0, t) * (1 - smoothstep(47.0, 50.0, t))
+    + smoothstep(54.8, 56.8, t) * (1 - smoothstep(57.8, 59.5, t));
+  const stagger = smoother(clamp((t - 4.8 - order[i] * 1.4) / 0.9, 0, 1));
+  const turb = lift * (0.22 + 0.42 * stagger);
+  const ang = phase[i] * TAU + t * (0.65 + phase[i]);
+  x += Math.cos(ang) * turb * 16 * (0.5 + order[i]);
+  y += Math.sin(ang * 1.25) * turb * 13 * (0.5 + order[i]);
+
+  // fish swim drift — modest so school stays readable at lock
+  const swim = smoothstep(11.0, 13.0, t) * (1 - smoothstep(22.5, 25.5, t));
+  x += swim * (t - 11.0) * 9;
+  y += swim * Math.sin(t * 1.35 + phase[i] * 5) * 4.5;
+
+  // bird travel
+  const fly = smoothstep(33.5, 36.0, t) * (1 - smoothstep(41.0, 44.0, t));
+  x += fly * (t - 33.5) * 10;
+  y += fly * Math.sin(t * 1.05 + phase[i] * 4) * 3.5;
+
+  // constellation shimmer micro-offset (stars twinkle in place)
+  const twinkle = smoothstep(48.0, 51.0, t) * (1 - smoothstep(55.5, 57.5, t));
+  if (twinkle > 0) {
+    x += Math.sin(t * 3.2 + phase[i] * 20) * twinkle * 1.8;
+    y += Math.cos(t * 2.8 + order[i] * 18) * twinkle * 1.5;
+  }
+
+  // spiral spin + expand — clear before title lock at t=62
+  const spin = smoothstep(55.5, 57.8, t);
+  if (spin > 0) {
+    const cx = W / 2, cy = H / 2;
+    const dx = x - cx, dy = y - cy;
+    const a2 = spin * (t - 55.5) * 0.36;
+    const ca = Math.cos(a2), sa = Math.sin(a2);
+    x = cx + ca * dx - sa * dy;
+    y = cy + sa * dx + ca * dy;
+    const out = smoothstep(59.2, 61.6, t);
+    x = lerp(x, cx + dx * 2.8, out);
+    y = lerp(y, cy + dy * 2.8, out);
+  }
+
+  const clear = smoothstep(59.8, 61.6, t);
+  if (clear > 0) {
+    const cx = W / 2, cy = H / 2;
+    x = lerp(x, cx + (x - cx) * 3.6, clear);
+    y = lerp(y, cy + (y - cy) * 3.6, clear);
+  }
+  return [x, y];
+}
+
+function camAt(t) {
+  const shots = STORY.shots;
+  let i = 0;
+  while (i < shots.length - 1 && t >= shots[i + 1].t0) i++;
+  const a = shots[i], b = shots[Math.min(i + 1, shots.length - 1)];
+  const ca = a.camera, cb = (t > a.t1 - 0.8 ? b.camera : a.camera);
+  const k = t > a.t1 - 0.8 ? smoother(clamp((t - (a.t1 - 0.8)) / 0.8, 0, 1)) : 0;
+  return {
+    x: lerp(ca.x, cb.x, k),
+    y: lerp(ca.y, cb.y, k),
+    zoom: lerp(ca.zoom, cb.zoom, k),
+    rot: lerp(ca.rot || 0, cb.rot || 0, k),
+    breathe: 1 + 0.008 * Math.sin(t * 0.7),
+  };
+}
+
+function captionAt(t) {
+  for (const s of STORY.shots) {
+    if (!s.caption) continue;
+    if (t >= s.t0 + 0.35 && t <= s.t1 - 0.4) {
+      const a = smoothstep(s.t0 + 0.35, s.t0 + 1.1, t) * (1 - smoothstep(s.t1 - 1.2, s.t1 - 0.4, t));
+      return { text: s.caption, a };
+    }
+  }
+  return null;
+}
+
+function hexRgb(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const C_GLASS = hexRgb(STORY.palette.glass);
+const C_GOLD = hexRgb(STORY.palette.gold);
+
+function skyColors(t) {
+  // day → dusk → night
+  const dusk = smoothstep(36, 44, t);
+  const night = smoothstep(42, 50, t);
+  const top = [
+    lerp(lerp(0x1a, 0x2a, dusk), 0x08, night),
+    lerp(lerp(0x28, 0x2e, dusk), 0x0c, night),
+    lerp(lerp(0x3a, 0x42, dusk), 0x16, night),
+  ];
+  const mid = [
+    lerp(lerp(0x10, 0x1c, dusk), 0x07, night),
+    lerp(lerp(0x14, 0x18, dusk), 0x09, night),
+    lerp(lerp(0x1e, 0x26, dusk), 0x10, night),
+  ];
+  const bot = [
+    lerp(lerp(0x08, 0x12, dusk), 0x05, night),
+    lerp(lerp(0x0a, 0x0e, dusk), 0x07, night),
+    lerp(lerp(0x10, 0x14, dusk), 0x0b, night),
+  ];
+  // warm dusk band
+  const warm = smoothstep(38, 42, t) * (1 - smoothstep(46, 52, t));
+  mid[0] = Math.min(255, mid[0] + 40 * warm);
+  mid[1] = Math.min(255, mid[1] + 18 * warm);
+  return { top, mid, bot, night, warm };
+}
+
+function drawFrame(t) {
+  t = clamp(t, 0, DUR);
+  const cam = camAt(t);
+  const clearTiles = smoothstep(59.8, 61.6, t);
+  const sky = skyColors(t);
+
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, `rgb(${sky.top[0] | 0},${sky.top[1] | 0},${sky.top[2] | 0})`);
+  g.addColorStop(0.55, `rgb(${sky.mid[0] | 0},${sky.mid[1] | 0},${sky.mid[2] | 0})`);
+  g.addColorStop(1, `rgb(${sky.bot[0] | 0},${sky.bot[1] | 0},${sky.bot[2] | 0})`);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // faint distant stars as night deepens (background, not tiles)
+  if (sky.night > 0.15) {
+    const sr = mulberry32(SEED ^ 0x51a);
+    ctx.globalAlpha = 0.35 * sky.night;
+    ctx.fillStyle = '#d8e0f0';
+    for (let k = 0; k < 90; k++) {
+      const sx = sr() * W, sy = sr() * H * 0.7;
+      const r = 0.6 + sr() * 1.4;
+      ctx.fillRect(sx, sy, r, r);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate(cam.rot);
+  ctx.scale(cam.zoom * cam.breathe, cam.zoom * cam.breathe);
+  ctx.translate(-W / 2 - cam.x * W, -H / 2 - cam.y * H);
+
+  const lx = W * 0.28, ly = H * 0.18;
+  const tileAlpha = 1 - clearTiles;
+  const gap = 1.1;
+  const [wWall, wFish, wBirds, wStars] = formationWeights(t);
+
+  for (let i = 0; i < N; i++) {
+    const [x, y] = tilePos(i, t);
+    if (tileAlpha < 0.02) continue;
+    const tw = TW - gap, th = TH - gap;
+    let k = tint[i];
+    if (wFish > 0.25 && fishTint[i] >= 0) k = lerp(k, fishTint[i], clamp(wFish * 1.35, 0, 1));
+    if (wBirds > 0.25 && birdTint[i] >= 0) k = lerp(k, birdTint[i], clamp(wBirds * 1.35, 0, 1));
+    // constellation: nodes hotter gold, arms cooler glass
+    if (wStars > 0.3) {
+      const nearNode = constellationMask(stars.x[i], stars.y[i])
+        && Math.hypot(stars.x[i] - x, stars.y[i] - y) < 1; // identity — use formation pos
+      // Use home-relative: brighter if this tile's star target is near a node
+      const nx = stars.x[i], ny = stars.y[i];
+      let nodeHot = 0;
+      const nodes = [
+        [0.22, 0.62], [0.30, 0.48], [0.42, 0.42], [0.52, 0.30], [0.48, 0.48],
+        [0.58, 0.36], [0.68, 0.24], [0.78, 0.22], [0.36, 0.55], [0.44, 0.58],
+      ];
+      for (const [ax, ay] of nodes) {
+        if (Math.hypot(nx - W * ax, ny - H * ay) < H * 0.032) { nodeHot = 1; break; }
+      }
+      k = lerp(k, nodeHot ? 0.95 : 0.18, clamp(wStars * 1.2, 0, 1));
+      void nearNode;
+    }
+
+    const toLx = x - lx, toLy = y - ly;
+    const llen = Math.hypot(toLx, toLy) || 1;
+    const ndot = clamp((-toLx / llen) * 0.45 + (-toLy / llen) * 0.75 + 0.35, 0, 1);
+    const key = 0.72 + 0.38 * ndot;
+    const shimmer = 0.96 + 0.04 * Math.sin(t * 1.6 + phase[i] * 28 + ndot * 4);
+    let r = (C_GLASS[0] * (1 - k) + C_GOLD[0] * k) * shimmer * key;
+    let gg = (C_GLASS[1] * (1 - k) + C_GOLD[1] * k) * shimmer * key;
+    let bl = (C_GLASS[2] * (1 - k) + C_GOLD[2] * k) * shimmer * key;
+
+    if (wWall > 0.55) {
+      if (k > 0.4) {
+        const push = (k - 0.4) * wWall * 1.55;
+        r = Math.min(255, r + 58 * push);
+        gg = Math.min(255, gg + 26 * push);
+        bl = Math.min(255, bl * (1 - 0.35 * push));
+      } else {
+        const cool = (0.4 - k) * wWall * 0.55;
+        r *= 1 - 0.28 * cool;
+        gg *= 1 - 0.18 * cool;
+        bl *= 1 - 0.05 * cool;
+      }
+    }
+
+    // night constellation: gold nodes pop against abyss
+    if (wStars > 0.4 && k > 0.6) {
+      const pop = (k - 0.6) * wStars * 1.4;
+      r = Math.min(255, r + 50 * pop);
+      gg = Math.min(255, gg + 28 * pop);
+      bl = Math.min(255, bl + 8 * pop);
+    }
+
+    const isGlass = k < 0.42;
+    ctx.globalAlpha = tileAlpha * (isGlass ? 0.82 : 0.96);
+    ctx.fillStyle = `rgb(${r | 0},${gg | 0},${bl | 0})`;
+    ctx.fillRect(x - tw / 2, y - th / 2, tw, th);
+
+    // Fresnel (glass) + hot specular (gold)
+    const wallQuiet = 1 - 0.62 * wWall;
+    const specPow = isGlass ? 3.2 : 10;
+    const spec = Math.pow(ndot, specPow);
+    const fresnel = isGlass ? Math.pow(1 - ndot, 1.5) * 0.28 : 0;
+    const specA = ((0.12 + 0.72 * k) * spec + fresnel) * wallQuiet;
+    if (specA > 0.015) {
+      ctx.globalAlpha = tileAlpha * clamp(specA, 0, 0.9);
+      ctx.fillStyle = k > 0.5 ? 'rgb(255,242,200)' : 'rgb(235,245,255)';
+      ctx.fillRect(x - tw / 2 + 1, y - th / 2 + 1, tw * (0.32 + 0.22 * k), th * (0.2 + 0.12 * k));
+      if (ndot > 0.5 && wWall < 0.85) {
+        ctx.globalAlpha = tileAlpha * (0.14 + 0.22 * k) * ndot * wallQuiet;
+        ctx.fillRect(x - tw / 2, y - th / 2, tw * 0.14, th);
+        ctx.fillRect(x - tw / 2, y - th / 2, tw, th * 0.12);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore();
+
+  // vignette
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.22, W / 2, H / 2, H * 0.82);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, `rgba(0,0,0,${0.28 + 0.18 * sky.night})`);
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+
+  const cap = captionAt(t);
+  if (cap) {
+    const capY = subjectLowExtent(t) ? H * 0.13 : H - 100;
+    ctx.save();
+    ctx.font = 'italic 42px Georgia, "Times New Roman", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(232,228,220,${cap.a})`;
+    ctx.shadowColor = `rgba(0,0,0,${0.7 * cap.a})`;
+    ctx.shadowBlur = 16;
+    ctx.fillText(cap.text, W / 2, capY);
+    ctx.restore();
+  }
+
+  // opening title
+  const open = 1 - smoothstep(0.25, 2.0, t);
+  if (open > 0.01) {
+    ctx.fillStyle = `rgba(7,9,14,${0.4 * open})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(232,228,220,${open})`;
+    ctx.font = '600 64px Georgia, serif';
+    ctx.fillText('Mosaic Flock', W / 2, H / 2 - 10);
+    ctx.font = 'italic 22px Georgia, serif';
+    ctx.fillStyle = `rgba(212,168,90,${open * 0.9})`;
+    ctx.fillText('every figure is a flock of tiles', W / 2, H / 2 + 36);
+  }
+
+  // end card — solid by locked beat t=62
+  const end = smoothstep(60.8, 62.0, t);
+  if (end > 0.01) {
+    ctx.fillStyle = `rgba(7,9,14,${0.75 * end})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(232,228,220,${end})`;
+    ctx.font = '600 52px Georgia, serif';
+    ctx.fillText('Mosaic Flock', W / 2, H / 2 - 8);
+    ctx.font = 'italic 20px Georgia, serif';
+    ctx.fillStyle = `rgba(212,168,90,${end})`;
+    ctx.fillText('a film written entirely in code', W / 2, H / 2 + 34);
+  }
+
+  // grain
+  const gr = mulberry32((SEED ^ (Math.floor(t * FPS) * 2654435761)) >>> 0);
+  ctx.globalAlpha = 0.032;
+  for (let k = 0; k < 160; k++) {
+    ctx.fillStyle = gr() > 0.5 ? '#fff' : '#000';
+    ctx.fillRect(gr() * W, gr() * H, 1.5, 1.5);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// --- audio ---
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const CHORDS = { Dm: [50, 53, 57], Bb: [46, 50, 53], F: [48, 53, 57], C: [48, 52, 55], D: [50, 54, 57, 61] };
+
+function buildScore(ac, T0) {
+  const master = ac.createGain();
+  master.gain.setValueAtTime(0, T0);
+  master.gain.linearRampToValueAtTime(0.8, T0 + 1.2);
+  master.gain.setValueAtTime(0.8, T0 + DUR - 2.5);
+  master.gain.linearRampToValueAtTime(0, T0 + DUR);
+  master.connect(ac.destination);
+  const at = (t) => T0 + Math.max(0, t);
+
+  function pad(name, t0, t1, level) {
+    for (const m of CHORDS[name]) {
+      const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = (m % 3) * 4 - 4;
+      const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 880;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, at(t0));
+      g.gain.linearRampToValueAtTime(level, at(t0 + 1.5));
+      g.gain.setValueAtTime(level, at(t1));
+      g.gain.linearRampToValueAtTime(0, at(t1 + 2));
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(at(t0)); o.stop(at(t1 + 2.2));
+    }
+  }
+  for (const s of STORY.sections) pad(s.harmony, s.t0, s.t1, s.id === 'release' ? 0.028 : 0.022);
+
+  function whoosh(t) {
+    const len = ac.sampleRate * 1.4;
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * 0.45));
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = 'bandpass';
+    f.frequency.setValueAtTime(380, at(t)); f.frequency.exponentialRampToValueAtTime(2400, at(t + 0.7));
+    const g = ac.createGain(); g.gain.value = 0.2;
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+  }
+  function impact(t) {
+    const o = ac.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(110, at(t)); o.frequency.exponentialRampToValueAtTime(38, at(t + 0.6));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(0.35, at(t + 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.2));
+    o.connect(g); g.connect(master); o.start(at(t)); o.stop(at(t + 1.3));
+  }
+  function bell(t) {
+    const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = 740;
+    const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = 1480;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(0.12, at(t + 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.8));
+    const g2 = ac.createGain(); g2.gain.value = 0.25;
+    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+    o.start(at(t)); o2.start(at(t)); o.stop(at(t + 2)); o2.stop(at(t + 2));
+  }
+  function pluck(t) {
+    const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = 392;
+    const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = 784;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t)); g.gain.linearRampToValueAtTime(0.1, at(t + 0.008));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.9));
+    const g2 = ac.createGain(); g2.gain.value = 0.3;
+    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+    o.start(at(t)); o2.start(at(t)); o.stop(at(t + 1)); o2.stop(at(t + 1));
+  }
+  for (const e of STORY.events) {
+    if (e.kind === 'whoosh') whoosh(e.t);
+    else if (e.kind === 'impact') impact(e.t);
+    else if (e.kind === 'bell') bell(e.t);
+    else if (e.kind === 'pluck') pluck(e.t);
+  }
+}
+
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, sr = buf.sampleRate, n = buf.length;
+  const ab = new ArrayBuffer(44 + n * ch * 2), dv = new DataView(ab);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+  dv.setUint16(34, 16, true); ws(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++, o += 2) {
+    const s = Math.max(-1, Math.min(1, chans[c][i]));
+    dv.setInt16(o, s * 32767, true);
+  }
+  const bytes = new Uint8Array(ab);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+drawFrame(0);
+window.FILM = {
+  ready: true,
+  seekPure: true,
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  storyboard: STORY,
+  canvas,
+  out: canvas,
+  seek(t) { drawFrame(t); },
+  reset() { drawFrame(0); },
+  async renderAudio() {
+    const sr = 48000;
+    const oc = new OfflineAudioContext(2, sr * DUR, sr);
+    buildScore(oc, 0);
+    return encodeWav(await oc.startRendering());
+  },
+};
+
+const params = new URLSearchParams(location.search);
+if (params.has('render')) {
+  document.body.classList.add('render');
+} else {
+  const btn = document.getElementById('play');
+  const clock = document.getElementById('clock');
+  let ac = null, T0 = 0, playing = false;
+  function loop() {
+    if (!playing) return;
+    const t = ac.currentTime - T0;
+    if (t >= DUR) { playing = false; btn.textContent = 'Replay'; drawFrame(DUR); return; }
+    drawFrame(t);
+    clock.textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    requestAnimationFrame(loop);
+  }
+  btn.addEventListener('click', async () => {
+    if (ac) await ac.close();
+    ac = new AudioContext();
+    T0 = ac.currentTime + 0.12;
+    buildScore(ac, T0);
+    playing = true; btn.textContent = 'Restart';
+    requestAnimationFrame(loop);
+  });
+}
+})();
+</script>
+</body>
+</html>

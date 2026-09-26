@@ -1,0 +1,44 @@
+{
+  "id": "sand-america",
+  "title": "Sand America",
+  "checkedAt": "2026-09-26T01:01:30.658Z",
+  "pass": true,
+  "failures": [],
+  "warnings": [],
+  "stats": {
+    "zeroAssets": true,
+    "beatMisses": 0,
+    "sample": {
+      "center": [
+        70,
+        56,
+        39
+      ],
+      "corners": [
+        [
+          9,
+          7,
+          6
+        ],
+        [
+          9,
+          7,
+          6
+        ],
+        [
+          9,
+          7,
+          6
+        ],
+        [
+          9,
+          7,
+          6
+        ]
+      ],
+      "w": 1920,
+      "h": 1080
+    },
+    "seekPure": true
+  }
+}

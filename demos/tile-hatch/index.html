@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tile Hatch — a code film</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #041018; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas { width: min(100vw, 177.78vh); aspect-ratio: 16/9; display: block; background: #041018; }
+  #ui {
+    position: fixed; left: 16px; bottom: 14px; display: flex; gap: 10px; align-items: center;
+    font: 12px/1 ui-sans-serif, system-ui, sans-serif; color: #dce8ee; letter-spacing: .08em;
+  }
+  #ui button {
+    font: inherit; text-transform: uppercase; letter-spacing: .14em; font-size: 11px;
+    color: #dce8ee; background: rgba(4,16,24,.65); border: 1px solid rgba(220,232,238,.28);
+    border-radius: 999px; padding: 8px 14px; cursor: pointer;
+  }
+  body.render #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="1920" height="1080"></canvas></div>
+<div id="ui"><button id="play" type="button">Play</button><span id="clock">0:00</span></div>
+<script>
+(() => {
+'use strict';
+
+const W = 1920, H = 1080, FPS = 30, DUR = 50, SEED = 0x71e4a;
+const COLS = 160, ROWS = 72; // 11520 tiles — dense night water
+const N = COLS * ROWS;
+const TW = W / COLS, TH = H / ROWS;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoother = (t) => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+const smoothstep = (a, b, x) => smoother((x - a) / (b - a));
+const TAU = Math.PI * 2;
+
+// --- storyboard ---
+const bpm = 96;
+const STORY = {
+  id: 'tile-hatch',
+  title: 'Tile Hatch',
+  logline: 'Night water made of eleven thousand glass tiles — star glints hatch into a school, gather into one great fish, then settle again.',
+  technique: 'tile-hatch-school',
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  seed: SEED,
+  tempo: { bpm, beatsPerBar: 4 },
+  palette: {
+    abyss: '#041018', deep: '#0a1c28', water: '#1a4a5c', foam: '#8ec4d4',
+    glint: '#e8f4f8', koi: '#c45a3a', gold: '#d4a05a', ink: '#061018',
+  },
+  sections: [
+    { id: 'night', t0: 0, t1: 7.5, mood: 'still-water', harmony: 'Em' },
+    { id: 'hatch', t0: 7.5, t1: 15, mood: 'awaken', harmony: 'G' },
+    { id: 'school', t0: 15, t1: 30, mood: 'swim', harmony: 'Am' },
+    { id: 'leviathan', t0: 30, t1: 40, mood: 'gather', harmony: 'C' },
+    { id: 'settle', t0: 40, t1: 45, mood: 'return', harmony: 'Em' },
+    { id: 'title', t0: 45, t1: 50, mood: 'release', harmony: 'Em' },
+  ],
+  shots: [
+    { id: 's0', t0: 0, t1: 3.75, beat: 0, camera: { x: 0, y: 0.04, zoom: 1.55, rot: 0.01 }, subject: 'water-mosaic', action: 'star glints on night tiles', caption: '' },
+    { id: 's1', t0: 3.75, t1: 7.5, beat: 3.75, camera: { x: 0, y: 0.02, zoom: 1.35, rot: 0 }, subject: 'glints', action: 'ripples pull speculars', caption: '' },
+    { id: 's2', t0: 7.5, t1: 12.5, beat: 7.5, camera: { x: 0, y: 0, zoom: 1.22, rot: 0 }, subject: 'hatch', action: 'reflections stretch and hatch', caption: 'The water remembers.' },
+    { id: 's3', t0: 12.5, t1: 17.5, beat: 12.5, camera: { x: -0.04, y: 0, zoom: 1.28, rot: 0 }, subject: 'hatching-fish', action: 'glints become fish bodies', caption: '' },
+    { id: 's4', t0: 17.5, t1: 25, beat: 17.5, camera: { x: 0, y: -0.02, zoom: 1.12, rot: 0 }, subject: 'school', action: 'twenty fish lock and swim', caption: 'Tiles that learned to swim.' },
+    { id: 's5', t0: 25, t1: 30, beat: 25, camera: { x: 0.06, y: 0, zoom: 1.18, rot: 0 }, subject: 'school', action: 'school crosses the frame', caption: '' },
+    { id: 's6', t0: 30, t1: 36.25, beat: 30, camera: { x: 0, y: 0, zoom: 1.35, rot: 0 }, subject: 'koi', action: 'reform as one great fish', caption: 'One shape from many.' },
+    { id: 's7', t0: 36.25, t1: 40, beat: 36.25, camera: { x: 0, y: 0.02, zoom: 1.22, rot: 0 }, subject: 'koi', action: 'hold then release', caption: '' },
+    { id: 's8', t0: 40, t1: 45, beat: 40, camera: { x: 0, y: 0, zoom: 1.08, rot: 0 }, subject: 'mosaic', action: 'tiles settle back to water', caption: '' },
+    { id: 's9', t0: 45, t1: 50, beat: 45, camera: { x: 0, y: 0, zoom: 1.0, rot: 0 }, subject: 'title', action: 'end card', caption: '' },
+  ],
+  events: [
+    { t: 3.75, kind: 'whoosh', id: 'ripple' },
+    { t: 7.5, kind: 'pluck', id: 'first-hatch' },
+    { t: 10, kind: 'whoosh', id: 'hatch-surge' },
+    { t: 12.5, kind: 'bell', id: 'fish-a' },
+    { t: 13.75, kind: 'bell', id: 'fish-b' },
+    { t: 15, kind: 'impact', id: 'school-lock' },
+    { t: 18.75, kind: 'whoosh', id: 'swim-1' },
+    { t: 25, kind: 'whoosh', id: 'cross' },
+    { t: 27.5, kind: 'pluck', id: 'turn' },
+    { t: 30, kind: 'whoosh', id: 'gather' },
+    { t: 32.5, kind: 'impact', id: 'koi-lock' },
+    { t: 36.25, kind: 'bell', id: 'hold' },
+    { t: 40, kind: 'whoosh', id: 'settle' },
+    { t: 45, kind: 'impact', id: 'end' },
+  ],
+  acceptance: { maxDeadAirSec: 1.5, beatToleranceSec: 0.04, thumbnailReadable: true, zeroExternalAssets: true },
+};
+
+// --- tile fields ---
+const rnd = mulberry32(SEED);
+const homeX = new Float32Array(N);
+const homeY = new Float32Array(N);
+const depth = new Float32Array(N);   // water depth tint 0..1
+const phase = new Float32Array(N);
+const order = new Float32Array(N);
+const glint = new Float32Array(N);   // star-reflection strength
+const koiTint = new Float32Array(N); // warm accent chance
+
+for (let i = 0; i < N; i++) {
+  const col = i % COLS, row = (i / COLS) | 0;
+  homeX[i] = (col + 0.5) * TW;
+  homeY[i] = (row + 0.5) * TH;
+  const nx = col / COLS, ny = row / ROWS;
+  // gentle depth bands + horizontal wave troughs (reads as water, not flat starfield)
+  const waveBand = 0.18 * Math.sin(nx * 6.5 + ny * 2.2) + 0.1 * Math.sin(nx * 14 - ny * 3.5);
+  depth[i] = clamp(0.28 + 0.52 * ny + waveBand + (rnd() - 0.5) * 0.06, 0, 1);
+  phase[i] = rnd();
+  order[i] = rnd();
+  // sparse bright glints — star reflections on water
+  const starField = Math.pow(rnd(), 6.5);
+  const rippleBoost = Math.pow(Math.max(0, Math.sin(nx * 17 + ny * 11) * Math.sin(nx * 5 - ny * 8)), 4);
+  glint[i] = clamp(starField * 1.4 + rippleBoost * 0.55, 0, 1);
+  koiTint[i] = rnd() < 0.14 ? 0.55 + rnd() * 0.45 : rnd() * 0.12;
+}
+
+function buildMaskTargets(predicate, fillFrac) {
+  const txs = new Float32Array(N);
+  const tys = new Float32Array(N);
+  const role = new Uint8Array(N); // 1 = in subject
+  const pts = [];
+  const sx = COLS * 2, sy = ROWS * 2;
+  for (let row = 0; row < sy; row++) {
+    for (let col = 0; col < sx; col++) {
+      const x = ((col + 0.5) / sx) * W, y = ((row + 0.5) / sy) * H;
+      if (predicate(x, y)) pts.push([x, y]);
+    }
+  }
+  if (pts.length === 0) {
+    for (let i = 0; i < N; i++) { txs[i] = homeX[i]; tys[i] = homeY[i]; }
+    return { x: txs, y: tys, role, aabb: { minX: 0, maxX: W, minY: 0, maxY: H } };
+  }
+  for (let i = pts.length - 1; i > 0; i--) {
+    const j = (rnd() * (i + 1)) | 0;
+    const t = pts[i]; pts[i] = pts[j]; pts[j] = t;
+  }
+  // Prefer glintiest tiles for subject (hatch from reflections)
+  const idx = Array.from({ length: N }, (_, i) => i);
+  idx.sort((a, b) => glint[b] - glint[a] + (order[a] - order[b]) * 0.05);
+  const take = Math.floor(N * (fillFrac == null ? 0.72 : fillFrac));
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (let p = 0; p < take; p++) {
+    const i = idx[p];
+    const src = pts[p % pts.length];
+    const jx = (p >= pts.length) ? (rnd() - 0.5) * TW * 0.2 : 0;
+    const jy = (p >= pts.length) ? (rnd() - 0.5) * TH * 0.2 : 0;
+    const px = src[0] + jx, py = src[1] + jy;
+    txs[i] = px; tys[i] = py; role[i] = 1;
+    if (px < minX) minX = px; if (px > maxX) maxX = px;
+    if (py < minY) minY = py; if (py > maxY) maxY = py;
+  }
+  // leftovers stay near home (water under school) with slight pull
+  for (let i = 0; i < N; i++) if (!role[i]) {
+    txs[i] = homeX[i] + (rnd() - 0.5) * TW * 0.4;
+    tys[i] = homeY[i] + (rnd() - 0.5) * TH * 0.4;
+  }
+  return { x: txs, y: tys, role, aabb: { minX, maxX, minY, maxY } };
+}
+
+// Side-profile fish — filled body, V-tail, dorsal, eye dark gap via hole
+function fishHit(x, y, cx, cy, sc, facing) {
+  const dx = ((x - cx) / sc) * facing;
+  const dy = (y - cy) / sc;
+  // fuselage ellipse (rear tapered)
+  const bodyW = 0.52, bodyH = 0.20;
+  const taper = dx < 0 ? 1 + dx * 0.55 : 1;
+  const body = (dx * dx) / (bodyW * bodyW) + (dy * dy) / ((bodyH * taper) * (bodyH * taper)) < 1
+    && dx > -0.42 && dx < 0.48;
+  const head = Math.hypot(dx - 0.42, dy * 1.05) < 0.17;
+  // V-tail
+  const tU = dx + 0.42;
+  const tail = tU < 0 && tU > -0.38
+    && Math.abs(dy) < 0.32 * (-tU / 0.38)
+    && Math.abs(dy) > 0.04 * (-tU / 0.38);
+  // dorsal fin
+  const dorsal = dx > -0.12 && dx < 0.28 && dy < -0.08 && dy > -0.48
+    && Math.abs(dx - 0.06) < 0.22 * (1 + (dy + 0.08) / 0.4);
+  // pelvic hint
+  const pelvic = dx > -0.05 && dx < 0.18 && dy > 0.12 && dy < 0.32
+    && Math.abs(dx - 0.05) < 0.12;
+  // eye as small hole (not filled) — punched later by excluding
+  const eyeHole = Math.hypot(dx - 0.48, dy + 0.03) < 0.045;
+  if (eyeHole) return false;
+  return body || head || tail || dorsal || pelvic;
+}
+
+// ~20 fish arranged as a school drifting left→right across mid frame
+const FISH_DEFS = [
+  [0.10, 0.38, 0.095, 1], [0.18, 0.52, 0.088, 1], [0.14, 0.64, 0.082, 1],
+  [0.26, 0.30, 0.100, 1], [0.32, 0.46, 0.092, 1], [0.28, 0.70, 0.086, 1],
+  [0.40, 0.36, 0.098, 1], [0.46, 0.58, 0.090, 1], [0.42, 0.74, 0.080, 1],
+  [0.54, 0.28, 0.094, 1], [0.58, 0.48, 0.102, 1], [0.56, 0.66, 0.088, 1],
+  [0.68, 0.34, 0.096, 1], [0.72, 0.54, 0.090, 1], [0.70, 0.72, 0.084, 1],
+  [0.82, 0.40, 0.092, 1], [0.86, 0.58, 0.086, 1], [0.78, 0.26, 0.080, 1],
+  [0.22, 0.22, 0.078, 1], [0.64, 0.78, 0.076, 1],
+];
+
+const school = buildMaskTargets((x, y) => {
+  for (const [bx, by, scN, facing] of FISH_DEFS) {
+    if (fishHit(x, y, W * bx, H * by, W * scN, facing)) return true;
+  }
+  return false;
+}, 0.68);
+
+// Large koi / whale silhouette — readable at thumbnail
+function leviathanHit(x, y) {
+  const cx = W * 0.52, cy = H * 0.50, sc = W * 0.34;
+  const dx = (x - cx) / sc;
+  const dy = (y - cy) / sc;
+  // long whale-koi body
+  const body = (dx * dx) / (0.72 * 0.72) + (dy * dy) / (0.28 * 0.28) < 1 && dx > -0.55 && dx < 0.62;
+  const head = Math.hypot(dx - 0.58, dy * 0.95) < 0.22;
+  // broad caudal
+  const tU = dx + 0.55;
+  const tail = tU < 0 && tU > -0.42
+    && Math.abs(dy) < 0.42 * (-tU / 0.42)
+    && Math.abs(dy) > 0.05 * (-tU / 0.42);
+  // tall dorsal
+  const dorsal = dx > -0.2 && dx < 0.35 && dy < -0.12 && dy > -0.58
+    && Math.abs(dx - 0.05) < 0.28 * (1 + (dy + 0.12) / 0.46);
+  // pectoral
+  const pec = dx > 0.05 && dx < 0.38 && dy > 0.15 && dy < 0.42
+    && Math.abs(dx - 0.2) < 0.18;
+  // eye hole
+  if (Math.hypot(dx - 0.62, dy + 0.04) < 0.055) return false;
+  // mouth notch
+  if (dx > 0.68 && dx < 0.82 && Math.abs(dy - 0.06) < 0.04) return false;
+  return body || head || tail || dorsal || pec;
+}
+
+const leviathan = buildMaskTargets(leviathanHit, 0.78);
+
+// Warm spots on leviathan (koi markings) — assigned by target position
+const leviMark = new Float32Array(N);
+for (let i = 0; i < N; i++) {
+  if (!leviathan.role[i]) { leviMark[i] = 0; continue; }
+  const nx = leviathan.x[i] / W, ny = leviathan.y[i] / H;
+  const blotch = Math.exp(-Math.pow((nx - 0.48) * 8, 2) - Math.pow((ny - 0.42) * 10, 2))
+    + Math.exp(-Math.pow((nx - 0.62) * 10, 2) - Math.pow((ny - 0.55) * 12, 2))
+    + Math.exp(-Math.pow((nx - 0.38) * 9, 2) - Math.pow((ny - 0.52) * 11, 2));
+  leviMark[i] = clamp(blotch * 1.4 + koiTint[i] * 0.35, 0, 1);
+}
+
+const water = { x: homeX, y: homeY };
+
+function formationWeights(t) {
+  // water → school → leviathan → water; settle complete by ~t=42
+  const wWater = 1 - smoothstep(6.5, 11.5, t) + smoothstep(38.5, 42.5, t);
+  const wSchool = smoothstep(8.5, 14.5, t) * (1 - smoothstep(28.5, 33.0, t));
+  const wLevi = smoothstep(29.5, 34.0, t) * (1 - smoothstep(38.0, 41.5, t));
+  const sum = wWater + wSchool + wLevi + 1e-6;
+  return [wWater / sum, wSchool / sum, wLevi / sum];
+}
+
+function tilePos(i, t) {
+  const [a, b, c] = formationWeights(t);
+  let x = a * water.x[i] + b * school.x[i] + c * leviathan.x[i];
+  let y = a * water.y[i] + b * school.y[i] + c * leviathan.y[i];
+
+  // micro jitter
+  x += (phase[i] - 0.5) * TW * 0.22;
+  y += (order[i] - 0.5) * TH * 0.2;
+
+  // night-water ripple: slow horizontal wave when mosaic dominates
+  const night = 1 - smoothstep(6.0, 10.0, t) + smoothstep(40.0, 44.0, t);
+  if (night > 0.05) {
+    const wave = Math.sin(homeX[i] * 0.008 + t * 1.1 + phase[i] * 2) * 3.5
+      + Math.sin(homeX[i] * 0.018 - t * 0.7) * 1.8;
+    y += wave * night * (0.35 + 0.65 * depth[i]);
+  }
+
+  // hatch stagger: glintiest tiles peel first toward fish
+  const hatch = smoothstep(6.0, 9.5, t) * (1 - smoothstep(13.5, 15.5, t));
+  if (hatch > 0 && school.role[i]) {
+    const delay = (1 - glint[i]) * 2.8 + order[i] * 1.2;
+    const u = smoother(clamp((t - 6.0 - delay) / 3.2, 0, 1));
+    const hx = lerp(water.x[i], school.x[i], u);
+    const hy = lerp(water.y[i], school.y[i], u);
+    const k = hatch * (0.55 + 0.45 * glint[i]);
+    x = lerp(x, hx, k);
+    y = lerp(y, hy, k);
+    x += (1 - u) * hatch * (phase[i] - 0.5) * 28;
+    y += (1 - u) * hatch * Math.sin(phase[i] * TAU) * 10;
+  }
+
+  // transition turbulence
+  const turbAmt =
+    smoothstep(7.0, 10.0, t) * (1 - smoothstep(13.0, 15.5, t))
+    + smoothstep(28.5, 31.5, t) * (1 - smoothstep(33.5, 35.5, t))
+    + smoothstep(38.0, 40.5, t) * (1 - smoothstep(42.0, 44.0, t));
+  if (turbAmt > 0.01) {
+    const ang = phase[i] * TAU + t * (0.9 + phase[i] * 0.5);
+    x += Math.cos(ang) * turbAmt * 16 * (0.4 + order[i]);
+    y += Math.sin(ang * 1.25) * turbAmt * 12 * (0.4 + order[i]);
+  }
+
+  // school swim drift across frame
+  const swim = smoothstep(15.0, 17.0, t) * (1 - smoothstep(28.5, 31.5, t));
+  if (swim > 0) {
+    const fishTravel = (t - 15.0) * 38;
+    x += swim * fishTravel;
+    y += swim * Math.sin(t * 1.35 + phase[i] * 5) * (school.role[i] ? 7 : 2);
+  }
+
+  // gentle undulation while locked as school
+  const lock = smoothstep(14.5, 16.0, t) * (1 - smoothstep(29.0, 32.0, t));
+  if (lock > 0 && school.role[i]) {
+    y += Math.sin(t * 2.1 + school.x[i] * 0.01 + phase[i] * 3) * 5 * lock;
+  }
+
+  // leviathan slight swim
+  const leviSwim = smoothstep(33.5, 35.0, t) * (1 - smoothstep(37.5, 40.0, t));
+  if (leviSwim > 0 && leviathan.role[i]) {
+    x += Math.sin(t * 0.9) * 8 * leviSwim;
+    y += Math.sin(t * 1.4 + phase[i]) * 3 * leviSwim;
+  }
+
+  // end card: clear tiles into abyss before title
+  const clear = smoothstep(44.5, 46.5, t);
+  if (clear > 0) {
+    const cx = W / 2, cy = H / 2;
+    x = lerp(x, cx + (x - cx) * 3.4, clear);
+    y = lerp(y, cy + (y - cy) * 3.4, clear);
+  }
+
+  return [x, y];
+}
+
+function camAt(t) {
+  const shots = STORY.shots;
+  let i = 0;
+  while (i < shots.length - 1 && t >= shots[i + 1].t0) i++;
+  const a = shots[i], b = shots[Math.min(i + 1, shots.length - 1)];
+  const ca = a.camera, cb = (t > a.t1 - 0.8 ? b.camera : a.camera);
+  const k = t > a.t1 - 0.8 ? smoother(clamp((t - (a.t1 - 0.8)) / 0.8, 0, 1)) : 0;
+  return {
+    x: lerp(ca.x, cb.x, k),
+    y: lerp(ca.y, cb.y, k),
+    zoom: lerp(ca.zoom, cb.zoom, k),
+    rot: lerp(ca.rot || 0, cb.rot || 0, k),
+    breathe: 1 + 0.006 * Math.sin(t * 0.65),
+  };
+}
+
+function captionAt(t) {
+  for (const s of STORY.shots) {
+    if (!s.caption) continue;
+    if (t >= s.t0 + 0.35 && t <= s.t1 - 0.4) {
+      const a = smoothstep(s.t0 + 0.35, s.t0 + 1.1, t) * (1 - smoothstep(s.t1 - 1.2, s.t1 - 0.4, t));
+      return { text: s.caption, a };
+    }
+  }
+  return null;
+}
+
+function subjectLowExtent(t) {
+  const [, b, c] = formationWeights(t);
+  if (c > 0.4) return leviathan.aabb.maxY > H * 0.72;
+  if (b > 0.35) return school.aabb.maxY > H * 0.72;
+  return false;
+}
+
+function hexRgb(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const C_WATER = hexRgb(STORY.palette.water);
+const C_DEEP = hexRgb(STORY.palette.deep);
+const C_FOAM = hexRgb(STORY.palette.foam);
+const C_GLINT = hexRgb(STORY.palette.glint);
+const C_KOI = hexRgb(STORY.palette.koi);
+const C_GOLD = hexRgb(STORY.palette.gold);
+
+function drawFrame(t) {
+  t = clamp(t, 0, DUR);
+  const cam = camAt(t);
+  const [wWater, wSchool, wLevi] = formationWeights(t);
+  const clearTiles = smoothstep(44.5, 46.5, t);
+
+  // night sky / deep water backdrop
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#061420');
+  g.addColorStop(0.45, '#041018');
+  g.addColorStop(1, '#02080e');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // faint distant stars in sky band (non-tile, sparse)
+  if (wWater > 0.35) {
+    const sr = mulberry32(SEED ^ 0xabc);
+    ctx.globalAlpha = 0.35 * wWater;
+    for (let k = 0; k < 60; k++) {
+      const sx = sr() * W, sy = sr() * H * 0.28;
+      const a = 0.15 + sr() * 0.55;
+      ctx.fillStyle = `rgba(220,236,245,${a})`;
+      ctx.fillRect(sx, sy, 1.2, 1.2);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate(cam.rot);
+  ctx.scale(cam.zoom * cam.breathe, cam.zoom * cam.breathe);
+  ctx.translate(-W / 2 - cam.x * W, -H / 2 - cam.y * H);
+
+  // key light upper-left (moon)
+  const lx = W * 0.22, ly = H * 0.12;
+  const gap = 0.85;
+  const hatchVis = smoothstep(6.0, 10.0, t) * (1 - smoothstep(14.0, 16.0, t));
+
+  for (let i = 0; i < N; i++) {
+    const [x, y] = tilePos(i, t);
+    const tw = TW - gap, th = TH - gap;
+    const inSchool = school.role[i] && wSchool > 0.2;
+    const inLevi = leviathan.role[i] && wLevi > 0.2;
+    const isSubject = inSchool || inLevi;
+
+    // dim leftover water tiles under school so fish read
+    let alpha = 1 - clearTiles;
+    if (alpha < 0.02) continue;
+    if (wSchool > 0.45 && !school.role[i]) alpha *= lerp(1, 0.18, clamp((wSchool - 0.45) / 0.4, 0, 1));
+    if (wLevi > 0.45 && !leviathan.role[i]) alpha *= lerp(1, 0.12, clamp((wLevi - 0.45) / 0.4, 0, 1));
+
+    const toLx = x - lx, toLy = y - ly;
+    const llen = Math.hypot(toLx, toLy) || 1;
+    const ndot = clamp((-toLx / llen) * 0.4 + (-toLy / llen) * 0.8 + 0.32, 0, 1);
+
+    // base water color
+    const d = depth[i];
+    let r = lerp(C_DEEP[0], C_WATER[0], d);
+    let gg = lerp(C_DEEP[1], C_WATER[1], d);
+    let b = lerp(C_DEEP[2], C_WATER[2], d);
+
+    // glass shimmer
+    const shimmer = 0.94 + 0.06 * Math.sin(t * 1.8 + phase[i] * 30 + ndot * 3);
+    const key = 0.68 + 0.42 * ndot;
+    r *= shimmer * key; gg *= shimmer * key; b *= shimmer * key;
+
+    // specular star glints on water (and hatch seeds)
+    const twinkle = 0.55 + 0.45 * Math.sin(t * (2.2 + phase[i] * 3) + phase[i] * 40);
+    const gl = glint[i] * twinkle * (0.55 + 0.45 * wWater + 0.35 * hatchVis);
+    if (gl > 0.35) {
+      const hot = clamp((gl - 0.35) / 0.65, 0, 1);
+      r = lerp(r, C_GLINT[0], hot * 0.95);
+      gg = lerp(gg, C_GLINT[1], hot * 0.95);
+      b = lerp(b, C_GLINT[2], hot * 0.95);
+    }
+
+    // school fish: cooler foam + occasional warm koi fleck
+    if (inSchool) {
+      const fishMix = clamp(wSchool * 1.5, 0, 1);
+      r = lerp(r, C_FOAM[0], fishMix * 0.75);
+      gg = lerp(gg, C_FOAM[1], fishMix * 0.75);
+      b = lerp(b, C_FOAM[2], fishMix * 0.75);
+      if (koiTint[i] > 0.4) {
+        const warm = (koiTint[i] - 0.4) * fishMix;
+        r = lerp(r, C_KOI[0], warm * 0.7);
+        gg = lerp(gg, C_KOI[1], warm * 0.55);
+        b = lerp(b, C_KOI[2], warm * 0.4);
+      }
+      // brighter rim on fish nose/back
+      r = Math.min(255, r * (1.05 + 0.12 * ndot));
+      gg = Math.min(255, gg * (1.05 + 0.1 * ndot));
+      b = Math.min(255, b * (1.02 + 0.08 * ndot));
+    }
+
+    // leviathan: water glass + koi blotches
+    if (inLevi) {
+      const lm = clamp(wLevi * 1.4, 0, 1);
+      r = lerp(r, C_FOAM[0], lm * 0.55);
+      gg = lerp(gg, C_FOAM[1], lm * 0.55);
+      b = lerp(b, C_FOAM[2], lm * 0.55);
+      const mk = leviMark[i] * lm;
+      if (mk > 0.15) {
+        r = lerp(r, C_KOI[0], mk * 0.85);
+        gg = lerp(gg, lerp(C_KOI[1], C_GOLD[1], 0.35), mk * 0.75);
+        b = lerp(b, C_KOI[2], mk * 0.55);
+      }
+    }
+
+    ctx.globalAlpha = alpha * (isSubject ? 0.96 : 0.78);
+    ctx.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
+    ctx.fillRect(x - tw / 2, y - th / 2, tw, th);
+
+    // glass specular / Fresnel
+    const isBright = gl > 0.45 || isSubject;
+    const specPow = isBright ? 8 : 3.4;
+    const spec = Math.pow(ndot, specPow);
+    const fresnel = Math.pow(1 - ndot, 1.6) * (isSubject ? 0.12 : 0.3);
+    const specA = (0.1 + 0.55 * gl + (isSubject ? 0.25 : 0)) * spec + fresnel;
+    if (specA > 0.02 && alpha > 0.15) {
+      ctx.globalAlpha = alpha * clamp(specA, 0, 0.85);
+      ctx.fillStyle = gl > 0.5 ? 'rgb(245,250,255)' : 'rgb(180,220,235)';
+      ctx.fillRect(x - tw / 2 + 0.5, y - th / 2 + 0.5, tw * (0.28 + 0.25 * gl), th * (0.18 + 0.1 * gl));
+      if (ndot > 0.55) {
+        ctx.globalAlpha = alpha * (0.1 + 0.18 * gl) * ndot;
+        ctx.fillRect(x - tw / 2, y - th / 2, tw * 0.12, th);
+        ctx.fillRect(x - tw / 2, y - th / 2, tw, th * 0.1);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore();
+
+  // vignette
+  const v = ctx.createRadialGradient(W / 2, H * 0.45, H * 0.2, W / 2, H / 2, H * 0.85);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,0.42)');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+
+  // captions
+  const cap = captionAt(t);
+  if (cap) {
+    const capY = subjectLowExtent(t) ? H * 0.12 : H - 96;
+    ctx.save();
+    ctx.font = 'italic 40px Georgia, "Times New Roman", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(220,232,238,${cap.a})`;
+    ctx.shadowColor = `rgba(0,0,0,${0.75 * cap.a})`;
+    ctx.shadowBlur = 14;
+    ctx.fillText(cap.text, W / 2, capY);
+    ctx.restore();
+  }
+
+  // opening title
+  const open = 1 - smoothstep(0.25, 2.4, t);
+  if (open > 0.01) {
+    ctx.fillStyle = `rgba(4,16,24,${0.4 * open})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(220,232,238,${open})`;
+    ctx.font = '600 62px Georgia, serif';
+    ctx.fillText('Tile Hatch', W / 2, H / 2 - 8);
+    ctx.font = 'italic 22px Georgia, serif';
+    ctx.fillStyle = `rgba(142,196,212,${open * 0.9})`;
+    ctx.fillText('glints that learned to swim', W / 2, H / 2 + 38);
+  }
+
+  // end card after tiles clear
+  const end = smoothstep(45.2, 46.4, t);
+  if (end > 0.01) {
+    ctx.fillStyle = `rgba(4,16,24,${0.78 * end})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(220,232,238,${end})`;
+    ctx.font = '600 52px Georgia, serif';
+    ctx.fillText('Tile Hatch', W / 2, H / 2 - 8);
+    ctx.font = 'italic 20px Georgia, serif';
+    ctx.fillStyle = `rgba(196,90,58,${end})`;
+    ctx.fillText('a film written entirely in code', W / 2, H / 2 + 34);
+  }
+
+  // grain
+  const gr = mulberry32((SEED ^ (Math.floor(t * FPS) * 2654435761)) >>> 0);
+  ctx.globalAlpha = 0.03;
+  for (let k = 0; k < 160; k++) {
+    ctx.fillStyle = gr() > 0.5 ? '#fff' : '#000';
+    ctx.fillRect(gr() * W, gr() * H, 1.4, 1.4);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// --- audio ---
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const CHORDS = {
+  Em: [52, 55, 59], G: [55, 59, 62], Am: [57, 60, 64], C: [48, 52, 55, 60],
+};
+
+function buildScore(ac, T0) {
+  const master = ac.createGain();
+  master.gain.setValueAtTime(0, T0);
+  master.gain.linearRampToValueAtTime(0.78, T0 + 1.4);
+  master.gain.setValueAtTime(0.78, T0 + DUR - 2.2);
+  master.gain.linearRampToValueAtTime(0, T0 + DUR);
+  master.connect(ac.destination);
+  const at = (t) => T0 + Math.max(0, t);
+
+  function pad(name, t0, t1, level) {
+    for (const m of CHORDS[name]) {
+      const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = mtof(m);
+      o.detune.value = (m % 3) * 3 - 3;
+      const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1100;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, at(t0));
+      g.gain.linearRampToValueAtTime(level, at(t0 + 1.6));
+      g.gain.setValueAtTime(level, at(t1));
+      g.gain.linearRampToValueAtTime(0, at(t1 + 2));
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(at(t0)); o.stop(at(t1 + 2.2));
+    }
+  }
+  for (const s of STORY.sections) {
+    const lvl = s.id === 'school' || s.id === 'leviathan' ? 0.028 : 0.02;
+    pad(s.harmony, s.t0, s.t1, lvl);
+  }
+
+  // soft water bed — filtered noise under night/settle
+  function waterBed(t0, t1, level) {
+    const len = Math.floor(ac.sampleRate * (t1 - t0 + 2));
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * 0.4;
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 380; f.Q.value = 0.6;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t0));
+    g.gain.linearRampToValueAtTime(level, at(t0 + 1.5));
+    g.gain.setValueAtTime(level, at(t1));
+    g.gain.linearRampToValueAtTime(0, at(t1 + 1.5));
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t0)); src.stop(at(t1 + 1.6));
+  }
+  waterBed(0, 8, 0.04);
+  waterBed(39, 46, 0.035);
+
+  function whoosh(t) {
+    const len = ac.sampleRate * 1.3;
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * 0.4));
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = 'bandpass';
+    f.frequency.setValueAtTime(320, at(t));
+    f.frequency.exponentialRampToValueAtTime(2400, at(t + 0.65));
+    const g = ac.createGain(); g.gain.value = 0.18;
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+  }
+  function impact(t) {
+    const o = ac.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(98, at(t));
+    o.frequency.exponentialRampToValueAtTime(36, at(t + 0.55));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.32, at(t + 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.1));
+    o.connect(g); g.connect(master); o.start(at(t)); o.stop(at(t + 1.2));
+  }
+  function bell(t) {
+    const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = 660;
+    const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = 1320;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.1, at(t + 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.6));
+    const g2 = ac.createGain(); g2.gain.value = 0.22;
+    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+    o.start(at(t)); o2.start(at(t)); o.stop(at(t + 1.8)); o2.stop(at(t + 1.8));
+  }
+  function pluck(t) {
+    const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = 392;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.14, at(t + 0.005));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.9));
+    o.connect(g); g.connect(master); o.start(at(t)); o.stop(at(t + 1));
+  }
+
+  for (const e of STORY.events) {
+    if (e.kind === 'whoosh') whoosh(e.t);
+    else if (e.kind === 'impact') impact(e.t);
+    else if (e.kind === 'bell') bell(e.t);
+    else if (e.kind === 'pluck') pluck(e.t);
+  }
+}
+
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, sr = buf.sampleRate, n = buf.length;
+  const ab = new ArrayBuffer(44 + n * ch * 2), dv = new DataView(ab);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+  dv.setUint16(34, 16, true); ws(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++, o += 2) {
+    const s = Math.max(-1, Math.min(1, chans[c][i]));
+    dv.setInt16(o, s * 32767, true);
+  }
+  const bytes = new Uint8Array(ab);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+drawFrame(0);
+window.FILM = {
+  ready: true,
+  seekPure: true,
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  storyboard: STORY,
+  canvas,
+  out: canvas,
+  seek(t) { drawFrame(t); },
+  reset() { drawFrame(0); },
+  async renderAudio() {
+    const sr = 48000;
+    const oc = new OfflineAudioContext(2, sr * DUR, sr);
+    buildScore(oc, 0);
+    return encodeWav(await oc.startRendering());
+  },
+};
+
+const params = new URLSearchParams(location.search);
+if (params.has('render')) {
+  document.body.classList.add('render');
+} else {
+  const btn = document.getElementById('play');
+  const clock = document.getElementById('clock');
+  let ac = null, T0 = 0, playing = false;
+  function loop() {
+    if (!playing) return;
+    const t = ac.currentTime - T0;
+    if (t >= DUR) { playing = false; btn.textContent = 'Replay'; drawFrame(DUR); return; }
+    drawFrame(t);
+    clock.textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    requestAnimationFrame(loop);
+  }
+  btn.addEventListener('click', async () => {
+    if (ac) await ac.close();
+    ac = new AudioContext();
+    T0 = ac.currentTime + 0.12;
+    buildScore(ac, T0);
+    playing = true; btn.textContent = 'Restart';
+    requestAnimationFrame(loop);
+  });
+}
+})();
+</script>
+</body>
+</html>

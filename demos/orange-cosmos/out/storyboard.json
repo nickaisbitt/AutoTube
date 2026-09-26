@@ -1,0 +1,239 @@
+{
+  "id": "orange-cosmos",
+  "title": "Orange Cosmos",
+  "logline": "A lonely orange square with a face breathes, multiplies on orbits, shatters into prism light, spirals through a particle vortex, collapses into a lensing black hole, then pulls back to Earth from the Moon.",
+  "technique": "orange-square-metamorphosis",
+  "duration": 32,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "seed": 787717,
+  "tempo": {
+    "bpm": 90,
+    "beatsPerBar": 4
+  },
+  "palette": {
+    "void": "#05070c",
+    "deep": "#0b1220",
+    "orange": "#f17822",
+    "ember": "#ff9a3c",
+    "core": "#ffc078",
+    "frost": "#e8f0ff",
+    "earth": "#3a6ea5",
+    "land": "#2f6b45"
+  },
+  "sections": [
+    {
+      "id": "breathe",
+      "t0": 0,
+      "t1": 4,
+      "mood": "alone",
+      "harmony": "Am"
+    },
+    {
+      "id": "orbit",
+      "t0": 4,
+      "t1": 10,
+      "mood": "multiply",
+      "harmony": "C"
+    },
+    {
+      "id": "prism",
+      "t0": 10,
+      "t1": 16,
+      "mood": "split",
+      "harmony": "F"
+    },
+    {
+      "id": "vortex",
+      "t0": 16,
+      "t1": 22,
+      "mood": "spiral",
+      "harmony": "Dm"
+    },
+    {
+      "id": "hole",
+      "t0": 22,
+      "t1": 28,
+      "mood": "collapse",
+      "harmony": "Em"
+    },
+    {
+      "id": "earth",
+      "t0": 28,
+      "t1": 32,
+      "mood": "arrival",
+      "harmony": "G"
+    }
+  ],
+  "shots": [
+    {
+      "id": "s0",
+      "t0": 0,
+      "t1": 4,
+      "beat": 0,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1.15,
+        "rot": 0
+      },
+      "subject": "orange-square",
+      "action": "breathe face",
+      "caption": ""
+    },
+    {
+      "id": "s1",
+      "t0": 4,
+      "t1": 10,
+      "beat": 4,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1.05,
+        "rot": 0
+      },
+      "subject": "orbiting-squares",
+      "action": "orbit multiply",
+      "caption": ""
+    },
+    {
+      "id": "s2",
+      "t0": 10,
+      "t1": 16,
+      "beat": 10,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1.2,
+        "rot": 0.04
+      },
+      "subject": "prism-shards",
+      "action": "light-split orbit",
+      "caption": ""
+    },
+    {
+      "id": "s3",
+      "t0": 16,
+      "t1": 22,
+      "beat": 16,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1.35,
+        "rot": 0
+      },
+      "subject": "particle-vortex",
+      "action": "spiral dissolve",
+      "caption": ""
+    },
+    {
+      "id": "s4",
+      "t0": 22,
+      "t1": 28,
+      "beat": 22,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1.55,
+        "rot": 0
+      },
+      "subject": "black-hole",
+      "action": "accretion lensing",
+      "caption": ""
+    },
+    {
+      "id": "s5",
+      "t0": 28,
+      "t1": 32,
+      "beat": 28,
+      "camera": {
+        "x": 0,
+        "y": 0.08,
+        "zoom": 0.92,
+        "rot": 0
+      },
+      "subject": "earth-moon",
+      "action": "pull back title",
+      "caption": "Orange Cosmos"
+    }
+  ],
+  "events": [
+    {
+      "t": 0,
+      "kind": "pluck",
+      "id": "awaken"
+    },
+    {
+      "t": 2,
+      "kind": "bell",
+      "id": "breath-mid"
+    },
+    {
+      "t": 4,
+      "kind": "whoosh",
+      "id": "to-orbit"
+    },
+    {
+      "t": 6,
+      "kind": "impact",
+      "id": "clone-1"
+    },
+    {
+      "t": 8,
+      "kind": "impact",
+      "id": "clone-2"
+    },
+    {
+      "t": 10,
+      "kind": "whoosh",
+      "id": "to-prism"
+    },
+    {
+      "t": 12,
+      "kind": "bell",
+      "id": "shard-chime"
+    },
+    {
+      "t": 14,
+      "kind": "pluck",
+      "id": "spectrum"
+    },
+    {
+      "t": 16,
+      "kind": "whoosh",
+      "id": "to-vortex"
+    },
+    {
+      "t": 19,
+      "kind": "impact",
+      "id": "vortex-pull"
+    },
+    {
+      "t": 22,
+      "kind": "thunder",
+      "id": "horizon"
+    },
+    {
+      "t": 25,
+      "kind": "whoosh",
+      "id": "lensing"
+    },
+    {
+      "t": 28,
+      "kind": "whoosh",
+      "id": "pullback"
+    },
+    {
+      "t": 30,
+      "kind": "bell",
+      "id": "title"
+    }
+  ],
+  "acceptance": {
+    "maxDeadAirSec": 1.5,
+    "beatToleranceSec": 0.04,
+    "thumbnailReadable": true,
+    "zeroExternalAssets": true
+  }
+}

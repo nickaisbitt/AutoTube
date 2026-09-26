@@ -1,0 +1,411 @@
+{
+  "id": "sand-america",
+  "title": "Sand America",
+  "logline": "Falling sand grains settle into US history icons on one table, then pour into the next.",
+  "technique": "particle-sand",
+  "duration": 80,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "seed": 23165,
+  "tempo": {
+    "bpm": 75,
+    "beatsPerBar": 4
+  },
+  "palette": {
+    "table": "#14110e",
+    "wood": "#2a2218",
+    "sandDeep": "#8a6a3e",
+    "sandMid": "#c4a06a",
+    "sandLight": "#e0c890",
+    "sandPale": "#f0e0b8",
+    "ink": "#3a2e1c",
+    "ember": "#b87040"
+  },
+  "sections": [
+    {
+      "id": "open",
+      "t0": 0,
+      "t1": 6.4,
+      "mood": "gather",
+      "harmony": "Am"
+    },
+    {
+      "id": "liberty",
+      "t0": 6.4,
+      "t1": 19.2,
+      "mood": "found",
+      "harmony": "C"
+    },
+    {
+      "id": "west",
+      "t0": 19.2,
+      "t1": 32,
+      "mood": "travel",
+      "harmony": "F"
+    },
+    {
+      "id": "flight",
+      "t0": 32,
+      "t1": 42.4,
+      "mood": "lift",
+      "harmony": "G"
+    },
+    {
+      "id": "moon",
+      "t0": 42.4,
+      "t1": 55.2,
+      "mood": "reach",
+      "harmony": "Em"
+    },
+    {
+      "id": "skyline",
+      "t0": 55.2,
+      "t1": 68.8,
+      "mood": "settle",
+      "harmony": "Am"
+    },
+    {
+      "id": "end",
+      "t0": 68.8,
+      "t1": 80,
+      "mood": "release",
+      "harmony": "C"
+    }
+  ],
+  "shots": [
+    {
+      "id": "s0",
+      "t0": 0,
+      "t1": 6.4,
+      "beat": 0,
+      "camera": {
+        "x": 0,
+        "y": 40,
+        "zoom": 1.05,
+        "rot": 0
+      },
+      "subject": "sand-table",
+      "action": "fall assemble pile",
+      "caption": ""
+    },
+    {
+      "id": "s1",
+      "t0": 6.4,
+      "t1": 12.8,
+      "beat": 6.4,
+      "camera": {
+        "x": 0,
+        "y": 10,
+        "zoom": 1.18,
+        "rot": 0
+      },
+      "subject": "liberty-bell",
+      "action": "fall assemble liberty",
+      "caption": ""
+    },
+    {
+      "id": "s2",
+      "t0": 12.8,
+      "t1": 19.2,
+      "beat": 12.8,
+      "camera": {
+        "x": 20,
+        "y": 20,
+        "zoom": 1.22,
+        "rot": 0
+      },
+      "subject": "liberty-1776",
+      "action": "settle hold pour",
+      "caption": "1776"
+    },
+    {
+      "id": "s3",
+      "t0": 19.2,
+      "t1": 25.6,
+      "beat": 19.2,
+      "camera": {
+        "x": -30,
+        "y": 50,
+        "zoom": 1.12,
+        "rot": 0
+      },
+      "subject": "wagon-rails",
+      "action": "pour assemble westward",
+      "caption": ""
+    },
+    {
+      "id": "s4",
+      "t0": 25.6,
+      "t1": 32,
+      "beat": 25.6,
+      "camera": {
+        "x": 40,
+        "y": 40,
+        "zoom": 1.2,
+        "rot": 0.01
+      },
+      "subject": "wagon",
+      "action": "pan settle wagon",
+      "caption": "Westward"
+    },
+    {
+      "id": "s5",
+      "t0": 32,
+      "t1": 37.6,
+      "beat": 32,
+      "camera": {
+        "x": 0,
+        "y": -20,
+        "zoom": 1.15,
+        "rot": 0
+      },
+      "subject": "wright-flyer",
+      "action": "pour assemble flyer",
+      "caption": ""
+    },
+    {
+      "id": "s6",
+      "t0": 37.6,
+      "t1": 42.4,
+      "beat": 37.6,
+      "camera": {
+        "x": 10,
+        "y": -40,
+        "zoom": 1.25,
+        "rot": -0.01
+      },
+      "subject": "wright",
+      "action": "orbit settle flight",
+      "caption": "First flight"
+    },
+    {
+      "id": "s7",
+      "t0": 42.4,
+      "t1": 48.8,
+      "beat": 42.4,
+      "camera": {
+        "x": 0,
+        "y": -10,
+        "zoom": 1.22,
+        "rot": 0
+      },
+      "subject": "moon-lander",
+      "action": "pour assemble lander",
+      "caption": ""
+    },
+    {
+      "id": "s8",
+      "t0": 48.8,
+      "t1": 55.2,
+      "beat": 48.8,
+      "camera": {
+        "x": 30,
+        "y": 0,
+        "zoom": 1.28,
+        "rot": 0
+      },
+      "subject": "lander-flag",
+      "action": "settle hold flag",
+      "caption": "One small step"
+    },
+    {
+      "id": "s9",
+      "t0": 55.2,
+      "t1": 64,
+      "beat": 55.2,
+      "camera": {
+        "x": 0,
+        "y": 30,
+        "zoom": 1.08,
+        "rot": 0
+      },
+      "subject": "skyline",
+      "action": "pour assemble skyline",
+      "caption": ""
+    },
+    {
+      "id": "s10",
+      "t0": 64,
+      "t1": 68.8,
+      "beat": 64,
+      "camera": {
+        "x": 0,
+        "y": 10,
+        "zoom": 1.12,
+        "rot": 0
+      },
+      "subject": "fireworks",
+      "action": "settle fireworks dissolve",
+      "caption": ""
+    },
+    {
+      "id": "s11",
+      "t0": 68.8,
+      "t1": 80,
+      "beat": 68.8,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1,
+        "rot": 0
+      },
+      "subject": "end-card",
+      "action": "settle end card",
+      "caption": ""
+    }
+  ],
+  "events": [
+    {
+      "t": 1.6,
+      "kind": "whoosh",
+      "id": "sand-gather"
+    },
+    {
+      "t": 4,
+      "kind": "impact",
+      "id": "pile-lock"
+    },
+    {
+      "t": 6.4,
+      "kind": "whoosh",
+      "id": "to-liberty"
+    },
+    {
+      "t": 9.6,
+      "kind": "impact",
+      "id": "bell-lock"
+    },
+    {
+      "t": 12.8,
+      "kind": "bell",
+      "id": "bell-ring"
+    },
+    {
+      "t": 16,
+      "kind": "pluck",
+      "id": "year-lock"
+    },
+    {
+      "t": 18.4,
+      "kind": "whoosh",
+      "id": "pour-west"
+    },
+    {
+      "t": 19.2,
+      "kind": "whoosh",
+      "id": "to-wagon"
+    },
+    {
+      "t": 22.4,
+      "kind": "impact",
+      "id": "rails-lock"
+    },
+    {
+      "t": 25.6,
+      "kind": "pluck",
+      "id": "wagon-lock"
+    },
+    {
+      "t": 28.8,
+      "kind": "whoosh",
+      "id": "west-dust"
+    },
+    {
+      "t": 31.2,
+      "kind": "whoosh",
+      "id": "pour-flight"
+    },
+    {
+      "t": 32,
+      "kind": "whoosh",
+      "id": "to-wright"
+    },
+    {
+      "t": 35.2,
+      "kind": "impact",
+      "id": "wings-lock"
+    },
+    {
+      "t": 37.6,
+      "kind": "pluck",
+      "id": "flyer-lock"
+    },
+    {
+      "t": 40.8,
+      "kind": "whoosh",
+      "id": "pour-moon"
+    },
+    {
+      "t": 42.4,
+      "kind": "whoosh",
+      "id": "to-lander"
+    },
+    {
+      "t": 44.8,
+      "kind": "impact",
+      "id": "lander-lock"
+    },
+    {
+      "t": 48.8,
+      "kind": "bell",
+      "id": "flag-plant"
+    },
+    {
+      "t": 52,
+      "kind": "pluck",
+      "id": "moon-hold"
+    },
+    {
+      "t": 54.4,
+      "kind": "whoosh",
+      "id": "pour-city"
+    },
+    {
+      "t": 55.2,
+      "kind": "whoosh",
+      "id": "to-skyline"
+    },
+    {
+      "t": 58.4,
+      "kind": "impact",
+      "id": "skyline-lock"
+    },
+    {
+      "t": 64,
+      "kind": "thunder",
+      "id": "firework-a"
+    },
+    {
+      "t": 65.6,
+      "kind": "thunder",
+      "id": "firework-b"
+    },
+    {
+      "t": 67.2,
+      "kind": "whoosh",
+      "id": "fireworks-settle"
+    },
+    {
+      "t": 68.8,
+      "kind": "impact",
+      "id": "end-lock"
+    },
+    {
+      "t": 72,
+      "kind": "bell",
+      "id": "end-bell-a"
+    },
+    {
+      "t": 73.6,
+      "kind": "bell",
+      "id": "end-bell-b"
+    }
+  ],
+  "acceptance": {
+    "maxDeadAirSec": 1.5,
+    "beatToleranceSec": 0.04,
+    "thumbnailReadable": true,
+    "zeroExternalAssets": true
+  }
+}

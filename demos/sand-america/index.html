@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sand America — particle sand history short</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14110e; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas { width: min(100vw, 177.78vh); aspect-ratio: 16/9; display: block; background: #14110e; }
+  #ui {
+    position: fixed; left: 16px; bottom: 14px; display: flex; gap: 10px; align-items: center;
+    font: 12px/1 "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    color: #e8dcc0; letter-spacing: .08em;
+  }
+  #ui button {
+    font: inherit; text-transform: uppercase; letter-spacing: .14em; font-size: 11px;
+    color: #e8dcc0; background: rgba(20,17,14,.7); border: 1px solid rgba(232,220,192,.3);
+    border-radius: 999px; padding: 8px 14px; cursor: pointer;
+  }
+  #ui button:hover { border-color: #c4a06a; color: #c4a06a; }
+  body.render #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="1920" height="1080"></canvas></div>
+<div id="ui"><button id="play" type="button">Play with sound</button><span id="clock">0:00</span></div>
+<script>
+(() => {
+'use strict';
+
+const W = 1920, H = 1080, FPS = 30, DUR = 80, SEED = 0x5a7d;
+const N = 9000;
+const TAU = Math.PI * 2;
+const SERIF = '"Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoother = (t) => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+const smoothstep = (a, b, x) => smoother((x - a) / (b - a));
+
+// --- storyboard ---
+const bpm = 75;
+const STORY = {
+  id: 'sand-america',
+  title: 'Sand America',
+  logline: 'Falling sand grains settle into US history icons on one table, then pour into the next.',
+  technique: 'particle-sand',
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  seed: SEED,
+  tempo: { bpm, beatsPerBar: 4 },
+  palette: {
+    table: '#14110e',
+    wood: '#2a2218',
+    sandDeep: '#8a6a3e',
+    sandMid: '#c4a06a',
+    sandLight: '#e0c890',
+    sandPale: '#f0e0b8',
+    ink: '#3a2e1c',
+    ember: '#b87040',
+  },
+  sections: [
+    { id: 'open', t0: 0, t1: 6.4, mood: 'gather', harmony: 'Am' },
+    { id: 'liberty', t0: 6.4, t1: 19.2, mood: 'found', harmony: 'C' },
+    { id: 'west', t0: 19.2, t1: 32.0, mood: 'travel', harmony: 'F' },
+    { id: 'flight', t0: 32.0, t1: 42.4, mood: 'lift', harmony: 'G' },
+    { id: 'moon', t0: 42.4, t1: 55.2, mood: 'reach', harmony: 'Em' },
+    { id: 'skyline', t0: 55.2, t1: 68.8, mood: 'settle', harmony: 'Am' },
+    { id: 'end', t0: 68.8, t1: 80.0, mood: 'release', harmony: 'C' },
+  ],
+  shots: [
+    { id: 's0', t0: 0, t1: 6.4, beat: 0, camera: { x: 0, y: 40, zoom: 1.05, rot: 0 }, subject: 'sand-table', action: 'fall assemble pile', caption: '' },
+    { id: 's1', t0: 6.4, t1: 12.8, beat: 6.4, camera: { x: 0, y: 10, zoom: 1.18, rot: 0 }, subject: 'liberty-bell', action: 'fall assemble liberty', caption: '' },
+    { id: 's2', t0: 12.8, t1: 19.2, beat: 12.8, camera: { x: 20, y: 20, zoom: 1.22, rot: 0 }, subject: 'liberty-1776', action: 'settle hold pour', caption: '1776' },
+    { id: 's3', t0: 19.2, t1: 25.6, beat: 19.2, camera: { x: -30, y: 50, zoom: 1.12, rot: 0 }, subject: 'wagon-rails', action: 'pour assemble westward', caption: '' },
+    { id: 's4', t0: 25.6, t1: 32.0, beat: 25.6, camera: { x: 40, y: 40, zoom: 1.2, rot: 0.01 }, subject: 'wagon', action: 'pan settle wagon', caption: 'Westward' },
+    { id: 's5', t0: 32.0, t1: 37.6, beat: 32.0, camera: { x: 0, y: -20, zoom: 1.15, rot: 0 }, subject: 'wright-flyer', action: 'pour assemble flyer', caption: '' },
+    { id: 's6', t0: 37.6, t1: 42.4, beat: 37.6, camera: { x: 10, y: -40, zoom: 1.25, rot: -0.01 }, subject: 'wright', action: 'orbit settle flight', caption: 'First flight' },
+    { id: 's7', t0: 42.4, t1: 48.8, beat: 42.4, camera: { x: 0, y: -10, zoom: 1.22, rot: 0 }, subject: 'moon-lander', action: 'pour assemble lander', caption: '' },
+    { id: 's8', t0: 48.8, t1: 55.2, beat: 48.8, camera: { x: 30, y: 0, zoom: 1.28, rot: 0 }, subject: 'lander-flag', action: 'settle hold flag', caption: 'One small step' },
+    { id: 's9', t0: 55.2, t1: 64.0, beat: 55.2, camera: { x: 0, y: 30, zoom: 1.08, rot: 0 }, subject: 'skyline', action: 'pour assemble skyline', caption: '' },
+    { id: 's10', t0: 64.0, t1: 68.8, beat: 64.0, camera: { x: 0, y: 10, zoom: 1.12, rot: 0 }, subject: 'fireworks', action: 'settle fireworks dissolve', caption: '' },
+    { id: 's11', t0: 68.8, t1: 80.0, beat: 68.8, camera: { x: 0, y: 0, zoom: 1.0, rot: 0 }, subject: 'end-card', action: 'settle end card', caption: '' },
+  ],
+  events: [
+    { t: 1.6, kind: 'whoosh', id: 'sand-gather' },
+    { t: 4.0, kind: 'impact', id: 'pile-lock' },
+    { t: 6.4, kind: 'whoosh', id: 'to-liberty' },
+    { t: 9.6, kind: 'impact', id: 'bell-lock' },
+    { t: 12.8, kind: 'bell', id: 'bell-ring' },
+    { t: 16.0, kind: 'pluck', id: 'year-lock' },
+    { t: 18.4, kind: 'whoosh', id: 'pour-west' },
+    { t: 19.2, kind: 'whoosh', id: 'to-wagon' },
+    { t: 22.4, kind: 'impact', id: 'rails-lock' },
+    { t: 25.6, kind: 'pluck', id: 'wagon-lock' },
+    { t: 28.8, kind: 'whoosh', id: 'west-dust' },
+    { t: 31.2, kind: 'whoosh', id: 'pour-flight' },
+    { t: 32.0, kind: 'whoosh', id: 'to-wright' },
+    { t: 35.2, kind: 'impact', id: 'wings-lock' },
+    { t: 37.6, kind: 'pluck', id: 'flyer-lock' },
+    { t: 40.8, kind: 'whoosh', id: 'pour-moon' },
+    { t: 42.4, kind: 'whoosh', id: 'to-lander' },
+    { t: 44.8, kind: 'impact', id: 'lander-lock' },
+    { t: 48.8, kind: 'bell', id: 'flag-plant' },
+    { t: 52.0, kind: 'pluck', id: 'moon-hold' },
+    { t: 54.4, kind: 'whoosh', id: 'pour-city' },
+    { t: 55.2, kind: 'whoosh', id: 'to-skyline' },
+    { t: 58.4, kind: 'impact', id: 'skyline-lock' },
+    { t: 64.0, kind: 'thunder', id: 'firework-a' },
+    { t: 65.6, kind: 'thunder', id: 'firework-b' },
+    { t: 67.2, kind: 'whoosh', id: 'fireworks-settle' },
+    { t: 68.8, kind: 'impact', id: 'end-lock' },
+    { t: 72.0, kind: 'bell', id: 'end-bell-a' },
+    { t: 73.6, kind: 'bell', id: 'end-bell-b' },
+  ],
+  acceptance: { maxDeadAirSec: 1.5, beatToleranceSec: 0.04, thumbnailReadable: true, zeroExternalAssets: true },
+};
+
+// --- particle state ---
+const rnd = mulberry32(SEED);
+const phase = new Float32Array(N);
+const order = new Float32Array(N);
+const size = new Float32Array(N);
+const tint = new Float32Array(N);
+const spawnX = new Float32Array(N);
+const spawnY = new Float32Array(N);
+
+for (let i = 0; i < N; i++) {
+  phase[i] = rnd();
+  order[i] = rnd();
+  size[i] = 1.4 + rnd() * 2.8;
+  tint[i] = rnd();
+  spawnX[i] = (rnd() - 0.5) * 1600;
+  spawnY[i] = -520 - rnd() * 380;
+}
+
+function inPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    const intersect = ((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function sampleMask(predicate, cx, cy, halfW, halfH, seedOff) {
+  const r = mulberry32(SEED ^ seedOff);
+  const txs = new Float32Array(N), tys = new Float32Array(N);
+  const core = new Uint8Array(N);
+  const pts = [];
+  const sx = 300, sy = 180;
+  for (let row = 0; row < sy; row++) {
+    for (let col = 0; col < sx; col++) {
+      const lx = ((col + 0.5) / sx) * 2 - 1;
+      const ly = ((row + 0.5) / sy) * 2 - 1;
+      const wx = cx + lx * halfW;
+      const wy = cy + ly * halfH;
+      if (predicate(lx, ly, wx, wy)) pts.push([wx, wy]);
+    }
+  }
+  for (let i = pts.length - 1; i > 0; i--) {
+    const j = (r() * (i + 1)) | 0;
+    const tmp = pts[i]; pts[i] = pts[j]; pts[j] = tmp;
+  }
+  const take = Math.min(pts.length, Math.floor(N * 0.98));
+  const idx = Array.from({ length: N }, (_, i) => i);
+  for (let i = N - 1; i > 0; i--) {
+    const j = (r() * (i + 1)) | 0;
+    const tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
+  }
+  const used = new Uint8Array(N);
+  for (let p = 0; p < take; p++) {
+    const i = idx[p];
+    txs[i] = pts[p][0];
+    tys[i] = pts[p][1];
+    used[i] = 1;
+    core[i] = 1;
+  }
+  for (let i = 0; i < N; i++) if (!used[i]) {
+    txs[i] = cx + (r() - 0.5) * halfW * 8;
+    tys[i] = cy + halfH * (2.2 + r() * 2.8);
+  }
+  return { x: txs, y: tys, core };
+}
+
+const CX = 0, CY = 20;
+
+// Open pile — broad sand mound (not a boat)
+const pile = sampleMask((lx, ly) => {
+  const base = ly > 0.35 && ly < 0.92 && Math.abs(lx) < 0.95 - (ly - 0.35) * 0.15;
+  const heap = ly > -0.05 && ly < 0.55 && Math.abs(lx) < 0.7 * (1 - (ly + 0.05) / 0.7 * 0.35);
+  const peak = Math.hypot(lx * 1.4, ly + 0.05) < 0.28;
+  const spill = ly > 0.55 && ly < 0.85 && Math.abs(lx) < 0.85 && ((Math.floor(lx * 14) + Math.floor(ly * 10)) % 3 !== 0);
+  return base || heap || peak || spill;
+}, CX, CY + 90, 560, 240, 101);
+
+// Liberty Bell + 1776 — thick yoke, body, crack cutout, block year
+const liberty = sampleMask((lx, ly) => {
+  const yoke = Math.abs(ly + 0.78) < 0.1 && Math.abs(lx) < 0.55;
+  const hanger = Math.abs(lx) < 0.1 && ly > -0.95 && ly < -0.7;
+  const crown = Math.hypot(lx, ly + 0.58) < 0.22;
+  const body = ly > -0.55 && ly < 0.35
+    && Math.abs(lx) < lerp(0.38, 0.72, clamp((ly + 0.55) / 0.9, 0, 1));
+  const lip = ly > 0.28 && ly < 0.48 && Math.abs(lx) < 0.78;
+  const crack = Math.abs(lx - 0.08) < 0.045 && ly > -0.35 && ly < 0.32
+    && Math.abs(ly + 0.05 - lx * 2.5) < 0.55;
+  const digits = [
+    [-0.72, 0.58, 0.08, 0.36],
+    [-0.56, 0.58, 0.18, 0.08], [-0.46, 0.58, 0.08, 0.36],
+    [-0.30, 0.58, 0.18, 0.08], [-0.20, 0.58, 0.08, 0.36],
+    [-0.04, 0.58, 0.08, 0.36], [-0.04, 0.58, 0.18, 0.08], [-0.04, 0.72, 0.16, 0.08],
+    [-0.04, 0.86, 0.18, 0.08], [0.06, 0.72, 0.08, 0.22],
+  ];
+  let onYear = false;
+  for (const [x, y, w, h] of digits) {
+    if (lx >= x && lx <= x + w && ly >= y && ly <= y + h) { onYear = true; break; }
+  }
+  return (yoke || hanger || crown || (body && !crack) || lip || onYear);
+}, CX, CY - 20, 480, 420, 202);
+
+// Covered wagon + distinct rails with ties
+const wagon = sampleMask((lx, ly) => {
+  const railT = Math.abs(ly - 0.78) < 0.035 && Math.abs(lx) < 0.98;
+  const railB = Math.abs(ly - 0.92) < 0.035 && Math.abs(lx) < 0.98;
+  const tieIdx = Math.floor((lx + 1.0) * 7);
+  const tieFrac = ((lx + 1.0) * 7) - tieIdx;
+  const tie = ly > 0.76 && ly < 0.94 && tieFrac > 0.35 && tieFrac < 0.65;
+  const wL = Math.hypot(lx + 0.38, ly - 0.52) < 0.2 && Math.hypot(lx + 0.38, ly - 0.52) > 0.09;
+  const wR = Math.hypot(lx - 0.3, ly - 0.52) < 0.2 && Math.hypot(lx - 0.3, ly - 0.52) > 0.09;
+  const hubL = Math.hypot(lx + 0.38, ly - 0.52) < 0.07;
+  const hubR = Math.hypot(lx - 0.3, ly - 0.52) < 0.07;
+  const box = lx > -0.58 && lx < 0.5 && ly > 0.02 && ly < 0.45;
+  const cover = lx > -0.55 && lx < 0.48 && ly > -0.58 && ly < 0.1
+    && Math.hypot(lx + 0.04, Math.max(0, -ly - 0.05) / 0.65) < 0.92
+    && Math.abs(lx + 0.04) < 0.52;
+  const tongue = lx > 0.45 && lx < 0.95 && Math.abs(ly - 0.28) < 0.055;
+  return railT || railB || tie || wL || wR || hubL || hubR || box || cover || tongue;
+}, CX, CY + 40, 580, 340, 303);
+
+// Wright flyer — thick biplane wings + struts
+const wright = sampleMask((lx, ly) => {
+  const wingTop = Math.abs(ly + 0.32) < 0.1 && Math.abs(lx) < 0.92;
+  const wingBot = Math.abs(ly - 0.15) < 0.1 && Math.abs(lx) < 0.92;
+  const strutL = Math.abs(lx + 0.58) < 0.055 && ly > -0.32 && ly < 0.15;
+  const strutR = Math.abs(lx - 0.58) < 0.055 && ly > -0.32 && ly < 0.15;
+  const strutC = Math.abs(lx) < 0.055 && ly > -0.32 && ly < 0.15;
+  const strutML = Math.abs(lx + 0.28) < 0.04 && ly > -0.32 && ly < 0.15;
+  const strutMR = Math.abs(lx - 0.28) < 0.04 && ly > -0.32 && ly < 0.15;
+  const fuselage = Math.abs(ly - 0.0) < 0.1 && lx > -0.2 && lx < 0.75;
+  const elevator = Math.abs(ly + 0.0) < 0.07 && lx > 0.55 && lx < 0.98;
+  const elevVert = Math.abs(lx - 0.85) < 0.07 && ly > -0.4 && ly < 0.18;
+  const skid = Math.abs(ly - 0.48) < 0.05 && lx > -0.4 && lx < 0.5;
+  const prop = lx < -0.72 && lx > -1.0 && Math.abs(ly + 0.05) < 0.28;
+  const engine = Math.hypot(lx + 0.68, ly + 0.05) < 0.12;
+  return wingTop || wingBot || strutL || strutR || strutC || strutML || strutMR
+    || fuselage || elevator || elevVert || skid || prop || engine;
+}, CX, CY - 20, 600, 300, 404);
+
+// Moon lander + flag — bold stage, legs, cabin, flag
+const lander = sampleMask((lx, ly) => {
+  const stage = Math.abs(lx + 0.05) < 0.38 && ly > 0.0 && ly < 0.42;
+  const cabin = Math.abs(lx + 0.05) < 0.28 && ly > -0.4 && ly < 0.05;
+  const window = Math.hypot(lx + 0.05, ly + 0.15) < 0.09;
+  const leg = (x0, y0, x1, y1, thick) => {
+    const dx = x1 - x0, dy = y1 - y0;
+    const len2 = dx * dx + dy * dy || 1;
+    const tt = clamp(((lx - x0) * dx + (ly - y0) * dy) / len2, 0, 1);
+    const px = x0 + dx * tt, py = y0 + dy * tt;
+    return Math.hypot(lx - px, ly - py) < thick;
+  };
+  const legs = leg(-0.38, 0.32, -0.78, 0.88, 0.07)
+    || leg(0.28, 0.32, 0.68, 0.88, 0.07)
+    || leg(-0.22, 0.35, -0.5, 0.9, 0.06)
+    || leg(0.12, 0.35, 0.42, 0.9, 0.06);
+  const footpads = Math.hypot(lx + 0.78, ly - 0.88) < 0.1
+    || Math.hypot(lx - 0.68, ly - 0.88) < 0.1
+    || Math.hypot(lx + 0.5, ly - 0.9) < 0.09
+    || Math.hypot(lx - 0.42, ly - 0.9) < 0.09;
+  const ant = Math.abs(lx + 0.05) < 0.04 && ly > -0.78 && ly < -0.38;
+  const dish = Math.hypot(lx + 0.05, ly + 0.78) < 0.1;
+  const pole = Math.abs(lx - 0.58) < 0.045 && ly > -0.82 && ly < 0.82;
+  const flag = lx > 0.58 && lx < 1.0 && ly > -0.78 && ly < -0.22;
+  return stage || (cabin && !window) || legs || footpads || ant || dish || pole || flag;
+}, CX, CY, 460, 420, 505);
+
+// Skyline + firework burst points
+const skyline = sampleMask((lx, ly) => {
+  const buildings = [
+    [-0.95, 0.95, 0.18, 0.55],
+    [-0.72, 0.95, 0.14, 0.72],
+    [-0.52, 0.95, 0.2, 0.48],
+    [-0.28, 0.95, 0.16, 0.85],
+    [-0.08, 0.95, 0.22, 0.62],
+    [0.18, 0.95, 0.14, 0.78],
+    [0.36, 0.95, 0.2, 0.52],
+    [0.6, 0.95, 0.16, 0.9],
+    [0.8, 0.95, 0.18, 0.58],
+  ];
+  let on = false;
+  for (const [x, y, w, h] of buildings) {
+    if (lx >= x && lx <= x + w && ly <= y && ly >= y - h) {
+      // window grid cutouts for texture without destroying silhouette
+      const wx = ((lx - x) / w);
+      const wy = ((y - ly) / h);
+      const win = (Math.floor(wx * 4) % 2 === 1) && (Math.floor(wy * 6) % 2 === 1)
+        && wx > 0.12 && wx < 0.88 && wy > 0.1 && wy < 0.9;
+      if (!win) on = true;
+      break;
+    }
+  }
+  // antenna on tallest
+  if (Math.abs(lx + 0.2) < 0.025 && ly > -0.05 && ly < 0.12) on = true;
+  if (Math.abs(lx - 0.68) < 0.025 && ly > -0.1 && ly < 0.08) on = true;
+  // ground strip
+  if (ly > 0.88 && ly < 0.98 && Math.abs(lx) < 0.98) on = true;
+  return on;
+}, CX, CY + 40, 620, 360, 606);
+
+const fireworks = sampleMask((lx, ly) => {
+  const bursts = [
+    [-0.55, -0.55, 0.28],
+    [0.1, -0.72, 0.32],
+    [0.55, -0.45, 0.26],
+    [-0.15, -0.35, 0.2],
+  ];
+  for (const [bx, by, br] of bursts) {
+    const dx = lx - bx, dy = ly - by;
+    const r = Math.hypot(dx, dy);
+    if (r < br && r > br * 0.35) {
+      const ang = Math.atan2(dy, dx);
+      const spoke = Math.abs(((ang / TAU) * 10 + 10) % 1 - 0.5) < 0.12;
+      if (spoke || r < br * 0.45) return true;
+    }
+    if (r < 0.06) return true;
+  }
+  // also keep skyline base so pour settles into city
+  const buildings = [
+    [-0.95, 0.95, 0.18, 0.55], [-0.72, 0.95, 0.14, 0.72], [-0.52, 0.95, 0.2, 0.48],
+    [-0.28, 0.95, 0.16, 0.85], [-0.08, 0.95, 0.22, 0.62], [0.18, 0.95, 0.14, 0.78],
+    [0.36, 0.95, 0.2, 0.52], [0.6, 0.95, 0.16, 0.9], [0.8, 0.95, 0.18, 0.58],
+  ];
+  for (const [x, y, w, h] of buildings) {
+    if (lx >= x && lx <= x + w && ly <= y && ly >= y - h) return true;
+  }
+  return ly > 0.88 && ly < 0.98 && Math.abs(lx) < 0.98;
+}, CX, CY + 40, 620, 360, 707);
+
+// End-card underpaint — soft underline mound (text drawn on top)
+const endForm = sampleMask((lx, ly) => {
+  const bar = ly > 0.28 && ly < 0.42 && Math.abs(lx) < 0.72;
+  const soft = ly > 0.15 && ly < 0.55 && Math.abs(lx) < 0.55
+    && ((Math.floor(lx * 18) + Math.floor(ly * 12)) % 4 === 0);
+  return bar || soft;
+}, CX, CY, 700, 280, 808);
+
+/** Scene windows: form rises, holds, then pours into next. */
+const SCENES = [
+  { id: 'pile', form: pile, t0: 0.0, rise: 0.2, lock: 2.0, pour: 5.2, t1: 6.4 },
+  { id: 'liberty', form: liberty, t0: 6.4, rise: 6.4, lock: 8.8, pour: 17.6, t1: 19.2 },
+  { id: 'wagon', form: wagon, t0: 19.2, rise: 19.2, lock: 21.6, pour: 30.4, t1: 32.0 },
+  { id: 'wright', form: wright, t0: 32.0, rise: 32.0, lock: 34.4, pour: 40.8, t1: 42.4 },
+  { id: 'lander', form: lander, t0: 42.4, rise: 42.4, lock: 44.0, pour: 53.6, t1: 55.2 },
+  { id: 'skyline', form: skyline, t0: 55.2, rise: 55.2, lock: 57.6, pour: 63.2, t1: 64.0 },
+  { id: 'fireworks', form: fireworks, t0: 64.0, rise: 64.0, lock: 65.0, pour: 67.6, t1: 68.8 },
+  { id: 'end', form: endForm, t0: 68.8, rise: 68.8, lock: 71.0, pour: 78.5, t1: 80.0 },
+];
+
+function sceneAt(t) {
+  let s = SCENES[0];
+  for (const sc of SCENES) if (t >= sc.t0) s = sc;
+  return s;
+}
+
+function nextScene(sc) {
+  const i = SCENES.indexOf(sc);
+  return SCENES[Math.min(i + 1, SCENES.length - 1)];
+}
+
+function prevScene(sc) {
+  const i = SCENES.indexOf(sc);
+  return SCENES[Math.max(0, i - 1)];
+}
+
+function eventStrength(t, kind, window = 0.9) {
+  let s = 0;
+  for (const e of STORY.events) {
+    if (e.kind !== kind) continue;
+    const d = Math.abs(t - e.t);
+    if (d < window) s = Math.max(s, 1 - d / window);
+  }
+  return s;
+}
+
+/**
+ * Frame-pure sand grain position.
+ * Continuity: each scene starts from the previous silhouette, falls/pours into the new mask,
+ * settles, then cascades into the next — no blank mid-transition frames.
+ */
+function grainWorld(i, t) {
+  const sc = sceneAt(t);
+  const prev = prevScene(sc);
+  const nxt = nextScene(sc);
+  const form = sc.form;
+  const tx = form.x[i], ty = form.y[i];
+  const isCore = form.core[i];
+
+  // Fast fall-in stagger (locked within ~1.5s of scene start)
+  const fallDelay = order[i] * 0.55;
+  const fallStart = sc.t0 + fallDelay * 0.3;
+  const fallDur = 0.75 + order[i] * 0.5;
+  const fallU = smoother(clamp((t - fallStart) / fallDur, 0, 1));
+
+  // Pour-out stagger
+  const pourDelay = (1 - order[i]) * 0.65;
+  const pourStart = sc.pour + pourDelay * 0.25;
+  const pourDur = 1.0 + phase[i] * 0.55;
+  const pourU = smoother(clamp((t - pourStart) / pourDur, 0, 1));
+
+  // Start from previous form (pour continuity) or sky for the opening mound
+  let sx0, sy0;
+  if (sc.id === 'pile' || prev === sc) {
+    sx0 = spawnX[i] * 0.45 + tx * 0.2;
+    sy0 = spawnY[i];
+  } else {
+    sx0 = prev.form.x[i];
+    sy0 = prev.form.y[i];
+  }
+
+  const nx = nxt.form.x[i], ny = nxt.form.y[i];
+
+  let x, y;
+  if (pourU > 0.001 && t >= sc.pour) {
+    // Cascade through a low pour, then into the next silhouette
+    const midX = lerp(tx, nx, 0.45) + Math.sin(phase[i] * TAU) * 55;
+    const midY = Math.max(ty, ny) + 140 + order[i] * 40;
+    if (pourU < 0.45) {
+      const u = pourU / 0.45;
+      x = lerp(tx, midX, u);
+      y = lerp(ty, midY, u);
+    } else {
+      const u = (pourU - 0.45) / 0.55;
+      x = lerp(midX, nx, u);
+      y = lerp(midY, ny, u);
+    }
+  } else {
+    x = lerp(sx0, tx, fallU);
+    y = lerp(sy0, ty, fallU);
+    if (sc.id === 'pile') {
+      const arc = Math.sin(fallU * Math.PI) * (1 - fallU) * 55;
+      y += arc * 0.35;
+    } else {
+      // Pour-over arc: lift then settle into new icon
+      const lift = Math.sin(fallU * Math.PI) * 100;
+      y -= lift * (1 - fallU * 0.25);
+    }
+  }
+
+  // Settle micro-noise while locked
+  const locked = fallU > 0.9 && pourU < 0.05 && isCore;
+  if (locked) {
+    const whoosh = eventStrength(t, 'whoosh', 0.7);
+    x += Math.sin(t * 3.2 + phase[i] * 20) * (0.55 + whoosh * 7);
+    y += Math.cos(t * 2.6 + phase[i] * 18) * (0.35 + whoosh * 4);
+  } else if (!isCore) {
+    x += Math.sin(t * 0.5 + phase[i] * 8) * 5;
+    y += Math.cos(t * 0.4 + phase[i] * 6) * 3.5;
+  }
+
+  // Opening rain from above
+  if (t < 3.2) {
+    const rain = 1 - smoothstep(0.3, 3.2, t);
+    y -= rain * order[i] * 180 * (1 - fallU);
+  }
+
+  return [x, y, isCore, fallU, pourU];
+}
+
+function camAt(t) {
+  const shots = STORY.shots;
+  let i = 0;
+  while (i < shots.length - 1 && t >= shots[i + 1].t0) i++;
+  const a = shots[i];
+  const b = shots[Math.min(i + 1, shots.length - 1)];
+  const span = Math.max(0.001, (b.t0 === a.t0 ? a.t1 : b.t0) - a.t0);
+  const u = smoother(clamp((t - a.t0) / span, 0, 1));
+  const ca = a.camera, cb = b.camera;
+  const punch = eventStrength(t, 'impact', 0.35) * 0.035;
+  return {
+    x: lerp(ca.x, cb.x, u),
+    y: lerp(ca.y, cb.y, u),
+    zoom: lerp(ca.zoom, cb.zoom, u) * (1 + 0.008 * Math.sin(t * 0.4) - punch),
+    rot: lerp(ca.rot || 0, cb.rot || 0, u),
+  };
+}
+
+function worldToScreen(wx, wy, cam) {
+  const z = cam.zoom;
+  const dx = wx - cam.x, dy = wy - cam.y;
+  const ca = Math.cos(cam.rot), sa = Math.sin(cam.rot);
+  const rx = ca * dx - sa * dy;
+  const ry = sa * dx + ca * dy;
+  return [W / 2 + rx * z, H / 2 + ry * z];
+}
+
+function captionAt(t) {
+  for (const s of STORY.shots) {
+    if (!s.caption) continue;
+    if (t >= s.t0 + 0.5 && t <= s.t1 - 0.6) {
+      const a = smoothstep(s.t0 + 0.5, s.t0 + 1.3, t) * (1 - smoothstep(s.t1 - 1.4, s.t1 - 0.6, t));
+      return { text: s.caption, a };
+    }
+  }
+  return null;
+}
+
+function hexRgb(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const C_DEEP = hexRgb(STORY.palette.sandDeep);
+const C_MID = hexRgb(STORY.palette.sandMid);
+const C_LIGHT = hexRgb(STORY.palette.sandLight);
+const C_PALE = hexRgb(STORY.palette.sandPale);
+const C_EMBER = hexRgb(STORY.palette.ember);
+
+function drawTable(t, cam) {
+  // warm wood table atmosphere — not flat
+  const g = ctx.createRadialGradient(W * 0.5, H * 0.42, 80, W * 0.5, H * 0.55, H * 0.85);
+  g.addColorStop(0, '#3a2e22');
+  g.addColorStop(0.45, '#241c14');
+  g.addColorStop(1, '#0e0b09');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // table surface ellipse in world → screen
+  const [cx, cy] = worldToScreen(0, 180, cam);
+  const rx = 820 * cam.zoom, ry = 260 * cam.zoom;
+  const tg = ctx.createRadialGradient(cx, cy - 40, 20, cx, cy, rx);
+  tg.addColorStop(0, '#4a3a28');
+  tg.addColorStop(0.55, '#2e2418');
+  tg.addColorStop(1, '#1a140e');
+  ctx.fillStyle = tg;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, TAU);
+  ctx.fill();
+
+  // wood grain lines
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, TAU);
+  ctx.clip();
+  const gr = mulberry32(SEED ^ 0x70ad);
+  ctx.strokeStyle = 'rgba(90,70,45,0.18)';
+  ctx.lineWidth = 1.2;
+  for (let k = 0; k < 28; k++) {
+    const yy = cy - ry + (k / 28) * ry * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - rx, yy);
+    for (let x = cx - rx; x <= cx + rx; x += 40) {
+      ctx.lineTo(x, yy + Math.sin(x * 0.01 + k) * 3 + (gr() - 0.5) * 2);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // rim highlight
+  ctx.strokeStyle = 'rgba(200,170,120,0.12)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, TAU);
+  ctx.stroke();
+
+  // soft overhead light
+  const lamp = ctx.createRadialGradient(W * 0.5, H * 0.15, 0, W * 0.5, H * 0.35, H * 0.55);
+  lamp.addColorStop(0, 'rgba(240,220,170,0.07)');
+  lamp.addColorStop(1, 'rgba(240,220,170,0)');
+  ctx.fillStyle = lamp;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawGrains(t, cam) {
+  const punch = eventStrength(t, 'impact', 0.45);
+  const whoosh = eventStrength(t, 'whoosh', 0.8);
+  const fw = eventStrength(t, 'thunder', 0.7);
+  const sc = sceneAt(t);
+  const emberBloom = (sc.id === 'fireworks' || sc.id === 'skyline') ? fw : 0;
+
+  for (let i = 0; i < N; i++) {
+    const [wx, wy, isCore, fallU, pourU] = grainWorld(i, t);
+    const [sx, sy] = worldToScreen(wx, wy, cam);
+    if (sx < -12 || sx > W + 12 || sy < -12 || sy > H + 12) continue;
+
+    // hide non-core scatter once form is locked (thumbnail clarity)
+    if (!isCore && fallU > 0.7 && pourU < 0.08) continue;
+
+    const k = tint[i];
+    let r, g, b;
+    if (k < 0.25) {
+      r = C_DEEP[0]; g = C_DEEP[1]; b = C_DEEP[2];
+    } else if (k < 0.55) {
+      r = C_MID[0]; g = C_MID[1]; b = C_MID[2];
+    } else if (k < 0.82) {
+      r = C_LIGHT[0]; g = C_LIGHT[1]; b = C_LIGHT[2];
+    } else {
+      r = C_PALE[0]; g = C_PALE[1]; b = C_PALE[2];
+    }
+    if (emberBloom > 0.05 && isCore && (phase[i] > 0.7 || sc.id === 'fireworks')) {
+      r = lerp(r, C_EMBER[0], emberBloom * 0.55);
+      g = lerp(g, C_EMBER[1], emberBloom * 0.4);
+      b = lerp(b, C_EMBER[2], emberBloom * 0.25);
+    }
+
+    const glow = (isCore ? 1.15 : 0.75) + punch * 0.25 + whoosh * 0.12;
+    const falling = fallU < 0.95 && pourU < 0.05;
+    const s = size[i] * (isCore ? 1.25 : 0.7) * (0.95 + cam.zoom * 0.12)
+      * (1 + punch * 0.15) * (falling ? 0.9 : 1);
+    // slight stretch while falling
+    const syStretch = falling ? 1 + (1 - fallU) * 0.55 : 1 + pourU * 0.4;
+
+    ctx.fillStyle = `rgb(${(r * glow) | 0},${(g * glow) | 0},${(b * glow) | 0})`;
+    ctx.fillRect(sx - s / 2, sy - (s * syStretch) / 2, s, s * syStretch);
+  }
+}
+
+function drawEndCard(t) {
+  const end = smoothstep(69.5, 72.0, t);
+  if (end < 0.01) return;
+  ctx.fillStyle = `rgba(14,11,9,${0.35 * end})`;
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = `rgba(240,224,184,${end})`;
+  ctx.font = `600 64px ${SERIF}`;
+  ctx.fillText('written in sand & code', W / 2, H / 2 - 8);
+  ctx.font = `italic 22px ${SERIF}`;
+  ctx.fillStyle = `rgba(196,160,106,${end * 0.9})`;
+  ctx.fillText('Sand America', W / 2, H / 2 + 48);
+}
+
+function drawFrame(t) {
+  t = clamp(t, 0, DUR);
+  const cam = camAt(t);
+  drawTable(t, cam);
+  drawGrains(t, cam);
+
+  // vignette
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.95);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(0.7, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,0.38)');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+
+  const cap = captionAt(t);
+  if (cap) {
+    ctx.save();
+    ctx.font = `italic 36px ${SERIF}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(240,224,184,${cap.a})`;
+    ctx.shadowColor = `rgba(0,0,0,${0.7 * cap.a})`;
+    ctx.shadowBlur = 12;
+    ctx.fillText(cap.text, W / 2, H * 0.1);
+    ctx.restore();
+  }
+
+  drawEndCard(t);
+
+  // fine sand grain noise overlay
+  const gr = mulberry32((SEED ^ (Math.floor(t * FPS) * 2654435761)) >>> 0);
+  ctx.globalAlpha = 0.035;
+  for (let k = 0; k < 140; k++) {
+    ctx.fillStyle = gr() > 0.5 ? '#e8d4a0' : '#1a1208';
+    ctx.fillRect(gr() * W, gr() * H, 1.5, 1.5);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// --- audio: sand whoosh / impact + pad score ---
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const CHORDS = {
+  Am: [45, 48, 52, 55],
+  C: [48, 52, 55, 59],
+  F: [41, 45, 48, 53],
+  G: [43, 47, 50, 55],
+  Em: [40, 43, 47, 52],
+};
+
+function buildScore(ac, T0) {
+  const master = ac.createGain();
+  master.gain.setValueAtTime(0, T0);
+  master.gain.linearRampToValueAtTime(0.88, T0 + 1.2);
+  master.gain.setValueAtTime(0.88, T0 + DUR - 2.8);
+  master.gain.linearRampToValueAtTime(0, T0 + DUR);
+  master.connect(ac.destination);
+  const at = (t) => T0 + Math.max(0, t);
+  const r = mulberry32(SEED ^ 0xaad10);
+
+  function noiseBuf(sec) {
+    const len = Math.max(1, (ac.sampleRate * sec) | 0);
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+
+  function pad(name, t0, t1, level) {
+    for (const m of CHORDS[name] || CHORDS.Am) {
+      const o = ac.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = mtof(m);
+      o.detune.value = (m % 5) * 2 - 4;
+      const f = ac.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 720;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, at(t0));
+      g.gain.linearRampToValueAtTime(level, at(t0 + 1.8));
+      g.gain.setValueAtTime(level, at(t1));
+      g.gain.linearRampToValueAtTime(0, at(t1 + 2.0));
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(at(t0)); o.stop(at(t1 + 2.2));
+    }
+  }
+  for (const s of STORY.sections) {
+    const lvl = s.id === 'moon' ? 0.026 : s.id === 'end' ? 0.032 : 0.02;
+    pad(s.harmony, s.t0, s.t1, lvl);
+  }
+
+  // continuous sand hiss bed
+  function sandHiss(t0, t1, level) {
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf(t1 - t0 + 0.5);
+    const f = ac.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 1800;
+    f.Q.value = 0.7;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t0));
+    g.gain.linearRampToValueAtTime(level, at(t0 + 0.8));
+    g.gain.setValueAtTime(level, at(t1 - 0.8));
+    g.gain.linearRampToValueAtTime(0, at(t1));
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t0));
+  }
+  sandHiss(0, DUR, 0.028);
+
+  function whoosh(t) {
+    // sand pour / cascade
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf(1.6);
+    const f = ac.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 1.4;
+    f.frequency.setValueAtTime(400, at(t));
+    f.frequency.exponentialRampToValueAtTime(2800, at(t + 0.55));
+    f.frequency.exponentialRampToValueAtTime(600, at(t + 1.4));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.28, at(t + 0.4));
+    g.gain.linearRampToValueAtTime(0, at(t + 1.45));
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+  }
+  function impact(t) {
+    // sand pile thud
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(90, at(t));
+    o.frequency.exponentialRampToValueAtTime(32, at(t + 0.55));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.42, at(t + 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.1));
+    o.connect(g); g.connect(master);
+    o.start(at(t)); o.stop(at(t + 1.2));
+    // grit layer
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf(0.35);
+    const f = ac.createBiquadFilter();
+    f.type = 'highpass'; f.frequency.value = 1200;
+    const ng = ac.createGain();
+    ng.gain.setValueAtTime(0.18, at(t));
+    ng.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.3));
+    src.connect(f); f.connect(ng); ng.connect(master);
+    src.start(at(t));
+  }
+  function bell(t) {
+    const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = 523;
+    const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = 523 * 2.5;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.1, at(t + 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 2.8));
+    const mg = ac.createGain(); mg.gain.value = 0.2;
+    o2.connect(mg); mg.connect(o.frequency);
+    o.connect(g); g.connect(master);
+    o.start(at(t)); o2.start(at(t));
+    o.stop(at(t + 2.9)); o2.stop(at(t + 2.9));
+  }
+  function thunder(t) {
+    // soft firework crackle (not literal thunder)
+    const src = ac.createBufferSource();
+    src.buffer = noiseBuf(1.8);
+    const f = ac.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.setValueAtTime(2200, at(t));
+    f.frequency.exponentialRampToValueAtTime(400, at(t + 1.2));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.32, at(t + 0.02));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.5));
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+  }
+  function pluck(t) {
+    const o = ac.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(196 + r() * 60, at(t));
+    o.frequency.linearRampToValueAtTime(140 + r() * 30, at(t + 1.8));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.07, at(t + 0.08));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 2.2));
+    const f = ac.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 1400;
+    o.connect(f); f.connect(g); g.connect(master);
+    o.start(at(t)); o.stop(at(t + 2.4));
+  }
+
+  for (const e of STORY.events) {
+    if (e.kind === 'whoosh') whoosh(e.t);
+    else if (e.kind === 'impact') impact(e.t);
+    else if (e.kind === 'bell') bell(e.t);
+    else if (e.kind === 'thunder') thunder(e.t);
+    else if (e.kind === 'pluck') pluck(e.t);
+  }
+}
+
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, sr = buf.sampleRate, n = buf.length;
+  const ab = new ArrayBuffer(44 + n * ch * 2), dv = new DataView(ab);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+  dv.setUint16(34, 16, true); ws(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
+  let peak = 0;
+  for (const d of chans) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
+  const gain = peak > 0.95 ? 0.95 / peak : 1;
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++, o += 2) {
+    const s = Math.max(-1, Math.min(1, chans[c][i] * gain));
+    dv.setInt16(o, s * 32767, true);
+  }
+  const bytes = new Uint8Array(ab);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+// --- API ---
+drawFrame(0);
+window.FILM = {
+  ready: true,
+  seekPure: true,
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  storyboard: STORY,
+  canvas,
+  out: canvas,
+  seek(t) { drawFrame(t); },
+  reset() { drawFrame(0); },
+  async renderAudio() {
+    const sr = 48000;
+    const oc = new OfflineAudioContext(2, Math.ceil(sr * DUR), sr);
+    buildScore(oc, 0);
+    return encodeWav(await oc.startRendering());
+  },
+};
+
+const params = new URLSearchParams(location.search);
+if (params.has('render')) {
+  document.body.classList.add('render');
+} else {
+  const btn = document.getElementById('play');
+  const clock = document.getElementById('clock');
+  let ac = null, T0 = 0, playing = false;
+  function loop() {
+    if (!playing) return;
+    const t = ac.currentTime - T0;
+    if (t >= DUR) { playing = false; btn.textContent = 'Replay'; drawFrame(DUR); return; }
+    drawFrame(t);
+    clock.textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    requestAnimationFrame(loop);
+  }
+  btn.addEventListener('click', async () => {
+    if (ac) await ac.close();
+    ac = new AudioContext();
+    T0 = ac.currentTime + 0.12;
+    buildScore(ac, T0);
+    playing = true; btn.textContent = 'Restart';
+    requestAnimationFrame(loop);
+  });
+}
+})();
+</script>
+</body>
+</html>

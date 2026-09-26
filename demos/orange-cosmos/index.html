@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Orange Cosmos — a code film</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05070c; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas { width: min(100vw, 177.78vh); aspect-ratio: 16/9; display: block; background: #05070c; }
+  #ui {
+    position: fixed; left: 16px; bottom: 14px; display: flex; gap: 10px; align-items: center;
+    font: 12px/1 ui-sans-serif, system-ui, sans-serif; color: #f4ece0; letter-spacing: .08em;
+  }
+  #ui button {
+    font: inherit; text-transform: uppercase; letter-spacing: .14em; font-size: 11px;
+    color: #f4ece0; background: rgba(8,12,18,.65); border: 1px solid rgba(244,236,224,.28);
+    border-radius: 999px; padding: 8px 14px; cursor: pointer;
+  }
+  body.render #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="1920" height="1080"></canvas></div>
+<div id="ui"><button id="play" type="button">Play</button><span id="clock">0:00</span></div>
+<script>
+(() => {
+'use strict';
+
+const W = 1920, H = 1080, FPS = 30, DUR = 32, SEED = 0x0c0505;
+const CX = W / 2, CY = H / 2;
+const TAU = Math.PI * 2;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoother = (t) => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+const smoothstep = (a, b, x) => smoother((x - a) / (b - a));
+const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+const bpm = 90;
+const beatSec = 60 / bpm;
+const beat = (n) => n * beatSec;
+
+const STORY = {
+  id: 'orange-cosmos',
+  title: 'Orange Cosmos',
+  logline: 'A lonely orange square with a face breathes, multiplies on orbits, shatters into prism light, spirals through a particle vortex, collapses into a lensing black hole, then pulls back to Earth from the Moon.',
+  technique: 'orange-square-metamorphosis',
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  seed: SEED,
+  tempo: { bpm, beatsPerBar: 4 },
+  palette: {
+    void: '#05070c',
+    deep: '#0b1220',
+    orange: '#f17822',
+    ember: '#ff9a3c',
+    core: '#ffc078',
+    frost: '#e8f0ff',
+    earth: '#3a6ea5',
+    land: '#2f6b45',
+  },
+  sections: [
+    { id: 'breathe', t0: 0, t1: 4, mood: 'alone', harmony: 'Am' },
+    { id: 'orbit', t0: 4, t1: 10, mood: 'multiply', harmony: 'C' },
+    { id: 'prism', t0: 10, t1: 16, mood: 'split', harmony: 'F' },
+    { id: 'vortex', t0: 16, t1: 22, mood: 'spiral', harmony: 'Dm' },
+    { id: 'hole', t0: 22, t1: 28, mood: 'collapse', harmony: 'Em' },
+    { id: 'earth', t0: 28, t1: 32, mood: 'arrival', harmony: 'G' },
+  ],
+  shots: [
+    { id: 's0', t0: 0, t1: 4, beat: 0, camera: { x: 0, y: 0, zoom: 1.15, rot: 0 }, subject: 'orange-square', action: 'breathe face', caption: '' },
+    { id: 's1', t0: 4, t1: 10, beat: 4, camera: { x: 0, y: 0, zoom: 1.05, rot: 0 }, subject: 'orbiting-squares', action: 'orbit multiply', caption: '' },
+    { id: 's2', t0: 10, t1: 16, beat: 10, camera: { x: 0, y: 0, zoom: 1.2, rot: 0.04 }, subject: 'prism-shards', action: 'light-split orbit', caption: '' },
+    { id: 's3', t0: 16, t1: 22, beat: 16, camera: { x: 0, y: 0, zoom: 1.35, rot: 0 }, subject: 'particle-vortex', action: 'spiral dissolve', caption: '' },
+    { id: 's4', t0: 22, t1: 28, beat: 22, camera: { x: 0, y: 0, zoom: 1.55, rot: 0 }, subject: 'black-hole', action: 'accretion lensing', caption: '' },
+    { id: 's5', t0: 28, t1: 32, beat: 28, camera: { x: 0, y: 0.08, zoom: 0.92, rot: 0 }, subject: 'earth-moon', action: 'pull back title', caption: 'Orange Cosmos' },
+  ],
+  events: [
+    { t: 0, kind: 'pluck', id: 'awaken' },
+    { t: 2, kind: 'bell', id: 'breath-mid' },
+    { t: 4, kind: 'whoosh', id: 'to-orbit' },
+    { t: 6, kind: 'impact', id: 'clone-1' },
+    { t: 8, kind: 'impact', id: 'clone-2' },
+    { t: 10, kind: 'whoosh', id: 'to-prism' },
+    { t: 12, kind: 'bell', id: 'shard-chime' },
+    { t: 14, kind: 'pluck', id: 'spectrum' },
+    { t: 16, kind: 'whoosh', id: 'to-vortex' },
+    { t: 19, kind: 'impact', id: 'vortex-pull' },
+    { t: 22, kind: 'thunder', id: 'horizon' },
+    { t: 25, kind: 'whoosh', id: 'lensing' },
+    { t: 28, kind: 'whoosh', id: 'pullback' },
+    { t: 30, kind: 'bell', id: 'title' },
+  ],
+  acceptance: { maxDeadAirSec: 1.5, beatToleranceSec: 0.04, thumbnailReadable: true, zeroExternalAssets: true },
+};
+
+// --- precompute particles / stars / shards (deterministic) ---
+const rnd = mulberry32(SEED);
+
+const STARS = Array.from({ length: 220 }, () => ({
+  x: rnd() * W,
+  y: rnd() * H,
+  r: 0.6 + rnd() * 1.8,
+  a: 0.25 + rnd() * 0.7,
+  tw: rnd() * TAU,
+}));
+
+const ORBITERS = Array.from({ length: 12 }, (_, i) => ({
+  i,
+  a: (i / 12) * TAU,
+  ra: 220 + (i % 4) * 85 + rnd() * 30,
+  rb: 150 + (i % 3) * 70 + rnd() * 25,
+  size: 52 + (i % 5) * 10,
+  speed: 0.55 + (i % 4) * 0.12,
+  phase: rnd() * TAU,
+  face: i % 3 === 0,
+}));
+
+const SHARDS = Array.from({ length: 28 }, (_, i) => {
+  const ang = (i / 28) * TAU + rnd() * 0.15;
+  return {
+    ang,
+    spread: 80 + rnd() * 420,
+    rot0: rnd() * TAU,
+    spin: (rnd() - 0.5) * 2.4,
+    w: 28 + rnd() * 70,
+    h: 18 + rnd() * 50,
+    hue: (i * 13 + rnd() * 20) % 360,
+    sat: 70 + rnd() * 25,
+    light: 48 + rnd() * 22,
+  };
+});
+
+const VPARTS = Array.from({ length: 520 }, () => {
+  const a = rnd() * TAU;
+  const r = 20 + rnd() * 520;
+  return {
+    a0: a,
+    r0: r,
+    speed: 1.1 + rnd() * 2.4,
+    size: 1.5 + rnd() * 4.5,
+    hue: rnd() < 0.55 ? 24 + rnd() * 28 : 180 + rnd() * 160,
+    sat: 70 + rnd() * 30,
+    light: 45 + rnd() * 35,
+    spiral: 1.6 + rnd() * 2.2,
+  };
+});
+
+const DUST = Array.from({ length: 180 }, () => ({
+  a: rnd() * TAU,
+  r: 90 + rnd() * 380,
+  size: 1 + rnd() * 3,
+  speed: 0.8 + rnd() * 1.6,
+  warm: rnd() < 0.7,
+}));
+
+function phaseWeights(t) {
+  // Overlapping morph envelopes — continuous metamorphosis, not hard cuts
+  const breathe = 1 - smoothstep(3.2, 5.2, t);
+  const orbit = smoothstep(3.2, 5.0, t) * (1 - smoothstep(9.0, 11.2, t));
+  const prism = smoothstep(9.0, 11.2, t) * (1 - smoothstep(15.0, 17.2, t));
+  const vortex = smoothstep(15.0, 17.2, t) * (1 - smoothstep(21.0, 23.2, t));
+  const hole = smoothstep(21.0, 23.2, t) * (1 - smoothstep(27.0, 29.0, t));
+  const earth = smoothstep(27.0, 29.2, t);
+  return { breathe, orbit, prism, vortex, hole, earth };
+}
+
+function drawBg(t, w) {
+  const g = ctx.createRadialGradient(CX, CY, 40, CX, CY, Math.hypot(W, H) * 0.55);
+  const deepShift = w.hole * 0.15 + w.earth * 0.08;
+  g.addColorStop(0, `rgb(${12 + deepShift * 40 | 0},${16 + w.prism * 20 | 0},${28 + w.vortex * 30 | 0})`);
+  g.addColorStop(0.55, '#070b14');
+  g.addColorStop(1, '#03050a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars — dim during breathe, brighten into space
+  const starA = 0.15 + 0.85 * (1 - w.breathe * 0.7) * (1 - w.earth * 0.25);
+  for (const s of STARS) {
+    // mild lensing warp near hole
+    let x = s.x, y = s.y;
+    if (w.hole > 0.05) {
+      const dx = x - CX, dy = y - CY;
+      const r = Math.hypot(dx, dy) + 1e-3;
+      const bend = w.hole * 120 * Math.exp(-((r - 160) ** 2) / (2 * 90 * 90)) / r;
+      // tangential shear + radial stretch
+      x += -dy * bend * 0.9 + dx * bend * 0.35;
+      y += dx * bend * 0.9 + dy * bend * 0.35;
+    }
+    const tw = 0.65 + 0.35 * Math.sin(t * 2.2 + s.tw);
+    ctx.globalAlpha = s.a * starA * tw;
+    ctx.fillStyle = '#e8f0ff';
+    ctx.beginPath();
+    ctx.arc(x, y, s.r, 0, TAU);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawSquareFace(x, y, size, breath, faceAlpha, rot) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot || 0);
+  const s = size * breath;
+  // soft glow
+  const glow = ctx.createRadialGradient(0, 0, s * 0.2, 0, 0, s * 1.35);
+  glow.addColorStop(0, 'rgba(255,154,60,0.55)');
+  glow.addColorStop(0.55, 'rgba(241,120,34,0.22)');
+  glow.addColorStop(1, 'rgba(241,120,34,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(-s * 1.4, -s * 1.4, s * 2.8, s * 2.8);
+
+  // body
+  const body = ctx.createLinearGradient(-s, -s, s, s);
+  body.addColorStop(0, '#ffb056');
+  body.addColorStop(0.45, '#f17822');
+  body.addColorStop(1, '#c45a12');
+  ctx.fillStyle = body;
+  ctx.fillRect(-s / 2, -s / 2, s, s);
+  // edge highlight
+  ctx.strokeStyle = 'rgba(255,220,160,0.55)';
+  ctx.lineWidth = Math.max(2, s * 0.04);
+  ctx.strokeRect(-s / 2, -s / 2, s, s);
+
+  if (faceAlpha > 0.02) {
+    ctx.globalAlpha = faceAlpha;
+    ctx.fillStyle = '#2a1408';
+    const eye = s * 0.08;
+    ctx.beginPath();
+    ctx.arc(-s * 0.16, -s * 0.08, eye, 0, TAU);
+    ctx.arc(s * 0.16, -s * 0.08, eye, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = '#2a1408';
+    ctx.lineWidth = Math.max(2, s * 0.045);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(0, s * 0.06, s * 0.18, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+function drawBreathe(t, w) {
+  if (w.breathe < 0.01 && w.orbit < 0.01) return;
+  const pulse = 1 + 0.07 * Math.sin(t * TAU * 0.55);
+  const size = 220 * pulse;
+  const faceA = clamp(w.breathe * 1.2 - w.orbit * 0.4, 0, 1);
+  const alpha = Math.max(w.breathe, w.orbit * 0.35);
+  ctx.globalAlpha = alpha;
+  // primary square stays during early orbit then shrinks into swarm
+  const shrink = 1 - smoothstep(4, 7.5, t) * 0.78;
+  drawSquareFace(CX, CY, size * shrink, 1, faceA, Math.sin(t * 0.4) * 0.04);
+  ctx.globalAlpha = 1;
+}
+
+function drawOrbit(t, w) {
+  if (w.orbit < 0.01 && w.prism < 0.15) return;
+  const birth = smoothstep(4, 7.5, t);
+  const n = Math.max(1, Math.min(ORBITERS.length, Math.floor(1 + birth * (ORBITERS.length - 1))));
+  const fade = Math.max(w.orbit, w.prism * 0.25);
+  for (let i = 0; i < n; i++) {
+    const o = ORBITERS[i];
+    const appear = clamp((birth * ORBITERS.length - i) / 2, 0, 1);
+    const ang = o.a + t * o.speed + o.phase * 0.1;
+    const rx = o.ra * (0.7 + 0.3 * birth);
+    const ry = o.rb * (0.7 + 0.3 * birth);
+    const x = CX + Math.cos(ang) * rx;
+    const y = CY + Math.sin(ang) * ry * 0.85;
+    // morph toward prism: rotate + stretch
+    const prismPull = smoothstep(9, 11.5, t);
+    const rot = ang + prismPull * (o.phase - Math.PI) * 0.8;
+    const size = o.size * (1 - prismPull * 0.35) * (0.85 + 0.15 * Math.sin(t * 3 + o.phase));
+    ctx.globalAlpha = fade * appear * (1 - prismPull * 0.7);
+    drawSquareFace(x, y, size, 1, o.face ? 0.85 * (1 - prismPull) : 0, rot);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawPrism(t, w) {
+  if (w.prism < 0.01 && w.orbit < 0.2 && w.vortex < 0.2) return;
+  const split = smoothstep(9.5, 12.5, t);
+  const fade = Math.max(w.prism, w.vortex * 0.2) * (1 - smoothstep(15.5, 17.5, t) * 0.85);
+  if (fade < 0.01) return;
+
+  // central refracting square that elongates into a prism
+  const coreSize = lerp(160, 40, split);
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(t * 0.35);
+  const prismGrad = ctx.createLinearGradient(-coreSize, 0, coreSize, 0);
+  for (let i = 0; i <= 6; i++) {
+    const hue = i * 50;
+    prismGrad.addColorStop(i / 6, `hsla(${hue},85%,58%,${0.55 * fade})`);
+  }
+  ctx.fillStyle = prismGrad;
+  ctx.beginPath();
+  ctx.moveTo(-coreSize, -coreSize * 0.35);
+  ctx.lineTo(coreSize, -coreSize * 0.55);
+  ctx.lineTo(coreSize * 0.85, coreSize * 0.55);
+  ctx.lineTo(-coreSize * 0.9, coreSize * 0.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  for (const sh of SHARDS) {
+    const dist = sh.spread * split * (0.4 + 0.6 * Math.sin(t * 1.2 + sh.ang) * 0.15 + 0.55);
+    const x = CX + Math.cos(sh.ang + t * 0.25) * dist;
+    const y = CY + Math.sin(sh.ang + t * 0.25) * dist * 0.78;
+    const rot = sh.rot0 + t * sh.spin;
+    // trail into vortex: spiral inward late
+    const intoVortex = smoothstep(14.5, 17, t);
+    const vx = CX + Math.cos(sh.ang + t * 2.2) * dist * (1 - intoVortex * 0.85);
+    const vy = CY + Math.sin(sh.ang + t * 2.2) * dist * (1 - intoVortex * 0.85) * 0.78;
+    const px = lerp(x, vx, intoVortex);
+    const py = lerp(y, vy, intoVortex);
+
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(rot);
+    ctx.globalAlpha = fade * (0.55 + 0.45 * split);
+    const sg = ctx.createLinearGradient(-sh.w / 2, 0, sh.w / 2, 0);
+    sg.addColorStop(0, `hsla(${sh.hue}, ${sh.sat}%, ${sh.light + 12}%, 0.95)`);
+    sg.addColorStop(0.5, `hsla(${(sh.hue + 40) % 360}, ${sh.sat}%, ${sh.light}%, 0.9)`);
+    sg.addColorStop(1, `hsla(${(sh.hue + 80) % 360}, ${sh.sat}%, ${sh.light - 8}%, 0.75)`);
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.moveTo(0, -sh.h / 2);
+    ctx.lineTo(sh.w / 2, sh.h / 4);
+    ctx.lineTo(0, sh.h / 2);
+    ctx.lineTo(-sh.w / 2, sh.h / 5);
+    ctx.closePath();
+    ctx.fill();
+    // specular edge
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawVortex(t, w) {
+  if (w.vortex < 0.01 && w.prism < 0.15 && w.hole < 0.25) return;
+  const pull = smoothstep(16, 20, t);
+  const fade = Math.max(w.vortex, w.hole * 0.35) * (1 - smoothstep(21.5, 24, t) * 0.9);
+  if (fade < 0.01) return;
+
+  // spiral arms — bright enough to read at thumbnail size
+  ctx.save();
+  ctx.translate(CX, CY);
+  for (let arm = 0; arm < 3; arm++) {
+    ctx.beginPath();
+    for (let i = 0; i < 90; i++) {
+      const u = i / 90;
+      const r = 50 + u * 520 * (1 - pull * 0.35);
+      const a = arm * (TAU / 3) + u * 4.8 - t * 1.8;
+      const x = Math.cos(a) * r;
+      const y = Math.sin(a) * r * 0.78;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.globalAlpha = (0.55 - arm * 0.08) * fade;
+    ctx.strokeStyle = arm === 0 ? '#ff9a3c' : arm === 1 ? '#7ec8ff' : '#ff6ec7';
+    ctx.lineWidth = 14 - arm * 3;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  for (const p of VPARTS) {
+    const spin = p.a0 + t * p.speed * p.spiral * (0.7 + pull);
+    const r = p.r0 * (1 - pull * 0.72) + 18;
+    // collapse toward hole
+    const intoHole = smoothstep(20.5, 23.5, t);
+    const rr = lerp(r, 110 + (p.r0 % 40), intoHole);
+    const x = CX + Math.cos(spin) * rr;
+    const y = CY + Math.sin(spin) * rr * 0.78;
+    ctx.globalAlpha = fade * (0.45 + 0.55 * (1 - intoHole * 0.5));
+    ctx.fillStyle = `hsl(${p.hue} ${p.sat}% ${p.light}%)`;
+    ctx.fillRect(x - p.size / 2, y - p.size / 2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawBlackHole(t, w) {
+  if (w.hole < 0.01 && w.earth < 0.35) return;
+  const form = smoothstep(21.5, 24.5, t);
+  const fade = Math.max(w.hole, w.earth * 0.2);
+  if (fade < 0.01) return;
+
+  // accretion disk
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.scale(1, 0.42);
+  ctx.rotate(t * 0.55);
+  for (let i = 0; i < 64; i++) {
+    const u = i / 64;
+    const a = u * TAU;
+    const r = 95 + 55 * Math.sin(u * 6 + t * 3) * 0.15 + 70 * form;
+    const x = Math.cos(a) * r;
+    const y = Math.sin(a) * r;
+    const warm = 0.5 + 0.5 * Math.sin(a * 2 + t);
+    ctx.globalAlpha = fade * form * (0.35 + 0.5 * warm);
+    ctx.fillStyle = warm > 0.55 ? '#ff9a3c' : '#ffd08a';
+    const s = 4 + 6 * warm;
+    ctx.beginPath();
+    ctx.arc(x, y, s, 0, TAU);
+    ctx.fill();
+  }
+  // bright inner ring
+  ctx.globalAlpha = fade * form;
+  ctx.strokeStyle = '#ffe0a8';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(0, 0, 118, 0, TAU);
+  ctx.stroke();
+  ctx.strokeStyle = '#f17822';
+  ctx.lineWidth = 14;
+  ctx.globalAlpha = fade * form * 0.55;
+  ctx.beginPath();
+  ctx.arc(0, 0, 150, 0, TAU);
+  ctx.stroke();
+  ctx.restore();
+
+  // dust on disk plane
+  for (const d of DUST) {
+    const a = d.a + t * d.speed;
+    const r = d.r * (0.7 + 0.3 * form);
+    const x = CX + Math.cos(a) * r;
+    const y = CY + Math.sin(a) * r * 0.38;
+    ctx.globalAlpha = fade * form * 0.7;
+    ctx.fillStyle = d.warm ? '#ffb056' : '#9ec8ff';
+    ctx.fillRect(x, y, d.size, d.size);
+  }
+
+  // event horizon
+  const hr = 72 * form;
+  const hg = ctx.createRadialGradient(CX, CY, hr * 0.2, CX, CY, hr * 1.6);
+  hg.addColorStop(0, '#000000');
+  hg.addColorStop(0.65, '#000000');
+  hg.addColorStop(0.85, 'rgba(40,20,10,0.85)');
+  hg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = fade * form;
+  ctx.fillStyle = hg;
+  ctx.beginPath();
+  ctx.arc(CX, CY, hr * 1.6, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(CX, CY, hr, 0, TAU);
+  ctx.fill();
+
+  // photon ring
+  ctx.strokeStyle = `rgba(255,200,120,${0.85 * fade * form})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(CX, CY, hr * 1.08, 0, TAU);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function drawEarthMoon(t, w) {
+  if (w.earth < 0.01) return;
+  const reveal = easeInOut(smoothstep(27.5, 30.5, t));
+  const fade = w.earth;
+  // camera pull: scale down hole remnant as distant speck
+  const speck = 1 - reveal * 0.85;
+
+  // distant black-hole speck
+  if (speck > 0.1) {
+    ctx.globalAlpha = fade * (1 - reveal * 0.7);
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(CX + 420 * reveal, CY - 180 * reveal, 18 * speck, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = '#ff9a3c';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(CX + 420 * reveal, CY - 180 * reveal, 22 * speck, 0, TAU);
+    ctx.stroke();
+  }
+
+  // Earth
+  const er = 230 * (0.55 + 0.45 * reveal);
+  const ex = CX - 60;
+  const ey = CY - 40;
+  const eg = ctx.createRadialGradient(ex - er * 0.3, ey - er * 0.35, er * 0.1, ex, ey, er);
+  eg.addColorStop(0, '#8ec4f0');
+  eg.addColorStop(0.35, '#3a6ea5');
+  eg.addColorStop(0.7, '#2a5080');
+  eg.addColorStop(1, '#152438');
+  ctx.globalAlpha = fade * reveal;
+  ctx.fillStyle = eg;
+  ctx.beginPath();
+  ctx.arc(ex, ey, er, 0, TAU);
+  ctx.fill();
+
+  // continents — chunky blobs readable at thumbnail
+  ctx.fillStyle = '#3d8a52';
+  ctx.beginPath();
+  ctx.ellipse(ex - er * 0.28, ey - er * 0.05, er * 0.32, er * 0.22, -0.35, 0, TAU);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(ex + er * 0.18, ey + er * 0.22, er * 0.26, er * 0.16, 0.45, 0, TAU);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(ex + er * 0.02, ey - er * 0.38, er * 0.14, er * 0.11, 0.15, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#2a6b3e';
+  ctx.beginPath();
+  ctx.ellipse(ex - er * 0.15, ey + er * 0.35, er * 0.18, er * 0.1, -0.2, 0, TAU);
+  ctx.fill();
+
+  // atmosphere rim (orange sunrise — motif callback)
+  ctx.strokeStyle = `rgba(255,154,60,${0.9 * fade * reveal})`;
+  ctx.lineWidth = 10;
+  ctx.beginPath();
+  ctx.arc(ex, ey, er + 5, 0.15, Math.PI * 0.85);
+  ctx.stroke();
+  ctx.strokeStyle = `rgba(200,220,255,${0.55 * fade * reveal})`;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(ex, ey, er + 12, 0, TAU);
+  ctx.stroke();
+
+  // Moon foreground — lit gray rim so silhouette reads against void
+  const mx = CX + 420;
+  const my = CY + 250;
+  const mr = 360;
+  ctx.globalAlpha = fade * reveal;
+  const mg = ctx.createRadialGradient(mx - 120, my - 90, 30, mx, my, mr);
+  mg.addColorStop(0, '#3a424c');
+  mg.addColorStop(0.35, '#1c222a');
+  mg.addColorStop(0.75, '#0c1016');
+  mg.addColorStop(1, '#05070c');
+  ctx.fillStyle = mg;
+  ctx.beginPath();
+  ctx.arc(mx, my, mr, 0, TAU);
+  ctx.fill();
+  // crater bowls
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.arc(mx - 110, my - 50, 36, 0, TAU);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(mx - 50, my + 60, 22, 0, TAU);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(mx - 180, my + 40, 16, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(90,100,110,0.45)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(mx - 110, my - 50, 36, 0, TAU);
+  ctx.stroke();
+  // lit limb
+  ctx.strokeStyle = `rgba(180,190,200,${0.35 * fade * reveal})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(mx, my, mr - 2, Math.PI * 0.85, Math.PI * 1.55);
+  ctx.stroke();
+
+  // end title
+  const titleA = smoothstep(29.2, 30.8, t) * fade;
+  if (titleA > 0.01) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(244,236,224,${titleA})`;
+    ctx.font = '600 56px Georgia, "Iowan Old Style", serif';
+    ctx.fillText('Orange Cosmos', W / 2, H * 0.78);
+    ctx.font = 'italic 22px Georgia, "Iowan Old Style", serif';
+    ctx.fillStyle = `rgba(241,120,34,${titleA * 0.9})`;
+    ctx.fillText('a film written entirely in code', W / 2, H * 0.78 + 40);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawGrain(t) {
+  const gr = mulberry32((SEED ^ (Math.floor(t * FPS) * 2654435761)) >>> 0);
+  ctx.globalAlpha = 0.04;
+  for (let k = 0; k < 140; k++) {
+    ctx.fillStyle = gr() > 0.5 ? '#fff' : '#000';
+    ctx.fillRect(gr() * W, gr() * H, 1.6, 1.6);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawFrame(t) {
+  t = clamp(t, 0, DUR);
+  const w = phaseWeights(t);
+  drawBg(t, w);
+  // Continuous stack: later phases drawn on top; morph envelopes handle dissolve
+  drawBreathe(t, w);
+  drawOrbit(t, w);
+  drawPrism(t, w);
+  drawVortex(t, w);
+  drawBlackHole(t, w);
+  drawEarthMoon(t, w);
+  drawGrain(t);
+}
+
+// --- audio ---
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const CHORDS = {
+  Am: [45, 48, 52],
+  C: [48, 52, 55],
+  F: [41, 45, 48, 53],
+  Dm: [50, 53, 57],
+  Em: [52, 55, 59],
+  G: [43, 47, 50, 55],
+};
+
+function buildScore(ac, T0) {
+  const master = ac.createGain();
+  master.gain.setValueAtTime(0, T0);
+  master.gain.linearRampToValueAtTime(0.78, T0 + 1.0);
+  master.gain.setValueAtTime(0.78, T0 + DUR - 2.5);
+  master.gain.linearRampToValueAtTime(0, T0 + DUR);
+  master.connect(ac.destination);
+  const at = (t) => T0 + Math.max(0, t);
+
+  function pad(name, t0, t1, level) {
+    for (const m of CHORDS[name]) {
+      const o = ac.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = mtof(m);
+      o.detune.value = (m % 3) * 5 - 5;
+      const f = ac.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 750 + (name === 'Em' || name === 'Dm' ? 200 : 0);
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, at(t0));
+      g.gain.linearRampToValueAtTime(level, at(t0 + 1.2));
+      g.gain.setValueAtTime(level, at(Math.max(t0 + 1.2, t1 - 0.4)));
+      g.gain.linearRampToValueAtTime(0, at(t1 + 1.5));
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(at(t0));
+      o.stop(at(t1 + 1.8));
+    }
+  }
+  for (const s of STORY.sections) {
+    const lvl = s.id === 'hole' ? 0.028 : s.id === 'earth' ? 0.032 : 0.022;
+    pad(s.harmony, s.t0, s.t1, lvl);
+  }
+
+  // soft pulse under breathe
+  for (let i = 0; i < 6; i++) {
+    const t = i * beatSec * 2;
+    if (t > 4) break;
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = mtof(57);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.06, at(t + 0.05));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.9));
+    o.connect(g); g.connect(master);
+    o.start(at(t));
+    o.stop(at(t + 1));
+  }
+
+  function whoosh(t) {
+    const len = Math.floor(ac.sampleRate * 1.3);
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * 0.4));
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const f = ac.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.setValueAtTime(350, at(t));
+    f.frequency.exponentialRampToValueAtTime(2400, at(t + 0.65));
+    const g = ac.createGain();
+    g.gain.value = 0.22;
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+  }
+  function impact(t) {
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(100, at(t));
+    o.frequency.exponentialRampToValueAtTime(36, at(t + 0.55));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.32, at(t + 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.1));
+    o.connect(g); g.connect(master);
+    o.start(at(t));
+    o.stop(at(t + 1.2));
+  }
+  function bell(t) {
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = 660;
+    const o2 = ac.createOscillator();
+    o2.type = 'sine';
+    o2.frequency.value = 990;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.11, at(t + 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.6));
+    const g2 = ac.createGain();
+    g2.gain.value = 0.28;
+    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+    o.start(at(t)); o2.start(at(t));
+    o.stop(at(t + 1.8)); o2.stop(at(t + 1.8));
+  }
+  function pluck(t) {
+    const o = ac.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(392, at(t));
+    o.frequency.exponentialRampToValueAtTime(220, at(t + 0.4));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.14, at(t + 0.008));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.7));
+    o.connect(g); g.connect(master);
+    o.start(at(t));
+    o.stop(at(t + 0.8));
+  }
+  function thunder(t) {
+    const len = Math.floor(ac.sampleRate * 1.8);
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * 0.55));
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const f = ac.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 180;
+    const g = ac.createGain();
+    g.gain.value = 0.35;
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(55, at(t));
+    o.frequency.exponentialRampToValueAtTime(28, at(t + 1.2));
+    const og = ac.createGain();
+    og.gain.setValueAtTime(0, at(t));
+    og.gain.linearRampToValueAtTime(0.28, at(t + 0.02));
+    og.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.5));
+    o.connect(og); og.connect(master);
+    o.start(at(t));
+    o.stop(at(t + 1.6));
+  }
+
+  for (const e of STORY.events) {
+    if (e.kind === 'whoosh') whoosh(e.t);
+    else if (e.kind === 'impact') impact(e.t);
+    else if (e.kind === 'bell') bell(e.t);
+    else if (e.kind === 'pluck') pluck(e.t);
+    else if (e.kind === 'thunder') thunder(e.t);
+  }
+}
+
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, sr = buf.sampleRate, n = buf.length;
+  const ab = new ArrayBuffer(44 + n * ch * 2), dv = new DataView(ab);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+  dv.setUint16(34, 16, true); ws(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++, o += 2) {
+    const s = Math.max(-1, Math.min(1, chans[c][i]));
+    dv.setInt16(o, s * 32767, true);
+  }
+  const bytes = new Uint8Array(ab);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+drawFrame(0);
+window.FILM = {
+  ready: true,
+  seekPure: true,
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  storyboard: STORY,
+  canvas,
+  out: canvas,
+  seek(t) { drawFrame(t); },
+  reset() { drawFrame(0); },
+  async renderAudio() {
+    const sr = 48000;
+    const oc = new OfflineAudioContext(2, sr * DUR, sr);
+    buildScore(oc, 0);
+    return encodeWav(await oc.startRendering());
+  },
+};
+
+const params = new URLSearchParams(location.search);
+if (params.has('render')) {
+  document.body.classList.add('render');
+} else {
+  const btn = document.getElementById('play');
+  const clock = document.getElementById('clock');
+  let ac = null, T0 = 0, playing = false;
+  function loop() {
+    if (!playing) return;
+    const t = ac.currentTime - T0;
+    if (t >= DUR) { playing = false; btn.textContent = 'Replay'; drawFrame(DUR); return; }
+    drawFrame(t);
+    clock.textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    requestAnimationFrame(loop);
+  }
+  btn.addEventListener('click', async () => {
+    if (ac) await ac.close();
+    ac = new AudioContext();
+    T0 = ac.currentTime + 0.12;
+    buildScore(ac, T0);
+    playing = true; btn.textContent = 'Restart';
+    requestAnimationFrame(loop);
+  });
+}
+})();
+</script>
+</body>
+</html>

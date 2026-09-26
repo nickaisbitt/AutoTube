@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pixel Wizard — a code film</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0c14; overflow: hidden; }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas {
+    width: min(100vw, 177.78vh); aspect-ratio: 16/9; display: block; background: #0a0c14;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+  }
+  #ui {
+    position: fixed; left: 16px; bottom: 14px; display: flex; gap: 10px; align-items: center;
+    font: 12px/1 ui-monospace, ui-sans-serif, system-ui, monospace; color: #c8d4e8; letter-spacing: .08em;
+  }
+  #ui button {
+    font: inherit; text-transform: uppercase; letter-spacing: .14em; font-size: 11px;
+    color: #c8d4e8; background: rgba(10,12,20,.7); border: 1px solid rgba(200,212,232,.28);
+    border-radius: 4px; padding: 8px 14px; cursor: pointer;
+  }
+  body.render #ui { display: none; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="1920" height="1080"></canvas></div>
+<div id="ui"><button id="play" type="button">Play</button><span id="clock">0:00</span></div>
+<script>
+(() => {
+'use strict';
+
+const W = 1920, H = 1080, FPS = 30, DUR = 30, SEED = 0x71a3d;
+const BW = 160, BH = 90; // internal low-res buffer — 12× nearest-neighbor → 1920×1080
+const PAL_N = 24;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+ctx.imageSmoothingEnabled = false;
+
+const low = document.createElement('canvas');
+low.width = BW; low.height = BH;
+const lctx = low.getContext('2d', { alpha: false, willReadFrequently: true });
+const img = lctx.createImageData(BW, BH);
+const pix = img.data;
+const buf = new Uint8Array(BW * BH);
+
+// Fixed ≤24 color palette (hard clamp). Night / teal robe / amber staff — no purple cliché.
+const PAL = [
+  [10, 12, 20],    // 0  void
+  [20, 24, 42],    // 1  deep night
+  [30, 39, 64],    // 2  mid night
+  [42, 53, 88],    // 3  dusk
+  [61, 74, 110],   // 4  slate
+  [90, 106, 136],  // 5  mist
+  [138, 154, 184], // 6  moonlight
+  [200, 212, 232], // 7  bright moon
+  [18, 36, 28],    // 8  dark moss
+  [36, 62, 46],    // 9  moss
+  [58, 94, 68],    // 10 grass
+  [90, 130, 92],   // 11 lit grass
+  [42, 30, 20],    // 12 cloak shadow
+  [74, 48, 28],    // 13 cloak
+  [120, 74, 40],   // 14 staff wood
+  [180, 118, 56],  // 15 warm wood
+  [232, 184, 88],  // 16 amber
+  [248, 220, 140], // 17 spark amber
+  [14, 40, 44],    // 18 robe deep teal
+  [28, 72, 78],    // 19 robe teal
+  [48, 112, 118],  // 20 robe mid
+  [72, 148, 152],  // 21 robe light
+  [220, 214, 198], // 22 trim / beard
+  [244, 240, 228], // 23 spark white
+];
+
+const bpm = 120;
+const beatSec = (n) => (n * 60) / bpm;
+
+const STORY = {
+  id: 'pixel-wizard',
+  title: 'Pixel Wizard',
+  logline: 'A 24-color wizard charges a staff twice under a chunky moon — every spark snaps to the pixel grid.',
+  technique: 'pixel-buffer-nearest-neighbor',
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  seed: SEED,
+  tempo: { bpm, beatsPerBar: 4 },
+  palette: {
+    void: '#0a0c14', night: '#14182a', moon: '#c8d4e8',
+    moss: '#2d4a2e', robe: '#1c484e', amber: '#e8b858', spark: '#f4f0e4',
+  },
+  sections: [
+    { id: 'idle', t0: 0, t1: 4, mood: 'calm', harmony: 'Em' },
+    { id: 'charge', t0: 4, t1: 7.5, mood: 'build', harmony: 'Am' },
+    { id: 'cast1', t0: 7.5, t1: 10, mood: 'burst', harmony: 'C' },
+    { id: 'recover', t0: 10, t1: 14, mood: 'settle', harmony: 'Em' },
+    { id: 'walk', t0: 14, t1: 20, mood: 'travel', harmony: 'G' },
+    { id: 'charge2', t0: 20, t1: 23, mood: 'build', harmony: 'Am' },
+    { id: 'cast2', t0: 23, t1: 26.5, mood: 'burst', harmony: 'C' },
+    { id: 'title', t0: 26.5, t1: 30, mood: 'resolve', harmony: 'Em' },
+  ],
+  shots: [
+    { id: 's0', t0: 0, t1: 4, beat: 0, camera: { x: 0, y: 0, zoom: 1 }, subject: 'wizard', action: 'idle bob sweep sparks', caption: '' },
+    { id: 's1', t0: 4, t1: 7.5, beat: 4, camera: { x: 0, y: 0, zoom: 1.05 }, subject: 'staff', action: 'charge glow assemble', caption: '' },
+    { id: 's2', t0: 7.5, t1: 10, beat: 7.5, camera: { x: 0, y: 0, zoom: 1.1 }, subject: 'spell', action: 'cast burst shake dissolve', caption: '' },
+    { id: 's3', t0: 10, t1: 14, beat: 10, camera: { x: 0, y: 0, zoom: 1 }, subject: 'wizard', action: 'recovery settle sweep', caption: '' },
+    { id: 's4', t0: 14, t1: 20, beat: 14, camera: { x: 0.08, y: 0, zoom: 1 }, subject: 'wizard', action: 'walk pan across', caption: '' },
+    { id: 's5', t0: 20, t1: 23, beat: 20, camera: { x: 0.12, y: 0, zoom: 1.05 }, subject: 'staff', action: 'charge again assemble', caption: '' },
+    { id: 's6', t0: 23, t1: 26.5, beat: 23, camera: { x: 0.12, y: 0, zoom: 1.12 }, subject: 'spell', action: 'cast burst dissolve shake', caption: '' },
+    { id: 's7', t0: 26.5, t1: 30, beat: 26.5, camera: { x: 0, y: 0, zoom: 1 }, subject: 'title', action: 'end card roll', caption: 'PIXEL WIZARD' },
+  ],
+  events: [
+    { t: 1.5, kind: 'visual', id: 'idle-spark' },
+    { t: 3, kind: 'pluck', id: 'idle-tick' },
+    { t: 4, kind: 'pluck', id: 'charge-start' },
+    { t: 5.5, kind: 'bell', id: 'charge-hum' },
+    { t: 7.5, kind: 'impact', id: 'cast-1' },
+    { t: 7.5, kind: 'whoosh', id: 'cast-1-whoosh' },
+    { t: 8.5, kind: 'visual', id: 'cast-1-trail' },
+    { t: 10, kind: 'pluck', id: 'recover' },
+    { t: 12, kind: 'visual', id: 'recover-spark' },
+    { t: 14, kind: 'whoosh', id: 'walk-start' },
+    { t: 17, kind: 'pluck', id: 'walk-mid' },
+    { t: 20, kind: 'pluck', id: 'charge2-start' },
+    { t: 21.5, kind: 'bell', id: 'charge2-hum' },
+    { t: 23, kind: 'impact', id: 'cast-2' },
+    { t: 23, kind: 'whoosh', id: 'cast-2-whoosh' },
+    { t: 24.5, kind: 'visual', id: 'cast-2-trail' },
+    { t: 26.5, kind: 'bell', id: 'title' },
+  ],
+  acceptance: { maxDeadAirSec: 1.5, beatToleranceSec: 0.04, thumbnailReadable: true, zeroExternalAssets: true },
+};
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+// --- tiny 5×7 pixel font (caps + space + digits) ---
+const FONT = {
+  ' ': [0,0,0,0,0],
+  A: [0x0e,0x11,0x11,0x1f,0x11,0x11,0x11],
+  B: [0x1e,0x11,0x11,0x1e,0x11,0x11,0x1e],
+  C: [0x0e,0x11,0x10,0x10,0x10,0x11,0x0e],
+  D: [0x1e,0x11,0x11,0x11,0x11,0x11,0x1e],
+  E: [0x1f,0x10,0x10,0x1e,0x10,0x10,0x1f],
+  F: [0x1f,0x10,0x10,0x1e,0x10,0x10,0x10],
+  G: [0x0e,0x11,0x10,0x17,0x11,0x11,0x0e],
+  H: [0x11,0x11,0x11,0x1f,0x11,0x11,0x11],
+  I: [0x0e,0x04,0x04,0x04,0x04,0x04,0x0e],
+  J: [0x07,0x02,0x02,0x02,0x02,0x12,0x0c],
+  K: [0x11,0x12,0x14,0x18,0x14,0x12,0x11],
+  L: [0x10,0x10,0x10,0x10,0x10,0x10,0x1f],
+  M: [0x11,0x1b,0x15,0x15,0x11,0x11,0x11],
+  N: [0x11,0x19,0x15,0x13,0x11,0x11,0x11],
+  O: [0x0e,0x11,0x11,0x11,0x11,0x11,0x0e],
+  P: [0x1e,0x11,0x11,0x1e,0x10,0x10,0x10],
+  Q: [0x0e,0x11,0x11,0x11,0x15,0x12,0x0d],
+  R: [0x1e,0x11,0x11,0x1e,0x14,0x12,0x11],
+  S: [0x0e,0x11,0x10,0x0e,0x01,0x11,0x0e],
+  T: [0x1f,0x04,0x04,0x04,0x04,0x04,0x04],
+  U: [0x11,0x11,0x11,0x11,0x11,0x11,0x0e],
+  V: [0x11,0x11,0x11,0x11,0x11,0x0a,0x04],
+  W: [0x11,0x11,0x11,0x15,0x15,0x1b,0x11],
+  X: [0x11,0x11,0x0a,0x04,0x0a,0x11,0x11],
+  Y: [0x11,0x11,0x0a,0x04,0x04,0x04,0x04],
+  Z: [0x1f,0x01,0x02,0x04,0x08,0x10,0x1f],
+  '-': [0x00,0x00,0x00,0x1f,0x00,0x00,0x00],
+  '.': [0x00,0x00,0x00,0x00,0x00,0x0c,0x0c],
+  '&': [0x0c,0x12,0x14,0x08,0x15,0x12,0x0d],
+};
+
+function drawChar(cx, cy, ch, col) {
+  const g = FONT[ch] || FONT[' '];
+  for (let row = 0; row < 7; row++) {
+    const bits = g[row] || 0;
+    for (let colBit = 0; colBit < 5; colBit++) {
+      if (bits & (1 << (4 - colBit))) set(cx + colBit, cy + row, col);
+    }
+  }
+}
+function drawText(x, y, str, col) {
+  let cx = x | 0;
+  for (const ch of str.toUpperCase()) {
+    drawChar(cx, y | 0, ch, col);
+    cx += 6;
+  }
+}
+
+function clear(c) {
+  buf.fill(c & 0x1f);
+}
+function set(x, y, c) {
+  x = x | 0; y = y | 0;
+  if (x < 0 || y < 0 || x >= BW || y >= BH) return;
+  const ci = c | 0;
+  buf[y * BW + x] = ci < 0 ? 0 : ci >= PAL_N ? PAL_N - 1 : ci;
+}
+function get(x, y) {
+  x = x | 0; y = y | 0;
+  if (x < 0 || y < 0 || x >= BW || y >= BH) return 0;
+  return buf[y * BW + x];
+}
+function fillRect(x, y, w, h, c) {
+  const x0 = x | 0, y0 = y | 0, x1 = (x + w) | 0, y1 = (y + h) | 0;
+  for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) set(xx, yy, c);
+}
+function circ(cx, cy, r, c) {
+  const rr = r * r;
+  const x0 = (cx - r) | 0, x1 = (cx + r + 1) | 0;
+  const y0 = (cy - r) | 0, y1 = (cy + r + 1) | 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+      if (dx * dx + dy * dy <= rr) set(x, y, c);
+    }
+  }
+}
+
+// Precompute stars & ground hash
+const rnd = mulberry32(SEED);
+const stars = Array.from({ length: 48 }, () => ({
+  x: (rnd() * BW) | 0,
+  y: (rnd() * (BH * 0.55)) | 0,
+  c: rnd() > 0.7 ? 7 : rnd() > 0.4 ? 6 : 5,
+  tw: rnd() * Math.PI * 2,
+}));
+const groundVar = new Uint8Array(BW);
+for (let i = 0; i < BW; i++) groundVar[i] = (rnd() * 3) | 0;
+
+// Wizard sprite (~14×32) — readable thumbnail silhouette, pointed hat
+function drawWizard(wx, wy, bob, armRaise, walkPhase, facing) {
+  const f = facing >= 0 ? 1 : -1;
+  const bodyY = (wy - 1 + bob) | 0;
+  const hx = (wx) | 0;
+
+  // cloak / robe — wider silhouette
+  fillRect(hx - 5, bodyY - 14, 11, 14, 18);
+  fillRect(hx - 4, bodyY - 13, 9, 12, 19);
+  fillRect(hx - 3, bodyY - 12, 7, 10, 20);
+  set(hx - 5, bodyY - 2, 18);
+  set(hx + 5, bodyY - 2, 18);
+  // belt
+  fillRect(hx - 3, bodyY - 5, 7, 1, 14);
+  set(hx, bodyY - 5, 16);
+
+  // legs / walk cycle
+  const step = Math.sin(walkPhase);
+  if (Math.abs(step) < 0.25) {
+    fillRect(hx - 3, bodyY, 3, 4, 12);
+    fillRect(hx + 1, bodyY, 3, 4, 12);
+  } else if (step > 0) {
+    fillRect(hx - 4, bodyY, 3, 4, 12);
+    fillRect(hx + 1, bodyY - 1, 3, 4, 12);
+  } else {
+    fillRect(hx - 3, bodyY - 1, 3, 4, 12);
+    fillRect(hx + 2, bodyY, 3, 4, 12);
+  }
+  // boots
+  fillRect(hx - 3 + (step > 0.25 ? -1 : 0), bodyY + 3, 3, 2, 13);
+  fillRect(hx + 1 + (step < -0.25 ? 1 : 0), bodyY + 3, 3, 2, 13);
+
+  // head + beard
+  fillRect(hx - 3, bodyY - 19, 7, 5, 22);
+  fillRect(hx - 2, bodyY - 18, 5, 3, 22);
+  set(hx - 2, bodyY - 17, 0);
+  set(hx + 2, bodyY - 17, 0);
+  // beard cascade
+  fillRect(hx - 1, bodyY - 15, 3, 3, 22);
+  set(hx, bodyY - 12, 7);
+  set(hx, bodyY - 11, 22);
+
+  // pointed hat (tall)
+  fillRect(hx - 5, bodyY - 21, 11, 2, 18); // brim
+  fillRect(hx - 4, bodyY - 23, 9, 2, 19);
+  fillRect(hx - 3, bodyY - 25, 7, 2, 19);
+  fillRect(hx - 2, bodyY - 27, 5, 2, 20);
+  fillRect(hx - 1, bodyY - 29, 3, 2, 20);
+  set(hx, bodyY - 30, 21);
+  set(hx, bodyY - 31, 16);
+  set(hx, bodyY - 32, 23);
+
+  // staff
+  const staffX = hx + f * 7;
+  const tipY = bodyY - 16 - Math.round(armRaise * 8);
+  const baseY = bodyY + 2;
+  for (let y = tipY; y <= baseY; y++) set(staffX, y, y < tipY + 3 ? 16 : 14);
+  set(staffX - 1, tipY + 1, 14);
+  circ(staffX, tipY, 2, 16);
+  circ(staffX, tipY, 1, 17);
+  set(staffX, tipY - 2, 23);
+
+  return { staffX, tipY };
+}
+
+function ambientSparks(t, wx, wy) {
+  const pr = mulberry32((SEED ^ 0x5a5a) >>> 0);
+  for (let i = 0; i < 14; i++) {
+    const life = 2.2 + pr() * 2;
+    const phase = (t * 0.7 + pr() * life) % life;
+    const u = phase / life;
+    const px = Math.round(wx + (pr() - 0.5) * 40 + Math.sin(t * 1.3 + i) * 6);
+    const py = Math.round(wy - 8 - u * 28 - (pr() * 10));
+    if (u > 0.85) continue;
+    set(px, py, u < 0.3 ? 23 : u < 0.6 ? 17 : 16);
+  }
+}
+
+function emitParticles(t, castT, tipX, tipY, seedOff) {
+  const age = t - castT;
+  if (age < 0 || age > 2.8) return;
+  const pr = mulberry32((SEED ^ (seedOff * 9973) ^ ((castT * 1000) | 0)) >>> 0);
+  const n = 84;
+  for (let i = 0; i < n; i++) {
+    const ang = pr() * Math.PI * 2;
+    const speed = 10 + pr() * 36;
+    const life = 0.6 + pr() * 1.8;
+    if (age > life) continue;
+    const u = age / life;
+    const px = Math.round(tipX + Math.cos(ang) * speed * age);
+    const py = Math.round(tipY + Math.sin(ang) * speed * age * 0.85 + age * age * 20);
+    const col = u < 0.18 ? 23 : u < 0.4 ? 17 : u < 0.65 ? 16 : (pr() > 0.5 ? 21 : 15);
+    set(px, py, col);
+    if (u < 0.4) {
+      set(px + 1, py, col);
+      set(px, py - 1, 23);
+      set(px - 1, py, 17);
+    }
+  }
+  if (age < 0.45) {
+    const r = 3 + age * 36;
+    const rr = r * r, r2 = (r - 1.6) * (r - 1.6);
+    for (let y = -r - 1; y <= r + 1; y++) {
+      for (let x = -r - 1; x <= r + 1; x++) {
+        const d = x * x + y * y;
+        if (d <= rr && d >= r2) set(Math.round(tipX + x), Math.round(tipY + y), age < 0.12 ? 23 : 17);
+      }
+    }
+  }
+}
+
+function chargeAura(t, chargeT0, chargeT1, tipX, tipY) {
+  if (t < chargeT0 || t > chargeT1 + 0.15) return;
+  const u = clamp((t - chargeT0) / Math.max(0.01, chargeT1 - chargeT0), 0, 1);
+  const pulse = 0.5 + 0.5 * Math.sin(t * 18);
+  const rMax = 1 + u * 7 * pulse;
+  for (let r = 1; r <= rMax; r++) {
+    const col = r < 2 ? 23 : r < 4 ? 17 : 16;
+    const steps = (r * 8) | 0;
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2 + t * 3;
+      set(Math.round(tipX + Math.cos(a) * r), Math.round(tipY + Math.sin(a) * r), col);
+    }
+  }
+  // rising sparks snapped to grid
+  const pr = mulberry32((SEED ^ 0xabc) >>> 0);
+  for (let i = 0; i < 10; i++) {
+    const sx = Math.round(tipX + (pr() - 0.5) * 6);
+    const sy = Math.round(tipY - (t * 14 + i * 3 + pr() * 8) % 12);
+    if (sy < tipY && sy > tipY - 14) set(sx, sy, pr() > 0.5 ? 17 : 23);
+  }
+}
+
+function shakeAmp(t) {
+  let a = 0;
+  for (const ct of [7.5, 23]) {
+    const age = t - ct;
+    if (age >= 0 && age < 0.55) a = Math.max(a, (1 - age / 0.55) * 3.2);
+  }
+  return a;
+}
+
+function wizardState(t) {
+  // idle bob → charge → cast → recover → walk → charge → cast → title
+  let phase = 'idle';
+  let bob = Math.sin(t * 3.2) * 0.6;
+  let arm = 0;
+  let walk = 0;
+  let wx = 48;
+  let facing = 1;
+
+  if (t < 4) {
+    phase = 'idle';
+    bob = Math.sin(t * 3.2) * 0.8;
+  } else if (t < 7.5) {
+    phase = 'charge';
+    arm = smoothstep(4, 6.5, t);
+    bob = Math.sin(t * 5) * 0.35;
+  } else if (t < 10) {
+    phase = 'cast';
+    arm = 1 - smoothstep(7.5, 8.2, t) * 0.35;
+    bob = Math.sin(t * 20) * 0.4 * (1 - smoothstep(7.5, 9, t));
+  } else if (t < 14) {
+    phase = 'recover';
+    arm = lerp(0.65, 0.1, smoothstep(10, 13, t));
+    bob = Math.sin(t * 2.8) * 0.55;
+  } else if (t < 20) {
+    phase = 'walk';
+    const u = smoothstep(14, 19.5, t);
+    wx = lerp(48, 108, u);
+    walk = (t - 14) * 9;
+    bob = Math.abs(Math.sin(walk)) * 0.9;
+    arm = 0.15;
+  } else if (t < 23) {
+    phase = 'charge2';
+    wx = 108;
+    arm = smoothstep(20, 22.2, t);
+    bob = Math.sin(t * 5.5) * 0.3;
+  } else if (t < 26.5) {
+    phase = 'cast2';
+    wx = 108;
+    arm = 1 - smoothstep(23, 23.8, t) * 0.3;
+    bob = Math.sin(t * 22) * 0.45 * (1 - smoothstep(23, 25, t));
+  } else {
+    phase = 'title';
+    wx = 108;
+    arm = 0.2;
+    bob = Math.sin(t * 2.5) * 0.4;
+  }
+  return { phase, bob, arm, walk, wx, facing, wy: 78 };
+}
+
+function drawScene(t) {
+  clear(1);
+
+  // sky gradient bands
+  for (let y = 0; y < 58; y++) {
+    const u = y / 58;
+    const c = u < 0.35 ? 0 : u < 0.55 ? 1 : u < 0.75 ? 2 : 3;
+    fillRect(0, y, BW, 1, c);
+  }
+
+  // moon
+  circ(128, 18, 9, 6);
+  circ(128, 18, 7, 7);
+  circ(131, 16, 3, 5); // crater shadow
+  circ(125, 20, 2, 5);
+
+  // stars
+  for (const s of stars) {
+    const tw = 0.5 + 0.5 * Math.sin(t * 2.4 + s.tw);
+    if (tw > 0.25) set(s.x, s.y, s.c);
+  }
+
+  // distant hills
+  for (let x = 0; x < BW; x++) {
+    const h1 = 52 + ((Math.sin(x * 0.07) * 4 + Math.sin(x * 0.19 + 1) * 2) | 0);
+    for (let y = h1; y < 62; y++) set(x, y, 2);
+    const h2 = 56 + ((Math.sin(x * 0.11 + 2) * 3) | 0);
+    for (let y = h2; y < 64; y++) set(x, y, 8);
+  }
+
+  // ground
+  fillRect(0, 64, BW, BH - 64, 9);
+  for (let x = 0; x < BW; x++) {
+    const v = groundVar[x];
+    set(x, 64, 10 + (v % 2));
+    if (v === 2) set(x, 65, 11);
+    // speckles
+    if ((x + ((t * 2) | 0)) % 17 === 0) set(x, 70 + (v % 5), 8);
+  }
+
+  const st = wizardState(t);
+  const tip = drawWizard(st.wx, st.wy, st.bob, st.arm, st.walk, st.facing);
+
+  // ambient fireflies keep idle/recover alive
+  if (st.phase === 'idle' || st.phase === 'recover' || st.phase === 'walk' || st.phase === 'title') {
+    ambientSparks(t, st.wx, st.wy);
+  }
+  // soft staff idle glow
+  if (st.phase === 'idle' || st.phase === 'recover') {
+    const pulse = 0.5 + 0.5 * Math.sin(t * 6);
+    if (pulse > 0.35) {
+      set(tip.staffX, tip.tipY - 1, 23);
+      set(tip.staffX - 1, tip.tipY, 17);
+      set(tip.staffX + 1, tip.tipY, 17);
+    }
+  }
+
+  // charge auras
+  if (t >= 4 && t < 7.55) chargeAura(t, 4, 7.5, tip.staffX, tip.tipY);
+  if (t >= 20 && t < 23.05) chargeAura(t, 20, 23, tip.staffX, tip.tipY);
+
+  // cast particles
+  emitParticles(t, 7.5, tip.staffX, tip.tipY, 1);
+  emitParticles(t, 23, tip.staffX, tip.tipY, 2);
+
+  // ground flash under cast
+  for (const ct of [7.5, 23]) {
+    const age = t - ct;
+    if (age >= 0 && age < 0.4) {
+      const a = 1 - age / 0.4;
+      const w = Math.round(8 + a * 20);
+      fillRect(tip.staffX - w / 2, 76, w, 2, a > 0.5 ? 17 : 16);
+    }
+  }
+
+  // title card — dark banner, keep scene readable (no checkerboard wash)
+  const titleA = smoothstep(26.5, 27.2, t);
+  if (titleA > 0.01) {
+    fillRect(18, 30, 124, 28, 0);
+    fillRect(20, 32, 120, 24, 1);
+    const label = 'PIXEL WIZARD';
+    const tw = label.length * 6 - 1;
+    const tx = ((BW - tw) / 2) | 0;
+    const ty = 36;
+    drawText(tx + 1, ty + 1, label, 0);
+    drawText(tx, ty, label, titleA > 0.5 ? 23 : 7);
+    drawText(((BW - ('A CODE FILM'.length * 6 - 1)) / 2) | 0, ty + 12, 'A CODE FILM', 16);
+  }
+
+  // open title (short)
+  const open = 1 - smoothstep(0.2, 1.8, t);
+  if (open > 0.02) {
+    fillRect(40, 4, 80, 12, 0);
+    drawText(46, 6, 'PIXEL WIZARD', open > 0.4 ? 7 : 5);
+  }
+}
+
+function blitToScreen(t) {
+  // palette hard clamp → ImageData
+  for (let i = 0, p = 0; i < buf.length; i++, p += 4) {
+    let ci = buf[i] | 0;
+    if (ci < 0) ci = 0;
+    if (ci >= PAL_N) ci = PAL_N - 1;
+    const rgb = PAL[ci];
+    pix[p] = rgb[0];
+    pix[p + 1] = rgb[1];
+    pix[p + 2] = rgb[2];
+    pix[p + 3] = 255;
+  }
+  lctx.putImageData(img, 0, 0);
+
+  const sh = shakeAmp(t);
+  const pr = mulberry32(((t * FPS) | 0) ^ SEED);
+  const ox = sh > 0 ? Math.round((pr() - 0.5) * 2 * sh) * (W / BW) : 0;
+  const oy = sh > 0 ? Math.round((pr() - 0.5) * 2 * sh) * (H / BH) : 0;
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = '#0a0c14';
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(low, 0, 0, BW, BH, ox, oy, W, H);
+}
+
+function drawFrame(t) {
+  t = clamp(t, 0, DUR);
+  drawScene(t);
+  blitToScreen(t);
+}
+
+// --- chiptune-ish score ---
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const CHORDS = {
+  Em: [40, 43, 47],
+  Am: [45, 48, 52],
+  C: [48, 52, 55],
+  G: [43, 47, 50],
+};
+
+function buildScore(ac, T0) {
+  const master = ac.createGain();
+  master.gain.setValueAtTime(0, T0);
+  master.gain.linearRampToValueAtTime(0.75, T0 + 0.4);
+  master.gain.setValueAtTime(0.75, T0 + DUR - 1.5);
+  master.gain.linearRampToValueAtTime(0, T0 + DUR);
+  master.connect(ac.destination);
+  const at = (t) => T0 + Math.max(0, t);
+
+  // square bass pulse on beats
+  function pulseBass(t0, t1, notes, level) {
+    const step = 60 / bpm;
+    for (let t = t0; t < t1; t += step) {
+      const m = notes[((Math.round(t / step)) % notes.length)];
+      const o = ac.createOscillator(); o.type = 'square'; o.frequency.value = mtof(m);
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, at(t));
+      g.gain.linearRampToValueAtTime(level, at(t + 0.01));
+      g.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.22));
+      const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 520;
+      o.connect(f); f.connect(g); g.connect(master);
+      o.start(at(t)); o.stop(at(t + 0.25));
+    }
+  }
+
+  function arpeggio(t0, t1, chord, level) {
+    const step = 60 / bpm / 2;
+    for (let i = 0, t = t0; t < t1; t += step, i++) {
+      const m = chord[i % chord.length] + 12;
+      const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = mtof(m);
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0, at(t));
+      g.gain.linearRampToValueAtTime(level, at(t + 0.01));
+      g.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.18));
+      o.connect(g); g.connect(master);
+      o.start(at(t)); o.stop(at(t + 0.2));
+    }
+  }
+
+  for (const s of STORY.sections) {
+    const ch = CHORDS[s.harmony] || CHORDS.Em;
+    const hot = s.mood === 'burst' || s.mood === 'build';
+    pulseBass(s.t0, s.t1, ch, hot ? 0.08 : 0.05);
+    arpeggio(s.t0, s.t1, ch, hot ? 0.06 : 0.035);
+  }
+
+  function noiseBurst(t, dur, level, fromHz, toHz) {
+    const len = Math.max(1, (ac.sampleRate * dur) | 0);
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * dur * 0.45));
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = 'bandpass';
+    f.frequency.setValueAtTime(fromHz, at(t));
+    f.frequency.exponentialRampToValueAtTime(toHz, at(t + dur));
+    const g = ac.createGain(); g.gain.value = level;
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(at(t));
+  }
+  function impact(t) {
+    const o = ac.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(180, at(t));
+    o.frequency.exponentialRampToValueAtTime(55, at(t + 0.35));
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.28, at(t + 0.008));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.7));
+    o.connect(g); g.connect(master);
+    o.start(at(t)); o.stop(at(t + 0.75));
+    noiseBurst(t, 0.45, 0.22, 900, 280);
+  }
+  function whoosh(t) {
+    noiseBurst(t, 0.55, 0.16, 400, 1800);
+  }
+  function bell(t) {
+    const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = 784;
+    const o2 = ac.createOscillator(); o2.type = 'square'; o2.frequency.value = 1176;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.1, at(t + 0.01));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 1.1));
+    const g2 = ac.createGain(); g2.gain.value = 0.18;
+    o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+    o.start(at(t)); o2.start(at(t)); o.stop(at(t + 1.2)); o2.stop(at(t + 1.2));
+  }
+  function pluck(t) {
+    const o = ac.createOscillator(); o.type = 'square'; o.frequency.value = 523.25;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, at(t));
+    g.gain.linearRampToValueAtTime(0.09, at(t + 0.005));
+    g.gain.exponentialRampToValueAtTime(0.0001, at(t + 0.28));
+    const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1400;
+    o.connect(f); f.connect(g); g.connect(master);
+    o.start(at(t)); o.stop(at(t + 0.3));
+  }
+
+  for (const e of STORY.events) {
+    if (e.kind === 'impact') impact(e.t);
+    else if (e.kind === 'whoosh') whoosh(e.t);
+    else if (e.kind === 'bell') bell(e.t);
+    else if (e.kind === 'pluck') pluck(e.t);
+  }
+}
+
+function encodeWav(audioBuf) {
+  const ch = audioBuf.numberOfChannels, sr = audioBuf.sampleRate, n = audioBuf.length;
+  const ab = new ArrayBuffer(44 + n * ch * 2), dv = new DataView(ab);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true);
+  dv.setUint16(34, 16, true); ws(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = Array.from({ length: ch }, (_, c) => audioBuf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++, o += 2) {
+    const s = Math.max(-1, Math.min(1, chans[c][i]));
+    dv.setInt16(o, s * 32767, true);
+  }
+  const bytes = new Uint8Array(ab);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+drawFrame(0);
+window.FILM = {
+  ready: true,
+  seekPure: true,
+  duration: DUR,
+  fps: FPS,
+  width: W,
+  height: H,
+  storyboard: STORY,
+  canvas,
+  out: canvas,
+  seek(t) { drawFrame(t); },
+  reset() { drawFrame(0); },
+  async renderAudio() {
+    const sr = 48000;
+    const oc = new OfflineAudioContext(2, Math.ceil(sr * DUR), sr);
+    buildScore(oc, 0);
+    return encodeWav(await oc.startRendering());
+  },
+};
+
+const params = new URLSearchParams(location.search);
+if (params.has('render')) {
+  document.body.classList.add('render');
+} else {
+  const btn = document.getElementById('play');
+  const clock = document.getElementById('clock');
+  let ac = null, T0 = 0, playing = false;
+  function loop() {
+    if (!playing) return;
+    const t = ac.currentTime - T0;
+    if (t >= DUR) { playing = false; btn.textContent = 'Replay'; drawFrame(DUR); return; }
+    drawFrame(t);
+    clock.textContent = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+    requestAnimationFrame(loop);
+  }
+  btn.addEventListener('click', async () => {
+    if (ac) await ac.close();
+    ac = new AudioContext();
+    T0 = ac.currentTime + 0.12;
+    buildScore(ac, T0);
+    playing = true; btn.textContent = 'Restart';
+    requestAnimationFrame(loop);
+  });
+}
+})();
+</script>
+</body>
+</html>

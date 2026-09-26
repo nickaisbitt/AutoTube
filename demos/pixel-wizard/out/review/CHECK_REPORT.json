@@ -1,0 +1,44 @@
+{
+  "id": "pixel-wizard",
+  "title": "Pixel Wizard",
+  "checkedAt": "2026-09-26T00:58:15.430Z",
+  "pass": true,
+  "failures": [],
+  "warnings": [],
+  "stats": {
+    "zeroAssets": true,
+    "beatMisses": 0,
+    "sample": {
+      "center": [
+        42,
+        53,
+        88
+      ],
+      "corners": [
+        [
+          10,
+          12,
+          20
+        ],
+        [
+          10,
+          12,
+          20
+        ],
+        [
+          36,
+          62,
+          46
+        ],
+        [
+          36,
+          62,
+          46
+        ]
+      ],
+      "w": 1920,
+      "h": 1080
+    },
+    "seekPure": true
+  }
+}

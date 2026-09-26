@@ -1,0 +1,289 @@
+{
+  "id": "pixel-wizard",
+  "title": "Pixel Wizard",
+  "logline": "A 24-color wizard charges a staff twice under a chunky moon — every spark snaps to the pixel grid.",
+  "technique": "pixel-buffer-nearest-neighbor",
+  "duration": 30,
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "seed": 465469,
+  "tempo": {
+    "bpm": 120,
+    "beatsPerBar": 4
+  },
+  "palette": {
+    "void": "#0a0c14",
+    "night": "#14182a",
+    "moon": "#c8d4e8",
+    "moss": "#2d4a2e",
+    "robe": "#1c484e",
+    "amber": "#e8b858",
+    "spark": "#f4f0e4"
+  },
+  "sections": [
+    {
+      "id": "idle",
+      "t0": 0,
+      "t1": 4,
+      "mood": "calm",
+      "harmony": "Em"
+    },
+    {
+      "id": "charge",
+      "t0": 4,
+      "t1": 7.5,
+      "mood": "build",
+      "harmony": "Am"
+    },
+    {
+      "id": "cast1",
+      "t0": 7.5,
+      "t1": 10,
+      "mood": "burst",
+      "harmony": "C"
+    },
+    {
+      "id": "recover",
+      "t0": 10,
+      "t1": 14,
+      "mood": "settle",
+      "harmony": "Em"
+    },
+    {
+      "id": "walk",
+      "t0": 14,
+      "t1": 20,
+      "mood": "travel",
+      "harmony": "G"
+    },
+    {
+      "id": "charge2",
+      "t0": 20,
+      "t1": 23,
+      "mood": "build",
+      "harmony": "Am"
+    },
+    {
+      "id": "cast2",
+      "t0": 23,
+      "t1": 26.5,
+      "mood": "burst",
+      "harmony": "C"
+    },
+    {
+      "id": "title",
+      "t0": 26.5,
+      "t1": 30,
+      "mood": "resolve",
+      "harmony": "Em"
+    }
+  ],
+  "shots": [
+    {
+      "id": "s0",
+      "t0": 0,
+      "t1": 4,
+      "beat": 0,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+      },
+      "subject": "wizard",
+      "action": "idle bob sweep sparks",
+      "caption": ""
+    },
+    {
+      "id": "s1",
+      "t0": 4,
+      "t1": 7.5,
+      "beat": 4,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1.05
+      },
+      "subject": "staff",
+      "action": "charge glow assemble",
+      "caption": ""
+    },
+    {
+      "id": "s2",
+      "t0": 7.5,
+      "t1": 10,
+      "beat": 7.5,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1.1
+      },
+      "subject": "spell",
+      "action": "cast burst shake dissolve",
+      "caption": ""
+    },
+    {
+      "id": "s3",
+      "t0": 10,
+      "t1": 14,
+      "beat": 10,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+      },
+      "subject": "wizard",
+      "action": "recovery settle sweep",
+      "caption": ""
+    },
+    {
+      "id": "s4",
+      "t0": 14,
+      "t1": 20,
+      "beat": 14,
+      "camera": {
+        "x": 0.08,
+        "y": 0,
+        "zoom": 1
+      },
+      "subject": "wizard",
+      "action": "walk pan across",
+      "caption": ""
+    },
+    {
+      "id": "s5",
+      "t0": 20,
+      "t1": 23,
+      "beat": 20,
+      "camera": {
+        "x": 0.12,
+        "y": 0,
+        "zoom": 1.05
+      },
+      "subject": "staff",
+      "action": "charge again assemble",
+      "caption": ""
+    },
+    {
+      "id": "s6",
+      "t0": 23,
+      "t1": 26.5,
+      "beat": 23,
+      "camera": {
+        "x": 0.12,
+        "y": 0,
+        "zoom": 1.12
+      },
+      "subject": "spell",
+      "action": "cast burst dissolve shake",
+      "caption": ""
+    },
+    {
+      "id": "s7",
+      "t0": 26.5,
+      "t1": 30,
+      "beat": 26.5,
+      "camera": {
+        "x": 0,
+        "y": 0,
+        "zoom": 1
+      },
+      "subject": "title",
+      "action": "end card roll",
+      "caption": "PIXEL WIZARD"
+    }
+  ],
+  "events": [
+    {
+      "t": 1.5,
+      "kind": "visual",
+      "id": "idle-spark"
+    },
+    {
+      "t": 3,
+      "kind": "pluck",
+      "id": "idle-tick"
+    },
+    {
+      "t": 4,
+      "kind": "pluck",
+      "id": "charge-start"
+    },
+    {
+      "t": 5.5,
+      "kind": "bell",
+      "id": "charge-hum"
+    },
+    {
+      "t": 7.5,
+      "kind": "impact",
+      "id": "cast-1"
+    },
+    {
+      "t": 7.5,
+      "kind": "whoosh",
+      "id": "cast-1-whoosh"
+    },
+    {
+      "t": 8.5,
+      "kind": "visual",
+      "id": "cast-1-trail"
+    },
+    {
+      "t": 10,
+      "kind": "pluck",
+      "id": "recover"
+    },
+    {
+      "t": 12,
+      "kind": "visual",
+      "id": "recover-spark"
+    },
+    {
+      "t": 14,
+      "kind": "whoosh",
+      "id": "walk-start"
+    },
+    {
+      "t": 17,
+      "kind": "pluck",
+      "id": "walk-mid"
+    },
+    {
+      "t": 20,
+      "kind": "pluck",
+      "id": "charge2-start"
+    },
+    {
+      "t": 21.5,
+      "kind": "bell",
+      "id": "charge2-hum"
+    },
+    {
+      "t": 23,
+      "kind": "impact",
+      "id": "cast-2"
+    },
+    {
+      "t": 23,
+      "kind": "whoosh",
+      "id": "cast-2-whoosh"
+    },
+    {
+      "t": 24.5,
+      "kind": "visual",
+      "id": "cast-2-trail"
+    },
+    {
+      "t": 26.5,
+      "kind": "bell",
+      "id": "title"
+    }
+  ],
+  "acceptance": {
+    "maxDeadAirSec": 1.5,
+    "beatToleranceSec": 0.04,
+    "thumbnailReadable": true,
+    "zeroExternalAssets": true
+  }
+}

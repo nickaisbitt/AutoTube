@@ -1,0 +1,10 @@
+[build]
+builder = "RAILPACK"
+# Railpack ignores nixpacks.toml; shrink deps after vite so image export does not hang
+buildCommand = "npm run build:railway"
+
+[deploy]
+startCommand = "npx tsx server.mjs"
+healthcheckPath = "/api/health"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10

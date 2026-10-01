@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Media Source Test — Top 5 per Source</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #eee; }
+    .source { margin: 20px 0; padding: 15px; background: #222; border-radius: 6px; border-left: 4px solid #333; }
+    .source.pass { border-color: #4caf50; }
+    .source.fail { border-color: #f44336; }
+    .source.skip { border-color: #ff9800; }
+    .source.empty { border-color: #78909c; }
+    .header { font-size: 1.1em; font-weight: bold; margin-bottom: 10px; display: flex; justify-content: space-between; }
+    .header .name { }
+    .header .meta { color: #90a4ae; font-weight: normal; }
+    .asset { margin: 8px 0; padding: 8px; background: #2a2a2a; border-radius: 4px; display: flex; gap: 12px; }
+    .asset-num { color: #64b5f6; font-weight: bold; min-width: 20px; }
+    .asset-info { flex: 1; }
+    .asset-url { color: #81c784; word-break: break-all; font-size: 0.85em; }
+    .asset-meta { color: #b0bec5; font-size: 0.8em; margin-top: 4px; }
+    .asset-meta span { margin-right: 12px; }
+    .asset-alt { color: #ffcc80; font-size: 0.8em; margin-top: 2px; font-style: italic; }
+    .error { color: #ef5350; margin-top: 8px; }
+    .empty-msg { color: #78909c; font-style: italic; }
+    h1 { color: #64b5f6; }
+    .summary { font-size: 1.2em; margin: 20px 0; padding: 15px; background: #2a2a2a; border-radius: 4px; }
+    .thumb { width: 120px; height: 68px; object-fit: cover; border-radius: 3px; background: #333; flex-shrink: 0; }
+    .thumb-fail { width: 120px; height: 68px; background: #3a2020; border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #ef5350; font-size: 0.7em; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+  <h1>Media Source Test — Top 5 Assets per Source</h1>
+  <div id="status">Running tests...</div>
+  <div id="results"></div>
+  
+  <script type="module">
+    import { FlickrProvider } from '/src/services/sourceProviders/flickr.ts';
+    import { GovPressProvider } from '/src/services/sourceProviders/govPress.ts';
+    import { PixabayProvider } from '/src/services/sourceProviders/pixabay.ts';
+    import { PexelsProvider } from '/src/services/sourceProviders/pexels.ts';
+    import { NasaProvider } from '/src/services/sourceProviders/nasa.ts';
+    import { VimeoProvider } from '/src/services/sourceProviders/vimeo.ts';
+    import { DailymotionProvider } from '/src/services/sourceProviders/dailymotion.ts';
+    import { GiphyProvider } from '/src/services/sourceProviders/giphy.ts';
+    import { UnsplashProvider } from '/src/services/sourceProviders/unsplash.ts';
+    import { ArchiveOrgProvider } from '/src/services/sourceProviders/archiveOrg.ts';
+    import { HybridScraperProvider } from '/src/services/sourceProviders/hybridScraper.ts';
+    import { PexelsVideoProvider } from '/src/services/sourceProviders/pexelsVideo.ts';
+    import { PixabayVideoProvider } from '/src/services/sourceProviders/pixabayVideo.ts';
+    import { DeepHarvestProvider } from '/src/services/sourceProviders/deepHarvest.ts';
+    
+    import { searchDDGLocal, searchDDGVideos, searchWikimedia, searchBingImages, searchGoogleImages, searchYandexImages, searchDuckDuckGoImages, searchStaticMap, searchBingVideos, searchGoogleVideos } from '/src/services/media.ts';
+
+    const TEST_QUERY = 'Silicon Valley Bank collapse';
+    const allResults = [];
+
+    async function testSource(name, fn, requiresKey = false) {
+      const start = Date.now();
+      if (requiresKey) {
+        allResults.push({ name, status: 'skip', count: 0, duration: 0, error: 'Requires API key (not configured)', items: [] });
+        return;
+      }
+      // Each source gets its own fresh 35s signal (some scrapers are slow)
+      const signal = AbortSignal.timeout(35_000);
+      const config = { signal };
+      try {
+        const data = await fn(signal, config);
+        const items = Array.isArray(data) ? data : [];
+        allResults.push({
+          name,
+          status: items.length > 0 ? 'pass' : 'empty',
+          count: items.length,
+          duration: Date.now() - start,
+          items: items.slice(0, 5).map(c => ({
+            url: c.url,
+            thumbnailUrl: c.thumbnailUrl,
+            alt: c.alt,
+            source: c.source,
+            width: c.width,
+            height: c.height,
+            type: c.type,
+            baseScore: c.baseScore,
+          })),
+        });
+      } catch (err) {
+        allResults.push({ name, status: 'fail', count: 0, duration: Date.now() - start, error: err.message, items: [] });
+      }
+    }
+
+    // Adapter-wrapped functions (pass signal directly)
+    await testSource('DDG Local', (signal) => searchDDGLocal(TEST_QUERY, signal));
+    await testSource('DDG Videos', (signal) => searchDDGVideos(TEST_QUERY, signal));
+    await testSource('Wikimedia', (signal) => searchWikimedia(TEST_QUERY, signal));
+    await testSource('Bing Images', (signal) => searchBingImages(TEST_QUERY, signal));
+    await testSource('Google Images', (signal) => searchGoogleImages(TEST_QUERY, signal));
+    await testSource('Startpage Images', (signal) => searchYandexImages(TEST_QUERY, signal));
+    await testSource('DDG Images', (signal) => searchDuckDuckGoImages(TEST_QUERY, signal));
+    await testSource('Static Map', (signal) => searchStaticMap('Wall Street New York', signal));
+    await testSource('Bing Videos', (signal) => searchBingVideos(TEST_QUERY, signal));
+    await testSource('Google Videos', (signal) => searchGoogleVideos(TEST_QUERY, signal));
+
+    // Provider classes (pass config object)
+    await testSource('Flickr', (_, config) => new FlickrProvider().search(TEST_QUERY, config));
+    await testSource('GovPress', (_, config) => new GovPressProvider().search(TEST_QUERY, config));
+    await testSource('Pixabay', (_, config) => new PixabayProvider().search(TEST_QUERY, config), true);
+    await testSource('Pexels', (_, config) => new PexelsProvider().search(TEST_QUERY, config), true);
+    await testSource('NASA', (_, config) => new NasaProvider().search(TEST_QUERY, config));
+    await testSource('Vimeo', (_, config) => new VimeoProvider().search(TEST_QUERY, config));
+    await testSource('Dailymotion', (_, config) => new DailymotionProvider().search(TEST_QUERY, config));
+    await testSource('Giphy', (_, config) => new GiphyProvider().search(TEST_QUERY, config));
+    await testSource('Unsplash', (_, config) => new UnsplashProvider().search(TEST_QUERY, config));
+    await testSource('Archive.org', (_, config) => new ArchiveOrgProvider().search(TEST_QUERY, config));
+    await testSource('HybridScraper', (_, config) => new HybridScraperProvider().search(TEST_QUERY, config));
+    await testSource('Pexels Video', (_, config) => new PexelsVideoProvider().search(TEST_QUERY, config), true);
+    await testSource('Pixabay Video', (_, config) => new PixabayVideoProvider().search(TEST_QUERY, config), true);
+    await testSource('Deep Harvest', (_, config) => new DeepHarvestProvider().search(TEST_QUERY, config));
+
+    // Render
+    const resultsDiv = document.getElementById('results');
+    const statusDiv = document.getElementById('status');
+    
+    const passed = allResults.filter(r => r.status === 'pass').length;
+    const empty = allResults.filter(r => r.status === 'empty').length;
+    const failed = allResults.filter(r => r.status === 'fail').length;
+    const skipped = allResults.filter(r => r.status === 'skip').length;
+    const totalItems = allResults.reduce((s, r) => s + r.count, 0);
+    
+    statusDiv.innerHTML = `<div class="summary">
+      ✓ With results: <strong>${passed}</strong> | 
+      ⊘ Empty (0 items): <strong>${empty}</strong> | 
+      ✗ Failed: <strong>${failed}</strong> | 
+      ⊘ No API key: <strong>${skipped}</strong> | 
+      Total items: <strong>${totalItems}</strong>
+    </div>`;
+
+    for (const r of allResults) {
+      const div = document.createElement('div');
+      div.className = `source ${r.status}`;
+      
+      let html = `<div class="header">
+        <span class="name">${r.status === 'pass' ? '✓' : r.status === 'empty' ? '⊘' : r.status === 'skip' ? '⊘' : '✗'} ${r.name}</span>
+        <span class="meta">${r.count} items | ${r.duration}ms</span>
+      </div>`;
+      
+      if (r.error) {
+        html += `<div class="error">${r.error}</div>`;
+      } else if (r.items.length === 0) {
+        html += `<div class="empty-msg">No results returned for "${TEST_QUERY}"</div>`;
+      } else {
+        for (let i = 0; i < r.items.length; i++) {
+          const item = r.items[i];
+          const thumbUrl = item.thumbnailUrl || item.url;
+          const proxyThumb = thumbUrl ? `/api/proxy-image?url=${encodeURIComponent(thumbUrl)}` : null;
+          
+          html += `<div class="asset">`;
+          html += `<span class="asset-num">#${i + 1}</span>`;
+          
+          if (proxyThumb && item.type !== 'video') {
+            html += `<img class="thumb" src="${proxyThumb}" onerror="this.outerHTML='<div class=thumb-fail>LOAD FAIL</div>'" loading="lazy" />`;
+          } else {
+            html += `<div class="thumb" style="display:flex;align-items:center;justify-content:center;color:#64b5f6;font-size:0.7em">${item.type || 'img'}</div>`;
+          }
+          
+          html += `<div class="asset-info">`;
+          html += `<div class="asset-url">${item.url?.substring(0, 120) || 'N/A'}</div>`;
+          html += `<div class="asset-meta">`;
+          if (item.width && item.height) html += `<span>${item.width}x${item.height}</span>`;
+          if (item.baseScore) html += `<span>score: ${item.baseScore}</span>`;
+          if (item.type) html += `<span>type: ${item.type}</span>`;
+          if (item.source) html += `<span>src: ${item.source}</span>`;
+          html += `</div>`;
+          if (item.alt) html += `<div class="asset-alt">${item.alt.substring(0, 150)}</div>`;
+          html += `</div></div>`;
+        }
+      }
+      
+      div.innerHTML = html;
+      resultsDiv.appendChild(div);
+    }
+  </script>
+</body>
+</html>

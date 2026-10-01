@@ -1,0 +1,84 @@
+{
+  "id": "test-project-001",
+  "title": "Test Video - All Features",
+  "topic": "Artificial Intelligence",
+  "style": "documentary",
+  "script": [
+    {
+      "id": "seg1",
+      "type": "intro",
+      "title": "Introduction to AI",
+      "narration": "Artificial intelligence is transforming our world. According to OpenAI, this technology will reshape every industry.",
+      "duration": 8,
+      "pacingScore": 4
+    },
+    {
+      "id": "seg2",
+      "type": "section",
+      "title": "Machine Learning Breakthroughs",
+      "narration": "Machine learning has achieved remarkable breakthroughs. Dr. Jane Smith from Stanford University leads research in neural networks.",
+      "duration": 10,
+      "pacingScore": 3
+    },
+    {
+      "id": "seg3",
+      "type": "section",
+      "title": "Future Applications",
+      "narration": "The future of AI includes autonomous vehicles, personalized medicine, and smart cities. These innovations will impact billions of people worldwide.",
+      "duration": 10,
+      "pacingScore": 5
+    },
+    {
+      "id": "seg4",
+      "type": "outro",
+      "title": "Conclusion",
+      "narration": "AI represents one of the most significant technological advances in human history. The journey has just begun.",
+      "duration": 8,
+      "pacingScore": 2
+    }
+  ],
+  "media": [
+    {
+      "id": "media1",
+      "url": "https://picsum.photos/seed/ai1/1920/1080",
+      "type": "image",
+      "alt": "AI technology concept",
+      "source": "Picsum",
+      "score": 85,
+      "segmentId": "seg1"
+    },
+    {
+      "id": "media2",
+      "url": "https://picsum.photos/seed/ml2/1920/1080",
+      "type": "image",
+      "alt": "Machine learning visualization",
+      "source": "Picsum",
+      "score": 90,
+      "segmentId": "seg2"
+    },
+    {
+      "id": "media3",
+      "url": "https://picsum.photos/seed/future3/1920/1080",
+      "type": "image",
+      "alt": "Future technology",
+      "source": "Picsum",
+      "score": 88,
+      "segmentId": "seg3"
+    },
+    {
+      "id": "media4",
+      "url": "https://picsum.photos/seed/conclusion4/1920/1080",
+      "type": "image",
+      "alt": "Conclusion concept",
+      "source": "Picsum",
+      "score": 82,
+      "segmentId": "seg4"
+    }
+  ],
+  "exportSettings": {
+    "resolution": "1080p",
+    "aspectRatio": "16:9",
+    "quality": "medium",
+    "backgroundMusic": true
+  }
+}

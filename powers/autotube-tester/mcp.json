@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "autotube-tester": {
+      "command": "node",
+      "args": ["/Users/nickaisbitt/automated-youtube-video-generator (1)/powers/autotube-tester/src/server.mjs"],
+      "env": {}
+    }
+  }
+}

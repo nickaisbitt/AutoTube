@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Brand: Safety Orange ── */
+  --color-brand-50: #fff7ed;
+  --color-brand-100: #ffedd5;
+  --color-brand-200: #fed7aa;
+  --color-brand-300: #fdba74;
+  --color-brand-400: #ff6b00;
+  --color-brand-500: #ff5500;
+  --color-brand-600: #ea580c;
+  --color-brand-700: #c2410c;
+  --color-brand-800: #9a3412;
+  --color-brand-900: #7c2d12;
+
+  /* ── Accent ── */
+  --color-accent-400: #ff6b00;
+  --color-accent-500: #ff5500;
+  --color-accent-600: #ea580c;
+
+  /* ── Surface: True blacks, whites, hard grays ── */
+  --color-surface-50: #ffffff;
+  --color-surface-100: #fafafa;
+  --color-surface-200: #e5e5e5;
+  --color-surface-300: #a3a3a3;
+  --color-surface-400: #737373;
+  --color-surface-500: #525252;
+  --color-surface-600: #404040;
+  --color-surface-700: #2a2a2a;
+  --color-surface-800: #1a1a1a;
+  --color-surface-900: #0d0d0d;
+  --color-surface-950: #000000;
+
+  /* ── Hard Shadows ── */
+  --shadow-hard: 4px 4px 0px #ff5500;
+  --shadow-hard-sm: 2px 2px 0px #ff5500;
+}
+
+/* ═══════════════════════════════════════════════════
+   TASK 1–3: GLOBAL INDUSTRIAL OVERRIDES
+   Kill all rounded corners, transitions, soft shadows
+   ═══════════════════════════════════════════════════ */
+
+/* Zero out ALL border-radius variants */
+.rounded-sm, .rounded, .rounded-md, .rounded-lg,
+.rounded-xl, .rounded-2xl, .rounded-3xl, .rounded-full {
+  border-radius: 0px !important;
+}
+
+/* Kill ALL transitions globally — instant mechanical feel */
+*, *::before, *::after {
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+/* Exception: allow spinner animations */
+.animate-spin {
+  transition-duration: 0s !important;
+  animation: spin 1s linear infinite;
+}
+
+/* ═══════════════════════════════════════════════════
+   TASK 2: Override soft shadows → hard or none
+   ═══════════════════════════════════════════════════ */
+.shadow-sm { box-shadow: 2px 2px 0px rgba(255, 85, 0, 0.3) !important; }
+.shadow-md, .shadow { box-shadow: 3px 3px 0px rgba(255, 85, 0, 0.3) !important; }
+
+/* Task 2b: Dedicated hard-shadow utilities */
+.shadow-hard { box-shadow: 4px 4px 0px #ff5500 !important; }
+.shadow-hard-sm { box-shadow: 2px 2px 0px #ff5500 !important; }
+
+.shadow-lg { box-shadow: 4px 4px 0px #ff5500 !important; }
+.shadow-xl { box-shadow: 6px 6px 0px #ff5500 !important; }
+.shadow-2xl { box-shadow: 8px 8px 0px #ff5500 !important; }
+
+/* ═══════════════════════════════════════════════════
+   TASK 4: Kill hover transforms (scale, translate)
+   ═══════════════════════════════════════════════════ */
+.hover\:scale-105:hover,
+.hover\:-translate-y-0\.5:hover,
+.hover\:-translate-y-1:hover,
+.hover\:translate-x-0\.5:hover,
+.group-hover\:scale-105:hover,
+.group:hover .group-hover\:scale-105,
+.group:hover .group-hover\:translate-x-0\.5,
+.group:hover .group-hover\:-translate-y-0\.5 {
+  transform: none !important;
+}
+
+/* ═══════════════════════════════════════════════════
+   TASK 5: Kill ALL backdrop blur
+   ═══════════════════════════════════════════════════ */
+.backdrop-blur-sm, .backdrop-blur, .backdrop-blur-md,
+.backdrop-blur-lg, .backdrop-blur-xl, .backdrop-blur-2xl,
+.backdrop-blur-3xl, [class*="backdrop-blur"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ═══════════════════════════════════════════════════
+   TASK 6: Solid rings
+   ═══════════════════════════════════════════════════ */
+.ring-1 { box-shadow: inset 0 0 0 2px #ff5500 !important; }
+.ring-2 { box-shadow: inset 0 0 0 2px #ff5500 !important; }
+
+/* ═══════════════════════════════════════════════════
+   TASK 7: Replace animate-ping with hard blink
+   ═══════════════════════════════════════════════════ */
+@keyframes industrial-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.animate-ping {
+  animation: industrial-blink 1s step-end infinite !important;
+  transform: none !important;
+}
+
+/* ═══════════════════════════════════════════════════
+   GRADIENT OVERRIDES — flat brand color
+   Excludes .preview-overlay elements which need real gradients
+   ═══════════════════════════════════════════════════ */
+.bg-gradient-to-br:not(.preview-overlay), .bg-gradient-to-r:not(.preview-overlay), .bg-gradient-to-l:not(.preview-overlay),
+.bg-gradient-to-t:not(.preview-overlay), .bg-gradient-to-b:not(.preview-overlay), .bg-gradient-to-tr:not(.preview-overlay),
+.bg-gradient-to-tl:not(.preview-overlay), .bg-gradient-to-bl:not(.preview-overlay) {
+  background: #ff5500 !important;
+  background-image: none !important;
+}

@@ -4,7 +4,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync, unlinkSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { isYouTubeExportMode, captionMetrics, hookFontPx } from './youtubeProfile.mjs';
+import { isYouTubeExportMode, captionMetrics, hookFontPx, captionsEnabled } from './youtubeProfile.mjs';
 
 function escapeDrawtext(text) {
   return String(text || '')
@@ -175,7 +175,7 @@ export function applyFfmpegYoutubeOverlays(videoPath, project, wordTimestampCach
   const results = {};
   if (!isYouTubeExportMode(project)) return results;
 
-  if (wordTimestampCache?.size) {
+  if (captionsEnabled() && wordTimestampCache?.size) {
     const caps = overlayKaraokeCaptions(videoPath, wordTimestampCache);
     results.captions = caps;
     if (caps.ok) {

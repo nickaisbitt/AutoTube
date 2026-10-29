@@ -6,6 +6,7 @@
 import { writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
+import { tmpdir } from 'os';
 import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../server-render/pipelineReliability.mjs';
 
 const ROOT = process.cwd();
@@ -56,30 +57,120 @@ const project = {
       segmentId: 'seg-intro',
       type: 'image',
       url: 'https://picsum.photos/id/10/1920/1080',
-      alt: 'Doctor using digital tablet',
+      alt: 'Researcher reviewing evidence',
       source: 'unsplash',
-      concept: 'healthcare technology',
+      concept: 'research evidence',
       score: 200,
     },
     {
       id: 'm2',
-      segmentId: 'seg-threat',
+      segmentId: 'seg-intro',
       type: 'image',
-      url: 'https://picsum.photos/id/11/1920/1080',
-      alt: 'Cybersecurity concept',
+      url: 'https://picsum.photos/id/12/1920/1080',
+      alt: 'Data archive and documents',
       source: 'unsplash',
-      concept: 'cybersecurity',
-      score: 190,
+      concept: 'data archive',
+      score: 198,
     },
     {
       id: 'm3',
+      segmentId: 'seg-intro',
+      type: 'image',
+      url: 'https://picsum.photos/id/14/1920/1080',
+      alt: 'Technology infrastructure',
+      source: 'unsplash',
+      concept: 'technology infrastructure',
+      score: 196,
+    },
+    {
+      id: 'm4',
+      segmentId: 'seg-intro',
+      type: 'image',
+      url: 'https://picsum.photos/id/16/1920/1080',
+      alt: 'Public records and systems',
+      source: 'unsplash',
+      concept: 'public records',
+      score: 194,
+    },
+    {
+      id: 'm5',
+      segmentId: 'seg-threat',
+      type: 'image',
+      url: 'https://picsum.photos/id/11/1920/1080',
+      alt: 'Security operations center',
+      source: 'unsplash',
+      concept: 'security operations',
+      score: 190,
+    },
+    {
+      id: 'm6',
+      segmentId: 'seg-threat',
+      type: 'image',
+      url: 'https://picsum.photos/id/18/1920/1080',
+      alt: 'Network infrastructure',
+      source: 'unsplash',
+      concept: 'network infrastructure',
+      score: 188,
+    },
+    {
+      id: 'm7',
+      segmentId: 'seg-threat',
+      type: 'image',
+      url: 'https://picsum.photos/id/22/1920/1080',
+      alt: 'System monitoring screens',
+      source: 'unsplash',
+      concept: 'system monitoring',
+      score: 186,
+    },
+    {
+      id: 'm8',
+      segmentId: 'seg-threat',
+      type: 'image',
+      url: 'https://picsum.photos/id/24/1920/1080',
+      alt: 'Digital risk analysis',
+      source: 'unsplash',
+      concept: 'risk analysis',
+      score: 184,
+    },
+    {
+      id: 'm9',
       segmentId: 'seg-outro',
       type: 'image',
       url: 'https://picsum.photos/id/20/1920/1080',
-      alt: 'Patient consultation',
+      alt: 'People reviewing a plan',
       source: 'unsplash',
-      concept: 'patient care',
+      concept: 'action plan',
       score: 185,
+    },
+    {
+      id: 'm10',
+      segmentId: 'seg-outro',
+      type: 'image',
+      url: 'https://picsum.photos/id/26/1920/1080',
+      alt: 'Checklist and decision making',
+      source: 'unsplash',
+      concept: 'checklist',
+      score: 183,
+    },
+    {
+      id: 'm11',
+      segmentId: 'seg-outro',
+      type: 'image',
+      url: 'https://picsum.photos/id/28/1920/1080',
+      alt: 'Secure workspace',
+      source: 'unsplash',
+      concept: 'secure workspace',
+      score: 181,
+    },
+    {
+      id: 'm12',
+      segmentId: 'seg-outro',
+      type: 'image',
+      url: 'https://picsum.photos/id/30/1920/1080',
+      alt: 'Technology safeguards',
+      source: 'unsplash',
+      concept: 'technology safeguards',
+      score: 179,
     },
   ],
   narration: [],
@@ -92,6 +183,41 @@ const project = {
     musicPreset: 'ambient',
   },
 };
+
+function prepareLocalFixtureMedia() {
+  if (process.env.AUTOTUBE_FIXTURE_LOCAL_MEDIA !== '1') return;
+
+  const mediaDir = join(tmpdir(), 'autotube-fixture-media');
+  mkdirSync(mediaDir, { recursive: true });
+  const baseColors = ['0x17252f', '0x241b26', '0x182b2b', '0x2a2020', '0x18233a', '0x211b2d'];
+  const accentColors = ['0x19c7a0', '0xe51b3e', '0x19c7a0', '0xe51b3e', '0x19c7a0', '0xe51b3e'];
+
+  for (const [index, asset] of project.media.entries()) {
+    const localPath = join(mediaDir, `${asset.id}.png`);
+    if (!existsSync(localPath)) {
+      const base = baseColors[index % baseColors.length];
+      const accent = accentColors[index % accentColors.length];
+      const offset = 120 + (index % 4) * 180;
+      const filter = [
+        `drawbox=x=${offset}:y=150:w=760:h=720:color=${accent}@0.75:t=fill`,
+        `drawbox=x=${980 - (index % 3) * 80}:y=260:w=620:h=420:color=0x080b0e@0.82:t=fill`,
+        `drawbox=x=0:y=${820 - (index % 4) * 40}:w=1920:h=4:color=${accent}:t=fill`,
+      ].join(',');
+      const result = spawnSync('ffmpeg', [
+        '-hide_banner', '-loglevel', 'error', '-y',
+        '-f', 'lavfi', '-i', `color=c=${base}:s=1920x1080:r=1`,
+        '-vf', filter, '-frames:v', '1', localPath,
+      ], { encoding: 'utf8' });
+      if (result.status !== 0 || !existsSync(localPath)) {
+        throw new Error(`Unable to create local fixture asset ${asset.id}: ${result.stderr || 'ffmpeg failed'}`);
+      }
+    }
+    asset.localPath = localPath;
+  }
+  console.log(`🖼️ Using deterministic local fixture media: ${mediaDir}`);
+}
+
+prepareLocalFixtureMedia();
 
 const projectPath = '/tmp/autotube-project.json';
 writeFileSync(projectPath, JSON.stringify(project, null, 2));

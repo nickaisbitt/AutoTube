@@ -6,11 +6,28 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { join, dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assetCutIntervalSec } from './youtubeProfile.mjs';
+import { assetCutIntervalSec, DEFAULT_CUT_INTERVAL_SEC, buildNoirVideoFilter, isNoirLookEnabled } from './youtubeProfile.mjs';
+import { buildNoirAssemblyOverlayFilter } from './visualFx.mjs';
 import { muxVideoWithAudio } from './audio.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FPS = 24;
+const FPS = isNoirLookEnabled() ? 30 : 24;
+let ffmpegHasDrawtext;
+
+function supportsFfmpegDrawtext() {
+  if (typeof ffmpegHasDrawtext === 'boolean') return ffmpegHasDrawtext;
+  const probe = spawnSync('ffmpeg', ['-hide_banner', '-filters'], { encoding: 'utf8' });
+  const filters = `${probe.stdout || ''}\n${probe.stderr || ''}`;
+  ffmpegHasDrawtext = probe.status === 0 && filters.split(/\r?\n/).some((line) => /\bdrawtext\b/.test(line));
+  if (!ffmpegHasDrawtext) console.warn('  [ffmpeg] drawtext filter unavailable; noir assembly will use geometry-only title cards');
+  return ffmpegHasDrawtext;
+}
+
+function buildAssemblyNoirOverlay(segment, segmentIndex, clipIndex, width, height) {
+  return buildNoirAssemblyOverlayFilter(segment, segmentIndex, clipIndex, width, height, {
+    includeTitle: supportsFfmpegDrawtext(),
+  });
+}
 
 function probeMediaDuration(path) {
   const probe = spawnSync(
@@ -281,7 +298,7 @@ async function resolveLocalAsset(asset, _segMedia, devServer, cacheDir) {
   return { localSrc: null, asset };
 }
 
-function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0 }) {
+function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft, sourceStartSec = 0, clipIndex = 0, segment, segmentIndex = 0 }) {
   const isVideo = asset.type === 'video' || /\.(mp4|webm|mov)/i.test(asset.url || '');
   const hardCuts = hardCutsEnabled();
   const frames = Math.max(1, Math.round(durationSec * FPS));
@@ -295,6 +312,11 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
   } else if (!isVideo && !draft) {
     vf = `zoompan=z='min(zoom+0.001,1.15)':d=${frames}:s=${w}x${h}:fps=${FPS},${vf}`;
   }
+
+  const noirOverlay = isNoirLookEnabled()
+    ? buildAssemblyNoirOverlay(segment, segmentIndex, clipIndex, w, h)
+    : '';
+  if (noirOverlay) vf = `${vf},${noirOverlay}`;
 
   let seekSec = isVideo ? Math.max(0, sourceStartSec || 0) : 0;
   if (isVideo) {
@@ -323,6 +345,7 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
       const fadeOut = Math.max(0.04, durationSec - 0.04);
       simpleVf = `fade=t=in:st=0:d=0.04,fade=t=out:st=${fadeOut.toFixed(3)}:d=0.04,${simpleVf}`;
     }
+    if (noirOverlay) simpleVf = `${simpleVf},${noirOverlay}`;
     r = spawnSync(
       'ffmpeg',
       [
@@ -338,8 +361,11 @@ function encodeClip(localSrc, asset, durationSec, clipOut, { w, h, preset, draft
 
 const PLACEHOLDER_COLORS = ['0x1a1a2e', '0x16213e', '0x0f3460', '0x533483', '0xe94560', '0x2d4059', '0xea5455'];
 
-function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }) {
+function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset, segment, segmentIndex = 0, segmentClipIndex = 0 }) {
   const color = PLACEHOLDER_COLORS[clipIdx % PLACEHOLDER_COLORS.length];
+  const noirOverlay = isNoirLookEnabled()
+    ? buildAssemblyNoirOverlay(segment, segmentIndex, segmentClipIndex, w, h)
+    : '';
   const r = spawnSync(
     'ffmpeg',
     [
@@ -348,6 +374,7 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }) 
       'lavfi',
       '-i',
       `color=c=${color}:s=${w}x${h}:r=${FPS}:d=${durationSec}`,
+      ...(noirOverlay ? ['-vf', noirOverlay] : []),
       '-c:v',
       'libx264',
       '-preset',
@@ -362,8 +389,8 @@ function encodePlaceholderClip(clipOut, durationSec, clipIdx, { w, h, preset }) 
   return r.status === 0 && existsSync(clipOut);
 }
 
-async function renderSegmentClips(segment, segMedia, project, outputPath, options) {
-  const interval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? 1.25;
+async function renderSegmentClips(segment, segMedia, project, outputPath, options, segmentIndex = 0) {
+  const interval = assetCutIntervalSec(project) ?? options.cutIntervalSec ?? DEFAULT_CUT_INTERVAL_SEC;
   const targetDuration = segment.duration || 20;
   const schedule = buildClipSchedule(segment, segMedia, interval, project);
   const { w, h } = outputDimensions();
@@ -405,17 +432,18 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
 
   async function pushClip(asset, durationSec, label, hintOffset = 0) {
     const clipOut = join(tmpDir, `clip-${String(clipIndex).padStart(3, '0')}.mp4`);
+    const segmentClipIndex = clipPaths.length;
     clipIndex += 1;
     const { localSrc, asset: resolvedAsset } = await resolveLocalAsset(asset, segMedia, devServer, cacheDir);
     let ok = false;
     if (!localSrc) {
       console.log(`  [ffmpeg] ${label}: placeholder — asset fetch failed`);
-      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
+      ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset, segment, segmentIndex, segmentClipIndex });
       if (ok) placeholderClipCount += 1;
     } else {
       const sourceStartSec = resolveVideoSeek(resolvedAsset, localSrc, durationSec, hintOffset);
       ok = encodeClip(localSrc, resolvedAsset, durationSec, clipOut, {
-        w, h, preset, draft, sourceStartSec, clipIndex: clipIndex - 1,
+        w, h, preset, draft, sourceStartSec, clipIndex: segmentClipIndex, segment, segmentIndex,
       });
       if (!ok) {
         const thumb = resolvedAsset.thumbnailUrl;
@@ -424,7 +452,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
           const thumbLocal = await ensureLocalAsset(thumbAsset, devServer, cacheDir);
           if (thumbLocal) {
             ok = encodeClip(thumbLocal, thumbAsset, durationSec, clipOut, {
-              w, h, preset, draft, sourceStartSec: 0, clipIndex: clipIndex - 1,
+              w, h, preset, draft, sourceStartSec: 0, clipIndex: segmentClipIndex, segment, segmentIndex,
             });
             if (ok) console.log(`  [ffmpeg] ${label}: video → thumbnail still`);
           }
@@ -432,7 +460,7 @@ async function renderSegmentClips(segment, segMedia, project, outputPath, option
       }
       if (!ok) {
         console.log(`  [ffmpeg] ${label}: encode failed — using placeholder`);
-        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset });
+        ok = encodePlaceholderClip(clipOut, durationSec, clipIndex, { w, h, preset, segment, segmentIndex, segmentClipIndex });
         if (ok) placeholderClipCount += 1;
       }
     }
@@ -514,7 +542,7 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
 
     console.log(`  [ffmpeg] segment ${si + 1}/${project.script.length}: ${seg.title} (${(seg.duration || 0).toFixed(1)}s)`);
     const segOut = join(workDir, `segment-${si}.mp4`);
-    const result = await renderSegmentClips(seg, segMedia, project, segOut, options);
+    const result = await renderSegmentClips(seg, segMedia, project, segOut, options, si);
     if (!result.ok) {
       return { ok: false, error: result.error, segment: seg.title };
     }
@@ -546,7 +574,28 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
     console.log('  [ffmpeg] segment merge used re-encode fallback');
   }
 
-  const videoDurationSec = probeMediaDuration(mergedVideo) || 60;
+  let videoForMux = mergedVideo;
+  if (isNoirLookEnabled()) {
+    const gradedVideo = join(workDir, 'graded-video.mp4');
+    const grade = spawnSync(
+      'ffmpeg',
+      [
+        '-y', '-i', mergedVideo,
+        '-vf', buildNoirVideoFilter(),
+        '-an', '-c:v', 'libx264', '-preset', preset, '-pix_fmt', 'yuv420p',
+        '-r', String(FPS), gradedVideo,
+      ],
+      { encoding: 'utf8', timeout: 300_000 },
+    );
+    if (grade.status === 0 && existsSync(gradedVideo)) {
+      videoForMux = gradedVideo;
+      console.log('  [ffmpeg] applied noir grade to merged video');
+    } else {
+      console.warn('  [ffmpeg] noir grade skipped — using merged video as-is');
+    }
+  }
+
+  const videoDurationSec = probeMediaDuration(videoForMux) || 60;
   const audioFile = options.mixedAudioPath;
   const audioDurationSec = audioFile && existsSync(audioFile) ? probeMediaDuration(audioFile) : 0;
 
@@ -565,12 +614,12 @@ export async function renderViaFfmpegAssembly(project, outputPath, options = {})
 
   if (audioForMux && existsSync(audioForMux)) {
     const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_LOOP_MODE === 'true';
-    muxVideoWithAudio(mergedVideo, audioForMux, outputPath, muxDurationSec, {
+     muxVideoWithAudio(videoForMux, audioForMux, outputPath, muxDurationSec, {
       backgroundMusic: !loopMode && project.exportSettings?.backgroundMusic !== false,
       musicPreset: project.exportSettings?.musicPreset,
     });
   } else {
-    spawnSync('ffmpeg', ['-y', '-i', mergedVideo, '-c', 'copy', outputPath], { encoding: 'utf8' });
+    spawnSync('ffmpeg', ['-y', '-i', videoForMux, '-c', 'copy', outputPath], { encoding: 'utf8' });
   }
 
   if (existsSync(outputPath) && (process.env.AUTOTUBE_LOOP_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === '1')) {

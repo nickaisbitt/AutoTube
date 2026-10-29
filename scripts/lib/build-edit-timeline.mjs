@@ -8,6 +8,8 @@
  * @param {{ cutIntervalSec?: number, reason?: string }} [options]
  * @returns {Array<{ segmentId: string, startSec: number, endSec: number, assetId: string, reason: string }>}
  */
+import { DEFAULT_CUT_INTERVAL_SEC } from '../../deploy/server-render/youtubeProfile.mjs';
+
 function urlKey(asset) {
   return (asset?.url || '').split('?')[0] || asset?.id || '';
 }
@@ -25,7 +27,7 @@ function uniqueAssetsByUrl(assets) {
 }
 
 export function buildEditTimeline(project, options = {}) {
-  const cut = options.cutIntervalSec ?? 1.25;
+  const cut = options.cutIntervalSec ?? DEFAULT_CUT_INTERVAL_SEC;
   const reason = options.reason ?? 'heuristic placement';
   const entries = [];
   const globalPool = uniqueAssetsByUrl(project.media || []);
@@ -115,7 +117,7 @@ export function validateEditTimeline(project, options = {}) {
   const rebuilt = staleRatio > 0.1 || timeline.length === 0;
   if (rebuilt) {
     project.editTimeline = buildEditTimeline(project, {
-      cutIntervalSec: options.cutIntervalSec ?? 1.25,
+      cutIntervalSec: options.cutIntervalSec ?? DEFAULT_CUT_INTERVAL_SEC,
       reason: 'post-sanitize rebuild',
     });
   }

@@ -2,6 +2,26 @@
  * YouTube-native export profile — full-bleed visuals, Hormozi-style captions, voice-first audio.
  */
 
+export const DEFAULT_CUT_INTERVAL_SEC = 4.0;
+
+export function isNoirLookEnabled() {
+  return process.env.AUTOTUBE_NOIR_LOOK !== '0';
+}
+
+export function captionsEnabled() {
+  return process.env.AUTOTUBE_CAPTIONS === '1';
+}
+
+export function buildNoirVideoFilter() {
+  return [
+    'eq=contrast=1.18:brightness=-0.06:saturation=0.62',
+    'colorbalance=rs=0.03:gs=0.01:bs=0.05:rm=0.03:gm=0.00:bm=0.04',
+    'vignette=PI/4.5',
+    'noise=alls=4:allf=t+u',
+    'curves=preset=increase_contrast',
+  ].join(',');
+}
+
 export function isYouTubeExportMode(project) {
   if (process.env.AUTOTUBE_YOUTUBE_MODE === '1' || process.env.AUTOTUBE_YOUTUBE_MODE === 'true') {
     return true;
@@ -28,8 +48,8 @@ export function hookFontPx(height) {
 export function assetCutIntervalSec(project) {
   if (!isYouTubeExportMode(project)) return null;
   const raw = process.env.AUTOTUBE_CUT_INTERVAL_SEC;
-  const parsed = raw ? parseFloat(raw) : 1.25;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.25;
+  const parsed = raw ? parseFloat(raw) : DEFAULT_CUT_INTERVAL_SEC;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CUT_INTERVAL_SEC;
 }
 
 /**

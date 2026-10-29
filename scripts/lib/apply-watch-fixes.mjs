@@ -3,6 +3,7 @@
  */
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildShortHookOverlay, extractOverlayFromVisionFix } from './patch-project-for-loop.mjs';
+import { DEFAULT_CUT_INTERVAL_SEC } from '../../deploy/server-render/youtubeProfile.mjs';
 
 const CUT_FLOOR = 0.5;
 
@@ -13,7 +14,7 @@ const CUT_FLOOR = 0.5;
  * @param {string} reason
  */
 function escalateFixStrategy(s, applied, reason, { sceneFirst = false } = {}) {
-  const cuts = s.cutIntervalSec ?? 1.25;
+  const cuts = s.cutIntervalSec ?? DEFAULT_CUT_INTERVAL_SEC;
 
   const tryHardCuts = () => {
     if (!s.ffmpegHardCuts) {
@@ -121,8 +122,8 @@ export function applyFixesFromWatch(watch, fixState, topic = '') {
   if ((pacing <= 5 || longestHold >= 4) && !sceneFail) {
     s.useFastPacing = true;
     s.patternInterrupts = true;
-    if ((s.cutIntervalSec ?? 1.25) > CUT_FLOOR) {
-      const prev = s.cutIntervalSec ?? 1.25;
+    if ((s.cutIntervalSec ?? DEFAULT_CUT_INTERVAL_SEC) > CUT_FLOOR) {
+      const prev = s.cutIntervalSec ?? DEFAULT_CUT_INTERVAL_SEC;
       s.cutIntervalSec = Math.max(CUT_FLOOR, prev - 0.15);
       applied.push(`2. Pacing/hold FAIL → cut interval ${prev}s → ${s.cutIntervalSec}s`);
     }

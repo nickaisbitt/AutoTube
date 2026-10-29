@@ -3,6 +3,7 @@
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { DEFAULT_CUT_INTERVAL_SEC } from '../../deploy/server-render/youtubeProfile.mjs';
 
 export const FIX_STATE_VERSION = 3;
 
@@ -10,7 +11,7 @@ export const FIX_STATE_VERSION = 3;
 
 export const DEFAULT_FIX_STATE = {
   version: FIX_STATE_VERSION,
-  cutIntervalSec: 1.25,
+  cutIntervalSec: DEFAULT_CUT_INTERVAL_SEC,
   showKineticText: false,
   useFastPacing: false,
   shockHook: true,

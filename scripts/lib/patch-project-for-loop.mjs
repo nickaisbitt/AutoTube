@@ -5,6 +5,7 @@ import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 import { buildShockHookLine } from '../../e2e/openRouterMock.mjs';
 import { buildEditTimeline } from './build-edit-timeline.mjs';
 import { aHashFromImage, isSimilarToRegistry } from './perceptual-hash.mjs';
+import { DEFAULT_CUT_INTERVAL_SEC } from '../../deploy/server-render/youtubeProfile.mjs';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'they', 'this', 'that', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
@@ -232,7 +233,7 @@ export function patchProjectForLoop(project, topic, fixState = {}, options = {})
 
   if (fixState.brollPlacement !== false && project.script?.length && project.media?.length) {
     project.editTimeline = buildEditTimeline(project, {
-      cutIntervalSec: fixState.cutIntervalSec ?? 1.25,
+      cutIntervalSec: fixState.cutIntervalSec ?? DEFAULT_CUT_INTERVAL_SEC,
       reason: 'loop heuristic placement',
     });
   }

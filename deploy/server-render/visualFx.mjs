@@ -651,3 +651,377 @@ export function drawDepthLayers(ctx, w, h, progress, intensity) {
 export function getColorTemperature(segType) {
   return COLOR_TEMP_MAP[segType] || 'neutral';
 }
+
+const NOIR_RED = '#e51b3e';
+const NOIR_TEAL = '#19c7a0';
+
+export function noirAccentForSegment(segmentType) {
+  if (segmentType === 'transition' || segmentType === 'section') return NOIR_RED;
+  if (segmentType === 'intro') return NOIR_TEAL;
+  return NOIR_RED;
+}
+
+/** Draws the restrained hatch/grid texture used on graphic beats. */
+export function drawNoirTexture(ctx, w, h, accent, opacity = 0.16) {
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.lineWidth = 1;
+
+  const hatchGap = Math.max(14, Math.round(h / 70));
+  ctx.strokeStyle = '#ffffff';
+  ctx.beginPath();
+  for (let x = -h; x < w + h; x += hatchGap) {
+    ctx.moveTo(x, h);
+    ctx.lineTo(x + h, 0);
+  }
+  ctx.stroke();
+
+  const gridGap = Math.max(64, Math.round(w / 18));
+  ctx.globalAlpha = opacity * 1.35;
+  ctx.beginPath();
+  for (let x = gridGap; x < w; x += gridGap) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+  }
+  for (let y = gridGap; y < h; y += gridGap) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+  }
+  ctx.stroke();
+
+  const glow = ctx.createRadialGradient(w * 0.12, h * 0.18, 0, w * 0.12, h * 0.18, w * 0.42);
+  glow.addColorStop(0, `${accent}55`);
+  glow.addColorStop(1, `${accent}00`);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+}
+
+/** Draws a compact window-chrome card for structural titles and keywords. */
+export function drawNoirWindowCard(ctx, centerX, centerY, text, accent, fontSize) {
+  const label = String(text || '').trim().toUpperCase();
+  if (!label) return;
+
+  ctx.save();
+  const bodyFontSize = Math.max(22, Math.round(fontSize));
+  const barHeight = Math.max(22, Math.round(bodyFontSize * 0.42));
+  const paddingX = Math.round(bodyFontSize * 0.7);
+  const bodyHeight = Math.round(bodyFontSize * 1.45);
+  // node-canvas does not parse browser-only system-ui stacks and falls back to 10px.
+  ctx.font = `800 ${bodyFontSize}px sans-serif`;
+  const width = Math.round(ctx.measureText(label).width + paddingX * 2);
+  const height = barHeight + bodyHeight;
+  const x = Math.round(centerX - width / 2);
+  const y = Math.round(centerY - height / 2);
+
+  ctx.shadowColor = 'rgba(0,0,0,0.8)';
+  ctx.shadowBlur = Math.round(bodyFontSize * 0.55);
+  ctx.fillStyle = '#111216';
+  ctx.fillRect(x, y, width, height);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = accent;
+  ctx.fillRect(x, y, width, barHeight);
+
+  const glyphY = y + Math.round(barHeight / 2);
+  const glyphSize = Math.max(4, Math.round(barHeight * 0.16));
+  const glyphRight = x + width - Math.round(barHeight * 0.5);
+  ctx.strokeStyle = '#090a0c';
+  ctx.lineWidth = Math.max(2, Math.round(bodyFontSize * 0.04));
+  ctx.beginPath();
+  ctx.moveTo(glyphRight - glyphSize * 7, glyphY);
+  ctx.lineTo(glyphRight - glyphSize * 5, glyphY);
+  ctx.stroke();
+  ctx.strokeRect(glyphRight - glyphSize * 4, glyphY - glyphSize, glyphSize * 2, glyphSize * 2);
+  ctx.beginPath();
+  ctx.moveTo(glyphRight - glyphSize * 1.5, glyphY - glyphSize);
+  ctx.lineTo(glyphRight + glyphSize * 0.5, glyphY + glyphSize);
+  ctx.moveTo(glyphRight + glyphSize * 0.5, glyphY - glyphSize);
+  ctx.lineTo(glyphRight - glyphSize * 1.5, glyphY + glyphSize);
+  ctx.stroke();
+
+  ctx.fillStyle = accent;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + paddingX, y + barHeight + bodyHeight / 2);
+  ctx.strokeStyle = `${accent}cc`;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x + 1, y + 1, width - 2, height - 2);
+  ctx.restore();
+}
+
+const NOIR_LAYOUTS = ['split', 'window', 'quote', 'archive'];
+
+export function noirLayoutForSegment(segmentType, segmentIndex = 0) {
+  if (segmentType === 'intro') return 'split';
+  if (segmentType === 'section') return 'window';
+  if (segmentType === 'transition') return 'quote';
+  if (segmentType === 'outro') return 'archive';
+  return NOIR_LAYOUTS[Math.abs(segmentIndex) % NOIR_LAYOUTS.length];
+}
+
+function noirClipPath(ctx, x, y, w, h) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x, y + h);
+  ctx.closePath();
+  ctx.clip();
+}
+
+function drawNoirImagePanel(ctx, img, x, y, w, h, progress, accent, options = {}) {
+  const { dim = 0.28, pan = 0 } = options;
+  ctx.save();
+  ctx.fillStyle = '#0b0e12';
+  ctx.fillRect(x, y, w, h);
+  noirClipPath(ctx, x, y, w, h);
+
+  if (img) {
+    const iw = img.width || img.naturalWidth || 1280;
+    const ih = img.height || img.naturalHeight || 720;
+    const scale = Math.max(w / iw, h / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    const drift = (progress - 0.5) * pan;
+    ctx.filter = 'saturate(0.58) contrast(1.16) brightness(0.78)';
+    ctx.drawImage(img, (x + (w - dw) / 2) + drift, y + (h - dh) / 2, dw, dh);
+    ctx.filter = 'none';
+  }
+
+  ctx.fillStyle = `rgba(5, 8, 11, ${dim})`;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = `${accent}aa`;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, w, h);
+  ctx.restore();
+}
+
+function drawNoirWrappedText(ctx, text, x, y, maxWidth, fontSize, color, options = {}) {
+  const { maxLines = 3, weight = 800, align = 'left', lineHeight = 1.12 } = options;
+  const content = String(text || '').trim();
+  if (!content) return 0;
+
+  ctx.save();
+  ctx.font = `${weight} ${Math.max(18, Math.round(fontSize))}px sans-serif`;
+  ctx.fillStyle = color;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'top';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+  ctx.shadowBlur = Math.max(4, Math.round(fontSize * 0.18));
+
+  const lines = [];
+  let current = '';
+  for (const word of content.split(/\s+/)) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (ctx.measureText(candidate).width > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+
+  const visible = lines.slice(0, maxLines);
+  for (let i = 0; i < visible.length; i++) {
+    ctx.fillText(visible[i], x, y + i * fontSize * lineHeight);
+  }
+  ctx.restore();
+  return visible.length;
+}
+
+function drawNoirKicker(ctx, text, x, y, accent, align = 'left') {
+  const content = String(text || '').trim().toUpperCase();
+  if (!content) return;
+  ctx.save();
+  ctx.font = '700 22px sans-serif';
+  ctx.fillStyle = accent;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(content, x, y);
+  ctx.restore();
+}
+
+function drawNoirWindowChrome(ctx, x, y, w, accent, label = 'FIELD NOTES') {
+  const barH = Math.max(28, Math.round(w * 0.028));
+  ctx.save();
+  ctx.fillStyle = '#0c1014';
+  ctx.fillRect(x, y, w, barH);
+  ctx.fillStyle = accent;
+  ctx.fillRect(x, y, w, 3);
+  ctx.fillStyle = '#98a2ad';
+  ctx.font = '700 14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(label).toUpperCase(), x + 18, y + barH / 2 + 1);
+
+  const glyphX = x + w - 58;
+  ctx.strokeStyle = '#65707b';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(glyphX, y + barH / 2 - 5, 10, 10);
+  ctx.beginPath();
+  ctx.moveTo(glyphX + 22, y + barH / 2 - 5);
+  ctx.lineTo(glyphX + 32, y + barH / 2 + 5);
+  ctx.moveTo(glyphX + 32, y + barH / 2 - 5);
+  ctx.lineTo(glyphX + 22, y + barH / 2 + 5);
+  ctx.stroke();
+  ctx.restore();
+  return barH;
+}
+
+function drawNoirRules(ctx, x, y, w, count, gap, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  for (let i = 0; i < count; i++) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + i * gap);
+    ctx.lineTo(x + w - i * Math.min(48, w * 0.08), y + i * gap);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
+ * Draws a complete noir editorial frame. This is intentionally composed here
+ * instead of layering legacy captions and title overlays over full-bleed media.
+ */
+export function drawNoirComposition(ctx, segment, img, w, h, progress = 0.5, segmentIndex = 0) {
+  const layout = noirLayoutForSegment(segment?.type, segmentIndex);
+  const accent = noirAccentForSegment(segment?.type);
+  const cream = '#e8e4d9';
+  const muted = '#9aa4ad';
+  const title = String(segment?.title || 'Untitled segment').trim();
+  const note = String(segment?.visualNote || '').trim();
+  const label = `CASE ${String(segmentIndex + 1).padStart(2, '0')}`;
+
+  ctx.save();
+  ctx.fillStyle = '#080b0e';
+  ctx.fillRect(0, 0, w, h);
+  const bg = ctx.createLinearGradient(0, 0, w, h);
+  bg.addColorStop(0, '#0b1014');
+  bg.addColorStop(0.5, '#080b0e');
+  bg.addColorStop(1, '#111014');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  drawNoirTexture(ctx, w, h, accent, 0.035);
+  drawNoirKicker(ctx, label, w * 0.08, h * 0.075, accent);
+  drawNoirRules(ctx, w * 0.08, h * 0.10, w * 0.84, 2, 10, 'rgba(232,228,217,0.22)');
+
+  if (layout === 'split') {
+    const imageX = w * 0.46;
+    const imageY = h * 0.16;
+    const imageW = w * 0.47;
+    const imageH = h * 0.68;
+    drawNoirImagePanel(ctx, img, imageX, imageY, imageW, imageH, progress, accent, { pan: 24, dim: 0.22 });
+    drawNoirWindowChrome(ctx, imageX, imageY, imageW, accent, 'SOURCE / 01');
+    ctx.save();
+    ctx.fillStyle = accent;
+    ctx.fillRect(w * 0.08, h * 0.24, 6, h * 0.26);
+    ctx.restore();
+    drawNoirWrappedText(ctx, title.toUpperCase(), w * 0.115, h * 0.25, w * 0.30, h * 0.065, cream, { maxLines: 4, lineHeight: 1.02 });
+    drawNoirWrappedText(ctx, note || 'VISUAL EVIDENCE / NARRATION-LED EDIT', w * 0.115, h * 0.70, w * 0.30, h * 0.021, muted, { maxLines: 3, weight: 500, lineHeight: 1.35 });
+  } else if (layout === 'window') {
+    const imageX = w * 0.10;
+    const imageY = h * 0.16;
+    const imageW = w * 0.80;
+    const imageH = h * 0.52;
+    drawNoirImagePanel(ctx, img, imageX, imageY, imageW, imageH, progress, accent, { pan: 18, dim: 0.20 });
+    drawNoirWindowChrome(ctx, imageX, imageY, imageW, accent, 'ARCHIVE / LIVE FILE');
+    ctx.save();
+    ctx.fillStyle = accent;
+    ctx.fillRect(w * 0.10, h * 0.75, w * 0.15, 4);
+    ctx.restore();
+    drawNoirWrappedText(ctx, title.toUpperCase(), w * 0.10, h * 0.80, w * 0.72, h * 0.052, cream, { maxLines: 2, lineHeight: 1.04 });
+    drawNoirKicker(ctx, note || 'SOURCE MATERIAL', w * 0.90, h * 0.76, muted, 'right');
+  } else if (layout === 'quote') {
+    drawNoirImagePanel(ctx, img, 0, 0, w, h, progress, accent, { pan: 18, dim: 0.62 });
+    ctx.save();
+    ctx.fillStyle = 'rgba(7, 10, 13, 0.52)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = accent;
+    ctx.fillRect(w * 0.10, h * 0.22, 6, h * 0.48);
+    ctx.restore();
+    drawNoirKicker(ctx, 'THE TURNING POINT', w * 0.14, h * 0.27, accent);
+    drawNoirWrappedText(ctx, title.toUpperCase(), w * 0.14, h * 0.34, w * 0.66, h * 0.064, cream, { maxLines: 3, lineHeight: 1.03 });
+    drawNoirWrappedText(ctx, note || 'A CHANGE IN THE STORY', w * 0.14, h * 0.70, w * 0.58, h * 0.022, muted, { maxLines: 2, weight: 500, lineHeight: 1.3 });
+  } else {
+    const imageX = w * 0.10;
+    const imageY = h * 0.19;
+    const imageW = w * 0.36;
+    const imageH = h * 0.62;
+    drawNoirImagePanel(ctx, img, imageX, imageY, imageW, imageH, progress, accent, { pan: 28, dim: 0.24 });
+    drawNoirWindowChrome(ctx, imageX, imageY, imageW, accent, 'ACTION / 03');
+    ctx.save();
+    ctx.fillStyle = accent;
+    ctx.fillRect(w * 0.56, h * 0.25, 5, h * 0.38);
+    ctx.restore();
+    drawNoirKicker(ctx, 'WHAT HAPPENS NEXT', w * 0.60, h * 0.28, accent);
+    drawNoirWrappedText(ctx, title.toUpperCase(), w * 0.60, h * 0.35, w * 0.30, h * 0.047, cream, { maxLines: 4, lineHeight: 1.04 });
+    drawNoirRules(ctx, w * 0.60, h * 0.70, w * 0.28, 3, 18, 'rgba(232,228,217,0.38)');
+    drawNoirWrappedText(ctx, note || 'VERIFY / AUDIT / PROTECT', w * 0.60, h * 0.77, w * 0.28, h * 0.020, muted, { maxLines: 2, weight: 500, lineHeight: 1.3 });
+  }
+
+  ctx.save();
+  ctx.font = '600 16px sans-serif';
+  ctx.fillStyle = 'rgba(232,228,217,0.62)';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('AUTOTUBE / NOIR EDIT', w * 0.92, h * 0.93);
+  ctx.restore();
+}
+
+function escapeFfmpegText(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/:/g, '\\:')
+    .replace(/,/g, '\\,')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]');
+}
+
+/** Builds the FFmpeg equivalent of the opening frame treatment for each segment. */
+export function buildNoirAssemblyOverlayFilter(segment, segmentIndex = 0, clipIndex = 0, width = 1920, height = 1080, { includeTitle = true } = {}) {
+  if (clipIndex !== 0) return '';
+  const type = segment?.type || 'section';
+  const isBeat = type === 'intro' || type === 'section' || type === 'transition' || type === 'outro' || segmentIndex % 4 === 0;
+  if (!isBeat) return '';
+
+  const layout = noirLayoutForSegment(type, segmentIndex);
+  const accent = noirAccentForSegment(type).replace('#', '0x');
+  const title = escapeFfmpegText(String(segment?.title || 'Untitled segment').slice(0, 32).toUpperCase());
+  const cardX = Math.round(width * 0.08);
+  const cardY = Math.round(height * 0.11);
+  const cardW = Math.round(width * 0.44);
+  const barH = Math.round(height * 0.045);
+  const cardH = Math.round(height * 0.13);
+  const titleSize = Math.round(height * 0.035);
+  const filters = [];
+
+  if (layout === 'split') {
+    filters.push(`drawbox=x=0:y=0:w=${Math.round(width * 0.42)}:h=${height}:color=0x080b0e@0.76:t=fill`);
+  } else if (layout === 'window') {
+    filters.push(`drawbox=x=${Math.round(width * 0.08)}:y=${Math.round(height * 0.12)}:w=${Math.round(width * 0.84)}:h=${Math.round(height * 0.64)}:color=${accent}@0.82:t=3`);
+  } else if (layout === 'quote') {
+    filters.push(`drawbox=x=0:y=0:w=${width}:h=${Math.round(height * 0.60)}:color=0x080b0e@0.42:t=fill`);
+    filters.push(`drawbox=x=${Math.round(width * 0.10)}:y=${Math.round(height * 0.22)}:w=6:h=${Math.round(height * 0.48)}:color=${accent}:t=fill`);
+  } else {
+    filters.push(`drawbox=x=${Math.round(width * 0.10)}:y=${Math.round(height * 0.18)}:w=${Math.round(width * 0.36)}:h=${Math.round(height * 0.64)}:color=${accent}@0.82:t=3`);
+    filters.push(`drawbox=x=${Math.round(width * 0.56)}:y=${Math.round(height * 0.24)}:w=5:h=${Math.round(height * 0.38)}:color=${accent}:t=fill`);
+  }
+
+  filters.push(`drawbox=x=${cardX}:y=${cardY}:w=${cardW}:h=${cardH}:color=0x090b0e@0.92:t=fill`);
+  filters.push(`drawbox=x=${cardX}:y=${cardY}:w=${cardW}:h=${barH}:color=${accent}:t=fill`);
+  if (includeTitle) {
+    filters.push(`drawtext=font='Sans':text='${title}':fontcolor=${accent}:fontsize=${titleSize}:x=${cardX + Math.round(width * 0.018)}:y=${cardY + barH + Math.round(height * 0.025)}`);
+  }
+  return filters.join(',');
+}

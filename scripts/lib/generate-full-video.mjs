@@ -10,6 +10,7 @@ import { validateOutput, MIN_RENDER_OUTPUT_BYTES } from '../../server-render/pip
 import { buildMockScriptForTopic, mockOpenRouterHttpBody } from '../../e2e/openRouterMock.mjs';
 import { patchProjectForLoop, stockSearchResults } from './patch-project-for-loop.mjs';
 import { validateEditTimeline } from './build-edit-timeline.mjs';
+import { DEFAULT_CUT_INTERVAL_SEC } from '../../deploy/server-render/youtubeProfile.mjs';
 import { dedupeMediaByPHash } from './perceptual-hash.mjs';
 import { STOCK_HEALTHCARE_IMAGES } from './stock-media-urls.mjs';
 import {
@@ -892,7 +893,7 @@ export async function generateFullVideo(options) {
       }
       patchProjectForLoop(project, topic, fixState, { skipMediaPatch: realHarvest });
     }
-    const timelineReport = validateEditTimeline(project, { cutIntervalSec: fixState.cutIntervalSec ?? 1.25 });
+    const timelineReport = validateEditTimeline(project, { cutIntervalSec: fixState.cutIntervalSec ?? DEFAULT_CUT_INTERVAL_SEC });
     if (timelineReport.rebuilt) {
       log(`   📐 Rebuilt editTimeline (${timelineReport.clipCount} clips, ${timelineReport.staleCount} stale IDs)`);
     }

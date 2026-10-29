@@ -30,7 +30,7 @@ import { fileURLToPath } from 'url';
 import { tmpdir, homedir } from 'os';
 import { generateNarration, assertTtsAvailable, detectTtsProviders } from './server-render/narration.mjs';
 import { parseVttWordTimestamps, findCurrentWord } from './server-render/subtitleParser.mjs';
-import { createStyleParticles, updateStyleParticles, drawStyleParticles, drawDynamicVignette, drawChromaticAberration, drawFlashFrame, computeTensionZoom, drawKineticOverlay } from './server-render/visualFx.mjs';
+import { createStyleParticles, updateStyleParticles, drawStyleParticles, drawDynamicVignette, drawChromaticAberration, drawFlashFrame, computeTensionZoom, drawKineticOverlay, drawNoirTexture, drawNoirWindowCard, noirAccentForSegment, drawNoirComposition } from './server-render/visualFx.mjs';
 import { generateFFmpegChapterMetadata, chaptersFromSegments, embedChaptersCommand, selectCommentBait, computeMidpointTime, generateEasterEggs, drawEasterEgg, computeSpeedRamp, generateABThumbnailVariants, detectEmotionalTone } from './server-render/growthFeatures.mjs';
 import { drawLowerThird, drawNameCard, drawSourceCitation, drawProgressTimeline, drawTransition, drawChartReveal, extractNamesFromText, extractCitationsFromSegments, selectTransitionForSegment, drawAnimatedBarChart, drawBounceText, drawElasticText, drawSlideInText, drawParallaxBackground, logBRollCoverage, snapTransitionToBeat, easeInOut, easeOut, easeInBounce, applyBreathingRoom, drawZoomTransition, getAvailableTransitions } from './server-render/advancedRender.mjs';
 import {
@@ -49,6 +49,10 @@ import {
   buildRetentionHook,
   tokenizeCaptionWords,
   assetCutIntervalSec,
+  DEFAULT_CUT_INTERVAL_SEC,
+  isNoirLookEnabled,
+  captionsEnabled,
+  buildNoirVideoFilter,
 } from './server-render/youtubeProfile.mjs';
 import { renderViaFfmpegAssembly } from './server-render/ffmpegAssembly.mjs';
 import { buildEditTimeline } from './scripts/lib/build-edit-timeline.mjs';
@@ -1408,6 +1412,60 @@ function drawTitleCardFrame(ctx, title, topic, progress) {
 
 // ── Draw end screen frame ──────────────────────────────────────────────────
 function drawEndScreenFrame(ctx, title, progress) {
+  if (isNoirLookEnabled() && !DRAFT_MODE) {
+    const accent = '#e51b3e';
+    const fadeAlpha = Math.min(1, progress / 0.25);
+
+    ctx.fillStyle = '#080b0e';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    const bg = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
+    bg.addColorStop(0, '#0b1014');
+    bg.addColorStop(0.55, '#080b0e');
+    bg.addColorStop(1, '#111014');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    drawNoirTexture(ctx, WIDTH, HEIGHT, accent, 0.035);
+
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha;
+    ctx.fillStyle = accent;
+    ctx.font = '700 22px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CASE CLOSED', WIDTH * 0.10, HEIGHT * 0.16);
+    ctx.fillStyle = 'rgba(232,228,217,0.24)';
+    ctx.fillRect(WIDTH * 0.10, HEIGHT * 0.19, WIDTH * 0.80, 1);
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = fadeAlpha;
+    ctx.fillStyle = '#e8e4d9';
+    ctx.font = '800 58px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(YOUTUBE_MODE ? 'BEFORE YOU GO' : 'THANKS FOR WATCHING', WIDTH * 0.10, HEIGHT * 0.31);
+    ctx.fillStyle = 'rgba(232,228,217,0.62)';
+    ctx.font = '500 24px sans-serif';
+    ctx.fillText(String(title || '').substring(0, 60), WIDTH * 0.10, HEIGHT * 0.46);
+    ctx.fillStyle = accent;
+    ctx.fillRect(WIDTH * 0.10, HEIGHT * 0.56, WIDTH * 0.18, 4);
+    ctx.restore();
+
+    const subFade = Math.min(1, Math.max(0, (progress - 0.3) / 0.3));
+    ctx.save();
+    ctx.globalAlpha = subFade;
+    ctx.fillStyle = '#e8e4d9';
+    ctx.font = '700 24px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(YOUTUBE_MODE ? 'SUBSCRIBE' : 'WATCH NEXT', WIDTH * 0.10, HEIGHT * 0.70);
+    ctx.fillStyle = 'rgba(232,228,217,0.5)';
+    ctx.font = '500 18px sans-serif';
+    ctx.fillText('AUTOTUBE / NOIR EDIT', WIDTH * 0.10, HEIGHT * 0.77);
+    ctx.restore();
+    return;
+  }
+
   // Rich cinematic gradient background
   const cx = WIDTH / 2 + Math.cos(progress * Math.PI * 0.2) * WIDTH * 0.06;
   const cy = HEIGHT / 2 + Math.sin(progress * Math.PI * 0.15) * HEIGHT * 0.04;
@@ -2541,23 +2599,37 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   const loopMode = process.env.AUTOTUBE_LOOP_MODE === '1';
   const sceneLayout = loopMode ? null : (seg.sceneLayout || null);
   const layoutFn = sceneLayout ? (SCENE_LAYOUT_DISPATCH[sceneLayout] || null) : null;
-
-  // Draw bright background when image is available, or procedural bg when not
-  if (activeImg && !YOUTUBE_MODE) {
-    const bgGrad = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
-    bgGrad.addColorStop(0, '#3a5a8e');
-    bgGrad.addColorStop(0.5, '#4a7ab8');
-    bgGrad.addColorStop(1, '#2a4a7e');
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  } else if (activeImg && YOUTUBE_MODE) {
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  } else if (!DRAFT_MODE || loopMode) {
-    drawProceduralBackground(ctx, seg, progress, false, segmentIndex);
+  const noirCompositionActive = isNoirLookEnabled() && !DRAFT_MODE;
+  const noirGraphicBeat = isNoirLookEnabled() && !DRAFT_MODE && (
+    seg.type === 'intro'
+    || seg.type === 'section'
+    || seg.type === 'transition'
+    || seg.type === 'outro'
+    || segmentIndex % 4 === 0
+  );
+  if (globalFrameCounter === 0) {
+    log('info', `  Noir composition state: enabled=${isNoirLookEnabled()} youtube=${YOUTUBE_MODE} draft=${DRAFT_MODE} active=${noirCompositionActive}`);
   }
 
-  if (layoutFn) {
+  if (noirCompositionActive) {
+    drawNoirComposition(ctx, seg, activeImg, WIDTH, HEIGHT, progress, segmentIndex);
+  } else {
+    // Draw bright background when image is available, or procedural bg when not
+    if (activeImg && !YOUTUBE_MODE) {
+      const bgGrad = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
+      bgGrad.addColorStop(0, '#3a5a8e');
+      bgGrad.addColorStop(0.5, '#4a7ab8');
+      bgGrad.addColorStop(1, '#2a4a7e');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    } else if (activeImg && YOUTUBE_MODE) {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    } else if (!DRAFT_MODE || loopMode) {
+      drawProceduralBackground(ctx, seg, progress, false, segmentIndex);
+    }
+
+    if (layoutFn) {
     // ── Scene layout path: layout function handles background + text overlays ──
     layoutFn(ctx, seg, activeImg, WIDTH, HEIGHT, globalSafeZone || computeSafeZone(WIDTH, HEIGHT));
   } else {
@@ -2676,6 +2748,8 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 }
 
+  }
+
   const barH = YOUTUBE_MODE ? 0 : Math.round(HEIGHT * 0.012);
   const accentHex = ACCENT_COLORS[seg.type] || '#ffffff';
   // Black bars
@@ -2688,25 +2762,59 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   ctx.fillRect(0, barH - 2, WIDTH, 2);
   ctx.fillRect(0, HEIGHT - barH, WIDTH, 2);
 
-  // Subtle gradient vignette — stronger stops for cinematic depth
-  if (!DRAFT_MODE) {
-    const vignetteGrad = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, HEIGHT * 0.35, WIDTH / 2, HEIGHT / 2, WIDTH * 0.8);
-    vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    vignetteGrad.addColorStop(0.6, 'rgba(0,0,0,0.0)');
-    vignetteGrad.addColorStop(0.85, 'rgba(0,0,0,0.15)');
-    vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.45)');
-    ctx.fillStyle = vignetteGrad;
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  // Gradient vignette — noir look uses a much heavier always-on vignette
+  // to match the dark MagnatesMedia reference; legacy look keeps the subtle stops.
+  if (!DRAFT_MODE && !noirCompositionActive) {
+    if (isNoirLookEnabled()) {
+      const noirVig = ctx.createRadialGradient(WIDTH / 2, HEIGHT * 0.42, HEIGHT * 0.18, WIDTH / 2, HEIGHT * 0.42, WIDTH * 0.78);
+      noirVig.addColorStop(0, 'rgba(0,0,0,0)');
+      noirVig.addColorStop(0.45, 'rgba(0,0,0,0.18)');
+      noirVig.addColorStop(0.75, 'rgba(0,0,0,0.45)');
+      noirVig.addColorStop(1, 'rgba(0,0,0,0.82)');
+      ctx.fillStyle = noirVig;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    } else {
+      const vignetteGrad = ctx.createRadialGradient(WIDTH / 2, HEIGHT / 2, HEIGHT * 0.35, WIDTH / 2, HEIGHT / 2, WIDTH * 0.8);
+      vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+      vignetteGrad.addColorStop(0.6, 'rgba(0,0,0,0.0)');
+      vignetteGrad.addColorStop(0.85, 'rgba(0,0,0,0.15)');
+      vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.45)');
+      ctx.fillStyle = vignetteGrad;
+      ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    }
   }
 
-  // Style-specific particles (Task 34, 61)
-  if (!DRAFT_MODE) {
+  // Style-specific particles (Task 34, 61) — suppressed under the noir look
+  // (the reference has no bokeh/spark particles; only grain + texture).
+  if (!DRAFT_MODE && !isNoirLookEnabled()) {
     if (!globalStyleParticles) {
       const videoStyle = project.style || 'documentary';
       globalStyleParticles = createStyleParticles(videoStyle, WIDTH, HEIGHT);
     }
     updateStyleParticles(globalStyleParticles, WIDTH, HEIGHT);
     drawStyleParticles(ctx, globalStyleParticles);
+  }
+
+  if (!noirCompositionActive && isNoirLookEnabled() && !DRAFT_MODE) {
+    const noirAccent = noirAccentForSegment(seg.type);
+    // Faint hatch/grid everywhere to give the whole frame the documentary texture.
+    drawNoirTexture(ctx, WIDTH, HEIGHT, noirAccent, 0.06);
+    if (noirGraphicBeat) {
+      // Stronger texture overlay on structural beats.
+      drawNoirTexture(ctx, WIDTH, HEIGHT, noirAccent, 0.16);
+      // YouTube mode skips the regular title block, so draw the structural card here.
+      // Non-YouTube mode gets its card from the title block below to avoid a duplicate.
+      if (YOUTUBE_MODE) {
+        drawNoirWindowCard(
+          ctx,
+          WIDTH * 0.30,
+          HEIGHT * 0.20,
+          seg.title.substring(0, 32),
+          noirAccent,
+          Math.round(HEIGHT * 0.038),
+        );
+      }
+    }
   }
 
   // Technical label badge (only if debug overlays are enabled)
@@ -2717,7 +2825,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
 
   // ── On-screen thesis text with typing animation (Step 2, req d) ────────
   // Extract ALL-CAPS phrases (3+ words) or double-quoted phrases from visualNote
-  if (seg.visualNote && progress <= 0.40) {
+  if (!noirCompositionActive && seg.visualNote && progress <= 0.40) {
     // Match 3+ consecutive ALL-CAPS words or a double-quoted phrase
     const capsMatch = seg.visualNote.match(/\b([A-Z]{2,}(?:\s+[A-Z]{2,}){2,})\b/);
     const quoteMatch = seg.visualNote.match(/"([^"]{1,40})"/);
@@ -2787,7 +2895,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 
   // ── Kinetic typography: keyword scale animation (req d) ────────────────
-  if (seg.narration && progress >= 0.1 && progress <= 0.7 && !DRAFT_MODE) {
+  if (!noirCompositionActive && seg.narration && progress >= 0.1 && progress <= 0.7 && !DRAFT_MODE) {
     // Find capitalized proper nouns or numbers to highlight
     const words = seg.narration.split(' ');
     const keywordPattern = /\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\b|\b(\d+[%x]?)\b/;
@@ -2828,7 +2936,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 
   // ── Data visualization: stat callout overlay (req b) ───────────────────
-  if (seg.narration && progress >= 0.2 && progress <= 0.6 && !DRAFT_MODE) {
+  if (!noirCompositionActive && seg.narration && progress >= 0.2 && progress <= 0.6 && !DRAFT_MODE) {
     const extractedStat = extractStat(seg.narration);
     if (extractedStat) {
       const statAlpha = progress < 0.3 ? (progress - 0.2) / 0.1 : (progress > 0.5 ? (0.6 - progress) / 0.1 : 1.0);
@@ -2858,7 +2966,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
 
   // Title overlay — hidden in YouTube mode (captions carry the story; less clutter)
-  if (!layoutFn && !YOUTUBE_MODE) {
+  if (!noirCompositionActive && !layoutFn && !YOUTUBE_MODE) {
   const titleAccent = '#60a5fa';
   const titleSafeZone = globalSafeZone || computeSafeZone(WIDTH, HEIGHT);
   // Position title overlay above the subtitle bar to avoid overlap
@@ -2866,29 +2974,40 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   const subtitleY = HEIGHT - barH - 100;
   const ltY = Math.min(subtitleY - 70, HEIGHT - titleSafeZone.bottom - 140);
 
-  // Semi-transparent dark gradient behind the title text area for contrast (Requirement 4.1, 4.2)
-  const titleOverlayGrad = ctx.createLinearGradient(0, ltY - 20, 0, ltY + 56);
-  titleOverlayGrad.addColorStop(0, 'rgba(0,0,0,0)');
-  titleOverlayGrad.addColorStop(0.3, 'rgba(0,0,0,0.6)');
-  titleOverlayGrad.addColorStop(1, 'rgba(0,0,0,0.7)');
-  ctx.fillStyle = titleOverlayGrad;
-  ctx.fillRect(0, ltY - 20, WIDTH * 0.55, 76);
+  if (noirGraphicBeat) {
+    drawNoirWindowCard(
+      ctx,
+      WIDTH * 0.30,
+      ltY + Math.round(HEIGHT * 0.035),
+      seg.title.substring(0, 32),
+      noirAccentForSegment(seg.type),
+      Math.round(HEIGHT * 0.035),
+    );
+  } else {
+    // Semi-transparent dark gradient behind the title text area for contrast (Requirement 4.1, 4.2)
+    const titleOverlayGrad = ctx.createLinearGradient(0, ltY - 20, 0, ltY + 56);
+    titleOverlayGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    titleOverlayGrad.addColorStop(0.3, 'rgba(0,0,0,0.6)');
+    titleOverlayGrad.addColorStop(1, 'rgba(0,0,0,0.7)');
+    ctx.fillStyle = titleOverlayGrad;
+    ctx.fillRect(0, ltY - 20, WIDTH * 0.55, 76);
 
-  ctx.fillStyle = titleAccent;
-  ctx.fillRect(titleSafeZone.left + 12, ltY, Math.min(40 + progress * 60, 100), 2);
+    ctx.fillStyle = titleAccent;
+    ctx.fillRect(titleSafeZone.left + 12, ltY, Math.min(40 + progress * 60, 100), 2);
 
-  ctx.save();
-  if (!DRAFT_MODE) {
-    ctx.shadowColor = 'rgba(0,0,0,0.9)';
-    ctx.shadowBlur = 16;
+    ctx.save();
+    if (!DRAFT_MODE) {
+      ctx.shadowColor = 'rgba(0,0,0,0.9)';
+      ctx.shadowBlur = 16;
+    }
+    ctx.fillStyle = '#ffffff';
+    const segmentTitlePx = Math.round(HEIGHT * 0.042);
+    ctx.font = `bold ${segmentTitlePx}px system-ui, Montserrat, Impact, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(seg.title.substring(0, 50), titleSafeZone.left + 12, ltY + 10);
+    ctx.restore();
   }
-  ctx.fillStyle = '#ffffff';
-  const segmentTitlePx = Math.round(HEIGHT * 0.042);
-  ctx.font = `bold ${segmentTitlePx}px system-ui, Montserrat, Impact, sans-serif`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText(seg.title.substring(0, 50), titleSafeZone.left + 12, ltY + 10);
-  ctx.restore();
 
   // #22: Lower-third name card for named people mentioned in narration
   if (seg.narration && progress >= 0.1 && progress <= 0.3) {
@@ -3009,7 +3128,7 @@ async function drawFrame(ctx, seg, asset, img, progress, project, globalProgress
   }
   } // end no-layout title/name-card block
   // Words appear one at a time with a pop-in scale effect (skip during cold open / title cards)
-  if (!suppressSubtitles) {
+  if (!suppressSubtitles && captionsEnabled()) {
   const words = segWordsCache && segWordsCache.has(seg.id) ? segWordsCache.get(seg.id) : (seg.narration ? seg.narration.split(' ') : []);
   if (words.length > 0) {
     // Use real word timestamps from VTT if available, otherwise uniform distribution
@@ -3251,7 +3370,7 @@ async function runFfmpegAssemblyRender(project) {
   }
   stepMetrics.endStep('narration', { segmentCount: audioFiles.length, narrationDuration: totalNarrationDuration });
 
-  const cutInterval = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || '1.25');
+  const cutInterval = parseFloat(process.env.AUTOTUBE_CUT_INTERVAL_SEC || String(DEFAULT_CUT_INTERVAL_SEC));
   const measuredSec = project.script.reduce((s, seg) => s + (seg.duration || 0), 0);
   project.editTimeline = buildEditTimeline(project, {
     cutIntervalSec: cutInterval,
@@ -3407,6 +3526,14 @@ async function render() {
     || project.exportSettings?.quality
     || (YOUTUBE_MODE ? 'highest' : 'medium');
   DRAFT_MODE = quality === 'draft';
+
+  // Noir look: bump default 24fps → 30fps to match the documentary reference.
+  // Only applies when the preset didn't already specify a higher frame rate.
+  if (isNoirLookEnabled() && FPS <= 24 && !project.exportSettings?.fps) {
+    FPS = 30;
+    log('info', `  Noir look: bumped to ${FPS}fps to match documentary reference`);
+  }
+
   const outputWidth = WIDTH;
   const outputHeight = HEIGHT;
   if (DRAFT_MODE) {
@@ -3865,13 +3992,22 @@ async function render() {
   const targetVideoBitrate = String(Math.round(baseBitrate * qualityMultiplier));
   const targetMaxRate = String(Math.round(Number(targetVideoBitrate) * 1.35));
   const targetBufferSize = String(Math.round(Number(targetVideoBitrate) * 2));
+  const outputFilterParts = [];
+  if (isNoirLookEnabled()) outputFilterParts.push(buildNoirVideoFilter());
+  if (DRAFT_MODE && process.env.AUTOTUBE_DRAFT_NO_UPSCALE !== '1') {
+    outputFilterParts.push(`scale=${outputWidth}:${outputHeight}:flags=lanczos`);
+  }
+  const outputVideoFilter = outputFilterParts.join(',');
+  let outputFilterApplied = false;
 
   if (useGpu && hwEncoder === 'h264_videotoolbox') {
     ffmpegArgs.push('-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize);
   } else if (useGpu && hwEncoder === 'h264_nvenc') {
     ffmpegArgs.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-tune', 'hq', '-rc', 'vbr', '-cq', '18', '-b:v', targetVideoBitrate, '-maxrate', targetMaxRate, '-bufsize', targetBufferSize);
   } else if (useGpu && hwEncoder === 'h264_vaapi') {
-    ffmpegArgs.push('-vaapi_device', '/dev/dri/renderD128', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi');
+    const vaapiFilter = outputVideoFilter ? `${outputVideoFilter},format=nv12,hwupload` : 'format=nv12,hwupload';
+    ffmpegArgs.push('-vaapi_device', '/dev/dri/renderD128', '-vf', vaapiFilter, '-c:v', 'h264_vaapi');
+    outputFilterApplied = true;
   } else {
     const codec = project?.exportSettings?.codec === 'av1' ? 'libsvtav1' : project?.exportSettings?.codec === 'hevc' ? 'libx265' : 'libx264';
     const crfValue = project?.exportSettings?.codec === 'av1' ? 30 : project?.exportSettings?.codec === 'hevc' ? 20 : (YOUTUBE_MODE ? 14 : 16);
@@ -3888,10 +4024,11 @@ async function render() {
         '-f', 'rawvideo',
         '-vcodec', 'rawvideo',
         '-s', `${WIDTH}x${HEIGHT}`,
-        '-pix_fmt', 'bgra',
-        '-r', String(FPS),
-        '-i', 'pipe:0',
-        '-c:v', codec, '-preset', 'slow', '-crf', String(crfValue), '-bf', '3', '-tune', 'film',
+         '-pix_fmt', 'bgra',
+         '-r', String(FPS),
+         '-i', 'pipe:0',
+         ...(outputVideoFilter ? ['-vf', outputVideoFilter] : []),
+         '-c:v', codec, '-preset', 'slow', '-crf', String(crfValue), '-bf', '3', '-tune', 'film',
         ...extraCodecArgs,
         '-pix_fmt', 'yuv420p',
         tempRenderFile,
@@ -3905,18 +4042,19 @@ async function render() {
       // Use temp render args for now
       ffmpegArgs.length = 0;
       ffmpegArgs.push(...tempRenderArgs);
+      outputFilterApplied = true;
     } else {
       ffmpegArgs.push('-c:v', codec, '-preset', x264Preset, '-crf', String(crfValue), '-bf', '3', '-tune', 'film', ...extraCodecArgs);
     }
   }
 
+  if (!outputFilterApplied && outputVideoFilter) {
+    ffmpegArgs.push('-vf', outputVideoFilter);
+  }
+
   // HDR10 metadata for HDR-capable exports
   const hdrArgs = project?.exportSettings?.hdr ? ['-color_primaries', 'bt2020', '-color_trc', 'smpte2084', '-colorspace', 'bt2020nc'] : [];
   ffmpegArgs.push(...hdrArgs);
-
-  if (DRAFT_MODE && process.env.AUTOTUBE_DRAFT_NO_UPSCALE !== '1') {
-    ffmpegArgs.push('-vf', `scale=${outputWidth}:${outputHeight}:flags=lanczos`);
-  }
 
   ffmpegArgs.push('-pix_fmt', 'yuv420p', '-movflags', '+faststart', OUTPUT_FILE);
 
@@ -4263,23 +4401,29 @@ async function render() {
     const comingUpPadX = 10;
     const comingUpPadY = 6;
     const comingUpY = comingUpSafeZone.top + 4;
-    ctx.fillStyle = 'rgba(96, 165, 250, 0.85)';
-    ctx.fillRect(WIDTH - comingUpSafeZone.right - comingUpW - comingUpPadX * 2, comingUpY - comingUpPadY, comingUpW + comingUpPadX * 2, 16 + comingUpPadY * 2);
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'right';
+       const comingUpAccent = isNoirLookEnabled() ? '#e51b3e' : '#60a5fa';
+       const comingUpBackground = isNoirLookEnabled() ? 'rgba(12, 16, 20, 0.94)' : 'rgba(96, 165, 250, 0.85)';
+       ctx.fillStyle = comingUpBackground;
+       ctx.fillRect(WIDTH - comingUpSafeZone.right - comingUpW - comingUpPadX * 2, comingUpY - comingUpPadY, comingUpW + comingUpPadX * 2, 16 + comingUpPadY * 2);
+       ctx.fillStyle = isNoirLookEnabled() ? '#e8e4d9' : '#ffffff';
+       ctx.fillRect(WIDTH - comingUpSafeZone.right - comingUpW - comingUpPadX * 2, comingUpY - comingUpPadY, 3, 16 + comingUpPadY * 2);
+       ctx.fillStyle = comingUpAccent;
+       ctx.fillRect(WIDTH - comingUpSafeZone.right - comingUpPadX * 2, comingUpY - comingUpPadY, 3, 16 + comingUpPadY * 2);
+       ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     ctx.letterSpacing = '0px';
     ctx.fillText('COMING UP...', WIDTH - comingUpSafeZone.right - comingUpPadX, comingUpY);
     ctx.restore();
 
-    // Task 16: Draw watermark/branding
-    const channelName = project.exportSettings?.channelName || 'THE UPDATE DESK';
-    const watermarkLogoUrl = project.exportSettings?.watermarkLogoUrl;
-    drawWatermark(ctx, WIDTH, HEIGHT, {
-      text: channelName,
-      position: 'bottom-right',
-      opacity: 0.7,
-    });
+     // Noir composition already includes its own restrained branding.
+     if (!isNoirLookEnabled()) {
+       const channelName = project.exportSettings?.channelName || 'THE UPDATE DESK';
+       drawWatermark(ctx, WIDTH, HEIGHT, {
+         text: channelName,
+         position: 'bottom-right',
+         opacity: 0.7,
+       });
+     }
 
     // #18: Fade-to-black on the last COLD_OPEN_FADE_FRAMES of the cold open for a smooth
     // crossfade transition into the title card (which already has its own fade-in).
@@ -4466,9 +4610,11 @@ async function render() {
     const ytCut = assetCutIntervalSec(project);
     const assetAlternationInterval = ytCut != null
       ? ytCut
-      : si === 0
-        ? Math.min(1.5, pacingScore >= 4 ? 1.0 : 1.5)
-        : Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
+      : isNoirLookEnabled()
+        ? DEFAULT_CUT_INTERVAL_SEC
+        : si === 0
+          ? Math.min(1.5, pacingScore >= 4 ? 1.0 : 1.5)
+          : Math.min(3.0, pacingScore >= 4 ? 2 : pacingScore <= 2 ? 4 : 3);
 
     if (ytCut != null) {
       log('info', `  B-roll cut interval: ${assetAlternationInterval}s (${segMedia.length} assets)`);

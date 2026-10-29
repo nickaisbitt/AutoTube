@@ -1,6 +1,8 @@
 /**
  * Title + thumbnail text suggestions (YouTube packaging — items 9–10).
  */
+import { DEFAULT_CUT_INTERVAL_SEC } from '../../deploy/server-render/youtubeProfile.mjs';
+
 export function buildPackagingSuggestions(project) {
   const topic = project?.topic || project?.title || 'Healthcare AI';
   const hook = project?.script?.[0]?.narration?.slice(0, 120) || topic;
@@ -31,7 +33,7 @@ export function buildPackagingSuggestions(project) {
       `${hook}\n\nIn this video we break down ransomware, AI in hospitals, and what it means for your medical records.\n\n#cybersecurity #healthcare #AI`,
     checklist: {
       hookFirst3s: 'Lead with shock line, not year/context',
-      visualCutSec: 1.25,
+      visualCutSec: DEFAULT_CUT_INTERVAL_SEC,
       captionMaxWords: 4,
       ctaEndScreen: 'Subscribe + Watch Next',
     },

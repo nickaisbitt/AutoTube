@@ -66,7 +66,7 @@
     "deploy:railway:registry:pull": "RAILWAY_SKIP_BUILD=1 RAILWAY_IMAGE_USE_SHA=1 node scripts/railway-deploy-registry.mjs",
     "railway:smoke": "node scripts/railway-smoke-prod.mjs",
     "railway:completion-check": "node scripts/railway-completion-check.mjs",
-    "test:documentary-engine": "node --test scripts/lib/ai-only-policy.test.mjs scripts/lib/documentary-orchestrator.test.mjs"
+    "test:documentary-engine": "node --test scripts/lib/ai-only-policy.test.mjs scripts/lib/documentary-orchestrator.test.mjs scripts/lib/ai-provider-adapters.test.mjs"
   },
   "dependencies": {
     "canvas": "^3.2.3",

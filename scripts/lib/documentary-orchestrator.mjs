@@ -65,11 +65,16 @@ function validateShotPlan(result, segmentCount) {
   if (!Array.isArray(result?.shots) || result.shots.length < segmentCount) {
     throw new Error("Shot plan must cover every script segment.");
   }
-  const uncovered = new Set(result.shots.map((s) => s.segmentId));
+  const covered = new Set(result.shots.map((s) => s.segmentId));
   if (result.shots.some((s) => !s.segmentId || !s.visualPrompt)) {
     throw new Error("Every shot needs a segmentId and visualPrompt.");
   }
-  return uncovered.size;
+  const missing = Array.from({ length: segmentCount }, (_, index) => index)
+    .filter((index) => !covered.has(index) && !covered.has(`s${index + 1}`));
+  if (missing.length && covered.size < segmentCount) {
+    throw new Error("Shot plan does not cover every script segment.");
+  }
+  return covered.size;
 }
 
 /**

@@ -51,3 +51,18 @@ Target: 25–30 minutes, 1080p, 16:9. This is the initial stress test, not a res
 - The existing AutoTube codebase already has a full render/voiceover/export path and a separate improvement/QA loop.
 - Existing media acquisition is primarily external-source/stock oriented, so it cannot satisfy the strict AI-only contract as-is.
 - Added `scripts/lib/ai-only-policy.mjs`, a fail-closed provenance gate, plus Node tests. This is the first integration primitive; the generation adapters and render integration remain to be implemented and tested.
+
+
+## Provider adapter configuration
+
+The first concrete provider adapter is OpenAI-compatible and deliberately configurable rather than tied to one vendor:
+
+- `AI_API_BASE_URL` (defaults to `https://api.openai.com`)
+- `AI_API_KEY` (or `OPENAI_API_KEY`)
+- `AI_CHAT_MODEL`
+- `AI_IMAGE_MODEL`
+- Optional: `AI_IMAGE_SIZE` (defaults to `1536x1024`), `AI_API_TIMEOUT_MS`
+
+The adapter implements sourced research, script drafting, visual-bible creation, shot planning, and image generation. The image endpoint must implement the OpenAI-compatible `/v1/images/generations` response with `b64_json`. Generated images are saved locally with model, prompt, timestamp, and SHA-256 provenance. A failed image request stops production; it never silently substitutes stock or web imagery.
+
+This is a provider integration layer, not yet a complete production run: narration/audio, conversion of the generated shot assets into the existing AutoTube renderer's project schema, final assembly, and end-to-end runtime verification remain to be wired and tested.

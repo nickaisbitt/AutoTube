@@ -61,18 +61,18 @@ function validateScript(result, minWords) {
   return { words, segments: script.length };
 }
 
-function validateShotPlan(result, segmentCount) {
-  if (!Array.isArray(result?.shots) || result.shots.length < segmentCount) {
+function validateShotPlan(result, scriptSegments) {
+  if (!Array.isArray(result?.shots) || result.shots.length < scriptSegments.length) {
     throw new Error("Shot plan must cover every script segment.");
   }
   const covered = new Set(result.shots.map((s) => s.segmentId));
   if (result.shots.some((s) => !s.segmentId || !s.visualPrompt)) {
     throw new Error("Every shot needs a segmentId and visualPrompt.");
   }
-  const missing = Array.from({ length: segmentCount }, (_, index) => index)
-    .filter((index) => !covered.has(index) && !covered.has(`s${index + 1}`));
-  if (missing.length && covered.size < segmentCount) {
-    throw new Error("Shot plan does not cover every script segment.");
+  const required = new Set(scriptSegments.map((segment) => segment.id));
+  const missing = [...required].filter((id) => !covered.has(id));
+  if (missing.length) {
+    throw new Error(`Shot plan is missing script segments: ${missing.join(", ")}`);
   }
   return covered.size;
 }
@@ -138,7 +138,7 @@ export async function produceDocumentary(title, {
 
     const visualBible = await runStage("visual_bible", { research, script });
     const shotPlan = await runStage("shot_plan", { research, script, visualBible });
-    const shotCount = validateShotPlan(shotPlan, script.segments.length);
+    const shotCount = validateShotPlan(shotPlan, script.segments);
 
     const visuals = await runStage("visual_generation", { shotPlan, visualBible });
     const audio = await runStage("audio_generation", { script, targetMinutes });
